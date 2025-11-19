@@ -1,0 +1,612 @@
+"""
+Unit tests for data_manager.py
+
+Tests the DataManager class and CommandSetData.
+"""
+
+import pytest
+import os
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+import pandas as pd
+import importlib.util
+import sys
+
+# Import module directly to avoid package __init__.py issues
+def _import_module_directly(module_name, file_path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+_lib_path = Path(__file__).parent.parent.parent / "lib"
+
+# First import the command sets module (has no complex dependencies)
+data_manager_service_command_sets = _import_module_directly(
+    "data_manager_service_command_sets",
+    _lib_path / "data_manager_service" / "data_manager_service_command_sets.py"
+)
+
+DMSDbType = data_manager_service_command_sets.DMSDbType
+DataManagerQueryType = data_manager_service_command_sets.DataManagerQueryType
+
+# Now import data_manager
+data_manager_module = _import_module_directly("data_manager_module", _lib_path / "data_manager" / "data_manager.py")
+
+CommandStatus = data_manager_module.CommandStatus
+Command = data_manager_module.Command
+CommandSet = data_manager_module.CommandSet
+ConnectionConfig = data_manager_module.ConnectionConfig
+CommandSetData = data_manager_module.CommandSetData
+DataManager = data_manager_module.DataManager
+
+
+class TestCommandStatus:
+    """Tests for the CommandStatus enum."""
+
+    def test_status_values(self):
+        """Test all status enum values."""
+        assert CommandStatus.PENDING.value == "pending"
+        assert CommandStatus.RUNNING.value == "running"
+        assert CommandStatus.COMPLETED.value == "completed"
+        assert CommandStatus.FAILED.value == "failed"
+        assert CommandStatus.CANCELLED.value == "cancelled"
+
+
+class TestCommand:
+    """Tests for the Command class."""
+
+    def test_create_basic_command(self):
+        """Test creating a basic command."""
+        cmd = Command(
+            name="test_cmd",
+            command_set_name="test_set",
+            query="SELECT 1"
+        )
+
+        assert cmd.name == "test_cmd"
+        assert cmd.command_set_name == "test_set"
+        assert cmd.query == "SELECT 1"
+        assert cmd.status == CommandStatus.PENDING
+
+    def test_command_with_all_params(self):
+        """Test creating a command with all parameters."""
+        cmd = Command(
+            name="full_cmd",
+            command_set_name="test_set",
+            query="SELECT *",
+            timeout=5000,
+            retries=3,
+            default_interval_ms=30000,
+            supports_latency_timing=True,
+            default_query=True,
+            description="Test command",
+            query_type=DataManagerQueryType.UPSTREAM,
+            schema=["col1", "col2"]
+        )
+
+        assert cmd.timeout == 5000
+        assert cmd.retries == 3
+        assert cmd.supports_latency_timing is True
+        assert cmd.description == "Test command"
+        assert cmd.schema == ["col1", "col2"]
+
+
+class TestCommandSet:
+    """Tests for the CommandSet class."""
+
+    def test_create_command_set(self):
+        """Test creating a command set."""
+        cs = CommandSet(
+            name="test_set",
+            sync_interval=60000
+        )
+
+        assert cs.name == "test_set"
+        assert cs.sync_interval == 60000
+        assert cs.failure_count == 0
+
+
+class TestConnectionConfig:
+    """Tests for the ConnectionConfig class."""
+
+    def test_create_postgres_config(self):
+        """Test creating a PostgreSQL connection config."""
+        config = ConnectionConfig(
+            host="localhost",
+            port=5432,
+            database="testdb",
+            username="user",
+            password="pass",
+            db_type="postgresql"
+        )
+
+        assert config.host == "localhost"
+        assert config.port == 5432
+        assert config.db_type == "postgresql"
+
+    def test_create_mysql_config(self):
+        """Test creating a MySQL connection config."""
+        config = ConnectionConfig(
+            host="localhost",
+            port=3306,
+            database="testdb",
+            username="user",
+            password="pass",
+            db_type="mysql",
+            ssl_mode="required"
+        )
+
+        assert config.port == 3306
+        assert config.ssl_mode == "required"
+
+
+class TestCommandSetData:
+    """Tests for the CommandSetData class."""
+
+    def test_init_with_schema(self, temp_dir, mock_logger):
+        """Test initialization with schema."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["col1", "col2", "col3"],
+            global_logger=mock_logger
+        )
+
+        assert csd.name == "test"
+        assert csd.schema == ["col1", "col2", "col3"]
+        assert csd._data.empty
+        assert list(csd._data.columns) == ["col1", "col2", "col3"]
+
+    def test_init_without_schema(self, temp_dir, mock_logger):
+        """Test initialization without schema."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            global_logger=mock_logger
+        )
+
+        assert csd.schema == []
+        assert csd._data.empty
+
+    def test_set_and_get(self, temp_dir, mock_logger):
+        """Test setting and getting values."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            global_logger=mock_logger
+        )
+
+        csd.set("key1", "value1")
+        result = csd.get("key1")
+
+        assert result == "value1"
+
+    def test_get_nonexistent_key(self, temp_dir, mock_logger):
+        """Test getting a key that doesn't exist."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            global_logger=mock_logger
+        )
+
+        result = csd.get("nonexistent", default="default")
+        assert result == "default"
+
+    def test_update_with_dataframe(self, temp_dir, mock_logger):
+        """Test updating with a DataFrame."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["id", "name"],
+            global_logger=mock_logger
+        )
+
+        df = pd.DataFrame({
+            "id": [1, 2],
+            "name": ["Alice", "Bob"]
+        })
+
+        csd.update_with_dataframe(df)
+
+        assert csd.row_count() == 2
+
+    def test_set_dataframe(self, temp_dir, mock_logger):
+        """Test replacing the entire DataFrame."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["id", "name"],
+            global_logger=mock_logger
+        )
+
+        df = pd.DataFrame({
+            "id": [1, 2, 3],
+            "name": ["A", "B", "C"]
+        })
+
+        csd.set_dataframe(df)
+
+        assert csd.row_count() == 3
+
+    def test_get_dataframe_returns_copy(self, temp_dir, mock_logger):
+        """Test that get_dataframe returns a copy."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["id"],
+            global_logger=mock_logger
+        )
+
+        df = pd.DataFrame({"id": [1, 2]})
+        csd.set_dataframe(df)
+
+        retrieved = csd.get_dataframe()
+        retrieved.drop(index=0, inplace=True)
+
+        # Original should be unchanged
+        assert csd.row_count() == 2
+
+    def test_set_records(self, temp_dir, mock_logger):
+        """Test setting data from records."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["col1", "col2"],
+            global_logger=mock_logger
+        )
+
+        records = [[1, "a"], [2, "b"], [3, "c"]]
+        csd.set_records(records)
+
+        assert csd.row_count() == 3
+
+    def test_to_csv(self, temp_dir, mock_logger):
+        """Test exporting to CSV."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["id", "name"],
+            global_logger=mock_logger
+        )
+
+        df = pd.DataFrame({"id": [1], "name": ["Test"]})
+        csd.set_dataframe(df)
+
+        path = csd.to_csv()
+
+        assert os.path.exists(path)
+
+    def test_from_csv(self, temp_dir, mock_logger):
+        """Test importing from CSV."""
+        # Create a CSV file
+        csv_path = temp_dir / "import.csv"
+        df = pd.DataFrame({"id": [1, 2], "name": ["A", "B"]})
+        df.to_csv(csv_path, index=False)
+
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            global_logger=mock_logger
+        )
+
+        result = csd.from_csv(str(csv_path))
+
+        assert result is True
+        assert csd.row_count() == 2
+
+    def test_to_json(self, temp_dir, mock_logger):
+        """Test converting to JSON."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["id", "name"],
+            global_logger=mock_logger
+        )
+
+        df = pd.DataFrame({"id": [1], "name": ["Test"]})
+        csd.set_dataframe(df)
+
+        json_str = csd.to_json()
+
+        assert "Test" in json_str
+
+    def test_to_dict(self, temp_dir, mock_logger):
+        """Test converting to dictionary."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            global_logger=mock_logger
+        )
+
+        csd.set("key1", "value1")
+        csd.set("key2", "value2")
+
+        result = csd.to_dict()
+
+        assert result.get("key1") == "value1"
+
+    def test_clear(self, temp_dir, mock_logger):
+        """Test clearing data."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["col1"],
+            global_logger=mock_logger
+        )
+
+        csd.set_dataframe(pd.DataFrame({"col1": [1, 2, 3]}))
+        assert csd.row_count() == 3
+
+        csd.clear()
+
+        assert csd.is_empty()
+        assert csd.row_count() == 0
+
+    def test_str_representation(self, temp_dir, mock_logger):
+        """Test string representation."""
+        csd = CommandSetData(
+            name="test_data",
+            data_folder=str(temp_dir),
+            schema=["col1", "col2"],
+            global_logger=mock_logger
+        )
+
+        str_repr = str(csd)
+
+        assert "test_data" in str_repr
+        assert "rows=0" in str_repr
+        assert "columns=2" in str_repr
+
+    def test_len(self, temp_dir, mock_logger):
+        """Test __len__ method."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["col1"],
+            global_logger=mock_logger
+        )
+
+        csd.set_dataframe(pd.DataFrame({"col1": [1, 2, 3, 4, 5]}))
+
+        assert len(csd) == 5
+
+
+class TestCommandSetDataMerge:
+    """Tests for DataFrame merging functionality."""
+
+    def test_merge_on_columns(self, temp_dir, mock_logger):
+        """Test merging DataFrames on specific columns."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["id", "name", "value"],
+            global_logger=mock_logger
+        )
+
+        # Initial data
+        df1 = pd.DataFrame({
+            "id": [1, 2],
+            "name": ["A", "B"],
+            "value": [10, 20]
+        })
+        csd.set_dataframe(df1)
+
+        # New data to merge
+        df2 = pd.DataFrame({
+            "id": [2, 3],
+            "name": ["B", "C"],
+            "value": [25, 30]
+        })
+
+        csd.update_with_dataframe(df2, merge_on=["id"])
+
+        # Should have merged data
+        result = csd.get_dataframe()
+        assert len(result) >= 2
+
+    def test_dedup_on_key(self, temp_dir, mock_logger):
+        """Test deduplication based on key column."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["key", "value"],
+            global_logger=mock_logger
+        )
+
+        df1 = pd.DataFrame({"key": ["a", "b"], "value": [1, 2]})
+        csd.set_dataframe(df1)
+
+        # Add new data with some existing keys
+        df2 = pd.DataFrame({"key": ["b", "c"], "value": [3, 4]})
+        csd.update_with_dataframe(df2, dedup_key="key")
+
+        result = csd.get_dataframe()
+        # Should have a, b (original), c (new)
+        assert len(result) == 3
+
+
+class TestDataManagerBasics:
+    """Tests for basic DataManager functionality."""
+
+    @pytest.fixture
+    def mock_data_manager(self, temp_dir, mock_logger):
+        """Create a DataManager with minimal mocking."""
+        with patch.object(DataManager, '_initial_connection_check'):
+            with patch.object(DataManager, '_load_commands'):
+                manager = DataManager(
+                    connection_config={},
+                    global_logger=mock_logger,
+                    command_sets=[],
+                    data_directory=str(temp_dir),
+                    instance_s3_data_folder="test/folder",
+                    s3_operation=MagicMock(),
+                    cli_mode=True
+                )
+                return manager
+
+    def test_init(self, mock_data_manager):
+        """Test DataManager initialization."""
+        assert mock_data_manager.logger is not None
+
+    def test_is_connected_system(self, mock_data_manager):
+        """Test that SYSTEM queries are always connected."""
+        result = mock_data_manager.is_connected(DataManagerQueryType.SYSTEM)
+        assert result is True
+
+    def test_get_connection_error_no_tracking(self, mock_data_manager):
+        """Test getting connection error when not tracked."""
+        # This should return a message indicating no tracking
+        mock_data_manager._connection_error = {}
+        result = mock_data_manager.get_connection_error(DataManagerQueryType.UPSTREAM)
+        assert "No error tracking" in result
+
+    def test_disconnect_none_connection(self, mock_data_manager):
+        """Test disconnecting when there's no connection."""
+        mock_data_manager.connections[DataManagerQueryType.UPSTREAM] = None
+
+        # Should not raise
+        mock_data_manager.disconnect(DataManagerQueryType.UPSTREAM)
+
+
+class TestDataManagerConnectionState:
+    """Tests for connection state tracking."""
+
+    @pytest.fixture
+    def manager_with_state(self, temp_dir, mock_logger):
+        """Create a DataManager with connection state initialized."""
+        with patch.object(DataManager, '_initial_connection_check'):
+            with patch.object(DataManager, '_load_commands'):
+                manager = DataManager(
+                    connection_config={},
+                    global_logger=mock_logger,
+                    command_sets=[],
+                    data_directory=str(temp_dir),
+                    instance_s3_data_folder="test",
+                    s3_operation=MagicMock(),
+                    cli_mode=True
+                )
+                return manager
+
+    def test_get_connection_state(self, manager_with_state):
+        """Test getting connection state."""
+        state = manager_with_state.get_connection_state(DataManagerQueryType.UPSTREAM)
+
+        assert "attempted" in state
+        assert "success" in state
+        assert "error" in state
+
+    def test_get_connection_attempted(self, manager_with_state):
+        """Test getting connection attempted flag."""
+        result = manager_with_state.get_connection_attempted(DataManagerQueryType.UPSTREAM)
+        assert isinstance(result, bool)
+
+    def test_get_success_connection(self, manager_with_state):
+        """Test getting success connection flag."""
+        result = manager_with_state.get_success_connection(DataManagerQueryType.UPSTREAM)
+        assert isinstance(result, bool)
+
+
+class TestSystemCommandExecution:
+    """Tests for system command execution."""
+
+    @pytest.fixture
+    def manager_for_system(self, temp_dir, mock_logger):
+        """Create a DataManager for testing system commands."""
+        with patch.object(DataManager, '_initial_connection_check'):
+            with patch.object(DataManager, '_load_commands'):
+                manager = DataManager(
+                    connection_config={},
+                    global_logger=mock_logger,
+                    command_sets=[],
+                    data_directory=str(temp_dir),
+                    instance_s3_data_folder="test",
+                    s3_operation=MagicMock(),
+                    cli_mode=True
+                )
+                return manager
+
+    def test_execute_system_command_success(self, manager_for_system):
+        """Test executing a system command."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="line1\nline2",
+                stderr=""
+            )
+
+            result = manager_for_system._execute_system_command("echo test")
+
+            assert len(result) == 2
+
+    def test_execute_system_command_failure(self, manager_for_system):
+        """Test system command failure."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="error"
+            )
+
+            result = manager_for_system._execute_system_command("false")
+
+            assert result == []
+
+    def test_execute_system_command_timeout(self, manager_for_system):
+        """Test system command timeout."""
+        import subprocess
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired("cmd", 30)
+
+            result = manager_for_system._execute_system_command("sleep 100")
+
+            assert result == []
+
+
+class TestEdgeCases:
+    """Tests for edge cases and error handling."""
+
+    def test_command_set_data_schema_validation_mismatch(self, temp_dir, mock_logger):
+        """Test schema validation with mismatched columns."""
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["col1", "col2"],
+            global_logger=mock_logger
+        )
+
+        # DataFrame with different columns
+        df = pd.DataFrame({"different": [1, 2]})
+
+        # Should handle mismatch gracefully (reindex)
+        csd.update_with_dataframe(df, validate_schema=True)
+
+    def test_command_set_data_thread_safety(self, temp_dir, mock_logger):
+        """Test thread safety of CommandSetData."""
+        import threading
+
+        csd = CommandSetData(
+            name="test",
+            data_folder=str(temp_dir),
+            schema=["key", "value"],
+            global_logger=mock_logger
+        )
+
+        errors = []
+
+        def concurrent_operations():
+            try:
+                for i in range(50):
+                    csd.set(f"key_{i}", f"value_{i}")
+                    csd.get(f"key_{i}")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=concurrent_operations) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0

@@ -1,0 +1,26 @@
+[project]
+name = "rdst"
+version = "0.1.0"
+description = "ReadySet Diagnostics & SQL Tuning - CLI tool for database diagnostics and query optimization"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "boto3",
+    "requests==2.31.0",
+    "psycopg2-binary",
+    "pymysql",
+    "pandas",
+    "rich",
+    "toml",
+    "pygments",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []
+
+[project.scripts]
+rdst = "rdst:main"

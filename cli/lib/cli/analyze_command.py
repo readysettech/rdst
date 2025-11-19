@@ -1,0 +1,1875 @@
+"""
+RDST Analyze Command Implementation
+
+Handles all query input modes for the 'rdst analyze' command:
+1. Inline query input (-q)
+2. File input (-f)
+3. Stdin input (--stdin)
+4. Interactive prompt (fallback)
+5. Registry lookup by ID (--query-id)
+6. Registry lookup by tag (--tag)
+7. Input precedence and deduplication
+8. SQL normalization and dialect detection
+"""
+from __future__ import annotations
+
+import sys
+import os
+from pathlib import Path
+from typing import Optional, Tuple
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.prompt import Prompt
+    _RICH_AVAILABLE = True
+except ImportError:
+    _RICH_AVAILABLE = False
+    Console = None
+    Panel = None
+    Prompt = None
+
+from ..query_registry.query_registry import QueryRegistry, normalize_sql, hash_sql
+from ..query_registry.conversation_registry import ConversationRegistry, InteractiveConversation
+from ..llm_manager.llm_manager import LLMManager
+
+
+@dataclass
+class AnalyzeInput:
+    """Represents the resolved input for analyze command."""
+    sql: str  # Original SQL with actual parameter values
+    normalized_sql: str  # Normalized SQL with ? placeholders
+    source: str  # "query-id", "inline", "file", "stdin", "prompt"
+    hash: str
+    tag: str = ""
+    save_as: str = ""
+
+
+class AnalyzeInputError(Exception):
+    """Raised when there are issues with analyze input."""
+    pass
+
+
+class AnalyzeCommand:
+    """Handles all functionality for the rdst analyze command."""
+
+    def __init__(self, client=None):
+        """Initialize the AnalyzeCommand with an optional CloudAgentClient."""
+        self.client = client
+        self._console = Console() if _RICH_AVAILABLE else None
+        self.registry = QueryRegistry()
+
+    def resolve_input(self, hash: Optional[str] = None,
+                      inline_query: Optional[str] = None,
+                      file_path: Optional[str] = None,
+                      use_stdin: bool = False,
+                      tag: Optional[str] = None,
+                      positional_query: Optional[str] = None,
+                      save_as: Optional[str] = None) -> AnalyzeInput:
+        """
+        Resolve query input using strict precedence rules.
+
+        Precedence: hash > tag > inline (-q) > file (-f) > stdin > prompt > positional
+
+        Args:
+            hash: Query hash from registry
+            inline_query: SQL query string from -q flag
+            file_path: Path to SQL file from -f flag
+            use_stdin: Whether to read from stdin
+            tag: Tag name for registry lookup
+            positional_query: Positional query argument (backward compatibility)
+            save_as: Tag to save query as after analysis
+
+        Returns:
+            AnalyzeInput with resolved SQL and metadata
+
+        Raises:
+            AnalyzeInputError: If input resolution fails
+        """
+
+        # Count non-None inputs for warning about extras
+        inputs_provided = [
+            ("hash", hash),
+            ("tag", tag),
+            ("inline", inline_query),
+            ("file", file_path),
+            ("stdin", use_stdin),
+            ("positional", positional_query)
+        ]
+        active_inputs = [(name, value) for name, value in inputs_provided if value]
+
+        if len(active_inputs) > 1:
+            primary = active_inputs[0][0]
+            ignored = [name for name, _ in active_inputs[1:]]
+            print(f"Warning: Using {primary} input, ignoring: {', '.join(ignored)}")
+
+        # Apply precedence rules
+        try:
+            # 1. Registry lookup by hash (highest precedence)
+            if hash:
+                return self._resolve_by_hash(hash, save_as)
+
+            # 2. Registry lookup by tag
+            if tag:
+                return self._resolve_by_tag(tag, save_as)
+
+            # 3. Inline query
+            if inline_query:
+                return self._resolve_inline_query(inline_query, save_as)
+
+            # 4. File input
+            if file_path:
+                return self._resolve_file_input(file_path, save_as)
+
+            # 5. Stdin input
+            if use_stdin:
+                return self._resolve_stdin_input(save_as)
+
+            # 6. Interactive prompt
+            if not positional_query:
+                return self._resolve_interactive_prompt(save_as)
+
+            # 7. Positional query (lowest precedence, backward compatibility)
+            # Auto-detect if positional argument is a hash (12-char hex)
+            if positional_query and self._looks_like_hash(positional_query):
+                return self._resolve_by_hash(positional_query, save_as)
+
+            return self._resolve_inline_query(positional_query, save_as)
+
+        except Exception as e:
+            raise AnalyzeInputError(f"Failed to resolve input: {e}")
+
+    def _resolve_by_hash(self, hash: str, save_as: str) -> AnalyzeInput:
+        """Resolve query by hash from registry."""
+        entry = self.registry.get_query(hash)
+        if not entry:
+            raise AnalyzeInputError(f"Query hash '{hash}' not found in registry. Run 'rdst list' to see available queries.")
+
+        # Get the executable SQL with parameter values reconstructed
+        executable_sql = self.registry.get_executable_query(hash, interactive=False)
+        if not executable_sql:
+            raise AnalyzeInputError(f"Could not reconstruct executable query for hash '{hash}'")
+
+        return AnalyzeInput(
+            sql=executable_sql,  # Original SQL with parameter values
+            normalized_sql=entry.sql,  # Normalized SQL with ? placeholders
+            source="hash",
+            hash=entry.hash,
+            tag=entry.tag,
+            save_as=save_as
+        )
+
+    def _resolve_by_tag(self, tag: str, save_as: str) -> AnalyzeInput:
+        """Resolve query by tag from registry."""
+        entry = self.registry.get_query_by_tag(tag)
+        if not entry:
+            raise AnalyzeInputError(f"Query tag '{tag}' not found in registry. Run 'rdst list' to see available queries.")
+
+        # Get the executable SQL with parameter values reconstructed
+        executable_sql = self.registry.get_executable_query_by_tag(tag, interactive=False)
+        if not executable_sql:
+            raise AnalyzeInputError(f"Could not reconstruct executable query for tag '{tag}'")
+
+        return AnalyzeInput(
+            sql=executable_sql,  # Original SQL with parameter values
+            normalized_sql=entry.sql,  # Normalized SQL with ? placeholders
+            source="tag",
+            hash=entry.hash,
+            tag=entry.tag,
+            save_as=save_as
+        )
+
+    def _resolve_inline_query(self, query: str, save_as: str) -> AnalyzeInput:
+        """Resolve inline query string."""
+        if not query or not query.strip():
+            raise AnalyzeInputError("Empty query provided")
+
+        # Normalize and hash
+        normalized_sql = normalize_sql(query)
+        query_hash = hash_sql(query)
+
+        return AnalyzeInput(
+            sql=query.strip(),  # Original SQL for EXPLAIN ANALYZE
+            normalized_sql=normalized_sql,  # Normalized SQL for registry/LLM
+            source="inline",
+            hash=query_hash,
+            save_as=save_as
+        )
+
+    def _resolve_file_input(self, file_path: str, save_as: str) -> AnalyzeInput:
+        """Resolve query from file input."""
+        path = Path(file_path)
+
+        if not path.exists():
+            raise AnalyzeInputError(f"File not found: {file_path}")
+
+        if not path.is_file():
+            raise AnalyzeInputError(f"Path is not a file: {file_path}")
+
+        try:
+            # Read file with UTF-8 encoding, handling BOM
+            content = path.read_text(encoding='utf-8-sig')
+        except Exception as e:
+            raise AnalyzeInputError(f"Could not read file {file_path}: {e}")
+
+        if not content.strip():
+            raise AnalyzeInputError(f"File is empty: {file_path}")
+
+        # Handle multi-statement files - take the first non-empty statement
+        content = content.strip()
+
+        # Split by semicolon and take first statement
+        statements = [stmt.strip() for stmt in content.split(';') if stmt.strip()]
+        if not statements:
+            raise AnalyzeInputError(f"No valid SQL statements found in file: {file_path}")
+
+        if len(statements) > 1:
+            print(f"Warning: File contains {len(statements)} statements, analyzing the first one")
+
+        query = statements[0]
+        normalized_sql = normalize_sql(query)
+        query_hash = hash_sql(query)
+
+        return AnalyzeInput(
+            sql=query.strip(),  # Original SQL
+            normalized_sql=normalized_sql,
+            source="file",
+            hash=query_hash,
+            save_as=save_as
+        )
+
+    def _resolve_stdin_input(self, save_as: str) -> AnalyzeInput:
+        """Resolve query from stdin input."""
+        if not sys.stdin.isatty():
+            # Reading from pipe
+            try:
+                content = sys.stdin.read()
+            except Exception as e:
+                raise AnalyzeInputError(f"Could not read from stdin: {e}")
+        else:
+            raise AnalyzeInputError("No input provided via stdin. Use pipe or redirect input.")
+
+        if not content.strip():
+            raise AnalyzeInputError("Empty input received from stdin")
+
+        # Apply size limit (1MB)
+        if len(content) > 1024 * 1024:
+            raise AnalyzeInputError("Input from stdin is too large (max 1MB)")
+
+        # Normalize the input
+        content = content.strip()
+        normalized_sql = normalize_sql(content)
+        query_hash = hash_sql(content)
+
+        return AnalyzeInput(
+            sql=content.strip(),  # Original SQL
+            normalized_sql=normalized_sql,
+            source="stdin",
+            hash=query_hash,
+            save_as=save_as
+        )
+
+    def _resolve_interactive_prompt(self, save_as: str) -> AnalyzeInput:
+        """Resolve query from interactive user prompt or registry browser."""
+        if not sys.stdin.isatty():
+            raise AnalyzeInputError("No query provided and stdin is not interactive")
+
+        # First, check if there are saved queries to browse
+        saved_queries = self.registry.list_queries(limit=100)  # Get up to 100 recent queries
+
+        if saved_queries:
+            # Offer to browse saved queries or enter new one
+            try:
+                if _RICH_AVAILABLE and self._console:
+                    from rich.prompt import Confirm
+                    browse_saved = Confirm.ask(
+                        f"📚 Found {len(saved_queries)} saved queries. Browse them instead of entering new query?",
+                        default=True
+                    )
+                else:
+                    choice = input(f"Found {len(saved_queries)} saved queries. Browse them? (Y/n): ").strip()
+                    browse_saved = choice.lower() in ['', 'y', 'yes']
+
+                if browse_saved:
+                    return self._browse_saved_queries(save_as)
+
+            except (KeyboardInterrupt, EOFError):
+                raise AnalyzeInputError("Query selection cancelled by user")
+
+        # Fall back to manual query input
+        try:
+            if _RICH_AVAILABLE and self._console:
+                self._console.print(Panel(
+                    "Please paste your SQL query below.\nPress Ctrl+C to cancel.",
+                    title="SQL Query Input",
+                    border_style="cyan"
+                ))
+                query = Prompt.ask("SQL query")
+            else:
+                print("Enter your SQL query (Ctrl+C to cancel):")
+                query = input("> ")
+
+        except (KeyboardInterrupt, EOFError):
+            raise AnalyzeInputError("Query input cancelled by user")
+
+        if not query or not query.strip():
+            raise AnalyzeInputError("Empty query provided")
+
+        normalized_sql = normalize_sql(query)
+        query_hash = hash_sql(query)
+
+        return AnalyzeInput(
+            sql=query.strip(),  # Original SQL
+            normalized_sql=normalized_sql,
+            source="prompt",
+            hash=query_hash,
+            save_as=save_as
+        )
+
+    def _looks_like_hash(self, text: str) -> bool:
+        import re
+        return bool(re.match(r'^[0-9a-f]{12}$', text.lower()))
+
+    def _browse_saved_queries(self, save_as: str) -> AnalyzeInput:
+        """Browse and select from saved queries."""
+        saved_queries = self.registry.list_queries(limit=50)  # Show up to 50 queries
+
+        if not saved_queries:
+            raise AnalyzeInputError("No saved queries found")
+
+        try:
+            if _RICH_AVAILABLE and self._console:
+                from rich.table import Table
+                from rich.prompt import Prompt
+
+                # Display queries with numbers for selection
+                table = Table(show_header=True, header_style="bold cyan")
+                table.add_column("#", style="bold yellow", width=3, justify="right")
+                table.add_column("HASH", style="bright_blue", width=12)
+                table.add_column("TAG", style="green", width=12)
+                table.add_column("SQL", style="white", width=22)
+                table.add_column("SOURCE", style="magenta", width=8)
+                table.add_column("LAST TARGET", style="red", width=10)
+                table.add_column("FIRST", style="cyan", width=6)
+                table.add_column("LAST", style="yellow", width=6)
+
+                for i, query in enumerate(saved_queries, 1):
+                    # Format timestamps
+                    import datetime
+                    try:
+                        dt = datetime.datetime.fromisoformat(query.last_analyzed.replace('Z', '+00:00'))
+                        last_analyzed = dt.strftime("%m-%d")
+                    except:
+                        last_analyzed = "Unknown"
+
+                    try:
+                        dt = datetime.datetime.fromisoformat(query.first_analyzed.replace('Z', '+00:00'))
+                        first_analyzed = dt.strftime("%m-%d")
+                    except:
+                        first_analyzed = "Unknown"
+
+                    sql_display = query.sql[:22] + ("..." if len(query.sql) > 22 else "")
+                    tag_display = query.tag if query.tag else "-"
+                    target_display = getattr(query, 'last_target', '') or "-"
+
+                    table.add_row(
+                        str(i),
+                        query.hash,
+                        tag_display,
+                        sql_display,
+                        query.source,
+                        target_display,
+                        first_analyzed,
+                        last_analyzed
+                    )
+
+                table.title = f"Select Query to Analyze ({len(saved_queries)} queries)"
+                self._console.print(table)
+
+                # Get user selection
+                while True:
+                    choice = Prompt.ask(
+                        f"\n[bold cyan]Select query to analyze[/bold cyan] ([bold yellow]1-{len(saved_queries)}[/bold yellow], [bold red]q[/bold red] to quit)"
+                    )
+
+                    if choice.lower() in ['q', 'quit', 'exit']:
+                        raise AnalyzeInputError("Query selection cancelled by user")
+
+                    try:
+                        idx = int(choice) - 1
+                        if 0 <= idx < len(saved_queries):
+                            selected_query = saved_queries[idx]
+                            return AnalyzeInput(
+                                sql=selected_query.sql,
+                                source="registry",
+                                hash=selected_query.hash,
+                                tag=selected_query.tag,
+                                save_as=save_as
+                            )
+                        else:
+                            self._console.print(f"[red]Invalid selection. Please enter 1-{len(saved_queries)} or 'q'[/red]")
+                    except ValueError:
+                        self._console.print(f"[red]Invalid input. Please enter a number or 'q'[/red]")
+
+            else:
+                # Plain text fallback
+                print(f"\nSelect Query to Analyze ({len(saved_queries)} queries):")
+                print("-" * 105)
+                print(f"{'#':<3} | {'HASH':<12} | {'TAG':<12} | {'SQL':<18} | {'SOURCE':<8} | {'LAST TARGET':<11} | {'FIRST':<6} | {'LAST':<6}")
+                print("-" * 105)
+
+                for i, query in enumerate(saved_queries, 1):
+                    # Format timestamps
+                    import datetime
+                    try:
+                        dt = datetime.datetime.fromisoformat(query.last_analyzed.replace('Z', '+00:00'))
+                        last_analyzed = dt.strftime("%m-%d")
+                    except:
+                        last_analyzed = "Unknown"
+
+                    try:
+                        dt = datetime.datetime.fromisoformat(query.first_analyzed.replace('Z', '+00:00'))
+                        first_analyzed = dt.strftime("%m-%d")
+                    except:
+                        first_analyzed = "Unknown"
+
+                    sql_display = query.sql[:18] + ("..." if len(query.sql) > 18 else "")
+                    tag_display = query.tag if query.tag else "-"
+                    target_display = getattr(query, 'last_target', '') or "-"
+                    print(f"{i:<3} | {query.hash:<12} | {tag_display:<12} | {sql_display:<18} | {query.source:<8} | {target_display:<11} | {first_analyzed:<6} | {last_analyzed:<6}")
+
+                while True:
+                    choice = input(f"\nSelect query (1-{len(saved_queries)}, 'q' to quit): ").strip()
+
+                    if choice.lower() in ['q', 'quit', 'exit']:
+                        raise AnalyzeInputError("Query selection cancelled by user")
+
+                    try:
+                        idx = int(choice) - 1
+                        if 0 <= idx < len(saved_queries):
+                            selected_query = saved_queries[idx]
+                            return AnalyzeInput(
+                                sql=selected_query.sql,
+                                source="registry",
+                                hash=selected_query.hash,
+                                tag=selected_query.tag,
+                                save_as=save_as
+                            )
+                        else:
+                            print(f"Invalid selection. Please enter 1-{len(saved_queries)} or 'q'")
+                    except ValueError:
+                        print("Invalid input. Please enter a number or 'q'")
+
+        except (KeyboardInterrupt, EOFError):
+            raise AnalyzeInputError("Query selection cancelled by user")
+
+    def detect_sql_dialect(self, sql: str) -> str:
+        """
+        Detect SQL dialect from query text using heuristics.
+
+        Args:
+            sql: SQL query text
+
+        Returns:
+            "postgresql", "mysql", or "unknown"
+        """
+        sql_lower = sql.lower()
+
+        # PostgreSQL-specific indicators
+        pg_indicators = [
+            'limit', 'offset', '::',  # Cast syntax
+            'ilike', 'similar to', 'regexp_matches',
+            'array[', 'jsonb', 'uuid',
+            'generate_series', 'extract(', 'interval'
+        ]
+
+        # MySQL-specific indicators
+        mysql_indicators = [
+            'limit', '`',  # Backtick identifiers
+            'auto_increment', 'engine=', 'charset=',
+            'ifnull(', 'concat(', 'date_format(',
+            'unix_timestamp', 'from_unixtime'
+        ]
+
+        pg_score = sum(1 for indicator in pg_indicators if indicator in sql_lower)
+        mysql_score = sum(1 for indicator in mysql_indicators if indicator in sql_lower)
+
+        if pg_score > mysql_score:
+            return "postgresql"
+        elif mysql_score > pg_score:
+            return "mysql"
+        else:
+            return "unknown"
+
+    def execute_analyze(self, resolved_input: AnalyzeInput, target: Optional[str] = None, readyset: bool = False, fast: bool = False, interactive: bool = False, review: bool = False) -> 'RdstResult':
+        """
+        Execute the analyze command with resolved input using the workflow engine.
+
+        Args:
+            resolved_input: Resolved input from resolve_input()
+            target: Target database name
+            readyset: Whether to run parallel workflow with ReadySet testing
+            fast: Whether to auto-skip slow EXPLAIN ANALYZE queries after 10 seconds
+            interactive: Whether to enter interactive mode after analysis
+            review: Whether to review conversation history instead of analyzing
+
+        Returns:
+            RdstResult with analysis results
+        """
+        from .rdst_cli import RdstResult, TargetsConfig
+        from .interactive_mode import display_conversation_history
+
+        try:
+            # Handle --review flag (show conversation history without analysis)
+            if review:
+                conv_registry = ConversationRegistry()
+                llm_manager = LLMManager()
+                provider = llm_manager.defaults.provider
+
+                if conv_registry.conversation_exists(resolved_input.hash, provider):
+                    conversation = conv_registry.load_conversation(resolved_input.hash, provider)
+                    display_conversation_history(conversation, show_system_messages=False)
+                    return RdstResult(True, f"Conversation history for query hash: {resolved_input.hash}")
+                else:
+                    return RdstResult(False, f"No conversation found for query hash: {resolved_input.hash}")
+
+            # Handle --interactive flag: Check for existing conversation BEFORE running analysis
+            if interactive:
+                conv_registry = ConversationRegistry()
+                llm_manager = LLMManager()
+                provider = llm_manager.defaults.provider
+
+                if conv_registry.conversation_exists(resolved_input.hash, provider):
+                    print(f"\n{'='*80}")
+                    print(f"Found existing conversation for this query (hash: {resolved_input.hash})")
+                    print(f"{'='*80}")
+
+                    while True:
+                        choice = input("\nContinue existing conversation or start new? [c/n]: ").strip().lower()
+                        if choice in ['c', 'continue']:
+                            # Load conversation and enter interactive mode directly
+                            conversation = conv_registry.load_conversation(resolved_input.hash, provider)
+                            print(f"Continuing conversation from {conversation.started_at}")
+
+                            # Get analysis results from registry to pass to interactive mode
+                            from ..query_registry.query_registry import QueryRegistry
+                            query_registry = QueryRegistry()
+                            query_entry = query_registry.get_query(resolved_input.hash)
+
+                            # We need to load the analysis results - for now use empty dict
+                            # The conversation already has the context in the system messages
+                            from .interactive_mode import run_interactive_mode
+                            run_interactive_mode(conversation, {}, llm_manager)
+
+                            return RdstResult(True, "Interactive session completed")
+                        elif choice in ['n', 'new']:
+                            # Delete old conversation and continue to run analysis
+                            conv_registry.delete_conversation(resolved_input.hash, provider)
+                            print("Starting fresh conversation...")
+                            break
+                        else:
+                            print("Please enter 'c' for continue or 'n' for new")
+
+            # Load target configuration
+            cfg = TargetsConfig()
+            cfg.load()
+
+            target_name = target or cfg.get_default()
+            if not target_name:
+                return RdstResult(False, "No target specified and no default configured. Run 'rdst configure' first.")
+
+            target_config = cfg.get(target_name)
+            if not target_config:
+                available_targets = cfg.list_targets()
+                targets_str = ', '.join(available_targets) if available_targets else 'none'
+                return RdstResult(False, f"Target '{target_name}' not found. Available targets: {targets_str}")
+
+            readyset_analysis_result = None
+
+            if readyset:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    analyze_future = executor.submit(
+                        self._run_analyze_workflow,
+                        resolved_input,
+                        target_name,
+                        target_config,
+                        save_as=resolved_input.save_as,
+                        source=resolved_input.source,
+                        fast=fast
+                    )
+                    readyset_future = executor.submit(
+                        self._run_readyset_analysis,
+                        resolved_input,
+                        target_name=target_name,
+                        target_config=target_config
+                    )
+
+                    workflow_result = analyze_future.result()
+                    try:
+                        readyset_analysis_result = readyset_future.result()
+                    except Exception as exc:  # pragma: no cover - defensive
+                        readyset_analysis_result = {
+                            "success": False,
+                            "error": f"ReadySet analysis failed: {exc}"
+                        }
+            else:
+                workflow_result = self._run_analyze_workflow(
+                    resolved_input=resolved_input,
+                    target=target_name,
+                    target_config=target_config,
+                    save_as=resolved_input.save_as,
+                    source=resolved_input.source,
+                    fast=fast
+                )
+
+            if readyset and readyset_analysis_result:
+                if workflow_result.get("success"):
+                    readyset_analysis_result.setdefault(
+                        "static_cacheability",
+                        workflow_result["result"].get("CheckReadySetCacheability", {})
+                    )
+                    context = workflow_result["result"]
+                    context["readyset_analysis"] = readyset_analysis_result
+
+                    formatted_output = context.get("FormatFinalResults")
+                    if isinstance(formatted_output, dict):
+                        formatted_output["readyset_analysis"] = readyset_analysis_result
+
+                        if readyset_analysis_result.get("success"):
+                            final_verdict = readyset_analysis_result.get("final_verdict", {})
+                            explain_result = readyset_analysis_result.get("explain_cache_result", {})
+
+                            readyset_summary = formatted_output.get("readyset_cacheability", {}) or {}
+                            readyset_summary.update({
+                                "checked": True,
+                                "method": final_verdict.get("method", readyset_analysis_result.get("method", "readyset_explain_cache")),
+                                "cacheable": final_verdict.get("cacheable", False),
+                                "confidence": final_verdict.get("confidence", "unknown"),
+                                "explanation": explain_result.get("explanation") or readyset_analysis_result.get("static_cacheability", {}).get("explanation"),
+                                "issues": explain_result.get("issues"),
+                            })
+                            formatted_output["readyset_cacheability"] = readyset_summary
+
+                            # Preserve explain result for downstream consumers
+                            formatted_output["readyset_explain_cache"] = explain_result
+
+                        context["FormatFinalResults"] = formatted_output
+                else:
+                    workflow_result["readyset_analysis"] = readyset_analysis_result
+
+            if workflow_result["success"]:
+                # Clear all the workflow progress output before showing final result
+                import sys
+                if sys.stdout.isatty():
+                    # Clear screen and move cursor to top
+                    print("\033[2J\033[H", end='', flush=True)
+
+                # Format the results for user display using new clean formatter
+                from .output_formatter import format_analyze_output
+                formatted_results = format_analyze_output(workflow_result["result"])
+
+                # Print the formatted results before entering interactive mode
+                if interactive:
+                    print(formatted_results)
+
+                # Handle --interactive flag (enter interactive mode after analysis)
+                # IMPORTANT: Only enter interactive mode if explain_results succeeded
+                # Without successful EXPLAIN, there's no analysis to discuss
+                if interactive:
+                    explain_results = workflow_result["result"].get("explain_results", {})
+                    if explain_results and explain_results.get("success"):
+                        self._handle_interactive_mode(
+                            resolved_input=resolved_input,
+                            target_name=target_name,
+                            analysis_results=workflow_result["result"]
+                        )
+                    else:
+                        print("\n" + "="*80)
+                        print("Cannot enter interactive mode: Query analysis failed")
+                        print("="*80)
+                        error_msg = explain_results.get("error", "Unknown error")
+                        print(f"\nError: {error_msg}")
+                        print("\nPlease fix the query and try again.")
+                        print()
+
+                return RdstResult(True, formatted_results)
+            else:
+                return RdstResult(False, workflow_result["error"])
+
+        except Exception as e:
+            return RdstResult(False, f"analyze failed: {e}")
+
+    def _handle_interactive_mode(self, resolved_input: AnalyzeInput, target_name: str, analysis_results: dict) -> None:
+        """
+        Handle interactive mode flow after analysis completes: create new conversation and enter REPL.
+
+        Note: The check for existing conversation now happens BEFORE analysis in execute_analyze()
+
+        Args:
+            resolved_input: Resolved input with query hash
+            target_name: Target database name
+            analysis_results: Full analysis results from workflow
+        """
+        from .interactive_mode import run_interactive_mode
+        from datetime import datetime, timezone
+
+        conv_registry = ConversationRegistry()
+        llm_manager = LLMManager()
+        provider = llm_manager.defaults.provider
+        model = llm_manager.defaults.model
+
+        query_hash = resolved_input.hash
+
+        # Create new conversation (we've already checked/deleted old one in execute_analyze)
+        conversation = conv_registry.create_conversation(
+            query_hash=query_hash,
+            provider=provider,
+            model=model,
+            analysis_id=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            target=target_name,
+            query_sql=resolved_input.sql
+        )
+
+        # Build comprehensive analysis context for system message
+        system_context = self._build_analysis_context(analysis_results, resolved_input.sql)
+        conversation.add_message("system", system_context)
+
+        # Save initial conversation
+        conv_registry.save_conversation(conversation)
+
+        # Enter interactive REPL
+        run_interactive_mode(conversation, analysis_results, llm_manager)
+
+    def _build_analysis_context(self, analysis_results: dict, query_sql: str) -> str:
+        """
+        Build comprehensive analysis context for the initial system message.
+
+        Args:
+            analysis_results: Full analysis results from workflow
+            query_sql: Original SQL query
+
+        Returns:
+            Formatted context string for system message
+        """
+        import json
+
+        # Extract key components from workflow context
+        explain_results = analysis_results.get("explain_results", {})
+        llm_analysis = analysis_results.get("llm_analysis", {})
+        schema_collection = analysis_results.get("schema_collection", {})
+        schema_info = schema_collection.get("schema_info", {}) if schema_collection else {}
+        query_metrics = analysis_results.get("query_metrics", {})
+
+        # Build context string
+        context_parts = []
+
+        context_parts.append("# QUERY ANALYSIS RESULTS")
+        context_parts.append("\n## Original Query")
+        context_parts.append(f"```sql\n{query_sql}\n```")
+
+        context_parts.append("\n## Performance Metrics")
+        if explain_results:
+            exec_time = explain_results.get("execution_time_ms", 0)
+            rows_examined = explain_results.get("rows_examined", 0)
+            rows_returned = explain_results.get("rows_returned", 0)
+            context_parts.append(f"- Execution Time: {exec_time:.2f}ms")
+            context_parts.append(f"- Rows Examined: {rows_examined:,}")
+            context_parts.append(f"- Rows Returned: {rows_returned:,}")
+
+        context_parts.append("\n## EXPLAIN ANALYZE Output")
+        if explain_results and "raw_explain" in explain_results:
+            context_parts.append(f"```\n{explain_results['raw_explain']}\n```")
+
+        context_parts.append("\n## Database Schema")
+        if schema_info:
+            context_parts.append(f"```json\n{json.dumps(schema_info, indent=2)}\n```")
+
+        context_parts.append("\n## AI Analysis & Recommendations")
+        if llm_analysis:
+            # Index recommendations
+            index_recs = llm_analysis.get("index_recommendations", [])
+            if index_recs:
+                context_parts.append("\n### Index Recommendations")
+                for i, rec in enumerate(index_recs, 1):
+                    context_parts.append(f"\n{i}. **{rec.get('table', 'N/A')}.{rec.get('columns', [])}**")
+                    context_parts.append(f"   - Rationale: {rec.get('rationale', 'N/A')}")
+                    context_parts.append(f"   - SQL: `{rec.get('sql', 'N/A')}`")
+
+            # Query rewrite suggestions
+            rewrite_sugs = llm_analysis.get("rewrite_suggestions", [])
+            if rewrite_sugs:
+                context_parts.append("\n### Query Rewrite Suggestions")
+                for i, sug in enumerate(rewrite_sugs, 1):
+                    context_parts.append(f"\n{i}. **{sug.get('type', 'N/A')}**")
+                    context_parts.append(f"   - Description: {sug.get('description', 'N/A')}")
+                    if sug.get('rewritten_query'):
+                        context_parts.append(f"   - Rewritten Query: ```sql\n{sug['rewritten_query']}\n```")
+
+            # Hotspots and issues
+            hotspots = llm_analysis.get("hotspots", {})
+            if hotspots:
+                context_parts.append("\n### Performance Hotspots")
+                context_parts.append(f"```json\n{json.dumps(hotspots, indent=2)}\n```")
+
+        return "\n".join(context_parts)
+
+    def _run_readyset_analysis(
+        self,
+        resolved_input: AnalyzeInput,
+        target_name: Optional[str] = None,
+        target_config: Optional[dict] = None,
+        analyze_workflow_output: Optional[dict] = None
+    ) -> dict:
+        """
+        Run ReadySet container setup and cacheability testing.
+
+        Args:
+            resolved_input: Resolved input with query info
+            target_name: Name of the target database to mirror
+            target_config: Resolved target configuration
+            analyze_workflow_output: Results from the regular analysis workflow (optional)
+
+        Returns:
+            Dict containing ReadySet analysis results
+        """
+        try:
+            from .rdst_cli import TargetsConfig
+            from .readyset_setup import setup_readyset_containers
+
+            print("\n🔧 Setting up ReadySet container for cacheability testing...")
+
+            # Load target configuration
+            cfg = TargetsConfig()
+            cfg.load()
+            effective_target_name = target_name or cfg.get_default()
+            if not target_config and effective_target_name:
+                target_config = cfg.get(effective_target_name)
+
+            if not target_config or not effective_target_name:
+                return {
+                    "success": False,
+                    "error": f"Target '{effective_target_name or ''}' not found"
+                }
+            target_name = effective_target_name
+
+            # Use shared setup function
+            print("  -> Setting up test database and ReadySet containers...")
+            setup_result_wrapper = setup_readyset_containers(
+                target_name=target_name,
+                target_config=target_config,
+                test_data_rows=100,
+                llm_model=None  # Use provider's default model
+            )
+
+            if not setup_result_wrapper.get("success"):
+                return {
+                    "success": False,
+                    "error": setup_result_wrapper.get("error", "Setup failed")
+                }
+
+            # Extract values from setup result
+            readyset_port = setup_result_wrapper["readyset_port"]
+            setup_result = setup_result_wrapper["setup_result"]
+
+            # Now run EXPLAIN CREATE CACHE against ReadySet
+            print("  -> Running EXPLAIN CREATE CACHE on ReadySet...")
+            from ..functions.readyset_explain_cache import explain_create_cache_readyset, create_cache_readyset
+
+            explain_result = explain_create_cache_readyset(
+                query=resolved_input.sql,
+                readyset_port=readyset_port,
+                test_db_config=setup_result.get("target_config", {})
+            )
+
+            print("  DONE: ReadySet cacheability analysis complete")
+
+            # If the query is cacheable, try to create the cache (unless already cached)
+            create_result = {}
+            already_cached = "already cached" in explain_result.get("explanation", "").lower()
+            if explain_result.get("cacheable", False):
+                if already_cached:
+                    print("  ✓ Query is already cached in ReadySet")
+                    create_result = {
+                        "success": True,
+                        "cached": True,
+                        "already_cached": True,
+                        "message": "Query already cached"
+                    }
+                else:
+                    print("  -> Query is cacheable, creating cache...")
+                    create_result = create_cache_readyset(
+                        query=resolved_input.sql,
+                        readyset_port=readyset_port,
+                        test_db_config=setup_result.get("target_config", {})
+                    )
+                    if create_result.get("cached"):
+                        print("  ✓ Cache created successfully")
+                    else:
+                        print(f"  ⚠ Cache creation failed: {create_result.get('error', 'Unknown error')}")
+
+            # Merge static cacheability check with actual ReadySet result
+            static_cacheability = {}
+            if analyze_workflow_output:
+                static_cacheability = analyze_workflow_output.get("CheckReadySetCacheability", {})
+
+            return {
+                "success": True,
+                "setup_result": setup_result,
+                "explain_cache_result": explain_result,
+                "create_cache_result": create_result,
+                "static_cacheability": static_cacheability,
+                "readyset_container": setup_result.get("readyset_container", {}),
+                "test_db_container": setup_result.get("container_start", {}),
+                "final_verdict": {
+                    "cacheable": explain_result.get("cacheable", False),
+                    "confidence": explain_result.get("confidence", "unknown"),
+                    "method": "readyset_container" if explain_result.get("success") else "static_analysis",
+                    "cached": create_result.get("cached", False)
+                }
+            }
+
+        except Exception as e:
+            print(f"  ERROR: ReadySet analysis failed: {str(e)}")
+            return {
+                "success": False,
+                "error": f"ReadySet analysis failed: {str(e)}"
+            }
+
+    def _run_analyze_workflow(self, resolved_input: AnalyzeInput, target: str, target_config: dict,
+                             save_as: str = "", source: str = "manual", fast: bool = False) -> dict:
+        """Run the complete analyze workflow using WorkflowManager."""
+        try:
+            from ..workflow_manager.workflow_manager import WorkflowManager, DEFAULT_FUNCTIONS
+            from ..functions import ANALYZE_WORKFLOW_FUNCTIONS
+            from pathlib import Path
+
+            # Set up workflow manager with analyze functions
+            workflow_functions = {
+                **DEFAULT_FUNCTIONS,  # Built-in workflow functions
+                **ANALYZE_WORKFLOW_FUNCTIONS,  # Our analyze functions
+            }
+
+            # Load workflow definition - always use simple workflow
+            workflow_path = Path(__file__).parent.parent / "workflows" / "analyze_workflow_simple.json"
+
+            if not workflow_path.exists():
+                return {
+                    "success": False,
+                    "error": f"Workflow file not found: {workflow_path}"
+                }
+
+            mgr = WorkflowManager.from_file(str(workflow_path), resources=workflow_functions)
+
+            # Prepare initial workflow input
+            initial_input = {
+                "query": resolved_input.sql,  # Original SQL for EXPLAIN ANALYZE
+                "normalized_query": resolved_input.normalized_sql,  # Normalized SQL for registry/LLM
+                "target": target,
+                "target_config": target_config,
+                "test_rewrites": True,  # Enable rewrite testing by default
+                "llm_model": None,  # Use provider's default model
+                "save_as": save_as,
+                "source": source,
+                "fast_mode": fast  # Auto-skip slow queries after 10 seconds
+            }
+
+            # Execute workflow with detailed progress tracking
+            result = self._run_workflow_with_progress(mgr, initial_input)
+
+            return {"success": True, "result": result}
+
+        except Exception as e:
+            print(f"  ERROR: Workflow failed: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Workflow execution failed: {str(e)}"
+            }
+
+    def _run_workflow_with_progress(self, mgr, initial_input):
+        """Run workflow with detailed step-by-step progress indicators and heartbeat."""
+        import time
+        import threading
+        from collections import defaultdict
+
+        print("Analyzing query performance...")
+
+        # Get LLM info for display
+        try:
+            # Check environment variable first
+            provider = os.getenv("RDST_LLM_PROVIDER")
+
+            # If no env var, read from config file
+            if not provider:
+                try:
+                    from .rdst_cli import TargetsConfig
+                    config = TargetsConfig()
+                    config.load()
+                    provider = config.get_llm_provider()
+                except:
+                    pass
+
+            # Default fallback
+            provider = provider or "openai"
+
+            if provider == "lmstudio":
+                llm_display = "AI analysis via LM Studio"
+            elif provider == "claude":
+                llm_display = "AI analysis via Claude"
+            elif provider == "openai":
+                llm_display = "AI analysis via OpenAI"
+            else:
+                llm_display = f"AI analysis via {provider}"
+        except:
+            llm_display = "AI analysis"
+
+        # Step mapping for user-friendly names
+        step_names = {
+            "ValidateQuerySafety": "Validating query safety",
+            "NormalizeForRegistry": "Normalizing query for registry",
+            "ParameterizeForLLM": "Parameterizing query for AI analysis",
+            "ExecuteExplainAnalyze": "Executing EXPLAIN ANALYZE on database",
+            "CollectQueryMetrics": "Collecting additional database metrics",
+            "CollectDatabaseSchema": "Collecting database schema",
+            "PerformLLMAnalysis": f"{llm_display} (may take 30-60s)",
+            "ExtractOptimizationSuggestions": "Extracting optimization suggestions",
+            "TestQueryRewrites": "Testing suggested query rewrites",
+            "StoreAnalysisResults": "Storing results in registry",
+            "FormatFinalResults": "Formatting final results"
+        }
+
+        # Track execution state
+        execution_state = {
+            "current_step": None,
+            "step_start_time": None,
+            "heartbeat_active": False,
+            "completed_steps": set()
+        }
+
+        def heartbeat_thread():
+            """Show heartbeat dots with live timer while steps are running."""
+            heartbeat_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+            i = 0
+            last_line_length = 0
+            while execution_state["heartbeat_active"]:
+                if execution_state["step_start_time"] and (time.time() - execution_state["step_start_time"]) > 0.5:
+                    current_step = execution_state.get('current_step', 'Processing')
+                    elapsed_time = time.time() - execution_state["step_start_time"]
+
+                    if elapsed_time >= 1.0:
+                        # Show whole seconds for longer operations
+                        line = f"  {heartbeat_chars[i % len(heartbeat_chars)]} {current_step}... ({elapsed_time:.0f}s)"
+                    else:
+                        # Show decimal for sub-second operations
+                        line = f"  {heartbeat_chars[i % len(heartbeat_chars)]} {current_step}... ({elapsed_time:.1f}s)"
+
+                    # Only clear extra characters from previous line if it was longer
+                    padding = max(0, last_line_length - len(line))
+                    print(f"\r{line}{' ' * padding}", end='', flush=True)
+                    last_line_length = len(line)
+                    i += 1
+                time.sleep(0.2)  # Update 5 times per second for responsive feedback
+
+        # Start heartbeat thread
+        execution_state["heartbeat_active"] = True
+        heartbeat = threading.Thread(target=heartbeat_thread, daemon=True)
+        heartbeat.start()
+
+        def step_start_callback(step_name, input_data):
+            """Called when a workflow step starts."""
+            friendly_name = step_names.get(step_name, step_name)
+            execution_state["current_step"] = friendly_name
+            execution_state["step_start_time"] = time.time()
+
+            # Don't print anything here - the heartbeat thread will show progress
+            # This prevents duplicate lines
+
+        def step_complete_callback(step_name, result, execution_time):
+            """Called when a workflow step completes."""
+            friendly_name = step_names.get(step_name, step_name)
+            execution_state["completed_steps"].add(step_name)
+
+            # Just update execution state - the next step or final cleanup will update the display
+            # This keeps everything on one line that continuously updates
+
+
+        try:
+            # Monkey patch the workflow manager to add progress callbacks at the right points
+            original_run_workflow_with_retry = mgr._run_workflow_with_retry
+
+            def enhanced_run_workflow_with_retry(execution, initial_input):
+                """Enhanced workflow execution with progress tracking."""
+                wf = getattr(mgr, "_workflow", None)
+                if not wf:
+                    raise Exception("No workflow loaded")
+
+                states = wf.get("States") or {}
+                current = wf.get("StartAt")
+                if not current:
+                    raise Exception("Workflow missing StartAt")
+
+                context = execution.context.copy()
+                if initial_input:
+                    context.update(initial_input)
+                context.setdefault("States", {})
+
+                # Initialize step tracking
+                for state_name in states.keys():
+                    from ..workflow_manager.workflow_manager import StepResult, WorkflowStatus
+                    execution.steps[state_name] = StepResult(
+                        step_name=state_name,
+                        status=WorkflowStatus.PENDING
+                    )
+
+                # Execute workflow loop with progress tracking
+                while current:
+                    execution.current_step = current
+                    state_name = current
+                    state = states.get(state_name)
+                    if not state:
+                        raise Exception(f"State '{state_name}' not found")
+
+                    step_result = execution.steps[state_name]
+                    from ..workflow_manager.workflow_manager import WorkflowStatus
+                    from datetime import datetime
+
+                    step_result.status = WorkflowStatus.RUNNING
+                    step_result.started_at = datetime.now()
+
+                    # Show step start
+                    step_start_callback(state_name, context)
+                    start_time = time.time()
+
+                    try:
+                        # Execute the actual step
+                        result = mgr._execute_step_with_retry(state, context, state_name)
+
+                        # Store result
+                        result_path = state.get("ResultPath") or f"$.{state_name}"
+                        mgr._assign_path(context, result_path, result)
+                        context["States"][state_name] = result
+
+                        step_result.result = result
+                        step_result.status = WorkflowStatus.COMPLETED
+                        step_result.completed_at = datetime.now()
+
+                        # Show completion
+                        end_time = time.time()
+                        step_complete_callback(state_name, result, end_time - start_time)
+
+                    except Exception as e:
+                        step_result.error = str(e)
+                        step_result.status = WorkflowStatus.FAILED
+                        step_result.completed_at = datetime.now()
+                        print(f"\r  ERROR: {step_names.get(state_name, state_name)} failed: {str(e)}")
+                        raise Exception(f"Step '{state_name}' failed: {e}")
+
+                    # Transition
+                    if state.get("End") is True:
+                        break
+                    current = state.get("Next")
+                    if not current:
+                        raise Exception(f"State '{state_name}' has no Next and is not End=true")
+
+                return context
+
+            mgr._run_workflow_with_retry = enhanced_run_workflow_with_retry
+
+            # Run the workflow
+            result = mgr.run(initial_input)
+
+            # Stop heartbeat and show completion message
+            execution_state["heartbeat_active"] = False
+            time.sleep(0.1)  # Give heartbeat thread time to stop
+            print("\r" + " " * 120, end='\r')  # Clear any remaining heartbeat
+            print("  ✓ Analysis complete")  # Final completion message
+            print()  # Add blank line before results
+
+            return result
+
+        finally:
+            execution_state["heartbeat_active"] = False
+
+    def _format_workflow_results(self, workflow_result: dict, skip_slow_fallback: bool = False) -> str:
+        """Format workflow results for user display."""
+        try:
+            # Get the formatted output from the workflow
+            formatted_output = workflow_result.get("FormatFinalResults", {})
+
+            if not formatted_output:
+                return "Analysis completed but no formatted results available."
+
+            # Check if formatting failed and use raw data instead
+            if not formatted_output.get("success", True):
+                # Silently use fallback formatting when workflow formatting fails
+                return self._format_raw_workflow_results(workflow_result, skip_slow_fallback)
+
+            # Build user-friendly output
+            lines = []
+            lines.append("Query Analysis Results")
+            lines.append("=" * 50)
+
+            # Analysis Summary
+            summary = formatted_output.get("analysis_summary", {})
+            if summary:
+                lines.append(f"Overall Rating: {summary.get('overall_rating', 'unknown')}")
+                lines.append(f"Execution Time: {summary.get('execution_time_ms', 0):.1f}ms")
+                lines.append(f"Efficiency Score: {summary.get('efficiency_score', 0)}/100")
+
+                rows_processed = summary.get('rows_processed', {})
+                lines.append(f"Rows Examined: {rows_processed.get('examined', 0):,}")
+                lines.append(f"Rows Returned: {rows_processed.get('returned', 0):,}")
+
+                concerns = summary.get('primary_concerns', [])
+                if concerns:
+                    lines.append(f"Primary Concerns: {', '.join(concerns)}")
+                lines.append("")
+
+            # Recommendations
+            recommendations = formatted_output.get("recommendations", {})
+            if recommendations.get("available", False):
+                rewrites = recommendations.get("query_rewrites", [])
+                if rewrites:
+                    lines.append(f"Query Rewrites ({len(rewrites)} suggestions):")
+                    for i, rewrite in enumerate(rewrites[:3], 1):
+                        lines.append(f"  {i}. {rewrite.get('type', 'Unknown')} ({rewrite.get('priority', 'medium')} priority)")
+                        lines.append(f"     {rewrite.get('explanation', 'No explanation')}")
+                    lines.append("")
+
+                indexes = recommendations.get("index_suggestions", [])
+                if indexes:
+                    lines.append(f"Index Suggestions ({len(indexes)} suggestions):")
+                    for i, index in enumerate(indexes[:3], 1):
+                        columns = ', '.join(index.get('columns', []))
+                        lines.append(f"  {i}. {index.get('table', 'unknown')}: {columns}")
+                        lines.append(f"     {index.get('rationale', 'No rationale')}")
+                    lines.append("")
+
+            # Rewrite Testing Results
+            rewrite_testing = formatted_output.get("rewrite_testing", {})
+            if rewrite_testing.get("tested", False):
+                lines.append("Rewrite Testing Results:")
+                lines.append(f"   {rewrite_testing.get('summary', 'No summary')}")
+                best = rewrite_testing.get("best_rewrite")
+                if best:
+                    improvement = best.get("improvement", {}).get("overall", {})
+                    improvement_pct = improvement.get("improvement_pct", 0)
+                    lines.append(f"   Best rewrite: {improvement_pct:+.1f}% performance change")
+                lines.append("")
+
+            # ReadySet Cacheability (check both formatted output and sequential result)
+            readyset_analysis = (
+                workflow_result.get("readyset_analysis")
+                or workflow_result.get("States", {}).get("readyset_analysis")
+                or formatted_output.get("readyset_analysis")
+                or {}
+            )
+            readyset_cacheability = formatted_output.get("readyset_cacheability", {})
+
+            # Use sequential ReadySet result if available, otherwise use formatted output
+            if readyset_analysis.get("success"):
+                lines.append("🚀 ReadySet Cacheability:")
+                final_verdict = readyset_analysis.get("final_verdict", {})
+                cacheable = final_verdict.get("cacheable", False)
+                confidence = final_verdict.get("confidence", "unknown")
+                method = final_verdict.get("method", "unknown")
+                reason = readyset_analysis.get('explain_cache_result').get("error", "")
+
+                status = "CACHEABLE" if cacheable else "NOT CACHEABLE"
+                lines.append(f"   {status} (confidence: {confidence})")
+                lines.append(f"   Method: {method}")
+                if reason:
+                    lines.append(f"Reason: {reason}")
+
+                # Show cache creation status
+                cached = final_verdict.get("cached", False)
+                create_result = readyset_analysis.get("create_cache_result", {})
+                if cacheable and create_result.get("already_cached"):
+                    lines.append("   ℹ️  Query already cached in ReadySet")
+                elif cacheable and cached:
+                    lines.append("   Cache created in ReadySet")
+                elif cacheable and create_result:
+                    # Cache creation was attempted but failed
+                    error = create_result.get("error", "Unknown error")
+                    lines.append(f"   ⚠ Cache creation failed: {error}")
+
+                explain_result = readyset_analysis.get("explain_cache_result", {})
+                if explain_result.get("explanation"):
+                    lines.append(f"   Explanation: {explain_result.get('explanation')}")
+                issues = explain_result.get("issues") or []
+                if issues:
+                    lines.append("   Issues:")
+                    for issue in issues:
+                        lines.append(f"     • {issue}")
+                else:
+                    details = explain_result.get("details")
+                    if isinstance(details, str) and details.strip():
+                        lines.append(f"   Details: {details}")
+                lines.append("")
+            elif readyset_cacheability.get("checked"):
+                lines.append("🚀 ReadySet Cacheability:")
+                cacheable = readyset_cacheability.get("cacheable", False)
+                confidence = readyset_cacheability.get("confidence", "unknown")
+
+                status = "CACHEABLE" if cacheable else "NOT CACHEABLE"
+                lines.append(f"   {status} (confidence: {confidence})")
+
+                if readyset_cacheability.get("explanation"):
+                    lines.append(f"   {readyset_cacheability.get('explanation')}")
+                lines.append("")
+
+            # Metadata
+            metadata = formatted_output.get("metadata", {})
+            if metadata:
+                lines.append("📋 Analysis Metadata:")
+                lines.append(f"   Target: {metadata.get('target', 'N/A')}")
+                lines.append(f"   Database: {metadata.get('database_engine', 'N/A')}")
+                lines.append(f"   Analysis ID: {metadata.get('analysis_id', 'N/A')}")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Analysis completed but formatting failed: {str(e)}\n\nRaw result available in registry."
+
+    def _format_raw_workflow_results(self, workflow_result: dict, skip_slow_fallback: bool = False) -> str:
+        """Format raw workflow results when the main formatter fails."""
+        lines = []
+        lines.append("Query Analysis Results")
+        lines.append("=" * 50)
+
+        query = workflow_result.get("query", "")
+        target = workflow_result.get("target", "")
+
+        lines.append(f"Query: {query}")
+        lines.append(f"Target: {target}")
+        lines.append("")
+
+        # Show basic execution info
+        explain_results = workflow_result.get("explain_results", {})
+        if explain_results and explain_results.get("success"):
+            lines.append("Database Performance:")
+
+            # Check if EXPLAIN ANALYZE was skipped
+            was_skipped = explain_results.get('explain_analyze_skipped', False) or explain_results.get('explain_analyze_timeout', False)
+
+            if was_skipped:
+                # Show actual elapsed time when skipped, not the instant EXPLAIN time
+                actual_elapsed = explain_results.get('actual_elapsed_time_ms', 0)
+                elapsed_seconds = actual_elapsed / 1000
+                if elapsed_seconds >= 60:
+                    elapsed_str = f"{int(elapsed_seconds // 60)} min {int(elapsed_seconds % 60)} sec"
+                else:
+                    elapsed_str = f"{elapsed_seconds:.1f}s"
+
+                lines.append(f"   WARNING: Execution Time: N/A (skipped after {elapsed_str})")
+                skip_reason = explain_results.get('skip_reason', '')
+                if skip_reason:
+                    lines.append(f"   Note: {skip_reason}")
+            else:
+                # Show actual execution time with performance rating
+                exec_time = explain_results.get('execution_time_ms', 0)
+                if exec_time > 1000:
+                    lines.append(f"   WARNING: Execution Time: {exec_time/1000:.2f}s (slow)")
+                elif exec_time > 100:
+                    lines.append(f"   WARNING: Execution Time: {exec_time:.0f}ms (moderate)")
+                else:
+                    lines.append(f"   OK: Execution Time: {exec_time:.1f}ms (fast)")
+
+            lines.append(f"   Database Engine: {explain_results.get('database_engine', 'unknown').upper()}")
+            lines.append(f"   Rows Examined: {explain_results.get('rows_examined', 0):,}")
+            lines.append(f"   Rows Returned: {explain_results.get('rows_returned', 0):,}")
+            cost = explain_results.get('cost_estimate', 0)
+            if cost > 0:
+                lines.append(f"   Query Cost: {cost:.1f}")
+            lines.append("")
+        else:
+            lines.append("ERROR: Database execution failed or skipped")
+            if explain_results.get("error"):
+                lines.append(f"   Error: {explain_results.get('error')}")
+            lines.append("")
+
+        # Show LLM analysis if available
+        llm_analysis = workflow_result.get("llm_analysis", {})
+        if llm_analysis and llm_analysis.get("success"):
+            analysis_results = llm_analysis.get("analysis_results", {})
+            performance = analysis_results.get("performance_assessment", {})
+            if performance:
+                lines.append("AI Performance Analysis:")
+                rating = performance.get('overall_rating', 'unknown')
+                score = performance.get('efficiency_score', 0)
+
+                if rating == 'excellent':
+                    lines.append(f"   Overall Rating: {rating.upper()} ({score}/100)")
+                elif rating == 'good':
+                    lines.append(f"   Overall Rating: {rating.upper()} ({score}/100)")
+                elif rating == 'fair':
+                    lines.append(f"   WARNING: Overall Rating: {rating.upper()} ({score}/100)")
+                else:
+                    lines.append(f"   ERROR: Overall Rating: {rating.upper()} ({score}/100)")
+
+                concerns = performance.get("primary_concerns", [])
+                if concerns:
+                    lines.append("   Key Issues:")
+                    for concern in concerns[:4]:
+                        lines.append(f"     • {concern}")
+
+                # Show optimization opportunities (general recommendations)
+                optimization_opportunities = llm_analysis.get("analysis_results", {}).get("optimization_opportunities", [])
+                if optimization_opportunities:
+                    lines.append("   General Recommendations:")
+                    for i, opp in enumerate(optimization_opportunities[:3], 1):
+                        desc = opp.get('description', 'No description')
+                        priority = opp.get('priority', 'medium')
+                        lines.append(f"     {i}. [{priority.upper()}] {desc}")
+
+                # Show index recommendations
+                index_recommendations = llm_analysis.get("index_recommendations", [])
+                if index_recommendations:
+                    lines.append("   Index Recommendations:")
+                    for i, idx_rec in enumerate(index_recommendations[:3], 1):
+                        sql = idx_rec.get('sql', '')
+                        rationale = idx_rec.get('rationale', 'No rationale provided')
+                        impact = idx_rec.get('estimated_impact', 'unknown')
+                        lines.append(f"     {i}. {rationale}")
+                        if sql:
+                            lines.append(f"        SQL: {sql}")
+                        lines.append(f"        Impact: {impact.upper()}")
+
+                # Show rewrite suggestions
+                rewrite_suggestions = llm_analysis.get("rewrite_suggestions", [])
+                if rewrite_suggestions:
+                    lines.append("   Query Rewrite Suggestions:")
+                    for i, rewrite in enumerate(rewrite_suggestions[:3], 1):
+                        explanation = rewrite.get('explanation', 'No explanation')
+                        expected_improvement = rewrite.get('expected_improvement', 'unknown')
+                        lines.append(f"     {i}. {explanation}")
+                        lines.append(f"        Expected improvement: {expected_improvement}")
+                        rewritten_sql = rewrite.get('rewritten_sql', '')
+                        if rewritten_sql:
+                            lines.append(f"        SQL: {rewritten_sql}")
+
+                lines.append("")
+        else:
+            # Try to run LLM analysis directly as fallback
+            explain_results = workflow_result.get("explain_results", {})
+            if explain_results and explain_results.get("success"):
+                lines.append("AI Performance Analysis:")
+                # ONLY use workflow LLM results - no fallback
+                workflow_llm_analysis = workflow_result.get("llm_analysis", {})
+                if workflow_llm_analysis and workflow_llm_analysis.get("success"):
+                    llm_result = workflow_llm_analysis.get("analysis_results", {})
+                    # Also get index_recommendations from top level
+                    llm_result['index_recommendations'] = workflow_llm_analysis.get("index_recommendations", [])
+                    llm_result['rewrite_suggestions'] = workflow_llm_analysis.get("rewrite_suggestions", [])
+                else:
+                    llm_result = None
+                    # Show what went wrong with workflow analysis
+                    error_msg = workflow_llm_analysis.get("error", "Workflow LLM analysis failed")
+                    lines.append(f"   WARNING: {error_msg[:100]}...")
+
+                if llm_result:
+                        performance = llm_result.get("performance_assessment", {})
+                        rating = performance.get('overall_rating', 'unknown')
+                        score = performance.get('efficiency_score', 0)
+
+                        if rating == 'excellent':
+                            lines.append(f"   Overall Rating: {rating.upper()} ({score}/100)")
+                        elif rating == 'good':
+                            lines.append(f"   Overall Rating: {rating.upper()} ({score}/100)")
+                        elif rating == 'fair':
+                            lines.append(f"   WARNING: Overall Rating: {rating.upper()} ({score}/100)")
+                        else:
+                            lines.append(f"   ERROR: Overall Rating: {rating.upper()} ({score}/100)")
+
+                        concerns = performance.get("primary_concerns", [])
+                        if concerns:
+                            lines.append("   Key Issues:")
+                            for concern in concerns[:4]:
+                                lines.append(f"     • {concern}")
+
+                        # Show index recommendations from AI analysis
+                        index_recommendations = llm_result.get("index_recommendations", [])
+                        if index_recommendations:
+                            lines.append("   Index Recommendations:")
+                            for i, idx_rec in enumerate(index_recommendations[:3], 1):
+                                rationale = idx_rec.get('rationale', 'No rationale provided')
+                                impact = idx_rec.get('estimated_impact', 'unknown')
+
+                                lines.append(f"     {i}. {rationale}")
+                                lines.append(f"        Impact: {impact.upper()}")
+
+                        # Show AI-suggested rewrites
+                        rewrite_suggestions = llm_result.get("rewrite_suggestions", [])
+                        if rewrite_suggestions:
+                            lines.append("   AI Suggested Query Rewrites:")
+                            for i, rewrite in enumerate(rewrite_suggestions[:3], 1):
+                                explanation = rewrite.get('explanation', 'No explanation')
+                                expected_improvement = rewrite.get('expected_improvement', 'unknown')
+                                lines.append(f"     {i}. {explanation} (Expected: {expected_improvement})")
+
+                                # Show SQL preview
+                                rewritten_sql = rewrite.get('rewritten_sql', '')
+                                if rewritten_sql:
+                                    sql_preview = rewritten_sql[:60] + "..." if len(rewritten_sql) > 60 else rewritten_sql
+                                    lines.append(f"        → {sql_preview}")
+                        else:
+                            print("DEBUG: No rewrite suggestions found in llm_result")
+                else:
+                    lines.append("   WARNING: AI analysis unavailable")
+                lines.append("")
+            else:
+                lines.append("WARNING: AI analysis unavailable (no database results)")
+                lines.append("")
+
+        # Show rewrite testing results if available
+        rewrite_results = workflow_result.get("rewrite_test_results", {})
+
+        if rewrite_results and rewrite_results.get("success"):
+            tested_rewrites = rewrite_results.get("rewrite_results", [])
+            best_rewrite = rewrite_results.get("best_rewrite")
+            original_performance = rewrite_results.get("original_performance", {})
+            testing_summary = rewrite_results.get("testing_summary", "")
+            baseline_skipped = rewrite_results.get("baseline_skipped", False)
+            baseline_skip_reason = rewrite_results.get("baseline_skip_reason", "")
+
+            if tested_rewrites:
+                lines.append("Query Rewrite Testing Results:")
+
+                # Add clear visual indicators for each rewrite tested at the top
+                all_results = rewrite_results.get("rewrite_results", [])
+                for i, result in enumerate(all_results[:3], 1):
+                    sql = result.get("sql", "")
+                    if sql:
+                        lines.append(f"   QUERY {i}: {sql}")
+                lines.append("")
+
+                successful_tests = [r for r in tested_rewrites if r.get("success")]
+                lines.append(f"   {testing_summary}")
+                lines.append("")
+
+                # Only show performance comparison if we have valid baseline
+                if original_performance and not baseline_skipped:
+                    baseline_time = original_performance.get("execution_time_ms", 0)
+                    lines.append(f"   Performance Comparison:")
+                    lines.append(f"     Original Query: {baseline_time:.1f}ms")
+                elif baseline_skipped:
+                    lines.append(f"   Performance Comparison:")
+                    lines.append(f"     WARNING: Original query was skipped - no baseline for comparison")
+                    if baseline_skip_reason:
+                        lines.append(f"     ({baseline_skip_reason})")
+
+                # Show what AI suggested and attempted
+                if rewrite_results.get("rewrite_results"):
+                    lines.append("   AI Rewrite Attempts:")
+                    all_results = rewrite_results.get("rewrite_results", [])
+                    for i, result in enumerate(all_results[:3], 1):
+                        # Get explanation and SQL
+                        metadata = result.get("suggestion_metadata", {})
+                        explanation = metadata.get("explanation", "Rewrite attempt")
+                        expected_improvement = metadata.get("expected_improvement", "unknown")
+
+                        # Show what was attempted
+                        lines.append(f"     {i}. {explanation}")
+                        lines.append(f"        Expected: {expected_improvement} improvement")
+
+                        # Show FULL SQL (not truncated)
+                        sql = result.get("sql", "")
+                        if sql:
+                            lines.append(f"        FULL SQL: {sql}")
+
+                        # Show result - check if this rewrite was also skipped
+                        if result.get("success"):
+                            recommendation = result.get("recommendation", "")
+                            if recommendation == "advisory_ddl":
+                                lines.append(f"        Result: ADVISORY: DDL suggestion (not executed for safety)")
+                                lines.append(f"        Note: This DDL can be applied manually if desired")
+                            else:
+                                perf = result.get("performance", {})
+                                was_skipped = result.get("was_skipped", False) or perf.get("was_skipped", False)
+
+                                if was_skipped:
+                                    # Show actual elapsed time when skipped
+                                    actual_elapsed = perf.get("actual_elapsed_time_ms", 0)
+                                    skip_reason = result.get("skip_reason") or perf.get("skip_reason", "")
+                                    lines.append(f"        Result: N/A (skipped after {actual_elapsed / 1000:.1f}s)")
+                                    if skip_reason:
+                                        lines.append(f"        Note: {skip_reason}")
+                                else:
+                                    # Show actual execution time
+                                    exec_time = perf.get("execution_time_ms", 0)
+                                    lines.append(f"        Result: {exec_time:.1f}ms")
+
+                                    # Only show comparison if baseline wasn't skipped
+                                    if not baseline_skipped and original_performance:
+                                        baseline_time = original_performance.get("execution_time_ms", 0)
+                                        if baseline_time > 0:
+                                            improvement_pct = ((baseline_time - exec_time) / baseline_time) * 100
+                                            lines.append(f"        vs Original: {improvement_pct:+.1f}%")
+                        else:
+                            error = result.get("error", "Failed")
+                            # Better error messages for common issues
+                            if "Key" in error and "doesn't exist" in error:
+                                lines.append(f"        Result: ERROR: Missing index (suggested index not found)")
+                            elif "syntax error" in error.lower():
+                                lines.append(f"        Result: ERROR: SQL syntax error")
+                            elif "safety validation" in error.lower():
+                                lines.append(f"        Result: ERROR: Blocked for safety (dangerous keyword)")
+                            else:
+                                error_short = error[:60] + "..." if len(error) > 60 else error
+                                lines.append(f"        Result: ERROR: {error_short}")
+                        lines.append("")
+
+                # Show detailed results for each tested rewrite ONLY if baseline wasn't skipped
+                # (If baseline was skipped, we can't compare performance so this section is meaningless)
+                if not baseline_skipped:
+                    for i, result in enumerate(successful_tests[:3], 1):  # Show top 3
+                        if result.get("success"):
+                            # Check if THIS rewrite was also skipped
+                            perf = result.get("performance", {})
+                            was_skipped = result.get("was_skipped", False) or perf.get("was_skipped", False)
+
+                            if was_skipped:
+                                # Skip this rewrite in the comparison - can't compare EXPLAIN times
+                                continue
+
+                            recommendation = result.get("recommendation", "")
+
+                            if recommendation == "advisory_ddl":
+                                # Handle advisory DDL suggestions
+                                status = "ADVISORY"
+                                lines.append(f"     {status} Advisory DDL {i}: Index/schema suggestion (review manually)")
+                                sql_preview = result.get("sql", "")[:70] + "..." if len(result.get("sql", "")) > 70 else result.get("sql", "")
+                                lines.append(f"       → {sql_preview}")
+                            else:
+                                # Handle executable rewrites with performance data
+                                improvement = result.get("improvement", {})
+                                time_improvement = improvement.get("execution_time", {})
+                                overall_improvement = improvement.get("overall", {})
+
+                                rewrite_time = time_improvement.get("rewrite_ms", 0)
+                                improvement_pct = overall_improvement.get("improvement_pct", 0)
+
+                                # Status icon based on improvement
+                                if improvement_pct >= 10:
+                                    status = "BETTER"
+                                elif improvement_pct >= 5:
+                                    status = "MODERATE"
+                                elif improvement_pct > 0:
+                                    status = "MINOR"
+                                else:
+                                    status = "WORSE"
+
+                                lines.append(f"     {status} Rewrite {i}: {rewrite_time:.1f}ms ({improvement_pct:+.1f}%)")
+
+                                # Show SQL preview for significant improvements
+                                if improvement_pct >= 5:
+                                    sql_preview = result.get("sql", "")[:50] + "..." if len(result.get("sql", "")) > 50 else result.get("sql", "")
+                                    lines.append(f"       → {sql_preview}")
+
+                    # Show best rewrite recommendation ONLY if we have valid comparisons
+                    if best_rewrite:
+                        # Check if best rewrite was skipped
+                        best_perf = best_rewrite.get("performance", {})
+                        best_was_skipped = best_rewrite.get("was_skipped", False) or best_perf.get("was_skipped", False)
+
+                        if not best_was_skipped:
+                            overall_best = best_rewrite.get("improvement", {}).get("overall", {})
+                            best_improvement = overall_best.get("improvement_pct", 0)
+                            recommendation = best_rewrite.get("recommendation", "")
+
+                            if best_improvement >= 10:
+                                lines.append(f"   Best Performance: {best_improvement:.1f}% improvement - {recommendation}")
+                            elif best_improvement >= 5:
+                                lines.append(f"   MODERATE Improvement: {best_improvement:.1f}% - Consider testing in production")
+                            elif best_improvement > 0:
+                                lines.append(f"   Minor Improvement: {best_improvement:.1f}% - Marginal benefit")
+                            else:
+                                lines.append("   No beneficial rewrites found")
+                        else:
+                            lines.append("   Best rewrite was also skipped - no valid comparison")
+                    else:
+                        lines.append("   No beneficial rewrites identified")
+
+                lines.append("")
+
+        # Add actionable optimization suggestions based on results
+        rewrite_results = workflow_result.get("rewrite_test_results", {})
+        if rewrite_results and rewrite_results.get("success"):
+            rewrite_test_results = rewrite_results.get("rewrite_results", [])
+            failed_rewrites = [r for r in rewrite_test_results if not r.get("success")]
+            successful_rewrites = [r for r in rewrite_test_results if r.get("success")]
+
+            # Generate actionable suggestions
+            suggestions = []
+
+            # Check for missing index suggestions from failed rewrites
+            for failed in failed_rewrites:
+                error = failed.get("error", "")
+                if "doesn't exist" in error and "Key" in error:
+                    # Extract index name from error
+                    import re
+                    match = re.search(r"Key '([^']+)' doesn't exist", error)
+                    if match:
+                        index_name = match.group(1)
+                        # Try to generate the actual CREATE INDEX statement
+                        create_statement = _generate_create_index_statement(index_name, workflow_result.get("query", ""))
+                        if create_statement:
+                            suggestions.append(f"Create missing index:")
+                            suggestions.append(f"     {create_statement}")
+                        else:
+                            suggestions.append(f"Create missing index: {index_name}")
+                elif "Missing index" in error:
+                    suggestions.append("Consider adding indexes on join and filter columns")
+
+            # Add general performance suggestions based on results
+            if not successful_rewrites and rewrite_test_results:
+                # If no rewrites provided meaningful improvement - suggest specific indexes
+                suggestions.append("Add indexes for better performance:")
+                # Extract table and column info from the original query
+                query = workflow_result.get("query", "").upper()
+                if "JOIN" in query and "TCONST" in query:
+                    suggestions.append("     CREATE INDEX idx_tconst ON title_basics (tconst);")
+                    suggestions.append("     CREATE INDEX idx_tconst_ratings ON title_ratings (tconst);")
+                if "NUMVOTES" in query:
+                    suggestions.append("     CREATE INDEX idx_numvotes ON title_ratings (numVotes);")
+                if "TITLETYPE" in query:
+                    suggestions.append("     CREATE INDEX idx_titletype ON title_basics (titleType);")
+            elif successful_rewrites:
+                # Check if improvements were minimal
+                minimal_improvements = [r for r in successful_rewrites
+                                      if r.get("improvement", {}).get("overall", {}).get("improvement_pct", 0) < 10]
+                if minimal_improvements:
+                    suggestions.append("Consider composite indexes for better performance:")
+                    query = workflow_result.get("query", "").upper()
+                    if "NUMVOTES" in query and "TCONST" in query:
+                        suggestions.append("     CREATE INDEX idx_numvotes_tconst ON title_ratings (numVotes, tconst);")
+                    if "TITLETYPE" in query and "TCONST" in query:
+                        suggestions.append("     CREATE INDEX idx_titletype_tconst ON title_basics (titleType, tconst);")
+
+            # Show suggestions if we have any
+            if suggestions:
+                lines.append("Recommended Improvements:")
+                for suggestion in suggestions[:3]:  # Show top 3 suggestions
+                    lines.append(f"   • {suggestion}")
+                lines.append("")
+
+        # Quick Summary of Proven Query Rewrites (only rewrites with valid performance data)
+        rewrite_results = workflow_result.get("rewrite_test_results", {})
+        has_rewrites = False
+
+        if rewrite_results and rewrite_results.get("success"):
+            tested_rewrites = rewrite_results.get("rewrite_results", [])
+            baseline_skipped = rewrite_results.get("baseline_skipped", False)
+
+            # Only include rewrites where both baseline and rewrite actually executed (not skipped)
+            successful_rewrites = []
+            for r in tested_rewrites:
+                if r.get("success") and r.get("recommendation") not in ["advisory_ddl"]:
+                    # Check if this rewrite was skipped
+                    perf = r.get("performance", {})
+                    was_skipped = r.get("was_skipped", False) or perf.get("was_skipped", False)
+                    # Only include if baseline wasn't skipped AND this rewrite wasn't skipped
+                    if not baseline_skipped and not was_skipped:
+                        successful_rewrites.append(r)
+
+            if successful_rewrites:
+                has_rewrites = True
+                lines.append("Proven Query Rewrites:")
+                for i, rewrite in enumerate(successful_rewrites[:3], 1):
+                    metadata = rewrite.get("suggestion_metadata", {})
+                    explanation = metadata.get("explanation", "Query rewrite")
+                    improvement = rewrite.get("improvement", {}).get("overall", {}).get("improvement_pct", 0)
+                    sql = rewrite.get("sql", "")
+
+                    lines.append(f"   {i}. {explanation}")
+                    lines.append(f"      Performance: {improvement:+.1f}% improvement")
+                    lines.append(f"      SQL: {sql}")
+                lines.append("")
+
+        # ReadySet Cacheability Results (from parallel analysis)
+        readyset_analysis = workflow_result.get("readyset_analysis", {})
+        if readyset_analysis and readyset_analysis.get("success"):
+            lines.append("🚀 ReadySet Cacheability:")
+            final_verdict = readyset_analysis.get("final_verdict", {})
+            cacheable = final_verdict.get("cacheable", False)
+            confidence = final_verdict.get("confidence", "unknown")
+            method = final_verdict.get("method", "unknown")
+            reason = readyset_analysis.get('explain_cache_result', {}).get("error", "")
+
+            status = "CACHEABLE" if cacheable else "NOT CACHEABLE"
+            lines.append(f"   {status} (confidence: {confidence})")
+            lines.append(f"   Method: {method}")
+            if reason:
+                lines.append(f"Reason: {reason}")
+
+            # Show cache creation status
+            cached = final_verdict.get("cached", False)
+            create_result = readyset_analysis.get("create_cache_result", {})
+            if cacheable and create_result.get("already_cached"):
+                lines.append("   ℹ️  Query already cached in ReadySet")
+            elif cacheable and cached:
+                lines.append("   Cache created in ReadySet")
+            elif cacheable and create_result:
+                # Cache creation was attempted but failed
+                error = create_result.get("error", "Unknown error")
+                lines.append(f"   ⚠ Cache creation failed: {error}")
+
+            explain_result = readyset_analysis.get("explain_cache_result", {})
+            if explain_result:
+                if explain_result.get("explanation"):
+                    lines.append(f"   Explanation: {explain_result.get('explanation')}")
+                issues = explain_result.get("issues") or []
+                if issues:
+                    lines.append("   Issues:")
+                    for issue in issues:
+                        lines.append(f"     • {issue}")
+                elif not explain_result.get("explanation"):
+                    # Show details if no explanation
+                    details = explain_result.get("details")
+                    if isinstance(details, str) and details.strip():
+                        lines.append(f"   Details: {details}")
+            lines.append("")
+
+        # Show completion status
+        lines.append("Analysis Summary:")
+        lines.append(f"   • Query executed against {target}")
+        lines.append(f"   • Results stored in query registry")
+        lines.append(f"   • Run `rdst list --limit 5` to see recent queries")
+
+        storage_result = workflow_result.get("storage_result", {})
+        if storage_result and storage_result.get("success"):
+            analysis_id = storage_result.get("analysis_id")
+            if analysis_id:
+                lines.append(f"   • Analysis ID: {analysis_id}")
+
+        return "\n".join(lines)
+
+
+def _generate_create_index_statement(index_name: str, query: str) -> str:
+    """Generate CREATE INDEX statement from index name and query analysis."""
+    try:
+        # Common patterns for index names and their corresponding CREATE statements
+        index_name_lower = index_name.lower()
+        query_upper = query.upper()
+
+        # Map common index patterns to CREATE statements
+        if "numvotes" in index_name_lower and "tconst" in index_name_lower:
+            return "CREATE INDEX idx_numvotes_tconst ON title_ratings (numVotes, tconst);"
+        elif "numvotes" in index_name_lower:
+            return "CREATE INDEX idx_numvotes ON title_ratings (numVotes);"
+        elif "titletype" in index_name_lower and "tconst" in index_name_lower:
+            return "CREATE INDEX idx_titletype_tconst ON title_basics (titleType, tconst);"
+        elif "titletype" in index_name_lower:
+            return "CREATE INDEX idx_titletype ON title_basics (titleType);"
+        elif "tconst" in index_name_lower:
+            # Determine table from query context
+            if "title_ratings" in query_upper or "tr." in query_upper:
+                return "CREATE INDEX idx_tconst ON title_ratings (tconst);"
+            else:
+                return "CREATE INDEX idx_tconst ON title_basics (tconst);"
+        else:
+            # Generic case - try to extract table and columns from index name
+            return f"CREATE INDEX {index_name} ON <table> (<columns>);"
+    except Exception:
+        return ""

@@ -1,0 +1,322 @@
+"""
+Unit tests for LLM providers.
+
+Tests Claude, OpenAI, and LMStudio provider implementations.
+"""
+
+import importlib.util
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch, Mock
+
+import pytest
+
+# Import module directly to avoid package __init__.py issues
+def _import_module_directly(module_name, file_path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+_lib_path = Path(__file__).parent.parent.parent / "lib"
+
+# Import base module first for shared classes
+base = _import_module_directly("base", _lib_path / "llm_manager" / "base.py")
+ProviderMessage = base.ProviderMessage
+ProviderRequest = base.ProviderRequest
+ProviderResponse = base.ProviderResponse
+LLMError = base.LLMError
+
+# Import providers
+claude_provider = _import_module_directly("claude_provider", _lib_path / "llm_manager" / "claude_provider.py")
+openai_provider = _import_module_directly("openai_provider", _lib_path / "llm_manager" / "openai_provider.py")
+lmstudio_provider = _import_module_directly("lmstudio_provider", _lib_path / "llm_manager" / "lmstudio_provider.py")
+
+ClaudeProvider = claude_provider.ClaudeProvider
+OpenAIProvider = openai_provider.OpenAIProvider
+LMStudioProvider = lmstudio_provider.LMStudioProvider
+
+
+class TestClaudeProvider:
+    """Tests for Claude provider."""
+
+    def test_default_model(self):
+        """Test default model is set."""
+        provider = ClaudeProvider()
+        model = provider.default_model()
+        assert model is not None
+        assert "claude" in model.lower()
+
+    def test_available_models(self):
+        """Test available models list."""
+        provider = ClaudeProvider()
+        models = provider.available_models()
+        assert isinstance(models, list)
+        assert len(models) > 0
+
+    def test_complete_without_api_key(self):
+        """Test complete raises error without API key."""
+        provider = ClaudeProvider()
+        request = ProviderRequest(
+            model="claude-3-haiku-20240307",
+            messages=[ProviderMessage(role="user", content="Hello")]
+        )
+
+        with pytest.raises(LLMError):
+            provider.complete(request, api_key=None)
+
+    @patch('anthropic.Anthropic')
+    def test_complete_success(self, mock_anthropic_class):
+        """Test successful completion."""
+        # Setup mock
+        mock_client = MagicMock()
+        mock_anthropic_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="Hello there!")]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_client.messages.create.return_value = mock_response
+
+        provider = ClaudeProvider()
+        request = ProviderRequest(
+            model="claude-3-haiku-20240307",
+            messages=[ProviderMessage(role="user", content="Hello")]
+        )
+
+        response = provider.complete(request, api_key="test-key")
+
+        assert response.text == "Hello there!"
+        assert response.usage["input_tokens"] == 10
+        assert response.usage["output_tokens"] == 5
+
+    @patch('anthropic.Anthropic')
+    def test_complete_with_system_message(self, mock_anthropic_class):
+        """Test completion with system message."""
+        mock_client = MagicMock()
+        mock_anthropic_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="Response")]
+        mock_response.usage.input_tokens = 20
+        mock_response.usage.output_tokens = 10
+        mock_client.messages.create.return_value = mock_response
+
+        provider = ClaudeProvider()
+        request = ProviderRequest(
+            model="claude-3-haiku-20240307",
+            messages=[
+                ProviderMessage(role="system", content="You are helpful"),
+                ProviderMessage(role="user", content="Hello")
+            ]
+        )
+
+        response = provider.complete(request, api_key="test-key")
+
+        # Verify system message was passed correctly
+        call_kwargs = mock_client.messages.create.call_args[1]
+        assert "system" in call_kwargs
+
+
+class TestOpenAIProvider:
+    """Tests for OpenAI provider."""
+
+    def test_default_model(self):
+        """Test default model is set."""
+        provider = OpenAIProvider()
+        model = provider.default_model()
+        assert model is not None
+        assert "gpt" in model.lower()
+
+    def test_available_models(self):
+        """Test available models list."""
+        provider = OpenAIProvider()
+        models = provider.available_models()
+        assert isinstance(models, list)
+        assert len(models) > 0
+
+    def test_complete_without_api_key(self):
+        """Test complete raises error without API key."""
+        provider = OpenAIProvider()
+        request = ProviderRequest(
+            model="gpt-4",
+            messages=[ProviderMessage(role="user", content="Hello")]
+        )
+
+        with pytest.raises(LLMError):
+            provider.complete(request, api_key=None)
+
+    @patch('openai.OpenAI')
+    def test_complete_success(self, mock_openai_class):
+        """Test successful completion."""
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="Hello!"))]
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_response.usage.total_tokens = 15
+        mock_client.chat.completions.create.return_value = mock_response
+
+        provider = OpenAIProvider()
+        request = ProviderRequest(
+            model="gpt-4",
+            messages=[ProviderMessage(role="user", content="Hello")]
+        )
+
+        response = provider.complete(request, api_key="test-key")
+
+        assert response.text == "Hello!"
+        assert response.usage["total_tokens"] == 15
+
+    @patch('openai.OpenAI')
+    def test_complete_with_temperature(self, mock_openai_class):
+        """Test completion with custom temperature."""
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="Response"))]
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_response.usage.total_tokens = 15
+        mock_client.chat.completions.create.return_value = mock_response
+
+        provider = OpenAIProvider()
+        request = ProviderRequest(
+            model="gpt-4",
+            messages=[ProviderMessage(role="user", content="Hello")],
+            temperature=0.7
+        )
+
+        provider.complete(request, api_key="test-key")
+
+        call_kwargs = mock_client.chat.completions.create.call_args[1]
+        assert call_kwargs["temperature"] == 0.7
+
+
+class TestLMStudioProvider:
+    """Tests for LMStudio provider."""
+
+    def test_default_model(self):
+        """Test default model."""
+        provider = LMStudioProvider()
+        model = provider.default_model()
+        # LMStudio uses whatever model is loaded
+        assert model is not None
+
+    def test_available_models(self):
+        """Test available models list."""
+        provider = LMStudioProvider()
+        models = provider.available_models()
+        assert isinstance(models, list)
+
+    def test_default_base_url(self):
+        """Test default base URL is localhost."""
+        provider = LMStudioProvider()
+        assert "localhost" in provider.base_url or "127.0.0.1" in provider.base_url
+
+    def test_custom_base_url(self):
+        """Test custom base URL."""
+        provider = LMStudioProvider(base_url="http://custom:8080")
+        assert provider.base_url == "http://custom:8080"
+
+    @patch('requests.post')
+    def test_complete_success(self, mock_post):
+        """Test successful completion via LMStudio API."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "LMStudio response"}}],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30
+            }
+        }
+        mock_post.return_value = mock_response
+
+        provider = LMStudioProvider()
+        request = ProviderRequest(
+            model="local-model",
+            messages=[ProviderMessage(role="user", content="Hello")]
+        )
+
+        # LMStudio doesn't require API key
+        response = provider.complete(request, api_key=None)
+
+        assert response.text == "LMStudio response"
+        assert response.usage["total_tokens"] == 30
+
+    @patch('requests.post')
+    def test_complete_connection_error(self, mock_post):
+        """Test handling of connection error."""
+        mock_post.side_effect = ConnectionError("Cannot connect to LMStudio")
+
+        provider = LMStudioProvider()
+        request = ProviderRequest(
+            model="local-model",
+            messages=[ProviderMessage(role="user", content="Hello")]
+        )
+
+        with pytest.raises(LLMError):
+            provider.complete(request, api_key=None)
+
+
+class TestProviderRequest:
+    """Tests for ProviderRequest formatting."""
+
+    def test_as_chat_dicts(self):
+        """Test converting messages to chat format."""
+        messages = [
+            ProviderMessage(role="system", content="Be helpful"),
+            ProviderMessage(role="user", content="Hello"),
+            ProviderMessage(role="assistant", content="Hi there!")
+        ]
+        request = ProviderRequest(model="test", messages=messages)
+
+        dicts = request.as_chat_dicts()
+
+        assert len(dicts) == 3
+        assert dicts[0] == {"role": "system", "content": "Be helpful"}
+        assert dicts[1] == {"role": "user", "content": "Hello"}
+        assert dicts[2] == {"role": "assistant", "content": "Hi there!"}
+
+    def test_default_parameters(self):
+        """Test default request parameters."""
+        request = ProviderRequest(
+            model="test",
+            messages=[ProviderMessage(role="user", content="Hi")]
+        )
+
+        assert request.temperature == 0.2
+        assert request.max_tokens == 800
+        assert request.top_p is None
+        assert request.stop_sequences is None
+
+
+class TestProviderResponse:
+    """Tests for ProviderResponse."""
+
+    def test_basic_response(self):
+        """Test basic response creation."""
+        response = ProviderResponse(text="Hello!")
+        assert response.text == "Hello!"
+        assert response.usage is None
+
+    def test_response_with_usage(self):
+        """Test response with usage info."""
+        usage = {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
+        response = ProviderResponse(text="Response", usage=usage)
+
+        assert response.text == "Response"
+        assert response.usage["total_tokens"] == 30
+
+    def test_response_with_raw(self):
+        """Test response with raw API response."""
+        raw = {"id": "test-id", "model": "test-model"}
+        response = ProviderResponse(text="Response", raw=raw)
+
+        assert response.raw["id"] == "test-id"

@@ -1,0 +1,335 @@
+"""
+Schema Collection for LLM Analysis
+
+Collects schema information for tables referenced in queries to provide
+context to LLM for better rewrite and index suggestions.
+"""
+
+import re
+from typing import Dict, Any, List, Set
+
+
+def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, Any]:
+    """
+    Workflow step to collect schema information for tables in the query.
+
+    Args:
+        sql: The SQL query to analyze
+        target: Target database name (for logging)
+        **kwargs: Additional workflow parameters including target_config
+
+    Returns:
+        Dict containing:
+        - success: boolean indicating if collection succeeded
+        - schema_info: formatted schema string for LLM prompt
+        - tables_analyzed: list of table names found
+        - error: error message if failed
+    """
+    try:
+        target_config = kwargs.get('target_config')
+
+        # Handle case where WorkflowManager passes target_config as string
+        if isinstance(target_config, str):
+            import json
+            try:
+                target_config = json.loads(target_config)
+            except (json.JSONDecodeError, TypeError):
+                return {
+                    "success": False,
+                    "schema_info": "Schema information: Not available",
+                    "tables_analyzed": [],
+                    "error": "target_config is invalid (string parse failed)"
+                }
+
+        if not target_config:
+            return {
+                "success": False,
+                "schema_info": "Schema information: Not available",
+                "tables_analyzed": [],
+                "error": "No target_config provided"
+            }
+
+        schema_info = collect_schema_for_query(sql, target_config)
+
+        # Extract table names for reporting
+        table_names = _extract_table_names_from_sql(sql)
+
+        return {
+            "success": True,
+            "schema_info": schema_info,
+            "tables_analyzed": list(table_names),
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "schema_info": "Schema information: Collection failed",
+            "tables_analyzed": [],
+            "error": str(e)
+        }
+
+
+def collect_schema_for_query(sql: str, target_config: Dict[str, Any]) -> str:
+    """
+    Collect schema information for tables referenced in the query.
+
+    Args:
+        sql: The SQL query to analyze
+        target_config: Database target configuration (dict or JSON string)
+
+    Returns:
+        Formatted schema string for LLM prompt
+    """
+    try:
+        # Handle case where WorkflowManager passes target_config as string
+        if isinstance(target_config, str):
+            import json
+            try:
+                target_config = json.loads(target_config)
+            except (json.JSONDecodeError, TypeError):
+                return "Schema information: target_config is invalid (string parse failed)"
+        # Extract table names from query
+        table_names = _extract_table_names_from_sql(sql)
+
+        if not table_names:
+            return "Schema information: No tables identified in query"
+
+        # Get schema for each table
+        engine = target_config.get('engine', 'unknown').lower()
+
+        if engine == 'mysql':
+            return _collect_mysql_schema(table_names, target_config)
+        elif engine in ['postgresql', 'postgres']:
+            return _collect_postgres_schema(table_names, target_config)
+        else:
+            return f"Schema information: Unsupported database engine '{engine}'"
+
+    except Exception as e:
+        return f"Schema information: Failed to collect schema - {str(e)}"
+
+
+def _extract_table_names_from_sql(sql: str) -> Set[str]:
+    """Extract table names from SQL query using regex patterns."""
+    table_names = set()
+    sql_upper = sql.upper()
+
+    # Common patterns for table references
+    patterns = [
+        r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # FROM table_name
+        r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # JOIN table_name
+        r'\bINTO\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # INTO table_name
+        r'\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # UPDATE table_name
+        r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(?:AS\s+)?[a-zA-Z_]',  # FROM table AS alias
+        r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(?:AS\s+)?[a-zA-Z_]',  # JOIN table AS alias
+    ]
+
+    for pattern in patterns:
+        matches = re.finditer(pattern, sql, re.IGNORECASE)
+        for match in matches:
+            table_name = match.group(1).lower()
+            # Avoid SQL keywords and aliases
+            if table_name not in {'select', 'where', 'order', 'group', 'having', 'limit', 'offset'}:
+                table_names.add(table_name)
+
+    return table_names
+
+
+def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) -> str:
+    """Collect schema information for MySQL tables."""
+    try:
+        import pymysql
+
+        # Get connection details
+        host = target_config.get('host')
+        port = target_config.get('port', 3306)
+        user = target_config.get('user')
+        database = target_config.get('database')
+
+        # Get password from environment
+        import os
+        password_env = target_config.get('password_env')
+        password = os.environ.get(password_env) if password_env else None
+
+        if not all([host, user, database, password]):
+            return "Schema information: Missing connection details"
+
+        # Connect to database
+        connection = pymysql.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            connect_timeout=5
+        )
+
+        schema_parts = []
+
+        try:
+            with connection.cursor() as cursor:
+                for table_name in table_names:
+                    # Validate table name contains only safe characters
+                    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table_name):
+                        continue  # Skip potentially unsafe table names
+
+                    # Get table structure - use backtick quoting for MySQL identifier safety
+                    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+                    cursor.execute(f"DESCRIBE `{table_name}`")
+                    columns = cursor.fetchall()
+
+                    if not columns:
+                        continue
+
+                    # Get indexes - use backtick quoting for MySQL identifier safety
+                    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+                    cursor.execute(f"SHOW INDEX FROM `{table_name}`")
+                    indexes = cursor.fetchall()
+
+                    # Get row count estimate (for LLM to understand scale)
+                    cursor.execute(f"""
+                        SELECT TABLE_ROWS as row_estimate
+                        FROM information_schema.TABLES
+                        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+                    """, (database, table_name))
+                    row_count_result = cursor.fetchone()
+                    row_estimate = row_count_result[0] if row_count_result else 0
+
+                    # Format table schema
+                    table_schema = [f"\nTable: {table_name}"]
+                    table_schema.append(f"Row estimate: {row_estimate:,}")
+                    table_schema.append("Columns:")
+
+                    for col in columns:
+                        field, type_, null, key, default, extra = col
+                        key_info = f" [{key}]" if key else ""
+                        table_schema.append(f"  - {field} {type_}{key_info}")
+
+                    # Format indexes (show type to prevent hallucination)
+                    if indexes:
+                        table_schema.append("Indexes:")
+                        index_dict = {}
+                        index_types = {}
+                        for idx in indexes:
+                            index_name = idx[2]  # Key_name
+                            column_name = idx[4]  # Column_name
+                            index_type = idx[10]  # Index_type (BTREE, HASH, FULLTEXT, etc.)
+
+                            if index_name not in index_dict:
+                                index_dict[index_name] = []
+                                index_types[index_name] = index_type
+                            index_dict[index_name].append(column_name)
+
+                        for idx_name, cols in index_dict.items():
+                            cols_str = ', '.join(cols)
+                            idx_type = index_types.get(idx_name, 'BTREE')
+                            # Show in format similar to PostgreSQL for consistency
+                            table_schema.append(f"  - {idx_name} USING {idx_type} ({cols_str})")
+
+                    schema_parts.append('\n'.join(table_schema))
+
+        finally:
+            connection.close()
+
+        if schema_parts:
+            return "Schema information:\n" + '\n'.join(schema_parts)
+        else:
+            return "Schema information: No schema found for referenced tables"
+
+    except Exception as e:
+        return f"Schema information: Error collecting MySQL schema - {str(e)}"
+
+
+def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any]) -> str:
+    """Collect schema information for PostgreSQL tables."""
+    try:
+        import psycopg2
+
+        # Get connection details
+        host = target_config.get('host')
+        port = target_config.get('port', 5432)
+        user = target_config.get('user')
+        database = target_config.get('database')
+
+        # Get password from environment
+        import os
+        password_env = target_config.get('password_env')
+        password = os.environ.get(password_env) if password_env else None
+
+        if not all([host, user, database, password]):
+            return "Schema information: Missing connection details"
+
+        # Connect to database
+        connection = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            connect_timeout=5
+        )
+
+        schema_parts = []
+
+        try:
+            with connection.cursor() as cursor:
+                for table_name in table_names:
+                    # Get table columns
+                    cursor.execute("""
+                        SELECT column_name, data_type, is_nullable, column_default
+                        FROM information_schema.columns
+                        WHERE table_name = %s
+                        ORDER BY ordinal_position
+                    """, (table_name,))
+                    columns = cursor.fetchall()
+
+                    if not columns:
+                        continue
+
+                    # Get indexes
+                    cursor.execute("""
+                        SELECT indexname, indexdef
+                        FROM pg_indexes
+                        WHERE tablename = %s
+                    """, (table_name,))
+                    indexes = cursor.fetchall()
+
+                    # Get row count estimate (for LLM to understand scale)
+                    cursor.execute("""
+                        SELECT reltuples::bigint as row_estimate
+                        FROM pg_class
+                        WHERE relname = %s
+                    """, (table_name,))
+                    row_count_result = cursor.fetchone()
+                    row_estimate = row_count_result[0] if row_count_result else 0
+
+                    # Format table schema
+                    table_schema = [f"\nTable: {table_name}"]
+                    table_schema.append(f"Row estimate: {row_estimate:,}")
+                    table_schema.append("Columns:")
+
+                    for col in columns:
+                        column_name, data_type, is_nullable, default = col
+                        null_info = " NULL" if is_nullable == 'YES' else " NOT NULL"
+                        table_schema.append(f"  - {column_name} {data_type}{null_info}")
+
+                    # Format indexes (show full definition with USING clause to prevent hallucination)
+                    if indexes:
+                        table_schema.append("Indexes:")
+                        for idx_name, idx_def in indexes:
+                            # Show full CREATE INDEX definition including USING clause
+                            # This is critical for LLM to understand index type (btree vs hash vs gin)
+                            table_schema.append(f"  - {idx_def}")
+
+                    schema_parts.append('\n'.join(table_schema))
+
+        finally:
+            connection.close()
+
+        if schema_parts:
+            return "Schema information:\n" + '\n'.join(schema_parts)
+        else:
+            return "Schema information: No schema found for referenced tables"
+
+    except Exception as e:
+        return f"Schema information: Error collecting PostgreSQL schema - {str(e)}"

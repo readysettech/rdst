@@ -1,0 +1,30 @@
+{
+    "Comment": "Workflow to table , summarize it, and build an LLM prompt",
+    "StartAt": "FetchUserData",
+    "States": {
+        "FetchUserData": {
+            "Type": "Task",
+            "Resource": "get_user_data",
+            "Parameters": {
+                "user_id": "123"
+            },
+            "Next": "SummarizeData"
+        },
+        "SummarizeData": {
+            "Type": "Task",
+            "Resource": "summarize_info",
+            "InputPath": "$.FetchUserData",
+            "ResultPath": "$.summary",
+            "Next": "BuildPrompt"
+        },
+        "BuildPrompt": {
+            "Type": "Task",
+            "Resource": "compose_prompt",
+            "Parameters": {
+                "template": "Given the following summary: {{States.SummarizeData.summary}}, generate SQL optimizations."
+            },
+            "InputPath": "$.summary",
+            "End": true
+        }
+    }
+}

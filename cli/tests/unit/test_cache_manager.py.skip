@@ -1,0 +1,381 @@
+"""
+Unit tests for cache_manager.py
+
+Tests the CacheManager class and related utilities.
+"""
+
+import pytest
+import threading
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+import pandas as pd
+import importlib.util
+import sys
+
+# Import module directly to avoid package __init__.py issues
+def _import_module_directly(module_name, file_path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+_lib_path = Path(__file__).parent.parent.parent / "lib"
+
+# Mock all the dependencies that cache_manager needs
+sys.modules['legacy_data_manager'] = MagicMock()
+sys.modules['configuration_manager'] = MagicMock()
+
+cache_manager_module = _import_module_directly("cache_manager_module", _lib_path / "cache_manager" / "cache_manager.py")
+
+ThreadSafeSet = cache_manager_module.ThreadSafeSet
+CacheQuery = cache_manager_module.CacheQuery
+CacheOperation = cache_manager_module.CacheOperation
+CacheManager = cache_manager_module.CacheManager
+log_call_trace = cache_manager_module.log_call_trace
+log_simple_call_trace = cache_manager_module.log_simple_call_trace
+
+
+class TestThreadSafeSet:
+    """Tests for the ThreadSafeSet class."""
+
+    def test_add_item(self):
+        """Test adding an item to the set."""
+        ts_set = ThreadSafeSet()
+        query = CacheQuery(query_id="q1", cache_operation=CacheOperation.ADD)
+
+        ts_set.add(query)
+
+        items = ts_set.get_all()
+        assert len(items) == 1
+        assert items[0].query_id == "q1"
+
+    def test_remove_item(self):
+        """Test removing an item from the set."""
+        ts_set = ThreadSafeSet()
+        query = CacheQuery(query_id="q1", cache_operation=CacheOperation.ADD)
+
+        ts_set.add(query)
+        ts_set.remove(query)
+
+        items = ts_set.get_all()
+        assert len(items) == 0
+
+    def test_remove_nonexistent_item(self):
+        """Test removing an item that doesn't exist."""
+        ts_set = ThreadSafeSet()
+        query = CacheQuery(query_id="q1", cache_operation=CacheOperation.ADD)
+
+        # Should not raise exception
+        ts_set.remove(query)
+        assert len(ts_set.get_all()) == 0
+
+    def test_get_all_returns_copy(self):
+        """Test that get_all returns a copy of items."""
+        ts_set = ThreadSafeSet()
+        query = CacheQuery(query_id="q1", cache_operation=CacheOperation.ADD)
+
+        ts_set.add(query)
+        items = ts_set.get_all()
+
+        # Modifying returned list shouldn't affect internal state
+        items.clear()
+        assert len(ts_set.get_all()) == 1
+
+    def test_thread_safety(self):
+        """Test that operations are thread-safe."""
+        ts_set = ThreadSafeSet()
+        errors = []
+
+        def add_items():
+            try:
+                for i in range(100):
+                    query = CacheQuery(
+                        query_id=f"thread_{threading.current_thread().name}_{i}",
+                        cache_operation=CacheOperation.ADD
+                    )
+                    ts_set.add(query)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=add_items) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0
+
+    def test_overwrite_by_query_id(self):
+        """Test that adding same query_id overwrites."""
+        ts_set = ThreadSafeSet()
+        query1 = CacheQuery(query_id="q1", cache_operation=CacheOperation.ADD)
+        query2 = CacheQuery(query_id="q1", cache_operation=CacheOperation.REMOVE)
+
+        ts_set.add(query1)
+        ts_set.add(query2)
+
+        items = ts_set.get_all()
+        assert len(items) == 1
+        assert items[0].cache_operation == CacheOperation.REMOVE
+
+
+class TestCacheQuery:
+    """Tests for the CacheQuery dataclass."""
+
+    def test_create_add_operation(self):
+        """Test creating an ADD cache query."""
+        query = CacheQuery(query_id="q1", cache_operation=CacheOperation.ADD)
+
+        assert query.query_id == "q1"
+        assert query.cache_operation == CacheOperation.ADD
+
+    def test_create_remove_operation(self):
+        """Test creating a REMOVE cache query."""
+        query = CacheQuery(query_id="q1", cache_operation=CacheOperation.REMOVE)
+
+        assert query.cache_operation == CacheOperation.REMOVE
+
+
+class TestCacheOperation:
+    """Tests for the CacheOperation enum."""
+
+    def test_add_value(self):
+        """Test ADD enum value."""
+        assert CacheOperation.ADD.value == "add"
+
+    def test_remove_value(self):
+        """Test REMOVE enum value."""
+        assert CacheOperation.REMOVE.value == "remove"
+
+
+class TestCacheManagerInitialization:
+    """Tests for CacheManager initialization."""
+
+    def test_inactive_without_config(self):
+        """Test that CacheManager is inactive without config."""
+        manager = CacheManager(logger=MagicMock())
+
+        assert manager.is_active is False
+
+    def test_check_if_initialized_raises(self):
+        """Test that check_if_initialized raises when not active."""
+        manager = CacheManager(logger=MagicMock())
+
+        with pytest.raises(Exception) as exc_info:
+            manager.check_if_initialized()
+
+        assert "not been initialized" in str(exc_info.value)
+
+    def test_get_current_activity_inactive(self):
+        """Test get_current_activity when inactive."""
+        manager = CacheManager(logger=MagicMock())
+
+        result = manager.get_current_activity()
+        assert result == []
+
+
+class TestCacheManagerWithMocks:
+    """Tests for CacheManager with mocked dependencies."""
+
+    @pytest.fixture
+    def mock_manager(self, mock_logger, mock_config_manager):
+        """Create a CacheManager with mocked dependencies."""
+        with patch('cache_manager.cache_manager.LegacyDataManager') as mock_dm:
+            mock_data_manager = MagicMock()
+            mock_dm.return_value = mock_data_manager
+
+            mock_dms = MagicMock()
+            mock_dms.s3_operation = MagicMock()
+
+            manager = CacheManager(
+                logger=mock_logger,
+                workflow_id="test-workflow",
+                config_manager=mock_config_manager,
+                data_manager_service=mock_dms
+            )
+
+            return manager
+
+    def test_manager_is_active(self, mock_manager):
+        """Test that manager is active with config."""
+        assert mock_manager.is_active is True
+
+    def test_get_cached_query_ids_no_file(self, mock_manager, temp_dir):
+        """Test get_cached_query_ids when file doesn't exist."""
+        mock_manager.global_cache_file_path = str(temp_dir / "nonexistent.csv")
+
+        result = mock_manager.get_cached_query_ids()
+
+        assert result == []
+
+    def test_get_cached_query_ids_with_file(self, mock_manager, temp_dir):
+        """Test get_cached_query_ids with valid file."""
+        cache_file = temp_dir / "global_cache.csv"
+        df = pd.DataFrame({
+            'query_id': ['q1', 'q2', 'q3'],
+            'cache_name': ['c1', 'c2', 'c3']
+        })
+        df.to_csv(cache_file, index=False)
+
+        mock_manager.global_cache_file_path = str(cache_file)
+
+        result = mock_manager.get_cached_query_ids()
+
+        assert result == ['q1', 'q2', 'q3']
+
+    def test_clear_caches(self, mock_manager):
+        """Test clear_caches method."""
+        mock_manager.clear_caches()
+
+        # Should have executed DROP ALL CACHES
+        mock_manager.readyset_data_manager.db_query.execute_query.assert_called_with(
+            query="DROP ALL CACHES"
+        )
+
+    def test_run_query_success(self, mock_manager):
+        """Test successful query execution."""
+        cache_query = CacheQuery(query_id="q1", cache_operation=CacheOperation.ADD)
+        mock_manager.readyset_data_manager.db_query.execute_query.return_value = [["result"]]
+
+        result = mock_manager.run_query("SELECT 1", cache_query)
+
+        assert result is not None
+
+    def test_run_query_failure(self, mock_manager):
+        """Test query execution failure."""
+        cache_query = CacheQuery(query_id="q1", cache_operation=CacheOperation.ADD)
+        mock_manager.readyset_data_manager.db_query.execute_query.side_effect = Exception("DB Error")
+
+        result = mock_manager.run_query("SELECT 1", cache_query)
+
+        assert result is None
+        mock_manager.logger.error.assert_called()
+
+
+class TestExtractAlwaysDataFromDf:
+    """Tests for _extract_always_data_from_df_s3 method."""
+
+    @pytest.fixture
+    def active_manager(self, mock_logger, mock_config_manager):
+        """Create an active CacheManager for testing."""
+        with patch('cache_manager.cache_manager.LegacyDataManager'):
+            mock_dms = MagicMock()
+            mock_dms.s3_operation = MagicMock()
+
+            manager = CacheManager(
+                logger=mock_logger,
+                workflow_id="test",
+                config_manager=mock_config_manager,
+                data_manager_service=mock_dms
+            )
+            return manager
+
+    def test_empty_dataframe(self, active_manager):
+        """Test with empty DataFrame."""
+        df = pd.DataFrame()
+        result = active_manager._extract_always_data_from_df_s3(df)
+
+        assert result.empty
+        assert list(result.columns) == ["query_id", "always"]
+
+    def test_none_dataframe(self, active_manager):
+        """Test with None DataFrame."""
+        result = active_manager._extract_always_data_from_df_s3(None)
+
+        assert result.empty
+        assert list(result.columns) == ["query_id", "always"]
+
+    def test_9_column_format(self, active_manager):
+        """Test with 9-column GLOBAL_CACHE_SCHEMA format."""
+        df = pd.DataFrame({
+            'query_id': ['q1', 'q2'],
+            'cache_name': ['c1', 'c2'],
+            'query_text': ['text1', 'text2'],
+            'fallback_behavior': ['fb1', 'fb2'],
+            'count': [1, 2],
+            'strategy': ['deep', 'deep'],
+            'blacklisted': [False, False],
+            'proxysql_create_query': ['', ''],
+            'always': ['true', 'false']
+        })
+
+        result = active_manager._extract_always_data_from_df_s3(df)
+
+        assert len(result) == 2
+        assert result.iloc[0]['always'] == 'true'
+        assert result.iloc[1]['always'] == 'false'
+
+    def test_4_column_format(self, active_manager):
+        """Test with 4-column format (defaults always to false)."""
+        df = pd.DataFrame({
+            'query_id': ['q1', 'q2'],
+            'cache_name': ['c1', 'c2'],
+            'query_text': ['text1', 'text2'],
+            'fallback_behavior': ['fb1', 'fb2']
+        })
+
+        result = active_manager._extract_always_data_from_df_s3(df)
+
+        assert len(result) == 2
+        assert all(result['always'] == 'false')
+
+
+class TestLogFunctions:
+    """Tests for log utility functions."""
+
+    def test_log_call_trace(self, mock_logger):
+        """Test log_call_trace doesn't raise."""
+        # Should not raise exception
+        log_call_trace(mock_logger, "test_function", {"key": "value"})
+
+        mock_logger.info.assert_called()
+
+    def test_log_simple_call_trace(self, mock_logger):
+        """Test log_simple_call_trace doesn't raise."""
+        # Should not raise exception
+        log_simple_call_trace(mock_logger, "test_function", {"key": "value"})
+
+        mock_logger.info.assert_called()
+
+    def test_log_with_long_value(self, mock_logger):
+        """Test that long values are truncated."""
+        long_value = "x" * 200
+        log_simple_call_trace(mock_logger, "test", {"key": long_value})
+
+        # Should have been called without error
+        mock_logger.info.assert_called()
+
+
+class TestEdgeCases:
+    """Tests for edge cases and error handling."""
+
+    def test_thread_safe_set_concurrent_add_remove(self):
+        """Test concurrent add and remove operations."""
+        ts_set = ThreadSafeSet()
+        errors = []
+
+        def add_then_remove():
+            try:
+                for i in range(50):
+                    query = CacheQuery(
+                        query_id=f"concurrent_{i}",
+                        cache_operation=CacheOperation.ADD
+                    )
+                    ts_set.add(query)
+                    ts_set.remove(query)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=add_then_remove) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0
+
+    def test_cache_operation_string_values(self):
+        """Test that enum string values are correct."""
+        assert str(CacheOperation.ADD.value) == "add"
+        assert str(CacheOperation.REMOVE.value) == "remove"

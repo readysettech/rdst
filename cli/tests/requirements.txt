@@ -1,0 +1,13 @@
+# Test dependencies for rdst unit tests
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-xdist>=3.0.0  # Parallel test execution
+pandas>=1.5.0
+toml>=0.10.0
+
+# Dependencies needed for imports in tested modules
+rich>=13.0.0
+anthropic>=0.18.0
+openai>=1.0.0
+requests>=2.28.0
+cryptography>=40.0.0

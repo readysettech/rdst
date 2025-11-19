@@ -1,0 +1,160 @@
+{
+    "Comment": "Setup Test Database for ReadySet Cacheability Analysis",
+    "StartAt": "GetTargetConfig",
+    "States": {
+        "GetTargetConfig": {
+            "Type": "Task",
+            "Resource": "get_target_config",
+            "Parameters": {
+                "target_name": "{{target_name}}"
+            },
+            "ResultPath": "$.target_config",
+            "Next": "DetectTestContainer"
+        },
+        "DetectTestContainer": {
+            "Type": "Task",
+            "Resource": "detect_test_db_container",
+            "Parameters": {
+                "container_name_pattern": "{{container_name_pattern}}",
+                "required": false
+            },
+            "ResultPath": "$.container_detection",
+            "Next": "CheckContainerStatus"
+        },
+        "CheckContainerStatus": {
+            "Type": "Task",
+            "Resource": "check_container_needs_start",
+            "Parameters": {
+                "container_detection": "{{container_detection}}"
+            },
+            "ResultPath": "$.container_status",
+            "Next": "StartTestContainerIfNeeded"
+        },
+        "StartTestContainerIfNeeded": {
+            "Type": "Task",
+            "Resource": "start_test_db_container",
+            "Parameters": {
+                "container_name": "{{container_detection.container_name}}",
+                "needs_start": "{{container_status.needs_start}}",
+                "needs_create": "{{container_status.needs_create}}",
+                "target_config": "{{target_config}}",
+                "test_port": "{{default_port}}"
+            },
+            "ResultPath": "$.container_start",
+            "Next": "WaitForDatabaseReady"
+        },
+        "WaitForDatabaseReady": {
+            "Type": "Task",
+            "Resource": "wait_for_database_ready",
+            "Parameters": {
+                "container_name": "{{container_start.container_name}}",
+                "port": "{{default_port}}",
+                "database_type": "{{target_config.engine}}",
+                "timeout": 30
+            },
+            "ResultPath": "$.database_ready",
+            "Next": "RecreateSchema"
+        },
+        "RecreateSchema": {
+            "Type": "Task",
+            "Resource": "recreate_schema_from_target",
+            "Parameters": {
+                "target_config": "{{target_config}}",
+                "test_container": "{{container_start.container_name}}",
+                "test_port": "{{default_port}}",
+                "test_database": "{{default_database}}"
+            },
+            "ResultPath": "$.schema_recreation",
+            "Next": "CreateTargetConfigTemp"
+        },
+        "CreateTargetConfigTemp": {
+            "Type": "Task",
+            "Resource": "create_test_db_target_config",
+            "Parameters": {
+                "container_name": "{{container_start.container_name}}",
+                "database": "{{default_database}}",
+                "user": "{{default_user}}",
+                "port": "{{default_port}}",
+                "host": "localhost",
+                "engine": "{{target_config.engine}}",
+                "target_config": "{{target_config}}"
+            },
+            "ResultPath": "$.temp_target_config",
+            "Next": "CheckTablesHaveData"
+        },
+        "CheckTablesHaveData": {
+            "Type": "Task",
+            "Resource": "check_tables_have_data",
+            "Parameters": {
+                "container_name": "{{container_start.container_name}}",
+                "target_config": "{{temp_target_config}}"
+            },
+            "ResultPath": "$.data_check",
+            "Next": "GetSchemaForDataGen"
+        },
+        "GetSchemaForDataGen": {
+            "Type": "Task",
+            "Resource": "get_test_database_schema",
+            "Parameters": {
+                "container_name": "{{container_start.container_name}}",
+                "target_config": "{{temp_target_config}}"
+            },
+            "ResultPath": "$.schema_info",
+            "Next": "GenerateTestData"
+        },
+        "GenerateTestData": {
+            "Type": "Task",
+            "Resource": "generate_test_data_with_llm",
+            "Parameters": {
+                "schema_info": "{{schema_info}}",
+                "data_check": "{{data_check}}",
+                "row_count": "{{test_data_rows}}",
+                "llm_model": "{{llm_model}}"
+            },
+            "ResultPath": "$.test_data",
+            "Next": "LoadTestData"
+        },
+        "LoadTestData": {
+            "Type": "Task",
+            "Resource": "load_test_data_to_database",
+            "Parameters": {
+                "insert_statements": "{{test_data.insert_statements}}",
+                "target_config": "{{temp_target_config}}",
+                "container_name": "{{container_start.container_name}}"
+            },
+            "ResultPath": "$.data_load_result",
+            "Next": "StartReadySetContainer"
+        },
+        "StartReadySetContainer": {
+            "Type": "Task",
+            "Resource": "start_readyset_container",
+            "Parameters": {
+                "test_db_container": "{{container_start.container_name}}",
+                "test_db_config": "{{temp_target_config}}",
+                "readyset_port": "{{readyset_port}}",
+                "readyset_container_name": "{{readyset_container_name}}"
+            },
+            "ResultPath": "$.readyset_container",
+            "Next": "WaitForReadySetReady"
+        },
+        "WaitForReadySetReady": {
+            "Type": "Task",
+            "Resource": "wait_for_readyset_ready",
+            "Parameters": {
+                "readyset_container_name": "{{readyset_container_name}}",
+                "timeout": 120
+            },
+            "ResultPath": "$.readyset_ready",
+            "Next": "ReturnFinalConfig"
+        },
+        "ReturnFinalConfig": {
+            "Type": "Task",
+            "Resource": "return_target_config",
+            "Parameters": {
+                "temp_target_config": "{{temp_target_config}}"
+            },
+            "ResultPath": "$.target_config",
+            "End": true
+        }
+    }
+}
