@@ -36,21 +36,30 @@ echo "RDST Integration Tests - Local Setup"
 echo "======================================================================"
 echo
 
-# Check required environment variables
+# Auto-derive API_BASE_URL from DUPLO_TENANT if not set
 if [[ -z "${API_BASE_URL:-}" ]]; then
-  echo "ERROR: API_BASE_URL environment variable is required"
-  echo
-  echo "Please export API_BASE_URL before running this script:"
-  echo "  export API_BASE_URL=\"https://api-dev01.apps.readyset.cloud\""
-  echo
-  echo "For container creation, also export ADMIN_API_TOKEN:"
-  echo "  export ADMIN_API_TOKEN=\"your-admin-token-here\""
-  echo
-  echo "Alternatively, provide existing database connection strings:"
-  echo "  export PSQL_CONNECTION_STRING=\"postgresql://user:pass@host:port/imdb\""
-  echo "  export MYSQL_CONNECTION_STRING=\"mysql://user:pass@host:port/imdb\""
-  echo
-  exit 1
+  if [[ -n "${DUPLO_TENANT:-}" ]]; then
+    API_BASE_URL="https://api-${DUPLO_TENANT}.apps.readyset.cloud"
+    export API_BASE_URL
+    echo "Auto-derived API_BASE_URL from DUPLO_TENANT: $API_BASE_URL"
+  else
+    echo "ERROR: API_BASE_URL environment variable is required"
+    echo
+    echo "Please export API_BASE_URL before running this script:"
+    echo "  export API_BASE_URL=\"https://api-dev01.apps.readyset.cloud\""
+    echo
+    echo "Or export DUPLO_TENANT to auto-derive (e.g., DUPLO_TENANT=dev01):"
+    echo "  export DUPLO_TENANT=\"dev01\""
+    echo
+    echo "For container creation, also export ADMIN_API_TOKEN:"
+    echo "  export ADMIN_API_TOKEN=\"your-admin-token-here\""
+    echo
+    echo "Alternatively, provide existing database connection strings:"
+    echo "  export PSQL_CONNECTION_STRING=\"postgresql://user:pass@host:port/imdb\""
+    echo "  export MYSQL_CONNECTION_STRING=\"mysql://user:pass@host:port/imdb\""
+    echo
+    exit 1
+  fi
 fi
 
 # Display configuration

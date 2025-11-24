@@ -4,33 +4,79 @@ A command-line interface for diagnostics, query analysis, performance tuning, an
 
 ## Installation
 
-RDST is distributed as platform-specific packages:
+RDST is distributed as a Python package and can be installed using `uvx` or `pipx`.
 
-- **Debian/Ubuntu**: `.deb` package
-- **RHEL/CentOS**: `.rpm` package
-- **Amazon Linux 2023**: `.rpm.al23` package
-- **macOS**: `.pkg` installer
+### Using uvx (recommended)
 
-Download the appropriate package for your platform and install using your system's package manager.
+Download and run RDST directly without installation:
+
+```bash
+# Download from S3 (production)
+aws s3 cp s3://readyset-rdst/stage01/latest/ . --recursive --exclude "*" --include "*.whl"
+uvx ./rdst-*.whl --help
+
+# Or download from S3 (dev)
+aws s3 cp s3://readyset-rdst-test/dev01/latest/ . --recursive --exclude "*" --include "*.whl"
+uvx ./rdst-*.whl --help
+```
+
+### Using pipx
+
+Download and install globally:
+
+```bash
+# Download from S3 (production)
+aws s3 cp s3://readyset-rdst/stage01/latest/ . --recursive --exclude "*" --include "*.whl"
+pipx install ./rdst-*.whl
+
+# Or download from S3 (dev)
+aws s3 cp s3://readyset-rdst-test/dev01/latest/ . --recursive --exclude "*" --include "*.whl"
+pipx install ./rdst-*.whl
+
+# Run installed version
+rdst --help
+
+# Upgrade to latest version
+aws s3 cp s3://readyset-rdst/stage01/latest/ . --recursive --exclude "*" --include "*.whl"
+pipx upgrade rdst --pip-args="--force-reinstall" ./rdst-*.whl
+```
+
+### Alternative: HTTPS URLs
+
+If the S3 bucket is public, you can install directly via HTTPS:
+
+```bash
+# Using uvx (runs directly, no installation)
+uvx https://readyset-rdst.s3.amazonaws.com/stage01/latest/rdst-0.1.0-py3-none-any.whl --help
+uvx https://readyset-rdst.s3.amazonaws.com/stage01/latest/rdst-0.1.0-py3-none-any.whl analyze "SELECT * FROM users"
+
+# Using pipx (install globally)
+pipx install https://readyset-rdst.s3.amazonaws.com/stage01/latest/rdst-0.1.0-py3-none-any.whl
+
+# Upgrade with pipx
+pipx upgrade rdst --pip-args="--force-reinstall" \
+  https://readyset-rdst.s3.amazonaws.com/stage01/latest/rdst-0.1.0-py3-none-any.whl
+```
 
 ## Build from Source
 
-RDST uses [uv](https://github.com/astral-sh/uv) for dependency management.
+RDST uses Python 3.11+ and modern Python packaging.
 
 ```bash
-# Install dependencies
+# Install dependencies (using uv)
 uv pip install -r requirements.txt
 
 # Run RDST
 python rdst.py --help
+
+# Or build and install locally
+python -m build
+pipx install dist/rdst-0.1.0-py3-none-any.whl
 ```
 
 ## Building Distribution Packages
 
-See build scripts in this directory:
-- `build_rdst.sh` - Main build script (runs in Docker container)
-- `orchestrate_rdst.sh` - Orchestrates Docker builds and S3 uploads
-- `Dockerfile.*` - Docker images for building on different platforms
+RDST uses Python's standard build system. The Buildkite pipeline automatically builds and uploads packages to S3 on merge to main.
 
 ## Commands
 
@@ -48,5 +94,5 @@ See build scripts in this directory:
 RDST is part of the ReadySet monorepo. This directory contains:
 - `rdst.py` - Main CLI entry point
 - `lib/` - Core functionality modules
-- `common/` - Shared utilities (logger, AWS operations, etc.)
-- Build scripts and Dockerfiles for package creation
+- `pyproject.toml` - Python package configuration
+- `.buildkite/` - CI/CD pipeline for building and deploying packages
