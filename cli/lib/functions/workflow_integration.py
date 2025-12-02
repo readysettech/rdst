@@ -320,6 +320,16 @@ def _format_readyset_cacheability(cacheability_results: Dict[str, Any],
 
 def _format_rewrite_testing(rewrite_test_results: Dict[str, Any]) -> Dict[str, Any]:
     """Format rewrite testing results for user display."""
+    # Check if testing was skipped due to parameterized query (no actual values)
+    if rewrite_test_results.get('skipped_reason') == 'parameterized_query':
+        return {
+            "tested": False,
+            "skipped_reason": "parameterized_query",
+            "message": rewrite_test_results.get('message', ''),
+            "recommendations": rewrite_test_results.get('recommendations', ''),
+            "results": []
+        }
+
     if not rewrite_test_results.get('success', False):
         return {
             "tested": False,

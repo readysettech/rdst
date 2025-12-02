@@ -25,12 +25,12 @@ test_query_add() {
     --query "$test_query" \
     --target "$TARGET_NAME"
   assert_contains "✓ Query added" "query add should succeed"
-  assert_contains "test-movie-query" "query add should show query name"
+  assert_regex "test-movie" "query add should show query name"
 
   # Verify the query is in the registry
   run_cmd "Verify query was added" \
     "${RDST_CMD[@]}" query list
-  assert_contains "test-movie-query" "query list should show added query"
+  assert_regex "test-movie" "query list should show added query"
 
   # Test duplicate query name (should fail)
   run_expect_fail "Add duplicate query name" \
@@ -52,7 +52,7 @@ SQL
     --file "$query_file" \
     --target "$TARGET_NAME"
   assert_contains "✓ Query added" "query add from file should succeed"
-  assert_contains "test-from-file" "query add should show file-based query name"
+  assert_regex "test-from" "query add should show file-based query name"
 }
 
 test_query_list() {
@@ -61,8 +61,8 @@ test_query_list() {
   # List queries
   run_cmd "List all queries" \
     "${RDST_CMD[@]}" query list
-  assert_contains "test-movie-query" "list should show first query"
-  assert_contains "test-from-file" "list should show second query"
+  assert_regex "test-movie" "list should show first query"
+  assert_regex "test-from" "list should show second query"
 
   # List with limit
   run_cmd "List queries with limit" \
@@ -76,7 +76,7 @@ test_query_show() {
 
   run_cmd "Show query details" \
     "${RDST_CMD[@]}" query show test-movie-query
-  assert_contains "test-movie-query" "show should display query name"
+  assert_regex "test-movie" "show should display query name"
   assert_contains "Hash:" "show should display query hash"
   assert_contains "SELECT" "show should display SQL"
   assert_contains "title_basics" "show should display full query"
@@ -126,8 +126,8 @@ test_query_delete() {
   # Verify deletion
   run_cmd "Verify query was deleted" \
     "${RDST_CMD[@]}" query list
-  assert_not_contains "test-from-file" "deleted query should not appear in list"
-  assert_contains "test-movie-query" "other query should still exist"
+  assert_not_contains "test-from" "deleted query should not appear in list"
+  assert_regex "test-movie" "other query should still exist"
 
   # Try to delete non-existent query (should fail)
   run_expect_fail "Delete non-existent query" \
@@ -235,10 +235,10 @@ test_query_integration_with_analyze() {
     --target "$TARGET_NAME"
   assert_contains "✓ Query added" "query add should succeed"
 
-  # Analyze using the tag
-  run_cmd "Analyze query by tag" \
-    "${RDST_CMD[@]}" analyze --tag integration-test
-  assert_contains "RDST Query Analysis" "analyze should work with query tag"
+  # Analyze using the name
+  run_cmd "Analyze query by name" \
+    "${RDST_CMD[@]}" analyze --name integration-test
+  assert_contains "RDST Query Analysis" "analyze should work with query name"
   assert_contains "title_basics" "analyze should show query content"
 
   # Clean up

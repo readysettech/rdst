@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from ..query_registry.conversation_registry import ConversationRegistry, InteractiveConversation
+from ..query_registry.query_registry import QueryRegistry
 from ..llm_manager.llm_manager import LLMManager
 
 # Try to import Rich for colored output
@@ -132,10 +133,8 @@ def run_interactive_mode(conversation: InteractiveConversation,
             # Handle exit
             if user_input.lower() in ['exit', 'quit', 'q']:
                 conv_registry.save_conversation(conversation)
-                print(f"\nConversation saved.")
-                print(f"Query hash: {conversation.query_hash}")
-                print(f"To continue: rdst analyze --query {conversation.query_hash} --interactive")
-                print()
+                saved_name = _prompt_for_tag_if_needed(conversation.query_hash)
+                _print_exit_message(conversation.query_hash, saved_name)
                 break
 
             # Handle help
@@ -190,6 +189,8 @@ def run_interactive_mode(conversation: InteractiveConversation,
         except KeyboardInterrupt:
             print("\n\nExiting interactive mode.")
             conv_registry.save_conversation(conversation)
+            saved_name = _prompt_for_tag_if_needed(conversation.query_hash)
+            _print_exit_message(conversation.query_hash, saved_name)
             break
         except Exception as e:
             print(f"\nError: {e}\n")
@@ -459,3 +460,80 @@ def _format_timestamp(timestamp_str: str) -> str:
         return dt.strftime("%Y-%m-%d %H:%M:%S")
     except:
         return timestamp_str
+
+
+def _prompt_for_tag_if_needed(query_hash: str) -> Optional[str]:
+    """
+    Prompt user to tag the query if it doesn't already have a tag.
+
+    Args:
+        query_hash: Hash of the query to potentially tag
+
+    Returns:
+        The tag name if saved (new or existing), None otherwise
+    """
+    try:
+        registry = QueryRegistry()
+        entry = registry.get_query(query_hash)
+
+        if not entry:
+            return None
+
+        # Already has a tag - return it
+        if entry.tag:
+            return entry.tag
+
+        # Prompt for tag
+        if _RICH_AVAILABLE and console:
+            console.print("\n[dim]💾 Save this query with a name for easy access later?[/dim]")
+            tag_name = input("   Name (leave blank to skip): ").strip()
+        else:
+            print("\n💾 Save this query with a name for easy access later?")
+            tag_name = input("   Name (leave blank to skip): ").strip()
+
+        if tag_name:
+            # Check if tag already exists
+            existing = registry.get_query_by_tag(tag_name)
+            if existing and existing.hash != query_hash:
+                print(f"   Name '{tag_name}' already used by another query. Skipping.")
+                return None
+
+            # Update the tag
+            registry.update_query_tag(query_hash, tag_name)
+            if _RICH_AVAILABLE and console:
+                console.print(f"   [green]✓ Saved as '{tag_name}'[/green]")
+            else:
+                print(f"   ✓ Saved as '{tag_name}'")
+            return tag_name
+
+        return None
+    except Exception:
+        # Don't fail the exit flow if tagging fails
+        return None
+
+
+def _print_exit_message(query_hash: str, saved_name: Optional[str]) -> None:
+    """
+    Print the exit message with continue command(s).
+
+    Args:
+        query_hash: Hash of the query
+        saved_name: Name if saved, None otherwise
+    """
+    print(f"\nConversation saved. Continue with:")
+
+    if saved_name:
+        # Show both options - name first (easier), then hash
+        if _RICH_AVAILABLE and console:
+            console.print(f"  [cyan]rdst analyze --name {saved_name} --interactive[/cyan]")
+            console.print(f"  [dim]rdst analyze --hash {query_hash} --interactive[/dim]")
+        else:
+            print(f"  rdst analyze --name {saved_name} --interactive")
+            print(f"  rdst analyze --hash {query_hash} --interactive")
+    else:
+        # Only hash available
+        if _RICH_AVAILABLE and console:
+            console.print(f"  [cyan]rdst analyze --hash {query_hash} --interactive[/cyan]")
+        else:
+            print(f"  rdst analyze --hash {query_hash} --interactive")
+    print()

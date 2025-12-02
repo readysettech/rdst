@@ -442,7 +442,7 @@ class InitCommand:
     # ---- Utilities ----
     def _welcome(self) -> None:
         intro_lines = [
-            "Welcome to ReadySet Diagnostics & SQL Tuning (rdst).",
+            "Welcome to Readyset Diagnostics & SQL Tuning (rdst).",
             "",
             "Let's get you set up in a few steps.",
         ]

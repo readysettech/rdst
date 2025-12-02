@@ -5,11 +5,44 @@ Automatically tests LLM-suggested query rewrites by executing them
 and comparing performance metrics with the original query.
 """
 
+import re
 import time
 import json
 from typing import Dict, Any, List, Optional
 from .explain_analysis import execute_explain_analyze
 from .query_safety import validate_query_safety
+
+
+def _has_unresolved_placeholders(sql: str) -> bool:
+    """
+    Check if SQL contains parameter placeholders that haven't been substituted.
+
+    This happens when:
+    - Query comes from rdst top with PostgreSQL prepared statements ($1, $2)
+    - Query comes from MySQL performance_schema digest (?)
+    - Query was normalized but we don't have stored parameter values
+
+    Args:
+        sql: SQL query string to check
+
+    Returns:
+        True if query contains unresolved placeholders
+    """
+    if not sql:
+        return False
+
+    # PostgreSQL-style: $1, $2, etc.
+    if re.search(r'\$\d+', sql):
+        return True
+
+    # MySQL/generic style: ? (but not inside quotes)
+    # Simple check - if ? appears outside of string literals
+    # Remove string literals first
+    sql_no_strings = re.sub(r"'[^']*'", '', sql)
+    if '?' in sql_no_strings:
+        return True
+
+    return False
 
 
 def test_query_rewrites(original_sql: str, rewrite_suggestions: List[Dict[str, Any]],
@@ -32,6 +65,26 @@ def test_query_rewrites(original_sql: str, rewrite_suggestions: List[Dict[str, A
         - recommendations: final recommendations based on testing
     """
     try:
+        # Check if query has unresolved parameter placeholders ($1, $2, ?)
+        # This happens when query comes from rdst top with prepared statements
+        # or from MySQL digest without stored parameter values
+        if _has_unresolved_placeholders(original_sql):
+            return {
+                "success": True,
+                "tested": False,
+                "skipped_reason": "parameterized_query",
+                "original_performance": None,
+                "rewrite_results": [],
+                "best_rewrite": None,
+                "recommendations": "Rewrite testing skipped - query contains parameter placeholders",
+                "message": (
+                    "This query contains parameter placeholders ($1, $2 or ?) without actual values. "
+                    "This typically happens when the query was captured from rdst top using prepared statements. "
+                    "To test rewrites, run 'rdst analyze' with the original query from your application code "
+                    "that includes actual parameter values."
+                )
+            }
+
         # Handle case where WorkflowManager passes rewrite_suggestions as string
         if isinstance(rewrite_suggestions, str):
             # Try to parse as JSON if it's a string

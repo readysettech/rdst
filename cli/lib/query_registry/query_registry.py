@@ -23,8 +23,9 @@ def normalize_sql(query: str) -> str:
     1. Strip leading/trailing whitespace
     2. Collapse multiple whitespace characters to single spaces
     3. Remove trailing semicolons
-    4. Replace string literals with ? placeholders
-    5. Replace numeric literals with ? placeholders
+    4. Replace PostgreSQL-style placeholders ($1, $2) with ?
+    5. Replace string literals with ? placeholders
+    6. Replace numeric literals with ? placeholders
 
     Args:
         query: Raw SQL query string
@@ -43,6 +44,10 @@ def normalize_sql(query: str) -> str:
 
     # Remove trailing semicolon and any whitespace after it
     normalized = re.sub(r';\s*$', '', normalized)
+
+    # Replace PostgreSQL-style placeholders ($1, $2, etc.) with ? FIRST
+    # This ensures parameterized queries hash the same as queries with values
+    normalized = re.sub(r'\$\d+', '?', normalized)
 
     # Replace string literals with ? placeholders
     normalized = re.sub(r"'[^']*'", '?', normalized)
@@ -480,6 +485,27 @@ class QueryRegistry:
 
         return False
 
+    def update_query_tag(self, query_hash: str, tag: str) -> bool:
+        """
+        Update the tag for an existing query.
+
+        Args:
+            query_hash: Hash of the query to update
+            tag: New tag to assign
+
+        Returns:
+            True if query was found and updated, False otherwise
+        """
+        if not self._loaded:
+            self.load()
+
+        if query_hash in self._queries:
+            self._queries[query_hash].tag = tag
+            self.save()
+            return True
+
+        return False
+
     def get_or_create_hash(self, sql: str) -> str:
         """
         Get the hash for a SQL query, ensuring consistent normalization.
@@ -571,3 +597,53 @@ class QueryRegistry:
             return None
 
         return self.get_executable_query(entry.hash, interactive)
+
+    def update_parameter_history(self, query_hash: str, parameters: Dict[str, Any],
+                                  target: str = "") -> bool:
+        """
+        Update the parameter history for an existing query.
+
+        This is used when a user provides parameter values interactively
+        for a parameterized query that was stored without actual values.
+
+        Args:
+            query_hash: Hash of the query to update
+            parameters: Dictionary of parameter values (e.g., {'param_1': 'value1', 'param_2': 123})
+            target: Optional target database name
+
+        Returns:
+            True if update succeeded, False if query not found
+        """
+        if not self._loaded:
+            self.load()
+
+        entry = self.get_query(query_hash)
+        if not entry:
+            return False
+
+        now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+        # Create new parameter set
+        param_set = ParameterSet(
+            values=parameters,
+            analyzed_at=now,
+            target=target
+        )
+
+        # Add to front of history (most recent first)
+        entry.parameter_history.insert(0, param_set)
+
+        # Keep only last 10 parameter sets
+        entry.parameter_history = entry.parameter_history[:10]
+
+        # Update most recent params
+        entry.most_recent_params = parameters
+
+        # Update last_analyzed timestamp
+        entry.last_analyzed = now
+
+        if target:
+            entry.last_target = target
+
+        self.save()
+        return True

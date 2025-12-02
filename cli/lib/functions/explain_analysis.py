@@ -108,6 +108,33 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
             "execution_time_ms": 0
         }
 
+    # Check if SQL contains parameter placeholders - PostgreSQL can run them but results are unreliable
+    # When normalized queries (from rdst top or registry) have placeholders, the EXPLAIN ANALYZE
+    # results won't match actual execution with real parameter values due to generic vs specific plans
+    # PostgreSQL uses $1, $2 style placeholders; ? is used by some client libraries
+    import re
+    has_pg_params = re.search(r'\$\d+', sql) is not None  # PostgreSQL-style $1, $2, etc.
+    has_question_mark = '?' in sql  # Client library style
+    if has_pg_params or has_question_mark:
+        placeholder_type = "$1, $2" if has_pg_params else "?"
+        return {
+            "success": False,
+            "error": (
+                "WARNING: Cannot get reliable EXPLAIN ANALYZE for parameterized queries.\n\n"
+                f"The query contains '{placeholder_type}' placeholders (from query normalization).\n"
+                "PostgreSQL EXPLAIN ANALYZE with placeholders uses generic plan estimates\n"
+                "which can differ SIGNIFICANTLY from execution with actual values.\n"
+                "(This is why MVZ saw 30x slower rewrites - generic vs specific plans!)\n\n"
+                "Solution: Copy the query from your application code and run:\n"
+                "   rdst analyze \"SELECT ... WHERE col = <actual_value>\"\n\n"
+                "Note: rdst top is designed for monitoring query traffic (like htop).\n"
+                "      For detailed analysis, use rdst analyze with the original query."
+            ),
+            "explain_plan": None,
+            "execution_time_ms": 0,
+            "skipped_reason": "parameterized_query_from_digest"
+        }
+
     try:
         import os
 

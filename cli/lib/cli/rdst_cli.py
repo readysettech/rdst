@@ -1,5 +1,5 @@
 """
-ReadySet CLI stubs (programmatic surface)
+Readyset CLI stubs (programmatic surface)
 
 This module defines a small, modern-feeling programmatic interface for a future
 `rdst` CLI. Each method returns a structured result and serves as a stub where
@@ -253,7 +253,7 @@ class RdstCLI:
 
     # rdst analyze
     def analyze(self, hash: Optional[str] = None, query: Optional[str] = None,
-                file: Optional[str] = None, stdin: bool = False, tag: Optional[str] = None,
+                file: Optional[str] = None, stdin: bool = False, name: Optional[str] = None,
                 positional_query: Optional[str] = None, target: Optional[str] = None,
                 save_as: Optional[str] = None, db: Optional[str] = None, readyset: bool = False,
                 fast: bool = False, interactive: bool = False, review: bool = False, **kwargs) -> RdstResult:
@@ -262,7 +262,7 @@ class RdstCLI:
 
         Supports input from:
         - Registry by hash (--hash)
-        - Registry by tag (--tag)
+        - Registry by name (--name)
         - Inline query (-q/--query)
         - File (-f/--file)
         - Stdin (--stdin)
@@ -274,12 +274,12 @@ class RdstCLI:
             query: SQL query string from -q flag
             file: Path to SQL file from -f flag
             stdin: Whether to read from stdin
-            tag: Tag name for registry lookup
+            name: Query name for registry lookup
             positional_query: Positional query argument
             target: Target database
-            save_as: Tag to save query as after analysis
+            save_as: Name to save query as after analysis
             db: Legacy parameter for target database
-            readyset: Whether to use local ReadySet Docker container
+            readyset: Whether to use local Readyset Docker container
             fast: Whether to auto-skip slow EXPLAIN ANALYZE queries after 10 seconds
             interactive: Whether to enter interactive mode after analysis
             review: Whether to review conversation history instead of analyzing
@@ -299,7 +299,7 @@ class RdstCLI:
                 inline_query=query,
                 file_path=file,
                 use_stdin=stdin,
-                tag=tag,
+                name=name,
                 positional_query=positional_query,
                 save_as=save_as
             )
@@ -326,7 +326,7 @@ class RdstCLI:
 
         Intended integration:
         - Static analysis + DataManagerService schema info
-        - Recommend indexes or ReadySet caching
+        - Recommend indexes or Readyset caching
         """
         if not query:
             return RdstResult(False, "tune requires a SQL query")
@@ -337,15 +337,15 @@ class RdstCLI:
     def cache(self, query: str, strategy: str = "explicit", target: Optional[str] = None,
               tag: Optional[str] = None, json: bool = False, **kwargs) -> RdstResult:
         """
-        Benchmark query performance and evaluate ReadySet caching benefits.
+        Benchmark query performance and evaluate Readyset caching benefits.
 
         New workflow:
         1. Resolve query (from hash_id or direct SQL)
         2. Run query against target DB and collect metrics (NO CACHE)
-        3. Cache query in ReadySet container
-        4. Run query against ReadySet and collect metrics (WITH CACHE)
+        3. Cache query in Readyset container
+        4. Run query against Readyset and collect metrics (WITH CACHE)
         5. Compare performance
-        6. Output CREATE CACHE command for user's production ReadySet
+        6. Output CREATE CACHE command for user's production Readyset
         7. Save query to registry if new
 
         Args:
@@ -422,173 +422,6 @@ class RdstCLI:
         except Exception as e:
             return RdstResult(False, f"query command failed: {e}")
 
-    # rdst list
-    def list(self, filter: str = None, limit: int = 10, **kwargs) -> RdstResult:  # noqa: A003 - intentional CLI method name
-        """Show all saved queries with hashes and tags."""
-        from ..query_registry.query_registry import QueryRegistry
-
-        try:
-            registry = QueryRegistry()
-            queries = registry.list_queries()
-
-            if not queries:
-                return RdstResult(True, "No queries found in registry. Run 'rdst analyze' to store queries.")
-
-            # Apply smart filter if specified
-            if filter:
-                filter_lower = filter.lower()
-                filtered_queries = []
-                for query in queries:
-                    # Format dates for better matching
-                    import datetime
-                    try:
-                        dt_first = datetime.datetime.fromisoformat(query.first_analyzed.replace('Z', '+00:00'))
-                        formatted_first = dt_first.strftime("%m-%d %H:%M")
-                        date_first = dt_first.strftime("%m-%d")  # Just date part
-                    except:
-                        formatted_first = "Unknown"
-                        date_first = ""
-
-                    try:
-                        dt_last = datetime.datetime.fromisoformat(query.last_analyzed.replace('Z', '+00:00'))
-                        formatted_last = dt_last.strftime("%m-%d %H:%M")
-                        date_last = dt_last.strftime("%m-%d")  # Just date part
-                    except:
-                        formatted_last = "Unknown"
-                        date_last = ""
-
-                    # Smart filter searches across all fields
-                    matches = [
-                        filter_lower in query.sql.lower(),                    # SQL content
-                        query.tag and filter_lower in query.tag.lower(),     # Tag
-                        filter_lower in query.hash.lower(),                  # Hash/Query ID
-                        filter_lower in query.source.lower(),                # Source (top, inline, file, etc.)
-                        # Date filtering: match what's actually displayed (last_analyzed) for intuitive UX
-                        filter_lower == date_last.lower(),                   # Exact last analyzed date match (MM-DD)
-                        # Allow partial matching for longer date strings like "09-26 19:42"
-                        filter_lower in formatted_last.lower() and len(filter_lower) >= 5,
-                    ]
-
-                    if any(matches):
-                        filtered_queries.append(query)
-
-                queries = filtered_queries
-
-                if not queries:
-                    return RdstResult(True, f"No queries found matching filter: '{filter}'")
-
-            # Apply limit with validation
-            if limit is not None and limit > 0:
-                if limit > 100:
-                    limit = 100  # Cap at maximum
-                    print("WARNING: Limit capped at 100 (maximum allowed)")
-
-                queries = queries[:limit]
-            elif limit is not None and limit < 0:
-                # Negative limit defaults to 10
-                queries = queries[:10]
-                limit = 10  # For display purposes
-
-            # Format output
-            if _RICH_AVAILABLE and self.client._console:
-                from rich.table import Table
-
-                table = Table(show_header=True, header_style="bold cyan")
-                table.add_column("HASH", style="bright_blue", width=12)
-                table.add_column("TAG", style="green", width=12)
-                table.add_column("SQL", style="white", width=25)
-                table.add_column("SOURCE", style="magenta", width=8)
-                table.add_column("LAST TARGET", style="red", width=10)
-                table.add_column("FIRST ANALYZED", style="cyan", width=12)
-                table.add_column("LAST ANALYZED", style="yellow", width=12)
-
-                for query in queries:
-                    # Format timestamps
-                    import datetime
-                    try:
-                        dt = datetime.datetime.fromisoformat(query.last_analyzed.replace('Z', '+00:00'))
-                        last_analyzed = dt.strftime("%m-%d %H:%M:%S")
-                    except:
-                        last_analyzed = "Unknown"
-
-                    try:
-                        dt = datetime.datetime.fromisoformat(query.first_analyzed.replace('Z', '+00:00'))
-                        first_analyzed = dt.strftime("%m-%d %H:%M:%S")
-                    except:
-                        first_analyzed = "Unknown"
-
-                    # Truncate SQL for display (reduced width to make room for target)
-                    sql_display = query.sql[:25] + ("..." if len(query.sql) > 25 else "")
-                    tag_display = query.tag if query.tag else "-"
-                    target_display = getattr(query, 'last_target', '') or "-"
-
-                    table.add_row(
-                        query.hash,
-                        tag_display,
-                        sql_display,
-                        query.source,
-                        target_display,
-                        first_analyzed,
-                        last_analyzed
-                    )
-
-                # Build title with filter/limit info
-                title_parts = [f"Saved Queries ({len(queries)}"]
-                if filter:
-                    title_parts.append(f" filtered by '{filter}'")
-                if limit:
-                    title_parts.append(f" limited to {limit}")
-                title_parts.append(")")
-                table.title = "".join(title_parts)
-
-                # Capture output
-                from rich.console import Console
-                console = Console(file=None, width=120)
-                with console.capture() as capture:
-                    console.print(table)
-                return RdstResult(True, capture.get())
-
-            else:
-                # Plain text fallback
-                lines = []
-                title_parts = [f"Saved Queries ({len(queries)}"]
-                if filter:
-                    title_parts.append(f" filtered by '{filter}'")
-                if limit:
-                    title_parts.append(f" limited to {limit}")
-                title_parts.append("):")
-                lines.append("".join(title_parts))
-                lines.append("")
-                lines.append(" HASH         | TAG          | SQL                  | SOURCE   | LAST TARGET | FIRST ANALYZED | LAST ANALYZED ")
-                lines.append("-" * 118)
-
-                for query in queries:
-                    # Format timestamps
-                    import datetime
-                    try:
-                        dt = datetime.datetime.fromisoformat(query.last_analyzed.replace('Z', '+00:00'))
-                        last_analyzed = dt.strftime("%m-%d %H:%M:%S")
-                    except:
-                        last_analyzed = "Unknown"
-
-                    try:
-                        dt = datetime.datetime.fromisoformat(query.first_analyzed.replace('Z', '+00:00'))
-                        first_analyzed = dt.strftime("%m-%d %H:%M:%S")
-                    except:
-                        first_analyzed = "Unknown"
-
-                    sql_display = query.sql[:20] + ("..." if len(query.sql) > 20 else "")
-                    tag_display = query.tag if query.tag else "-"
-                    target_display = getattr(query, 'last_target', '') or "-"
-
-                    line = f" {query.hash:<12} | {tag_display:<12} | {sql_display:<20} | {query.source:<8} | {target_display:<11} | {first_analyzed:<14} | {last_analyzed}"
-                    lines.append(line)
-
-                return RdstResult(True, "\n".join(lines))
-
-        except Exception as e:
-            return RdstResult(False, f"Failed to list queries: {e}")
-
     # rdst help / rdst version
     def help(self) -> RdstResult:
         """Display a friendly welcome/help page."""
@@ -609,7 +442,7 @@ class RdstCLI:
             "  - rdst cache            Evaluate Readyset caching benefits\n"
             "  - rdst top              Live view of top slow queries\n"
             "  - rdst init             First-time setup wizard\n"
-            "  - rdst list             Show saved queries\n"
+            "  - rdst query list             Show saved queries\n"
             "  - rdst query            Manage query registry\n"
             "  - rdst version          Show version information\n"
             "  - rdst report           Submit feedback or bug reports\n"

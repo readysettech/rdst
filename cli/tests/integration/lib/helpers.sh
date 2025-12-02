@@ -172,7 +172,8 @@ assert_file_not_contains() {
 # =============================================================================
 
 latest_hash_from_list() {
-  # Get latest hash from list output stored in LAST_OUTPUT_FILE
+  # Get latest hash from output stored in LAST_OUTPUT_FILE
+  # Note: analyze output shows 12-char hashes, list shows 8-char truncated hashes
   "$PYTHON_BIN" - "$LAST_OUTPUT_FILE" <<'PYTHON_SCRIPT'
 import sys
 import re
@@ -180,12 +181,18 @@ import re
 with open(sys.argv[1], 'r') as f:
     content = f.read()
 
-# Look for 12-character hex hash patterns
+# First try 12-character hex hash patterns (from analyze output)
 matches = re.findall(r'\b[0-9a-f]{12}\b', content, re.IGNORECASE)
 if matches:
-    print(matches[0])
+    # Return first 8 chars to match what list output shows
+    print(matches[0][:8])
 else:
-    sys.exit(1)
+    # Fallback to 8-character patterns (from list output)
+    matches = re.findall(r'\b[0-9a-f]{8}\b', content, re.IGNORECASE)
+    if matches:
+        print(matches[0])
+    else:
+        sys.exit(1)
 PYTHON_SCRIPT
 }
 

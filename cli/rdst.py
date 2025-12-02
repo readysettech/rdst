@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-rdst - ReadySet Diagnostics & SQL Tuning
+rdst - Readyset Diagnostics & SQL Tuning
 
 A command-line interface for diagnostics, query analysis, performance tuning,
-and caching with ReadySet.
+and caching with Readyset.
 """
 import sys
 import argparse
@@ -31,7 +31,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         prog='rdst',
-        description='ReadySet Diagnostics & SQL Tuning - Diagnose, analyze, and tune SQL performance',
+        description='Readyset Diagnostics & SQL Tuning - Diagnose, analyze, and tune SQL performance',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
@@ -39,7 +39,7 @@ Commands:
   top          Live view of top slow queries
   analyze      Analyze and explain SQL queries  
   tune         Get optimization suggestions for queries
-  cache        Evaluate ReadySet caching benefits
+  cache        Evaluate Readyset caching benefits
   init         First-time setup wizard
   tag          Tag and store queries for later reference
   list         Show saved queries
@@ -113,19 +113,19 @@ Examples:
 
     # Query input modes (mutually exclusive group)
     query_group = analyze_parser.add_mutually_exclusive_group()
-    query_group.add_argument('-q', '--query', dest='inline_query', help='SQL query to analyze (inline)')
-    query_group.add_argument('-f', '--file', help='Read SQL from file')
-    query_group.add_argument('--stdin', action='store_true', help='Read SQL from standard input')
+    query_group.add_argument('-q', '--query', dest='inline_query', help='SQL query to analyze (use quotes for multiline)')
+    query_group.add_argument('-f', '--file', help='Read SQL from file (supports multiline)')
+    query_group.add_argument('--stdin', action='store_true', help='Read SQL from stdin (e.g., echo "SELECT..." | rdst analyze --stdin)')
     query_group.add_argument('--hash', dest='hash', help='Load query by hash from registry')
-    query_group.add_argument('--tag', help='Load query by tag from registry')
+    query_group.add_argument('--name', help='Load query by name from registry')
 
     # Backward compatibility: positional query argument (lowest precedence)
     analyze_parser.add_argument('query', nargs='?', help='SQL query to analyze (fallback)')
 
     # Other options
     analyze_parser.add_argument('--target', help='Target database')
-    analyze_parser.add_argument('--save-as', help='Tag to save query as after analysis')
-    analyze_parser.add_argument('--readyset', action='store_true', help='Run analysis against local ReadySet Docker container')
+    analyze_parser.add_argument('--save-as', help='Name to save query as after analysis')
+    analyze_parser.add_argument('--readyset', action='store_true', help='Run analysis against local Readyset Docker container')
     analyze_parser.add_argument('--fast', action='store_true', help='Auto-skip slow EXPLAIN ANALYZE queries after 10 seconds (for testing)')
     analyze_parser.add_argument('--interactive', action='store_true', help='Enter interactive mode after analysis for Q&A about recommendations')
     analyze_parser.add_argument('--review', action='store_true', help='Review conversation history for this query without re-analyzing')
@@ -139,7 +139,7 @@ Examples:
     cache_parser.add_argument('query', help='SQL query or hash_id from registry to evaluate')
     cache_parser.add_argument('--target', help='Specific configured DB target')
     cache_parser.add_argument('--strategy', default='explicit', help='Caching strategy')
-    cache_parser.add_argument('--tag', help='Tag to assign to the query when saving to registry')
+    cache_parser.add_argument('--name', help='Name to assign to the query when saving to registry')
     cache_parser.add_argument('--json', action='store_true', help='Output results in JSON format')
 
     # init command
@@ -173,6 +173,8 @@ Examples:
     # query list
     query_list_parser = query_subparsers.add_parser('list', help='List all queries')
     query_list_parser.add_argument('--limit', type=int, default=20, help='Maximum queries to display')
+    query_list_parser.add_argument('--target', help='Filter queries by target database')
+    query_list_parser.add_argument('--filter', help='Smart filter: search across SQL, tags, hash, source')
 
     # query show
     query_show_parser = query_subparsers.add_parser('show', help='Show details of a specific query')
@@ -191,11 +193,6 @@ Examples:
     query_rm_group.add_argument('query_name', nargs='?', help='Query name to delete')
     query_rm_group.add_argument('--hash', help='Query hash to delete')
     query_rm_parser.add_argument('--force', action='store_true', help='Skip confirmation prompt')
-
-    # list command
-    list_parser = subparsers.add_parser('list', help='Show saved queries')
-    list_parser.add_argument('--filter', help='Smart filter: search across SQL content, tags, hash, source, dates')
-    list_parser.add_argument('--limit', type=int, default=10, help='Limit number of results (default: 10, max: 100)')
 
     # version command
     subparsers.add_parser('version', help='Show version')
@@ -225,7 +222,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         return cli.top(**kwargs)
     elif command == 'analyze':
         # Create filtered kwargs for analyze (exclude analyze-specific parameters)
-        analyze_exclude_keys = ['query', 'hash', 'inline_query', 'file', 'stdin', 'tag', 'target', 'save_as', 'readyset', 'fast', 'interactive', 'review']
+        analyze_exclude_keys = ['query', 'hash', 'inline_query', 'file', 'stdin', 'name', 'target', 'save_as', 'readyset', 'fast', 'interactive', 'review']
         filtered_kwargs = {k: v for k, v in kwargs.items() if k not in analyze_exclude_keys}
 
         return cli.analyze(
@@ -233,7 +230,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             query=getattr(args, 'inline_query', None),  # -q/--query flag
             file=getattr(args, 'file', None),
             stdin=getattr(args, 'stdin', False),
-            tag=getattr(args, 'tag', None),
+            name=getattr(args, 'name', None),
             positional_query=getattr(args, 'query', None),  # positional argument
             target=getattr(args, 'target', None),
             save_as=getattr(args, 'save_as', None),
@@ -276,12 +273,12 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             query_kwargs['target'] = getattr(args, 'target', None)
         if query_subcommand in ['list']:
             query_kwargs['limit'] = getattr(args, 'limit', 20)
+            query_kwargs['target'] = getattr(args, 'target', None)
+            query_kwargs['filter'] = getattr(args, 'filter', None)
         if query_subcommand in ['delete', 'rm']:
             query_kwargs['force'] = getattr(args, 'force', False)
 
         return cli.query(subcommand=query_subcommand, **query_kwargs)
-    elif command == 'list':
-        return cli.list(**kwargs)
     elif command == 'version':
         return cli.version()
     elif command == 'report':

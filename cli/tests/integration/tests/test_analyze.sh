@@ -28,9 +28,9 @@ LIMIT 25"
     "${RDST_CMD[@]}" analyze "$PRIMARY_HASH"
   assert_not_contains "ERROR:" "analysis by hash should succeed"
 
-  run_cmd "Analyze by tag (${PRIMARY_TAG})" \
-    "${RDST_CMD[@]}" analyze --tag "$PRIMARY_TAG"
-  assert_contains "RDST Query Analysis" "analysis by tag header"
+  run_cmd "Analyze by name (${PRIMARY_TAG})" \
+    "${RDST_CMD[@]}" analyze --name "$PRIMARY_TAG"
+  assert_contains "RDST Query Analysis" "analysis by name header"
 
   local query_file="$TMP_RUN/from_file.sql"
   cat >"$query_file" <<'SQL'
@@ -123,10 +123,10 @@ test_readyset_flag() {
   assert_contains "RDST Query Analysis" "analyze --readyset with tag should run analysis"
   assert_regex "READYSET|ReadySet|readyset" "analyze --readyset with tag should mention ReadySet"
 
-  run_cmd "Analyze with --readyset using tag" \
-    "${RDST_CMD[@]}" analyze --readyset --tag "readyset-test"
-  assert_contains "RDST Query Analysis" "analyze --readyset by tag should run analysis"
-  assert_regex "READYSET|ReadySet|readyset" "analyze --readyset by tag should mention ReadySet"
+  run_cmd "Analyze with --readyset using name" \
+    "${RDST_CMD[@]}" analyze --readyset --name "readyset-test"
+  assert_contains "RDST Query Analysis" "analyze --readyset by name should run analysis"
+  assert_regex "READYSET|ReadySet|readyset" "analyze --readyset by name should mention ReadySet"
 
   # Test with a basic SELECT to verify functionality
   run_cmd "Analyze with --readyset using basic query" \

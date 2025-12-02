@@ -65,11 +65,11 @@ test_registry_and_files() {
 test_list_command() {
   log_section "6. List Command Scenarios (${DB_ENGINE})"
 
-  run_cmd "List recent queries" "${RDST_CMD[@]}" list
+  run_cmd "List recent queries" "${RDST_CMD[@]}" query list
   assert_contains "$PRIMARY_HASH" "list output should include primary hash"
 
-  run_cmd "List with result limit" "${RDST_CMD[@]}" list --limit 5
-  LIST_HASH="$(grep -oE '[a-f0-9]{12}' "$LAST_OUTPUT_FILE" | head -n1)"
+  run_cmd "List with result limit" "${RDST_CMD[@]}" query list --limit 5
+  LIST_HASH="$(grep -oE '[a-f0-9]{8}' "$LAST_OUTPUT_FILE" | head -n1)"
   [[ -n "$LIST_HASH" ]] || fail "Failed to extract hash from list --limit output"
 
   run_cmd "Analyze using hash from list (${LIST_HASH})" \

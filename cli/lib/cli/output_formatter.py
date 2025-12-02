@@ -7,6 +7,108 @@ Removes runtime progress noise and presents information in a hierarchical, actio
 
 from typing import Dict, Any, List, Optional
 import textwrap
+import shlex
+
+# Rich imports for beautiful formatting
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.syntax import Syntax
+    from rich.table import Table
+    from rich.text import Text
+    from rich import box
+    _RICH_AVAILABLE = True
+except ImportError:
+    _RICH_AVAILABLE = False
+
+
+def _generate_db_test_command(sql: str, target_config: Dict[str, Any], db_engine: str) -> Optional[str]:
+    """
+    Generate a one-liner database command for testing a query.
+
+    Uses environment variable reference (not actual password) for security.
+
+    Args:
+        sql: The SQL query to test
+        target_config: Target configuration with host, port, user, password_env, database
+        db_engine: Database engine type (mysql, postgresql, postgres)
+
+    Returns:
+        One-liner shell command string, or None if config is incomplete
+    """
+    if not target_config or not sql:
+        return None
+
+    host = target_config.get("host")
+    port = target_config.get("port")
+    user = target_config.get("user")
+    database = target_config.get("database")
+    # Use the env var NAME, not the actual password (security!)
+    password_env = target_config.get("password_env", "DB_PASSWORD")
+
+    if not all([host, port, user, database]):
+        return None
+
+    # Clean up SQL: remove trailing semicolon and normalize whitespace
+    sql_clean = sql.strip().rstrip(';')
+    # Escape single quotes in SQL for shell
+    sql_escaped = sql_clean.replace("'", "'\"'\"'")
+
+    # Reference the environment variable by name (e.g., $IMDB_POSTGRES_PASSWORD)
+    pwd_ref = f"${password_env}"
+
+    engine_lower = (db_engine or "").lower()
+
+    if engine_lower in ("mysql", "mariadb"):
+        return f"MYSQL_PWD=\"{pwd_ref}\" mysql -h {host} -P {port} -u {user} {database} -e '{sql_escaped}'"
+
+    elif engine_lower in ("postgresql", "postgres", "pg"):
+        return f"PGPASSWORD=\"{pwd_ref}\" psql -h {host} -p {port} -U {user} -d {database} -c '{sql_escaped}'"
+
+    return None
+
+
+def _clean_error_message(error: str) -> str:
+    """Clean up error messages to be user-friendly (no tracebacks)."""
+    if not error:
+        return "Unknown error"
+
+    # Remove traceback sections entirely
+    if "Traceback (most recent call last):" in error:
+        parts = error.split("Traceback (most recent call last):")
+        before_traceback = parts[0].strip()
+        if before_traceback:
+            # Clean the before-traceback part too
+            return _clean_error_message(before_traceback)
+        return "Database error occurred"
+
+    # Clean up PostgreSQL-style error messages
+    clean_lines = []
+    for line in error.split('\n'):
+        line = line.strip()
+        # Skip LINE 1: and ^ pointer lines
+        if line.startswith('LINE 1:') or line.startswith('^'):
+            continue
+        # Skip file paths
+        if line.startswith('File "') or line.startswith('cursor.'):
+            continue
+        # Keep HINT lines but clean them
+        if line.startswith('HINT:'):
+            clean_lines.append(line)
+        elif line:
+            clean_lines.append(line)
+
+    result = ' '.join(clean_lines[:2])  # Max 2 meaningful lines
+
+    # Extract just the error type and message for PostgreSQL errors
+    # e.g., "UndefinedFunction: operator does not exist: text = integer"
+    if ': ' in result and ('Error' in result or 'Exception' in result or 'Function' in result):
+        # Keep just the error description
+        parts = result.split(': ', 1)
+        if len(parts) > 1:
+            return parts[1][:200]
+
+    return result[:300]  # Limit length
 
 
 def _wrap_text(text: str, width: int = 100, indent: str = "", subsequent_indent: str = "") -> List[str]:
@@ -78,8 +180,27 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
 
         # Tested optimizations (if any)
         rewrite_testing = formatted_output.get("rewrite_testing") or {}
+        # Get target config and db engine for copy-paste commands
+        target_config = workflow_result.get("target_config") or {}
+        db_engine = metadata.get("database_engine", "")
         if rewrite_testing.get("tested") and rewrite_testing.get("rewrite_results"):
-            lines.extend(_format_tested_optimizations(rewrite_testing))
+            lines.extend(_format_tested_optimizations(rewrite_testing, target_config, db_engine))
+            lines.append(_divider())
+        elif rewrite_testing.get("skipped_reason") == "parameterized_query":
+            # Query has placeholders ($1, $2, ?) - can't test rewrites without actual values
+            lines.append("⚠️  REWRITE TESTING SKIPPED")
+            lines.append("")
+            lines.append("  This query contains parameter placeholders ($1, $2 or ?) without actual values.")
+            lines.append("  Query rewrites were suggested but could not be tested.")
+            lines.append("")
+            lines.append("  This typically happens when:")
+            lines.append("    • Query was captured from rdst top using prepared statements")
+            lines.append("    • Query was normalized from performance_schema without stored parameters")
+            lines.append("")
+            lines.append("  To test rewrites with actual execution times:")
+            lines.append("    rdst analyze --query \"SELECT ... WHERE id = 123\"")
+            lines.append("  Use the original query from your application code with real parameter values.")
+            lines.append("")
             lines.append(_divider())
 
         # Index recommendations (clear, actionable)
@@ -92,7 +213,7 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
         if recommendations.get("available") and recommendations.get("query_rewrites"):
             # Only show if not already in tested optimizations
             if not (rewrite_testing.get("tested") and rewrite_testing.get("rewrite_results")):
-                lines.extend(_format_query_rewrite_suggestions(recommendations))
+                lines.extend(_format_query_rewrite_suggestions(recommendations, target_config, db_engine))
                 lines.append(_divider())
 
         # ReadySet cacheability
@@ -126,6 +247,8 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
     target = workflow_result.get("target", "unknown")
     explain_results = workflow_result.get("explain_results") or {}
     db_engine = explain_results.get("database_engine", "")
+    # Get target config for copy-paste test commands
+    target_config = workflow_result.get("target_config") or {}
     storage_result = workflow_result.get("storage_result") or {}
     analysis_id = storage_result.get("analysis_id", "")[:12] if storage_result else ""
 
@@ -190,19 +313,48 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
                     wrapped = _wrap_text(concern, width=100, indent="  • ", subsequent_indent="    ")
                     lines.extend(wrapped)
     else:
-        lines.append("ERROR: Database execution failed or skipped")
+        # EXPLAIN ANALYZE failed - show clear error and stop
+        lines.append("❌ QUERY EXECUTION FAILED")
+        lines.append("")
         if explain_results.get("error"):
-            lines.append(f"   Error: {explain_results.get('error')}")
+            clean_error = _clean_error_message(explain_results.get("error"))
+            wrapped = _wrap_text(clean_error, width=95, indent="  ", subsequent_indent="  ")
+            lines.extend(wrapped)
+            lines.append("")
+
+            # Provide helpful hints based on error type
+            error_lower = explain_results.get("error", "").lower()
+            if "operator does not exist" in error_lower:
+                lines.append("  Fix: Check parameter types match the column types (e.g., use 'movie' not 123).")
+            elif "column" in error_lower and "does not exist" in error_lower:
+                lines.append("  Fix: Check that the column name is correct and exists in the table.")
+            elif "relation" in error_lower and "does not exist" in error_lower:
+                lines.append("  Fix: Check that the table name is correct.")
+            elif "permission denied" in error_lower:
+                lines.append("  Fix: Check database user has SELECT permissions.")
+            elif "connection" in error_lower or "refused" in error_lower:
+                lines.append("  Fix: Check database connectivity with 'rdst configure list'.")
+            elif "syntax error" in error_lower:
+                lines.append("  Fix: Check SQL syntax.")
+            else:
+                lines.append("  Fix: Review the query and try again.")
+
+        lines.append("")
+        lines.append(_divider())
+
+        # Don't show AI analysis error if EXPLAIN failed - that's the root cause
+        return "\n".join(lines)
 
     lines.append("")
     lines.append(_divider())
 
-    # Show LLM analysis error if it failed
+    # Show LLM analysis error ONLY if it failed independently (not due to EXPLAIN failure)
     llm_analysis = workflow_result.get("llm_analysis") or {}
-    if llm_analysis and not llm_analysis.get("success") and llm_analysis.get("error"):
+    explain_failed = not explain_results.get("success", False)
+    if llm_analysis and not llm_analysis.get("success") and llm_analysis.get("error") and not explain_failed:
         lines.append("⚠️  AI ANALYSIS ERROR")
         lines.append("")
-        error_msg = llm_analysis.get("error", "Unknown error")
+        error_msg = _clean_error_message(llm_analysis.get("error", "Unknown error"))
         wrapped = _wrap_text(error_msg, width=100, indent="  ", subsequent_indent="  ")
         lines.extend(wrapped)
         lines.append("")
@@ -234,7 +386,24 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
 
     # Tested rewrites
     rewrite_results = workflow_result.get("rewrite_test_results") or {}
-    if rewrite_results and rewrite_results.get("success"):
+
+    # Check if rewrite testing was skipped due to parameterized query
+    if rewrite_results and rewrite_results.get("skipped_reason") == "parameterized_query":
+        lines.append("⚠️  REWRITE TESTING SKIPPED")
+        lines.append("")
+        lines.append("  This query contains parameter placeholders ($1, $2 or ?) without actual values.")
+        lines.append("  Query rewrites were suggested but could not be tested.")
+        lines.append("")
+        lines.append("  This typically happens when:")
+        lines.append("    • Query was captured from rdst top using prepared statements")
+        lines.append("    • Query was normalized from performance_schema without stored parameters")
+        lines.append("")
+        lines.append("  To test rewrites with actual execution times:")
+        lines.append("    rdst analyze --query \"SELECT ... WHERE id = 123\"")
+        lines.append("  Use the original query from your application code with real parameter values.")
+        lines.append("")
+        lines.append(_divider())
+    elif rewrite_results and rewrite_results.get("success"):
         tested_rewrites = rewrite_results.get("rewrite_results", [])
         baseline_skipped = rewrite_results.get("baseline_skipped", False)
         original_perf = rewrite_results.get("original_performance") or {}
@@ -263,28 +432,45 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
                     perf = rewrite.get("performance") or {}
                     rewrite_time = perf.get("execution_time_ms", 0)
 
-                    symbol = "✅" if improvement_pct >= 10 else "⚠️" if improvement_pct >= 5 else "→"
+                    # Clear indicator: positive = FASTER, negative = SLOWER
+                    if improvement_pct >= 10:
+                        status_icon = "✅"
+                        status_text = "FASTER"
+                        pct_display = f"+{improvement_pct:.1f}%"
+                    elif improvement_pct >= 0:
+                        status_icon = "➡️ "
+                        status_text = "SIMILAR"
+                        pct_display = f"{improvement_pct:+.1f}%"
+                    else:
+                        status_icon = "❌"
+                        status_text = "SLOWER"
+                        pct_display = f"{improvement_pct:.1f}%"
 
-                    # Format header line with rewrite number and improvement
-                    lines.append(f"{symbol} Rewrite #{i}: {improvement_pct:+.1f}% change")
+                    # Header with clear status
+                    lines.append(f"{status_icon} Rewrite #{i}: {status_text} ({pct_display})")
+                    lines.append(f"   Time: {baseline_time:.1f}ms → {rewrite_time:.1f}ms")
+                    lines.append("")
 
-                    # Wrap explanation text to 100 characters with proper indentation
-                    wrapped_explanation = _wrap_text(explanation, width=100, indent="   ", subsequent_indent="   ")
+                    # Explanation
+                    wrapped_explanation = _wrap_text(explanation, width=95, indent="   ", subsequent_indent="   ")
                     lines.extend(wrapped_explanation)
-
-                    # Show timing comparison
-                    lines.append(f"   {baseline_time:.1f}ms → {rewrite_time:.1f}ms")
                     lines.append("")
 
                     sql = rewrite.get("sql", "")
                     if sql:
-                        for sql_line in sql.strip().split('\n')[:5]:  # First 5 lines
+                        lines.append("   SQL:")
+                        for sql_line in sql.strip().split('\n'):
                             lines.append(f"   {sql_line}")
-                        if len(sql.strip().split('\n')) > 5:
-                            lines.append("   ...")
+                        lines.append("")
+                        # Add copy-paste test command (uses env var reference for security)
+                        if target_config and db_engine:
+                            test_cmd = _generate_db_test_command(sql, target_config, db_engine)
+                            if test_cmd:
+                                lines.append("   Test it yourself:")
+                                lines.append(f"   {test_cmd}")
                     lines.append("")
             else:
-                lines.append("→ No immediate query rewrites provided measurable improvements")
+                lines.append("  No rewrites were tested successfully")
 
             lines.append("")
             lines.append(_divider())
@@ -336,20 +522,21 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
 
             if best_rewrite and best_improvement >= 5:
                 rewrite_time = (best_rewrite.get("performance") or {}).get("execution_time_ms", 0)
-                lines.append(f"Quick win:   Apply tested rewrite ({rewrite_time:.1f}ms, {best_improvement:+.1f}% improvement)")
+                lines.append(f"• Apply tested rewrite ({rewrite_time:.1f}ms, {best_improvement:+.1f}% faster)")
 
-    # Long-term from index suggestions
+    # Index suggestions
     if llm_analysis and llm_analysis.get("success"):
         index_recs = llm_analysis.get("index_recommendations") or []
         if index_recs:
-            idx = index_recs[0]
-            rationale = idx.get("rationale", "Create recommended indexes")
-            rationale_short = rationale[:60] + "..." if len(rationale) > 60 else rationale
-            lines.append(f"Long-term:   {rationale_short}")
+            lines.append("• Create recommended indexes above for long-term improvement")
 
+    # Continuation hint
     if analysis_id:
         lines.append("")
-        lines.append("Recent queries:  rdst list --limit 5")
+        lines.append("Continue this conversation:")
+        lines.append(f"  rdst analyze --hash {analysis_id} --interactive")
+        lines.append("")
+        lines.append("List recent queries:  rdst query list --limit 5")
 
     return "\n".join(lines)
 
@@ -429,8 +616,10 @@ def _format_performance_summary(summary: Dict[str, Any], perf_metrics: Dict[str,
     return lines
 
 
-def _format_tested_optimizations(rewrite_testing: Dict[str, Any]) -> List[str]:
-    """Show tested rewrites with clear improvement metrics."""
+def _format_tested_optimizations(rewrite_testing: Dict[str, Any],
+                                  target_config: Optional[Dict[str, Any]] = None,
+                                  db_engine: Optional[str] = None) -> List[str]:
+    """Show tested rewrites with clear improvement metrics and copy-paste test commands."""
     lines = ["📊 TESTED OPTIMIZATIONS", ""]
 
     rewrite_results = rewrite_testing.get("rewrite_results", [])
@@ -439,7 +628,7 @@ def _format_tested_optimizations(rewrite_testing: Dict[str, Any]) -> List[str]:
     baseline_skipped = rewrite_testing.get("baseline_skipped", False)
 
     if baseline_skipped:
-        lines.append("⚠️  Original query was skipped (slow execution) - no baseline for comparison")
+        lines.append("  ⚠️  Original query was skipped (slow execution) - no baseline for comparison")
         lines.append("")
 
     successful_rewrites = []
@@ -451,7 +640,7 @@ def _format_tested_optimizations(rewrite_testing: Dict[str, Any]) -> List[str]:
                 successful_rewrites.append(result)
 
     if not successful_rewrites:
-        lines.append("→ No immediate query rewrites provided measurable improvements")
+        lines.append("  No rewrites were tested successfully")
         return lines
 
     for i, rewrite in enumerate(successful_rewrites[:3], 1):  # Top 3
@@ -464,32 +653,45 @@ def _format_tested_optimizations(rewrite_testing: Dict[str, Any]) -> List[str]:
         perf = rewrite.get("performance") or {}
         rewrite_time = perf.get("execution_time_ms", 0)
 
-        symbol = "✅" if improvement_pct >= 10 else "⚠️" if improvement_pct >= 5 else "→"
+        # Clear indicator: positive = FASTER, negative = SLOWER
+        if improvement_pct >= 10:
+            status_icon = "✅"
+            status_text = "FASTER"
+            pct_display = f"+{improvement_pct:.1f}%"
+        elif improvement_pct >= 0:
+            status_icon = "➡️ "
+            status_text = "SIMILAR"
+            pct_display = f"{improvement_pct:+.1f}%"
+        else:
+            status_icon = "❌"
+            status_text = "SLOWER"
+            pct_display = f"{improvement_pct:.1f}%"
 
-        # Format header line with rewrite number and improvement
-        lines.append(f"{symbol} Rewrite #{i}: {improvement_pct:+.1f}% change")
-
-        # Wrap explanation text to 100 characters with proper indentation
-        wrapped_explanation = _wrap_text(explanation, width=100, indent="   ", subsequent_indent="   ")
-        lines.extend(wrapped_explanation)
-
-        # Show timing comparison
-        lines.append(f"   {baseline_time:.1f}ms → {rewrite_time:.1f}ms")
+        # Header with clear status
+        lines.append(f"{status_icon} Rewrite #{i}: {status_text} ({pct_display})")
+        lines.append(f"   Time: {baseline_time:.1f}ms → {rewrite_time:.1f}ms")
         lines.append("")
 
-        # Show SQL
+        # Explanation
+        wrapped_explanation = _wrap_text(explanation, width=95, indent="   ", subsequent_indent="   ")
+        lines.extend(wrapped_explanation)
+        lines.append("")
+
+        # Show FULL SQL (no truncation)
         sql = rewrite.get("sql", "")
         if sql:
+            lines.append("   SQL:")
             for sql_line in sql.strip().split('\n'):
                 lines.append(f"   {sql_line}")
-
-        lines.append("")
-
-        # Recommendation
-        recommendation = rewrite.get("recommendation", "")
-        if recommendation:
-            lines.append(f"   Recommendation: {recommendation}")
             lines.append("")
+
+        # Add copy-paste test command (uses env var reference for security)
+        if sql and target_config and db_engine:
+            test_cmd = _generate_db_test_command(sql, target_config, db_engine)
+            if test_cmd:
+                lines.append("   Test it yourself:")
+                lines.append(f"   {test_cmd}")
+                lines.append("")
 
     return lines
 
@@ -537,9 +739,11 @@ def _format_index_recommendations(recommendations: Dict[str, Any]) -> List[str]:
     return lines
 
 
-def _format_query_rewrite_suggestions(recommendations: Dict[str, Any]) -> List[str]:
-    """Format AI-suggested query rewrites (not yet tested)."""
-    lines = ["💡 SUGGESTED QUERY REWRITES", ""]
+def _format_query_rewrite_suggestions(recommendations: Dict[str, Any],
+                                       target_config: Optional[Dict[str, Any]] = None,
+                                       db_engine: Optional[str] = None) -> List[str]:
+    """Format AI-suggested query rewrites (not yet tested) with copy-paste commands."""
+    lines = ["SUGGESTED QUERY REWRITES", ""]
 
     query_rewrites = recommendations.get("query_rewrites", [])
 
@@ -570,6 +774,21 @@ def _format_query_rewrite_suggestions(recommendations: Dict[str, Any]) -> List[s
             for sql_line in sql.strip().split('\n'):
                 lines.append(f"   {sql_line}")
 
+        lines.append("")
+
+        # Add copy-paste test command if we have target config
+        if sql and target_config and db_engine:
+            test_cmd = _generate_db_test_command(sql, target_config, db_engine)
+            if test_cmd:
+                lines.append("   Test yourself (set DB_PASSWORD first):")
+                # Wrap long commands
+                if len(test_cmd) > 90:
+                    lines.append(f"   {test_cmd[:90]}")
+                    lines.append(f"      {test_cmd[90:]}")
+                else:
+                    lines.append(f"   {test_cmd}")
+                lines.append("")
+
         # Trade-offs
         trade_offs = rewrite.get("trade_offs", "")
         if trade_offs:
@@ -578,7 +797,7 @@ def _format_query_rewrite_suggestions(recommendations: Dict[str, Any]) -> List[s
 
         lines.append("")
 
-    lines.append("Note: These rewrites have not been tested. Run analysis again to test them.")
+    lines.append("Note: These rewrites have not been tested. Use commands above to test manually.")
     lines.append("")
 
     return lines
@@ -698,22 +917,21 @@ def _format_next_steps(formatted_output: Dict[str, Any],
 
             if best_rewrite and best_improvement >= 5:
                 rewrite_time = (best_rewrite.get("performance") or {}).get("execution_time_ms", 0)
-                lines.append(f"Quick win:   Apply tested rewrite ({rewrite_time:.1f}ms, {best_improvement:+.1f}% improvement)")
+                lines.append(f"• Apply tested rewrite ({rewrite_time:.1f}ms, {best_improvement:+.1f}% faster)")
 
-    # Long-term from index suggestions
+    # Index suggestions
     if recommendations.get("available"):
         index_suggestions = recommendations.get("index_suggestions", [])
         if index_suggestions:
-            idx = index_suggestions[0]
-            rationale = idx.get("rationale", "Create recommended indexes")
-            # Truncate if too long
-            rationale_short = rationale[:60] + "..." if len(rationale) > 60 else rationale
-            lines.append(f"Long-term:   {rationale_short}")
+            lines.append("• Create recommended indexes above for long-term improvement")
 
-    # Analysis ID
+    # Analysis ID and continuation hint
     analysis_id = metadata.get("analysis_id", "")
     if analysis_id:
         lines.append("")
-        lines.append("Recent queries:  rdst list --limit 5")
+        lines.append(f"Continue this conversation:")
+        lines.append(f"  rdst analyze --hash {analysis_id} --interactive")
+        lines.append("")
+        lines.append(f"List recent queries:  rdst query list --limit 5")
 
     return lines

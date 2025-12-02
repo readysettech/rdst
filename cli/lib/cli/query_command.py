@@ -520,7 +520,7 @@ class QueryCommand:
                     message=f"No query found with hash: {hash}",
                     data={"hash": hash}
                 )
-            query_hash = hash
+            query_hash = entry.hash  # Use full hash from entry, not the input prefix
             identifier = f"hash {hash}"
         else:
             return RdstResult(
@@ -567,18 +567,20 @@ class QueryCommand:
                 data={"identifier": identifier, "error": str(e)}
             )
 
-    def list(self, limit: int = 20, **kwargs):
+    def list(self, limit: int = 20, target: str = None, filter: str = None, **kwargs):
         """
         List all queries in the registry.
 
         Args:
             limit: Maximum number of queries to display
+            target: Filter by target database
+            filter: Smart filter across SQL, tags, hash, source
 
         Returns:
             RdstResult with query list
         """
         from .rdst_cli import RdstResult
-        queries = self.registry.list_queries(limit=limit)
+        queries = self.registry.list_queries(limit=limit * 10 if filter or target else limit)
 
         if not queries:
             return RdstResult(
@@ -587,11 +589,57 @@ class QueryCommand:
                 data={"queries": []}
             )
 
+        # Apply target filter if specified
+        if target:
+            target_lower = target.lower()
+            queries = [q for q in queries if q.last_target and target_lower in q.last_target.lower()]
+            if not queries:
+                return RdstResult(
+                    ok=True,
+                    message=f"No queries found for target: '{target}'",
+                    data={"queries": []}
+                )
+
+        # Apply smart filter if specified
+        if filter:
+            filter_lower = filter.lower()
+            filtered_queries = []
+            for query in queries:
+                matches = [
+                    filter_lower in query.sql.lower(),                    # SQL content
+                    query.tag and filter_lower in query.tag.lower(),      # Tag
+                    filter_lower in query.hash.lower(),                   # Hash
+                    filter_lower in query.source.lower(),                 # Source
+                    query.last_target and filter_lower in query.last_target.lower(),  # Target
+                ]
+                if any(matches):
+                    filtered_queries.append(query)
+            queries = filtered_queries
+            if not queries:
+                return RdstResult(
+                    ok=True,
+                    message=f"No queries found matching filter: '{filter}'",
+                    data={"queries": []}
+                )
+
+        # Apply limit after filtering
+        queries = queries[:limit]
+
+        # Build title with filter info
+        title_parts = [f"Query Registry ({len(queries)} queries"]
+        if target:
+            title_parts.append(f", target: {target}")
+        if filter:
+            title_parts.append(f", filter: '{filter}'")
+        title_parts.append(")")
+        title = "".join(title_parts)
+
         # Format output
         if RICH_AVAILABLE:
-            table = Table(title=f"Query Registry ({len(queries)} queries)")
+            table = Table(title=title)
             table.add_column("Tag", style="cyan")
             table.add_column("Hash", style="yellow")
+            table.add_column("Target", style="magenta")
             table.add_column("Source", style="green")
             table.add_column("Last Analyzed", style="blue")
             table.add_column("SQL Preview", style="white")
@@ -599,12 +647,13 @@ class QueryCommand:
             for q in queries:
                 # Format timestamp
                 timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
-                # Preview SQL (first 60 chars)
-                sql_preview = (q.sql[:60] + '...') if len(q.sql) > 60 else q.sql
+                # Preview SQL (first 50 chars)
+                sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
 
                 table.add_row(
                     q.tag or "(untagged)",
                     q.hash[:8],
+                    q.last_target or "-",
                     q.source,
                     timestamp,
                     sql_preview
@@ -613,12 +662,13 @@ class QueryCommand:
             self.console.print(table)
         else:
             # Plain text output
-            print(f"\nQuery Registry ({len(queries)} queries)")
-            print("-" * 80)
+            print(f"\n{title}")
+            print("-" * 100)
             for q in queries:
                 timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
-                sql_preview = (q.sql[:60] + '...') if len(q.sql) > 60 else q.sql
-                print(f"Tag: {q.tag or '(untagged)':20} Hash: {q.hash[:8]:10} Source: {q.source:10}")
+                sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
+                target_display = q.last_target or "-"
+                print(f"Tag: {q.tag or '(untagged)':20} Hash: {q.hash[:8]:10} Target: {target_display:15} Source: {q.source:10}")
                 print(f"  Last analyzed: {timestamp}")
                 print(f"  SQL: {sql_preview}")
                 print()
@@ -626,7 +676,7 @@ class QueryCommand:
         return RdstResult(
             ok=True,
             message=f"Listed {len(queries)} queries",
-            data={"queries": [{"tag": q.tag, "hash": q.hash, "sql": q.sql} for q in queries]}
+            data={"queries": [{"tag": q.tag, "hash": q.hash, "sql": q.sql, "target": q.last_target} for q in queries]}
         )
 
     def show(self, name: str, **kwargs):

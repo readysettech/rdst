@@ -6,8 +6,8 @@ Handles all query input modes for the 'rdst analyze' command:
 2. File input (-f)
 3. Stdin input (--stdin)
 4. Interactive prompt (fallback)
-5. Registry lookup by ID (--query-id)
-6. Registry lookup by tag (--tag)
+5. Registry lookup by hash (--hash)
+6. Registry lookup by name (--name)
 7. Input precedence and deduplication
 8. SQL normalization and dialect detection
 """
@@ -34,6 +34,7 @@ except ImportError:
 from ..query_registry.query_registry import QueryRegistry, normalize_sql, hash_sql
 from ..query_registry.conversation_registry import ConversationRegistry, InteractiveConversation
 from ..llm_manager.llm_manager import LLMManager
+from .parameter_prompt import has_unresolved_placeholders, prompt_for_parameters
 
 
 @dataclass
@@ -65,22 +66,22 @@ class AnalyzeCommand:
                       inline_query: Optional[str] = None,
                       file_path: Optional[str] = None,
                       use_stdin: bool = False,
-                      tag: Optional[str] = None,
+                      name: Optional[str] = None,
                       positional_query: Optional[str] = None,
                       save_as: Optional[str] = None) -> AnalyzeInput:
         """
         Resolve query input using strict precedence rules.
 
-        Precedence: hash > tag > inline (-q) > file (-f) > stdin > prompt > positional
+        Precedence: hash > name > inline (-q) > file (-f) > stdin > prompt > positional
 
         Args:
             hash: Query hash from registry
             inline_query: SQL query string from -q flag
             file_path: Path to SQL file from -f flag
             use_stdin: Whether to read from stdin
-            tag: Tag name for registry lookup
+            name: Query name for registry lookup
             positional_query: Positional query argument (backward compatibility)
-            save_as: Tag to save query as after analysis
+            save_as: Name to save query as after analysis
 
         Returns:
             AnalyzeInput with resolved SQL and metadata
@@ -92,7 +93,7 @@ class AnalyzeCommand:
         # Count non-None inputs for warning about extras
         inputs_provided = [
             ("hash", hash),
-            ("tag", tag),
+            ("name", name),
             ("inline", inline_query),
             ("file", file_path),
             ("stdin", use_stdin),
@@ -111,9 +112,9 @@ class AnalyzeCommand:
             if hash:
                 return self._resolve_by_hash(hash, save_as)
 
-            # 2. Registry lookup by tag
-            if tag:
-                return self._resolve_by_tag(tag, save_as)
+            # 2. Registry lookup by name
+            if name:
+                return self._resolve_by_name(name, save_as)
 
             # 3. Inline query
             if inline_query:
@@ -145,7 +146,7 @@ class AnalyzeCommand:
         """Resolve query by hash from registry."""
         entry = self.registry.get_query(hash)
         if not entry:
-            raise AnalyzeInputError(f"Query hash '{hash}' not found in registry. Run 'rdst list' to see available queries.")
+            raise AnalyzeInputError(f"Query hash '{hash}' not found in registry. Run 'rdst query list' to see available queries.")
 
         # Get the executable SQL with parameter values reconstructed
         executable_sql = self.registry.get_executable_query(hash, interactive=False)
@@ -161,21 +162,21 @@ class AnalyzeCommand:
             save_as=save_as
         )
 
-    def _resolve_by_tag(self, tag: str, save_as: str) -> AnalyzeInput:
-        """Resolve query by tag from registry."""
-        entry = self.registry.get_query_by_tag(tag)
+    def _resolve_by_name(self, name: str, save_as: str) -> AnalyzeInput:
+        """Resolve query by name from registry."""
+        entry = self.registry.get_query_by_tag(name)
         if not entry:
-            raise AnalyzeInputError(f"Query tag '{tag}' not found in registry. Run 'rdst list' to see available queries.")
+            raise AnalyzeInputError(f"Query '{name}' not found in registry. Run 'rdst query list' to see available queries.")
 
         # Get the executable SQL with parameter values reconstructed
-        executable_sql = self.registry.get_executable_query_by_tag(tag, interactive=False)
+        executable_sql = self.registry.get_executable_query_by_tag(name, interactive=False)
         if not executable_sql:
-            raise AnalyzeInputError(f"Could not reconstruct executable query for tag '{tag}'")
+            raise AnalyzeInputError(f"Could not reconstruct executable query for '{name}'")
 
         return AnalyzeInput(
             sql=executable_sql,  # Original SQL with parameter values
             normalized_sql=entry.sql,  # Normalized SQL with ? placeholders
-            source="tag",
+            source="name",
             hash=entry.hash,
             tag=entry.tag,
             save_as=save_as
@@ -298,20 +299,45 @@ class AnalyzeCommand:
             except (KeyboardInterrupt, EOFError):
                 raise AnalyzeInputError("Query selection cancelled by user")
 
-        # Fall back to manual query input
+        # Fall back to manual query input with multiline support
         try:
             if _RICH_AVAILABLE and self._console:
                 self._console.print(Panel(
-                    "Please paste your SQL query below.\nPress Ctrl+C to cancel.",
+                    "Paste your SQL query below (multiline supported).\n"
+                    "End with a semicolon (;) and press Enter, or press Enter twice on a blank line.\n"
+                    "Press Ctrl+C to cancel.",
                     title="SQL Query Input",
                     border_style="cyan"
                 ))
-                query = Prompt.ask("SQL query")
             else:
-                print("Enter your SQL query (Ctrl+C to cancel):")
-                query = input("> ")
+                print("Enter your SQL query (multiline supported):")
+                print("End with ; and Enter, or Enter twice on blank line. Ctrl+C to cancel.")
 
-        except (KeyboardInterrupt, EOFError):
+            # Collect multiline input
+            lines = []
+            while True:
+                try:
+                    line = input("> " if not lines else "  ")
+                except EOFError:
+                    break
+
+                # Check for termination conditions
+                if not line.strip():
+                    # Empty line - if we have content, we're done
+                    if lines:
+                        break
+                    # Otherwise, continue waiting for input
+                    continue
+
+                lines.append(line)
+
+                # If line ends with semicolon, we're done
+                if line.rstrip().endswith(';'):
+                    break
+
+            query = '\n'.join(lines)
+
+        except KeyboardInterrupt:
             raise AnalyzeInputError("Query input cancelled by user")
 
         if not query or not query.strip():
@@ -572,6 +598,63 @@ class AnalyzeCommand:
                         else:
                             print("Please enter 'c' for continue or 'n' for new")
 
+            # Check for unresolved parameter placeholders
+            if has_unresolved_placeholders(resolved_input.sql):
+                # First, check if we have stored parameters for this query
+                from ..query_registry.query_registry import reconstruct_query_with_params
+
+                existing_entry = self.registry.get_query(resolved_input.hash)
+                stored_params = existing_entry.most_recent_params if existing_entry else None
+
+                if stored_params:
+                    # We have stored parameters - use them automatically
+                    substituted_sql = reconstruct_query_with_params(
+                        resolved_input.normalized_sql or resolved_input.sql,
+                        stored_params
+                    )
+                    print(f"\nUsing stored parameters for query {resolved_input.hash}:")
+                    print(f"  {substituted_sql[:150]}{'...' if len(substituted_sql) > 150 else ''}")
+                    print()
+
+                    resolved_input = AnalyzeInput(
+                        sql=substituted_sql,
+                        normalized_sql=resolved_input.normalized_sql,
+                        source=resolved_input.source,
+                        hash=resolved_input.hash,
+                        tag=resolved_input.tag,
+                        save_as=resolved_input.save_as
+                    )
+                else:
+                    # No stored parameters - prompt the user
+                    result = prompt_for_parameters(resolved_input.sql)
+
+                    if result is None:
+                        return RdstResult(False, "Analysis cancelled - parameter values required")
+
+                    substituted_sql, param_dict = result
+
+                    # Update resolved_input with substituted SQL
+                    resolved_input = AnalyzeInput(
+                        sql=substituted_sql,
+                        normalized_sql=resolved_input.normalized_sql,
+                        source=resolved_input.source,
+                        hash=resolved_input.hash,
+                        tag=resolved_input.tag,
+                        save_as=resolved_input.save_as
+                    )
+
+                    # Store these parameters in the registry for future use
+                    try:
+                        self.registry.update_parameter_history(
+                            query_hash=resolved_input.hash,
+                            parameters=param_dict
+                        )
+                    except Exception:
+                        # Non-fatal - continue with analysis even if storage fails
+                        pass
+
+                    print()
+
             # Load target configuration
             cfg = TargetsConfig()
             cfg.load()
@@ -668,16 +751,17 @@ class AnalyzeCommand:
 
                 # Format the results for user display using new clean formatter
                 from .output_formatter import format_analyze_output
+                # Include target_config for copy-paste test commands (uses env var name, not actual password)
+                workflow_result["result"]["target_config"] = target_config
                 formatted_results = format_analyze_output(workflow_result["result"])
-
-                # Print the formatted results before entering interactive mode
-                if interactive:
-                    print(formatted_results)
 
                 # Handle --interactive flag (enter interactive mode after analysis)
                 # IMPORTANT: Only enter interactive mode if explain_results succeeded
                 # Without successful EXPLAIN, there's no analysis to discuss
                 if interactive:
+                    # Print results before entering interactive mode
+                    print(formatted_results)
+
                     explain_results = workflow_result["result"].get("explain_results", {})
                     if explain_results and explain_results.get("success"):
                         self._handle_interactive_mode(
@@ -693,6 +777,9 @@ class AnalyzeCommand:
                         print(f"\nError: {error_msg}")
                         print("\nPlease fix the query and try again.")
                         print()
+
+                    # Already printed everything - return empty to avoid duplicate output
+                    return RdstResult(True, "")
 
                 return RdstResult(True, formatted_results)
             else:
@@ -1835,7 +1922,7 @@ class AnalyzeCommand:
         lines.append("Analysis Summary:")
         lines.append(f"   • Query executed against {target}")
         lines.append(f"   • Results stored in query registry")
-        lines.append(f"   • Run `rdst list --limit 5` to see recent queries")
+        lines.append(f"   • Run `rdst query list --limit 5` to see recent queries")
 
         storage_result = workflow_result.get("storage_result", {})
         if storage_result and storage_result.get("success"):

@@ -98,7 +98,7 @@ class ConfigurationWizard:
             proxy = target.get('proxy', 'none')
             proxy_display = {
                 'none': 'None',
-                'readyset': 'ReadySet',
+                'readyset': 'Readyset',
                 'proxysql': 'ProxySQL',
                 'pgbouncer': 'PgBouncer',
                 'tunnel': 'SSH Tunnel',
@@ -300,6 +300,26 @@ class ConfigurationWizard:
         validation_result = self._validate_config(config_data)
         if not validation_result.ok:
             return validation_result
+
+        # Test connection
+        test_result = self._test_connection(config_data)
+        if test_result.ok:
+            self._show_success("Connection Test", test_result.message)
+            config_data["verified"] = True
+            config_data["endpoint_verified"] = True
+        else:
+            self._show_error("Connection Test Failed", test_result.message)
+            config_data["verified"] = False
+            config_data["endpoint_verified"] = False
+
+            target_name = name or config_data.get("name", "target")
+            # Ask if they want to save anyway
+            if not self._confirm(
+                "Save configuration anyway?",
+                f"You can edit later with: rdst configure edit {target_name}",
+                default=False
+            ):
+                return RdstResult(False, "Configuration cancelled due to connection failure")
 
         # Save configuration
         target_name = name or config_data["name"]
@@ -551,7 +571,7 @@ class ConfigurationWizard:
         allowed_values = self._allowed_proxies_for_engine(engine or existing.get("engine"))
         labels = {
             "none": "None - Direct connection",
-            "readyset": "ReadySet - Caching proxy",
+            "readyset": "Readyset - Caching proxy",
             "proxysql": "ProxySQL - Connection pooling",
             "pgbouncer": "PgBouncer - PostgreSQL pooling",
             "tunnel": "SSH Tunnel - Secure connection",
@@ -796,6 +816,108 @@ class ConfigurationWizard:
             self.console.print(f"{title}: {message}")
         else:
             print(f"{title}: {message}")
+
+    def _test_connection(self, config: dict) -> RdstResult:
+        """Test database connection with the provided configuration."""
+        import os
+
+        engine = config.get("engine", "postgresql")
+        host = config.get("host")
+        port = config.get("port")
+        user = config.get("user")
+        database = config.get("database")
+        password_env = config.get("password_env")
+        tls = config.get("tls", False)
+
+        # Get password from environment variable
+        password = ""
+        if password_env:
+            password = os.environ.get(password_env, "")
+            if not password:
+                return RdstResult(
+                    False,
+                    f"Environment variable '{password_env}' is not set.\n"
+                    f"Set it with: export {password_env}=\"your_password\""
+                )
+
+        self._show_info("Testing Connection", f"Connecting to {host}:{port}/{database}...")
+
+        try:
+            if engine == "postgresql":
+                import psycopg2
+                conn = psycopg2.connect(
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                    database=database,
+                    connect_timeout=10,
+                    sslmode="require" if tls else "prefer"
+                )
+                cursor = conn.cursor()
+                cursor.execute("SELECT version()")
+                version = cursor.fetchone()[0]
+                cursor.close()
+                conn.close()
+                return RdstResult(True, f"Connected successfully!\nServer: {version[:80]}...")
+
+            elif engine == "mysql":
+                import pymysql
+                conn = pymysql.connect(
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                    database=database,
+                    connect_timeout=10,
+                    ssl={"ssl": {}} if tls else None
+                )
+                cursor = conn.cursor()
+                cursor.execute("SELECT version()")
+                version = cursor.fetchone()[0]
+                cursor.close()
+                conn.close()
+                return RdstResult(True, f"Connected successfully!\nServer: MySQL {version}")
+
+            else:
+                return RdstResult(False, f"Unknown engine: {engine}")
+
+        except ImportError as e:
+            driver = "psycopg2" if engine == "postgresql" else "pymysql"
+            return RdstResult(
+                False,
+                f"Missing database driver: {driver}\n"
+                f"Install with: pip install {driver}"
+            )
+        except Exception as e:
+            error_msg = str(e)
+            # Clean up common error messages
+            if "could not connect" in error_msg.lower() or "connection refused" in error_msg.lower():
+                return RdstResult(
+                    False,
+                    f"Connection refused: Cannot reach {host}:{port}\n"
+                    f"Check that the database is running and accessible."
+                )
+            elif "authentication failed" in error_msg.lower() or "access denied" in error_msg.lower():
+                return RdstResult(
+                    False,
+                    f"Authentication failed for user '{user}'\n"
+                    f"Check your username and password."
+                )
+            elif "does not exist" in error_msg.lower():
+                return RdstResult(
+                    False,
+                    f"Database '{database}' does not exist.\n"
+                    f"Check the database name."
+                )
+            elif "timeout" in error_msg.lower():
+                return RdstResult(
+                    False,
+                    f"Connection timed out to {host}:{port}\n"
+                    f"Check network connectivity and firewall rules."
+                )
+            else:
+                return RdstResult(False, f"Connection failed: {error_msg}")
 
     def _validate_config(self, config: dict) -> RdstResult:
         """Validate configuration with modern error reporting."""

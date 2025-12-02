@@ -114,6 +114,7 @@ IDENTIFIED ISSUES:
 {identified_issues}
 
 DATABASE ENGINE: {database_engine}
+ENGINE VERSION: {engine_version}
 AVAILABLE SCHEMA INFO: {schema_info}
 
 Please provide rewrite suggestions in the following JSON format:
@@ -144,6 +145,12 @@ IMPORTANT GUIDELINES:
 4. Prioritize suggestions by expected impact
 5. Always recommend testing rewrites against actual data
 6. If no beneficial rewrites are possible, return empty rewrite_suggestions array
+
+CRITICAL - COMPLETE SQL ONLY:
+7. ALWAYS provide COMPLETE, EXECUTABLE SQL statements in rewritten_sql
+8. NEVER truncate or abbreviate SQL with "..." or similar placeholders
+9. Include ALL clauses from the original query (SELECT, FROM, WHERE, JOIN, GROUP BY, ORDER BY, etc.)
+10. If a rewrite is too long, provide FEWER alternatives but ensure each is COMPLETE
 
 Be conservative and only suggest rewrites you're confident will help."""
 
@@ -295,7 +302,7 @@ PROMPT_REQUIRED_FIELDS = {
     ],
     'REWRITE_SUGGESTION_PROMPT': [
         'parameterized_sql', 'performance_analysis', 'identified_issues',
-        'database_engine', 'schema_info'
+        'database_engine', 'engine_version', 'schema_info'
     ],
     'INDEX_SUGGESTION_PROMPT': [
         'parameterized_sql', 'execution_analysis', 'performance_metrics',

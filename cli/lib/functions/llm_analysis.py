@@ -77,8 +77,10 @@ def analyze_with_llm(explain_results: Dict[str, Any], query_metrics: Dict[str, A
         # Use the direct approach that's been working in fallback
         llm_manager = LLMManager()
 
-        # Use original SQL for rewrites if available, otherwise use parameterized
-        sql_for_analysis = parameterized_sql
+        # Send real values to LLM by default - this produces more accurate analysis
+        # and makes rewrites directly testable. The parameterized version is only used
+        # for storage/display when we want to protect PII.
+        sql_for_analysis = original_sql if original_sql else parameterized_sql
         sql_for_rewrites = original_sql if original_sql else parameterized_sql
 
         # Enhanced analysis with rewrite suggestions
@@ -202,6 +204,18 @@ CRITICAL DISTINCTIONS:
   * Example INVALID rewrite: SELECT id, title FROM posts WHERE ... (changes columns from SELECT *)
   * If suggesting to replace SELECT * with explicit columns, provide this as a separate recommendation
     in "optimization_opportunities" with type "column_selection", NOT as a query rewrite
+
+  ** CRITICAL: DO NOT INTRODUCE CTEs TO FLAT QUERIES **
+
+  If the original query has NO subqueries or nested SELECTs:
+  - NEVER suggest rewriting it to use CTEs (WITH clauses)
+  - CTEs add overhead and prevent optimizer from pushing filters down
+  - A flat query gives PostgreSQL maximum optimization flexibility
+
+  CTEs are ONLY acceptable in rewrites when:
+  - Original query ALREADY contains subqueries/nested SELECTs (restructuring, not introducing)
+  - AND the rewrite is tested and shows actual improvement
+  - AND for PostgreSQL >= 12, consider suggesting NOT MATERIALIZED hint
 
   ** CRITICAL ANTI-PATTERN: DISTINCT + LIMIT → GROUP BY + LIMIT **
 

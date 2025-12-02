@@ -23,6 +23,8 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
         - success: boolean indicating if collection succeeded
         - schema_info: formatted schema string for LLM prompt
         - tables_analyzed: list of table names found
+        - engine_version: database engine version string
+        - engine_major_version: major version number (e.g., 12 for PostgreSQL 12.4)
         - error: error message if failed
     """
     try:
@@ -38,6 +40,8 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
                     "success": False,
                     "schema_info": "Schema information: Not available",
                     "tables_analyzed": [],
+                    "engine_version": "unknown",
+                    "engine_major_version": None,
                     "error": "target_config is invalid (string parse failed)"
                 }
 
@@ -46,8 +50,15 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
                 "success": False,
                 "schema_info": "Schema information: Not available",
                 "tables_analyzed": [],
+                "engine_version": "unknown",
+                "engine_major_version": None,
                 "error": "No target_config provided"
             }
+
+        # Collect engine version
+        version_info = collect_engine_version(target_config)
+        engine_version = version_info.get("version", "unknown")
+        engine_major_version = version_info.get("major_version")
 
         schema_info = collect_schema_for_query(sql, target_config)
 
@@ -58,6 +69,8 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
             "success": True,
             "schema_info": schema_info,
             "tables_analyzed": list(table_names),
+            "engine_version": engine_version,
+            "engine_major_version": engine_major_version,
             "error": None
         }
 
@@ -66,8 +79,127 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
             "success": False,
             "schema_info": "Schema information: Collection failed",
             "tables_analyzed": [],
+            "engine_version": "unknown",
+            "engine_major_version": None,
             "error": str(e)
         }
+
+
+def collect_engine_version(target_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Collect the database engine version.
+
+    This is important for version-specific optimization guidance:
+    - PostgreSQL < 12: CTEs always materialize (can hurt performance)
+    - PostgreSQL >= 12: CTEs can be inlined (NOT MATERIALIZED hint available)
+    - MySQL 8.0+: Window functions, CTEs supported
+
+    Args:
+        target_config: Database target configuration
+
+    Returns:
+        Dict containing:
+        - version: Full version string (e.g., "PostgreSQL 14.5")
+        - major_version: Major version number (e.g., 14)
+        - error: Error message if version couldn't be determined
+    """
+    import os
+
+    engine = target_config.get('engine', 'unknown').lower()
+    host = target_config.get('host')
+    port = target_config.get('port')
+    user = target_config.get('user')
+    database = target_config.get('database')
+    password_env = target_config.get('password_env')
+    password = os.environ.get(password_env) if password_env else None
+
+    if not all([host, user, database, password]):
+        return {"version": "unknown", "major_version": None, "error": "Missing connection details"}
+
+    try:
+        if engine == 'mysql':
+            import pymysql
+            connection = pymysql.connect(
+                host=host,
+                port=port or 3306,
+                user=user,
+                password=password,
+                database=database,
+                connect_timeout=5
+            )
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT VERSION()")
+                    result = cursor.fetchone()
+                    if result:
+                        version_str = result[0]
+                        # Parse version like "8.0.33" or "5.7.42-log"
+                        major_version = _parse_major_version(version_str)
+                        return {
+                            "version": f"MySQL {version_str}",
+                            "major_version": major_version,
+                            "error": None
+                        }
+            finally:
+                connection.close()
+
+        elif engine in ['postgresql', 'postgres']:
+            import psycopg2
+            connection = psycopg2.connect(
+                host=host,
+                port=port or 5432,
+                user=user,
+                password=password,
+                database=database,
+                connect_timeout=5
+            )
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT version()")
+                    result = cursor.fetchone()
+                    if result:
+                        version_str = result[0]
+                        # Parse version like "PostgreSQL 14.5 on x86_64..."
+                        major_version = _parse_postgres_version(version_str)
+                        return {
+                            "version": version_str.split(' on ')[0] if ' on ' in version_str else version_str,
+                            "major_version": major_version,
+                            "error": None
+                        }
+            finally:
+                connection.close()
+        else:
+            return {"version": f"Unsupported engine: {engine}", "major_version": None, "error": None}
+
+    except Exception as e:
+        return {"version": "unknown", "major_version": None, "error": str(e)}
+
+    return {"version": "unknown", "major_version": None, "error": "Failed to get version"}
+
+
+def _parse_major_version(version_str: str) -> int:
+    """Parse major version from MySQL version string like '8.0.33' or '5.7.42-log'."""
+    try:
+        # Handle formats like "8.0.33", "5.7.42-log", "8.0.33-0ubuntu0.22.04.1"
+        version_part = version_str.split('-')[0]
+        parts = version_part.split('.')
+        if len(parts) >= 1:
+            return int(parts[0])
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
+def _parse_postgres_version(version_str: str) -> int:
+    """Parse major version from PostgreSQL version string like 'PostgreSQL 14.5 on x86_64...'."""
+    try:
+        # Handle formats like "PostgreSQL 14.5 on x86_64..."
+        match = re.search(r'PostgreSQL\s+(\d+)', version_str)
+        if match:
+            return int(match.group(1))
+    except (ValueError, AttributeError):
+        pass
+    return None
 
 
 def collect_schema_for_query(sql: str, target_config: Dict[str, Any]) -> str:
