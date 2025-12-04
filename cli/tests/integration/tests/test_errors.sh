@@ -3,6 +3,17 @@
 test_error_handling() {
   log_section "9. Error Handling Scenarios (${DB_ENGINE})"
 
+  # Test early API key validation - unset ANTHROPIC_API_KEY and verify early failure
+  local saved_api_key="${ANTHROPIC_API_KEY:-}"
+  unset ANTHROPIC_API_KEY
+  run_expect_fail "Analyze without API key" \
+    "${RDST_CMD[@]}" analyze --target "$TARGET_NAME" --query "SELECT 1"
+  assert_contains "No API key configured" "missing API key should fail early"
+  # Restore API key
+  if [[ -n "$saved_api_key" ]]; then
+    export ANTHROPIC_API_KEY="$saved_api_key"
+  fi
+
   run_expect_fail "Analyze with invalid target" \
     "${RDST_CMD[@]}" analyze --target "does-not-exist" --query "SELECT 1"
   assert_contains "Target 'does-not-exist' not found" "invalid target error message"

@@ -66,6 +66,16 @@ SQL
   run_cmd "Analyze using normalized structure hash (${STRUCTURE_HASH})" \
     "${RDST_CMD[@]}" analyze "$STRUCTURE_HASH"
   assert_not_contains "ERROR:" "analysis using structure hash should succeed"
+
+  # Verify token usage tracking in stats.json
+  local stats_file="$HOME/.rdst/stats.json"
+  if [[ -f "$stats_file" ]]; then
+    assert_file_contains "$stats_file" "total_tokens" "stats should track total tokens"
+    assert_file_contains "$stats_file" "token_usage_by_model" "stats should track per-model usage"
+    echo "✓ Token usage tracking verified in stats.json"
+  else
+    echo "⚠ stats.json not found (token tracking not verified)"
+  fi
 }
 
 test_analyze_interactive_flag() {

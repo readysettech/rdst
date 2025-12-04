@@ -11,27 +11,34 @@ from .base import LLMError, Provider, ProviderRequest, ProviderResponse
 
 
 class AnthropicModel(str, Enum):
-    """Supported Anthropic models."""
-    # https://docs.anthropic.com/en/docs/about-claude/models/overview
-    CLAUDE4_1_OPUS = "claude-opus-4-1-20250805"
-    CLAUDE_4_OPUS = "claude-opus-4-20250514"
+    """Supported Anthropic models for RDST.
+
+    RDST uses Claude Sonnet 4.5 as the default model for query analysis.
+    Same pricing as Sonnet 4, better performance.
+
+    https://docs.anthropic.com/en/docs/about-claude/models/overview
+    """
+    # Primary models for RDST
+    SONNET_4_5 = "claude-sonnet-4-5-20250929"  # Default - fast, cost-effective, latest
+    SONNET_4 = "claude-sonnet-4-20250514"      # Previous version
+    OPUS_4 = "claude-opus-4-20250514"          # Optional - more sophisticated
+
+    # Legacy aliases for backward compatibility
     CLAUDE_4_SONNET = "claude-sonnet-4-20250514"
-    CLAUDE_3_7_SONNET = "claude-3-7-sonnet-20250219"
-    CLAUDE_3_5_SONNET_LATEST = "claude-sonnet-4-20250514"
-    CLAUDE_3_5_HAIKU_LATEST = "claude-3-5-haiku-latest"
-    CLAUDE_3_OPUS = "claude-3-opus-20240229"
-    CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
-    CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
+    CLAUDE_4_OPUS = "claude-opus-4-20250514"
     
 
 
 class ClaudeProvider(Provider):
     """
     Anthropic Claude Messages API wrapper.
+
+    Default: Sonnet 4.5 (fast, cost-effective for query analysis)
+    Override via RDST_ANTHROPIC_MODEL env var to use Opus for more sophisticated analysis.
     """
 
     _DEFAULT_MODEL = AnthropicModel(
-        os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.CLAUDE_3_5_SONNET_LATEST.value)
+        os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.SONNET_4_5.value)
     )
 
     _BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1/messages")

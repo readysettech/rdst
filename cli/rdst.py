@@ -171,10 +171,11 @@ Examples:
     query_edit_group.add_argument('--hash', help='Query hash to edit')
 
     # query list
-    query_list_parser = query_subparsers.add_parser('list', help='List all queries')
-    query_list_parser.add_argument('--limit', type=int, default=20, help='Maximum queries to display')
+    query_list_parser = query_subparsers.add_parser('list', help='List all queries (interactive by default)')
+    query_list_parser.add_argument('--limit', type=int, default=10, help='Queries per page (default: 10)')
     query_list_parser.add_argument('--target', help='Filter queries by target database')
     query_list_parser.add_argument('--filter', help='Smart filter: search across SQL, tags, hash, source')
+    query_list_parser.add_argument('--no-interactive', action='store_true', help='Plain text output without selection prompt')
 
     # query show
     query_show_parser = query_subparsers.add_parser('show', help='Show details of a specific query')
@@ -197,10 +198,15 @@ Examples:
     # version command
     subparsers.add_parser('version', help='Show version')
 
-    # report command
-    report_parser = subparsers.add_parser('report', help='Submit feedback')
-    report_parser.add_argument('title', help='Report title')
-    report_parser.add_argument('--body', default='', help='Report body')
+    # report command - user feedback
+    report_parser = subparsers.add_parser('report', help='Submit feedback about RDST')
+    report_parser.add_argument('--hash', help='Query hash to provide feedback on')
+    report_parser.add_argument('--reason', '-r', help='Feedback reason (interactive if not provided)')
+    report_parser.add_argument('--email', '-e', help='Email for follow-up (optional)')
+    report_parser.add_argument('--positive', action='store_true', help='Mark as positive feedback')
+    report_parser.add_argument('--negative', action='store_true', help='Mark as negative feedback')
+    report_parser.add_argument('--include-query', action='store_true', help='Include raw SQL in feedback')
+    report_parser.add_argument('--include-plan', action='store_true', help='Include execution plan in feedback')
 
     # help command
     subparsers.add_parser('help', help='Show help')
@@ -272,17 +278,45 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             query_kwargs['update'] = getattr(args, 'update', False)
             query_kwargs['target'] = getattr(args, 'target', None)
         if query_subcommand in ['list']:
-            query_kwargs['limit'] = getattr(args, 'limit', 20)
+            query_kwargs['limit'] = getattr(args, 'limit', 10)
             query_kwargs['target'] = getattr(args, 'target', None)
             query_kwargs['filter'] = getattr(args, 'filter', None)
+            query_kwargs['no_interactive'] = getattr(args, 'no_interactive', False)
         if query_subcommand in ['delete', 'rm']:
             query_kwargs['force'] = getattr(args, 'force', False)
 
-        return cli.query(subcommand=query_subcommand, **query_kwargs)
+        result = cli.query(subcommand=query_subcommand, **query_kwargs)
+
+        # If user selected a query to analyze, exec into analyze command for clean terminal
+        if result.data and result.data.get('action') == 'analyze':
+            import os
+            selected_hash = result.data.get('selected_hash')
+            selected_target = result.data.get('selected_target')
+
+            # Build args for analyze command - use Python interpreter since rdst.py is a script
+            analyze_args = [sys.executable, sys.argv[0], 'analyze', '--hash', selected_hash]
+            if selected_target:
+                analyze_args.extend(['--target', selected_target])
+
+            # Replace this process with analyze - gives clean terminal state
+            os.execv(sys.executable, analyze_args)
+
+        return result
     elif command == 'version':
         return cli.version()
     elif command == 'report':
-        return cli.report(args.title, **kwargs)
+        from lib.cli.report_command import ReportCommand
+        report_cmd = ReportCommand()
+        success = report_cmd.run(
+            query_hash=getattr(args, 'hash', None),
+            reason=getattr(args, 'reason', None),
+            email=getattr(args, 'email', None),
+            positive=getattr(args, 'positive', False),
+            negative=getattr(args, 'negative', False),
+            include_query=getattr(args, 'include_query', False),
+            include_plan=getattr(args, 'include_plan', False),
+        )
+        return RdstResult(success, "")
     elif command == 'help' or command is None:
         return cli.help()
     else:
@@ -446,6 +480,14 @@ def main():
         if result.ok:
             if result.message:
                 print(result.message)
+
+            # Check for periodic NPS prompt (every ~100 commands)
+            try:
+                from lib.telemetry import telemetry
+                if telemetry.should_show_nps_prompt():
+                    telemetry.show_nps_prompt()
+            except Exception:
+                pass  # Don't fail if NPS prompt fails
         else:
             print(f"Error: {result.message}", file=sys.stderr)
             sys.exit(1)
@@ -454,12 +496,27 @@ def main():
         print("\nOperation cancelled.", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
+        # Report crash to telemetry
+        try:
+            from lib.telemetry import telemetry
+            command = args.command if 'args' in locals() and hasattr(args, 'command') else "unknown"
+            telemetry.report_crash(e, context={"command": command, "source": "main"})
+        except Exception:
+            pass  # Don't fail if telemetry fails
+
         if args.verbose if 'args' in locals() else False:
             import traceback
             traceback.print_exc()
         else:
             print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        # Ensure telemetry events are flushed before exit
+        try:
+            from lib.telemetry import telemetry
+            telemetry.flush()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

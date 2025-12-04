@@ -10,6 +10,49 @@ import json
 import os
 import re
 from typing import Dict, Any, List, Optional
+
+
+def estimate_tokens(text: str) -> int:
+    """
+    Estimate token count for text (Claude/GPT tokenizers average ~4 chars per token).
+
+    This is a rough estimate - actual tokens may vary by ±20%.
+    """
+    if not text:
+        return 0
+    # Claude tokenizer is roughly 4 characters per token for English text
+    # JSON/code tends to be slightly more tokens per character
+    return len(text) // 4
+
+
+# Claude pricing (as of 2025) - $ per million tokens
+CLAUDE_PRICING = {
+    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},  # Default - same price as 4
+    "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
+    "claude-opus-4-20250514": {"input": 15.0, "output": 75.0},
+    # Fallback for unknown models (assume Sonnet pricing)
+    "default": {"input": 3.0, "output": 15.0},
+}
+
+
+def estimate_cost(tokens_in: int, tokens_out: int, model: str = "default") -> float:
+    """
+    Estimate cost in USD for a given token count.
+
+    Args:
+        tokens_in: Input tokens
+        tokens_out: Output tokens
+        model: Model name for pricing lookup
+
+    Returns:
+        Estimated cost in USD
+    """
+    pricing = CLAUDE_PRICING.get(model, CLAUDE_PRICING["default"])
+    cost_in = (tokens_in / 1_000_000) * pricing["input"]
+    cost_out = (tokens_out / 1_000_000) * pricing["output"]
+    return cost_in + cost_out
+
+
 from ..llm_manager.llm_manager import LLMManager
 from ..prompts.analyze_prompts import (
     EXPLAIN_ANALYSIS_PROMPT,
@@ -416,10 +459,17 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
         if use_json_mode:
             extra_params["response_format"] = json_schema
 
+        # Estimate input tokens before call (for progress display)
+        system_msg = "You are a database performance expert. Respond with valid JSON only. Be proactive in suggesting query rewrites when you see opportunities like: old-style comma JOINs, missing LIMIT on ORDER BY, inefficient subqueries, or non-optimal WHERE clause ordering."
+        estimated_input_tokens = estimate_tokens(system_msg) + estimate_tokens(ANALYZE_PROMPT)
+
+        # Store estimate in kwargs for progress display access
+        kwargs['_estimated_input_tokens'] = estimated_input_tokens
+
         llm_response = llm_manager.generate_response(
             prompt=ANALYZE_PROMPT,
             model=model_param,
-            system_message="You are a database performance expert. Respond with valid JSON only. Be proactive in suggesting query rewrites when you see opportunities like: old-style comma JOINs, missing LIMIT on ORDER BY, inefficient subqueries, or non-optimal WHERE clause ordering.",
+            system_message=system_msg,
             max_tokens=2000,
             temperature=0.0,  # Deterministic output for consistent recommendations
             extra=extra_params if extra_params else None
@@ -453,6 +503,18 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             rewrite_suggestions = analysis_json.get('rewrite_suggestions', [])
             index_recommendations = analysis_json.get('index_recommendations', [])
 
+            # Get detailed token usage
+            tokens_used = llm_response.get('tokens_used') or 0
+            model_used = llm_response.get('model') or model_param or 'claude-sonnet-4-5-20250929'
+
+            # Try to get actual token breakdown if available
+            # tokens_used is usually total, but we can estimate breakdown
+            actual_input = estimated_input_tokens  # Use estimate for input
+            actual_output = tokens_used - actual_input if tokens_used > actual_input else tokens_used // 2
+
+            # Calculate cost
+            cost_usd = estimate_cost(actual_input, actual_output, model_used)
+
             return {
                 "success": True,
                 "analysis_results": validated_analysis,
@@ -460,8 +522,14 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
                 "optimization_suggestions": validated_analysis.get('optimization_opportunities', []),
                 "rewrite_suggestions": rewrite_suggestions,
                 "index_recommendations": index_recommendations,
-                "llm_model": llm_response.get('model'),
-                "tokens_used": llm_response.get('tokens_used')
+                "llm_model": model_used,
+                "tokens_used": tokens_used,
+                "token_usage": {
+                    "input": actual_input,
+                    "output": actual_output,
+                    "total": tokens_used if tokens_used else actual_input + actual_output,
+                    "estimated_cost_usd": cost_usd,
+                },
             }
 
         except Exception as parse_error:

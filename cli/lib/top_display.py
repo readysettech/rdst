@@ -344,6 +344,54 @@ class TopDisplay:
         except KeyboardInterrupt:
             self.quit_requested = True
 
+        finally:
+            # Ensure terminal is properly restored after Live exits
+            # This is critical because the daemon keypress thread may not
+            # get a chance to restore settings when interrupted by Ctrl+C
+            self._restore_terminal()
+
+    def _restore_terminal(self):
+        """Restore terminal to normal state after Live display exits.
+
+        Ensures:
+        - Cursor is visible
+        - Alternate screen buffer is exited
+        - Terminal settings are restored (echo, canonical mode)
+        """
+        import sys
+        import os
+
+        try:
+            # Show cursor and exit alternate screen buffer using ANSI codes
+            if sys.stdout.isatty():
+                sys.stdout.write('\033[?25h')  # Show cursor
+                sys.stdout.write('\033[?1049l')  # Exit alternate screen buffer
+                sys.stdout.flush()
+
+            # Restore terminal settings on Unix
+            if os.name == 'posix':
+                try:
+                    import termios
+                    import tty
+
+                    fd = sys.stdin.fileno()
+                    # Get current settings and restore to sane defaults
+                    try:
+                        # Try to restore canonical mode and echo
+                        import subprocess
+                        subprocess.run(['stty', 'sane'], check=False,
+                                      stdin=sys.stdin, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass
+
+                except Exception:
+                    pass
+
+        except Exception:
+            # Best effort - don't let cleanup failure cause issues
+            pass
+
 
 def format_query_for_save(query: QueryMetrics) -> dict:
     """

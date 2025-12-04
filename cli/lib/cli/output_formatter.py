@@ -164,9 +164,14 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
         lines.extend(_format_header(formatted_output))
         lines.append("")
 
-        # Query
+        # Query - use normalized/parameterized version for privacy (no PII)
         metadata = formatted_output.get("metadata") or {}
-        query = metadata.get("query", "")
+        # Prefer normalized_query > parameterized_sql > query
+        query = (
+            metadata.get("normalized_query") or
+            metadata.get("parameterized_sql") or
+            metadata.get("query", "")
+        )
         if query:
             lines.extend(_format_query(query))
             lines.append(_divider())
@@ -260,11 +265,30 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
     lines.append(f"│ Engine: {engine_display:<52}│")
     if analysis_id:
         lines.append(f"│ Analysis ID: {analysis_id:<47}│")
+
+    # Add LLM token usage if available
+    llm_analysis = workflow_result.get("llm_analysis") or {}
+    token_usage = llm_analysis.get("token_usage")
+    if token_usage:
+        tokens_in = token_usage.get("input", 0)
+        tokens_out = token_usage.get("output", 0)
+        total = token_usage.get("total", tokens_in + tokens_out)
+        cost = token_usage.get("estimated_cost_usd", 0)
+        model = llm_analysis.get("llm_model", "claude")
+        # Shorten model name for display
+        model_short = model.replace("claude-", "").replace("-20250514", "").replace("-20250929", "")
+        llm_line = f"│ LLM: {model_short} ({total:,} tokens, ~${cost:.3f})".ljust(61) + "│"
+        lines.append(llm_line)
+
     lines.append("╰─────────────────────────────────────────────────────────────╯")
     lines.append("")
 
-    # Query
-    query = workflow_result.get("query", "")
+    # Query - use normalized/parameterized version for privacy (no PII)
+    query = (
+        workflow_result.get("normalized_query") or
+        workflow_result.get("parameterized_sql") or
+        workflow_result.get("query", "")
+    )
     if query:
         lines.append("Query:")
         for line in query.strip().split('\n'):

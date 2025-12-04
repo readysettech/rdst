@@ -567,20 +567,28 @@ class QueryCommand:
                 data={"identifier": identifier, "error": str(e)}
             )
 
-    def list(self, limit: int = 20, target: str = None, filter: str = None, **kwargs):
+    def list(self, limit: int = 10, target: str = None, filter: str = None,
+             no_interactive: bool = False, **kwargs):
         """
-        List all queries in the registry.
+        List all queries in the registry with optional interactive selection.
+
+        By default, shows an interactive list where user can select a query to analyze.
+        Use --no-interactive for plain text output (also auto-detected if not a TTY).
 
         Args:
-            limit: Maximum number of queries to display
+            limit: Queries per page (default: 10)
             target: Filter by target database
             filter: Smart filter across SQL, tags, hash, source
+            no_interactive: Skip interactive mode, just print list
 
         Returns:
-            RdstResult with query list
+            RdstResult with query list (and optional selected query hash)
         """
+        import sys
         from .rdst_cli import RdstResult
-        queries = self.registry.list_queries(limit=limit * 10 if filter or target else limit)
+
+        # Get all queries for filtering
+        queries = self.registry.list_queries(limit=200)  # Get more for filtering
 
         if not queries:
             return RdstResult(
@@ -622,7 +630,22 @@ class QueryCommand:
                     data={"queries": []}
                 )
 
-        # Apply limit after filtering
+        total_queries = len(queries)
+
+        # Determine if we should use interactive mode
+        # Auto-detect: if not a TTY, use non-interactive mode (for tests/scripts)
+        use_interactive = not no_interactive and sys.stdin.isatty()
+
+        if use_interactive:
+            return self._interactive_query_list(queries, limit, target, filter)
+        else:
+            return self._plain_query_list(queries, limit, target, filter)
+
+    def _plain_query_list(self, queries: list, limit: int, target: str = None, filter: str = None):
+        """Plain text output for query list (non-interactive)."""
+        from .rdst_cli import RdstResult
+
+        # Apply limit
         queries = queries[:limit]
 
         # Build title with filter info
@@ -635,7 +658,7 @@ class QueryCommand:
         title = "".join(title_parts)
 
         # Format output
-        if RICH_AVAILABLE:
+        if RICH_AVAILABLE and self.console:
             table = Table(title=title)
             table.add_column("Tag", style="cyan")
             table.add_column("Hash", style="yellow")
@@ -678,6 +701,182 @@ class QueryCommand:
             message=f"Listed {len(queries)} queries",
             data={"queries": [{"tag": q.tag, "hash": q.hash, "sql": q.sql, "target": q.last_target} for q in queries]}
         )
+
+    def _interactive_query_list(self, queries: list, page_size: int = 10,
+                                 target: str = None, filter: str = None):
+        """Interactive query list with pagination and selection - uses table format."""
+        from .rdst_cli import RdstResult
+
+        total = len(queries)
+        page = 0
+        max_page = (total - 1) // page_size if total > 0 else 0
+
+        while True:
+            # Calculate page bounds
+            start = page * page_size
+            end = min(start + page_size, total)
+            page_queries = queries[start:end]
+
+            # Clear screen
+            print("\033[H\033[J", end="")
+
+            # Build title with filter info
+            title_parts = [f"Query Registry ({total} queries"]
+            if target:
+                title_parts.append(f", target: {target}")
+            if filter:
+                title_parts.append(f", filter: '{filter}'")
+            title_parts.append(")")
+            title = "".join(title_parts)
+
+            # Show table with selection numbers
+            if RICH_AVAILABLE and self.console:
+                table = Table(title=title)
+                table.add_column("#", style="bold green", width=3)
+                table.add_column("Tag", style="cyan")
+                table.add_column("Hash", style="yellow")
+                table.add_column("Target", style="magenta")
+                table.add_column("Source", style="green")
+                table.add_column("Last Analyzed", style="blue")
+                table.add_column("SQL Preview", style="white")
+
+                for i, q in enumerate(page_queries):
+                    num = i + 1
+                    timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
+                    sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
+
+                    table.add_row(
+                        str(num),
+                        q.tag or "(untagged)",
+                        q.hash[:8],
+                        q.last_target or "-",
+                        q.source,
+                        timestamp,
+                        sql_preview
+                    )
+
+                self.console.print(table)
+                self.console.print(f"\n[dim]Page {page+1}/{max_page+1} (showing {start+1}-{end} of {total})[/dim]")
+            else:
+                # Plain text table
+                print(f"\n{title}")
+                print(f"Page {page+1}/{max_page+1} (showing {start+1}-{end} of {total})\n")
+                print("-" * 100)
+                for i, q in enumerate(page_queries):
+                    num = i + 1
+                    timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
+                    sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
+                    target_display = q.last_target or "-"
+                    print(f"[{num}] Tag: {q.tag or '(untagged)':20} Hash: {q.hash[:8]:10} Target: {target_display:15}")
+                    print(f"    Last: {timestamp}  SQL: {sql_preview}")
+                    print()
+
+            # Show navigation options
+            print()
+            nav_options = []
+            if page > 0:
+                nav_options.append("[p] Prev")
+            if page < max_page:
+                nav_options.append("[n] Next")
+            nav_options.append("[q/Esc] Quit")
+
+            if RICH_AVAILABLE and self.console:
+                self.console.print(f"[dim]Enter # to analyze | {' | '.join(nav_options)}[/dim]")
+            else:
+                print(f"Enter # to analyze | {' | '.join(nav_options)}")
+
+            # Get user input
+            try:
+                choice = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nCancelled")
+                return RdstResult(ok=True, message="Query list cancelled", data={"queries": []})
+
+            # Handle escape key (shows as empty or \x1b)
+            if choice == '' or choice == '\x1b' or choice.lower() == 'q':
+                return RdstResult(
+                    ok=True,
+                    message=f"Listed {total} queries",
+                    data={"queries": [{"tag": q.tag, "hash": q.hash, "sql": q.sql, "target": q.last_target} for q in queries[:page_size]]}
+                )
+            elif choice.lower() == 'n' and page < max_page:
+                page += 1
+                continue
+            elif choice.lower() == 'p' and page > 0:
+                page -= 1
+                continue
+            elif choice.isdigit():
+                num = int(choice)
+                if 1 <= num <= len(page_queries):
+                    selected = page_queries[num - 1]
+                    # Exit interactive mode and return selection for analyze
+                    # Clear screen to restore normal terminal
+                    print("\033[H\033[J", end="")
+                    return RdstResult(
+                        ok=True,
+                        message="",  # Message will be handled by caller
+                        data={
+                            "action": "analyze",
+                            "selected_hash": selected.hash,
+                            "selected_tag": selected.tag,
+                            "selected_sql": selected.sql,
+                            "selected_target": selected.last_target
+                        }
+                    )
+                else:
+                    print(f"Invalid selection. Enter 1-{len(page_queries)}")
+                    input("Press Enter to continue...")
+            else:
+                print(f"Unknown option: {choice}")
+                input("Press Enter to continue...")
+
+    def _analyze_selected_query(self, query_entry):
+        """Analyze the selected query."""
+        from .rdst_cli import RdstResult
+
+        if RICH_AVAILABLE and self.console:
+            self.console.print(f"\n[bold]Analyzing query:[/bold] {query_entry.tag or query_entry.hash[:8]}")
+        else:
+            print(f"\nAnalyzing query: {query_entry.tag or query_entry.hash[:8]}")
+
+        # Import and run analyze
+        try:
+            from .analyze_command import AnalyzeCommand, AnalyzeInput
+            analyze_cmd = AnalyzeCommand()
+
+            # Get executable query (with parameters if available)
+            sql = self.registry.get_executable_query(query_entry.hash, interactive=False)
+            if not sql:
+                sql = query_entry.sql
+
+            # Create AnalyzeInput
+            resolved_input = AnalyzeInput(
+                sql=sql,
+                normalized_sql=query_entry.sql,
+                source="registry",
+                hash=query_entry.hash,
+                tag=query_entry.tag or "",
+                save_as=""
+            )
+
+            # Run analysis
+            result = analyze_cmd.execute_analyze(
+                resolved_input=resolved_input,
+                target=query_entry.last_target,
+                interactive=False
+            )
+
+            return RdstResult(
+                ok=True,
+                message="Analysis complete",
+                data={"selected_hash": query_entry.hash, "analysis": result}
+            )
+        except Exception as e:
+            return RdstResult(
+                ok=False,
+                message=f"Failed to analyze query: {e}",
+                data={"selected_hash": query_entry.hash, "error": str(e)}
+            )
 
     def show(self, name: str, **kwargs):
         """

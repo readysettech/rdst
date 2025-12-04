@@ -132,6 +132,8 @@ def run_realtime_monitor(target_config: Dict[str, Any], console: Optional[Consol
         return None  # Interactive mode returns None
 
     except KeyboardInterrupt:
+        # Ensure terminal is restored on Ctrl+C
+        _restore_terminal()
         return None
 
     except Exception as e:
@@ -228,6 +230,36 @@ def _run_snapshot_mode(collector, tracker, duration, limit, json_output, db_engi
             lines.append(f"{idx:<3} | {query.query_hash[:12]:<12} | {max_dur:<12} | {avg_dur:<12} | {obs_count:<12} | {running_now:<12} | {query_text}")
 
         return "\n".join(lines)
+
+
+def _restore_terminal():
+    """Restore terminal to normal state after interrupted display.
+
+    Ensures cursor is visible, alternate screen buffer is exited,
+    and terminal settings are restored.
+    """
+    import sys
+    import os
+
+    try:
+        # Show cursor and exit alternate screen buffer using ANSI codes
+        if sys.stdout.isatty():
+            sys.stdout.write('\033[?25h')  # Show cursor
+            sys.stdout.write('\033[?1049l')  # Exit alternate screen buffer
+            sys.stdout.flush()
+
+        # Restore terminal settings on Unix
+        if os.name == 'posix':
+            try:
+                import subprocess
+                subprocess.run(['stty', 'sane'], check=False,
+                              stdin=sys.stdin, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+    except Exception:
+        # Best effort - don't let cleanup failure cause issues
+        pass
 
 
 def save_queries_to_registry(queries, selected_indices, target_config, console):

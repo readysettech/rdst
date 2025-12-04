@@ -108,6 +108,8 @@ def format_analysis_output(**kwargs) -> Dict[str, Any]:
             "validation": validation_results,  # Add validation results
             "metadata": {
                 "query": query,
+                "normalized_query": kwargs.get('normalized_query', ''),  # Privacy-safe version
+                "parameterized_sql": kwargs.get('parameterized_sql', ''),  # Privacy-safe version
                 "target": target,
                 "analysis_id": analysis_id,
                 "database_engine": explain_results.get('database_engine', ''),

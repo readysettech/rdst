@@ -243,13 +243,61 @@ class RdstCLI:
             return RdstResult(False, f"configure failed: {e}")
 
     # rdst top
-    def top(self, target: str = None, source: str = "auto", limit: int = 10, 
-            sort: str = "total_time", filter: str = None, json: bool = False, 
+    def top(self, target: str = None, source: str = "auto", limit: int = 10,
+            sort: str = "total_time", filter: str = None, json: bool = False,
             watch: bool = False, no_color: bool = False, **kwargs) -> RdstResult:
         """Live view of top slow queries from database telemetry."""
         from .top import TopCommand
-        top_command = TopCommand(client=self.client)
-        return top_command.execute(target, source, limit, sort, filter, json, watch, no_color, **kwargs)
+        import time
+
+        start_time = time.time()
+        target_engine = "unknown"
+        queries_found = 0
+
+        try:
+            # Get target engine for telemetry
+            if target:
+                try:
+                    cfg = TargetsConfig()
+                    cfg.load()
+                    target_config = cfg.get(target)
+                    if target_config:
+                        target_engine = target_config.get("engine", "unknown")
+                except Exception:
+                    pass
+
+            top_command = TopCommand(client=self.client)
+            result = top_command.execute(target, source, limit, sort, filter, json, watch, no_color, **kwargs)
+
+            # Extract queries found from result
+            if result.data:
+                queries_found = result.data.get("queries_found", result.data.get("total_queries_tracked", 0))
+
+            # Track telemetry
+            duration_seconds = int(time.time() - start_time)
+            mode = "interactive" if kwargs.get("interactive") else "snapshot"
+
+            try:
+                from lib.telemetry import telemetry
+                telemetry.track_top(
+                    mode=mode,
+                    duration_seconds=duration_seconds,
+                    queries_found=queries_found,
+                    target_engine=target_engine,
+                )
+            except Exception:
+                pass
+
+            return result
+
+        except Exception as e:
+            # Track crash
+            try:
+                from lib.telemetry import telemetry
+                telemetry.report_crash(e, context={"command": "top", "target": target})
+            except Exception:
+                pass
+            return RdstResult(False, f"top failed: {e}")
 
     # rdst analyze
     def analyze(self, hash: Optional[str] = None, query: Optional[str] = None,
@@ -289,6 +337,14 @@ class RdstCLI:
             RdstResult with analysis results
         """
         from .analyze_command import AnalyzeCommand, AnalyzeInputError
+        import time
+
+        # Track timing for telemetry
+        start_time = time.time()
+        query_hash = None
+        target_engine = "unknown"
+        error_type = None
+        resolved_input = None
 
         try:
             analyze_cmd = AnalyzeCommand(client=self.client)
@@ -306,18 +362,80 @@ class RdstCLI:
 
             # Use target parameter, fallback to db for backward compatibility, then to default
             target_db = target or db
+            cfg = TargetsConfig()
+            cfg.load()
             if not target_db:
                 # Get default target from configuration if none specified
-                cfg = TargetsConfig()
-                cfg.load()
                 target_db = cfg.get_default()
 
+            # Get target engine for telemetry
+            if target_db:
+                try:
+                    target_config = cfg.get(target_db)
+                    if target_config:
+                        target_engine = target_config.get("engine", "unknown")
+                except Exception:
+                    pass
+
             # Execute analysis
-            return analyze_cmd.execute_analyze(resolved_input, target=target_db, readyset=readyset, fast=fast, interactive=interactive, review=review)
+            result = analyze_cmd.execute_analyze(resolved_input, target=target_db, readyset=readyset, fast=fast, interactive=interactive, review=review)
+
+            # Extract query hash from result for telemetry
+            if result.data:
+                query_hash = result.data.get("query_hash") or result.data.get("hash")
+
+            # Track telemetry
+            duration_ms = int((time.time() - start_time) * 1000)
+            mode = "interactive" if interactive else ("fast" if fast else ("readyset" if readyset else "standard"))
+
+            try:
+                from lib.telemetry import telemetry
+                telemetry.track_analyze(
+                    query_hash=query_hash or "unknown",
+                    mode=mode,
+                    duration_ms=duration_ms,
+                    success=result.ok,
+                    target_engine=target_engine,
+                )
+            except Exception:
+                pass  # Don't fail analyze if telemetry fails
+
+            return result
 
         except AnalyzeInputError as e:
+            error_type = "input_error"
+            # Track failed analysis
+            try:
+                from lib.telemetry import telemetry
+                duration_ms = int((time.time() - start_time) * 1000)
+                telemetry.track_analyze(
+                    query_hash="unknown",
+                    mode="standard",
+                    duration_ms=duration_ms,
+                    success=False,
+                    error_type=error_type,
+                    target_engine=target_engine,
+                )
+            except Exception:
+                pass
             return RdstResult(False, str(e))
         except Exception as e:
+            error_type = type(e).__name__
+            # Track crash and report to Sentry
+            try:
+                from lib.telemetry import telemetry
+                duration_ms = int((time.time() - start_time) * 1000)
+                telemetry.track_analyze(
+                    query_hash=query_hash or "unknown",
+                    mode="standard",
+                    duration_ms=duration_ms,
+                    success=False,
+                    error_type=error_type,
+                    target_engine=target_engine,
+                )
+                telemetry.report_crash(e, context={"command": "analyze", "target": target_db})
+            except Exception:
+                pass
             return RdstResult(False, f"analyze failed: {e}")
 
     # rdst tune "<query>"

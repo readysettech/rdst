@@ -427,8 +427,13 @@ class AnalyzeCommand:
                         idx = int(choice) - 1
                         if 0 <= idx < len(saved_queries):
                             selected_query = saved_queries[idx]
+                            # Get executable SQL with parameter values reconstructed
+                            executable_sql = self.registry.get_executable_query(selected_query.hash, interactive=False)
+                            if not executable_sql:
+                                executable_sql = selected_query.sql  # Fallback to normalized
                             return AnalyzeInput(
-                                sql=selected_query.sql,
+                                sql=executable_sql,
+                                normalized_sql=selected_query.sql,
                                 source="registry",
                                 hash=selected_query.hash,
                                 tag=selected_query.tag,
@@ -476,8 +481,13 @@ class AnalyzeCommand:
                         idx = int(choice) - 1
                         if 0 <= idx < len(saved_queries):
                             selected_query = saved_queries[idx]
+                            # Get executable SQL with parameter values reconstructed
+                            executable_sql = self.registry.get_executable_query(selected_query.hash, interactive=False)
+                            if not executable_sql:
+                                executable_sql = selected_query.sql  # Fallback to normalized
                             return AnalyzeInput(
-                                sql=selected_query.sql,
+                                sql=executable_sql,
+                                normalized_sql=selected_query.sql,
                                 source="registry",
                                 hash=selected_query.hash,
                                 tag=selected_query.tag,
@@ -548,6 +558,12 @@ class AnalyzeCommand:
         from .interactive_mode import display_conversation_history
 
         try:
+            # Check for API key BEFORE any LLM operations (interactive mode, review, or analysis)
+            api_key_error = self._check_api_key_configured()
+            if api_key_error:
+                from .rdst_cli import RdstResult
+                return RdstResult(False, api_key_error)
+
             # Handle --review flag (show conversation history without analysis)
             if review:
                 conv_registry = ConversationRegistry()
@@ -1024,6 +1040,33 @@ class AnalyzeCommand:
                 "error": f"ReadySet analysis failed: {str(e)}"
             }
 
+    def _check_api_key_configured(self) -> Optional[str]:
+        """Check if an API key is configured for Anthropic (Claude).
+
+        RDST officially uses Claude/Anthropic for AI analysis.
+
+        Returns:
+            Error message if no API key configured, None if OK
+        """
+        try:
+            # RDST uses Anthropic/Claude - check for that key
+            key = os.environ.get("ANTHROPIC_API_KEY")
+            if not key:
+                return (
+                    "No API key configured. Set the ANTHROPIC_API_KEY environment variable.\n\n"
+                    "To get an API key:\n"
+                    "  1. Visit https://console.anthropic.com/\n"
+                    "  2. Create an account or sign in\n"
+                    "  3. Generate an API key\n"
+                    "  4. Set the environment variable:\n"
+                    "     export ANTHROPIC_API_KEY=\"sk-ant-...\""
+                )
+
+            return None  # Key is configured
+
+        except Exception as e:
+            return f"Configuration error: {e}"
+
     def _run_analyze_workflow(self, resolved_input: AnalyzeInput, target: str, target_config: dict,
                              save_as: str = "", source: str = "manual", fast: bool = False) -> dict:
         """Run the complete analyze workflow using WorkflowManager."""
@@ -1080,8 +1123,6 @@ class AnalyzeCommand:
         import threading
         from collections import defaultdict
 
-        print("Analyzing query performance...")
-
         # Get LLM info for display
         try:
             # Check environment variable first
@@ -1097,17 +1138,8 @@ class AnalyzeCommand:
                 except:
                     pass
 
-            # Default fallback
-            provider = provider or "openai"
-
-            if provider == "lmstudio":
-                llm_display = "AI analysis via LM Studio"
-            elif provider == "claude":
-                llm_display = "AI analysis via Claude"
-            elif provider == "openai":
-                llm_display = "AI analysis via OpenAI"
-            else:
-                llm_display = f"AI analysis via {provider}"
+            # RDST uses Claude exclusively
+            llm_display = "AI analysis via Claude"
         except:
             llm_display = "AI analysis"
 
@@ -1129,9 +1161,12 @@ class AnalyzeCommand:
         # Track execution state
         execution_state = {
             "current_step": None,
+            "current_step_raw": None,  # Raw step name for token display logic
             "step_start_time": None,
             "heartbeat_active": False,
-            "completed_steps": set()
+            "completed_steps": set(),
+            "estimated_tokens": None,  # Estimated input tokens for LLM step
+            "token_usage": None,  # Final token usage after LLM completes
         }
 
         def heartbeat_thread():
@@ -1142,14 +1177,23 @@ class AnalyzeCommand:
             while execution_state["heartbeat_active"]:
                 if execution_state["step_start_time"] and (time.time() - execution_state["step_start_time"]) > 0.5:
                     current_step = execution_state.get('current_step', 'Processing')
+                    raw_step = execution_state.get('current_step_raw', '')
                     elapsed_time = time.time() - execution_state["step_start_time"]
 
+                    # Build time display
                     if elapsed_time >= 1.0:
-                        # Show whole seconds for longer operations
-                        line = f"  {heartbeat_chars[i % len(heartbeat_chars)]} {current_step}... ({elapsed_time:.0f}s)"
+                        time_str = f"{elapsed_time:.0f}s"
                     else:
-                        # Show decimal for sub-second operations
-                        line = f"  {heartbeat_chars[i % len(heartbeat_chars)]} {current_step}... ({elapsed_time:.1f}s)"
+                        time_str = f"{elapsed_time:.1f}s"
+
+                    # For LLM step, show input tokens in the spinner line
+                    extra_info = ""
+                    if raw_step == "PerformLLMAnalysis":
+                        est_tokens = execution_state.get('estimated_tokens')
+                        if est_tokens:
+                            extra_info = f" | ~{est_tokens:,} tokens"
+
+                    line = f"  {heartbeat_chars[i % len(heartbeat_chars)]} {current_step}... ({time_str}{extra_info})"
 
                     # Only clear extra characters from previous line if it was longer
                     padding = max(0, last_line_length - len(line))
@@ -1167,15 +1211,35 @@ class AnalyzeCommand:
             """Called when a workflow step starts."""
             friendly_name = step_names.get(step_name, step_name)
             execution_state["current_step"] = friendly_name
+            execution_state["current_step_raw"] = step_name
             execution_state["step_start_time"] = time.time()
 
-            # Don't print anything here - the heartbeat thread will show progress
-            # This prevents duplicate lines
+            # For LLM step, estimate tokens and include in spinner
+            if step_name == "PerformLLMAnalysis":
+                try:
+                    from ..functions.llm_analysis import estimate_tokens
+                    # Estimate tokens from context that will be sent to LLM
+                    total_chars = 0
+                    for key in ['parameterized_sql', 'original_sql', 'schema_info', 'explain_results']:
+                        val = input_data.get(key)
+                        if val:
+                            total_chars += len(str(val))
+                    # Add system prompt overhead (~200 tokens)
+                    est_tokens = estimate_tokens(str(total_chars * 'x')) + 200
+                    execution_state["estimated_tokens"] = est_tokens
+                except Exception:
+                    pass
 
         def step_complete_callback(step_name, result, execution_time):
             """Called when a workflow step completes."""
             friendly_name = step_names.get(step_name, step_name)
             execution_state["completed_steps"].add(step_name)
+
+            # Capture token usage from LLM step
+            if step_name == "PerformLLMAnalysis" and result:
+                token_usage = result.get("token_usage")
+                if token_usage:
+                    execution_state["token_usage"] = token_usage
 
             # Just update execution state - the next step or final cleanup will update the display
             # This keeps everything on one line that continuously updates

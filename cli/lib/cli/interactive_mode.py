@@ -59,12 +59,8 @@ def run_interactive_mode(conversation: InteractiveConversation,
         print("Interactive Mode - Explore the analysis")
         print("=" * 80)
 
-    # Show provider name in welcome message
-    provider_name = {
-        "claude": "Claude",
-        "openai": "OpenAI",
-        "lmstudio": "LM Studio"
-    }.get(conversation.provider, conversation.provider)
+    # RDST uses Claude exclusively
+    provider_name = "Claude"
 
     if conversation.total_exchanges == 0:
         if _RICH_AVAILABLE and console:
@@ -152,12 +148,7 @@ def run_interactive_mode(conversation: InteractiveConversation,
                 display_conversation_history(conversation)
                 continue
 
-            # Free-form question - send to LLM
-            provider_name = {
-                "claude": "Claude",
-                "openai": "OpenAI",
-                "lmstudio": "LM Studio"
-            }.get(conversation.provider, "AI")
+            # Free-form question - send to LLM (always uses Claude)
 
             if _RICH_AVAILABLE and console:
                 console.print(f"\n[dim]Getting response from {provider_name}...[/dim]", end="")
@@ -355,13 +346,13 @@ def _ask_llm(conversation: InteractiveConversation,
         combined_system_message = "\n\n".join(system_messages)
 
         # Call LLM with full conversation context
+        # Always use Claude (default provider) regardless of what's stored in old conversations
         response_data = llm_manager.query(
             system_message=combined_system_message,
             user_query=user_question,
             context="",  # Context is already in system message
             max_tokens=2000,
             temperature=0.1,  # Low temperature for consistent, deterministic responses
-            provider=conversation.provider
         )
 
         # Remove the temporarily added user message (we'll add it properly with the response)

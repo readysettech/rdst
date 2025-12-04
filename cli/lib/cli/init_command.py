@@ -96,8 +96,8 @@ class InitCommand:
 
         # Step 2: LLM setup
         self._print("", "")  # Add some spacing
-        self._print("Step 2", "Configure LLM Provider")
-        self._print("", "Choose your AI analysis provider (OpenAI, Claude, or local LM Studio)")
+        self._print("Step 2", "Configure Anthropic API")
+        self._print("", "RDST uses Anthropic's Claude for AI-powered query analysis")
 
         # Use the centralized LLM configuration wizard
         wizard = ConfigurationWizard(console=self.console)
@@ -211,17 +211,18 @@ class InitCommand:
         # Save the updated configuration with verification results
         cfg.save()
 
-        # LLM access check (presence + ping)
+        # LLM access check (Anthropic API with ANTHROPIC_API_KEY)
         llm = (cfg._data or {}).get("llm", {})
-        prov = llm.get("provider")
-        if prov:
-            try:
-                from lib.llm_manager.llm_manager import LLMManager
-                llm_mgr = LLMManager(defaults={"provider": prov, "max_tokens": 8, "temperature": 0.0})
+        if llm.get("provider") == "claude":
+            import os
+            has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
-                # LM Studio doesn't use shared pool, just test connectivity
-                if prov == "lmstudio":
-                    self._print("LLM", f"Testing LM Studio connection...")
+            if has_api_key:
+                try:
+                    from lib.llm_manager.llm_manager import LLMManager
+                    llm_mgr = LLMManager(defaults={"max_tokens": 8, "temperature": 0.0})
+
+                    self._print("Anthropic", "Testing API connection...")
                     resp = llm_mgr.query(
                         system_message="You are a terse assistant.",
                         user_query="ping",
@@ -229,50 +230,20 @@ class InitCommand:
                         max_tokens=8,
                         temperature=0.0,
                     )
-                    self._print("LLM", f"LM Studio configured and reachable. Response: {resp['text'][:50]}")
-                elif llm.get("shared"):
-                    import os
-                    shared_key_set = bool(os.environ.get("RDST_LLM_SHARED_KEY"))
-
-                    if shared_key_set:
-                        # Shared key is set, test the connection
-                        self._print("LLM", f"{prov} configured (shared pool). Testing connection...")
-                        resp = llm_mgr.query(
-                            system_message="You are a terse assistant.",
-                            user_query="ping",
-                            context=None,
-                            max_tokens=8,
-                            temperature=0.0,
-                        )
-                        self._print("LLM", f"{prov} configured and reachable. Response: {resp['text'][:50]}")
-                    else:
-                        # Shared key not set yet - skip validation and remind user
-                        self._print("LLM", f"{prov} configured (shared pool).")
-                        self._print("", "")
-                        self._print("⚠️  Setup Required", "To use RDST with the shared key, run this command:", style="yellow")
-                        self._print("", "  export RDST_LLM_SHARED_KEY=\"ALPHA-STATIC-SHARED-KEY\"", style="yellow")
-                        self._print("", "")
-                        self._print("", "For persistence, add to ~/.bashrc:", style="yellow")
-                        self._print("", "  echo 'export RDST_LLM_SHARED_KEY=\"ALPHA-STATIC-SHARED-KEY\"' >> ~/.bashrc", style="yellow")
-                        self._print("", "  source ~/.bashrc", style="yellow")
-                else:
-                    # User provided their own API key (either encrypted or via env var)
-                    hint = llm.get("hint", "")
-                    self._print("LLM", f"{prov} configured ({hint}).")
-
-                    # Test the connection
-                    resp = llm_mgr.query(
-                        system_message="You are a terse assistant.",
-                        user_query="ping",
-                        context=None,
-                        max_tokens=8,
-                        temperature=0.0,
-                    )
-                    self._print("LLM", f"{prov} configured and reachable. Response: {resp['text'][:50]}")
-            except Exception as e:
-                self._print("LLM", f"{prov} configured but ping failed: {e}", style="red")
+                    model = llm.get("model", "claude-sonnet-4-20250514")
+                    self._print("Anthropic", f"Configured and reachable ({model})")
+                except Exception as e:
+                    self._print("Anthropic", f"Connection test failed: {e}", style="red")
+            else:
+                # API key not set - remind user
+                self._print("Anthropic", "ANTHROPIC_API_KEY not set", style="yellow")
+                self._print("", "")
+                self._print("Setup Required", "Set your Anthropic API key:", style="yellow")
+                self._print("", "  export ANTHROPIC_API_KEY=\"sk-ant-...\"", style="yellow")
+                self._print("", "")
+                self._print("", "Get an API key at: https://console.anthropic.com/", style="yellow")
         else:
-            self._print("LLM", "No LLM provider configured")
+            self._print("Anthropic", "Not configured (run 'rdst configure llm')")
         return results
 
     def _maybe_run_top(self, cfg: TargetsConfig, results: List[TargetTestResult]) -> None:

@@ -107,8 +107,8 @@ class Conversation:
 
 @dataclass
 class LLMDefaults:
-    # "openai" | "claude"
-    provider: str = "openai"
+    # Claude is the only supported provider (BYOK with ANTHROPIC_API_KEY)
+    provider: str = "claude"
     model: Optional[str] = None
     max_tokens: int = 800
     temperature: float = 0.2

@@ -365,7 +365,40 @@ class TopCommand:
                     time.sleep(5)  # Update every 5 seconds
                     live.update(generate_table())
         except KeyboardInterrupt:
-            return RdstResult(True, "\nWatch mode stopped")
+            pass
+        finally:
+            # Ensure terminal is properly restored after Live exits
+            self._restore_terminal()
+        return RdstResult(True, "\nWatch mode stopped")
+
+    def _restore_terminal(self):
+        """Restore terminal to normal state after Live display exits.
+
+        Ensures cursor is visible, alternate screen buffer is exited,
+        and terminal settings are restored.
+        """
+        import sys
+        import os
+
+        try:
+            # Show cursor and exit alternate screen buffer using ANSI codes
+            if sys.stdout.isatty():
+                sys.stdout.write('\033[?25h')  # Show cursor
+                sys.stdout.write('\033[?1049l')  # Exit alternate screen buffer
+                sys.stdout.flush()
+
+            # Restore terminal settings on Unix
+            if os.name == 'posix':
+                try:
+                    import subprocess
+                    subprocess.run(['stty', 'sane'], check=False,
+                                  stdin=sys.stdin, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+        except Exception:
+            # Best effort - don't let cleanup failure cause issues
+            pass
 
     def _run_interactive_mode(self, target_config: dict, db_engine: str, source: str,
                              limit: int, sort: str, filter_pattern: str, no_color: bool):

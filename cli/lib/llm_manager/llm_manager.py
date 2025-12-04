@@ -6,108 +6,72 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from .base import LLMDefaults, LLMError, Provider, ProviderRequest, ProviderResponse
-from .openai_provider import OpenAIProvider
 from .claude_provider import ClaudeProvider
-from .lmstudio_provider import LMStudioProvider
-from .gemini_provider import GeminiProvider
-from .security import encrypt, decrypt, LLMKeyVault
 
 
 class LLMManager:
     """
-    Unified, provider-agnostic LLM facade.
+    Unified LLM facade for RDST.
 
-    Key Management (POC, static encryption)
-   -----------------------------------
-    - Keys are encrypted with a static shared secret and stored locally per provider.
-    - The shared secret can be passed explicitly or via env: RDST_LLM_SHARED_KEY.
-    - Storage path defaults to: ~/.rdst/keys/<provider>.key.enc (overridable).
+    RDST uses Claude (Anthropic) exclusively for AI-powered query analysis.
+    Users must provide their own API key via the ANTHROPIC_API_KEY environment variable.
 
-    Env Overrides
-   ---------
-    RDST_LLM_PROVIDER: default provider name (openai|claude|lmstudio|gemini)
-    RDST_LLM_SHARED_KEY: static shared secret for encrypt/decrypt (POC)
-    RDST_LLM_KEYS_DIR: where encrypted keys are stored (default: ~/.rdst/keys)
-    LMSTUDIO_BASE_URL: LM Studio server URL (default: http://localhost:1234/v1/chat/completions)
+    Default Model: Claude Sonnet 4 (fast, cost-effective)
+    Optional: Claude Opus 4 (more sophisticated analysis via RDST_ANTHROPIC_MODEL env var)
+
+    Environment Variables
+    --------------------
+    ANTHROPIC_API_KEY: Your Anthropic API key (required)
+    RDST_ANTHROPIC_MODEL: Override default model (optional, e.g., "claude-opus-4-20250514")
 
     Public API
-   ------
-    save_encrypted_api_key(provider, plaintext_key, shared_secret=None) -> Path
-    load_api_key(provider, shared_secret=None) -> str  # decrypted key
-    query(system_message, user_query, context, max_tokens, temperature, top_p=None, stop_sequences=None, provider=None, model=None, debug=None) -> dict
+    ----------
+    query(system_message, user_query, context, max_tokens, temperature, ...) -> dict
     """
 
     def __init__(self, defaults: Optional[Dict[str, Any]] = None, logger: Optional[logging.Logger] = None):
         d = LLMDefaults(**(defaults or {}))
 
-        # Load from config file first, then allow env to override
+        # Load model from config file if set
         try:
             from ..cli.rdst_cli import TargetsConfig
             config = TargetsConfig()
             config.load()
             llm_config = config.get_llm_config()
 
-            # Apply config file settings
-            if llm_config.get("provider"):
-                d.provider = llm_config["provider"]
+            # Only model can be overridden from config (provider is always Claude)
             if llm_config.get("model"):
                 d.model = llm_config["model"]
 
-            # Store config reference for dynamic lookups
             self._config = config
-
         except Exception:
             self._config = None
 
-        # Environment variables still take precedence
-        d.provider = os.getenv("RDST_LLM_PROVIDER", d.provider)
-        d.model = os.getenv("RDST_LMSTUDIO_MODEL", d.model) if d.provider == "lmstudio" else d.model
+        # Environment variable takes precedence for model
+        env_model = os.getenv("RDST_ANTHROPIC_MODEL")
+        if env_model:
+            d.model = env_model
+
+        # Provider is always Claude (BYOK)
+        d.provider = "claude"
 
         self.defaults = d
         self.logger = logger or logging.getLogger("llm_manager")
         self.logger.addHandler(logging.NullHandler())
 
-        # registry llm providers
+        # Claude is the only provider
         self._providers: Dict[str, Provider] = {}
-        self.register_provider("openai", OpenAIProvider())
         self.register_provider("claude", ClaudeProvider())
-        self.register_provider("lmstudio", LMStudioProvider())
-        self.register_provider("gemini", GeminiProvider())
-
-        # key vault (filesystem-based, static-secret encryption in POC)
-        keys_dir = Path(os.getenv("RDST_LLM_KEYS_DIR", Path.home() / ".rdst" / "keys"))
-        self.vault = LLMKeyVault(keys_dir)
 
     # Provider registry
     def register_provider(self, name: str, provider: Provider) -> None:
         self._providers[name.lower()] = provider
 
     def provider(self, name: Optional[str] = None) -> Provider:
-        p = (name or self.defaults.provider or "").lower()
+        p = (name or self.defaults.provider or "claude").lower()
         if p not in self._providers:
-            raise LLMError(f"Unknown provider '{p}'", code="NO_SUCH_PROVIDER")
+            raise LLMError(f"Unknown provider '{p}'. RDST only supports Claude.", code="NO_SUCH_PROVIDER")
         return self._providers[p]
-
-    # Key management (POC)
-    def save_encrypted_api_key(self, provider: str, plaintext_key: str, shared_secret: Optional[str] = None) -> Path:
-        secret = shared_secret or os.getenv("RDST_LLM_SHARED_KEY", "")
-        if not secret:
-            raise LLMError("Missing shared secret for key encryption (RDST_LLM_SHARED_KEY)", code="NO_SHARED_SECRET")
-        enc = encrypt(plaintext_key.encode("utf-8"), secret)
-        path = self.vault.write_encrypted_key(provider, enc)
-        return path
-
-    def load_api_key(self, provider: str, shared_secret: Optional[str] = None) -> str:
-        secret = shared_secret or os.getenv("RDST_LLM_SHARED_KEY", "")
-        if not secret:
-            raise LLMError("Missing shared secret for key decryption (RDST_LLM_SHARED_KEY)", code="NO_SHARED_SECRET")
-        enc = self.vault.read_encrypted_key(provider)
-        if enc is None:
-            raise LLMError(f"No API key configured for provider '{provider}'", code="NO_API_KEY")
-        try:
-            return decrypt(enc, secret).decode("utf-8")
-        except Exception as e:
-            raise LLMError("Failed to decrypt stored API key (check shared secret)", code="DECRYPT_FAILED", cause=e)
 
     def query(
         self,
@@ -190,6 +154,22 @@ class LLMManager:
         }
         if resolved["debug"]:
             out["raw"] = resp.raw
+
+        # Track LLM usage for telemetry
+        try:
+            from ..telemetry import telemetry
+            usage = resp.usage or {}
+            telemetry.track_llm_usage(
+                provider=name,
+                model=actual_model,
+                tokens_in=usage.get("prompt_tokens") or 0,
+                tokens_out=usage.get("completion_tokens") or 0,
+                duration_ms=0,  # TODO: Add timing if needed
+                purpose=extra.get("purpose", "general") if extra else "general",
+            )
+        except Exception:
+            pass  # Don't fail LLM call if telemetry fails
+
         return out
 
     def generate_response(self, prompt: str, model: Optional[str] = None, **kwargs) -> Dict[str, Any]:
@@ -231,34 +211,24 @@ class LLMManager:
             raise e
 
     def _safe_load_key_for_query(self, provider: str) -> str:
-        # LM Studio doesn't require an API key for local usage
-        if provider == "lmstudio":
-            return "not-needed"
+        """Load API key from ANTHROPIC_API_KEY environment variable.
 
-        # Check standard environment variables first (no encryption needed)
-        env_var_map = {
-            "claude": "ANTHROPIC_API_KEY",
-            "openai": "OPENAI_API_KEY",
-        }
-        env_var = env_var_map.get(provider)
-        if env_var:
-            api_key = os.getenv(env_var)
-            if api_key:
-                # Found API key in environment variable
-                return api_key
+        RDST uses Bring Your Own Key (BYOK) - users must set their own API key.
+        """
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if api_key:
+            return api_key
 
-        # Try to load from encrypted vault
-        try:
-            return self.load_api_key(provider)
-        except LLMError as e:
-            if e.code in ("NO_API_KEY", "NO_SHARED_SECRET"):
-                # No API key found anywhere
-                raise LLMError(
-                    f"No API key configured for provider '{provider}'. "
-                    f"Set ${env_var} environment variable or run 'rdst configure llm' to save an encrypted key",
-                    code="NO_API_KEY"
-                )
-            raise
+        raise LLMError(
+            "No API key configured. Set the ANTHROPIC_API_KEY environment variable.\n\n"
+            "To get an API key:\n"
+            "  1. Visit https://console.anthropic.com/\n"
+            "  2. Create an account or sign in\n"
+            "  3. Generate an API key\n"
+            "  4. Set the environment variable:\n"
+            "     export ANTHROPIC_API_KEY=\"sk-ant-...\"",
+            code="NO_API_KEY"
+        )
 
 
 def _assemble_messages(system_message: str, user_query: str, context: Optional[str]) -> List[Dict[str, str]]:

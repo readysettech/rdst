@@ -1032,196 +1032,66 @@ class ConfigurationWizard:
             return None
 
     def configure_llm(self, cfg: TargetsConfig, kwargs: dict) -> RdstResult:
-        """Configure LLM provider settings (independent of database targets)."""
+        """Configure LLM settings for RDST.
+
+        RDST uses Anthropic's Claude for AI-powered query analysis.
+        Users must provide their own API key via ANTHROPIC_API_KEY environment variable.
+        """
         import os
 
         llm_meta = cfg.get_llm_config()
         has_existing = bool(llm_meta)
 
-        self._show_step("", "LLM Configuration", "🤖")
+        self._show_step("", "Anthropic Configuration", "")
 
-        if has_existing:
-            current_provider = llm_meta.get("provider", "not set")
-            hint = llm_meta.get("hint", "")
-            self._show_info("Current Settings", f"Provider: {current_provider}\n{hint}")
-        else:
-            self._show_info("No LLM configured", "Configure your AI analysis provider (OpenAI, Claude, Gemini, or local LM Studio)")
+        # Check if API key is already set
+        has_api_key = bool(os.getenv("ANTHROPIC_API_KEY"))
 
-        providers = ["openai", "claude", "gemini", "lmstudio"]
-        current_provider = llm_meta.get("provider", "openai") if has_existing else "openai"
+        if has_api_key:
+            self._show_success("API Key Detected", "ANTHROPIC_API_KEY is set in your environment")
 
-        try:
-            default_idx = providers.index(current_provider)
-        except ValueError:
-            default_idx = 0
+            # Ask about model preference
+            model_choices = [
+                "claude-sonnet-4-20250514 (default - fast, cost-effective)",
+                "claude-opus-4-20250514 (more sophisticated analysis)",
+            ]
+            model_choice = self._interactive_select("Select model", model_choices, default_idx=0)
 
-        prov = self._interactive_select("Choose LLM provider", providers, default_idx=default_idx)
-        if not prov:
-            return RdstResult(False, "No provider selected")
-
-        # LM Studio configuration
-        if prov == "lmstudio":
             cfg._data.setdefault("llm", {})
-            cfg._data["llm"]["provider"] = prov
-            cfg._data["llm"]["shared"] = False
-            cfg._data["llm"]["hint"] = "Local LM Studio (no API key required)"
+            cfg._data["llm"]["provider"] = "claude"
 
-            # Prompt for LM Studio base URL
-            default_url = "http://localhost:1234/v1/chat/completions"
-            current_url = llm_meta.get("base_url", default_url) if has_existing else default_url
-
-            self._show_info("LM Studio URL", f"Current: {current_url}")
-            url = self._prompt(f"LM Studio base URL", default=current_url)
-            if url:
-                cfg._data["llm"]["base_url"] = url
+            if model_choice and "Opus" in model_choice:
+                cfg._data["llm"]["model"] = "claude-opus-4-20250514"
+                cfg._data["llm"]["hint"] = "Using Claude Opus 4"
             else:
-                cfg._data["llm"]["base_url"] = default_url
+                cfg._data["llm"]["model"] = "claude-sonnet-4-20250514"
+                cfg._data["llm"]["hint"] = "Using Claude Sonnet 4"
 
             cfg.save()
-            self._show_success("LLM Configured", f"Using LM Studio server: {cfg._data['llm']['base_url']}")
-            return RdstResult(True, f"LLM configured: {prov}")
+            self._show_success("Configured", cfg._data["llm"]["hint"])
+            return RdstResult(True, "Anthropic configured")
 
-        # OpenAI or Claude configuration
-        if has_existing:
-            choices = [
-                "Keep current LLM settings",
-                "Provide your own API key",
-                "Use shared key (limited quota)",
-                "Skip for now",
-            ]
-            default_idx = 0
         else:
-            choices = [
-                "Provide your own API key",
-                "Use shared key (limited quota)",
-                "Skip for now",
-            ]
-            default_idx = 0
-
-        choice = self._interactive_select("LLM Integration", choices, default_idx=default_idx)
-        if not choice:
-            return RdstResult(False, "No option selected")
-
-        cfg._data.setdefault("llm", {})
-        llm_meta = cfg._data["llm"]
-        llm_meta["provider"] = prov
-
-        if choice.startswith("Keep current"):
-            return RdstResult(True, "LLM configuration unchanged")
-
-        elif "your own API key" in choice:
-            # Prompt user for their API key
-            env_var_map = {
-                "openai": "OPENAI_API_KEY",
-                "claude": "ANTHROPIC_API_KEY",
-                "gemini": "GOOGLE_API_KEY",
-            }
-            env_var_name = env_var_map.get(prov, "API_KEY")
-            self._show_info("API Key", f"You can provide your {prov.upper()} API key in two ways:\n"
-                           f"  1. Set environment variable: {env_var_name}\n"
-                           f"  2. Enter it now (will be encrypted and stored in ~/.rdst/keys/)")
-
-            key_choice = self._interactive_select(
-                "How would you like to provide the API key?",
-                ["Enter API key now", "Use environment variable", "Cancel"],
-                default_idx=0
+            # No API key set - show instructions
+            self._show_warning(
+                "API Key Required",
+                "RDST requires an Anthropic API key for AI-powered query analysis.\n\n"
+                "To get started:\n"
+                "  1. Visit https://console.anthropic.com/\n"
+                "  2. Create an account or sign in\n"
+                "  3. Generate an API key\n"
+                "  4. Set the environment variable:\n"
+                "     export ANTHROPIC_API_KEY=\"sk-ant-...\"\n\n"
+                "For persistence, add to ~/.bashrc or ~/.zshrc:\n"
+                "  echo 'export ANTHROPIC_API_KEY=\"your-key\"' >> ~/.bashrc\n"
+                "  source ~/.bashrc"
             )
 
-            if key_choice == "Enter API key now":
-                api_key = self._prompt(f"Enter your {prov.upper()} API key", default="")
-                if api_key:
-                    # Save encrypted API key
-                    try:
-                        from lib.llm_manager.llm_manager import LLMManager
-                        mgr = LLMManager()
+            # Still save config to mark LLM as configured (will work once key is set)
+            cfg._data.setdefault("llm", {})
+            cfg._data["llm"]["provider"] = "claude"
+            cfg._data["llm"]["model"] = "claude-sonnet-4-20250514"
+            cfg._data["llm"]["hint"] = "Waiting for ANTHROPIC_API_KEY"
+            cfg.save()
 
-                        # Require shared secret for encryption
-                        shared_secret = os.getenv("RDST_LLM_SHARED_KEY", "")
-                        if not shared_secret:
-                            self._show_warning("RDST_LLM_SHARED_KEY not set. Using default (insecure for production!)")
-                            shared_secret = "default-insecure-key-change-me"
-
-                        path = mgr.save_encrypted_api_key(prov, api_key, shared_secret=shared_secret)
-                        llm_meta.update({
-                            "provider": prov,
-                            "shared": False,
-                            "vault_path": str(path),
-                            "hint": "Using personal API key (encrypted)",
-                        })
-                        cfg.save()
-                        self._show_success("API Key Saved", f"API key saved to {path}")
-                        return RdstResult(True, f"LLM configured: {prov}")
-                    except Exception as e:
-                        self._show_error(f"Failed to save API key: {e}")
-                        return RdstResult(False, str(e))
-                else:
-                    return RdstResult(False, "No API key provided")
-
-            elif key_choice == "Use environment variable":
-                llm_meta.update({
-                    "provider": prov,
-                    "shared": False,
-                    "vault_path": None,
-                    "hint": f"Using {env_var_name} environment variable",
-                })
-                cfg.save()
-                self._show_success("LLM Configured", f"Configured to use {env_var_name} from environment")
-                return RdstResult(True, f"LLM configured: {prov}")
-
-            else:  # Cancel
-                return RdstResult(False, "Cancelled")
-
-        elif "shared key" in choice:
-            # Copy encrypted key from lib/llm_manager/keys/ to ~/.rdst/keys/
-            import shutil
-            from pathlib import Path
-
-            source_key = Path(__file__).parent.parent / "llm_manager" / "keys" / f"{prov}.key.enc"
-            dest_dir = Path.home() / ".rdst" / "keys"
-            dest_key = dest_dir / f"{prov}.key.enc"
-
-            try:
-                # Create destination directory if needed
-                dest_dir.mkdir(parents=True, exist_ok=True)
-
-                # Copy encrypted key if source exists AND destination doesn't exist
-                if dest_key.exists():
-                    self._show_info("Shared Key Already Installed", f"Using existing key at {dest_key}")
-                elif source_key.exists():
-                    shutil.copy2(source_key, dest_key)
-                    self._show_info("Shared Key Installed", f"Encrypted key copied to {dest_key}")
-                else:
-                    self._show_warning(
-                        "Encrypted key not found",
-                        f"Missing source: {source_key}\n"
-                        f"Missing destination: {dest_key}\n\n"
-                        f"Contact your admin for the encrypted key file."
-                    )
-
-                llm_meta.update({
-                    "provider": prov,
-                    "shared": True,
-                    "vault_path": str(dest_key),
-                    "hint": "Using shared key pool",
-                })
-                cfg.save()
-
-                # Show setup instructions
-                self._show_success(
-                    "LLM Configured",
-                    f"Using shared {prov.upper()} key pool (limited quota)\n\n"
-                    f"To use RDST, set this environment variable:\n"
-                    f"  export RDST_LLM_SHARED_KEY=\"ALPHA-STATIC-SHARED-KEY\"\n\n"
-                    f"For persistence, add to ~/.bashrc:\n"
-                    f"  echo 'export RDST_LLM_SHARED_KEY=\"ALPHA-STATIC-SHARED-KEY\"' >> ~/.bashrc\n"
-                    f"  source ~/.bashrc"
-                )
-
-                return RdstResult(True, f"LLM configured: {prov} (shared)")
-
-            except Exception as e:
-                self._show_error("Failed to set up shared key", str(e))
-                return RdstResult(False, f"Failed to set up shared key: {e}")
-
-        else:  # Skip
-            return RdstResult(False, "Skipped LLM configuration")
+            return RdstResult(False, "ANTHROPIC_API_KEY not set. See instructions above.")

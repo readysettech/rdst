@@ -67,9 +67,35 @@ STRUCTURE_HASH=""
 LIST_HASH=""
 
 # LLM and environment configuration
-export RDST_LLM_SHARED_KEY="${RDST_LLM_SHARED_KEY:-ALPHA-STATIC-SHARED-KEY}"
-export RDST_LLM_PROVIDER="${RDST_LLM_PROVIDER:-lmstudio}"
-export LMSTUDIO_BASE_URL="${LMSTUDIO_BASE_URL:-http://127.0.0.1:65535/v1/chat/completions}"
+# Fetch ANTHROPIC_API_KEY from AWS Secrets Manager when running in Buildkite
+if [[ -z "${ANTHROPIC_API_KEY:-}" && -n "${BUILDKITE:-}" ]]; then
+  if command -v aws >/dev/null 2>&1; then
+    echo "Fetching ANTHROPIC_API_KEY from AWS Secrets Manager..."
+    # Secret is stored as JSON: {"ANTHROPIC_API_KEY": "sk-ant-..."}
+    SECRET_JSON=$(aws secretsmanager get-secret-value \
+      --secret-id ANTHROPIC_API_KEY \
+      --region us-east-2 \
+      --query SecretString \
+      --output text 2>/dev/null || echo "")
+    if [[ -n "$SECRET_JSON" ]]; then
+      ANTHROPIC_API_KEY=$(echo "$SECRET_JSON" | "$PYTHON_BIN" -c "import sys,json; print(json.load(sys.stdin).get('ANTHROPIC_API_KEY',''))" 2>/dev/null || echo "")
+      if [[ -n "$ANTHROPIC_API_KEY" ]]; then
+        export ANTHROPIC_API_KEY
+        echo "✓ ANTHROPIC_API_KEY loaded from Secrets Manager"
+      else
+        echo "Warning: Failed to parse ANTHROPIC_API_KEY from secret JSON"
+      fi
+    else
+      echo "Warning: Failed to fetch ANTHROPIC_API_KEY from Secrets Manager"
+    fi
+  else
+    echo "Warning: AWS CLI not available, ANTHROPIC_API_KEY not set"
+  fi
+fi
+
+# Disable telemetry during tests
+export RDST_TESTING=true
+
 export RICH_NO_COLOR=1
 export TERM=dumb
 
