@@ -1,9 +1,27 @@
 [project]
-name = "rdst"
-version = "0.1.0"  # TODO: Set up proper versioning when publishing to PyPI
+name = "rdst-staging"
+dynamic = ["version"]
 description = "ReadySet Diagnostics & SQL Tuning - CLI tool for database diagnostics and query optimization"
 readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "ReadySet", email = "support@readyset.io"}
+]
+keywords = ["database", "sql", "optimization", "readyset", "diagnostics", "performance", "caching"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Topic :: Database",
+    "Topic :: Software Development :: Testing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "boto3",
     "requests==2.31.0",
@@ -16,9 +34,20 @@ dependencies = [
     "posthog",
 ]
 
+[project.urls]
+Homepage = "https://readyset.io"
+Documentation = "https://docs.readyset.io"
+Repository = "https://github.com/readysettech/readyset"
+Issues = "https://github.com/readysettech/readyset/issues"
+Changelog = "https://github.com/readysettech/readyset/releases"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "_version_build.py"
+pattern = "__version__ = ['\"](?P<version>[^'\"]+)['\"]"
 
 [tool.hatch.build.targets.wheel]
 packages = ["lib"]

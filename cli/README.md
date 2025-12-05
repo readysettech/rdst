@@ -1,97 +1,116 @@
 # RDST - ReadySet Diagnostics & SQL Tuning
 
-A command-line interface for diagnostics, query analysis, performance tuning, and caching with ReadySet.
+A command-line tool for database diagnostics, query analysis, performance tuning, and caching optimization with ReadySet.
+
+## What is RDST?
+
+RDST helps you:
+- Analyze SQL queries for caching opportunities
+- Identify slow queries in real-time
+- Get optimization suggestions
+- Evaluate query compatibility with ReadySet cache
+- Manage database connection profiles
 
 ## Installation
 
-RDST is distributed as a Python package and can be installed using `uvx` or `pipx`.
+### Using uvx (recommended - no installation required)
 
-### Using uvx (recommended)
-
-Download and run RDST directly without installation:
+Run RDST directly without installing:
 
 ```bash
-# Download from S3 (production)
-aws s3 cp s3://readyset-rdst/stage01/latest/ . --recursive --exclude "*" --include "*.whl"
-uvx ./rdst-*.whl --help
-
-# Or download from S3 (dev)
-aws s3 cp s3://readyset-rdst-test/dev01/latest/ . --recursive --exclude "*" --include "*.whl"
-uvx ./rdst-*.whl --help
+uvx rdst-staging --help
+uvx rdst-staging analyze "SELECT * FROM users WHERE id = 1"
 ```
 
-### Using pipx
+### Using pipx (persistent installation)
 
-Download and install globally:
+Install globally:
 
 ```bash
-# Download from S3 (production)
-aws s3 cp s3://readyset-rdst/stage01/latest/ . --recursive --exclude "*" --include "*.whl"
-pipx install ./rdst-*.whl
+# Install
+pipx install rdst-staging
 
-# Or download from S3 (dev)
-aws s3 cp s3://readyset-rdst-test/dev01/latest/ . --recursive --exclude "*" --include "*.whl"
-pipx install ./rdst-*.whl
-
-# Run installed version
+# Run
 rdst --help
 
 # Upgrade to latest version
-aws s3 cp s3://readyset-rdst/stage01/latest/ . --recursive --exclude "*" --include "*.whl"
-pipx upgrade rdst --pip-args="--force-reinstall" ./rdst-*.whl
+pipx upgrade rdst-staging
 ```
 
-### Alternative: HTTPS URLs
-
-If the S3 bucket is public, you can install directly via HTTPS:
+### Using pip
 
 ```bash
-# Using uvx (runs directly, no installation)
-uvx https://readyset-rdst.s3.amazonaws.com/stage01/latest/rdst-0.1.0-py3-none-any.whl --help
-uvx https://readyset-rdst.s3.amazonaws.com/stage01/latest/rdst-0.1.0-py3-none-any.whl analyze "SELECT * FROM users"
-
-# Using pipx (install globally)
-pipx install https://readyset-rdst.s3.amazonaws.com/stage01/latest/rdst-0.1.0-py3-none-any.whl
-
-# Upgrade with pipx
-pipx upgrade rdst --pip-args="--force-reinstall" \
-  https://readyset-rdst.s3.amazonaws.com/stage01/latest/rdst-0.1.0-py3-none-any.whl
+pip install rdst-staging
 ```
 
-## Build from Source
+## Quick Start
 
-RDST uses Python 3.11+ and modern Python packaging.
+1. **Initialize RDST:**
+   ```bash
+   rdst init
+   # Or with uvx (no installation needed):
+   uvx rdst-staging init
+   ```
 
-```bash
-# Install dependencies (using uv)
-uv pip install -r requirements.txt
+2. **Configure database connection:**
+   ```bash
+   rdst configure add-target mydb \
+     --host localhost \
+     --port 5432 \
+     --database myapp \
+     --user postgres
+   ```
 
-# Run RDST
-python rdst.py --help
+3. **Analyze queries:**
+   ```bash
+   # Analyze a specific query
+   rdst analyze "SELECT * FROM users WHERE active = true"
 
-# Or build and install locally
-python -m build
-pipx install dist/rdst-0.1.0-py3-none-any.whl
-```
+   # With uvx:
+   uvx rdst-staging analyze "SELECT * FROM users WHERE active = true"
 
-## Building Distribution Packages
+   # Analyze with ReadySet cache evaluation
+   rdst analyze --readyset-cache "SELECT * FROM products ORDER BY created_at"
+   ```
 
-RDST uses Python's standard build system. The Buildkite pipeline automatically builds and uploads packages to S3 on merge to main.
+4. **Monitor slow queries:**
+   ```bash
+   rdst top
+   # Or: uvx rdst-staging top
+   ```
 
 ## Commands
 
+All commands can be run with `rdst` (if installed) or `uvx rdst-staging` (no installation):
+
 - `rdst configure` - Manage database targets and connection profiles
-- `rdst top` - Live view of top slow queries
-- `rdst analyze` - Analyze and explain SQL queries (use `--readyset-cache` for ReadySet cache evaluation)
-- `rdst tune` - Get optimization suggestions for queries
-- `rdst init` - First-time setup wizard
+- `rdst analyze` - Analyze SQL queries and evaluate caching opportunities
+- `rdst top` - Live view of slow queries
+- `rdst tune` - Get query optimization suggestions
 - `rdst query` - Manage query registry
+- `rdst init` - First-time setup wizard
 - `rdst version` - Show version information
 
-## Development
+**Example with uvx:**
+```bash
+uvx rdst-staging analyze "SELECT * FROM orders WHERE status = 'pending'"
+```
 
-RDST is part of the ReadySet monorepo. This directory contains:
-- `rdst.py` - Main CLI entry point
-- `lib/` - Core functionality modules
-- `pyproject.toml` - Python package configuration
-- `.buildkite/` - CI/CD pipeline for building and deploying packages
+## Requirements
+
+- Python 3.11 or higher
+- PostgreSQL or MySQL database access
+
+## About ReadySet
+
+ReadySet is a SQL caching engine that sits between your application and database, automatically caching query results to improve performance. Learn more at [readyset.io](https://readyset.io).
+
+## Documentation
+
+- [ReadySet Documentation](https://docs.readyset.io)
+- [GitHub Repository](https://github.com/readysettech/readyset)
+- [Report Issues](https://github.com/readysettech/readyset/issues)
+
+## License
+
+MIT License - see LICENSE file for details

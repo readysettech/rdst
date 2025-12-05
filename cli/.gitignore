@@ -30,3 +30,4 @@ uv.lock
 # OS
 .DS_Store
 Thumbs.db
+_version_build.py
