@@ -58,6 +58,13 @@ def setup_readyset_containers(
         # Get database engine from target config
         engine = target_config.get("engine", "postgresql").lower()
 
+        # Validate that database name is configured (required for --readyset-cache)
+        if "database" not in target_config or not target_config["database"]:
+            return {
+                "success": False,
+                "error": f"Database name not configured for target '{target_name}'. Please update your target configuration with 'rdst configure edit --target {target_name}' and specify the database name."
+            }
+
         # Get user from target config
         target_user = target_config.get("user", "postgres" if engine == "postgresql" else "root")
 
@@ -110,11 +117,14 @@ def setup_readyset_containers(
                         break
 
             # Return existing configuration without running full workflow
+            # Extract database name from target config
+            target_database = target_config["database"]
+
             test_db_config = {
                 "engine": engine,
                 "host": "localhost",
                 "port": test_port,
-                "database": "testdb",
+                "database": target_database,
                 "user": target_user,
                 "password": password
             }
@@ -148,11 +158,14 @@ def setup_readyset_containers(
             }
 
         mgr = WorkflowManager.from_file(str(workflow_path), resources=workflow_functions)
+        # Extract database name from target config, fallback to testdb
+        target_database = target_config.get("database", "testdb")
+
         readyset_input = {
             "target_name": target_name,
             "target_config": target_config,
             "container_name_pattern": container_name,
-            "default_database": "testdb",
+            "default_database": target_database,
             "default_user": target_user,
             "default_port": test_port,
             "readyset_port": readyset_port,

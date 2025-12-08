@@ -37,9 +37,8 @@ def parse_arguments() -> argparse.Namespace:
 Commands:
   configure     Manage database targets and connection profiles
   top          Live view of top slow queries
-  analyze      Analyze and explain SQL queries  
+  analyze      Analyze and explain SQL queries
   tune         Get optimization suggestions for queries
-  cache        Evaluate Readyset caching benefits
   init         First-time setup wizard
   tag          Tag and store queries for later reference
   list         Show saved queries
@@ -51,8 +50,8 @@ Examples:
   rdst configure add --target prod --host db.example.com --user admin
   rdst configure list
   rdst analyze "SELECT * FROM users WHERE active = true"
+  rdst analyze "SELECT COUNT(*) FROM orders WHERE status = 'pending'" --readyset-cache
   rdst tune "SELECT u.name, p.title FROM users u JOIN posts p ON u.id = p.user_id"
-  rdst cache "SELECT COUNT(*) FROM orders WHERE status = 'pending'"
   rdst top --limit 10
         """
     )
@@ -126,6 +125,7 @@ Examples:
     analyze_parser.add_argument('--target', help='Target database')
     analyze_parser.add_argument('--save-as', help='Name to save query as after analysis')
     analyze_parser.add_argument('--readyset', action='store_true', help='Run analysis against local Readyset Docker container')
+    analyze_parser.add_argument('--readyset-cache', action='store_true', dest='readyset_cache', help='Evaluate ReadySet caching with performance comparison')
     analyze_parser.add_argument('--fast', action='store_true', help='Auto-skip slow EXPLAIN ANALYZE queries after 10 seconds (for testing)')
     analyze_parser.add_argument('--interactive', action='store_true', help='Enter interactive mode after analysis for Q&A about recommendations')
     analyze_parser.add_argument('--review', action='store_true', help='Review conversation history for this query without re-analyzing')
@@ -133,14 +133,6 @@ Examples:
     # tune command
     tune_parser = subparsers.add_parser('tune', help='Get optimization suggestions')
     tune_parser.add_argument('query', help='SQL query to tune')
-
-    # cache command
-    cache_parser = subparsers.add_parser('cache', help='Evaluate caching benefits')
-    cache_parser.add_argument('query', help='SQL query or hash_id from registry to evaluate')
-    cache_parser.add_argument('--target', help='Specific configured DB target')
-    cache_parser.add_argument('--strategy', default='explicit', help='Caching strategy')
-    cache_parser.add_argument('--name', help='Name to assign to the query when saving to registry')
-    cache_parser.add_argument('--json', action='store_true', help='Output results in JSON format')
 
     # init command
     init_parser = subparsers.add_parser('init', help='First-time setup wizard')
@@ -228,7 +220,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         return cli.top(**kwargs)
     elif command == 'analyze':
         # Create filtered kwargs for analyze (exclude analyze-specific parameters)
-        analyze_exclude_keys = ['query', 'hash', 'inline_query', 'file', 'stdin', 'name', 'target', 'save_as', 'readyset', 'fast', 'interactive', 'review']
+        analyze_exclude_keys = ['query', 'hash', 'inline_query', 'file', 'stdin', 'name', 'target', 'save_as', 'readyset', 'readyset_cache', 'fast', 'interactive', 'review']
         filtered_kwargs = {k: v for k, v in kwargs.items() if k not in analyze_exclude_keys}
 
         return cli.analyze(
@@ -241,6 +233,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             target=getattr(args, 'target', None),
             save_as=getattr(args, 'save_as', None),
             readyset=getattr(args, 'readyset', False),
+            readyset_cache=getattr(args, 'readyset_cache', False),
             fast=getattr(args, 'fast', False),
             interactive=getattr(args, 'interactive', False),
             review=getattr(args, 'review', False),
@@ -250,10 +243,6 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         tune_exclude_keys = ['query']
         filtered_kwargs = {k: v for k, v in kwargs.items() if k not in tune_exclude_keys}
         return cli.tune(args.query, **filtered_kwargs)
-    elif command == 'cache':
-        cache_exclude_keys = ['query']
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in cache_exclude_keys}
-        return cli.cache(args.query, **filtered_kwargs)
     elif command == 'init':
         return cli.init(**kwargs)
     elif command == 'query':
@@ -340,7 +329,6 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             ("top", "Live view of slow queries"),
             ("analyze", "Analyze a SQL query"),
             ("tune", "Suggest optimizations for a SQL query"),
-            ("cache", "Evaluate caching for a SQL query"),
             ("init", "First-time setup wizard"),
             ("query", "Manage query registry"),
             ("list", "Show saved queries"),
@@ -403,7 +391,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             except ValueError:
                 limit = 20
             return cli.top(limit=limit)
-        elif cmd in ("analyze", "tune", "cache"):
+        elif cmd in ("analyze", "tune"):
             query = input("SQL query: ").strip()
             if not query:
                 return RdstResult(False, f"{cmd} requires a SQL query")
@@ -411,9 +399,6 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
                 return cli.analyze(query)
             if cmd == "tune":
                 return cli.tune(query)
-            # cache
-            strategy = input("Strategy [explicit]: ").strip() or "explicit"
-            return cli.cache(query, strategy=strategy)
         elif cmd == "init":
             return cli.init()
         elif cmd == "query":

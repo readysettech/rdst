@@ -238,7 +238,22 @@ def _execute_postgres_query(
     database: str,
     password: str
 ):
-    """Execute query using psql client."""
+    """Execute query using psycopg2 library or psql client as fallback."""
+    # Try psycopg2 first
+    try:
+        import psycopg2
+        return _execute_postgres_query_psycopg2(
+            query=query,
+            host=host,
+            port=port,
+            user=user,
+            database=database,
+            password=password
+        )
+    except ImportError:
+        # Fall back to psql CLI if psycopg2 not available
+        pass
+
     psql_cmd = [
         'psql',
         '-h', host,
@@ -262,6 +277,60 @@ def _execute_postgres_query(
         env=env,
         timeout=30
     )
+
+
+def _execute_postgres_query_psycopg2(
+    query: str,
+    host: str,
+    port: int,
+    user: str,
+    database: str,
+    password: str
+):
+    """Execute query using psycopg2 library."""
+    import psycopg2
+    from dataclasses import dataclass
+
+    @dataclass
+    class CompletedProcess:
+        returncode: int
+        stdout: str
+        stderr: str
+
+    try:
+        connection = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            connect_timeout=30
+        )
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                result = cursor.fetchall()
+
+                # Format output similar to psql CLI (pipe-separated rows)
+                output_lines = []
+                for row in result:
+                    output_lines.append('|'.join(str(val) if val is not None else '' for val in row))
+
+                return CompletedProcess(
+                    returncode=0,
+                    stdout='\n'.join(output_lines),
+                    stderr=''
+                )
+        finally:
+            connection.close()
+
+    except Exception as e:
+        return CompletedProcess(
+            returncode=1,
+            stdout='',
+            stderr=str(e)
+        )
 
 
 def _execute_mysql_query(

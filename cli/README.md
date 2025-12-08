@@ -82,9 +82,8 @@ RDST uses Python's standard build system. The Buildkite pipeline automatically b
 
 - `rdst configure` - Manage database targets and connection profiles
 - `rdst top` - Live view of top slow queries
-- `rdst analyze` - Analyze and explain SQL queries
+- `rdst analyze` - Analyze and explain SQL queries (use `--readyset-cache` for ReadySet cache evaluation)
 - `rdst tune` - Get optimization suggestions for queries
-- `rdst cache` - Evaluate ReadySet caching benefits
 - `rdst init` - First-time setup wizard
 - `rdst query` - Manage query registry
 - `rdst version` - Show version information

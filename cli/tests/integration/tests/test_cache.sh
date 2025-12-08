@@ -12,11 +12,12 @@ test_cache_commands() {
   local simple_query="SELECT * FROM title_basics WHERE tconst = 'tt0000001'"
 
   run_cmd "Cache query by SQL text" \
-    "${RDST_CMD[@]}" cache \
+    "${RDST_CMD[@]}" analyze \
+    --readyset-cache \
     --target "$TARGET_NAME" \
     "$simple_query"
   assert_contains "ReadySet Cache Performance Analysis" "cache text header"
-  assert_contains "Step 1:" "cache workflow step 1"
+  assert_contains "Performance Comparison" "cache performance comparison"
   assert_not_contains "ERROR:" "cache should not error"
 
   # Get hash of the simple query we just cached
@@ -25,25 +26,23 @@ test_cache_commands() {
   [[ -n "$CACHE_HASH" ]] || fail "Failed to capture cache query hash from list output"
 
   run_cmd "Cache query by registry hash (${CACHE_HASH})" \
-    "${RDST_CMD[@]}" cache --target "$TARGET_NAME" "$CACHE_HASH"
+    "${RDST_CMD[@]}" analyze --readyset-cache --target "$TARGET_NAME" --hash "$CACHE_HASH"
   assert_contains "ReadySet Cache Performance Analysis" "cache hash header"
   assert_not_contains "ERROR:" "cache by hash should not error"
 
-  run_cmd "Cache command with JSON output" \
-    "${RDST_CMD[@]}" cache \
-    --json \
-    --target "$TARGET_NAME" \
-    "SELECT * FROM title_basics WHERE tconst = 'tt0000002'"
-  assert_json "cache --json output"
+  # Note: analyze command doesn't have --json flag, removed from test
+  # JSON output is available through the workflow result data structure
 
   run_cmd "Cache duplicate query first run" \
-    "${RDST_CMD[@]}" cache \
+    "${RDST_CMD[@]}" analyze \
+    --readyset-cache \
     --target "$TARGET_NAME" \
     "SELECT * FROM title_basics WHERE tconst = 'tt0000003' LIMIT 5"
   assert_contains "ReadySet Cache Performance Analysis" "cache duplicate first run"
 
   run_cmd "Cache duplicate query second run" \
-    "${RDST_CMD[@]}" cache \
+    "${RDST_CMD[@]}" analyze \
+    --readyset-cache \
     --target "$TARGET_NAME" \
     "SELECT * FROM title_basics WHERE tconst = 'tt0000003' LIMIT 5"
   assert_contains "ReadySet Cache Performance Analysis" "cache duplicate second run"

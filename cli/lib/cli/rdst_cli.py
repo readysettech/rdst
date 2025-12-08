@@ -304,7 +304,7 @@ class RdstCLI:
                 file: Optional[str] = None, stdin: bool = False, name: Optional[str] = None,
                 positional_query: Optional[str] = None, target: Optional[str] = None,
                 save_as: Optional[str] = None, db: Optional[str] = None, readyset: bool = False,
-                fast: bool = False, interactive: bool = False, review: bool = False, **kwargs) -> RdstResult:
+                readyset_cache: bool = False, fast: bool = False, interactive: bool = False, review: bool = False, **kwargs) -> RdstResult:
         """
         Analyze SQL query with support for multiple input modes.
 
@@ -328,6 +328,7 @@ class RdstCLI:
             save_as: Name to save query as after analysis
             db: Legacy parameter for target database
             readyset: Whether to use local Readyset Docker container
+            readyset_cache: Whether to evaluate ReadySet caching with performance comparison
             fast: Whether to auto-skip slow EXPLAIN ANALYZE queries after 10 seconds
             interactive: Whether to enter interactive mode after analysis
             review: Whether to review conversation history instead of analyzing
@@ -378,7 +379,7 @@ class RdstCLI:
                     pass
 
             # Execute analysis
-            result = analyze_cmd.execute_analyze(resolved_input, target=target_db, readyset=readyset, fast=fast, interactive=interactive, review=review)
+            result = analyze_cmd.execute_analyze(resolved_input, target=target_db, readyset=readyset, readyset_cache=readyset_cache, fast=fast, interactive=interactive, review=review)
 
             # Extract query hash from result for telemetry
             if result.data:
@@ -450,60 +451,6 @@ class RdstCLI:
             return RdstResult(False, "tune requires a SQL query")
         msg = "Tune stub – would suggest rewrites/indexes/caching."
         return RdstResult(True, msg, data={"query": query})
-
-    # rdst cache "<query>" or rdst cache "<hash_id>"
-    def cache(self, query: str, strategy: str = "explicit", target: Optional[str] = None,
-              tag: Optional[str] = None, json: bool = False, **kwargs) -> RdstResult:
-        """
-        Benchmark query performance and evaluate Readyset caching benefits.
-
-        New workflow:
-        1. Resolve query (from hash_id or direct SQL)
-        2. Run query against target DB and collect metrics (NO CACHE)
-        3. Cache query in Readyset container
-        4. Run query against Readyset and collect metrics (WITH CACHE)
-        5. Compare performance
-        6. Output CREATE CACHE command for user's production Readyset
-        7. Save query to registry if new
-
-        Args:
-            query: SQL query string OR hash_id from registry
-            strategy: Caching strategy (explicit, always, etc.)
-            target: Target database name
-            tag: Optional tag to assign when saving to registry
-            json: Output results in JSON format
-            **kwargs: Additional arguments
-
-        Returns:
-            RdstResult with performance comparison and caching instructions
-        """
-        from .cache_command import CacheCommand
-
-        try:
-            # Load target configuration
-            if not target:
-                cfg = TargetsConfig()
-                cfg.load()
-                target = cfg.get_default()
-
-            if not target:
-                return RdstResult(False, "No target specified and no default configured. Run 'rdst configure' first.")
-
-            cfg = TargetsConfig()
-            cfg.load()
-            target_config = cfg.get(target)
-
-            if not target_config:
-                available_targets = cfg.list_targets()
-                targets_str = ', '.join(available_targets) if available_targets else 'none'
-                return RdstResult(False, f"Target '{target}' not found. Available targets: {targets_str}")
-
-            # Execute cache command
-            cache_cmd = CacheCommand(client=self.client)
-            return cache_cmd.execute_cache(query, target, target_config, strategy, tag, json)
-
-        except Exception as e:
-            return RdstResult(False, f"cache command failed: {e}")
 
     # rdst init
     def init(self, **kwargs) -> RdstResult:

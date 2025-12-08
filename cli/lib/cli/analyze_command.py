@@ -539,7 +539,7 @@ class AnalyzeCommand:
         else:
             return "unknown"
 
-    def execute_analyze(self, resolved_input: AnalyzeInput, target: Optional[str] = None, readyset: bool = False, fast: bool = False, interactive: bool = False, review: bool = False) -> 'RdstResult':
+    def execute_analyze(self, resolved_input: AnalyzeInput, target: Optional[str] = None, readyset: bool = False, readyset_cache: bool = False, fast: bool = False, interactive: bool = False, review: bool = False) -> 'RdstResult':
         """
         Execute the analyze command with resolved input using the workflow engine.
 
@@ -547,6 +547,7 @@ class AnalyzeCommand:
             resolved_input: Resolved input from resolve_input()
             target: Target database name
             readyset: Whether to run parallel workflow with ReadySet testing
+            readyset_cache: Whether to evaluate ReadySet caching with performance comparison
             fast: Whether to auto-skip slow EXPLAIN ANALYZE queries after 10 seconds
             interactive: Whether to enter interactive mode after analysis
             review: Whether to review conversation history instead of analyzing
@@ -686,6 +687,11 @@ class AnalyzeCommand:
                 return RdstResult(False, f"Target '{target_name}' not found. Available targets: {targets_str}")
 
             readyset_analysis_result = None
+            cache_performance_result = None
+
+            # If cache is enabled, we need readyset containers too
+            if readyset_cache:
+                readyset = True
 
             if readyset:
                 with ThreadPoolExecutor(max_workers=2) as executor:
@@ -758,6 +764,21 @@ class AnalyzeCommand:
                 else:
                     workflow_result["readyset_analysis"] = readyset_analysis_result
 
+            # Run cache performance comparison if --readyset-cache flag is set
+            if readyset_cache and readyset_analysis_result and readyset_analysis_result.get("success"):
+                cache_performance_result = self._run_cache_performance_comparison(
+                    resolved_input=resolved_input,
+                    target_name=target_name,
+                    target_config=target_config,
+                    readyset_analysis_result=readyset_analysis_result
+                )
+
+                # Add cache results to workflow result
+                if workflow_result.get("success"):
+                    workflow_result["result"]["cache_performance"] = cache_performance_result
+                else:
+                    workflow_result["cache_performance"] = cache_performance_result
+
             if workflow_result["success"]:
                 # Clear all the workflow progress output before showing final result
                 import sys
@@ -770,6 +791,26 @@ class AnalyzeCommand:
                 # Include target_config for copy-paste test commands (uses env var name, not actual password)
                 workflow_result["result"]["target_config"] = target_config
                 formatted_results = format_analyze_output(workflow_result["result"])
+
+                # Append cache performance results if available
+                if readyset_cache and cache_performance_result:
+                    from ..functions.performance_comparison import format_performance_comparison
+                    formatted_results += "\n\n" + "="*70 + "\n"
+                    formatted_results += "ReadySet Cache Performance Analysis\n"
+                    formatted_results += "="*70 + "\n\n"
+
+                    if cache_performance_result.get("success"):
+                        perf_comparison = cache_performance_result.get("performance_comparison", {})
+                        if perf_comparison:
+                            formatted_results += format_performance_comparison(perf_comparison)
+
+                        # Add deployment instructions
+                        deployment_instructions = cache_performance_result.get("deployment_instructions", "")
+                        if deployment_instructions:
+                            formatted_results += "\n" + deployment_instructions
+                    else:
+                        error = cache_performance_result.get("error", "Unknown error")
+                        formatted_results += f"\nCache performance comparison failed: {error}\n"
 
                 # Handle --interactive flag (enter interactive mode after analysis)
                 # IMPORTANT: Only enter interactive mode if explain_results succeeded
@@ -973,8 +1014,37 @@ class AnalyzeCommand:
                 }
 
             # Extract values from setup result
-            readyset_port = setup_result_wrapper["readyset_port"]
-            setup_result = setup_result_wrapper["setup_result"]
+            # When containers are already running, values are at top level
+            # When creating new containers, they're nested under 'setup_result'
+            readyset_port = setup_result_wrapper.get("readyset_port")
+
+            if not readyset_port:
+                return {
+                    "success": False,
+                    "error": f"ReadySet port not found in setup result. Available keys: {list(setup_result_wrapper.keys())}"
+                }
+
+            # For target_config, check both top level and nested
+            if "setup_result" in setup_result_wrapper:
+                # New containers case - nested structure
+                setup_result = setup_result_wrapper["setup_result"]
+            else:
+                # Already running case - use the wrapper itself as setup_result
+                setup_result = setup_result_wrapper
+
+            # Get test_db_config and ensure password is set
+            test_db_config = setup_result.get("target_config", {})
+
+            # Resolve password from environment if needed
+            import os
+            password = target_config.get('password', '')
+            password_env = target_config.get('password_env')
+            if password_env:
+                password = os.environ.get(password_env, '')
+
+            # Ensure password is in test_db_config
+            if not test_db_config.get('password'):
+                test_db_config['password'] = password
 
             # Now run EXPLAIN CREATE CACHE against ReadySet
             print("  -> Running EXPLAIN CREATE CACHE on ReadySet...")
@@ -983,7 +1053,7 @@ class AnalyzeCommand:
             explain_result = explain_create_cache_readyset(
                 query=resolved_input.sql,
                 readyset_port=readyset_port,
-                test_db_config=setup_result.get("target_config", {})
+                test_db_config=test_db_config
             )
 
             print("  DONE: ReadySet cacheability analysis complete")
@@ -991,26 +1061,61 @@ class AnalyzeCommand:
             # If the query is cacheable, try to create the cache (unless already cached)
             create_result = {}
             already_cached = "already cached" in explain_result.get("explanation", "").lower()
+            explanation = explain_result.get("explanation", "")
             if explain_result.get("cacheable", False):
                 if already_cached:
-                    print("  ✓ Query is already cached in ReadySet")
+                    print(f"  ✓ {explanation}")
                     create_result = {
                         "success": True,
                         "cached": True,
                         "already_cached": True,
                         "message": "Query already cached"
                     }
+
+                    # Get cache ID for existing cache
+                    try:
+                        cache_id = self._get_cache_id_for_query(
+                            resolved_input.sql,
+                            readyset_port,
+                            test_db_config
+                        )
+                        if cache_id:
+                            print(f"     Cache ID: {cache_id}")
+                            create_result['cache_id'] = cache_id
+                    except Exception as e:
+                        print(f"     (Could not retrieve cache ID: {e})")
                 else:
                     print("  -> Query is cacheable, creating cache...")
+                    print(f"     Query to cache: {resolved_input.sql[:100]}{'...' if len(resolved_input.sql) > 100 else ''}")
                     create_result = create_cache_readyset(
                         query=resolved_input.sql,
                         readyset_port=readyset_port,
-                        test_db_config=setup_result.get("target_config", {})
+                        test_db_config=test_db_config
                     )
                     if create_result.get("cached"):
                         print("  ✓ Cache created successfully")
+
+                        # Get cache ID by querying SHOW CACHES
+                        try:
+                            cache_id = self._get_cache_id_for_query(
+                                resolved_input.sql,
+                                readyset_port,
+                                test_db_config
+                            )
+                            if cache_id:
+                                print(f"     Cache ID: {cache_id}")
+                                create_result['cache_id'] = cache_id
+                        except Exception as e:
+                            print(f"     (Could not retrieve cache ID: {e})")
                     else:
                         print(f"  ⚠ Cache creation failed: {create_result.get('error', 'Unknown error')}")
+                        print(f"     Details: {create_result}")
+            else:
+                print(f"  ℹ️  EXPLAIN CREATE CACHE: Query may not be cacheable")
+                explanation = explain_result.get('explanation', 'Unknown')
+                if explanation and explanation != 'Unknown':
+                    print(f"     Reason: {explanation}")
+                print(f"     Note: Will attempt to create cache anyway (EXPLAIN can be conservative)")
 
             # Merge static cacheability check with actual ReadySet result
             static_cacheability = {}
@@ -1019,6 +1124,7 @@ class AnalyzeCommand:
 
             return {
                 "success": True,
+                "readyset_port": readyset_port,
                 "setup_result": setup_result,
                 "explain_cache_result": explain_result,
                 "create_cache_result": create_result,
@@ -1995,6 +2101,321 @@ class AnalyzeCommand:
                 lines.append(f"   • Analysis ID: {analysis_id}")
 
         return "\n".join(lines)
+
+    def _get_cache_id_for_query(
+        self,
+        query: str,
+        readyset_port: int,
+        db_config: dict
+    ) -> str:
+        """
+        Query SHOW CACHES to get the cache ID for a specific query.
+
+        Args:
+            query: SQL query to find cache for
+            readyset_port: ReadySet port
+            db_config: Database configuration
+
+        Returns:
+            Cache ID (query_id) if found, None otherwise
+        """
+        import subprocess
+        import re
+
+        try:
+            database = db_config.get('database', 'testdb')
+            user = db_config.get('user', 'postgres')
+            password = db_config.get('password', '')
+            engine = (db_config.get('engine') or 'postgresql').lower()
+
+            # Normalize query for comparison (remove extra whitespace)
+            normalized_query = ' '.join(query.strip().split())
+
+            if engine == 'mysql':
+                cmd = [
+                    'mysql',
+                    '--protocol=TCP',
+                    f'--host=localhost',
+                    f'--port={readyset_port}',
+                    f'--user={user}',
+                    f'--database={database}',
+                    '-e', 'SHOW CACHES;'
+                ]
+                env = {'MYSQL_PWD': password} if password else {}
+            else:
+                # PostgreSQL - use unaligned output for easier parsing
+                cmd = [
+                    'psql',
+                    '-h', 'localhost',
+                    '-p', str(readyset_port),
+                    '-U', user,
+                    '-d', database,
+                    '-c', 'SHOW CACHES;',
+                    '-A',  # Unaligned output
+                    '-t',  # Tuples only (no headers)
+                    '-F', '|||'  # Use triple pipe as field separator (less likely to conflict)
+                ]
+                env = {'PGPASSWORD': password} if password else {}
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env={**subprocess.os.environ, **env}
+            )
+
+            if result.returncode != 0:
+                return None
+
+            # Parse output to find matching query
+            # SHOW CACHES with -A -t -F '|||' gives: query_id|||cache_name|||query_text|||fallback|||count
+            # Query text may span multiple lines, so we need to accumulate
+            lines = result.stdout.strip().split('\n')
+
+            current_cache_id = None
+            current_query_parts = []
+
+            for line in lines:
+                if not line.strip():
+                    continue
+
+                parts = line.split('|||')
+
+                # New cache entry starts when first field has a query_id (starts with 'q_')
+                if len(parts) >= 3 and parts[0].strip().startswith('q_'):
+                    # Check previous cache if we have one
+                    if current_cache_id and current_query_parts:
+                        full_query = ' '.join(current_query_parts)
+                        normalized_cache_query = ' '.join(full_query.strip().split())
+
+                        if normalized_query.lower() in normalized_cache_query.lower():
+                            return current_cache_id
+
+                    # Start new cache entry
+                    current_cache_id = parts[0].strip()
+                    current_query_parts = [parts[2].strip()]
+                elif current_cache_id and len(parts) >= 3:
+                    # Continuation line for current cache
+                    current_query_parts.append(parts[2].strip())
+
+            # Check the last cache entry
+            if current_cache_id and current_query_parts:
+                full_query = ' '.join(current_query_parts)
+                normalized_cache_query = ' '.join(full_query.strip().split())
+
+                if normalized_query.lower() in normalized_cache_query.lower():
+                    return current_cache_id
+
+            return None
+
+        except Exception as e:
+            # Silently fail - cache ID is nice to have but not critical
+            return None
+
+    def _run_cache_performance_comparison(
+        self,
+        resolved_input: AnalyzeInput,
+        target_name: str,
+        target_config: dict,
+        readyset_analysis_result: dict
+    ) -> dict:
+        """
+        Run cache creation and performance comparison workflow.
+
+        Args:
+            resolved_input: Resolved input with query info
+            target_name: Name of the target database
+            target_config: Resolved target configuration
+            readyset_analysis_result: Results from ReadySet analysis (contains container info)
+
+        Returns:
+            Dict containing cache performance comparison results
+        """
+        try:
+            import os
+            from ..functions.readyset_explain_cache import create_cache_readyset
+            from ..functions.performance_comparison import compare_query_performance, format_performance_comparison
+
+            print("\n🚀 Running cache performance comparison...")
+
+            # Extract ReadySet container info from analysis result
+            if not readyset_analysis_result.get("success"):
+                return {
+                    "success": False,
+                    "error": "ReadySet analysis failed, cannot run cache comparison"
+                }
+
+            readyset_port = readyset_analysis_result.get("readyset_port")
+            if not readyset_port:
+                return {
+                    "success": False,
+                    "error": "ReadySet port not available from setup"
+                }
+
+            # Get test_db_config from setup result
+            test_db_config = readyset_analysis_result.get("setup_result", {}).get("target_config", {})
+
+            # Get password from environment
+            password = target_config.get('password', '')
+            password_env = target_config.get('password_env')
+            if password_env:
+                password = os.environ.get(password_env, '')
+
+            # Ensure password is set from our target_config
+            if not test_db_config.get('password'):
+                test_db_config['password'] = password
+
+            # Check if cache is already created or if we need to create it
+            create_result = readyset_analysis_result.get("create_cache_result", {})
+
+            if not create_result.get("cached") and not create_result.get("already_cached"):
+                # Cache wasn't created in ReadySet analysis, create it now
+                print("  -> Creating cache in ReadySet...")
+                print(f"     Query: {resolved_input.sql[:100]}{'...' if len(resolved_input.sql) > 100 else ''}")
+                create_result = create_cache_readyset(
+                    query=resolved_input.sql,
+                    readyset_port=readyset_port,
+                    test_db_config=test_db_config
+                )
+
+                if not create_result.get('success') and not create_result.get('cached'):
+                    print(f"  ✗ Cache creation failed: {create_result.get('error', 'Unknown error')}")
+                    return {
+                        "success": False,
+                        "error": f"Failed to create cache: {create_result.get('error', 'Unknown error')}"
+                    }
+                print(f"  ✓ Cache created successfully")
+
+                # Get cache ID by querying SHOW CACHES
+                try:
+                    cache_id = self._get_cache_id_for_query(
+                        resolved_input.sql,
+                        readyset_port,
+                        test_db_config
+                    )
+                    if cache_id:
+                        print(f"     Cache ID: {cache_id}")
+                        create_result['cache_id'] = cache_id
+                except Exception as e:
+                    print(f"     (Could not retrieve cache ID: {e})")
+            else:
+                print(f"  ℹ️  Cache already exists")
+                # Try to get the cache ID even if it already existed
+                try:
+                    cache_id = self._get_cache_id_for_query(
+                        resolved_input.sql,
+                        readyset_port,
+                        test_db_config
+                    )
+                    if cache_id:
+                        print(f"     Cache ID: {cache_id}")
+                        create_result['cache_id'] = cache_id
+                except Exception:
+                    pass
+
+            # Run performance comparison
+            print("  -> Running performance comparison (10 iterations with 2 warmup)...")
+
+            # Use the original target DB configuration (production database)
+            original_db_config = {
+                'engine': target_config.get('engine', 'postgresql'),
+                'host': target_config.get('host', 'localhost'),
+                'port': target_config.get('port', 5432),
+                'database': target_config.get('database', 'postgres'),
+                'user': target_config.get('user', 'postgres'),
+                'password': password
+            }
+
+            perf_result = compare_query_performance(
+                query=resolved_input.sql,
+                original_db_config=original_db_config,
+                readyset_port=readyset_port,
+                readyset_host='localhost',
+                iterations=10,
+                warmup_iterations=2
+            )
+
+            if not perf_result.get('success'):
+                return {
+                    "success": False,
+                    "error": f"Performance comparison failed: {perf_result.get('error', 'Unknown error')}"
+                }
+
+            print("  ✓ Performance comparison complete")
+
+            # Generate deployment instructions
+            from ..functions.readyset_cacheability import check_readyset_cacheability
+            static_result = check_readyset_cacheability(query=resolved_input.sql)
+            cache_command = static_result.get('create_cache_command') or f"CREATE CACHE FROM {resolved_input.sql};"
+
+            deployment_instructions = []
+            deployment_instructions.append("\n" + "="*70)
+            deployment_instructions.append("Deployment Instructions")
+            deployment_instructions.append("="*70)
+            deployment_instructions.append("")
+            deployment_instructions.append("To cache this query in your ReadySet instance:")
+            deployment_instructions.append("")
+            deployment_instructions.append(cache_command)
+            deployment_instructions.append("")
+            deployment_instructions.append("Connect to your ReadySet and run this command:")
+            if target_config.get('engine') == 'mysql':
+                deployment_instructions.append(f"  mysql -h YOUR_READYSET_HOST -P YOUR_READYSET_PORT -u {target_config['user']} -D {target_config['database']}")
+            else:
+                deployment_instructions.append(f"  psql -h YOUR_READYSET_HOST -p YOUR_READYSET_PORT -U {target_config['user']} -d {target_config['database']}")
+            deployment_instructions.append("")
+            deployment_instructions.append("=" * 70)
+            deployment_instructions.append("Notes on Local Test Containers")
+            deployment_instructions.append("=" * 70)
+            deployment_instructions.append("")
+            deployment_instructions.append(f"• Test containers are persistent and reused across runs")
+            deployment_instructions.append(f"• ReadySet container port: {readyset_port}")
+            deployment_instructions.append(f"• To view all caches: psql -h localhost -p {readyset_port} -U {target_config['user']} -d {target_config['database']} -c 'SHOW CACHES;'")
+            deployment_instructions.append(f"• To drop this cache: psql -h localhost -p {readyset_port} -U {target_config['user']} -d {target_config['database']} -c \"DROP CACHE <cache_name>;\"")
+            deployment_instructions.append("")
+
+            return {
+                "success": True,
+                "performance_comparison": perf_result,
+                "cache_command": cache_command,
+                "deployment_instructions": "\n".join(deployment_instructions),
+                "create_result": create_result
+            }
+
+        except ImportError as e:
+            print(f"  ERROR: Missing required dependency: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Missing required dependency for cache comparison: {str(e)}"
+            }
+        except KeyError as e:
+            print(f"  ERROR: Missing required configuration key: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Invalid configuration - missing required key {str(e)}. Please check your target configuration."
+            }
+        except ConnectionError as e:
+            print(f"  ERROR: Failed to connect to database or ReadySet: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Database connection failed: {str(e)}. Ensure containers are running and accessible."
+            }
+        except TimeoutError as e:
+            print(f"  ERROR: Operation timed out: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Performance comparison timed out: {str(e)}. Database or ReadySet may be unresponsive."
+            }
+        except Exception as e:
+            # Catch-all for unexpected errors - include more context
+            import traceback
+            error_context = f"{type(e).__name__}: {str(e)}"
+            print(f"  ERROR: Cache performance comparison failed: {error_context}")
+            print(f"  Debug info: {traceback.format_exc()[:500]}")  # Print first 500 chars of traceback
+            return {
+                "success": False,
+                "error": f"Cache performance comparison failed with {error_context}. Run with --verbose for full traceback."
+            }
 
 
 def _generate_create_index_statement(index_name: str, query: str) -> str:
