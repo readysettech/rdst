@@ -33,7 +33,10 @@ def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str,
     Args:
         sql: The SQL query to analyze
         target: Target database configuration name
-        **kwargs: Additional workflow parameters including target_config
+        **kwargs: Additional workflow parameters including:
+            - target_config: Database connection configuration
+            - fast_mode: If True, auto-skip after 10 seconds
+            - rewrite_max_time_ms: Max time for rewrite testing (auto-cancel if exceeded)
 
     Returns:
         Dict containing:
@@ -77,10 +80,18 @@ def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str,
         if isinstance(fast_mode, str):
             fast_mode = fast_mode.lower() in ['true', '1', 'yes']
 
+        # Extract rewrite_max_time_ms for rewrite testing timeout
+        rewrite_max_time_ms = kwargs.get('rewrite_max_time_ms')
+        if isinstance(rewrite_max_time_ms, str):
+            try:
+                rewrite_max_time_ms = float(rewrite_max_time_ms)
+            except (ValueError, TypeError):
+                rewrite_max_time_ms = None
+
         if engine in ['postgresql', 'postgres']:
-            return _execute_postgres_explain_analyze(sql, target_config, fast_mode=fast_mode)
+            return _execute_postgres_explain_analyze(sql, target_config, fast_mode=fast_mode, rewrite_max_time_ms=rewrite_max_time_ms)
         elif engine in ['mysql', 'mariadb']:
-            return _execute_mysql_explain_analyze(sql, target_config, fast_mode=fast_mode)
+            return _execute_mysql_explain_analyze(sql, target_config, fast_mode=fast_mode, rewrite_max_time_ms=rewrite_max_time_ms)
         else:
             return {
                 "success": False,
@@ -98,8 +109,14 @@ def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str,
         }
 
 
-def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], fast_mode: bool = False) -> Dict[str, Any]:
-    """Execute EXPLAIN ANALYZE for PostgreSQL."""
+def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], fast_mode: bool = False, rewrite_max_time_ms: float = None) -> Dict[str, Any]:
+    """Execute EXPLAIN ANALYZE for PostgreSQL with timeout handling.
+
+    Behavior:
+    - fast_mode=True: SKIP EXPLAIN ANALYZE entirely, only run EXPLAIN (instant)
+    - rewrite_max_time_ms set: Run with timeout, cancel if exceeds baseline time
+    - Normal mode: Run EXPLAIN ANALYZE, offer interactive skip after 10s
+    """
     if psycopg2 is None:
         return {
             "success": False,
@@ -108,13 +125,11 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
             "execution_time_ms": 0
         }
 
-    # Check if SQL contains parameter placeholders - PostgreSQL can run them but results are unreliable
-    # When normalized queries (from rdst top or registry) have placeholders, the EXPLAIN ANALYZE
-    # results won't match actual execution with real parameter values due to generic vs specific plans
-    # PostgreSQL uses $1, $2 style placeholders; ? is used by some client libraries
+    # Check if SQL contains parameter placeholders
     import re
-    has_pg_params = re.search(r'\$\d+', sql) is not None  # PostgreSQL-style $1, $2, etc.
-    has_question_mark = '?' in sql  # Client library style
+    import threading
+    has_pg_params = re.search(r'\$\d+', sql) is not None
+    has_question_mark = '?' in sql
     if has_pg_params or has_question_mark:
         placeholder_type = "$1, $2" if has_pg_params else "?"
         return {
@@ -123,8 +138,7 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
                 "WARNING: Cannot get reliable EXPLAIN ANALYZE for parameterized queries.\n\n"
                 f"The query contains '{placeholder_type}' placeholders (from query normalization).\n"
                 "PostgreSQL EXPLAIN ANALYZE with placeholders uses generic plan estimates\n"
-                "which can differ SIGNIFICANTLY from execution with actual values.\n"
-                "(This is why MVZ saw 30x slower rewrites - generic vs specific plans!)\n\n"
+                "which can differ SIGNIFICANTLY from execution with actual values.\n\n"
                 "Solution: Copy the query from your application code and run:\n"
                 "   rdst analyze \"SELECT ... WHERE col = <actual_value>\"\n\n"
                 "Note: rdst top is designed for monitoring query traffic (like htop).\n"
@@ -138,7 +152,6 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
     try:
         import os
 
-        # Get password - either directly from config or from environment variable
         password = target_config.get('password')
         if not password:
             password_env = target_config.get('password_env', 'RDST_DB_PASSWORD')
@@ -152,45 +165,261 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
             'password': password,
         }
 
-        # Add SSL configuration if specified
         if target_config.get('tls', False):
             conn_params['sslmode'] = 'require'
 
-        with _postgres_connection(conn_params) as conn:
-            with conn.cursor() as cursor:
-                # Execute EXPLAIN ANALYZE with detailed output
-                explain_query = f"EXPLAIN (ANALYZE true, VERBOSE true, COSTS true, BUFFERS true, FORMAT JSON) {sql}"
+        # FAST MODE: Skip EXPLAIN ANALYZE entirely, only run EXPLAIN
+        if fast_mode:
+            try:
+                with _postgres_connection(conn_params) as conn:
+                    with conn.cursor() as cursor:
+                        explain_query = f"EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) {sql}"
+                        start_time = time.perf_counter()
+                        cursor.execute(explain_query)  # nosem
+                        end_time = time.perf_counter()
 
-                start_time = time.perf_counter()
-                # Safe: sql parameter is user's query to analyze (intended functionality), validated by query_safety.py
-                cursor.execute(explain_query)  # nosem
-                end_time = time.perf_counter()
+                        result = cursor.fetchone()
+                        explain_plan_time_ms = (end_time - start_time) * 1000
 
-                result = cursor.fetchone()
-                execution_time_ms = (end_time - start_time) * 1000
+                        if result and result[0]:
+                            explain_plan_data = result[0][0] if isinstance(result[0], list) else result[0]
+                            return {
+                                "success": True,
+                                "explain_plan": explain_plan_data,
+                                "execution_time_ms": explain_plan_time_ms,
+                                "rows_examined": _extract_postgres_rows_examined(explain_plan_data),
+                                "rows_returned": _extract_postgres_rows_returned(explain_plan_data),
+                                "cost_estimate": _extract_postgres_cost(explain_plan_data),
+                                "database_engine": "postgresql",
+                                "plan_format": "json",
+                                "explain_analyze_skipped": True,
+                                "skip_reason": "fast_mode - EXPLAIN ANALYZE skipped",
+                                "fallback_reason": "Using EXPLAIN plan only (fast mode)"
+                            }
+                        else:
+                            return {
+                                "success": False,
+                                "error": "No EXPLAIN plan returned",
+                                "explain_plan": None,
+                                "execution_time_ms": 0
+                            }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"PostgreSQL EXPLAIN failed: {str(e)}",
+                    "explain_plan": None,
+                    "execution_time_ms": 0
+                }
 
-                if result and result[0]:
-                    plan_data = result[0][0] if isinstance(result[0], list) else result[0]
+        # NORMAL MODE: Run EXPLAIN first (for fallback), then EXPLAIN ANALYZE with timeout
+        explain_plan_data = None
+        explain_plan_time_ms = 0
 
-                    return {
-                        "success": True,
-                        "explain_plan": plan_data,
-                        "execution_time_ms": execution_time_ms,
-                        "rows_examined": _extract_postgres_rows_examined(plan_data),
-                        "rows_returned": _extract_postgres_rows_returned(plan_data),
-                        "cost_estimate": _extract_postgres_cost(plan_data),
-                        "actual_time_ms": _extract_postgres_actual_time(plan_data),
-                        "planning_time_ms": plan_data.get('Planning Time', 0),
-                        "execution_time_ms": plan_data.get('Execution Time', execution_time_ms),
-                        "database_engine": "postgresql"
-                    }
+        try:
+            with _postgres_connection(conn_params) as conn:
+                with conn.cursor() as cursor:
+                    explain_query = f"EXPLAIN (VERBOSE true, COSTS true, FORMAT JSON) {sql}"
+                    start_time = time.perf_counter()
+                    cursor.execute(explain_query)  # nosem
+                    end_time = time.perf_counter()
+
+                    result = cursor.fetchone()
+                    explain_plan_time_ms = (end_time - start_time) * 1000
+
+                    if result and result[0]:
+                        explain_plan_data = result[0][0] if isinstance(result[0], list) else result[0]
+        except Exception as explain_error:
+            return {
+                "success": False,
+                "error": f"PostgreSQL EXPLAIN failed: {str(explain_error)}",
+                "explain_plan": None,
+                "execution_time_ms": 0
+            }
+
+        # Now run EXPLAIN ANALYZE in background thread with timeout handling
+        query_result = {'completed': False, 'data': None, 'error': None, 'backend_pid': None}
+        query_lock = threading.Lock()
+
+        def execute_explain_analyze():
+            query_conn = None
+            try:
+                query_conn = psycopg2.connect(**conn_params)
+                with query_conn.cursor() as query_cursor:
+                    query_cursor.execute("SELECT pg_backend_pid()")
+                    backend_pid = query_cursor.fetchone()[0]
+
+                    with query_lock:
+                        query_result['backend_pid'] = backend_pid
+
+                    explain_analyze_query = f"EXPLAIN (ANALYZE true, VERBOSE true, COSTS true, BUFFERS true, FORMAT JSON) {sql}"
+                    query_cursor.execute(explain_analyze_query)  # nosem
+                    result = query_cursor.fetchone()
+
+                    with query_lock:
+                        query_result['completed'] = True
+                        if result and result[0]:
+                            query_result['data'] = result[0][0] if isinstance(result[0], list) else result[0]
+            except Exception as e:
+                with query_lock:
+                    query_result['completed'] = True
+                    query_result['error'] = str(e)
+            finally:
+                if query_conn:
+                    try:
+                        query_conn.close()
+                    except:
+                        pass
+
+        start_time = time.perf_counter()
+        analyze_thread = threading.Thread(target=execute_explain_analyze, daemon=True)
+        analyze_thread.start()
+
+        user_skipped = False
+        rewrite_timeout_exceeded = False
+        prompt_shown = False
+        max_wait_time = 600  # 10 minutes total
+
+        # TTY for interactive skip
+        tty_fd = None
+        old_settings = None
+        if not rewrite_max_time_ms:  # Only try TTY if not in rewrite testing mode
+            try:
+                tty_fd = open('/dev/tty', 'r')
+                old_settings = termios.tcgetattr(tty_fd)
+                tty.setcbreak(tty_fd)
+            except:
+                pass
+
+        try:
+            while time.perf_counter() - start_time < max_wait_time:
+                with query_lock:
+                    if query_result['completed']:
+                        break
+
+                elapsed = time.perf_counter() - start_time
+                elapsed_ms = elapsed * 1000
+
+                # Check rewrite timeout (for rewrite testing - cancel if slower than baseline)
+                if rewrite_max_time_ms and elapsed_ms >= rewrite_max_time_ms:
+                    rewrite_timeout_exceeded = True
+                    user_skipped = True
+
+                    try:
+                        with query_lock:
+                            backend_pid = query_result.get('backend_pid')
+                        if backend_pid:
+                            cancel_conn = psycopg2.connect(**conn_params)
+                            with cancel_conn.cursor() as cancel_cursor:
+                                cancel_cursor.execute(f"SELECT pg_cancel_backend({backend_pid})")  # nosem
+                            cancel_conn.close()
+                    except Exception:
+                        pass  # Cancellation is best-effort
+                    break
+
+                # Interactive mode: show prompt after 10 seconds
+                if elapsed >= 10 and not prompt_shown and not rewrite_max_time_ms:
+                    prompt_shown = True
+                    if tty_fd:
+                        print(f"\n** EXPLAIN ANALYZE has been running for 10 seconds...")
+                        print(f"   Press ENTER to skip and continue with EXPLAIN plan only")
+                        print(f"   Or wait for full analysis (max 10 minutes)", flush=True)
+
+                # Check for user input
+                if prompt_shown and tty_fd and not rewrite_max_time_ms:
+                    try:
+                        if select.select([tty_fd], [], [], 0.1)[0]:
+                            user_input = tty_fd.read(1)
+                            if user_input in ['\n', '\r', '1']:
+                                user_skipped = True
+                                print(f"\n>> Skipping EXPLAIN ANALYZE - using EXPLAIN plan only\n")
+                                sys.stdout.flush()
+
+                                try:
+                                    with query_lock:
+                                        backend_pid = query_result.get('backend_pid')
+                                    if backend_pid:
+                                        cancel_conn = psycopg2.connect(**conn_params)
+                                        with cancel_conn.cursor() as cancel_cursor:
+                                            cancel_cursor.execute(f"SELECT pg_cancel_backend({backend_pid})")  # nosem
+                                        cancel_conn.close()
+                                except:
+                                    pass
+                                break
+                    except (OSError, ValueError):
+                        tty_fd.close()
+                        tty_fd = None
+
+                time.sleep(0.1)
+        finally:
+            if old_settings and tty_fd:
+                try:
+                    termios.tcsetattr(tty_fd, termios.TCSADRAIN, old_settings)
+                except:
+                    pass
+            if tty_fd:
+                try:
+                    tty_fd.close()
+                except:
+                    pass
+
+        end_time = time.perf_counter()
+        execution_time_ms = (end_time - start_time) * 1000
+
+        # Check results
+        with query_lock:
+            if query_result['data'] and not user_skipped:
+                plan_data = query_result['data']
+                return {
+                    "success": True,
+                    "explain_plan": plan_data,
+                    "execution_time_ms": execution_time_ms,
+                    "rows_examined": _extract_postgres_rows_examined(plan_data),
+                    "rows_returned": _extract_postgres_rows_returned(plan_data),
+                    "cost_estimate": _extract_postgres_cost(plan_data),
+                    "actual_time_ms": _extract_postgres_actual_time(plan_data),
+                    "planning_time_ms": plan_data.get('Planning Time', 0),
+                    "execution_time_ms": plan_data.get('Execution Time', execution_time_ms),
+                    "database_engine": "postgresql",
+                    "plan_format": "analyze",
+                    "explain_only_plan": explain_plan_data
+                }
+            elif explain_plan_data:
+                elapsed_seconds = execution_time_ms / 1000
+                if elapsed_seconds >= 60:
+                    elapsed_str = f"{int(elapsed_seconds // 60)} min {int(elapsed_seconds % 60)} sec"
                 else:
-                    return {
-                        "success": False,
-                        "error": "No EXPLAIN plan returned from PostgreSQL",
-                        "explain_plan": None,
-                        "execution_time_ms": execution_time_ms
-                    }
+                    elapsed_str = f"{elapsed_seconds:.1f} sec"
+
+                if rewrite_timeout_exceeded:
+                    skip_reason = f"Rewrite slower than baseline (cancelled after {elapsed_str})"
+                elif user_skipped:
+                    skip_reason = f"User skipped after {elapsed_str}"
+                else:
+                    skip_reason = f"EXPLAIN ANALYZE timed out after {elapsed_str}: {query_result.get('error', 'timeout')}"
+
+                return {
+                    "success": True,
+                    "explain_plan": explain_plan_data,
+                    "execution_time_ms": explain_plan_time_ms,
+                    "actual_elapsed_time_ms": execution_time_ms,
+                    "rows_examined": _extract_postgres_rows_examined(explain_plan_data),
+                    "rows_returned": _extract_postgres_rows_returned(explain_plan_data),
+                    "cost_estimate": _extract_postgres_cost(explain_plan_data),
+                    "database_engine": "postgresql",
+                    "plan_format": "json",
+                    "explain_analyze_timeout": not user_skipped,
+                    "explain_analyze_skipped": user_skipped,
+                    "rewrite_timeout_exceeded": rewrite_timeout_exceeded,
+                    "fallback_reason": f"Using EXPLAIN plan only - {skip_reason}",
+                    "skip_reason": skip_reason
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"No EXPLAIN plan available. ANALYZE error: {query_result.get('error', 'unknown')}",
+                    "explain_plan": None,
+                    "execution_time_ms": 0
+                }
 
     except Exception as e:
         import traceback
@@ -203,8 +432,14 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
         }
 
 
-def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast_mode: bool = False) -> Dict[str, Any]:
-    """Execute EXPLAIN ANALYZE for MySQL."""
+def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast_mode: bool = False, rewrite_max_time_ms: float = None) -> Dict[str, Any]:
+    """Execute EXPLAIN ANALYZE for MySQL.
+
+    Behavior:
+    - fast_mode=True: SKIP EXPLAIN ANALYZE entirely, only run EXPLAIN (instant)
+    - rewrite_max_time_ms set: Run with timeout, cancel if exceeds baseline time
+    - Normal mode: Run EXPLAIN ANALYZE, offer interactive skip after 10s
+    """
     if pymysql is None:
         return {
             "success": False,

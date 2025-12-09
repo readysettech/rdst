@@ -63,7 +63,8 @@ def _generate_db_test_command(sql: str, target_config: Dict[str, Any], db_engine
         return f"MYSQL_PWD=\"{pwd_ref}\" mysql -h {host} -P {port} -u {user} {database} -e '{sql_escaped}'"
 
     elif engine_lower in ("postgresql", "postgres", "pg"):
-        return f"PGPASSWORD=\"{pwd_ref}\" psql -h {host} -p {port} -U {user} -d {database} -c '{sql_escaped}'"
+        # Use \timing to show query execution time
+        return f"PGPASSWORD=\"{pwd_ref}\" psql -h {host} -p {port} -U {user} -d {database} -c '\\timing' -c '{sql_escaped}'"
 
     return None
 
@@ -303,6 +304,10 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
 
         exec_time = explain_results.get("execution_time_ms", 0)
 
+        # Check if EXPLAIN ANALYZE was skipped (fast mode or user skip)
+        explain_skipped = explain_results.get("explain_analyze_skipped", False)
+        skip_reason = explain_results.get("skip_reason") or explain_results.get("fallback_reason")
+
         # Get LLM analysis for rating and score
         llm_analysis = workflow_result.get("llm_analysis") or {}
         if llm_analysis and llm_analysis.get("success"):
@@ -312,13 +317,18 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
             efficiency_score = performance.get("efficiency_score", 0)
             exec_rating = performance.get("execution_time_rating", "")
 
-            # Only show exec_rating if available
-            if exec_rating and exec_rating != "unknown":
+            # If EXPLAIN ANALYZE was skipped, show N/A for execution time
+            if explain_skipped:
+                lines.append(f"Query Execution Time: N/A (EXPLAIN only) | Rating: {overall_rating.upper()} ({efficiency_score}/100)")
+            elif exec_rating and exec_rating != "unknown":
                 lines.append(f"Query Execution Time: {exec_time:.1f}ms ({exec_rating}) | Rating: {overall_rating.upper()} ({efficiency_score}/100)")
             else:
                 lines.append(f"Query Execution Time: {exec_time:.1f}ms | Rating: {overall_rating.upper()} ({efficiency_score}/100)")
         else:
-            lines.append(f"Query Execution Time: {exec_time:.1f}ms")
+            if explain_skipped:
+                lines.append(f"Query Execution Time: N/A (EXPLAIN only - query not executed)")
+            else:
+                lines.append(f"Query Execution Time: {exec_time:.1f}ms")
 
         lines.append("")
         lines.append(f"  Rows Examined: {explain_results.get('rows_examined', 0):,}")
@@ -404,6 +414,26 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
                 if rationale:
                     wrapped = _wrap_text(f"Why: {rationale}", width=100, indent="   ", subsequent_indent="   ")
                     lines.extend(wrapped)
+                lines.append("")
+
+                # Display caveats if present (important context about index limitations)
+                caveats = idx.get("caveats", [])
+                if caveats:
+                    for caveat in caveats:
+                        # Format caveat - extract key if present (e.g., "workload_context: message")
+                        if ": " in caveat:
+                            key, msg = caveat.split(": ", 1)
+                            wrapped = _wrap_text(f"Note: {msg}", width=100, indent="   ", subsequent_indent="         ")
+                        else:
+                            wrapped = _wrap_text(f"Note: {caveat}", width=100, indent="   ", subsequent_indent="         ")
+                        lines.extend(wrapped)
+                    lines.append("")
+
+            # Show workload analysis tip when there are 2+ index recommendations
+            # This indicates complex optimization where holistic analysis would help
+            if len(index_recs) >= 2:
+                lines.append("Note: These indexes optimize this query. For workload-wide index")
+                lines.append("recommendations across multiple queries: rdst analyze --workload (coming soon)")
                 lines.append("")
 
             lines.append(_divider())
@@ -611,8 +641,13 @@ def _format_performance_summary(summary: Dict[str, Any], perf_metrics: Dict[str,
     overall_rating = summary.get("overall_rating", "unknown")
     efficiency_score = summary.get("efficiency_score", 0)
 
-    # Build execution line - only show rating if available
-    if exec_rating and exec_rating != "unknown":
+    # Check if EXPLAIN ANALYZE was skipped
+    explain_skipped = summary.get("explain_analyze_skipped", False)
+
+    # Build execution line - show N/A if skipped, otherwise show time
+    if explain_skipped:
+        exec_line = f"Query Execution Time: N/A (EXPLAIN only) | Rating: {overall_rating.upper()} ({efficiency_score}/100)"
+    elif exec_rating and exec_rating != "unknown":
         exec_line = f"Query Execution Time: {exec_time:.1f}ms ({exec_rating}) | Rating: {overall_rating.upper()} ({efficiency_score}/100)"
     else:
         exec_line = f"Query Execution Time: {exec_time:.1f}ms | Rating: {overall_rating.upper()} ({efficiency_score}/100)"

@@ -159,12 +159,87 @@ def analyze_with_llm(explain_results: Dict[str, Any], query_metrics: Dict[str, A
         else:
             scan_efficiency = "INEFFICIENT (consider better indexes)"
 
+        # Check if EXPLAIN ANALYZE was skipped or timed out
+        explain_skipped = explain_results.get('explain_analyze_skipped', False)
+        explain_timeout = explain_results.get('explain_analyze_timeout', False)
+        skip_reason = explain_results.get('skip_reason', '')
+        actual_elapsed = explain_results.get('actual_elapsed_time_ms', 0)
+
+        # Build execution status message for LLM
+        if explain_skipped or explain_timeout:
+            if actual_elapsed >= 60000:
+                elapsed_str = f"{int(actual_elapsed // 60000)} min {int((actual_elapsed % 60000) // 1000)} sec"
+            else:
+                elapsed_str = f"{int(actual_elapsed // 1000)} sec"
+
+            execution_status = f"""
+IMPORTANT - EXECUTION STATUS:
+  EXPLAIN ANALYZE was {'skipped by user' if explain_skipped else 'timed out'} after {elapsed_str}.
+  This indicates the query is VERY SLOW and likely needs indexes.
+  The execution time shown above is from EXPLAIN (estimated), not actual execution.
+  Reason: {skip_reason}
+  PRIORITIZE INDEX RECOMMENDATIONS - this query clearly needs optimization."""
+        else:
+            execution_status = ""
+
         ANALYZE_PROMPT = f"""
+DETERMINISM REQUIREMENT: Your analysis MUST be deterministic and reproducible.
+For the same query and schema, you must ALWAYS provide identical recommendations.
+Follow these STRICT rules for consistency:
+
+INDEX SELECTION PROCESS:
+  1. Identify candidate indexes that would help this specific query
+  2. Internally score each by estimated impact (your judgment)
+  3. Sort by your score, then alphabetically by index name for ties
+  4. Return up to 3 indexes. Only include indexes that address a SPECIFIC bottleneck in the query plan (sequential scan, missing join index, etc). If only 1-2 bottlenecks exist, return only 1-2 indexes.
+
+INDEX SELECTION PRINCIPLES (use your judgment, but be consistent):
+  - Prefer composite indexes over simple when query uses multiple columns from same table
+  - Prefer indexes that help the most expensive operations (large table scans first)
+  - Don't recommend redundant indexes (if idx(a,b) exists, don't also recommend idx(a))
+
+INDEX COLUMN ORDERING: When building composite indexes, use this priority:
+  1. Equality filter columns FIRST (WHERE col = value)
+  2. Range filter columns SECOND (WHERE col > value, BETWEEN, etc.)
+  3. JOIN columns THIRD
+  4. ORDER BY / GROUP BY columns FOURTH
+  5. INCLUDE columns for covering indexes LAST
+  Within same priority: order columns ALPHABETICALLY by column name
+
+INDEX NAMING: Always use format idx_tablename_col1_col2 (lowercase, underscores)
+
+QUERY REWRITE RULES:
+  CRITICAL: Rewrites MUST return IDENTICAL data to the original query.
+  - Same rows, same columns, same values - no exceptions
+  - If unsure whether a rewrite is semantically equivalent, DO NOT suggest it
+  - Never change: column order in SELECT, GROUP BY semantics, DISTINCT behavior, NULL handling
+
+  REWRITE SELECTION PROCESS (follow this exact algorithm):
+  1. IDENTIFY all possible rewrites that maintain semantic equivalence
+  2. SCORE each rewrite using the formula below (0-100 scale)
+  3. SORT rewrites by score DESCENDING
+  4. If scores are tied, sort alphabetically by the first differing keyword
+  5. Return up to 3 rewrites. Only include rewrites that address a SPECIFIC issue (comma joins, subquery conversion, etc). If fewer issues exist, return fewer rewrites.
+
+  REWRITE SCORING FORMULA:
+  - Converts comma JOIN to explicit JOIN: +25 points
+  - Adds index hints or optimizer hints: +20 points
+  - Rewrites subquery to JOIN: +30 points
+  - Simplifies OR to IN clause: +15 points
+  - Eliminates redundant operations: +20 points
+  - Improves predicate pushdown opportunity: +20 points
+  - SUBTRACT 50 points if rewrite might change results (don't recommend these)
+
+  REWRITE FORMATTING: For deterministic output:
+  - NEVER reorder columns in SELECT clause (must match original exactly)
+  - Order JOIN tables alphabetically by alias (a, b, c) when converting comma joins
+  - Order WHERE conditions alphabetically by column name
+
 Analyze this SQL query performance and distinguish between immediate query rewrites vs database optimization recommendations:
 
 Query for Analysis: {sql_for_analysis}
 Database: {explain_results.get('database_engine', 'unknown')}
-
+{execution_status}
 PERFORMANCE METRICS:
   Execution Time: {execution_time_ms}ms → {perf_class}
   Rows Examined: {rows_examined:,} {f'({scan_pct:.2f}% of table)' if row_estimate > 0 else ''}
@@ -218,7 +293,8 @@ Provide analysis in JSON format with:
       "columns": ["col1", "col2"],
       "index_type": "btree",
       "rationale": "explanation of why this index helps",
-      "estimated_impact": "high/medium/low"
+      "estimated_impact": "high/medium/low",
+      "caveats": ["workload_context: This index helps this query but consider full workload analysis", "other relevant warnings"]
     }}
   ]
 }}
@@ -643,7 +719,7 @@ def _get_rewrite_suggestions(llm_manager: LLMManager, parameterized_sql: str,
             model=kwargs.get('model'),  # Use provider's default model
             system_message="You are an expert SQL optimization consultant.",
             max_tokens=1500,
-            temperature=0.1
+            temperature=0.0  # Deterministic output for consistent recommendations
         )
 
         if llm_response and 'response' in llm_response:
@@ -683,7 +759,7 @@ def _get_index_suggestions(llm_manager: LLMManager, parameterized_sql: str,
             model=kwargs.get('model'),  # Use provider's default model
             system_message="You are a database indexing expert.",
             max_tokens=1500,
-            temperature=0.1
+            temperature=0.0  # Deterministic output for consistent recommendations
         )
 
         if llm_response and 'response' in llm_response:
@@ -721,7 +797,7 @@ def _get_caching_recommendations(llm_manager: LLMManager, parameterized_sql: str
             model=kwargs.get('model'),  # Use provider's default model
             system_message="You are a ReadySet caching optimization expert.",
             max_tokens=1500,
-            temperature=0.1
+            temperature=0.0  # Deterministic output for consistent recommendations
         )
 
         if llm_response and 'response' in llm_response:

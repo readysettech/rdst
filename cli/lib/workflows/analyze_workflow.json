@@ -215,7 +215,7 @@
                 "MaxAttempts": 1,
                 "IntervalSeconds": 1
             },
-            "TimeoutSeconds": 120
+            "TimeoutSeconds": 300
         },
         "StoreAnalysisResults": {
             "Type": "Task",

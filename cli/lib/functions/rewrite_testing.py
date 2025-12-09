@@ -243,7 +243,11 @@ def _get_baseline_performance(original_sql: str, target: str, kwargs: Dict) -> D
 
 def _test_single_rewrite(suggestion: Dict[str, Any], baseline_result: Dict[str, Any],
                         target: str, kwargs: Dict, index: int) -> Dict[str, Any]:
-    """Test a single rewrite suggestion."""
+    """Test a single rewrite suggestion.
+
+    Uses baseline execution time to set a timeout for rewrite testing.
+    If rewrite takes longer than baseline, it's cancelled and marked as slower.
+    """
     try:
         suggestion_id = suggestion.get('suggestion_id', f'rewrite_{index}')
         rewritten_sql = suggestion.get('rewritten_sql', '').strip()
@@ -304,12 +308,27 @@ def _test_single_rewrite(suggestion: Dict[str, Any], baseline_result: Dict[str, 
                 "recommendation": "reject_unsafe"
             }
 
-        # Execute EXPLAIN ANALYZE on rewrite
+        # Calculate timeout for rewrite testing
+        # Allow rewrites to run up to 30 seconds to measure actual performance
+        # If original took >30s, stop when rewrite exceeds original time
+        baseline_perf = baseline_result.get('performance', {})
+        baseline_time_ms = baseline_perf.get('execution_time_ms', 0) if baseline_perf else 0
+
+        # 30 second cap - if baseline < 30s, allow up to 30s; if baseline > 30s, use baseline time
+        MAX_REWRITE_TIME_MS = 30000  # 30 seconds
+        used_30s_cap = baseline_time_ms < MAX_REWRITE_TIME_MS
+        if used_30s_cap:
+            rewrite_max_time_ms = MAX_REWRITE_TIME_MS
+        else:
+            rewrite_max_time_ms = baseline_time_ms
+
+        # Execute EXPLAIN ANALYZE on rewrite with timeout
         explain_result = execute_explain_analyze(
             sql=rewritten_sql,
             target=target,
             target_config=kwargs.get('target_config'),
-            fast_mode=kwargs.get('fast_mode', False)
+            fast_mode=kwargs.get('fast_mode', False),
+            rewrite_max_time_ms=rewrite_max_time_ms
         )
 
         if not explain_result.get('success', False):
@@ -324,7 +343,8 @@ def _test_single_rewrite(suggestion: Dict[str, Any], baseline_result: Dict[str, 
             }
 
         # Compare performance with baseline
-        # Check if this rewrite was also skipped
+        # Check if this rewrite timed out (slower than baseline)
+        rewrite_timeout_exceeded = explain_result.get('rewrite_timeout_exceeded', False)
         rewrite_skipped = explain_result.get('explain_analyze_skipped', False) or explain_result.get('explain_analyze_timeout', False)
         actual_elapsed = explain_result.get('actual_elapsed_time_ms', explain_result.get('execution_time_ms', 0))
 
@@ -335,8 +355,43 @@ def _test_single_rewrite(suggestion: Dict[str, Any], baseline_result: Dict[str, 
             "rows_returned": explain_result.get('rows_returned', 0),
             "cost_estimate": explain_result.get('cost_estimate', 0),
             "was_skipped": rewrite_skipped,
+            "rewrite_timeout_exceeded": rewrite_timeout_exceeded,
             "skip_reason": explain_result.get('skip_reason')
         }
+
+        # If rewrite timed out, mark as reject_slower with appropriate message
+        if rewrite_timeout_exceeded:
+            # Determine the appropriate message based on whether we hit 30s cap or exceeded baseline
+            if used_30s_cap:
+                timeout_message = "Rewrite cancelled - stopped after 30 seconds"
+            else:
+                timeout_message = f"Rewrite cancelled - exceeded original query time ({baseline_time_ms/1000:.1f}s). Actual time unknown."
+
+            empty_improvement = {
+                "execution_time": {"improvement_pct": -100, "is_better": False},
+                "cost_estimate": {"improvement_pct": 0, "is_better": False},
+                "rows_examined": {"improvement_pct": 0, "is_better": False},
+                "overall": {"improvement_pct": -100, "is_better": False, "significant": True}
+            }
+            return {
+                "suggestion_id": suggestion_id,
+                "success": True,
+                "sql": rewritten_sql,
+                "performance": rewrite_performance,
+                "improvement": empty_improvement,
+                "recommendation": "reject_slower",
+                "was_skipped": True,
+                "rewrite_timeout_exceeded": True,
+                "skip_reason": explain_result.get('skip_reason', 'Rewrite slower than baseline'),
+                "suggestion_metadata": {
+                    "type": suggestion.get('optimization_type'),
+                    "priority": suggestion.get('priority'),
+                    "confidence": suggestion.get('confidence'),
+                    "explanation": suggestion.get('explanation'),
+                    "expected_improvement": suggestion.get('expected_improvement')
+                },
+                "message": timeout_message
+            }
 
         improvement = _calculate_improvement(
             baseline_result['performance'],

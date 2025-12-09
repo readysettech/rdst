@@ -1231,23 +1231,13 @@ class AnalyzeCommand:
 
         # Get LLM info for display
         try:
-            # Check environment variable first
-            provider = os.getenv("RDST_LLM_PROVIDER")
-
-            # If no env var, read from config file
-            if not provider:
-                try:
-                    from .rdst_cli import TargetsConfig
-                    config = TargetsConfig()
-                    config.load()
-                    provider = config.get_llm_provider()
-                except:
-                    pass
-
-            # RDST uses Claude exclusively
-            llm_display = "AI analysis via Claude"
+            from .rdst_cli import TargetsConfig
+            config = TargetsConfig()
+            config.load()
+            model = config.get_llm_model() or "sonnet-4"
+            llm_display = f"Analysis via {model}"
         except:
-            llm_display = "AI analysis"
+            llm_display = "Analysis"
 
         # Step mapping for user-friendly names
         step_names = {

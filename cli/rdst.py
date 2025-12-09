@@ -129,6 +129,7 @@ Examples:
     analyze_parser.add_argument('--fast', action='store_true', help='Auto-skip slow EXPLAIN ANALYZE queries after 10 seconds (for testing)')
     analyze_parser.add_argument('--interactive', action='store_true', help='Enter interactive mode after analysis for Q&A about recommendations')
     analyze_parser.add_argument('--review', action='store_true', help='Review conversation history for this query without re-analyzing')
+    analyze_parser.add_argument('--workload', action='store_true', help='Analyze multiple queries together for holistic index recommendations (coming soon)')
 
     # tune command
     tune_parser = subparsers.add_parser('tune', help='Get optimization suggestions')
