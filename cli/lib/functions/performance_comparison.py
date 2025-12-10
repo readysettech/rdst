@@ -13,6 +13,7 @@ def compare_query_performance(
     readyset_host: str = "localhost",
     iterations: int | str = 10,
     warmup_iterations: int | str = 2,
+    readyset_db_config: Dict[str, Any] = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -28,6 +29,7 @@ def compare_query_performance(
         readyset_host: Host where ReadySet is running
         iterations: Number of benchmark iterations
         warmup_iterations: Number of warmup runs (not counted in stats)
+        readyset_db_config: ReadySet database configuration (for auth). If not provided, uses original_db_config credentials
         **kwargs: Additional workflow parameters
 
     Returns:
@@ -68,14 +70,25 @@ def compare_query_performance(
 
         # Warmup - ReadySet
         print("Warming up ReadySet...")
-        readyset_config = {
-            'engine': engine,
-            'host': readyset_host,
-            'port': readyset_port,
-            'database': original_db_config.get('database'),
-            'user': original_db_config.get('user'),
-            'password': original_db_config.get('password', '')
-        }
+        # Use readyset_db_config if provided (for test container auth), otherwise fall back to original creds
+        if readyset_db_config:
+            readyset_config = {
+                'engine': engine,
+                'host': readyset_host,
+                'port': readyset_port,
+                'database': readyset_db_config.get('database', original_db_config.get('database')),
+                'user': readyset_db_config.get('user', original_db_config.get('user')),
+                'password': readyset_db_config.get('password', '')
+            }
+        else:
+            readyset_config = {
+                'engine': engine,
+                'host': readyset_host,
+                'port': readyset_port,
+                'database': original_db_config.get('database'),
+                'user': original_db_config.get('user'),
+                'password': original_db_config.get('password', '')
+            }
         for i in range(warmup_iterations):
             _execute_query_timed(query, readyset_config, is_readyset=True)
 

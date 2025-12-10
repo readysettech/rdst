@@ -31,7 +31,7 @@ class ConfigurationWizard:
             "default": self._set_default_target,
             "add": lambda cfg, kwargs: self._add_edit_target(cfg, "add", kwargs),
             "edit": lambda cfg, kwargs: self._add_edit_target(cfg, "edit", kwargs),
-            "menu": self._menu
+            "menu": self._menu,
         }
 
         if subcmd not in handlers:
@@ -301,25 +301,32 @@ class ConfigurationWizard:
         if not validation_result.ok:
             return validation_result
 
-        # Test connection
-        test_result = self._test_connection(config_data)
-        if test_result.ok:
-            self._show_success("Connection Test", test_result.message)
-            config_data["verified"] = True
-            config_data["endpoint_verified"] = True
-        else:
-            self._show_error("Connection Test Failed", test_result.message)
+        # Test connection (skip if --skip-verify flag is set)
+        skip_verify = kwargs.get("skip_verify") or kwargs.get("skip-verify", False)
+        if skip_verify:
+            # Skip connection verification entirely (for MCP/non-interactive use)
             config_data["verified"] = False
             config_data["endpoint_verified"] = False
+            self._show_info("Skipped", "Connection verification skipped (--skip-verify)")
+        else:
+            test_result = self._test_connection(config_data)
+            if test_result.ok:
+                self._show_success("Connection Test", test_result.message)
+                config_data["verified"] = True
+                config_data["endpoint_verified"] = True
+            else:
+                self._show_error("Connection Test Failed", test_result.message)
+                config_data["verified"] = False
+                config_data["endpoint_verified"] = False
 
-            target_name = name or config_data.get("name", "target")
-            # Ask if they want to save anyway
-            if not self._confirm(
-                "Save configuration anyway?",
-                f"You can edit later with: rdst configure edit {target_name}",
-                default=False
-            ):
-                return RdstResult(False, "Configuration cancelled due to connection failure")
+                target_name = name or config_data.get("name", "target")
+                # Ask if they want to save anyway
+                if not self._confirm(
+                    "Save configuration anyway?",
+                    f"You can edit later with: rdst configure edit {target_name}",
+                    default=False
+                ):
+                    return RdstResult(False, "Configuration cancelled due to connection failure")
 
         # Save configuration
         target_name = name or config_data["name"]

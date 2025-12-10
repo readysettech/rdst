@@ -35,13 +35,13 @@ def run_realtime_monitor(target_config: Dict[str, Any], console: Optional[Consol
         target_config: Database target configuration
         console: Rich console (optional)
         limit: Number of top queries to show
-        json_output: Output results as JSON
+        json_output: Output results as JSON (auto-enables snapshot mode if duration not set)
         duration: Run for N seconds then return results (snapshot mode, non-interactive)
 
     Flow:
         1. Connect to database
         2. Create collector and tracker
-        3. If duration set: Run polling loop for N seconds, return results
+        3. If json_output or duration set: Run polling loop, return results
         4. Otherwise: Display with Rich Live + interactive prompt
         5. Handle save or analyze requests
     """
@@ -49,6 +49,11 @@ def run_realtime_monitor(target_config: Dict[str, Any], console: Optional[Consol
 
     console = console or RichConsole()
     connection = None
+
+    # If json_output requested without duration, auto-set a short snapshot duration
+    # This enables --json to work standalone without requiring --duration
+    if json_output and duration is None:
+        duration = 2  # 2 second snapshot - enough to catch a few poll cycles
 
     try:
         # Connect to database (silently)

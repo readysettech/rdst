@@ -170,8 +170,9 @@ class TopCommand:
             result = run_realtime_monitor(target_config, console, limit=limit,
                                          json_output=json_output, duration=duration)
 
-            # If snapshot mode was used, result contains the output data
-            if duration and result:
+            # If snapshot mode was used (--json or --duration), result contains the output data
+            # Note: --json auto-enables snapshot mode in top_realtime.py
+            if (json_output or duration) and result:
                 return RdstResult(True, result)
 
             return RdstResult(True, "Real-time monitoring stopped")

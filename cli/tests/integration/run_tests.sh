@@ -98,8 +98,23 @@ run_test_suite() {
   echo
 }
 
+# Run MCP sync check (no database required)
+run_mcp_sync_check() {
+  log_section "Running MCP Sync Check"
+  python3 "${SCRIPT_DIR}/tests/test_mcp_sync.py"
+  if [[ $? -ne 0 ]]; then
+    echo "✗ MCP sync check failed - CLI and MCP server are out of sync"
+    exit 1
+  fi
+  echo "✓ MCP sync check passed"
+  echo
+}
+
 # Main execution
 main() {
+  # Run MCP sync check first (no database needed)
+  run_mcp_sync_check
+
   setup_upstream_databases
 
   if [[ "$TEST_POSTGRESQL" == "true" ]]; then

@@ -220,7 +220,7 @@ class RdstCLI:
                 self.client.print_panel("configure", f"Loaded agent config from {config_path}")
 
             subcmd = (kwargs.get("subcommand") or "menu").lower()
-            valid_subcommands = {"add", "edit", "list", "remove", "default", "menu", "llm"}
+            valid_subcommands = {"add", "edit", "list", "remove", "default", "menu", "llm", "test"}
 
             if subcmd not in valid_subcommands:
                 return RdstResult(False, f"Unknown subcommand: {subcmd}")
@@ -228,6 +228,10 @@ class RdstCLI:
             # Load configuration
             cfg = TargetsConfig()
             cfg.load()
+
+            # Handle test subcommand directly (standalone connection test)
+            if subcmd == "test":
+                return self._test_connection(cfg, kwargs)
 
             # Use the modern configuration wizard
             from .configuration_wizard import ConfigurationWizard
@@ -241,6 +245,128 @@ class RdstCLI:
 
         except Exception as e:
             return RdstResult(False, f"configure failed: {e}")
+
+    def _test_connection(self, cfg: TargetsConfig, kwargs: dict) -> RdstResult:
+        """Test database connection for a target. Returns JSON-formatted result."""
+        import json
+        import os
+
+        target_name = kwargs.get("target") or kwargs.get("name")
+
+        # If no target specified, use default
+        if not target_name:
+            target_name = cfg.get_default()
+            if not target_name:
+                result = {"success": False, "error": "No target specified and no default target configured"}
+                return RdstResult(False, json.dumps(result, indent=2))
+
+        # Get target configuration
+        target_config = cfg.get(target_name)
+        if not target_config:
+            result = {"success": False, "error": f"Target '{target_name}' not found in configuration"}
+            return RdstResult(False, json.dumps(result, indent=2))
+
+        # Extract connection parameters
+        engine = target_config.get("engine", "").lower()
+        host = target_config.get("host", "localhost")
+        port = target_config.get("port")
+        user = target_config.get("user", "postgres")
+        database = target_config.get("database", "postgres")
+        password_env = target_config.get("password_env", "")
+
+        # Get password from environment
+        password = os.environ.get(password_env, "") if password_env else ""
+        if password_env and not password:
+            result = {
+                "success": False,
+                "target": target_name,
+                "error": f"Password environment variable '{password_env}' is not set"
+            }
+            return RdstResult(False, json.dumps(result, indent=2))
+
+        # Test connection based on engine
+        try:
+            if engine == "postgresql":
+                import psycopg2
+                conn = psycopg2.connect(
+                    host=host,
+                    port=port or 5432,
+                    user=user,
+                    password=password,
+                    database=database,
+                    connect_timeout=10
+                )
+                cursor = conn.cursor()
+                cursor.execute("SELECT version()")
+                version = cursor.fetchone()[0]
+                cursor.close()
+                conn.close()
+
+                result = {
+                    "success": True,
+                    "target": target_name,
+                    "engine": engine,
+                    "host": host,
+                    "port": port or 5432,
+                    "database": database,
+                    "server_version": version
+                }
+                return RdstResult(True, json.dumps(result, indent=2))
+
+            elif engine == "mysql":
+                import pymysql
+                conn = pymysql.connect(
+                    host=host,
+                    port=port or 3306,
+                    user=user,
+                    password=password,
+                    database=database,
+                    connect_timeout=10
+                )
+                cursor = conn.cursor()
+                cursor.execute("SELECT version()")
+                version = cursor.fetchone()[0]
+                cursor.close()
+                conn.close()
+
+                result = {
+                    "success": True,
+                    "target": target_name,
+                    "engine": engine,
+                    "host": host,
+                    "port": port or 3306,
+                    "database": database,
+                    "server_version": version
+                }
+                return RdstResult(True, json.dumps(result, indent=2))
+
+            else:
+                result = {"success": False, "error": f"Unsupported engine: {engine}"}
+                return RdstResult(False, json.dumps(result, indent=2))
+
+        except Exception as e:
+            error_msg = str(e)
+            # Provide helpful hints for common errors
+            hints = []
+            if "authentication failed" in error_msg.lower() or "access denied" in error_msg.lower():
+                hints.append("Check that your password is correct")
+                hints.append(f"Verify the password environment variable '{password_env}' is set correctly")
+            elif "could not connect" in error_msg.lower() or "connection refused" in error_msg.lower():
+                hints.append(f"Check that the database server is running on {host}:{port or (5432 if engine == 'postgresql' else 3306)}")
+                hints.append("Verify the host and port are correct")
+            elif "does not exist" in error_msg.lower():
+                hints.append(f"Check that the database '{database}' exists")
+
+            result = {
+                "success": False,
+                "target": target_name,
+                "engine": engine,
+                "host": host,
+                "port": port or (5432 if engine == "postgresql" else 3306),
+                "error": error_msg,
+                "hints": hints if hints else None
+            }
+            return RdstResult(False, json.dumps(result, indent=2))
 
     # rdst top
     def top(self, target: str = None, source: str = "auto", limit: int = 10,

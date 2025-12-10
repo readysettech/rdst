@@ -1159,13 +1159,9 @@ class AnalyzeCommand:
             key = os.environ.get("ANTHROPIC_API_KEY")
             if not key:
                 return (
-                    "No API key configured. Set the ANTHROPIC_API_KEY environment variable.\n\n"
-                    "To get an API key:\n"
-                    "  1. Visit https://console.anthropic.com/\n"
-                    "  2. Create an account or sign in\n"
-                    "  3. Generate an API key\n"
-                    "  4. Set the environment variable:\n"
-                    "     export ANTHROPIC_API_KEY=\"sk-ant-...\""
+                    "No LLM API key configured.\n\n"
+                    "Please provide your Anthropic API key to enable query analysis.\n"
+                    "You can get one at: https://console.anthropic.com/"
                 )
 
             return None  # Key is configured
@@ -2323,7 +2319,8 @@ class AnalyzeCommand:
                 readyset_port=readyset_port,
                 readyset_host='localhost',
                 iterations=10,
-                warmup_iterations=2
+                warmup_iterations=2,
+                readyset_db_config=test_db_config
             )
 
             if not perf_result.get('success'):

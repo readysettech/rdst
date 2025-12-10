@@ -296,7 +296,8 @@ def start_test_db_container(
                 'docker', 'run',
                 '-d',
                 '--name', container_name,
-                '-p', port_mapping
+                '-p', port_mapping,
+                '--add-host=host.docker.internal:host-gateway',  # Allow container to reach host (for Linux)
             ] + env_vars + [image] + pg_args
 
             result = subprocess.run(
@@ -512,6 +513,12 @@ def recreate_schema_from_target(
 
         print(f"Recreating schema from {target_host}:{target_port}/{target_db}...")
 
+        # Translate localhost to host.docker.internal for Docker container access
+        # pg_dump runs inside the test container, so localhost would refer to the container itself
+        docker_target_host = target_host
+        if target_host in ('localhost', '127.0.0.1'):
+            docker_target_host = 'host.docker.internal'
+
         if engine == "postgresql":
             # Try Docker-based pg_dump first (more reliable)
             try:
@@ -521,7 +528,7 @@ def recreate_schema_from_target(
                     '-e', f'PGPASSWORD={target_password}',
                     test_container,
                     'pg_dump',
-                    '-h', target_host,
+                    '-h', docker_target_host,
                     '-p', str(target_port),
                     '-U', target_user,
                     '-d', target_db,
@@ -624,7 +631,7 @@ def recreate_schema_from_target(
                 dump_cmd = [
                     'docker', 'exec', test_container,
                     'mysqldump',
-                    '-h', target_host,
+                    '-h', docker_target_host,
                     '-P', str(target_port),
                     '-u', target_user,
                     f'-p{target_password}',

@@ -55,9 +55,11 @@ packages = ["lib"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "rdst.py" = "rdst.py"
+"mcp_server.py" = "mcp_server.py"
 
 [tool.uv]
 dev-dependencies = []
 
 [project.scripts]
 rdst = "rdst:main"
+rdst-mcp = "mcp_server:main"

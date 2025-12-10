@@ -5,8 +5,11 @@ rdst - Readyset Diagnostics & SQL Tuning
 A command-line interface for diagnostics, query analysis, performance tuning,
 and caching with Readyset.
 """
+import os
 import sys
 import argparse
+import shutil
+import subprocess
 from typing import List, Dict, Any, Optional
 
 # Optional pretty output
@@ -22,6 +25,63 @@ except Exception:  # pragma: no cover
     Table = None  # type: ignore
     Text = None  # type: ignore
     _RICH_AVAILABLE = False
+
+
+def print_rich_help():
+    """Print colorized help using Rich."""
+    if not _RICH_AVAILABLE:
+        return False
+
+    console = Console()
+
+    # Header
+    console.print()
+    console.print("[bold blue]rdst[/bold blue] - [dim]ReadySet Diagnostics & SQL Tuning[/dim]")
+    console.print()
+
+    # Commands table
+    table = Table(show_header=True, header_style="bold cyan", box=None, padding=(0, 2))
+    table.add_column("Command", style="green")
+    table.add_column("Description")
+
+    commands = [
+        ("configure", "Manage database targets and connection profiles"),
+        ("top", "Live view of slow queries"),
+        ("analyze", "Analyze SQL query performance"),
+        ("init", "First-time setup wizard"),
+        ("query", "Manage saved queries (add/list/delete)"),
+        ("report", "Submit feedback or bug reports"),
+        ("howdoi", "Quick documentation lookup"),
+        ("claude", "Register RDST with Claude Code (MCP)"),
+        ("version", "Show version information"),
+    ]
+
+    for cmd, desc in commands:
+        table.add_row(cmd, desc)
+
+    console.print("[bold]Commands:[/bold]")
+    console.print(table)
+    console.print()
+
+    # Examples
+    console.print("[bold]Examples:[/bold]")
+    examples = [
+        ("rdst init", "First-time setup wizard"),
+        ("rdst top --target mydb", "Monitor slow queries"),
+        ("rdst analyze -q \"SELECT * FROM users\" --target mydb", "Analyze a query"),
+        ("rdst analyze -q \"SELECT ...\" --readyset-cache", "Test ReadySet caching"),
+        ("rdst howdoi \"how do I find slow queries?\"", "Quick docs lookup"),
+    ]
+
+    for cmd, desc in examples:
+        console.print(f"  [cyan]{cmd}[/cyan]")
+        console.print(f"    [dim]{desc}[/dim]")
+
+    console.print()
+    console.print("[dim]Use[/dim] [cyan]rdst <command> --help[/cyan] [dim]for command-specific options[/dim]")
+    console.print()
+
+    return True
 
 # Import the CLI functionality
 from lib.cli import RdstCLI, RdstResult
@@ -74,7 +134,7 @@ Examples:
     # configure command
     configure_parser = subparsers.add_parser('configure', help='Manage database targets')
     configure_parser.add_argument('subcommand', nargs='?', default='menu',
-                                  help='Subcommand: menu (default), add, edit, list, remove, default')
+                                  help='Subcommand: menu (default), add, edit, list, remove, default, test')
     configure_parser.add_argument('name', nargs='?', help='Target name for edit/remove/default')
     configure_parser.add_argument('--target', '--name', help='Target name')
     configure_parser.add_argument('--engine', choices=['postgresql', 'mysql'], help='Database engine')
@@ -90,6 +150,7 @@ Examples:
     configure_parser.add_argument('--no-tls', action='store_true', help='Disable TLS')
     configure_parser.add_argument('--default', action='store_true', help='Set as default target')
     configure_parser.add_argument('--confirm', action='store_true', help='Confirm removal without prompting')
+    configure_parser.add_argument('--skip-verify', action='store_true', help='Skip connection verification (for non-interactive use)')
 
     # top command
     top_parser = subparsers.add_parser('top', help='Live view of slow queries')
@@ -191,6 +252,11 @@ Examples:
     # version command
     subparsers.add_parser('version', help='Show version')
 
+    # claude command - register with Claude Code
+    claude_parser = subparsers.add_parser('claude', help='Register RDST with Claude Code')
+    claude_parser.add_argument('action', nargs='?', default='add', choices=['add', 'remove'],
+                               help='Action: add (default) or remove')
+
     # report command - user feedback
     report_parser = subparsers.add_parser('report', help='Submit feedback about RDST')
     report_parser.add_argument('--hash', help='Query hash to provide feedback on')
@@ -203,6 +269,10 @@ Examples:
 
     # help command
     subparsers.add_parser('help', help='Show help')
+
+    # howdoi command - quick docs lookup
+    howdoi_parser = subparsers.add_parser('howdoi', help='Ask a question about RDST usage')
+    howdoi_parser.add_argument('question', nargs='*', help='Your question (e.g., "how do I analyze a query?")')
 
     return parser.parse_args()
 
@@ -279,7 +349,6 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
 
         # If user selected a query to analyze, exec into analyze command for clean terminal
         if result.data and result.data.get('action') == 'analyze':
-            import os
             selected_hash = result.data.get('selected_hash')
             selected_target = result.data.get('selected_target')
 
@@ -294,6 +363,141 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         return result
     elif command == 'version':
         return cli.version()
+    elif command == 'claude':
+        # Register or remove RDST from Claude Code
+        action = getattr(args, 'action', 'add')
+
+        # Check if claude CLI is available
+        claude_path = shutil.which('claude')
+        if not claude_path:
+            return RdstResult(False, "Claude Code CLI not found. Install it from: https://claude.ai/code")
+
+        if action == 'add':
+            # Register the MCP server
+            # Determine the best way to run the MCP server:
+            # 1. If rdst-mcp is in PATH (pip installed), use it
+            # 2. Otherwise, use python3 with full path to mcp_server.py
+            rdst_mcp_path = shutil.which('rdst-mcp')
+            if rdst_mcp_path:
+                mcp_command = ['rdst-mcp']
+            else:
+                # Find mcp_server.py relative to this script
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                mcp_server_path = os.path.join(script_dir, 'mcp_server.py')
+                if not os.path.exists(mcp_server_path):
+                    return RdstResult(False, f"MCP server not found at {mcp_server_path}")
+                mcp_command = ['python3', mcp_server_path]
+
+            # Install the /rdst slash command globally
+            slash_cmd_content = '''# RDST Mode Activated
+
+You have RDST (ReadySet Diagnostics & SQL Tuning) tools available.
+
+**First, call the `rdst_help` tool to check the user's setup.**
+
+Based on the result:
+
+## If NO targets are configured (first-time user):
+
+Present a friendly welcome:
+
+---
+
+**Welcome to RDST!**
+
+Looks like this is your first time using RDST. I'll help you get set up.
+
+To analyze your database queries, I need to connect to your database. Please provide:
+
+1. **Database type**: PostgreSQL or MySQL?
+2. **Host**: Where is your database? (e.g., localhost, db.example.com)
+3. **Port**: What port? (default: 5432 for PostgreSQL, 3306 for MySQL)
+4. **Username**: Database user to connect as
+5. **Database name**: Which database to connect to
+6. **Password env var name**: What should I call the environment variable for the password? (e.g., MY_DB_PASSWORD)
+
+Once you give me these details, I'll configure RDST and we can start analyzing your slow queries!
+
+---
+
+## If targets ARE configured:
+
+Present a status summary:
+
+---
+
+**RDST Ready**
+
+[List their configured targets - show which are ready vs need passwords]
+
+[If any need passwords, show: "To use [target], export: `export VAR_NAME='password'`"]
+
+**What would you like to do?**
+- Analyze a SQL query
+- Find and fix slow queries
+- Explore your database
+- Add another database connection
+
+---
+
+Keep it conversational. The user shouldn't need to know the underlying commands - just help them with their database.
+'''
+            # Install slash command to ~/.claude/commands/
+            claude_commands_dir = os.path.expanduser('~/.claude/commands')
+            os.makedirs(claude_commands_dir, exist_ok=True)
+            slash_cmd_path = os.path.join(claude_commands_dir, 'rdst.md')
+            try:
+                with open(slash_cmd_path, 'w') as f:
+                    f.write(slash_cmd_content)
+            except Exception as e:
+                # Non-fatal - continue with MCP registration
+                pass
+
+            try:
+                result = subprocess.run(
+                    ['claude', 'mcp', 'add', 'rdst', '--'] + mcp_command,
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    return RdstResult(True, """RDST registered with Claude Code!
+
+To use RDST in Claude:
+  1. Start a new Claude Code session
+  2. Type /rdst to activate RDST mode
+
+Claude will now have access to all RDST tools for query analysis and optimization.""")
+                else:
+                    # Check if already registered
+                    if 'already exists' in result.stderr.lower():
+                        return RdstResult(True, "RDST is already registered with Claude Code.")
+                    return RdstResult(False, f"Failed to register: {result.stderr}")
+            except Exception as e:
+                return RdstResult(False, f"Error running claude command: {e}")
+
+        elif action == 'remove':
+            # Remove the slash command
+            slash_cmd_path = os.path.expanduser('~/.claude/commands/rdst.md')
+            if os.path.exists(slash_cmd_path):
+                try:
+                    os.remove(slash_cmd_path)
+                except Exception:
+                    pass  # Non-fatal
+
+            try:
+                result = subprocess.run(
+                    ['claude', 'mcp', 'remove', 'rdst'],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    return RdstResult(True, "RDST removed from Claude Code.")
+                else:
+                    return RdstResult(False, f"Failed to remove: {result.stderr}")
+            except Exception as e:
+                return RdstResult(False, f"Error running claude command: {e}")
+
+        return RdstResult(False, f"Unknown action: {action}")
     elif command == 'report':
         from lib.cli.report_command import ReportCommand
         report_cmd = ReportCommand()
@@ -307,6 +511,18 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             include_plan=getattr(args, 'include_plan', False),
         )
         return RdstResult(success, "")
+    elif command == 'howdoi':
+        from lib.cli.howdoi_command import HowDoICommand
+        howdoi_cmd = HowDoICommand()
+        question = ' '.join(args.question) if args.question else ''
+        if not question:
+            return RdstResult(False, "Please provide a question. Example: rdst howdoi \"how do I analyze a query?\"")
+        result = howdoi_cmd.run(question)
+        if result.success:
+            howdoi_cmd.print_formatted(result.answer)
+            return RdstResult(True, "")
+        else:
+            return RdstResult(False, result.error or "Failed to answer question")
     elif command == 'help' or command is None:
         return cli.help()
     else:
@@ -450,6 +666,12 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
 def main():
     """Main entry point for the rdst CLI wrapper."""
     try:
+        # Intercept top-level --help for Rich formatted output
+        if len(sys.argv) == 2 and sys.argv[1] in ('--help', '-h', 'help'):
+            if print_rich_help():
+                sys.exit(0)
+            # Fall through to argparse if Rich not available
+
         args = parse_arguments()
 
         # Initialize the CLI

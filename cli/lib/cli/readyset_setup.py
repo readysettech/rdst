@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 from pathlib import Path
+import socket
 
 
 """
@@ -10,6 +11,63 @@ Shared ReadySet Container Setup Utilities
 Provides reusable functions for setting up test database and ReadySet containers
 across different commands (analyze, cache, etc.).
 """
+
+
+def is_port_available(port: int) -> bool:
+    """Check if a port is available for binding."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('localhost', port))
+            return True
+    except OSError:
+        return False
+
+
+def find_available_port(start_port: int, max_attempts: int = 10, exclude: set = None) -> int:
+    """
+    Find an available port starting from start_port.
+
+    Args:
+        start_port: Port to start checking from
+        max_attempts: Maximum number of ports to try (default: 10)
+        exclude: Set of ports to skip (already allocated)
+
+    Returns:
+        An available port number
+
+    Raises:
+        RuntimeError: If no available port found within max_attempts
+    """
+    exclude = exclude or set()
+    for offset in range(max_attempts):
+        port = start_port + offset
+        if port not in exclude and is_port_available(port):
+            return port
+    raise RuntimeError(f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
+
+
+def find_two_available_ports(port1_start: int, port2_start: int, max_attempts: int = 10) -> Tuple[int, int]:
+    """
+    Find two available ports that don't overlap.
+
+    Args:
+        port1_start: Starting port for first allocation
+        port2_start: Starting port for second allocation
+        max_attempts: Maximum attempts per port (default: 10)
+
+    Returns:
+        Tuple of (port1, port2) that are both available and different
+
+    Raises:
+        RuntimeError: If unable to find two non-overlapping available ports
+    """
+    # Find first port
+    port1 = find_available_port(port1_start, max_attempts)
+
+    # Find second port, excluding the first one
+    port2 = find_available_port(port2_start, max_attempts, exclude={port1})
+
+    return port1, port2
 
 
 def setup_readyset_containers(
@@ -69,14 +127,26 @@ def setup_readyset_containers(
         target_user = target_config.get("user", "postgres" if engine == "postgresql" else "root")
 
         # Determine database-specific configuration with target-specific naming
+        # Find available ports (try default, then increment if busy)
+        # IMPORTANT: Find both ports together to ensure they don't overlap
         if engine == "mysql":
             container_name = f"rdst-test-mysql-{target_name}"
-            test_port = 3308
-            readyset_port = 3307
+            try:
+                test_port, readyset_port = find_two_available_ports(3308, 3307)
+            except RuntimeError as e:
+                return {
+                    "success": False,
+                    "error": f"No available ports for MySQL containers: {e}"
+                }
         else:  # postgresql
             container_name = f"rdst-test-psql-{target_name}"
-            test_port = 5434
-            readyset_port = 5433
+            try:
+                test_port, readyset_port = find_two_available_ports(5434, 5433)
+            except RuntimeError as e:
+                return {
+                    "success": False,
+                    "error": f"No available ports for PostgreSQL containers: {e}"
+                }
 
         # Prepare workflow input with target-specific container names
         readyset_container_name = f"rdst-readyset-{target_name}"
@@ -96,12 +166,43 @@ def setup_readyset_containers(
         if test_db_running and readyset_running:
             print(f"✓ Test database and ReadySet containers already running for '{target_name}'")
 
+            # Get actual ports from running containers
+            test_port_result = subprocess.run(
+                ['docker', 'port', container_name],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            readyset_port_result = subprocess.run(
+                ['docker', 'port', readyset_container_name],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            # Parse actual test DB port (format: "5432/tcp -> 0.0.0.0:5437")
+            actual_test_port = test_port  # fallback
+            if test_port_result.returncode == 0:
+                for line in test_port_result.stdout.strip().split('\n'):
+                    if '->' in line:
+                        actual_test_port = int(line.split(':')[-1])
+                        break
+
+            # Parse actual ReadySet port
+            actual_readyset_port = readyset_port  # fallback
+            if readyset_port_result.returncode == 0:
+                for line in readyset_port_result.stdout.strip().split('\n'):
+                    if '->' in line:
+                        actual_readyset_port = int(line.split(':')[-1])
+                        break
+
             # Get password from running container
+            # Docker postgres images use POSTGRES_PASSWORD, mysql uses MYSQL_ROOT_PASSWORD
             password = ""
             if engine == "mysql":
-                env_var = "MYSQL_PASSWORD"
+                env_vars = ["MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD"]
             else:  # postgresql
-                env_var = "PGPASSWORD"
+                env_vars = ["POSTGRES_PASSWORD", "PGPASSWORD"]
 
             inspect_result = subprocess.run(
                 ['docker', 'inspect', container_name, '--format', '{{range .Config.Env}}{{println .}}{{end}}'],
@@ -112,8 +213,11 @@ def setup_readyset_containers(
 
             if inspect_result.returncode == 0:
                 for line in inspect_result.stdout.strip().split('\n'):
-                    if line.startswith(f"{env_var}="):
-                        password = line.split('=', 1)[1]
+                    for env_var in env_vars:
+                        if line.startswith(f"{env_var}="):
+                            password = line.split('=', 1)[1]
+                            break
+                    if password:
                         break
 
             # Return existing configuration without running full workflow
@@ -123,7 +227,7 @@ def setup_readyset_containers(
             test_db_config = {
                 "engine": engine,
                 "host": "localhost",
-                "port": test_port,
+                "port": actual_test_port,
                 "database": target_database,
                 "user": target_user,
                 "password": password
@@ -132,11 +236,11 @@ def setup_readyset_containers(
             return {
                 "success": True,
                 "target_config": test_db_config,
-                "readyset_port": readyset_port,
+                "readyset_port": actual_readyset_port,
                 "readyset_host": "localhost",
                 "container_name": container_name,
                 "readyset_container_name": readyset_container_name,
-                "test_port": test_port,
+                "test_port": actual_test_port,
                 "engine": engine,
                 "already_running": True
             }
@@ -206,12 +310,13 @@ def setup_readyset_containers(
         }
 
 
-def get_container_ports(engine: str) -> tuple[int, int]:
+def get_container_ports(engine: str, find_available: bool = False) -> tuple[int, int]:
     """
     Get the test database and ReadySet ports for a given database engine.
 
     Args:
         engine: Database engine ("mysql" or "postgresql")
+        find_available: If True, find available ports starting from defaults
 
     Returns:
         Tuple of (test_db_port, readyset_port)
@@ -219,11 +324,18 @@ def get_container_ports(engine: str) -> tuple[int, int]:
     Example:
         >>> test_port, readyset_port = get_container_ports("postgresql")
         >>> print(test_port, readyset_port)  # 5434, 5433
+
+        >>> # Find available ports if defaults are busy
+        >>> test_port, readyset_port = get_container_ports("postgresql", find_available=True)
     """
     if engine.lower() == "mysql":
-        return 3308, 3307
+        default_test, default_readyset = 3308, 3307
     else:  # postgresql
-        return 5434, 5433
+        default_test, default_readyset = 5434, 5433
+
+    if find_available:
+        return find_available_port(default_test), find_available_port(default_readyset)
+    return default_test, default_readyset
 
 
 def get_container_names(target_name: str, engine: str) -> tuple[str, str]:

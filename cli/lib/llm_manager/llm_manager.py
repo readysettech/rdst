@@ -220,13 +220,9 @@ class LLMManager:
             return api_key
 
         raise LLMError(
-            "No API key configured. Set the ANTHROPIC_API_KEY environment variable.\n\n"
-            "To get an API key:\n"
-            "  1. Visit https://console.anthropic.com/\n"
-            "  2. Create an account or sign in\n"
-            "  3. Generate an API key\n"
-            "  4. Set the environment variable:\n"
-            "     export ANTHROPIC_API_KEY=\"sk-ant-...\"",
+            "No LLM API key configured.\n\n"
+            "Please provide your Anthropic API key to enable query analysis.\n"
+            "You can get one at: https://console.anthropic.com/",
             code="NO_API_KEY"
         )
 
