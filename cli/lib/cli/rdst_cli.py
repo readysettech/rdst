@@ -521,9 +521,19 @@ class RdstCLI:
         return RdstResult(True, f"{banner}{intro}")
 
     def version(self) -> RdstResult:
-        """Stub: Report CLI/library version."""
-        # In a future iteration, derive from package/version file
-        return RdstResult(True, "Readyset Diagnostics & SQL Tuning (rdst) version 0.0.0 (stubs)")
+        """Report CLI/library version."""
+        try:
+            from importlib.metadata import version as get_version
+            pkg_version = get_version("rdst-staging")
+        except Exception:
+            # Fallback to _version.py if package metadata not available
+            try:
+                from _version import __version__
+                pkg_version = __version__
+            except Exception:
+                pkg_version = "unknown"
+
+        return RdstResult(True, f"Readyset Diagnostics & SQL Tuning (rdst) version {pkg_version}")
 
     # rdst report
     def report(self, title: str, body: str = "", **kwargs) -> RdstResult:
