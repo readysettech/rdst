@@ -3,6 +3,36 @@ Common pytest fixtures and configuration for RDST tests.
 """
 
 import pytest
+
+
+# Register custom markers
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "ask_experimental: tests for unreleased Ask/Schema features (not run by default)"
+    )
+
+
+# Exclude ask_experimental tests from default runs
+def pytest_collection_modifyitems(config, items):
+    """Skip ask_experimental tests unless explicitly targeted."""
+    # Check if user is explicitly running ask_experimental tests
+    # by looking at the test paths being collected
+    running_ask_explicit = any(
+        "ask_experimental" in str(item.fspath)
+        for item in items
+    ) and all(
+        "ask_experimental" in str(item.fspath) or "conftest" in str(item.fspath)
+        for item in items
+    )
+
+    if running_ask_explicit:
+        # User explicitly ran: pytest tests/ask_experimental/
+        return
+
+    skip_ask = pytest.mark.skip(reason="ask_experimental tests excluded by default. Run with: pytest tests/ask_experimental/ -v")
+    for item in items:
+        if "ask_experimental" in str(item.fspath):
+            item.add_marker(skip_ask)
 import tempfile
 import os
 import sys

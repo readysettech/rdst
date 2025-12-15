@@ -31,6 +31,11 @@ DOCS_EXCLUDED_COMMANDS = {
     "show",
     "list",
     "import",
+    # Experimental features (require RDST_EXPERIMENTAL=1)
+    "ask",       # Text-to-SQL - not yet released
+    "schema",    # Semantic layer management - not yet released
+    "annotate",  # Schema subcommand - not yet released
+    "export",    # Schema subcommand - not yet released
 }
 
 # Commands documented under different names or as part of other commands

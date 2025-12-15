@@ -131,7 +131,6 @@ def start_readyset_container(
         print(f"  ReadySet port: {readyset_port}")
 
         # Create and start ReadySet container using the same pattern as control_plane
-        # Include feature flags to match ReadySet Cloud defaults
         docker_cmd = [
             'docker', 'run',
             '-d',
@@ -139,8 +138,6 @@ def start_readyset_container(
             '-e', f'DATABASE_TYPE={db_type}',
             '-e', f'DATABASE_URL={target_db_url}',
             '-e', f'DATABASE_PORT={readyset_port}',
-            '-e', 'FEATURE_FULL_MATERIALIZATION=true',  # Match ReadySet Cloud default
-            '-e', 'FEATURE_POST_LOOKUP=true',           # Match ReadySet Cloud default
             '-p', f'{readyset_port}:{readyset_port}',
             '--add-host=host.docker.internal:host-gateway',  # Allow container to reach host
             'public.ecr.aws/g3d8h1n9/readyset/readyset-base-build:latest'

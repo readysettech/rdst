@@ -25,6 +25,11 @@ MCP_EXCLUDED_COMMANDS = {
     "claude",    # N/A - meta command for MCP registration itself
     "help",      # N/A - rdst_help handles this differently
     "howdoi",    # N/A - CLI-only, MCP has its own tool descriptions
+    # Experimental features (require RDST_EXPERIMENTAL=1)
+    "ask",       # Text-to-SQL - not yet released
+    "schema",    # Semantic layer management - not yet released
+    "annotate",  # Schema subcommand - not yet released
+    "export",    # Schema subcommand - not yet released
 }
 
 # MCP-only tools that don't map directly to CLI commands

@@ -669,7 +669,353 @@ class RdstCLI:
         msg = "Report stub – would submit feedback via control plane API."
         return RdstResult(True, msg, data={"title": title, "body": body})
 
+    # ============================================================================
+    # RDST ASK - Text-to-SQL with hybrid linear + agent architecture
+    # NOTE: Not yet exposed in CLI - internal API only
+    # ============================================================================
+    def ask(
+        self,
+        question: Optional[str] = None,
+        target: Optional[str] = None,
+        dry_run: bool = False,
+        timeout: int = 30,
+        verbose: bool = False,
+        agent_mode: bool = False,
+        **kwargs
+    ) -> RdstResult:
+        """
+        Generate SQL from natural language using hybrid linear + agent architecture.
 
+        Uses a fast linear flow (schema → filter → clarify → generate → validate → execute)
+        for most queries, with automatic escalation to an intelligent agent for complex cases.
+
+        The agent can:
+        - Explore the schema iteratively
+        - Sample data to understand semantics
+        - Ask the user clarifying questions
+        - Refine its approach based on observations
+
+        Args:
+            question: Natural language question (if None, prompt user interactively)
+            target: Target database name (if None, use default)
+            dry_run: Generate SQL but don't execute (default: False)
+            timeout: Query timeout in seconds (default: 30)
+            verbose: Show detailed information
+            agent_mode: Skip linear flow and go directly to agent exploration
+            **kwargs: Additional parameters
+
+        Returns:
+            RdstResult with generated SQL, execution results, and metadata
+
+        Examples:
+            # Basic usage
+            rdst ask "Show me the top 10 customers by revenue"
+
+            # Dry run (generate but don't execute)
+            rdst ask "Count active users" --dry-run
+
+            # Direct agent mode for complex queries
+            rdst ask "Find users who give the most downvotes" --agent
+
+            # Verbose output
+            rdst ask "Show slow queries" --verbose
+        """
+        from ..engines.ask3 import Ask3Engine, Ask3Presenter, Status
+
+        try:
+            # Load target configuration
+            if not target:
+                cfg = TargetsConfig()
+                cfg.load()
+                target = cfg.get_default()
+
+            if not target:
+                return RdstResult(False, "No target specified and no default configured. Run 'rdst configure' first.")
+
+            cfg = TargetsConfig()
+            cfg.load()
+            target_config = cfg._data.get("targets", {}).get(target)
+
+            if not target_config:
+                return RdstResult(False, f"Target '{target}' not found in configuration")
+
+            # Determine database type
+            engine_type = target_config.get('engine', 'postgresql').lower()
+            if 'mysql' in engine_type:
+                db_type = 'mysql'
+            else:
+                db_type = 'postgresql'
+
+            # Create presenter and engine
+            presenter = Ask3Presenter(verbose=verbose, use_rich=_RICH_AVAILABLE)
+            engine = Ask3Engine(presenter=presenter)
+
+            # Run the engine
+            ctx = engine.run(
+                question=question,
+                target=target,
+                target_config=target_config,
+                db_type=db_type,
+                timeout_seconds=timeout,
+                verbose=verbose,
+                no_interactive=kwargs.get('no_interactive', False),
+                agent_mode=agent_mode
+            )
+
+            # Build result
+            if ctx.status == Status.SUCCESS:
+                row_count = ctx.execution_result.row_count if ctx.execution_result else 0
+                exec_time = ctx.execution_result.execution_time_ms if ctx.execution_result else 0
+
+                message = f"\nSQL: {ctx.sql}\n"
+                message += f"Rows: {row_count}\n"
+                message += f"Execution time: {exec_time:.1f}ms\n"
+                message += f"LLM calls: {len(ctx.llm_calls)}\n"
+                message += f"Total tokens: {ctx.total_tokens}\n"
+
+                return RdstResult(
+                    ok=True,
+                    message=message,
+                    data={
+                        'sql': ctx.sql,
+                        'rows': ctx.execution_result.rows if ctx.execution_result else [],
+                        'columns': ctx.execution_result.columns if ctx.execution_result else [],
+                        'row_count': row_count,
+                        'execution_time_ms': exec_time,
+                        'llm_calls': len(ctx.llm_calls),
+                        'total_tokens': ctx.total_tokens,
+                        'status': ctx.status,
+                    }
+                )
+
+            elif ctx.status == Status.CANCELLED:
+                return RdstResult(ok=False, message="Operation cancelled by user")
+
+            else:
+                return RdstResult(
+                    ok=False,
+                    message=f"Error: {ctx.error_message}",
+                    data={'status': ctx.status, 'phase': ctx.phase}
+                )
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return RdstResult(False, f"ask command failed: {e}")
+
+    # ============================================================================
+    # RDST SCHEMA - Semantic layer management
+    # NOTE: Not yet exposed in CLI - internal API only
+    # ============================================================================
+    def schema(self, subcommand: str, target: str = None, **kwargs) -> RdstResult:
+        """
+        Manage semantic layer for better SQL generation.
+
+        Args:
+            subcommand: One of: show, init, edit, annotate, export, delete, list, add-table, add-term
+            target: Target database name
+            **kwargs: Subcommand-specific arguments
+
+        Returns:
+            RdstResult with operation outcome
+        """
+        try:
+            from .schema_command import SchemaCommand
+            schema_cmd = SchemaCommand()
+
+            if subcommand == 'show':
+                table = kwargs.get('table')
+                if not target:
+                    default_target = self._get_default_target()
+                    if not default_target:
+                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                    target = default_target
+                result = schema_cmd.show(target, table)
+
+            elif subcommand == 'init':
+                if not target:
+                    default_target = self._get_default_target()
+                    if not default_target:
+                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                    target = default_target
+
+                # Get target config
+                target_config = self._get_target_config(target)
+                if not target_config:
+                    return RdstResult(False, f"Target '{target}' not found. Run 'rdst configure' first.")
+
+                enum_threshold = kwargs.get('enum_threshold', 20)
+                force = kwargs.get('force', False)
+                interactive = kwargs.get('interactive', False)
+                result = schema_cmd.init(target, target_config, enum_threshold, force, interactive)
+
+            elif subcommand == 'edit':
+                table = kwargs.get('table')
+                if not target:
+                    default_target = self._get_default_target()
+                    if not default_target:
+                        return RdstResult(False, "No target specified and no default target configured.")
+                    target = default_target
+                result = schema_cmd.edit(target, table)
+
+            elif subcommand == 'annotate':
+                table = kwargs.get('table')
+                if not target:
+                    default_target = self._get_default_target()
+                    if not default_target:
+                        return RdstResult(False, "No target specified and no default target configured.")
+                    target = default_target
+                use_llm = kwargs.get('use_llm', False)
+                sample_rows = kwargs.get('sample_rows', 5)
+
+                # Always try to get target config (needed for AI suggestions in wizard)
+                target_config = self._get_target_config(target)
+
+                # Only error if --use-llm specified but config missing
+                if use_llm and not target_config:
+                    return RdstResult(False, f"Target '{target}' not found. Run 'rdst configure' first.")
+
+                result = schema_cmd.annotate(target, table, use_llm, sample_rows, target_config)
+
+            elif subcommand == 'export':
+                if not target:
+                    default_target = self._get_default_target()
+                    if not default_target:
+                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                    target = default_target
+                output_format = kwargs.get('output_format', 'yaml')
+                result = schema_cmd.export(target, output_format)
+
+            elif subcommand == 'delete':
+                if not target:
+                    default_target = self._get_default_target()
+                    if not default_target:
+                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                    target = default_target
+
+                force = kwargs.get('force', False)
+                if not force:
+                    # Prompt for confirmation
+                    try:
+                        confirm = input(f"Delete semantic layer for '{target}'? [y/N] ")
+                        if confirm.lower() != 'y':
+                            return RdstResult(False, "Cancelled")
+                    except EOFError:
+                        return RdstResult(False, "Cannot prompt for confirmation in non-interactive mode. Use --force")
+
+                result = schema_cmd.delete(target)
+
+            elif subcommand == 'list':
+                result = schema_cmd.list_targets()
+
+            elif subcommand == 'add-table':
+                if not target:
+                    default_target = self._get_default_target()
+                    if not default_target:
+                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                    target = default_target
+                table = kwargs.get('table')
+                description = kwargs.get('description', '')
+                context = kwargs.get('context', '')
+                result = schema_cmd.add_table(target, table, description, context)
+
+            elif subcommand == 'add-term':
+                if not target:
+                    default_target = self._get_default_target()
+                    if not default_target:
+                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                    target = default_target
+                term = kwargs.get('term')
+                definition = kwargs.get('definition', '')
+                sql_pattern = kwargs.get('sql_pattern', '')
+                result = schema_cmd.add_terminology(target, term, definition, sql_pattern)
+
+            else:
+                return RdstResult(False, f"Unknown schema subcommand: {subcommand}")
+
+            # Format result for display
+            if result['ok']:
+                message = result['message']
+                if result.get('data'):
+                    # Format data for display
+                    data = result['data']
+                    if subcommand == 'show' and 'tables' in data:
+                        message += self._format_schema_show(data)
+                    elif subcommand == 'init':
+                        message += f"\n\nDiscovered:"
+                        message += f"\n  Tables: {data.get('tables', 0)}"
+                        message += f"\n  Columns: {data.get('columns', 0)}"
+                        message += f"\n  Relationships: {data.get('relationships', 0)}"
+                        if data.get('enum_columns'):
+                            message += f"\n  Potential enums: {len(data['enum_columns'])}"
+                        if data.get('next_steps'):
+                            message += f"\n\nNext steps:\n" + "\n".join(data['next_steps'])
+                    elif subcommand == 'list':
+                        targets = data.get('targets', [])
+                        if targets:
+                            message += "\n"
+                            for t in targets:
+                                message += f"\n  {t['name']}: {t['tables']} tables, {t['terminology']} terms"
+                    elif subcommand == 'export':
+                        message = result['data'].get('content', '')
+
+                return RdstResult(True, message)
+            else:
+                return RdstResult(False, result['message'])
+
+        except Exception as e:
+            return RdstResult(False, f"schema command failed: {e}")
+
+    def _format_schema_show(self, data: dict) -> str:
+        """Format schema show output for display."""
+        lines = []
+
+        # Summary
+        summary = data.get('summary', {})
+        lines.append(f"\n\nSummary: {summary.get('tables', 0)} tables, {summary.get('columns', 0)} columns, {summary.get('terminology', 0)} terms")
+
+        # Tables
+        tables = data.get('tables', {})
+        if tables:
+            lines.append("\n\nTables:")
+            for name, table in tables.items():
+                desc = table.get('description', 'No description')
+                lines.append(f"  {name}: {desc}")
+                if table.get('columns'):
+                    for col_name, col in table['columns'].items():
+                        col_desc = col.get('description', '')
+                        col_type = col.get('type', '')
+                        if col.get('enum_values'):
+                            enum_preview = list(col['enum_values'].keys())[:3]
+                            col_type = f"enum({', '.join(enum_preview)}...)"
+                        lines.append(f"    - {col_name} ({col_type}): {col_desc}")
+
+        # Terminology
+        terminology = data.get('terminology', {})
+        if terminology:
+            lines.append("\n\nTerminology:")
+            for term, info in terminology.items():
+                lines.append(f"  {term}: {info.get('definition', '')}")
+
+        return "\n".join(lines)
+
+    def _get_default_target(self) -> str:
+        """Get the default target from config."""
+        try:
+            cfg = TargetsConfig()
+            cfg.load()
+            return cfg.get_default() or ''
+        except Exception:
+            return ''
+
+    def _get_target_config(self, target: str) -> dict:
+        """Get target configuration by name."""
+        try:
+            cfg = TargetsConfig()
+            cfg.load()
+            return cfg.get(target) or {}
+        except Exception:
+            return {}
 
 
 
