@@ -149,6 +149,57 @@ rdst report --reason "Analysis gave wrong recommendation" --hash abc123 --negati
 rdst report --reason "Great index suggestion!" --hash abc123 --positive
 ```
 
+### rdst ask
+Generate SQL from natural language questions.
+
+```bash
+# Ask a question about your data
+rdst ask "Show me top 10 customers by order value" --target mydb
+
+# Dry run - generate SQL without executing
+rdst ask "Count orders by status" --target mydb --dry-run
+
+# Use agent mode for complex queries
+rdst ask "What's the relationship between customers and orders?" --target mydb --agent
+```
+
+The ask command:
+- Understands your database schema automatically
+- Generates optimized SQL queries
+- Validates SQL before execution
+- Shows results in a readable table
+
+### rdst schema
+Manage semantic layer for better SQL generation.
+
+```bash
+# Initialize semantic layer from database
+rdst schema init --target mydb
+
+# View semantic layer
+rdst schema show --target mydb
+
+# AI-generate column/table descriptions
+rdst schema annotate --target mydb --use-llm
+
+# Edit semantic layer manually
+rdst schema edit --target mydb
+
+# Export semantic layer
+rdst schema export --target mydb --format yaml
+
+# Delete semantic layer
+rdst schema delete --target mydb
+```
+
+The semantic layer stores:
+- Table and column descriptions
+- Enum value meanings
+- Business terminology
+- Relationships between tables
+
+This helps `rdst ask` generate more accurate SQL.
+
 ## Password Handling
 RDST never stores passwords in config files. Each target has a `password_env` field
 specifying which environment variable holds the password.

@@ -8,7 +8,7 @@ import pytest
 # Register custom markers
 def pytest_configure(config):
     config.addinivalue_line(
-        "markers", "ask_experimental: tests for unreleased Ask/Schema features (not run by default)"
+        "markers", "ask_experimental: tests for Ask/Schema features (not run by default, require database)"
     )
 
 

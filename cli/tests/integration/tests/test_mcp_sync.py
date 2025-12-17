@@ -20,16 +20,16 @@ import os
 # claude: Meta command for registering with Claude Code
 # help: Handled by rdst_help tool differently
 # howdoi: CLI-only docs lookup (MCP has its own tool descriptions)
+# ask: Requires interactive TTY for best experience
 MCP_EXCLUDED_COMMANDS = {
     "tune",      # N/A - not implemented
     "claude",    # N/A - meta command for MCP registration itself
     "help",      # N/A - rdst_help handles this differently
     "howdoi",    # N/A - CLI-only, MCP has its own tool descriptions
-    # Experimental features (require RDST_EXPERIMENTAL=1)
-    "ask",       # Text-to-SQL - not yet released
-    "schema",    # Semantic layer management - not yet released
-    "annotate",  # Schema subcommand - not yet released
-    "export",    # Schema subcommand - not yet released
+    "ask",       # CLI-only - requires interactive TTY for multi-step flow
+    # Schema subcommands (handled via rdst_schema tool, some are CLI-only)
+    "annotate",  # Schema subcommand - interactive wizard, CLI-only
+    "export",    # Schema subcommand - handled by rdst_schema tool
 }
 
 # MCP-only tools that don't map directly to CLI commands

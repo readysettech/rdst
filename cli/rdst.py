@@ -250,60 +250,58 @@ Examples:
     query_rm_parser.add_argument('--force', action='store_true', help='Skip confirmation prompt')
 
     # ============================================================================
-    # RDST ASK & SCHEMA - Hidden features (NOT YET RELEASED)
-    # Enable with: export RDST_EXPERIMENTAL=1
+    # RDST ASK & SCHEMA - Natural language to SQL and semantic layer management
     # ============================================================================
-    if os.environ.get('RDST_EXPERIMENTAL') == '1':
-        # ask command - Natural language to SQL
-        ask_parser = subparsers.add_parser('ask', help='Generate SQL from natural language')
-        ask_parser.add_argument('question', nargs='?', help='Natural language question')
-        ask_parser.add_argument('--target', help='Target database')
-        ask_parser.add_argument('--dry-run', action='store_true', help='Generate SQL but do not execute')
-        ask_parser.add_argument('--timeout', type=int, default=30, help='Query timeout in seconds')
-        ask_parser.add_argument('--verbose', action='store_true', help='Show detailed information')
-        ask_parser.add_argument('--agent', dest='agent_mode', action='store_true', help='Skip linear flow, use agent exploration')
-        ask_parser.add_argument('--no-interactive', action='store_true', help='Non-interactive mode')
+    # ask command - Natural language to SQL
+    ask_parser = subparsers.add_parser('ask', help='Generate SQL from natural language')
+    ask_parser.add_argument('question', nargs='?', help='Natural language question')
+    ask_parser.add_argument('--target', help='Target database')
+    ask_parser.add_argument('--dry-run', action='store_true', help='Generate SQL but do not execute')
+    ask_parser.add_argument('--timeout', type=int, default=30, help='Query timeout in seconds')
+    ask_parser.add_argument('--verbose', action='store_true', help='Show detailed information')
+    ask_parser.add_argument('--agent', dest='agent_mode', action='store_true', help='Skip linear flow, use agent exploration')
+    ask_parser.add_argument('--no-interactive', action='store_true', help='Non-interactive mode')
 
-        # schema command - Semantic layer management
-        schema_parser = subparsers.add_parser('schema', help='Manage semantic layer for better SQL generation')
-        schema_subparsers = schema_parser.add_subparsers(dest='schema_subcommand', help='Schema subcommands')
+    # schema command - Semantic layer management
+    schema_parser = subparsers.add_parser('schema', help='Manage semantic layer for better SQL generation')
+    schema_subparsers = schema_parser.add_subparsers(dest='schema_subcommand', help='Schema subcommands')
 
-        # schema show
-        schema_show_parser = schema_subparsers.add_parser('show', help='Display semantic layer')
-        schema_show_parser.add_argument('table', nargs='?', help='Specific table to show')
-        schema_show_parser.add_argument('--target', help='Target database name')
+    # schema show
+    schema_show_parser = schema_subparsers.add_parser('show', help='Display semantic layer')
+    schema_show_parser.add_argument('table', nargs='?', help='Specific table to show')
+    schema_show_parser.add_argument('--target', help='Target database name')
 
-        # schema init
-        schema_init_parser = schema_subparsers.add_parser('init', help='Initialize semantic layer from database')
-        schema_init_parser.add_argument('--target', help='Target database name')
-        schema_init_parser.add_argument('--enum-threshold', type=int, default=20, help='Max distinct values for enum detection')
-        schema_init_parser.add_argument('--force', action='store_true', help='Overwrite existing semantic layer')
-        schema_init_parser.add_argument('-i', '--interactive', action='store_true', help='Interactively annotate enum values')
+    # schema init
+    schema_init_parser = schema_subparsers.add_parser('init', help='Initialize semantic layer from database')
+    schema_init_parser.add_argument('--target', help='Target database name')
+    schema_init_parser.add_argument('--enum-threshold', type=int, default=20, help='Max distinct values for enum detection')
+    schema_init_parser.add_argument('--force', action='store_true', help='Overwrite existing semantic layer')
+    schema_init_parser.add_argument('-i', '--interactive', action='store_true', help='Interactively annotate enum values')
 
-        # schema edit
-        schema_edit_parser = schema_subparsers.add_parser('edit', help='Edit semantic layer in $EDITOR')
-        schema_edit_parser.add_argument('table', nargs='?', help='Specific table to focus on')
-        schema_edit_parser.add_argument('--target', help='Target database name')
+    # schema edit
+    schema_edit_parser = schema_subparsers.add_parser('edit', help='Edit semantic layer in $EDITOR')
+    schema_edit_parser.add_argument('table', nargs='?', help='Specific table to focus on')
+    schema_edit_parser.add_argument('--target', help='Target database name')
 
-        # schema annotate
-        schema_annotate_parser = schema_subparsers.add_parser('annotate', help='Annotate columns interactively')
-        schema_annotate_parser.add_argument('table', nargs='?', help='Table to annotate')
-        schema_annotate_parser.add_argument('--target', help='Target database name')
-        schema_annotate_parser.add_argument('--use-llm', action='store_true', help='Use LLM to suggest annotations')
-        schema_annotate_parser.add_argument('--sample-rows', type=int, default=5, help='Sample rows for LLM context')
+    # schema annotate
+    schema_annotate_parser = schema_subparsers.add_parser('annotate', help='Annotate columns interactively')
+    schema_annotate_parser.add_argument('table', nargs='?', help='Table to annotate')
+    schema_annotate_parser.add_argument('--target', help='Target database name')
+    schema_annotate_parser.add_argument('--use-llm', action='store_true', help='Use LLM to suggest annotations')
+    schema_annotate_parser.add_argument('--sample-rows', type=int, default=5, help='Sample rows for LLM context')
 
-        # schema export
-        schema_export_parser = schema_subparsers.add_parser('export', help='Export semantic layer')
-        schema_export_parser.add_argument('--target', help='Target database name')
-        schema_export_parser.add_argument('--format', dest='output_format', choices=['yaml', 'json'], default='yaml', help='Output format')
+    # schema export
+    schema_export_parser = schema_subparsers.add_parser('export', help='Export semantic layer')
+    schema_export_parser.add_argument('--target', help='Target database name')
+    schema_export_parser.add_argument('--format', dest='output_format', choices=['yaml', 'json'], default='yaml', help='Output format')
 
-        # schema delete
-        schema_delete_parser = schema_subparsers.add_parser('delete', help='Delete semantic layer')
-        schema_delete_parser.add_argument('--target', help='Target database name')
-        schema_delete_parser.add_argument('--force', action='store_true', help='Skip confirmation')
+    # schema delete
+    schema_delete_parser = schema_subparsers.add_parser('delete', help='Delete semantic layer')
+    schema_delete_parser.add_argument('--target', help='Target database name')
+    schema_delete_parser.add_argument('--force', action='store_true', help='Skip confirmation')
 
-        # schema list
-        schema_subparsers.add_parser('list', help='List all semantic layers')
+    # schema list
+    schema_subparsers.add_parser('list', help='List all semantic layers')
 
     # version command
     subparsers.add_parser('version', help='Show version')
@@ -419,8 +417,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         return result
 
     # ============================================================================
-    # RDST ASK & SCHEMA - Hidden command handlers
-    # Only available when RDST_EXPERIMENTAL=1
+    # RDST ASK & SCHEMA - Natural language to SQL and semantic layer
     # ============================================================================
     elif command == 'ask':
         return cli.ask(

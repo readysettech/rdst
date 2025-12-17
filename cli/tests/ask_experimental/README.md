@@ -1,12 +1,12 @@
-# Ask Experimental Tests
+# Ask/Schema Tests
 
-These tests are for the **unreleased** `rdst ask` and `rdst schema` features.
+Tests for the `rdst ask` and `rdst schema` features.
 
 ## Status
 
-- **NOT included in regular test runs** - these are isolated until Ask is released
-- **Manual testing required** - see `ask_validation/MANUAL_TEST_CASES.md` for functional tests
-- **Database required** - most tests need a live database connection
+- **NOT included in regular test runs** - these require a live database connection
+- **Manual testing guide** - see `MANUAL_TEST_CASES.md` for functional tests
+- **Database required** - most tests need a database (e.g., TPC-H on localhost:5433)
 
 ## Test Categories
 

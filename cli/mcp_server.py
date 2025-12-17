@@ -97,6 +97,20 @@ If a command fails with authentication error, check:
 - Use `--target NAME` to specify which database to use
 - If omitted, uses the default target from config
 - List available targets with `rdst configure list`
+
+### CLI-Only Features (Interactive Terminal Required)
+These features require the user to run commands directly in their terminal:
+
+- **Natural Language to SQL**: `rdst ask "Show me top 10 customers" --target mydb`
+  Converts questions to SQL queries interactively (clarifications, execution, results)
+
+- **Schema Annotation**: `rdst schema annotate --target mydb --use-llm`
+  Interactive wizard to add table/column descriptions (AI-assisted option available)
+
+- **Schema Editing**: `rdst schema edit --target mydb`
+  Opens semantic layer YAML in $EDITOR
+
+Tell users to run these commands in their terminal when they need these features.
 """
 
 
@@ -796,6 +810,69 @@ explicitly asks to set up or reconfigure RDST.
                 "properties": {},
                 "required": []
             }
+        },
+        {
+            "name": "rdst_schema",
+            "description": """Manage semantic layer for better SQL generation.
+
+The semantic layer stores information about your database schema including:
+- Table and column descriptions
+- Enum value meanings
+- Business terminology
+- Relationships between tables
+
+This metadata helps generate better SQL queries and understand the database.
+
+SUBCOMMANDS (available via MCP):
+- show: Display semantic layer (all or specific table)
+- init: Initialize from database introspection
+- export: Export as YAML/JSON
+- delete: Remove semantic layer
+- list: List all semantic layers
+
+CLI-ONLY FEATURES (tell user to run these in their terminal):
+- `rdst schema annotate --target <target>` - Interactive wizard to add descriptions
+- `rdst schema annotate --target <target> --use-llm` - AI-generated descriptions
+- `rdst schema edit --target <target>` - Opens in $EDITOR
+- `rdst ask "question" --target <target>` - Natural language to SQL (interactive)
+
+The `rdst ask` command converts natural language questions into SQL queries.
+It requires an interactive terminal for its multi-step flow (clarifications,
+execution confirmation, result display). Tell users to run it directly in CLI.
+
+EXAMPLES:
+  rdst_schema(subcommand="init", target="mydb")
+  rdst_schema(subcommand="show", target="mydb", table="customers")
+  rdst_schema(subcommand="export", target="mydb", output_format="yaml")
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subcommand": {
+                        "type": "string",
+                        "enum": ["show", "init", "export", "delete", "list"],
+                        "description": "Schema subcommand to run (annotate/edit require CLI)"
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Database target name"
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": "Specific table (for show)"
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Overwrite existing (for init, delete)"
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "enum": ["yaml", "json"],
+                        "description": "Export format (for export)"
+                    }
+                },
+                "required": ["subcommand"]
+            }
         }
     ]
 
@@ -1137,6 +1214,34 @@ Just describe your database and we'll get connected!
         if not result["success"] and "interactive" in result.get("stderr", "").lower():
             result["stderr"] += "\n\nNote: rdst init is interactive. For MCP, use rdst_configure_add to add targets directly."
         return result
+
+    elif name == "rdst_schema":
+        subcommand = arguments.get("subcommand", "show")
+
+        # Block interactive-only subcommands
+        if subcommand in ["annotate", "edit"]:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": f"'{subcommand}' requires an interactive terminal. Please use the CLI directly:\n  rdst schema {subcommand} --target <target>",
+                "returncode": 1
+            }
+
+        args = ["schema", subcommand]
+
+        if "target" in arguments:
+            args.extend(["--target", arguments["target"]])
+
+        if subcommand == "show" and "table" in arguments:
+            args.append(arguments["table"])
+
+        if subcommand in ["init", "delete"] and arguments.get("force"):
+            args.append("--force")
+
+        if subcommand == "export" and "output_format" in arguments:
+            args.extend(["--format", arguments["output_format"]])
+
+        return run_rdst_command(args)
 
     else:
         return {

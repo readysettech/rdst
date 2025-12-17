@@ -50,8 +50,8 @@ rdst/
 │   │   ├── schema_collector.py  # DB schema introspection
 │   │   └── rewrite_testing.py   # Query rewrite benchmarking
 │   ├── llm_manager/        # LLM provider abstraction
-│   ├── engines/            # [NOT RELEASED] Ask3 text-to-SQL engine
-│   ├── semantic_layer/     # [NOT RELEASED] Schema semantic context
+│   ├── engines/            # Ask3 text-to-SQL engine (rdst ask)
+│   ├── semantic_layer/     # Schema semantic context (rdst schema)
 │   └── prompts/            # LLM prompt templates
 ├── test/                   # Test cases
 └── devtools/               # Development utilities
@@ -65,6 +65,8 @@ rdst/
 | `rdst configure` | Manage database targets |
 | `rdst analyze -q "SQL"` | Analyze query performance |
 | `rdst top --target X` | Monitor slow queries |
+| `rdst ask "question"` | Natural language to SQL |
+| `rdst schema show` | View/manage semantic layer |
 | `rdst query list` | View saved queries |
 | `rdst howdoi "question"` | Documentation lookup |
 | `rdst claude add` | Register MCP server with Claude Code |
@@ -113,34 +115,85 @@ These files contain important improvements - be careful when merging:
 - `lib/functions/explain_analysis.py` - Interactive skip mechanism
 - `lib/cli/analyze_command.py` - All UX improvements
 
-## Experimental Features (RDST_EXPERIMENTAL=1)
+## Natural Language to SQL (rdst ask)
 
-Hidden features accessible via environment variable:
+Convert natural language questions into SQL queries:
 
 ```bash
-export RDST_EXPERIMENTAL=1
-
-# Natural language to SQL
+# Basic usage
 rdst ask "Show me top 10 orders by price" --target tpch
 
-# Semantic layer management
-rdst schema init --target tpch    # Initialize from database
-rdst schema show --target tpch    # Display semantic layer
-rdst schema edit --target tpch    # Edit in $EDITOR
-rdst schema annotate --target tpch customer  # Add descriptions
+# Dry run - generate SQL without executing
+rdst ask "Count customers by market segment" --target tpch --dry-run
+
+# Agent mode for complex queries
+rdst ask "Which suppliers have the most orders?" --target tpch --agent
 ```
 
-**Note**: `rdst ask` requires an LLM API key (ANTHROPIC_API_KEY).
-`rdst schema` commands work without LLM.
+**How it works**:
+1. Loads database schema (from semantic layer if available, otherwise introspects DB)
+2. LLM generates SQL based on question and schema context
+3. Validates SQL (read-only, columns exist, has LIMIT)
+4. Executes and displays results
 
-### Testing Experimental Features
+**Requires**: `ANTHROPIC_API_KEY` environment variable
+
+**Best experience**: Run interactively in terminal (not via MCP)
+
+## Semantic Layer (rdst schema)
+
+The semantic layer stores metadata about your database to improve `rdst ask` results:
 
 ```bash
-# Run experimental tests (skipped by default)
+# Initialize from database (introspects tables, columns, detects enums)
+rdst schema init --target tpch
+
+# View semantic layer
+rdst schema show --target tpch
+rdst schema show --target tpch customer   # Specific table
+
+# AI-generate descriptions (requires ANTHROPIC_API_KEY)
+rdst schema annotate --target tpch --use-llm
+
+# Manual annotation wizard
+rdst schema annotate --target tpch
+
+# Edit in $EDITOR
+rdst schema edit --target tpch
+
+# Export/delete
+rdst schema export --target tpch --format yaml
+rdst schema delete --target tpch
+```
+
+**Storage**: `~/.rdst/semantic-layer/<target>.yaml`
+
+**What it stores**:
+- Table descriptions and row estimates
+- Column descriptions and types
+- Enum values with meanings (e.g., `AUTOMOBILE` = "Automotive industry customers")
+- Business terminology definitions
+- Foreign key relationships
+
+**Workflow**:
+1. `rdst schema init` - Bootstrap from database
+2. `rdst schema annotate --use-llm` - AI fills in descriptions
+3. `rdst schema edit` - Manual tweaks if needed
+4. `rdst ask` - Now generates better SQL with context
+
+## Testing Ask/Schema
+
+```bash
+# Run tests
 pytest tests/ask_experimental/ -v
 
 # Manual testing guide
 cat tests/ask_experimental/MANUAL_TEST_CASES.md
+
+# Quick validation (requires TPC-H database)
+export TPCH_PASSWORD=tpchtest
+rdst ask "How many customers?" --target tpch --no-interactive
+rdst schema show --target tpch
 ```
 
 ## Environment Variables
