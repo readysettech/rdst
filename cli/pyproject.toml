@@ -33,6 +33,9 @@ dependencies = [
     "toml",
     "pygments",
     "posthog",
+    "sqlparse",
+    "pyyaml",
+    "sqlglot",
 ]
 
 [project.urls]

@@ -5,3 +5,6 @@ pandas
 rich
 toml
 pygments
+sqlparse
+pyyaml
+sqlglot
