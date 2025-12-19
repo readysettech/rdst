@@ -15,6 +15,7 @@ from ..data_structures.semantic_layer import (
     SemanticLayer,
     TableAnnotation,
     ColumnAnnotation,
+    IndexAnnotation,
     Relationship,
     Extension,
     CustomType
@@ -251,6 +252,39 @@ class SchemaIntrospector:
                         }
 
             table.columns[col_name] = column
+
+        # Get indexes
+        cursor.execute("""
+            SELECT
+                i.relname as index_name,
+                ix.indisunique,
+                ix.indisprimary,
+                pg_get_indexdef(ix.indexrelid) as index_def,
+                array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) as columns
+            FROM pg_class t
+            JOIN pg_index ix ON t.oid = ix.indrelid
+            JOIN pg_class i ON i.oid = ix.indexrelid
+            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+            WHERE t.relname = %s
+            GROUP BY i.relname, ix.indisunique, ix.indisprimary, ix.indexrelid
+            ORDER BY i.relname
+        """, (table_name,))
+
+        for idx_row in cursor.fetchall():
+            idx_name, is_unique, is_primary, idx_def, idx_columns = idx_row
+            # Parse index type from definition (USING btree/hash/gin/gist)
+            idx_type = "btree"
+            if " USING " in idx_def:
+                idx_type = idx_def.split(" USING ")[1].split(" ")[0].split("(")[0]
+
+            table.indexes[idx_name] = IndexAnnotation(
+                name=idx_name,
+                columns=list(idx_columns) if idx_columns else [],
+                index_type=idx_type,
+                is_unique=bool(is_unique),
+                is_primary=bool(is_primary),
+                definition=idx_def,
+            )
 
         return table
 
@@ -572,6 +606,39 @@ class SchemaIntrospector:
                         }
 
             table.columns[field] = column
+
+        # Get indexes
+        cursor.execute(f"SHOW INDEX FROM `{table_name}`")
+        idx_rows = cursor.fetchall()
+        idx_dict: dict[str, list] = {}
+        idx_meta: dict[str, dict] = {}
+        for idx_row in idx_rows:
+            # MySQL SHOW INDEX columns: Table, Non_unique, Key_name, Seq_in_index,
+            # Column_name, Collation, Cardinality, Sub_part, Packed, Null, Index_type, ...
+            idx_name = idx_row[2]
+            col_name_idx = idx_row[4]
+            non_unique = idx_row[1]
+            idx_type = idx_row[10] if len(idx_row) > 10 else "BTREE"
+
+            if idx_name not in idx_dict:
+                idx_dict[idx_name] = []
+                idx_meta[idx_name] = {
+                    "unique": non_unique == 0,
+                    "primary": idx_name == "PRIMARY",
+                    "type": idx_type.lower() if idx_type else "btree",
+                }
+            idx_dict[idx_name].append(col_name_idx)
+
+        for idx_name, cols in idx_dict.items():
+            meta = idx_meta[idx_name]
+            table.indexes[idx_name] = IndexAnnotation(
+                name=idx_name,
+                columns=cols,
+                index_type=meta["type"],
+                is_unique=meta["unique"],
+                is_primary=meta["primary"],
+                definition="",
+            )
 
         return table
 

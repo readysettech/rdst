@@ -108,6 +108,84 @@ def normalize_sql(query: str, dialect: str = None) -> str:
     return normalized
 
 
+def normalize_sql_deep(query: str) -> str:
+    """
+    Deep normalization for matching queries across different sources.
+
+    This function performs additional normalization beyond normalize_sql()
+    to ensure queries from different sources (LLM-generated, SQLAlchemy echo,
+    pg_stat_activity) can be matched after normalization.
+
+    Additional normalization steps:
+    1. All normalize_sql() steps
+    2. Remove column aliases (AS column_alias)
+    3. Remove table prefixes (table.column -> column)
+    4. Lowercase everything
+    5. Replace Python-style params (%(name)s) with ?
+    6. Replace MySQL-style params (%s) with ?
+
+    Args:
+        query: Raw SQL query string
+
+    Returns:
+        Deeply normalized SQL query string
+    """
+    if not query:
+        return ""
+
+    # First apply basic normalization
+    normalized = normalize_sql(query)
+
+    # Lowercase everything (SQL keywords and identifiers)
+    normalized = normalized.lower()
+
+    # Replace Python DB-API style placeholders %(name)s with ?
+    normalized = re.sub(r'%\([^)]+\)s', '?', normalized)
+
+    # Replace MySQL/Python style %s with ?
+    normalized = re.sub(r'%s', '?', normalized)
+
+    # Remove column aliases in SELECT clause
+    # Pattern: "column_name AS alias_name" -> "column_name"
+    # This handles: customer.c_custkey AS customer_c_custkey -> customer.c_custkey
+    # Be careful not to remove table aliases (e.g., "FROM customer AS c")
+    # Only remove aliases after column names, not after table names
+    # Match: word.word AS word or word AS word (in select context)
+    normalized = re.sub(r'(\w+(?:\.\w+)?)\s+as\s+\w+', r'\1', normalized)
+
+    # Remove table prefixes from column names
+    # Pattern: "table.column" -> "column"
+    # This handles: customer.c_custkey -> c_custkey
+    # Be careful with function calls like COUNT(table.column)
+    normalized = re.sub(r'\b(\w+)\.(\w+)\b', r'\2', normalized)
+
+    # Collapse whitespace again (in case removals left extra spaces)
+    normalized = re.sub(r'\s+', ' ', normalized)
+
+    # Final trim
+    normalized = normalized.strip()
+
+    return normalized
+
+
+def hash_sql_deep(query: str) -> str:
+    """
+    Generate a consistent hash using deep normalization.
+
+    Uses deeply normalized SQL for matching across different sources
+    (LLM-generated, ORM output, pg_stat_activity).
+
+    Args:
+        query: SQL query string (will be deeply normalized)
+
+    Returns:
+        12-character hexadecimal hash string
+    """
+    normalized = normalize_sql_deep(query)
+    # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5
+    return hashlib.md5(normalized.encode('utf-8')).hexdigest()[:12]
+
+
 def hash_sql(query: str) -> str:
     """
     Generate a consistent hash for a SQL query.
@@ -317,6 +395,88 @@ def generate_query_name(text: str, existing_names: Optional[set] = None) -> str:
 def extract_parameters_from_sql(
     original_sql: str, parameterized_sql: str
 ) -> Dict[str, Any]:
+    """
+    Extract parameter values by comparing original SQL with parameterized version.
+
+    This is a placeholder - the actual implementation would diff the two SQL
+    strings to extract literal values that were replaced with placeholders.
+    """
+    # TODO: Implement actual parameter extraction
+    return {}
+
+
+def generate_dummy_parameters(sql: str) -> Dict[str, Any]:
+    """
+    Generate sensible dummy parameter values for a parameterized SQL query.
+
+    Analyzes the SQL context around each ? placeholder to infer appropriate
+    dummy values based on:
+    - LIMIT/OFFSET → small integers (10, 0)
+    - WHERE col = ? → 1 for IDs, 'example' for strings
+    - Date comparisons → reasonable date
+    - IN clauses → single value of appropriate type
+
+    Args:
+        sql: Parameterized SQL with ? placeholders
+
+    Returns:
+        Dictionary of parameter values (param_0, param_1, etc.)
+    """
+    params = {}
+
+    # Find all ? placeholders and their surrounding context
+    # We'll analyze what comes before each ?
+    sql_upper = sql.upper()
+
+    # Count placeholders
+    placeholder_count = sql.count('?')
+    if placeholder_count == 0:
+        return params
+
+    # Split by ? and analyze context before each placeholder
+    parts = sql_upper.split('?')
+
+    for i in range(placeholder_count):
+        context = parts[i].strip() if i < len(parts) else ""
+
+        # Get the last few tokens before the placeholder
+        tokens = context.split()
+        last_tokens = tokens[-3:] if len(tokens) >= 3 else tokens
+        context_str = ' '.join(last_tokens)
+
+        # Infer type based on context
+        if 'LIMIT' in context_str:
+            params[f'param_{i}'] = 10  # Reasonable limit
+        elif 'OFFSET' in context_str:
+            params[f'param_{i}'] = 0  # Start from beginning
+        elif any(kw in context_str for kw in ['<', '>', '<=', '>=']):
+            # Comparison - could be date or number
+            if any(date_hint in context_str for date_hint in ['DATE', 'TIME', 'YEAR', 'MONTH', 'DAY', 'ORDERDATE', 'CREATED', 'UPDATED']):
+                params[f'param_{i}'] = '2024-01-01'
+            else:
+                params[f'param_{i}'] = 100
+        elif 'LIKE' in context_str:
+            params[f'param_{i}'] = '%example%'  # LIKE pattern
+        elif 'IN' in context_str and '(' in context_str:
+            params[f'param_{i}'] = 1  # Single value for IN clause
+        elif any(id_hint in context_str for id_hint in ['_ID', '_KEY', 'KEY =', 'ID =']):
+            params[f'param_{i}'] = 1  # ID lookup
+        elif any(seg_hint in context_str for seg_hint in ['SEGMENT', 'STATUS', 'TYPE', 'CATEGORY', 'NAME']):
+            params[f'param_{i}'] = 'EXAMPLE'  # String enum/category
+        elif '=' in context_str:
+            # Generic equality - try to guess from column name
+            if any(num_hint in context_str for num_hint in ['COUNT', 'PRICE', 'TOTAL', 'AMOUNT', 'QTY', 'QUANTITY', 'BALANCE']):
+                params[f'param_{i}'] = 100
+            else:
+                params[f'param_{i}'] = 1  # Default to integer
+        else:
+            # Unknown context - use integer as safe default
+            params[f'param_{i}'] = 1
+
+    return params
+
+
+def extract_parameters_from_sql(original_sql: str, parameterized_sql: str) -> Dict[str, Any]:
     """
     Extract parameter values from original SQL by comparing with parameterized version.
 
@@ -546,6 +706,7 @@ class QueryRegistry:
         max_duration_ms: float = 0.0,
         avg_duration_ms: float = 0.0,
         observation_count: int = 0,
+        skip_param_extraction: bool = False,
     ) -> tuple[str, bool]:
         """
         Add a query to the registry with parameter extraction and history.
@@ -556,9 +717,10 @@ class QueryRegistry:
         Args:
             sql: SQL query string (with actual parameter values)
             tag: Optional tag for the query
-            source: Source of the query ("manual", "top", "file", "stdin")
+            source: Source of the query ("manual", "top", "file", "stdin", "scan")
             frequency: Query frequency from telemetry (if available)
             target: Target database name for this analysis
+            skip_param_extraction: Skip parameter extraction (for pre-parameterized queries from scan)
             dialect: Optional SQL dialect ('postgres', 'mysql', etc.)
             max_duration_ms: Maximum observed duration in ms (from rdst top)
             avg_duration_ms: Average observed duration in ms (from rdst top)
@@ -594,7 +756,12 @@ class QueryRegistry:
             )
 
         # Use SQLGlot for robust normalization and parameter extraction
-        normalized_sql, params = normalize_and_extract(sql, dialect)
+        if skip_param_extraction:
+            # For pre-parameterized queries (from scan), skip extraction
+            normalized_sql = sql
+            params = {}
+        else:
+            normalized_sql, params = normalize_and_extract(sql, dialect)
         query_hash = hash_sql(sql)
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 

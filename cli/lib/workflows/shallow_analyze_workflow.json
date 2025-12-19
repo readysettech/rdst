@@ -1,0 +1,89 @@
+{
+    "Comment": "RDST Shallow Analyze Workflow - Schema-only analysis without DB connection",
+    "StartAt": "ValidateQuerySafety",
+    "States": {
+        "ValidateQuerySafety": {
+            "Type": "Task",
+            "Resource": "validate_query_safety",
+            "Parameters": {
+                "sql": "{{query}}"
+            },
+            "ResultPath": "$.safety_check",
+            "Next": "NormalizeForRegistry"
+        },
+        "NormalizeForRegistry": {
+            "Type": "Task",
+            "Resource": "normalize_for_registry",
+            "Parameters": {
+                "sql": "{{query}}"
+            },
+            "ResultPath": "$.registry_normalization",
+            "Next": "ParameterizeForLLM"
+        },
+        "ParameterizeForLLM": {
+            "Type": "Task",
+            "Resource": "parameterize_for_llm",
+            "Parameters": {
+                "sql": "{{query}}"
+            },
+            "ResultPath": "$.llm_parameterization",
+            "Next": "CollectSchemaFromYaml"
+        },
+        "CollectSchemaFromYaml": {
+            "Type": "Task",
+            "Resource": "collect_schema_from_yaml",
+            "Parameters": {
+                "target": "{{target}}"
+            },
+            "ResultPath": "$.schema_collection",
+            "Next": "PerformShallowLLMAnalysis"
+        },
+        "PerformShallowLLMAnalysis": {
+            "Type": "Task",
+            "Resource": "analyze_shallow_with_llm",
+            "Parameters": {
+                "parameterized_sql": "{{llm_parameterization.parameterized_sql}}",
+                "original_sql": "{{query}}",
+                "schema_info": "{{schema_collection.schema_info}}",
+                "database_engine": "{{database_engine}}",
+                "model": "{{llm_model}}"
+            },
+            "ResultPath": "$.llm_analysis",
+            "Next": "StoreAnalysisResults",
+            "Retry": {
+                "MaxAttempts": 1,
+                "IntervalSeconds": 2
+            },
+            "TimeoutSeconds": 60
+        },
+        "StoreAnalysisResults": {
+            "Type": "Task",
+            "Resource": "store_analysis_results",
+            "Parameters": {
+                "query_hash": "{{registry_normalization.hash}}",
+                "query": "{{query}}",
+                "target": "{{target}}",
+                "llm_analysis": "{{llm_analysis}}",
+                "registry_normalization": "{{registry_normalization}}",
+                "llm_parameterization": "{{llm_parameterization}}",
+                "analysis_mode": "shallow"
+            },
+            "ResultPath": "$.storage_result",
+            "Next": "FormatFinalResults"
+        },
+        "FormatFinalResults": {
+            "Type": "Task",
+            "Resource": "format_analysis_output",
+            "Parameters": {
+                "llm_analysis": "{{llm_analysis}}",
+                "query": "{{query}}",
+                "parameterized_sql": "{{llm_parameterization.parameterized_sql}}",
+                "normalized_query": "{{registry_normalization.normalized_sql}}",
+                "target": "{{target}}",
+                "analysis_id": "{{storage_result.analysis_id}}",
+                "analysis_mode": "shallow"
+            },
+            "End": true
+        }
+    }
+}

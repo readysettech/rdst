@@ -69,6 +69,7 @@ rdst/
 | `rdst top --target X`    | Monitor slow queries                 |
 | `rdst ask "question"`    | Natural language to SQL              |
 | `rdst schema show`       | View/manage semantic layer           |
+| `rdst scan ./path`       | Scan codebase for ORM queries        |
 | `rdst query list`        | View saved queries                   |
 | `rdst query run <names>` | Benchmark/load test queries          |
 | `rdst help "question"`   | Documentation lookup                 |
@@ -163,6 +164,53 @@ rdst ask "Which suppliers have the most orders?" --target tpch --agent
 **Requires**: `ANTHROPIC_API_KEY` environment variable
 
 **Best experience**: Run interactively in terminal (not via MCP)
+
+## Codebase Scanning (rdst scan)
+
+Scan codebases for ORM queries and analyze them for performance issues:
+
+```bash
+# Scan a directory for all ORM queries
+rdst scan ./backend --schema mydb
+
+# Scan a specific subdirectory (e.g., just the services layer)
+rdst scan /path/to/myapp/backend/app/services --schema mydb
+
+# Scan current directory
+rdst scan . --schema mydb
+
+# Git diff mode - only scan changed files (great for CI)
+rdst scan ./backend --schema mydb --diff HEAD         # Uncommitted changes
+rdst scan ./backend --schema mydb --diff HEAD~1       # Last commit
+rdst scan ./backend --schema mydb --diff abc123       # Specific commit
+
+# With shallow analysis (finds performance issues, uses LLM)
+rdst scan ./backend --schema mydb --analyze
+
+# CI mode - exit code 1 if issues found
+rdst scan ./backend --schema mydb --analyze --check --fail-threshold 30
+
+# Scan without saving queries to registry
+rdst scan ./backend --schema mydb --nosave
+```
+
+**Supported ORMs**:
+- **Python**: SQLAlchemy (1.x and 2.0), Django ORM
+- **JavaScript/TypeScript**: Prisma, Drizzle
+
+**How it works**:
+1. Extraction finds ORM patterns (deterministic, no LLM) — AST for Python, regex + brace counting for JS/TS
+2. ORM code converted to SQL using Haiku (deterministic with schema)
+3. Optional analysis checks for performance issues (shallow = schema-only, deep = EXPLAIN ANALYZE)
+4. Queries saved to registry with deduplication
+
+**Key features**:
+- 100% deterministic extraction (same input = same output)
+- Git diff integration for incremental CI checks
+- No database connection needed (uses semantic layer schema)
+- Risk scores (0-100) for CI pass/fail decisions
+
+**Full documentation**: See `aidoc/projects/rdst-cli/design/rdst-scan.md`
 
 ## Semantic Layer (rdst schema)
 

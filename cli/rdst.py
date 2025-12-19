@@ -127,6 +127,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             "interactive",
             "review",
             "large_query_bypass",
+            "json",
         ]
         filtered_kwargs = {
             k: v for k, v in kwargs.items() if k not in analyze_exclude_keys
@@ -146,6 +147,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             interactive=getattr(args, "interactive", False),
             review=getattr(args, "review", False),
             large_query_bypass=getattr(args, "large_query_bypass", None),
+            output_json=getattr(args, "json", False),
             **filtered_kwargs,
         )
     elif command == "init":
@@ -250,7 +252,27 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
 
         return cli.schema(**schema_kwargs)
 
-    elif command == "version":
+    elif command == 'scan':
+        from lib.cli.scan_command import ScanCommand
+        scan_cmd = ScanCommand()
+        output_format = getattr(args, 'output', 'table')
+        return scan_cmd.execute(
+            subcommand=getattr(args, 'subcommand', 'scan'),
+            directory=getattr(args, 'directory', '.'),
+            dry_run=getattr(args, 'dry_run', False),
+            analyze=getattr(args, 'analyze', False),
+            target=getattr(args, 'target', None),
+            output_json=(output_format == 'json'),
+            file_pattern=getattr(args, 'file_pattern', None),
+            diff=getattr(args, 'diff', None),
+            shallow=getattr(args, 'shallow', False),
+            warn_threshold=getattr(args, 'warn_threshold', 50),
+            fail_threshold=getattr(args, 'fail_threshold', 30),
+            nosave=getattr(args, 'nosave', False),
+            sequential=getattr(args, 'sequential', False),
+        )
+
+    elif command == 'version':
         return cli.version()
     elif command == "claude":
         # Register or remove RDST from Claude Code

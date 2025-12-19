@@ -272,6 +272,85 @@ READYSET CACHING GUIDELINES:
 6. Evaluate cache invalidation patterns
 7. Prefer queries with predictable access patterns"""
 
+# Shallow Analysis Prompt - for schema-only analysis without EXPLAIN ANALYZE
+SHALLOW_ANALYSIS_PROMPT = """
+SHALLOW ANALYSIS MODE - Schema-based analysis without execution metrics.
+
+DATABASE ENGINE: {database_engine}
+
+QUERY FOR ANALYSIS:
+{sql}
+
+{schema_info}
+
+ANALYSIS CONTEXT:
+This is a SHALLOW analysis - we do NOT have EXPLAIN ANALYZE output.
+Predict performance issues based on:
+1. Query structure (SELECT *, missing LIMIT, subqueries)
+2. Schema information (table sizes from row_estimate)
+3. Index coverage (are JOIN/WHERE columns indexed?)
+4. Known SQL anti-patterns
+
+Provide analysis in JSON format:
+{{
+  "performance_assessment": {{
+    "overall_rating": "excellent|good|fair|poor|critical",
+    "risk_score": 0-100,
+    "primary_concerns": ["list", "of", "main", "issues"]
+  }},
+  "structural_analysis": {{
+    "has_select_star": true|false,
+    "has_limit": true|false,
+    "has_order_by": true|false,
+    "uses_explicit_joins": true|false,
+    "subquery_count": 0,
+    "potential_bottlenecks": ["list of predicted bottlenecks"]
+  }},
+  "index_coverage": {{
+    "where_columns_indexed": true|false,
+    "join_columns_indexed": true|false,
+    "order_by_columns_indexed": true|false,
+    "missing_indexes": ["list of columns that should be indexed"]
+  }},
+  "optimization_opportunities": [
+    {{
+      "priority": "high|medium|low",
+      "description": "suggestion",
+      "type": "missing_index|query_rewrite|correctness|best_practice"
+    }}
+  ],
+  "rewrite_suggestions": [
+    {{
+      "rewritten_sql": "SELECT ... (complete rewritten query)",
+      "explanation": "why this rewrite should be better",
+      "expected_improvement": "description of expected benefit",
+      "priority": "high|medium|low",
+      "optimization_type": "join_syntax|index_hint|structure"
+    }}
+  ],
+  "index_recommendations": [
+    {{
+      "sql": "CREATE INDEX idx_name ON table_name(col1, col2)",
+      "table": "table_name",
+      "columns": ["col1", "col2"],
+      "index_type": "btree",
+      "rationale": "explanation of why this index helps",
+      "estimated_impact": "high|medium|low"
+    }}
+  ]
+}}
+
+RISK SCORE GUIDELINES:
+- 0-30: CRITICAL - Multiple severe issues
+- 31-50: POOR - Significant issues
+- 51-70: FAIR - Some issues but may be acceptable
+- 71-85: GOOD - Minor issues only
+- 86-100: EXCELLENT - Query follows best practices
+
+Return empty arrays if no improvements needed.
+Be conservative - only suggest changes you're confident will help.
+"""
+
 # Template validation and utility functions
 def validate_prompt_template(template: str, required_fields: list) -> bool:
     """

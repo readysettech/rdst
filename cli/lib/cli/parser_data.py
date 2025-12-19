@@ -291,6 +291,11 @@ and Readyset caching opportunities.""",
                 action="store_true",
                 help="Bypass the 4KB query size limit (allows up to 10KB) for -q, -f, or --stdin input",
             ),
+            ArgDef(
+                "--json",
+                action="store_true",
+                help="Output results as JSON (for programmatic use)",
+            ),
         ],
         examples=[
             (
@@ -668,6 +673,13 @@ The more comprehensive your semantic layer, the better 'rdst ask' can generate a
                 ],
             ),
             SubcommandDef(name="list", help="List all semantic layers", args=[]),
+            SubcommandDef(
+                name="refresh",
+                help="Refresh structural data (indexes, columns, row counts) while preserving annotations",
+                args=[
+                    ArgDef("--target", help="Target database name"),
+                ],
+            ),
         ],
         subcommands=[
             (
@@ -683,6 +695,7 @@ The more comprehensive your semantic layer, the better 'rdst ask' can generate a
             ("export", "Export as YAML or JSON"),
             ("delete", "Remove semantic layer for a target"),
             ("list", "List all configured semantic layers"),
+            ("refresh", "Update indexes, columns, row estimates — keeps descriptions"),
         ],
         examples=[
             ("rdst schema init --target mydb", "Bootstrap from database"),
@@ -692,6 +705,7 @@ The more comprehensive your semantic layer, the better 'rdst ask' can generate a
             ),
             ("rdst schema show --target mydb", "View current semantic layer"),
             ("rdst schema show --target mydb customer", "Show specific table details"),
+            ("rdst schema refresh --target mydb", "Update indexes without losing annotations"),
         ],
     ),
     "report": CommandDef(
@@ -910,6 +924,48 @@ that can be applied to one or more agents.""",
             ("rdst agent create --name bot --target prod --guard pii-safe", "Create agent with guard"),
         ],
     ),
+    "scan": CommandDef(
+        name="scan",
+        short_help="Scan codebase for ORM queries (experimental)",
+        description="""Scan a codebase directory for ORM queries and analyze them.
+
+This command finds SQL queries in ORM code and can optionally analyze them for
+performance issues.
+
+Supported ORMs: SQLAlchemy, Django ORM, Prisma, Drizzle
+
+Modes:
+  Default              Scan and list all queries found
+  --analyze            Deep analysis with EXPLAIN ANALYZE (requires DB connection)
+  --analyze --shallow  Schema-only analysis, no DB connection needed
+  --check              CI mode with exit codes (0=pass, 1=fail)
+  --diff               Only scan files changed in git (uncommitted changes)""",
+        args=[
+            ArgDef("directory", nargs="?", default=".", help="Directory to scan"),
+            ArgDef("--dry-run", action="store_true", help="Show what would be scanned without scanning"),
+            ArgDef("--analyze", action="store_true", help="Analyze queries for performance issues (runs EXPLAIN ANALYZE, requires DB connection)"),
+            ArgDef("--shallow", action="store_true", help="Schema-only analysis, no DB connection needed (use with --analyze)"),
+            ArgDef("--schema", dest="target", help="Target name for schema context"),
+            ArgDef("--output", choices=["table", "json"], default="table", help="Output format"),
+            ArgDef("--diff", metavar="REF", help="Only scan changed files since REF. Use HEAD for uncommitted, HEAD~1 for last commit, or any commit/branch"),
+            ArgDef("--check", action="store_true", help="CI mode: exit 1 if issues found"),
+            ArgDef("--warn-threshold", type=int, default=50, help="Risk score threshold for warnings (0-100)"),
+            ArgDef("--fail-threshold", type=int, default=30, help="Risk score threshold for failures (0-100)"),
+            ArgDef("--file-pattern", help="Glob pattern to filter files (e.g., '*.py')"),
+            ArgDef("--nosave", action="store_true", help="Don't save queries to the registry"),
+            ArgDef("--sequential", action="store_true", help="Run analysis queries one at a time (more deterministic scores, slower)"),
+        ],
+        examples=[
+            ("rdst scan ./backend --schema mydb", "Scan directory for ORM queries"),
+            ("rdst scan /path/to/app/services --schema mydb", "Scan specific subdirectory"),
+            ("rdst scan . --analyze --schema mydb", "Deep analysis (EXPLAIN ANALYZE)"),
+            ("rdst scan . --analyze --shallow --schema mydb", "Schema-only analysis"),
+            ("rdst scan . --diff HEAD --analyze --schema mydb", "Analyze only changed files"),
+            ("rdst scan . --check --analyze --schema mydb", "CI mode with exit codes"),
+            ("rdst scan ./backend --schema mydb --nosave", "Scan without saving to registry"),
+            ("rdst scan . --analyze --schema mydb --sequential", "Deterministic analysis (one query at a time)"),
+        ],
+    ),
 }
 
 COMMAND_ORDER = [
@@ -923,6 +979,7 @@ COMMAND_ORDER = [
     "schema",
     "slack",
     "guard",
+    "scan",
     "report",
     "help",
     "claude",

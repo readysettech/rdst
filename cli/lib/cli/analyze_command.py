@@ -562,6 +562,7 @@ class AnalyzeCommand:
         fast: bool = False,
         interactive: bool = False,
         review: bool = False,
+        output_json: bool = False,
     ) -> RdstResult:
         """
         Execute the analyze command with resolved input using the workflow engine.
@@ -574,6 +575,7 @@ class AnalyzeCommand:
             fast: Whether to auto-skip slow EXPLAIN ANALYZE queries after 10 seconds
             interactive: Whether to enter interactive mode after analysis
             review: Whether to review conversation history instead of analyzing
+            output_json: Whether to output results as JSON (for programmatic use)
 
         Returns:
             RdstResult with analysis results
@@ -727,7 +729,8 @@ class AnalyzeCommand:
                         # Non-fatal - continue with analysis even if storage fails
                         pass
 
-                    print()
+                    if not output_json:
+                        print()
 
             # Load target configuration
             cfg = TargetsConfig()
@@ -768,6 +771,7 @@ class AnalyzeCommand:
                         save_as=resolved_input.save_as,
                         source=resolved_input.source,
                         fast=fast,
+                        quiet=output_json,
                     )
                     readyset_future = executor.submit(
                         self._run_readyset_analysis,
@@ -792,6 +796,7 @@ class AnalyzeCommand:
                     save_as=resolved_input.save_as,
                     source=resolved_input.source,
                     fast=fast,
+                    quiet=output_json,
                 )
 
             if readyset and readyset_analysis_result:
@@ -869,6 +874,17 @@ class AnalyzeCommand:
                     workflow_result["cache_performance"] = cache_performance_result
 
             if workflow_result["success"]:
+                # Handle JSON output mode - skip all formatting and return raw data
+                if output_json:
+                    import json
+                    result_data = workflow_result["result"]
+                    # Remove target_config for security (may contain sensitive env var names)
+                    result_data.pop("target_config", None)
+                    json_output = json.dumps(result_data, indent=2, default=str)
+                    # Return JSON as message so rdst.py prints it once
+                    # (returning data= with empty message causes rdst.py to double-print)
+                    return RdstResult(True, json_output, data=result_data)
+
                 # Clear all the workflow progress output before showing final result
                 import sys
 
@@ -950,16 +966,26 @@ class AnalyzeCommand:
                         )
 
                     # Already printed everything - return empty to avoid duplicate output
-                    return RdstResult(True, "")
+                    return RdstResult(True, "", data=workflow_result["result"])
 
                 # Print formatted results
                 print(formatted_results)
 
                 return RdstResult(True, "")  # Already printed
             else:
+                if output_json:
+                    import json
+                    error_data = {"success": False, "error": workflow_result["error"]}
+                    print(json.dumps(error_data, indent=2))
+                    return RdstResult(False, "", data=error_data)
                 return RdstResult(False, workflow_result["error"])
 
         except Exception as e:
+            if output_json:
+                import json
+                error_data = {"success": False, "error": str(e)}
+                print(json.dumps(error_data, indent=2))
+                return RdstResult(False, "", data=error_data)
             return RdstResult(False, f"analyze failed: {e}")
 
     def _handle_interactive_mode(
@@ -1331,6 +1357,7 @@ class AnalyzeCommand:
         save_as: str = "",
         source: str = "manual",
         fast: bool = False,
+        quiet: bool = False,
     ) -> dict:
         """Run the complete analyze workflow using WorkflowManager."""
         try:
@@ -1378,7 +1405,7 @@ class AnalyzeCommand:
             }
 
             # Execute workflow with detailed progress tracking
-            result = self._run_workflow_with_progress(mgr, initial_input)
+            result = self._run_workflow_with_progress(mgr, initial_input, quiet=quiet)
 
             return {"success": True, "result": result}
 
@@ -1391,10 +1418,14 @@ class AnalyzeCommand:
             )
             return {"success": False, "error": f"Workflow execution failed: {str(e)}"}
 
-    def _run_workflow_with_progress(self, mgr, initial_input):
+    def _run_workflow_with_progress(self, mgr, initial_input, quiet: bool = False):
         """Run workflow with detailed step-by-step progress indicators and heartbeat."""
         import time
         import threading
+
+        # In quiet mode, just run the workflow without any output
+        if quiet:
+            return mgr.run(initial_input)
 
         # Get LLM info for display
         try:

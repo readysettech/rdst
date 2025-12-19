@@ -41,6 +41,8 @@ from .test_data_generator import (
 )
 from .workflow_integration import store_analysis_results, format_analysis_output
 from .parallel_merge import merge_parallel_analysis_results
+from .schema_from_yaml import collect_schema_from_yaml
+from .shallow_analysis import analyze_shallow_with_llm
 
 ANALYZE_WORKFLOW_FUNCTIONS = {
     "validate_query_safety": validate_query_safety,
@@ -56,6 +58,8 @@ ANALYZE_WORKFLOW_FUNCTIONS = {
     "store_analysis_results": store_analysis_results,
     "format_analysis_output": format_analysis_output,
     "merge_parallel_analysis_results": merge_parallel_analysis_results,
+    "collect_schema_from_yaml": collect_schema_from_yaml,
+    "analyze_shallow_with_llm": analyze_shallow_with_llm,
 }
 
 DATABASE_SETUP_FUNCTIONS = {

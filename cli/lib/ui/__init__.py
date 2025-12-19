@@ -122,6 +122,12 @@ from .components import (
     RichLayout,
     Group,
     Text,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    # Raw Rich components (for when styled versions don't fit)
+    RichPanel,
+    RichTable,
 )
 
 __all__ = [
@@ -205,4 +211,10 @@ __all__ = [
     "RichLayout",
     "Group",
     "Text",
+    "Progress",
+    "SpinnerColumn",
+    "TextColumn",
+    # Raw Rich components
+    "RichPanel",
+    "RichTable",
 ]

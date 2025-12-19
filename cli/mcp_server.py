@@ -1040,6 +1040,89 @@ After creation, use rdst_agent_ask to query the agent.
                 },
                 "required": ["name", "target"]
             }
+        },
+        {
+            "name": "rdst_scan",
+            "description": """Scan a codebase for ORM queries and optionally analyze them for performance issues.
+
+Supports 4 ORMs across Python and JavaScript/TypeScript:
+- Python: SQLAlchemy (1.x and 2.0), Django ORM
+- JS/TS: Prisma, Drizzle
+
+PREREQUISITE: Run 'rdst schema init --target <name>' first to provide table/column
+context for ORM-to-SQL conversion. This introspects your database and creates a
+local schema YAML — it only needs to be done once per target.
+
+How it works:
+1. Finds files with ORM patterns (AST parsing for Python, regex for JS/TS — deterministic)
+2. Extracts query snippets and converts them to SQL using schema context (Haiku, cached)
+3. Optionally analyzes queries for performance issues
+
+Analysis modes:
+- No --analyze: Extract and convert only. No DB connection needed. Shows SQL + anti-patterns.
+- --analyze --shallow: Schema-only analysis via LLM. No DB connection needed. Fast.
+  Assigns risk scores (0-100) based on query structure, missing indexes, anti-patterns.
+- --analyze (deep): Runs EXPLAIN ANALYZE against the live database + LLM analysis.
+  Requires DB password set via password_env. Shows execution plans, index recommendations,
+  and query rewrite suggestions. Scores may vary slightly between runs due to DB state.
+
+Note: Deep analysis executes queries against your database in read-only transactions.
+Results depend on current table sizes, indexes, and data distribution. If a query times
+out or the DB is under load, that query's analysis may fail — the rest will still complete.
+
+Examples:
+  rdst_scan(directory="./backend", schema="mydb")
+  rdst_scan(directory="./backend", schema="mydb", diff="HEAD")  # Uncommitted changes only
+  rdst_scan(directory="./backend", schema="mydb", analyze=True)  # Deep analysis
+  rdst_scan(directory="./backend", schema="mydb", analyze=True, check=True)  # CI mode
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "directory": {
+                        "type": "string",
+                        "description": "Directory or file to scan for ORM code (default: current directory)"
+                    },
+                    "schema": {
+                        "type": "string",
+                        "description": "Target name for schema context (required)"
+                    },
+                    "diff": {
+                        "type": "string",
+                        "description": "Git ref to diff against: HEAD (uncommitted), HEAD~1 (last commit), commit ID, or branch"
+                    },
+                    "analyze": {
+                        "type": "boolean",
+                        "description": "Run analysis on extracted queries. Deep by default (EXPLAIN ANALYZE against live DB). Add shallow=true for schema-only analysis without a DB connection."
+                    },
+                    "shallow": {
+                        "type": "boolean",
+                        "description": "Use schema-only analysis (no DB connection needed). Must be used with analyze=true."
+                    },
+                    "check": {
+                        "type": "boolean",
+                        "description": "CI mode: return exit code 1 if issues found below threshold"
+                    },
+                    "fail_threshold": {
+                        "type": "integer",
+                        "description": "Risk score below which to fail (0-100, default: 30)"
+                    },
+                    "output": {
+                        "type": "string",
+                        "enum": ["table", "json"],
+                        "description": "Output format (default: table)"
+                    },
+                    "sequential": {
+                        "type": "boolean",
+                        "description": "Run analysis queries one at a time (more deterministic scores, slower)"
+                    },
+                    "nosave": {
+                        "type": "boolean",
+                        "description": "Don't save extracted queries to the registry"
+                    }
+                },
+                "required": ["schema"]
+            }
         }
     ]
 
@@ -1429,6 +1512,42 @@ Just describe your database and we'll get connected!
 
         if subcommand == "export" and "output_format" in arguments:
             args.extend(["--format", arguments["output_format"]])
+
+        return run_rdst_command(args)
+
+    elif name == "rdst_scan":
+        # Scan codebase for ORM queries
+        args = ["scan"]
+
+        if "directory" in arguments:
+            args.append(arguments["directory"])
+
+        if "schema" in arguments:
+            args.extend(["--schema", arguments["schema"]])
+
+        if "diff" in arguments:
+            args.extend(["--diff", arguments["diff"]])
+
+        if arguments.get("analyze"):
+            args.append("--analyze")
+
+        if arguments.get("shallow"):
+            args.append("--shallow")
+
+        if arguments.get("check"):
+            args.append("--check")
+
+        if "fail_threshold" in arguments:
+            args.extend(["--fail-threshold", str(arguments["fail_threshold"])])
+
+        if "output" in arguments:
+            args.extend(["--output", arguments["output"]])
+
+        if arguments.get("sequential"):
+            args.append("--sequential")
+
+        if arguments.get("nosave"):
+            args.append("--nosave")
 
         return run_rdst_command(args)
 

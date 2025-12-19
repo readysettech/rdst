@@ -319,6 +319,106 @@ The semantic layer stores:
 
 This helps `rdst ask` generate more accurate SQL.
 
+### rdst scan
+Scan codebases for ORM queries and analyze them for performance issues.
+
+Supports 4 ORMs across Python and JavaScript/TypeScript:
+- **Python**: SQLAlchemy (1.x and 2.0), Django ORM
+- **JS/TS**: Prisma, Drizzle
+
+```bash
+# Basic scan - find all ORM queries in a directory
+rdst scan ./backend --schema mydb
+
+# Git diff mode - only scan changed files (great for CI)
+rdst scan ./backend --schema mydb --diff HEAD        # Uncommitted changes
+rdst scan ./backend --schema mydb --diff HEAD~1      # Since last commit
+rdst scan ./backend --schema mydb --diff abc123      # Since specific commit
+
+# Shallow analysis (schema-only, no DB connection needed)
+rdst scan ./backend --schema mydb --analyze --shallow
+
+# Deep analysis (EXPLAIN ANALYZE against live DB - requires DB password)
+rdst scan ./backend --schema mydb --analyze
+
+# CI mode - exit code 1 if any query scores below fail threshold
+rdst scan ./backend --schema mydb --analyze --check
+rdst scan ./backend --schema mydb --analyze --check --fail-threshold 50
+
+# JSON output for scripting
+rdst scan ./backend --schema mydb --output json
+```
+
+The scan command:
+- Uses AST parsing (Python) and regex extraction (JS/TS) to find ORM patterns (100% deterministic)
+- Converts ORM code to SQL using schema context (Claude Haiku, cached by hash)
+- Git diff integration for incremental CI checks
+- Two analysis modes: shallow (schema-only) and deep (EXPLAIN ANALYZE + LLM)
+- Assigns risk scores (0-100) for CI pass/fail decisions
+- Shows per-query progress with real-time score/timing output during deep analysis
+
+Analysis modes:
+- **Shallow** (`--analyze --shallow`): Schema-only, no DB connection. Fast. Good for CI without DB access.
+- **Deep** (`--analyze`): Runs EXPLAIN ANALYZE against live DB + LLM analysis. Requires `ANTHROPIC_API_KEY` and DB password. Shows execution time, index recommendations, query rewrites.
+
+Options:
+- `--diff REF`: Only scan files changed since REF (HEAD, HEAD~1, commit ID, branch)
+- `--analyze`: Run analysis on queries (deep by default, add `--shallow` for schema-only)
+- `--shallow`: Use schema-only analysis (no DB connection needed)
+- `--check`: CI mode - set exit code based on scores (0=pass, 1=fail)
+- `--warn-threshold N`: Score below which to warn (default: 50)
+- `--fail-threshold N`: Score below which to fail (default: 30)
+- `--output {table,json}`: Output format
+- `--nosave`: Don't save queries to registry
+- `--sequential`: Run analysis queries one at a time instead of in parallel batches. Produces more deterministic scores for deep analysis since queries don't compete for database resources. Slower but more reproducible.
+- `--dry-run`: Show what would be scanned without calling the LLM
+- `--file-pattern GLOB`: Only scan files matching this pattern
+
+CI thresholds:
+- `--check` enables exit codes. Without it, scores are informational only (always exit 0).
+- Queries scoring below `--fail-threshold` trigger CI failure (exit 1).
+- Queries scoring below `--warn-threshold` trigger a warning (exit 0).
+- The summary shows which queries breached each threshold.
+
+Risk score ranges (0-100, higher is better):
+
+- **86-100 (excellent)**: Well-optimized with indexes and LIMIT.
+  Example: `SELECT * FROM orders WHERE o_custkey = $1 ORDER BY o_orderdate DESC LIMIT 20`
+  (Index on o_custkey, bounded result set, fast lookup)
+
+- **71-85 (good)**: Works well, minor improvements possible.
+  Example: `SELECT COUNT(*) FROM orders WHERE o_orderstatus = 'F'`
+  (Scans matching rows but no index on status — still acceptable for moderate tables)
+
+- **51-70 (fair)**: Noticeable issues, may scan more rows than needed.
+  Example: `SELECT * FROM customer WHERE c_name LIKE '%smith%'`
+  (Leading wildcard prevents index usage, scans full table, but has implicit single-table scope)
+
+- **31-50 (poor)**: Significant risk — full scans, missing indexes, anti-patterns.
+  Example: `SELECT * FROM orders ORDER BY o_totalprice DESC`
+  (Full table scan + sort on unindexed column, no LIMIT — returns ALL rows sorted)
+
+- **0-30 (critical)**: Severe — unbounded scans on large tables, dangerous operations.
+  Example: `DELETE FROM customer` or `SELECT * FROM lineitem` (60M rows, no WHERE, no LIMIT)
+
+Recommended threshold presets:
+
+- **Lenient** (`--fail-threshold 20 --warn-threshold 40`):
+  Only blocks critical queries (score < 20). Poor queries (31-50) pass silently.
+  Use for: Legacy codebases, initial adoption, non-critical batch jobs.
+
+- **Default** (`--fail-threshold 30 --warn-threshold 50`):
+  Blocks critical queries, warns on poor ones. Fair queries (51-70) pass cleanly.
+  Use for: Most applications, CI pipelines, general development.
+
+- **Strict** (`--fail-threshold 50 --warn-threshold 70`):
+  Blocks poor AND critical. Only fair-or-better queries pass.
+  Use for: Production APIs, user-facing endpoints, high-traffic services.
+
+- **Aggressive** (`--fail-threshold 70 --warn-threshold 85`):
+  Requires good or excellent. Even fair queries trigger failure.
+  Use for: Performance-critical hot paths, latency-sensitive microservices.
+
 ## Password Handling
 RDST never stores passwords in config files. Each target has a `password_env` field
 specifying which environment variable holds the password.

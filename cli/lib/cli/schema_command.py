@@ -814,6 +814,154 @@ class SchemaCommand:
                 "data": None,
             }
 
+    def refresh(self, target: str, target_config: dict) -> dict:
+        """
+        Refresh structural data (indexes, columns, row estimates) from the live
+        database while preserving all user annotations (descriptions, business
+        context, enum meanings, access hints).
+
+        This is the non-destructive alternative to 'init --force'.
+        """
+        if not self.manager.exists(target):
+            return {
+                "ok": False,
+                "message": f"No semantic layer found for '{target}'. Run 'rdst schema init --target {target}' first.",
+                "data": None,
+            }
+
+        try:
+            # Load existing layer (with all annotations)
+            existing = self.manager.load(target)
+
+            # Introspect fresh schema from database
+            introspector = SchemaIntrospector(target_config)
+            fresh = introspector.introspect(target_name=target, enum_threshold=20, sample_enums=False)
+
+            # Track changes for the report
+            changes = {
+                "tables_added": [],
+                "tables_removed": [],
+                "columns_added": [],
+                "columns_removed": [],
+                "columns_type_changed": [],
+                "indexes_added": [],
+                "indexes_removed": [],
+                "row_estimates_updated": [],
+                "relationships_updated": 0,
+            }
+
+            # Merge tables
+            all_table_names = set(list(existing.tables.keys()) + list(fresh.tables.keys()))
+
+            for table_name in all_table_names:
+                if table_name not in fresh.tables:
+                    # Table was dropped from database — remove it
+                    changes["tables_removed"].append(table_name)
+                    del existing.tables[table_name]
+                    continue
+
+                if table_name not in existing.tables:
+                    # New table — add it as-is from fresh introspection
+                    changes["tables_added"].append(table_name)
+                    existing.tables[table_name] = fresh.tables[table_name]
+                    continue
+
+                # Table exists in both — merge structural changes, keep annotations
+                old_table = existing.tables[table_name]
+                new_table = fresh.tables[table_name]
+
+                # Update row estimate
+                if old_table.row_estimate != new_table.row_estimate:
+                    changes["row_estimates_updated"].append(
+                        f"{table_name}: {old_table.row_estimate} → {new_table.row_estimate}"
+                    )
+                    old_table.row_estimate = new_table.row_estimate
+
+                # Merge columns
+                old_cols = set(old_table.columns.keys())
+                new_cols = set(new_table.columns.keys())
+
+                for col_name in new_cols - old_cols:
+                    # New column — add from fresh
+                    changes["columns_added"].append(f"{table_name}.{col_name}")
+                    old_table.columns[col_name] = new_table.columns[col_name]
+
+                for col_name in old_cols - new_cols:
+                    # Column dropped — remove
+                    changes["columns_removed"].append(f"{table_name}.{col_name}")
+                    del old_table.columns[col_name]
+
+                for col_name in old_cols & new_cols:
+                    old_col = old_table.columns[col_name]
+                    new_col = new_table.columns[col_name]
+                    # Update type if changed, but keep description and enum_values
+                    if old_col.data_type != new_col.data_type and old_col.data_type != "enum":
+                        changes["columns_type_changed"].append(
+                            f"{table_name}.{col_name}: {old_col.data_type} → {new_col.data_type}"
+                        )
+                        old_col.data_type = new_col.data_type
+
+                # Replace indexes entirely (structural data, no annotations)
+                old_idx_names = set(old_table.indexes.keys()) if old_table.indexes else set()
+                new_idx_names = set(new_table.indexes.keys()) if new_table.indexes else set()
+
+                for idx_name in new_idx_names - old_idx_names:
+                    changes["indexes_added"].append(f"{table_name}.{idx_name}")
+                for idx_name in old_idx_names - new_idx_names:
+                    changes["indexes_removed"].append(f"{table_name}.{idx_name}")
+
+                old_table.indexes = new_table.indexes
+
+                # Update relationships from fresh introspection
+                if new_table.relationships:
+                    old_table.relationships = new_table.relationships
+                    changes["relationships_updated"] += 1
+
+            # Update extensions and custom types
+            existing.extensions = fresh.extensions
+            existing.custom_types = fresh.custom_types
+
+            # Save merged layer
+            self.manager.save(existing)
+
+            # Build change summary
+            total_changes = (
+                len(changes["tables_added"]) + len(changes["tables_removed"]) +
+                len(changes["columns_added"]) + len(changes["columns_removed"]) +
+                len(changes["columns_type_changed"]) +
+                len(changes["indexes_added"]) + len(changes["indexes_removed"]) +
+                len(changes["row_estimates_updated"])
+            )
+
+            if total_changes == 0:
+                message = f"Schema for '{target}' is up to date. No structural changes detected."
+            else:
+                message = f"Refreshed schema for '{target}' — {total_changes} change(s), annotations preserved."
+
+            return {
+                "ok": True,
+                "message": message,
+                "data": {
+                    "target": target,
+                    "changes": {k: v for k, v in changes.items() if v},
+                    "total_changes": total_changes,
+                    "path": str(self.manager.get_path(target)),
+                },
+            }
+
+        except ConnectionError as e:
+            return {
+                "ok": False,
+                "message": f"Database connection failed: {e}",
+                "data": None,
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "message": f"Failed to refresh schema: {e}",
+                "data": None,
+            }
+
     def annotate(
         self,
         target: str,

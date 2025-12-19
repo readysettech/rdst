@@ -121,6 +121,42 @@ class Relationship:
 
 
 @dataclass
+class IndexAnnotation:
+    """Annotation for a database index."""
+
+    name: str
+    columns: list[str] = field(default_factory=list)
+    index_type: str = "btree"  # btree, hash, gin, gist, etc.
+    is_unique: bool = False
+    is_primary: bool = False
+    definition: str = ""  # Full CREATE INDEX statement
+
+    def to_dict(self) -> dict:
+        result = {
+            'columns': self.columns,
+            'type': self.index_type,
+        }
+        if self.is_unique:
+            result['unique'] = True
+        if self.is_primary:
+            result['primary'] = True
+        if self.definition:
+            result['definition'] = self.definition
+        return result
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict) -> 'IndexAnnotation':
+        return cls(
+            name=name,
+            columns=data.get('columns', []),
+            index_type=data.get('type', 'btree'),
+            is_unique=data.get('unique', False),
+            is_primary=data.get('primary', False),
+            definition=data.get('definition', ''),
+        )
+
+
+@dataclass
 class TableAnnotation:
     """Annotation for a database table with business context."""
 
@@ -135,6 +171,9 @@ class TableAnnotation:
 
     # Relationships to other tables
     relationships: list[Relationship] = field(default_factory=list)
+
+    # Index annotations
+    indexes: dict[str, IndexAnnotation] = field(default_factory=dict)
 
     # Access pattern hints
     access_hints: list[str] = field(default_factory=list)  # e.g., "Always filter by tenant_id"
@@ -161,6 +200,12 @@ class TableAnnotation:
         if self.relationships:
             result['relationships'] = [rel.to_dict() for rel in self.relationships]
 
+        if self.indexes:
+            result['indexes'] = {
+                name: idx.to_dict()
+                for name, idx in self.indexes.items()
+            }
+
         if self.access_hints:
             result['access_hints'] = self.access_hints
 
@@ -178,6 +223,10 @@ class TableAnnotation:
             for rel_data in data.get('relationships', [])
         ]
 
+        indexes = {}
+        for idx_name, idx_data in data.get('indexes', {}).items():
+            indexes[idx_name] = IndexAnnotation.from_dict(idx_name, idx_data)
+
         return cls(
             name=name,
             description=data.get('description', ''),
@@ -186,6 +235,7 @@ class TableAnnotation:
             data_freshness=data.get('data_freshness', ''),
             columns=columns,
             relationships=relationships,
+            indexes=indexes,
             access_hints=data.get('access_hints', [])
         )
 

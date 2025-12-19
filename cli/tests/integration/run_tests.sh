@@ -47,6 +47,7 @@ source "${SCRIPT_DIR}/tests/test_cache.sh"
 source "${SCRIPT_DIR}/tests/test_top_and_registry.sh"
 source "${SCRIPT_DIR}/tests/test_query_command.sh"
 source "${SCRIPT_DIR}/tests/test_errors.sh"
+source "${SCRIPT_DIR}/tests/test_scan.sh"
 
 # Test suite execution
 run_test_suite() {
@@ -90,6 +91,9 @@ run_test_suite() {
     # Registry and error tests
     test_registry_and_files
     test_error_handling
+
+    # Scan command tests (all 4 ORMs, shallow + deep analysis)
+    test_scan_commands
   ) || suite_failed=1
 
   if [[ $suite_failed -eq 1 ]]; then

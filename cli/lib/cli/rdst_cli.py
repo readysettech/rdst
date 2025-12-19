@@ -617,6 +617,7 @@ class RdstCLI:
         interactive: bool = False,
         review: bool = False,
         large_query_bypass: Optional[str] = None,
+        output_json: bool = False,
         **kwargs,
     ) -> RdstResult:
         """
@@ -701,6 +702,7 @@ class RdstCLI:
                 fast=fast,
                 interactive=interactive,
                 review=review,
+                output_json=output_json,
             )
 
             # Extract query hash from result for telemetry
@@ -1207,6 +1209,25 @@ class RdstCLI:
 
             elif subcommand == "list":
                 result = schema_cmd.list_targets()
+
+            elif subcommand == "refresh":
+                if not target:
+                    default_target = self._get_default_target()
+                    if not default_target:
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                        )
+                    target = default_target
+
+                target_config = self._get_target_config(target)
+                if not target_config:
+                    return RdstResult(
+                        False,
+                        f"Target '{target}' not found. Run 'rdst configure' first.",
+                    )
+
+                result = schema_cmd.refresh(target, target_config)
 
             elif subcommand == "add-table":
                 if not target:
