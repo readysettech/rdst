@@ -108,6 +108,7 @@ Commands:
 
 Examples:
   rdst configure add --target prod --host db.example.com --user admin
+  rdst configure add --target prod --connection-string "postgresql://user:pass@host:5432/db"
   rdst configure list
   rdst analyze "SELECT * FROM users WHERE active = true"
   rdst analyze "SELECT COUNT(*) FROM orders WHERE status = 'pending'" --readyset-cache
@@ -136,18 +137,19 @@ Examples:
     configure_parser.add_argument('subcommand', nargs='?', default='menu',
                                   help='Subcommand: menu (default), add, edit, list, remove, default, test')
     configure_parser.add_argument('name', nargs='?', help='Target name for edit/remove/default')
+    configure_parser.add_argument('--connection-string', help='Database connection string (postgresql://user:pass@host:port/db or mysql://...)')
     configure_parser.add_argument('--target', '--name', help='Target name')
-    configure_parser.add_argument('--engine', choices=['postgresql', 'mysql'], help='Database engine')
-    configure_parser.add_argument('--host', help='Database host')
-    configure_parser.add_argument('--port', type=int, help='Database port')
-    configure_parser.add_argument('--user', help='Database user')
-    configure_parser.add_argument('--database', help='Database name')
+    configure_parser.add_argument('--engine', choices=['postgresql', 'mysql'], help='Database engine (overrides connection string)')
+    configure_parser.add_argument('--host', help='Database host (overrides connection string)')
+    configure_parser.add_argument('--port', type=int, help='Database port (overrides connection string)')
+    configure_parser.add_argument('--user', help='Database user (overrides connection string)')
+    configure_parser.add_argument('--database', help='Database name (overrides connection string)')
     configure_parser.add_argument('--password-env', help='Environment variable for password')
     configure_parser.add_argument('--read-only', action='store_true', help='Read-only connection')
     configure_parser.add_argument('--proxy', choices=['none', 'readyset', 'proxysql', 'pgbouncer', 'tunnel', 'custom'],
                                   help='Proxy type')
-    configure_parser.add_argument('--tls', action='store_true', help='Enable TLS')
-    configure_parser.add_argument('--no-tls', action='store_true', help='Disable TLS')
+    configure_parser.add_argument('--tls', action='store_true', help='Enable TLS (overrides connection string)')
+    configure_parser.add_argument('--no-tls', action='store_true', help='Disable TLS (overrides connection string)')
     configure_parser.add_argument('--default', action='store_true', help='Set as default target')
     configure_parser.add_argument('--confirm', action='store_true', help='Confirm removal without prompting')
     configure_parser.add_argument('--skip-verify', action='store_true', help='Skip connection verification (for non-interactive use)')

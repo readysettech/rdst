@@ -283,10 +283,11 @@ class ConfigurationWizard:
         existing = cfg.get(name) if (is_edit and name) else {}
 
         # Check if we have enough info from CLI args
+        has_connection_string = bool(kwargs.get("connection_string") or kwargs.get("connection-string"))
         has_required_args = all(kwargs.get(field) for field in ["host", "user", "database"])
 
-        if has_required_args and not is_edit:
-            # Quick CLI mode
+        if (has_required_args or has_connection_string) and not is_edit:
+            # Quick CLI mode - either individual args or connection string provided
             config_data = self._collect_config_from_args(kwargs, existing, name)
         else:
             # Interactive wizard mode
@@ -972,31 +973,129 @@ class ConfigurationWizard:
         return RdstResult(True, "Configuration is valid")
 
     def _collect_config_from_args(self, kwargs: dict, existing: dict, name: str = None) -> dict:
-        """Collect configuration from command line arguments."""
+        """Collect configuration from command line arguments.
+
+        If --connection-string is provided, parse it first and use individual flags to override.
+        """
+        from .rdst_cli import parse_connection_string
+
+        parsed_values = {}
+
+        # Parse connection string if provided
+        connection_string = kwargs.get("connection_string") or kwargs.get("connection-string")
+        password_from_connstring = None
+        if connection_string:
+            try:
+                parsed_values = parse_connection_string(connection_string)
+                # If password was in connection string, save it for env var prompt
+                if parsed_values.get('password'):
+                    password_from_connstring = parsed_values.get('password')
+            except ValueError as e:
+                # Show error but continue - validation will catch issues
+                self._show_error("Connection String Error", str(e))
+                return {}
+
+        # Build config with priority: individual flags > connection string > existing > defaults
+        # First, determine the target name (needed for password_env resolution)
+        target_name = name or kwargs.get("target") or kwargs.get("name")
+
         config = {
-            "name": name or kwargs.get("target") or kwargs.get("name"),
-            "engine": normalize_db_type(kwargs.get("engine") or existing.get("engine")) or "postgresql",
-            "host": kwargs.get("host") or existing.get("host"),
-            "port": kwargs.get("port") or existing.get("port") or default_port_for(kwargs.get("engine", "postgresql")),
-            "user": kwargs.get("user") or existing.get("user"),
-            "database": kwargs.get("database") or existing.get("database"),
-            "password_env": (kwargs.get("password_env") or kwargs.get("password-env") or
-                            existing.get("password_env", "")),
-            "read_only": bool(kwargs.get("read_only") or kwargs.get("read-only") or
-                             existing.get("read_only", False)),
-            "proxy": (kwargs.get("proxy") or existing.get("proxy") or "none").lower(),
-            "tls": self._resolve_tls_flag(kwargs, existing),
+            "name": target_name,
+            "engine": normalize_db_type(
+                kwargs.get("engine") or
+                parsed_values.get("engine") or
+                existing.get("engine")
+            ) or "postgresql",
+            "host": (
+                kwargs.get("host") or
+                parsed_values.get("host") or
+                existing.get("host")
+            ),
+            "port": (
+                kwargs.get("port") or
+                parsed_values.get("port") or
+                existing.get("port") or
+                default_port_for(kwargs.get("engine") or parsed_values.get("engine", "postgresql"))
+            ),
+            "user": (
+                kwargs.get("user") or
+                parsed_values.get("user") or
+                existing.get("user")
+            ),
+            "database": (
+                kwargs.get("database") or
+                parsed_values.get("database") or
+                existing.get("database")
+            ),
+            "password_env": self._resolve_password_env(
+                kwargs,
+                existing,
+                target_name,
+                password_from_connstring
+            ),
+            "read_only": bool(
+                kwargs.get("read_only") or
+                kwargs.get("read-only") or
+                existing.get("read_only", False)
+            ),
+            "proxy": (
+                kwargs.get("proxy") or
+                existing.get("proxy") or
+                "none"
+            ).lower(),
+            "tls": self._resolve_tls_flag(kwargs, existing, parsed_values),
             "make_default": bool(kwargs.get("default"))
         }
 
         return config
 
-    def _resolve_tls_flag(self, kwargs: dict, existing: dict) -> bool:
-        """Resolve TLS flag from various sources."""
-        if kwargs.get("tls") is not None:
-            return bool(kwargs["tls"])
+    def _resolve_password_env(self, kwargs: dict, existing: dict, target_name: str, password_from_connstring: str = None) -> str:
+        """Resolve password environment variable name.
+
+        If password was in connection string, suggest env var and warn user to set it.
+        Priority: --password-env flag > existing config > generated suggestion
+        """
+        # Check for explicit password-env flag
+        explicit_env = kwargs.get("password_env") or kwargs.get("password-env")
+        if explicit_env:
+            return explicit_env
+
+        # If existing config has password_env, use it
+        if existing.get("password_env"):
+            return existing["password_env"]
+
+        # If password was in connection string, suggest env var name
+        if password_from_connstring:
+            suggested_var = f"{target_name.upper().replace('-', '_')}_PASSWORD" if target_name else "DB_PASSWORD"
+            self._show_warning(
+                "Password in Connection String",
+                f"Found password in connection string.\n"
+                f"For security, rdst stores passwords in environment variables.\n\n"
+                f"Suggested: export {suggested_var}=\"{password_from_connstring}\"\n\n"
+                f"You can override with --password-env flag."
+            )
+            return suggested_var
+
+        return ""
+
+    def _resolve_tls_flag(self, kwargs: dict, existing: dict, parsed_values: dict = None) -> bool:
+        """Resolve TLS flag from various sources.
+
+        Priority: --tls/--no-tls flags > connection string > existing config > default (False)
+        """
+        # Explicit --tls flag (only True matters, False is argparse default)
+        if kwargs.get("tls"):
+            return True
+
+        # Explicit --no-tls flag
         if kwargs.get("no_tls") or kwargs.get("no-tls"):
             return False
+
+        # Connection string TLS setting
+        if parsed_values and "tls" in parsed_values:
+            return bool(parsed_values["tls"])
+
+        # Existing config default
         return bool(existing.get("tls", False))
 
     def _basic_interactive_config(self, existing: dict, is_edit: bool, name: str = None) -> Optional[dict]:

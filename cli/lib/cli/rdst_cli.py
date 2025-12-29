@@ -16,7 +16,7 @@ import sys
 import os
 from pathlib import Path
 from getpass import getpass
-from urllib.parse import urlsplit, urlunsplit, quote
+from urllib.parse import urlsplit, urlunsplit, quote, parse_qs, unquote
 import toml
 
 try:
@@ -103,6 +103,117 @@ def normalize_db_type(db: Optional[str]) -> Optional[str]:
 def default_port_for(db: Optional[str]) -> int:
     nd = normalize_db_type(db)
     return 5432 if nd == "postgresql" else 3306
+
+
+def parse_connection_string(connection_string: str) -> dict:
+    """
+    Parse a database connection string and extract connection parameters.
+
+    Supports PostgreSQL and MySQL connection string formats:
+    - postgresql://user:password@host:port/database?param=value
+    - mysql://user:password@host:port/database?param=value
+
+    Args:
+        connection_string: Database connection URL
+
+    Returns:
+        Dictionary with parsed connection parameters:
+        {
+            'engine': 'postgresql' or 'mysql',
+            'host': hostname,
+            'port': port number (int),
+            'user': username,
+            'password': password (if present),
+            'database': database name,
+            'ssl_params': dict of SSL-related query parameters
+        }
+
+    Raises:
+        ValueError: If connection string format is invalid or unsupported
+    """
+    if not connection_string:
+        raise ValueError("Connection string cannot be empty")
+
+    try:
+        parsed = urlsplit(connection_string)
+    except Exception as e:
+        raise ValueError(f"Invalid connection string format: {e}")
+
+    # Validate and extract scheme (engine)
+    scheme = parsed.scheme.lower()
+    if scheme not in ('postgresql', 'postgres', 'mysql'):
+        raise ValueError(
+            f"Unsupported database engine '{scheme}'. "
+            f"Supported: postgresql, postgres, mysql"
+        )
+
+    # Normalize engine name
+    engine = 'postgresql' if scheme in ('postgresql', 'postgres') else 'mysql'
+
+    # Extract host
+    if not parsed.hostname:
+        raise ValueError("Connection string missing hostname")
+    host = parsed.hostname
+
+    # Extract port (use default if not specified)
+    port = parsed.port if parsed.port else default_port_for(engine)
+
+    # Extract username
+    user = unquote(parsed.username) if parsed.username else None
+    if not user:
+        raise ValueError("Connection string missing username")
+
+    # Extract password (optional - we'll prompt for env var later)
+    password = unquote(parsed.password) if parsed.password else None
+
+    # Extract database name from path
+    database = parsed.path.lstrip('/') if parsed.path else None
+    if not database:
+        raise ValueError("Connection string missing database name")
+
+    # Parse query parameters for SSL settings
+    ssl_params = {}
+    if parsed.query:
+        params = parse_qs(parsed.query)
+
+        # PostgreSQL SSL parameters
+        if 'sslmode' in params:
+            ssl_params['sslmode'] = params['sslmode'][0]
+        if 'sslrootcert' in params:
+            ssl_params['sslrootcert'] = params['sslrootcert'][0]
+        if 'sslcert' in params:
+            ssl_params['sslcert'] = params['sslcert'][0]
+        if 'sslkey' in params:
+            ssl_params['sslkey'] = params['sslkey'][0]
+
+        # MySQL SSL parameters
+        if 'ssl' in params:
+            ssl_params['ssl'] = params['ssl'][0]
+        if 'ssl-mode' in params:
+            ssl_params['ssl-mode'] = params['ssl-mode'][0]
+        if 'ssl-ca' in params:
+            ssl_params['ssl-ca'] = params['ssl-ca'][0]
+
+    # Determine TLS setting from SSL parameters
+    tls = False
+    if engine == 'postgresql':
+        sslmode = ssl_params.get('sslmode', '')
+        tls = sslmode in ('require', 'verify-ca', 'verify-full')
+    elif engine == 'mysql':
+        ssl = ssl_params.get('ssl', '')
+        ssl_mode = ssl_params.get('ssl-mode', '')
+        tls = ssl in ('true', '1') or ssl_mode in ('REQUIRED', 'VERIFY_CA', 'VERIFY_IDENTITY')
+
+    return {
+        'engine': engine,
+        'host': host,
+        'port': port,
+        'user': user,
+        'password': password,
+        'database': database,
+        'ssl_params': ssl_params,
+        'tls': tls
+    }
 
 
 class TargetsConfig:

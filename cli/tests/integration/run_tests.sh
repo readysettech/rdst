@@ -67,6 +67,9 @@ run_test_suite() {
   (
     # Basic tests (no ReadySet required)
     test_config_commands
+    test_config_connection_string
+    test_config_connection_string_override
+    test_config_connection_string_no_password
     test_analyze_inputs
     # TEMPORARILY DISABLED: test_analyze_interactive_flag (LMStudio not running)
     test_list_command
