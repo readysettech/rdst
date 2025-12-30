@@ -10,7 +10,6 @@ import sys
 import argparse
 import shutil
 import subprocess
-from typing import List, Dict, Any, Optional
 
 # Optional pretty output
 try:
@@ -187,8 +186,10 @@ Examples:
   rdst top --historical               Use pg_stat_statements instead of live monitoring''',
         formatter_class=argparse.RawDescriptionHelpFormatter)
     top_parser.add_argument('--target', help='Specific configured DB target')
+    top_parser.add_argument('--source', choices=['auto', 'pg_stat', 'activity', 'slowlog', 'digest', 'rds', 'pmm'],
+                           default='auto', help='Telemetry source to use')
     top_parser.add_argument('--limit', type=int, default=10, help='Number of queries to show')
-    top_parser.add_argument('--sort', choices=['freq', 'total_time', 'avg_time', 'load'], 
+    top_parser.add_argument('--sort', choices=['freq', 'total_time', 'avg_time', 'load'],
                            default='total_time', help='Sort field')
     top_parser.add_argument('--filter', help='Regex to filter query text')
     top_parser.add_argument('--json', action='store_true', help='Output machine-readable JSON')
@@ -234,6 +235,7 @@ Examples:
     analyze_parser.add_argument('--review', action='store_true',
                                help='Review conversation history for this query without re-running analysis')
     analyze_parser.add_argument('--workload', action='store_true', help='Analyze multiple queries together for holistic index recommendations (coming soon)')
+    analyze_parser.add_argument('--large-query-bypass', action='store_true', help='Bypass the 1KB query size limit (allows up to 10KB) for -q, -f, or --stdin input')
 
     # tune command
     tune_parser = subparsers.add_parser('tune', help='Get optimization suggestions')
@@ -495,7 +497,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         return cli.top(**kwargs)
     elif command == 'analyze':
         # Create filtered kwargs for analyze (exclude analyze-specific parameters)
-        analyze_exclude_keys = ['query', 'hash', 'inline_query', 'file', 'stdin', 'name', 'target', 'save_as', 'readyset_cache', 'fast', 'interactive', 'review']
+        analyze_exclude_keys = ['query', 'hash', 'inline_query', 'file', 'stdin', 'name', 'target', 'save_as', 'readyset_cache', 'fast', 'interactive', 'review', 'large_query_bypass']
         filtered_kwargs = {k: v for k, v in kwargs.items() if k not in analyze_exclude_keys}
 
         return cli.analyze(
@@ -511,6 +513,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             fast=getattr(args, 'fast', False),
             interactive=getattr(args, 'interactive', False),
             review=getattr(args, 'review', False),
+            large_query_bypass=getattr(args, 'large_query_bypass', None),
             **filtered_kwargs
         )
     elif command == 'tune':
@@ -693,7 +696,7 @@ Keep it conversational. The user shouldn't need to know the underlying commands 
             try:
                 with open(slash_cmd_path, 'w') as f:
                     f.write(slash_cmd_content)
-            except Exception as e:
+            except Exception:
                 # Non-fatal - continue with MCP registration
                 pass
 

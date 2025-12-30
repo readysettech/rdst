@@ -361,6 +361,7 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
             console.print(f"\n[cyan]Saving {len(selected_indices)} selected queries to registry...[/cyan]\n")
 
         # Save each query
+        skipped_queries = []
         for idx in indices_to_save:
             if idx >= len(queries):
                 continue
@@ -369,23 +370,32 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
             tag = f"top_query_{idx}"
             query_info = format_query_for_save(query)
 
-            registry.add_query(
-                tag=tag,
-                sql=query_info['query_text'],
-                source="top",
-                target=target_name
-            )
+            try:
+                registry.add_query(
+                    tag=tag,
+                    sql=query_info['query_text'],
+                    source="top",
+                    target=target_name
+                )
 
-            # Store info for return
-            saved_queries.append({
-                'index': idx,
-                'hash': query.query_hash[:8],  # First 8 chars of hash
-                'query_text': query.normalized_query[:80] + '...' if len(query.normalized_query) > 80 else query.normalized_query,
-                'tag': tag
-            })
+                # Store info for return
+                saved_queries.append({
+                    'index': idx,
+                    'hash': query.query_hash[:8],  # First 8 chars of hash
+                    'query_text': query.normalized_query[:80] + '...' if len(query.normalized_query) > 80 else query.normalized_query,
+                    'tag': tag
+                })
 
-            # Print saved query with hash
-            console.print(f"  [{idx}] {query.query_hash[:8]} - {query.normalized_query[:80]}{'...' if len(query.normalized_query) > 80 else ''}")
+                # Print saved query with hash
+                console.print(f"  [{idx}] {query.query_hash[:8]} - {query.normalized_query[:80]}{'...' if len(query.normalized_query) > 80 else ''}")
+            except ValueError as e:
+                # Query exceeds 1KB limit
+                skipped_queries.append(idx)
+                console.print(f"  [{idx}] [yellow]Skipped - query exceeds 1KB limit[/yellow]")
+
+        if skipped_queries:
+            console.print(f"\n[yellow]Note: {len(skipped_queries)} queries exceeded the 1KB limit and were not saved.[/yellow]")
+            console.print("[yellow]Use 'rdst analyze --large-query-bypass' to analyze large queries.[/yellow]")
 
         console.print(f"\n[green]Saved {len(saved_queries)} queries successfully[/green]")
         console.print("\n[cyan]Next steps:[/cyan]")

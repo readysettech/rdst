@@ -333,12 +333,9 @@ class TestExecuteExplainAnalyze:
 
     def test_missing_target_config(self):
         """Test error when target config is missing."""
-        explain_analysis = _import_module_directly(
-            "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
-        )
+        from lib.functions.explain_analysis import execute_explain_analyze
 
-        result = explain_analysis.execute_explain_analyze(
+        result = execute_explain_analyze(
             sql="SELECT * FROM users",
             target=None
         )
@@ -348,12 +345,9 @@ class TestExecuteExplainAnalyze:
 
     def test_unsupported_engine(self):
         """Test error for unsupported database engine."""
-        explain_analysis = _import_module_directly(
-            "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
-        )
+        from lib.functions.explain_analysis import execute_explain_analyze
 
-        result = explain_analysis.execute_explain_analyze(
+        result = execute_explain_analyze(
             sql="SELECT * FROM users",
             target="test",
             target_config={"engine": "oracle", "host": "localhost"}
@@ -364,12 +358,9 @@ class TestExecuteExplainAnalyze:
 
     def test_mysql_parameterized_query(self):
         """Test MySQL rejects parameterized queries."""
-        explain_analysis = _import_module_directly(
-            "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
-        )
+        from lib.functions.explain_analysis import execute_explain_analyze
 
-        result = explain_analysis.execute_explain_analyze(
+        result = execute_explain_analyze(
             sql="SELECT * FROM users WHERE id = ?",
             target="test",
             target_config={

@@ -16,8 +16,9 @@ from __future__ import annotations
 import sys
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 from dataclasses import dataclass
+from .rdst_cli import RdstResult
 from concurrent.futures import ThreadPoolExecutor
 
 try:
@@ -32,7 +33,7 @@ except ImportError:
     Prompt = None
 
 from ..query_registry.query_registry import QueryRegistry, normalize_sql, hash_sql
-from ..query_registry.conversation_registry import ConversationRegistry, InteractiveConversation
+from ..query_registry.conversation_registry import ConversationRegistry
 from ..llm_manager.llm_manager import LLMManager
 from .parameter_prompt import has_unresolved_placeholders, prompt_for_parameters
 
@@ -68,7 +69,8 @@ class AnalyzeCommand:
                       use_stdin: bool = False,
                       name: Optional[str] = None,
                       positional_query: Optional[str] = None,
-                      save_as: Optional[str] = None) -> AnalyzeInput:
+                      save_as: Optional[str] = None,
+                      large_query_bypass: bool = False) -> AnalyzeInput:
         """
         Resolve query input using strict precedence rules.
 
@@ -82,6 +84,7 @@ class AnalyzeCommand:
             name: Query name for registry lookup
             positional_query: Positional query argument (backward compatibility)
             save_as: Name to save query as after analysis
+            large_query_bypass: If True, allows queries up to 10KB instead of 1KB
 
         Returns:
             AnalyzeInput with resolved SQL and metadata
@@ -108,7 +111,7 @@ class AnalyzeCommand:
 
         # Apply precedence rules
         try:
-            # 1. Registry lookup by hash (highest precedence)
+            # 1. Registry lookup by hash
             if hash:
                 return self._resolve_by_hash(hash, save_as)
 
@@ -118,15 +121,15 @@ class AnalyzeCommand:
 
             # 3. Inline query
             if inline_query:
-                return self._resolve_inline_query(inline_query, save_as)
+                return self._resolve_inline_query(inline_query, save_as, large_query_bypass)
 
             # 4. File input
             if file_path:
-                return self._resolve_file_input(file_path, save_as)
+                return self._resolve_file_input(file_path, save_as, large_query_bypass)
 
             # 5. Stdin input
             if use_stdin:
-                return self._resolve_stdin_input(save_as)
+                return self._resolve_stdin_input(save_as, large_query_bypass)
 
             # 6. Interactive prompt
             if not positional_query:
@@ -137,7 +140,7 @@ class AnalyzeCommand:
             if positional_query and self._looks_like_hash(positional_query):
                 return self._resolve_by_hash(positional_query, save_as)
 
-            return self._resolve_inline_query(positional_query, save_as)
+            return self._resolve_inline_query(positional_query, save_as, large_query_bypass)
 
         except Exception as e:
             raise AnalyzeInputError(f"Failed to resolve input: {e}")
@@ -182,24 +185,63 @@ class AnalyzeCommand:
             save_as=save_as
         )
 
-    def _resolve_inline_query(self, query: str, save_as: str) -> AnalyzeInput:
+    def _enforce_query_size_limit(self, query: str, bypass: bool = False) -> None:
+        """
+        Enforce query size limits.
+
+        Args:
+            query: The SQL query string to check
+            bypass: If True, use 10KB limit instead of 1KB
+
+        Raises:
+            AnalyzeInputError: If query exceeds the size limit
+        """
+        from lib.data_manager_service.data_manager_service_command_sets import MAX_QUERY_LENGTH
+        query_bytes = len(query.encode('utf-8'))
+
+        if bypass:
+            # With bypass flag, allow up to 10KB
+            max_bypass_size = 10 * 1024  # 10KB
+            if query_bytes > max_bypass_size:
+                raise AnalyzeInputError(
+                    f"Query size ({query_bytes:,} bytes) exceeds maximum allowed size (10KB).\n\n"
+                    "Even with --large-query-bypass, queries cannot exceed 10KB due to LLM context limits."
+                )
+            # Warn if query is very large (> 5KB)
+            if query_bytes > 5 * 1024:
+                print(f"Note: Large query ({query_bytes:,} bytes). Analysis may use significant LLM tokens.")
+        else:
+            # Default 1KB limit
+            if query_bytes > MAX_QUERY_LENGTH:
+                raise AnalyzeInputError(
+                    f"Query size ({query_bytes:,} bytes) exceeds the default limit (1KB).\n\n"
+                    "To analyze large queries, use --large-query-bypass:\n"
+                    "  rdst analyze --large-query-bypass -f your_file.sql\n"
+                    "  rdst analyze --large-query-bypass -q '<your query>'\n\n"
+                    "This allows queries up to 10KB."
+                )
+
+    def _resolve_inline_query(self, query: str, save_as: str, bypass: bool = False) -> AnalyzeInput:
         """Resolve inline query string."""
         if not query or not query.strip():
             raise AnalyzeInputError("Empty query provided")
+
+        query = query.strip()
+        self._enforce_query_size_limit(query, bypass)
 
         # Normalize and hash
         normalized_sql = normalize_sql(query)
         query_hash = hash_sql(query)
 
         return AnalyzeInput(
-            sql=query.strip(),  # Original SQL for EXPLAIN ANALYZE
+            sql=query,  # Original SQL for EXPLAIN ANALYZE
             normalized_sql=normalized_sql,  # Normalized SQL for registry/LLM
             source="inline",
             hash=query_hash,
             save_as=save_as
         )
 
-    def _resolve_file_input(self, file_path: str, save_as: str) -> AnalyzeInput:
+    def _resolve_file_input(self, file_path: str, save_as: str, bypass: bool = False) -> AnalyzeInput:
         """Resolve query from file input."""
         path = Path(file_path)
 
@@ -229,19 +271,21 @@ class AnalyzeCommand:
         if len(statements) > 1:
             print(f"Warning: File contains {len(statements)} statements, analyzing the first one")
 
-        query = statements[0]
+        query = statements[0].strip()
+        self._enforce_query_size_limit(query, bypass)
+
         normalized_sql = normalize_sql(query)
         query_hash = hash_sql(query)
 
         return AnalyzeInput(
-            sql=query.strip(),  # Original SQL
+            sql=query,  # Original SQL
             normalized_sql=normalized_sql,
             source="file",
             hash=query_hash,
             save_as=save_as
         )
 
-    def _resolve_stdin_input(self, save_as: str) -> AnalyzeInput:
+    def _resolve_stdin_input(self, save_as: str, bypass: bool = False) -> AnalyzeInput:
         """Resolve query from stdin input."""
         if not sys.stdin.isatty():
             # Reading from pipe
@@ -255,17 +299,14 @@ class AnalyzeCommand:
         if not content.strip():
             raise AnalyzeInputError("Empty input received from stdin")
 
-        # Apply size limit (1MB)
-        if len(content) > 1024 * 1024:
-            raise AnalyzeInputError("Input from stdin is too large (max 1MB)")
-
-        # Normalize the input
         content = content.strip()
+        self._enforce_query_size_limit(content, bypass)
+
         normalized_sql = normalize_sql(content)
         query_hash = hash_sql(content)
 
         return AnalyzeInput(
-            sql=content.strip(),  # Original SQL
+            sql=content,  # Original SQL
             normalized_sql=normalized_sql,
             source="stdin",
             hash=query_hash,
@@ -442,7 +483,7 @@ class AnalyzeCommand:
                         else:
                             self._console.print(f"[red]Invalid selection. Please enter 1-{len(saved_queries)} or 'q'[/red]")
                     except ValueError:
-                        self._console.print(f"[red]Invalid input. Please enter a number or 'q'[/red]")
+                        self._console.print("[red]Invalid input. Please enter a number or 'q'[/red]")
 
             else:
                 # Plain text fallback
@@ -539,7 +580,7 @@ class AnalyzeCommand:
         else:
             return "unknown"
 
-    def execute_analyze(self, resolved_input: AnalyzeInput, target: Optional[str] = None, readyset: bool = False, readyset_cache: bool = False, fast: bool = False, interactive: bool = False, review: bool = False) -> 'RdstResult':
+    def execute_analyze(self, resolved_input: AnalyzeInput, target: Optional[str] = None, readyset: bool = False, readyset_cache: bool = False, fast: bool = False, interactive: bool = False, review: bool = False) -> RdstResult:
         """
         Execute the analyze command with resolved input using the workflow engine.
 
@@ -1133,11 +1174,11 @@ class AnalyzeCommand:
                         print(f"  ⚠ Cache creation failed: {create_result.get('error', 'Unknown error')}")
                         print(f"     Details: {create_result}")
             else:
-                print(f"  ℹ️  EXPLAIN CREATE CACHE: Query may not be cacheable")
+                print("  ℹ️  EXPLAIN CREATE CACHE: Query may not be cacheable")
                 explanation = explain_result.get('explanation', 'Unknown')
                 if explanation and explanation != 'Unknown':
                     print(f"     Reason: {explanation}")
-                print(f"     Note: Will attempt to create cache anyway (EXPLAIN can be conservative)")
+                print("     Note: Will attempt to create cache anyway (EXPLAIN can be conservative)")
 
             # Merge static cacheability check with actual ReadySet result
             static_cacheability = {}
@@ -1245,7 +1286,6 @@ class AnalyzeCommand:
         """Run workflow with detailed step-by-step progress indicators and heartbeat."""
         import time
         import threading
-        from collections import defaultdict
 
         # Get LLM info for display
         try:
@@ -1816,11 +1856,11 @@ class AnalyzeCommand:
                 # Only show performance comparison if we have valid baseline
                 if original_performance and not baseline_skipped:
                     baseline_time = original_performance.get("execution_time_ms", 0)
-                    lines.append(f"   Performance Comparison:")
+                    lines.append("   Performance Comparison:")
                     lines.append(f"     Original Query: {baseline_time:.1f}ms")
                 elif baseline_skipped:
-                    lines.append(f"   Performance Comparison:")
-                    lines.append(f"     WARNING: Original query was skipped - no baseline for comparison")
+                    lines.append("   Performance Comparison:")
+                    lines.append("     WARNING: Original query was skipped - no baseline for comparison")
                     if baseline_skip_reason:
                         lines.append(f"     ({baseline_skip_reason})")
 
@@ -1847,8 +1887,8 @@ class AnalyzeCommand:
                         if result.get("success"):
                             recommendation = result.get("recommendation", "")
                             if recommendation == "advisory_ddl":
-                                lines.append(f"        Result: ADVISORY: DDL suggestion (not executed for safety)")
-                                lines.append(f"        Note: This DDL can be applied manually if desired")
+                                lines.append("        Result: ADVISORY: DDL suggestion (not executed for safety)")
+                                lines.append("        Note: This DDL can be applied manually if desired")
                             else:
                                 perf = result.get("performance", {})
                                 was_skipped = result.get("was_skipped", False) or perf.get("was_skipped", False)
@@ -1875,11 +1915,11 @@ class AnalyzeCommand:
                             error = result.get("error", "Failed")
                             # Better error messages for common issues
                             if "Key" in error and "doesn't exist" in error:
-                                lines.append(f"        Result: ERROR: Missing index (suggested index not found)")
+                                lines.append("        Result: ERROR: Missing index (suggested index not found)")
                             elif "syntax error" in error.lower():
-                                lines.append(f"        Result: ERROR: SQL syntax error")
+                                lines.append("        Result: ERROR: SQL syntax error")
                             elif "safety validation" in error.lower():
-                                lines.append(f"        Result: ERROR: Blocked for safety (dangerous keyword)")
+                                lines.append("        Result: ERROR: Blocked for safety (dangerous keyword)")
                             else:
                                 error_short = error[:60] + "..." if len(error) > 60 else error
                                 lines.append(f"        Result: ERROR: {error_short}")
@@ -1980,7 +2020,7 @@ class AnalyzeCommand:
                         # Try to generate the actual CREATE INDEX statement
                         create_statement = _generate_create_index_statement(index_name, workflow_result.get("query", ""))
                         if create_statement:
-                            suggestions.append(f"Create missing index:")
+                            suggestions.append("Create missing index:")
                             suggestions.append(f"     {create_statement}")
                         else:
                             suggestions.append(f"Create missing index: {index_name}")
@@ -2099,8 +2139,8 @@ class AnalyzeCommand:
         # Show completion status
         lines.append("Analysis Summary:")
         lines.append(f"   • Query executed against {target}")
-        lines.append(f"   • Results stored in query registry")
-        lines.append(f"   • Run `rdst query list --limit 5` to see recent queries")
+        lines.append("   • Results stored in query registry")
+        lines.append("   • Run `rdst query list --limit 5` to see recent queries")
 
         storage_result = workflow_result.get("storage_result", {})
         if storage_result and storage_result.get("success"):
@@ -2128,7 +2168,6 @@ class AnalyzeCommand:
             Cache ID (query_id) if found, None otherwise
         """
         import subprocess
-        import re
 
         try:
             database = db_config.get('database', 'testdb')
@@ -2143,7 +2182,7 @@ class AnalyzeCommand:
                 cmd = [
                     'mysql',
                     '--protocol=TCP',
-                    f'--host=localhost',
+                    '--host=localhost',
                     f'--port={readyset_port}',
                     f'--user={user}',
                     f'--database={database}',
@@ -2217,7 +2256,7 @@ class AnalyzeCommand:
 
             return None
 
-        except Exception as e:
+        except Exception:
             # Silently fail - cache ID is nice to have but not critical
             return None
 
@@ -2293,7 +2332,7 @@ class AnalyzeCommand:
                         "success": False,
                         "error": f"Failed to create cache: {create_result.get('error', 'Unknown error')}"
                     }
-                print(f"  ✓ Cache created successfully")
+                print("  ✓ Cache created successfully")
 
                 # Get cache ID by querying SHOW CACHES
                 try:
@@ -2308,7 +2347,7 @@ class AnalyzeCommand:
                 except Exception as e:
                     print(f"     (Could not retrieve cache ID: {e})")
             else:
-                print(f"  ℹ️  Cache already exists")
+                print("  ℹ️  Cache already exists")
                 # Try to get the cache ID even if it already existed
                 try:
                     cache_id = self._get_cache_id_for_query(
@@ -2377,7 +2416,7 @@ class AnalyzeCommand:
             deployment_instructions.append("Notes on Local Test Containers")
             deployment_instructions.append("=" * 70)
             deployment_instructions.append("")
-            deployment_instructions.append(f"• Test containers are persistent and reused across runs")
+            deployment_instructions.append("• Test containers are persistent and reused across runs")
             deployment_instructions.append(f"• ReadySet container port: {readyset_port}")
             deployment_instructions.append(f"• To view all caches: psql -h localhost -p {readyset_port} -U {target_config['user']} -d {target_config['database']} -c 'SHOW CACHES;'")
             deployment_instructions.append(f"• To drop this cache: psql -h localhost -p {readyset_port} -U {target_config['user']} -d {target_config['database']} -c \"DROP CACHE <cache_name>;\"")

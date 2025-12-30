@@ -12,11 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, List
-import sys
 import os
 from pathlib import Path
-from getpass import getpass
-from urllib.parse import urlsplit, urlunsplit, quote, parse_qs, unquote
+from urllib.parse import urlsplit, parse_qs, unquote
 import toml
 
 try:
@@ -66,7 +64,7 @@ class CloudAgentClient:
         # Note: CacheManager currently requires initialization context; defer wiring
         from lib.cache_manager.cache_manager import CacheManager  # local import
         return CacheManager
-    
+
     def llm_manager(self):  # -> LLMManager
         from lib.llm_manager.llm_manager import LLMManager  # local import
         return LLMManager()
@@ -360,7 +358,6 @@ class RdstCLI:
     def _test_connection(self, cfg: TargetsConfig, kwargs: dict) -> RdstResult:
         """Test database connection for a target. Returns JSON-formatted result."""
         import json
-        import os
 
         target_name = kwargs.get("target") or kwargs.get("name")
 
@@ -541,7 +538,8 @@ class RdstCLI:
                 file: Optional[str] = None, stdin: bool = False, name: Optional[str] = None,
                 positional_query: Optional[str] = None, target: Optional[str] = None,
                 save_as: Optional[str] = None, db: Optional[str] = None,
-                readyset_cache: bool = False, fast: bool = False, interactive: bool = False, review: bool = False, **kwargs) -> RdstResult:
+                readyset_cache: bool = False, fast: bool = False, interactive: bool = False, review: bool = False,
+                large_query_bypass: Optional[str] = None, **kwargs) -> RdstResult:
         """
         Analyze SQL query with support for multiple input modes.
 
@@ -594,7 +592,8 @@ class RdstCLI:
                 use_stdin=stdin,
                 name=name,
                 positional_query=positional_query,
-                save_as=save_as
+                save_as=save_as,
+                large_query_bypass=large_query_bypass
             )
 
             # Use target parameter, fallback to db for backward compatibility, then to default
@@ -1052,7 +1051,7 @@ class RdstCLI:
                     if subcommand == 'show' and 'tables' in data:
                         message += self._format_schema_show(data)
                     elif subcommand == 'init':
-                        message += f"\n\nDiscovered:"
+                        message += "\n\nDiscovered:"
                         message += f"\n  Tables: {data.get('tables', 0)}"
                         message += f"\n  Columns: {data.get('columns', 0)}"
                         message += f"\n  Relationships: {data.get('relationships', 0)}"

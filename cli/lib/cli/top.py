@@ -8,12 +8,12 @@ Extracted from rdst_cli.py to improve code organization and maintainability.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, List
+from typing import List, TYPE_CHECKING
 import sys
 import os
-from pathlib import Path
-import toml
+
+if TYPE_CHECKING:
+    from ..functions.db_config_check import TargetConfig
 
 try:
     # Rich is optional; if unavailable, we still work without pretty output
@@ -39,7 +39,7 @@ from ..query_registry import hash_sql
 
 class TopCommand:
     """Handles all functionality for the rdst top command."""
-    
+
     def __init__(self, client=None):
         """Initialize the TopCommand with an optional CloudAgentClient."""
         self.client = client
@@ -99,7 +99,7 @@ class TopCommand:
                 return self._run_interactive_mode(target_config, db_engine, source, limit, sort, filter, no_color)
             else:
                 return self._run_single_snapshot(target_config, db_engine, source, limit, sort, filter, json, no_color)
-                
+
         except KeyboardInterrupt:
             return RdstResult(True, "\nTop view cancelled by user")
         except Exception as e:
@@ -109,7 +109,7 @@ class TopCommand:
                 error_msg += f"\n{traceback.format_exc()}"
             return RdstResult(False, error_msg)
 
-    def _auto_select_source(self, db_engine: str, target_config: dict) -> str:
+    def _auto_select_source(self, db_engine: str, target_config: TargetConfig) -> str:
         """Auto-select the best source for the database engine."""
         if db_engine == "postgresql":
             # Check if pg_stat_statements is likely available
@@ -145,10 +145,10 @@ class TopCommand:
                 return "rdst_top_mysql_digest"
             elif source == "activity":
                 return "rdst_top_mysql_activity"
-        
+
         raise ValueError(f"No command set available for engine='{db_engine}' source='{source}'")
 
-    def _run_realtime_monitor(self, target_config: dict, db_engine: str, no_color: bool,
+    def _run_realtime_monitor(self, target_config: TargetConfig, db_engine: str, no_color: bool,
                              limit: int = 10, json_output: bool = False, duration: int = None):
         """Run new real-time monitoring (default behavior - polls every 200ms).
 
@@ -181,48 +181,47 @@ class TopCommand:
         except Exception as e:
             return RdstResult(False, f"Real-time monitoring failed: {e}")
 
-    def _run_single_snapshot(self, target_config: dict, db_engine: str, source: str, 
+    def _run_single_snapshot(self, target_config: TargetConfig, db_engine: str, source: str,
                             limit: int, sort: str, filter_pattern: str, json_output: bool, no_color: bool):
         """Run a single snapshot of top queries."""
         from .rdst_cli import RdstResult
-        
+
         try:
             # 1. Execute the query via DataManager
             data = self._execute_top_query(target_config, db_engine, source)
-            
+
             # 2. Process and format the results
             actual_source = data.get('source', source)  # Use actual source from execution
             processed_data = self._process_top_data(data, actual_source, limit, sort, filter_pattern)
-            
+
             # 3. Output in requested format
             if json_output:
                 return RdstResult(True, "", data={
-                    "queries": processed_data, 
-                    "source": source, 
+                    "queries": processed_data,
+                    "source": source,
                     "target": target_config.get("name", "unknown"),
                     "engine": db_engine
                 })
             else:
                 formatted_output = self._format_top_display(processed_data, actual_source, no_color, db_engine, target_config.get("name", "unknown"))
                 return RdstResult(True, formatted_output)
-                
+
         except Exception as e:
             import traceback
             error_detail = traceback.format_exc()
             return RdstResult(False, f"Failed to get top queries: {e}\n{error_detail}")
 
-    def _run_watch_mode(self, target_config: dict, db_engine: str, source: str, 
+    def _run_watch_mode(self, target_config: TargetConfig, db_engine: str, source: str,
                        limit: int, sort: str, filter_pattern: str, no_color: bool):
         """Run continuous watch mode with smooth screen updates."""
         from .rdst_cli import RdstResult
         import time
-        import os
         import sys
-        
+
         # Try to use Rich Live if available for smooth updates
         if _RICH_AVAILABLE and self._console and not no_color:
             return self._run_watch_mode_rich(target_config, db_engine, source, limit, sort, filter_pattern)
-        
+
         # Fallback to terminal control sequences for smoother updates than os.system('clear')
         def clear_screen():
             if os.name == 'posix':
@@ -231,16 +230,16 @@ class TopCommand:
                 sys.stdout.flush()
             else:
                 os.system('cls')
-        
+
         def move_cursor_home():
             if os.name == 'posix':
                 sys.stdout.write('\033[H')  # Move cursor to home position
                 sys.stdout.flush()
-        
+
         # Initial clear
         clear_screen()
         first_run = True
-        
+
         try:
             while True:
                 # Only clear on first run, then just move cursor to home
@@ -248,14 +247,14 @@ class TopCommand:
                     first_run = False
                 else:
                     move_cursor_home()
-                
+
                 # Get latest data and display
                 try:
                     data = self._execute_top_query(target_config, db_engine, source)
                     processed_data = self._process_top_data(data, source, limit, sort, filter_pattern)
-                    formatted_output = self._format_top_display(processed_data, source, no_color, db_engine, 
+                    formatted_output = self._format_top_display(processed_data, source, no_color, db_engine,
                                                               target_config.get("name", "unknown"), watch_mode=True)
-                    
+
                     # Print output and ensure we clear any leftover lines
                     lines = formatted_output.split('\n')
                     for i, line in enumerate(lines):
@@ -264,29 +263,29 @@ class TopCommand:
                             print(f"{line}\033[K")  # Print line and clear to end of line
                         else:
                             print(line)
-                    
+
                     # Add status line
                     status_line = "\nPress Ctrl+C to exit - Refreshing every 5 seconds"
                     if os.name == 'posix':
                         print(f"{status_line}\033[K")
                     else:
                         print(status_line)
-                    
+
                     # Clear any remaining lines from previous output
                     if os.name == 'posix':
                         sys.stdout.write('\033[J')  # Clear from cursor to end of screen
                         sys.stdout.flush()
-                    
+
                 except Exception as e:
                     error_msg = f"Error refreshing data: {e}"
                     if os.name == 'posix':
                         print(f"{error_msg}\033[K")
                     else:
                         print(error_msg)
-                
+
                 # Wait before next update
                 time.sleep(5)
-                
+
         except KeyboardInterrupt:
             # Clean up terminal before exiting
             if os.name == 'posix':
@@ -294,33 +293,33 @@ class TopCommand:
                 sys.stdout.flush()
             return RdstResult(True, "\nWatch mode stopped")
 
-    def _run_watch_mode_rich(self, target_config: dict, db_engine: str, source: str, 
+    def _run_watch_mode_rich(self, target_config: TargetConfig, db_engine: str, source: str,
                            limit: int, sort: str, filter_pattern: str):
         """Run watch mode with Rich Live for smooth updates."""
         from .rdst_cli import RdstResult
         import time
         import datetime
-        
+
         def generate_table():
             """Generate the current top queries table."""
             try:
                 data = self._execute_top_query(target_config, db_engine, source)
                 processed_data = self._process_top_data(data, source, limit, sort, filter_pattern)
-                
+
                 if not processed_data:
                     return Panel("No active queries found. Run some database queries in another session to see them here.", title="rdst top", border_style="yellow")
-                
+
                 # Create table
                 table = Table(show_header=True, header_style="bold cyan")
                 table.add_column("QUERY HASH", style="bright_blue", width=12)
-                table.add_column("QUERY", style="white", width=20)  
+                table.add_column("QUERY", style="white", width=20)
                 table.add_column("FREQ", style="green", width=7)
                 table.add_column("TOTAL TIME", style="yellow", width=10)
                 table.add_column("AVG TIME", style="yellow", width=8)
                 table.add_column("% LOAD", style="red", width=6)
                 table.add_column("SOURCE", style="magenta", width=8)
                 table.add_column("READYSET", style="blue", width=8)
-                
+
                 # Add rows
                 for row in processed_data:
                     readyset_advice = "N/A"  # Placeholder for future readyset integration
@@ -329,28 +328,28 @@ class TopCommand:
                         row['query_hash'],
                         query_display,
                         str(row['freq']),
-                        row['total_time'], 
+                        row['total_time'],
                         row['avg_time'],
                         row['pct_load'],
                         source,
                         readyset_advice
                     )
-                
+
                 # Create title with metadata and timestamp
                 timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                 target_name = target_config.get("name", "unknown")
                 title = f"rdst top - {timestamp} - {target_name} ({db_engine}) - {source}"
                 table.title = title
-                
+
                 # Create status panel
                 status_panel = Panel(
                     "Press Ctrl+C to exit • Refreshing every 5 seconds",
                     style="dim",
                     border_style="dim"
                 )
-                
+
                 return Group(table, status_panel)
-                
+
             except Exception as e:
                 error_panel = Panel(
                     f"Error refreshing data: {e}",
@@ -358,7 +357,7 @@ class TopCommand:
                     border_style="red"
                 )
                 return error_panel
-        
+
         # Start Live display
         try:
             with Live(generate_table(), refresh_per_second=0.2, screen=True) as live:
@@ -378,7 +377,6 @@ class TopCommand:
         Ensures cursor is visible, alternate screen buffer is exited,
         and terminal settings are restored.
         """
-        import sys
         import os
 
         try:
@@ -401,7 +399,7 @@ class TopCommand:
             # Best effort - don't let cleanup failure cause issues
             pass
 
-    def _run_interactive_mode(self, target_config: dict, db_engine: str, source: str,
+    def _run_interactive_mode(self, target_config: TargetConfig, db_engine: str, source: str,
                              limit: int, sort: str, filter_pattern: str, no_color: bool):
         """Run interactive mode where user can select queries for analysis."""
         from .rdst_cli import RdstResult
@@ -490,12 +488,28 @@ class TopCommand:
         """Analyze the selected query."""
         from ..query_registry import QueryRegistry
         from .rdst_cli import RdstResult
+        from ..data_manager_service.data_manager_service_command_sets import MAX_QUERY_LENGTH
 
         try:
+            # Check query size before attempting to save
+            query_text = selected_query['query_text']
+            query_bytes = len(query_text.encode('utf-8')) if query_text else 0
+
+            if query_bytes > MAX_QUERY_LENGTH:
+                # Query exceeds 1KB limit - cannot save to registry
+                return RdstResult(
+                    False,
+                    f"Query size ({query_bytes:,} bytes) exceeds the 1KB limit.\n\n"
+                    "Queries captured from 'rdst top' cannot exceed 1KB.\n"
+                    "To analyze this query, get the full SQL from your application and run:\n"
+                    f"  rdst analyze --large-query-bypass '<full query>'\n\n"
+                    "This allows one-time analysis of queries up to 10KB."
+                )
+
             # Store query in registry with metadata from top
             registry = QueryRegistry()
             query_hash, is_new = registry.add_query(
-                sql=selected_query['query_text'],
+                sql=query_text,
                 source="top",
                 frequency=selected_query['freq'] if isinstance(selected_query['freq'], int) else 0,
                 target=""  # Top command doesn't specify target, will be updated when analyzed
@@ -534,12 +548,11 @@ class TopCommand:
         except Exception as e:
             return RdstResult(False, f"Analysis failed: {e}")
 
-    def _execute_top_query(self, target_config: dict, db_engine: str, source: str) -> dict:
+    def _execute_top_query(self, target_config: TargetConfig, db_engine: str, source: str) -> dict:
         """Execute the top query using DataManager."""
-        import os
         import sys
         import tempfile
-        
+
         # Import required modules
         from lib.data_manager.data_manager import DataManager
         from lib.data_manager_service import ConnectionConfig, DMSDbType, DataManagerQueryType
@@ -550,10 +563,10 @@ class TopCommand:
             password = os.getenv(target_config['password_env'])
         elif target_config.get('password'):
             password = target_config['password']
-        
+
         if not password:
             raise ValueError(f"No password found. Set environment variable {target_config.get('password_env', 'DB_PASSWORD')}")
-        
+
         # Create connection config
         connection_config = ConnectionConfig(
             host=target_config['host'],
@@ -564,7 +577,7 @@ class TopCommand:
             db_type=DMSDbType.MySql if db_engine == 'mysql' else DMSDbType.PostgreSQL,
             query_type=DataManagerQueryType.UPSTREAM
         )
-        
+
         # Get command set name - try the preferred source, fallback if needed
         try:
             command_set_name = self._get_command_set_for_source(db_engine, source)
@@ -578,10 +591,10 @@ class TopCommand:
                 source = "activity"  # Update source for display
             else:
                 raise e
-        
+
         # Create temporary output directory
         output_dir = tempfile.mkdtemp(prefix="rdst_")
-        
+
         try:
             # Create a simple logger wrapper for DataManager
             import logging
@@ -608,7 +621,7 @@ class TopCommand:
                     self.logger.error(msg)
 
             logger = SimpleLoggerWrapper()
-            
+
             # Initialize DataManager
             dm = DataManager(
                 connection_config={DataManagerQueryType.UPSTREAM: connection_config},
@@ -617,14 +630,14 @@ class TopCommand:
                 data_directory=output_dir,
                 cli_mode=True
             )
-            
+
             # Get the command name from the command set
             command_name = list(dm._available_commands[command_set_name]['commands'].keys())[0]
-            
+
             # Execute command (suppress DataManager error output when we know it will fail)
             import contextlib
             import io
-            
+
             if db_engine == "postgresql" and source == "pg_stat":
                 # Suppress stderr for the first attempt since we expect it might fail
                 stderr_capture = io.StringIO()
@@ -636,7 +649,7 @@ class TopCommand:
                     print(captured_stderr, file=sys.stderr)
             else:
                 result = dm.execute_command(command_set_name, command_name)
-            
+
             # Check if command failed and we can fallback
             if not result.get('success') and db_engine == "postgresql" and source == "pg_stat":
                 error_msg = result.get('error', '')
@@ -647,7 +660,7 @@ class TopCommand:
                     # Retry with activity source
                     command_set_name = self._get_command_set_for_source(db_engine, "activity")
                     command_name = list(dm._available_commands[command_set_name]['commands'].keys())[0]
-                    
+
                     # Re-create DataManager with activity command set
                     dm = DataManager(
                         connection_config={DataManagerQueryType.UPSTREAM: connection_config},
@@ -658,11 +671,11 @@ class TopCommand:
                     )
                     result = dm.execute_command(command_set_name, command_name)
                     source = "activity"  # Update source for display
-            
+
             # Add source info to result for processing
             result['source'] = source
             return result
-            
+
         finally:
             # Clean up temporary directory
             import shutil
@@ -675,14 +688,13 @@ class TopCommand:
         """Process and format the top queries data."""
         if not data.get('success') or not data.get('data') is not None:
             return []
-        
+
         import re
-        import pandas as pd
-        
+
         df = data['data']
         if df.empty:
             return []
-        
+
         # For activity sources, remove duplicates and system noise
         if source == 'activity':
             # Remove duplicates by query_hash, keeping the longest running
@@ -690,7 +702,7 @@ class TopCommand:
                 df = df.sort_values('duration_ms', ascending=False).drop_duplicates('query_hash', keep='first')
             else:
                 df = df.drop_duplicates('query_hash', keep='first')
-        
+
         # Apply filter if specified
         if filter_pattern:
             try:
@@ -701,7 +713,7 @@ class TopCommand:
                 # If regex is invalid, treat as literal string
                 mask = df['query_text'].str.contains(filter_pattern, case=False, na=False)
                 df = df[mask]
-        
+
         # Normalize column names based on source
         if source in ['pg_stat', 'digest']:
             # Historical sources
@@ -709,18 +721,18 @@ class TopCommand:
                 df['freq'] = df['calls']
             elif 'count_star' in df.columns:
                 df['freq'] = df['count_star']
-            
+
             if 'total_time' in df.columns:
                 df['total_time_sort'] = df['total_time']
             elif 'sum_timer_wait' in df.columns:
                 df['total_time_sort'] = df['sum_timer_wait']
                 df['total_time'] = df['sum_timer_wait']
-            
+
             if 'mean_time' in df.columns:
                 df['avg_time'] = df['mean_time']
             elif 'avg_timer_wait' in df.columns:
                 df['avg_time'] = df['avg_timer_wait']
-                
+
         else:
             # Activity sources - different columns for MySQL vs PostgreSQL
             if 'time' in df.columns:
@@ -729,19 +741,19 @@ class TopCommand:
                 df['total_time_sort'] = df['time'].astype(float)
                 df['total_time'] = df['total_time_sort']
                 df['avg_time'] = df['total_time_sort']
-                
+
                 # For fast queries (TIME=0), show a minimal time value
                 df.loc[df['total_time_sort'] == 0, 'total_time_sort'] = 0.001
                 df.loc[df['total_time'] == 0, 'total_time'] = 0.001
                 df.loc[df['avg_time'] == 0, 'avg_time'] = 0.001
-                
+
             elif 'duration_ms' in df.columns:
                 # PostgreSQL pg_stat_activity - duration_ms column
                 df['freq'] = 1
                 df['total_time_sort'] = df['duration_ms'].astype(float) / 1000.0  # Convert to seconds
                 df['total_time'] = df['total_time_sort']
                 df['avg_time'] = df['total_time_sort']
-        
+
         # Calculate percentage load for activity sources
         if 'pct_load' not in df.columns:
             if source == 'activity' and 'total_time_sort' in df.columns:
@@ -753,22 +765,22 @@ class TopCommand:
                     df['pct_load'] = 0.0
             else:
                 df['pct_load'] = 0.0
-        
+
         # Sort the data
         sort_column_map = {
             'freq': 'freq',
             'total_time': 'total_time_sort',
-            'avg_time': 'avg_time', 
+            'avg_time': 'avg_time',
             'load': 'pct_load'
         }
-        
+
         sort_col = sort_column_map.get(sort, 'total_time_sort')
         if sort_col in df.columns:
             df = df.sort_values(sort_col, ascending=False)
-        
+
         # Limit results
         df = df.head(limit)
-        
+
         # Convert to list of dicts
         results = []
         for _, row in df.iterrows():
@@ -784,34 +796,34 @@ class TopCommand:
                 'avg_time': f"{float(row.get('avg_time', 0)):.3f}s",
                 'pct_load': f"{float(row.get('pct_load', 0)):.1f}%"
             })
-        
+
         return results
 
     def _format_top_display(self, data: List[dict], source: str, no_color: bool, db_engine: str, target_name: str, watch_mode: bool = False) -> str:
         """Format the top queries data for display."""
         if not data:
             if _RICH_AVAILABLE and self._console and not no_color:
-                self._console.print(Panel(f"No active queries found for target '{target_name}' using source '{source}'. Run some database queries in another session to see them here.", 
+                self._console.print(Panel(f"No active queries found for target '{target_name}' using source '{source}'. Run some database queries in another session to see them here.",
                                        title="rdst top", border_style="yellow"))
                 return ""
             else:
                 return f"No active queries found for target '{target_name}' using source '{source}'. Run some database queries in another session to see them here."
-        
+
         # Use Rich formatting if available
         if _RICH_AVAILABLE and self._console and not no_color:
             import datetime
-            
+
             # Create table
             table = Table(show_header=True, header_style="bold cyan")
             table.add_column("QUERY HASH", style="bright_blue", width=12)
-            table.add_column("QUERY", style="white", width=15)  
+            table.add_column("QUERY", style="white", width=15)
             table.add_column("FREQ", style="green", width=7)
             table.add_column("TOTAL TIME", style="yellow", width=10)
             table.add_column("AVG TIME", style="yellow", width=8)
             table.add_column("% LOAD", style="red", width=6)
             table.add_column("SOURCE", style="magenta", width=8)
             table.add_column("READYSET", style="blue", width=8)
-            
+
             # Add rows
             for row in data:
                 readyset_advice = "N/A"  # Placeholder for future readyset integration
@@ -820,29 +832,29 @@ class TopCommand:
                     row['query_hash'],
                     query_display,
                     str(row['freq']),
-                    row['total_time'], 
+                    row['total_time'],
                     row['avg_time'],
                     row['pct_load'],
                     source,
                     readyset_advice
                 )
-            
+
             # Create title with metadata
             if watch_mode:
                 timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                 title = f"rdst top - {timestamp} - {target_name} ({db_engine}) - {source}"
             else:
                 title = f"Top queries: {target_name} ({db_engine}) - {source}"
-            
+
             # Set table title
             table.title = title
-            
+
             # Capture Rich output as string
             console = Console(file=None, width=120)
             with console.capture() as capture:
                 console.print(table)
             return capture.get()
-        
+
         else:
             # Fallback to plain text formatting
             header_lines = []
@@ -854,11 +866,11 @@ class TopCommand:
             else:
                 header_lines.append(f"Top queries for target '{target_name}' ({db_engine}) using source '{source}':")
                 header_lines.append("")
-            
-            # Column headers  
+
+            # Column headers
             header_lines.append(" QUERY HASH   | QUERY           | FREQ    | TOTAL TIME | AVG TIME | % LOAD | SOURCE   | READYSET")
             header_lines.append("-" * 105)
-            
+
             # Data rows
             data_lines = []
             for row in data:
@@ -866,8 +878,8 @@ class TopCommand:
                 query_display = row['query_text'][:15] + ("..." if len(row['query_text']) > 15 else "")
                 line = f" {row['query_hash']:<12} | {query_display:<15} | {row['freq']:<7} | {row['total_time']:<10} | {row['avg_time']:<8} | {row['pct_load']:<6} | {source:<8} | {readyset_advice}"
                 data_lines.append(line)
-            
+
             if not data_lines:
                 data_lines.append(" No matching queries found")
-            
+
             return "\n".join(header_lines + data_lines)

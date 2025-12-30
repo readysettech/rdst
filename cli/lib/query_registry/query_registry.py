@@ -13,6 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import toml
+import sqlglot
+
+from lib.data_manager_service.data_manager_service_command_sets import MAX_QUERY_LENGTH
 
 
 def normalize_sql(query: str) -> str:
@@ -330,9 +333,22 @@ class QueryRegistry:
 
         Returns:
             Tuple of (query_hash, is_new) where is_new is True if this was a new query pattern
+
+        Raises:
+            ValueError: If query exceeds 1KB size limit
         """
         if not self._loaded:
             self.load()
+
+        # Enforce 1KB size limit for registry storage
+        query_bytes = len(sql.encode('utf-8')) if sql else 0
+
+        if query_bytes > MAX_QUERY_LENGTH:
+            raise ValueError(
+                f"Query size ({query_bytes:,} bytes) exceeds registry limit (1KB). "
+                "Large queries cannot be saved to the registry. "
+                "Use 'rdst analyze --large-query-bypass' for one-time analysis of large queries."
+            )
 
         # Normalize SQL for hashing and parameterization
         normalized_sql = normalize_sql(sql)
@@ -569,7 +585,7 @@ class QueryRegistry:
             print(f"[{i}] {reconstructed} ({timestamp})")
 
         try:
-            choice = input(f"Which to analyze [1]: ").strip() or "1"
+            choice = input("Which to analyze [1]: ").strip() or "1"
             selected_idx = int(choice) - 1
             if 0 <= selected_idx < len(param_history):
                 selected_params = param_history[selected_idx].values

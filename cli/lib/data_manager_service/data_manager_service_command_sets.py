@@ -7,6 +7,11 @@ DEFAULT_TIMEOUT = 30
 MAX_RETRIES = 3
 RETRY_DELAY = 1
 
+# Maximum query length to capture from database query logs (hard-capped at 1KB)
+# This limit applies to queries captured from rdst top and saved to the registry.
+# For analyzing larger queries (up to 10KB), use: rdst analyze --large-query-bypass '<query>'
+MAX_QUERY_LENGTH = 1024
+
 class DataManagerQueryType(Enum):
     UPSTREAM = "upstream"
     READYSET = "readyset"
@@ -510,14 +515,14 @@ COMMAND_SETS = {
         'commands': {
             'pg_stat_queries': {
                 'description': 'Get top queries from pg_stat_statements',
-                'query': """
+                'query': f"""
                     WITH total_time_sum AS (
-                        SELECT COALESCE(SUM(total_exec_time), 1) as total 
+                        SELECT COALESCE(SUM(total_exec_time), 1) as total
                         FROM pg_stat_statements
                     )
-                    SELECT 
+                    SELECT
                         abs(queryid)::text as query_hash,
-                        LEFT(REGEXP_REPLACE(query, E'[\\n\\r\\t]+', ' ', 'g'), 100) as query_text,
+                        LEFT(REGEXP_REPLACE(query, E'[\\n\\r\\t]+', ' ', 'g'), {MAX_QUERY_LENGTH}) as query_text,
                         calls,
                         ROUND(total_exec_time::numeric, 3) as total_time,
                         ROUND(mean_exec_time::numeric, 3) as mean_time,
@@ -546,10 +551,10 @@ COMMAND_SETS = {
         'commands': {
             'pg_activity_queries': {
                 'description': 'Get currently running queries from pg_stat_activity',
-                'query': """
-                    SELECT 
+                'query': f"""
+                    SELECT
                         SUBSTRING(MD5(query), 1, 16) as query_hash,
-                        LEFT(REGEXP_REPLACE(query, E'[\\n\\r\\t]+', ' ', 'g'), 100) as query_text,
+                        LEFT(REGEXP_REPLACE(query, E'[\\n\\r\\t]+', ' ', 'g'), {MAX_QUERY_LENGTH}) as query_text,
                         state,
                         query_start,
                         CASE 
@@ -604,10 +609,10 @@ COMMAND_SETS = {
         'commands': {
             'mysql_digest_queries': {
                 'description': 'Get top queries from performance_schema digest',
-                'query': """
-                    SELECT 
+                'query': f"""
+                    SELECT
                         DIGEST as query_hash,
-                        LEFT(REPLACE(REPLACE(REPLACE(DIGEST_TEXT, '\\n', ' '), '\\r', ' '), '\\t', ' '), 100) as query_text,
+                        LEFT(REPLACE(REPLACE(REPLACE(DIGEST_TEXT, '\\n', ' '), '\\r', ' '), '\\t', ' '), {MAX_QUERY_LENGTH}) as query_text,
                         COUNT_STAR as count_star,
                         ROUND(SUM_TIMER_WAIT / 1000000000000, 6) as sum_timer_wait,
                         ROUND(AVG_TIMER_WAIT / 1000000000000, 6) as avg_timer_wait,
@@ -639,10 +644,10 @@ COMMAND_SETS = {
         'commands': {
             'mysql_activity_queries': {
                 'description': 'Get currently running queries from SHOW FULL PROCESSLIST',
-                'query': """
-                    SELECT 
+                'query': f"""
+                    SELECT
                         SUBSTRING(MD5(INFO), 1, 16) as query_hash,
-                        LEFT(REPLACE(REPLACE(REPLACE(INFO, '\\n', ' '), '\\r', ' '), '\\t', ' '), 100) as query_text,
+                        LEFT(REPLACE(REPLACE(REPLACE(INFO, '\\n', ' '), '\\r', ' '), '\\t', ' '), {MAX_QUERY_LENGTH}) as query_text,
                         TIME as time,
                         STATE as state,
                         USER as user,

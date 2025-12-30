@@ -21,6 +21,7 @@ def create_direct_connection(target_config: Dict[str, Any]):
             - user: Database username
             - database: Database name
             - password_env: Environment variable containing password
+            - tls: Enable TLS/SSL (optional, default False)
 
     Returns:
         Database connection object (psycopg2 or pymysql connection)
@@ -35,6 +36,7 @@ def create_direct_connection(target_config: Dict[str, Any]):
     user = target_config.get('user')
     database = target_config.get('database')
     password_env = target_config.get('password_env')
+    use_tls = target_config.get('tls', False)
 
     # Validate required fields
     if not all([engine, host, port, user, database]):
@@ -46,14 +48,14 @@ def create_direct_connection(target_config: Dict[str, Any]):
         raise ValueError(f"Password environment variable '{password_env}' not set")
 
     if engine == 'postgresql':
-        return _create_postgres_connection(host, port, user, password, database)
+        return _create_postgres_connection(host, port, user, password, database, use_tls)
     elif engine == 'mysql':
-        return _create_mysql_connection(host, port, user, password, database)
+        return _create_mysql_connection(host, port, user, password, database, use_tls)
     else:
         raise ValueError(f"Unsupported database engine: {engine}")
 
 
-def _create_postgres_connection(host: str, port: int, user: str, password: str, database: str):
+def _create_postgres_connection(host: str, port: int, user: str, password: str, database: str, use_tls: bool = False):
     """Create PostgreSQL connection using psycopg2."""
     try:
         import psycopg2
@@ -62,14 +64,19 @@ def _create_postgres_connection(host: str, port: int, user: str, password: str, 
         raise RuntimeError("psycopg2-binary not installed. Run: pip install psycopg2-binary")
 
     try:
-        conn = psycopg2.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=10
-        )
+        conn_params = {
+            'host': host,
+            'port': port,
+            'user': user,
+            'password': password,
+            'database': database,
+            'connect_timeout': 10,
+        }
+
+        if use_tls:
+            conn_params['sslmode'] = 'require'
+
+        conn = psycopg2.connect(**conn_params)
         # Set autocommit for read-only queries
         conn.autocommit = True
         return conn
@@ -77,7 +84,7 @@ def _create_postgres_connection(host: str, port: int, user: str, password: str, 
         raise RuntimeError(f"Failed to connect to PostgreSQL: {e}")
 
 
-def _create_mysql_connection(host: str, port: int, user: str, password: str, database: str):
+def _create_mysql_connection(host: str, port: int, user: str, password: str, database: str, use_tls: bool = False):
     """Create MySQL connection using pymysql."""
     try:
         import pymysql
@@ -86,16 +93,24 @@ def _create_mysql_connection(host: str, port: int, user: str, password: str, dat
         raise RuntimeError("pymysql not installed. Run: pip install pymysql")
 
     try:
-        conn = pymysql.connect(
-            host=host,
-            port=int(port),
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=10,
-            autocommit=True,
-            cursorclass=pymysql.cursors.DictCursor  # Return results as dicts
-        )
+        conn_params = {
+            'host': host,
+            'port': int(port),
+            'user': user,
+            'password': password,
+            'database': database,
+            'connect_timeout': 10,
+            'autocommit': True,
+            'cursorclass': pymysql.cursors.DictCursor,  # Return results as dicts
+        }
+
+        if use_tls:
+            import ssl
+            # Create SSL context that verifies server certificate
+            ssl_context = ssl.create_default_context()
+            conn_params['ssl'] = ssl_context
+
+        conn = pymysql.connect(**conn_params)
         return conn
     except Exception as e:
         raise RuntimeError(f"Failed to connect to MySQL: {e}")
