@@ -263,6 +263,85 @@ class Metric:
 
 
 @dataclass
+class Extension:
+    """PostgreSQL extension with type information.
+
+    Extensions like pgx_ulid, postgis, pgvector provide custom types
+    that are critical for understanding type compatibility in queries.
+    """
+
+    name: str
+    version: str = ""
+    description: str = ""
+    # Types provided by this extension (e.g., ulid, geometry, vector)
+    types_provided: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for YAML serialization."""
+        result = {}
+        if self.version:
+            result['version'] = self.version
+        if self.description:
+            result['description'] = self.description
+        if self.types_provided:
+            result['types_provided'] = self.types_provided
+        return result
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict) -> 'Extension':
+        """Create from dictionary loaded from YAML."""
+        return cls(
+            name=name,
+            version=data.get('version', ''),
+            description=data.get('description', ''),
+            types_provided=data.get('types_provided', [])
+        )
+
+
+@dataclass
+class CustomType:
+    """Custom database type (enum, domain, or extension type).
+
+    Captures types that are not built-in PostgreSQL types, which is
+    essential for LLM to understand type compatibility and avoid
+    incorrect cast suggestions.
+    """
+
+    name: str
+    type_category: str = ""  # enum, domain, base (extension type), composite
+    base_type: str = ""  # For domains, the underlying type
+    enum_values: list[str] = field(default_factory=list)  # For enum types
+    description: str = ""
+    # Extension that provides this type (if any)
+    extension: str = ""
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for YAML serialization."""
+        result = {'category': self.type_category}
+        if self.base_type:
+            result['base_type'] = self.base_type
+        if self.enum_values:
+            result['enum_values'] = self.enum_values
+        if self.description:
+            result['description'] = self.description
+        if self.extension:
+            result['extension'] = self.extension
+        return result
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict) -> 'CustomType':
+        """Create from dictionary loaded from YAML."""
+        return cls(
+            name=name,
+            type_category=data.get('category', ''),
+            base_type=data.get('base_type', ''),
+            enum_values=data.get('enum_values', []),
+            description=data.get('description', ''),
+            extension=data.get('extension', '')
+        )
+
+
+@dataclass
 class SemanticLayer:
     """
     Complete semantic layer for a database target.
@@ -284,6 +363,10 @@ class SemanticLayer:
     tables: dict[str, TableAnnotation] = field(default_factory=dict)
     terminology: dict[str, Terminology] = field(default_factory=dict)
     metrics: dict[str, Metric] = field(default_factory=dict)
+
+    # Database-level metadata (PostgreSQL)
+    extensions: dict[str, Extension] = field(default_factory=dict)
+    custom_types: dict[str, CustomType] = field(default_factory=dict)
 
     # Global notes
     notes: str = ""
@@ -315,6 +398,18 @@ class SemanticLayer:
                 for name, m in self.metrics.items()
             }
 
+        if self.extensions:
+            result['extensions'] = {
+                name: ext.to_dict()
+                for name, ext in self.extensions.items()
+            }
+
+        if self.custom_types:
+            result['custom_types'] = {
+                name: ct.to_dict()
+                for name, ct in self.custom_types.items()
+            }
+
         if self.notes:
             result['notes'] = self.notes
 
@@ -334,6 +429,14 @@ class SemanticLayer:
         metrics = {}
         for metric_name, metric_data in data.get('metrics', {}).items():
             metrics[metric_name] = Metric.from_dict(metric_name, metric_data)
+
+        extensions = {}
+        for ext_name, ext_data in data.get('extensions', {}).items():
+            extensions[ext_name] = Extension.from_dict(ext_name, ext_data)
+
+        custom_types = {}
+        for type_name, type_data in data.get('custom_types', {}).items():
+            custom_types[type_name] = CustomType.from_dict(type_name, type_data)
 
         # Parse timestamps
         created_at = _utcnow()
@@ -357,6 +460,8 @@ class SemanticLayer:
             tables=tables,
             terminology=terminology,
             metrics=metrics,
+            extensions=extensions,
+            custom_types=custom_types,
             notes=data.get('notes', '')
         )
 
@@ -472,6 +577,44 @@ class SemanticLayer:
             parts.append(f"    SQL: {metric.sql}")
 
         return "\n".join(parts)
+
+    def get_extensions_context(self) -> str:
+        """Get formatted context for installed extensions and custom types.
+
+        This is critical for LLM to understand type compatibility and avoid
+        incorrect recommendations like 'cast ULID to integer'.
+        """
+        parts = []
+
+        if self.extensions:
+            parts.append("Installed Extensions:")
+            for name, ext in self.extensions.items():
+                if ext.description:
+                    parts.append(f"  - {name} v{ext.version}: {ext.description}")
+                else:
+                    parts.append(f"  - {name} v{ext.version}")
+                if ext.types_provided:
+                    parts.append(f"    Types: {', '.join(ext.types_provided)}")
+
+        if self.custom_types:
+            if parts:
+                parts.append("")
+            parts.append("Custom Types:")
+            for name, ct in self.custom_types.items():
+                if ct.type_category == 'enum' and ct.enum_values:
+                    values_str = ', '.join(ct.enum_values[:5])
+                    if len(ct.enum_values) > 5:
+                        values_str += f"... ({len(ct.enum_values)} total)"
+                    parts.append(f"  - {name} (enum): [{values_str}]")
+                elif ct.type_category == 'domain' and ct.base_type:
+                    parts.append(f"  - {name} (domain over {ct.base_type})")
+                elif ct.type_category == 'base':
+                    desc = ct.description or "Compare with same type only"
+                    parts.append(f"  - {name} (extension type): {desc}")
+                else:
+                    parts.append(f"  - {name} ({ct.type_category})")
+
+        return "\n".join(parts) if parts else ""
 
     def add_terminology(self, term: str, definition: str, sql_pattern: str,
                        synonyms: list[str] = None, tables_used: list[str] = None) -> None:

@@ -138,8 +138,42 @@ class SchemaCommand:
                                 enum_node.add(f"{val} = {meaning}")
             console.print(tree)
 
-        # Only show terminology and metrics for full display (not single table)
+        # Only show extensions, custom_types, terminology and metrics for full display (not single table)
         if not single_table:
+            # Extensions
+            if layer.extensions:
+                console.print()
+                console.print("[bold cyan]Extensions:[/bold cyan]")
+                ext_tree = Tree(f"[bold]Installed Extensions ({len(layer.extensions)})[/bold]")
+                for name, ext in layer.extensions.items():
+                    if ext.description:
+                        ext_node = ext_tree.add(f"[bold blue]{name}[/bold blue] v{ext.version}: {ext.description}")
+                    else:
+                        ext_node = ext_tree.add(f"[bold blue]{name}[/bold blue] v{ext.version}")
+                    if ext.types_provided:
+                        ext_node.add(f"[dim]Types:[/dim] {', '.join(ext.types_provided)}")
+                console.print(ext_tree)
+
+            # Custom Types
+            if layer.custom_types:
+                console.print()
+                console.print("[bold cyan]Custom Types:[/bold cyan]")
+                types_tree = Tree(f"[bold]Custom Types ({len(layer.custom_types)})[/bold]")
+                for name, ct in layer.custom_types.items():
+                    if ct.type_category == 'enum' and ct.enum_values:
+                        values_preview = ', '.join(ct.enum_values[:5])
+                        if len(ct.enum_values) > 5:
+                            values_preview += f"... ({len(ct.enum_values)} total)"
+                        types_tree.add(f"[bold magenta]{name}[/bold magenta] [dim](enum)[/dim]: [{values_preview}]")
+                    elif ct.type_category == 'domain' and ct.base_type:
+                        types_tree.add(f"[bold magenta]{name}[/bold magenta] [dim](domain over {ct.base_type})[/dim]")
+                    elif ct.type_category == 'base':
+                        desc = ct.description or "extension type"
+                        types_tree.add(f"[bold magenta]{name}[/bold magenta] [dim]({desc})[/dim]")
+                    else:
+                        types_tree.add(f"[bold magenta]{name}[/bold magenta] [dim]({ct.type_category})[/dim]")
+                console.print(types_tree)
+
             # Terminology
             if layer.terminology:
                 console.print()

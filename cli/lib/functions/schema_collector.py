@@ -6,7 +6,7 @@ context to LLM for better rewrite and index suggestions.
 """
 
 import re
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, Set
 
 
 def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, Any]:
@@ -319,7 +319,7 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
                     indexes = cursor.fetchall()
 
                     # Get row count estimate (for LLM to understand scale)
-                    cursor.execute(f"""
+                    cursor.execute("""
                         SELECT TABLE_ROWS as row_estimate
                         FROM information_schema.TABLES
                         WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
@@ -370,7 +370,6 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
 
     except Exception as e:
         return f"Schema information: Error collecting MySQL schema - {str(e)}"
-
 
 def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any]) -> str:
     """Collect schema information for PostgreSQL tables."""
@@ -455,6 +454,15 @@ def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any
 
                     schema_parts.append('\n'.join(table_schema))
 
+                # Collect installed extensions and custom types (important for type compatibility)
+                extensions_info = _collect_postgres_extensions(cursor)
+                custom_types_info = _collect_postgres_custom_types(cursor)
+
+                if extensions_info:
+                    schema_parts.insert(0, extensions_info)
+                if custom_types_info:
+                    schema_parts.insert(1 if extensions_info else 0, custom_types_info)
+
         finally:
             connection.close()
 
@@ -465,3 +473,62 @@ def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any
 
     except Exception as e:
         return f"Schema information: Error collecting PostgreSQL schema - {str(e)}"
+
+
+def _collect_postgres_extensions(cursor) -> str:
+    """
+    Collect installed PostgreSQL extensions with descriptions from the database.
+
+    Args:
+        cursor: Active database cursor
+
+    Returns:
+        Formatted string describing installed extensions
+    """
+    from .postgres_metadata import fetch_postgres_extensions
+
+    try:
+        extensions = fetch_postgres_extensions(cursor)
+        if not extensions:
+            return ""
+        lines = ["\nInstalled Extensions:"]
+        for ext_name, ext_version, description, _ in extensions:
+            if description:
+                lines.append(f"  - {ext_name} v{ext_version}: {description}")
+            else:
+                lines.append(f"  - {ext_name} v{ext_version}")
+        return '\n'.join(lines)
+    except Exception:
+        return ""
+
+
+def _collect_postgres_custom_types(cursor) -> str:
+    """
+    Collect custom types and domains defined in the database.
+
+    Args:
+        cursor: Active database cursor
+
+    Returns:
+        Formatted string describing custom types
+    """
+    from .postgres_metadata import fetch_postgres_custom_types
+
+    try:
+        custom_types = fetch_postgres_custom_types(cursor)
+        if not custom_types:
+            return ""
+        lines = ["\nCustom Types:"]
+        for type_name, type_code, type_category, base_type, enum_values in custom_types:
+            if type_code == 'e' and enum_values:
+                lines.append(f"  - {type_name} (enum): [{enum_values}]")
+            elif type_code == 'd' and base_type:
+                lines.append(f"  - {type_name} (domain over {base_type})")
+            elif type_code == 'b':
+                lines.append(f"  - {type_name} (extension type): compare with same type only")
+            else:
+                lines.append(f"  - {type_name} ({type_category})")
+
+        return '\n'.join(lines)
+    except Exception:
+        return ""

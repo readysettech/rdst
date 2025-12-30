@@ -15,7 +15,9 @@ from ..data_structures.semantic_layer import (
     SemanticLayer,
     TableAnnotation,
     ColumnAnnotation,
-    Relationship
+    Relationship,
+    Extension,
+    CustomType
 )
 
 
@@ -153,6 +155,10 @@ class SchemaIntrospector:
                 # Get foreign key relationships
                 self._add_postgres_relationships(cursor, layer)
 
+                # Get installed extensions and custom types
+                self._add_postgres_extensions(cursor, layer)
+                self._add_postgres_custom_types(cursor, layer)
+
         finally:
             connection.close()
 
@@ -186,10 +192,12 @@ class SchemaIntrospector:
         )
 
         # Get columns
+        # Use udt_name for actual type name (data_type returns 'USER-DEFINED' for custom types)
         cursor.execute("""
             SELECT
                 c.column_name,
                 c.data_type,
+                c.udt_name,
                 c.is_nullable,
                 c.column_default,
                 c.character_maximum_length,
@@ -209,10 +217,10 @@ class SchemaIntrospector:
         columns = cursor.fetchall()
 
         for col in columns:
-            col_name, data_type, is_nullable, default, char_len, num_prec, constraint = col
+            col_name, data_type, udt_name, is_nullable, default, char_len, num_prec, constraint = col
 
-            # Determine column type
-            col_type = self._normalize_postgres_type(data_type, char_len, num_prec)
+            # Determine column type - use udt_name for USER-DEFINED types
+            col_type = self._normalize_postgres_type(data_type, char_len, num_prec, udt_name)
 
             column = ColumnAnnotation(
                 name=col_name,
@@ -305,8 +313,23 @@ class SchemaIntrospector:
 
     def _normalize_postgres_type(self, data_type: str,
                                   char_len: Optional[int],
-                                  num_prec: Optional[int]) -> str:
-        """Normalize PostgreSQL data type to simple type name."""
+                                  num_prec: Optional[int],
+                                  udt_name: Optional[str] = None) -> str:
+        """Normalize PostgreSQL data type to simple type name.
+
+        Args:
+            data_type: The data_type from information_schema (e.g., 'integer', 'USER-DEFINED')
+            char_len: Character maximum length for string types
+            num_prec: Numeric precision for numeric types
+            udt_name: The actual type name for USER-DEFINED types (e.g., 'ulid', 'geometry')
+
+        Returns:
+            Normalized type name
+        """
+        # For custom types (extensions like ULID, PostGIS, etc.), use the actual type name
+        if data_type == 'USER-DEFINED' and udt_name:
+            return udt_name
+
         type_map = {
             'integer': 'int',
             'bigint': 'bigint',
@@ -362,6 +385,67 @@ class SchemaIntrospector:
                     description=""
                 )
                 layer.tables[source_table].relationships.append(relationship)
+
+    def _add_postgres_extensions(self, cursor, layer: SemanticLayer) -> None:
+        """
+        Collect installed PostgreSQL extensions with descriptions and types.
+        """
+        from ..functions.postgres_metadata import fetch_postgres_extensions
+
+        try:
+            extensions = fetch_postgres_extensions(cursor)
+
+            for ext_name, ext_version, description, types_str in extensions:
+                types_list = [t.strip() for t in types_str.split(',') if t.strip()] if types_str else []
+                layer.extensions[ext_name] = Extension(
+                    name=ext_name,
+                    version=ext_version or '',
+                    description=description or '',
+                    types_provided=types_list
+                )
+
+        except Exception:
+            # Don't fail introspection if extension query fails
+            pass
+
+    def _add_postgres_custom_types(self, cursor, layer: SemanticLayer) -> None:
+        """
+        Collect custom types and domains defined in the database.
+        """
+        from ..functions.postgres_metadata import fetch_postgres_custom_types
+
+        try:
+            custom_types = fetch_postgres_custom_types(cursor)
+
+            for type_name, type_code, type_category, base_type, enum_values in custom_types:
+                enum_list = []
+                if type_code == 'e' and enum_values:
+                    enum_list = [v.strip() for v in enum_values.split(',')]
+
+                description = ""
+                extension = ""
+
+                # Check if this type comes from a known extension
+                if type_code == 'b':
+                    description = "Custom type, compare with same type only"
+                    # Try to match with known extension types
+                    for ext_name, ext in layer.extensions.items():
+                        if type_name in ext.types_provided:
+                            extension = ext_name
+                            break
+
+                layer.custom_types[type_name] = CustomType(
+                    name=type_name,
+                    type_category=type_category,
+                    base_type=base_type if type_code == 'd' else '',
+                    enum_values=enum_list,
+                    description=description,
+                    extension=extension
+                )
+
+        except Exception:
+            # Don't fail introspection if custom type query fails
+            pass
 
     def _introspect_mysql(self, target_name: str,
                           enum_threshold: int,

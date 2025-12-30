@@ -140,7 +140,7 @@ def _format_semantic_schema(layer) -> str:
     """
     Format semantic layer as schema string for LLM prompt.
 
-    Includes table descriptions, column types, and enum values.
+    Includes table descriptions, column types, enum values, and extension info.
     """
     parts = []
 
@@ -166,6 +166,11 @@ def _format_semantic_schema(layer) -> str:
 
         parts.append("\n".join(col_strs))
         parts.append("")  # Blank line between tables
+
+    # Add extensions and custom types context if available
+    extensions_context = layer.get_extensions_context()
+    if extensions_context:
+        parts.append(extensions_context)
 
     return "\n".join(parts)
 
