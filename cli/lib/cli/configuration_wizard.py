@@ -1158,7 +1158,7 @@ class ConfigurationWizard:
 
             # Ask about model preference
             model_choices = [
-                "claude-sonnet-4-20250514 (default - fast, cost-effective)",
+                "claude-sonnet-4-5-20250929 (default - fast, cost-effective)",
                 "claude-opus-4-20250514 (more sophisticated analysis)",
             ]
             model_choice = self._interactive_select("Select model", model_choices, default_idx=0)
@@ -1170,8 +1170,8 @@ class ConfigurationWizard:
                 cfg._data["llm"]["model"] = "claude-opus-4-20250514"
                 cfg._data["llm"]["hint"] = "Using Claude Opus 4"
             else:
-                cfg._data["llm"]["model"] = "claude-sonnet-4-20250514"
-                cfg._data["llm"]["hint"] = "Using Claude Sonnet 4"
+                cfg._data["llm"]["model"] = "claude-sonnet-4-5-20250929"
+                cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.5"
 
             cfg.save()
             self._show_success("Configured", cfg._data["llm"]["hint"])
@@ -1196,7 +1196,7 @@ class ConfigurationWizard:
             # Still save config to mark LLM as configured (will work once key is set)
             cfg._data.setdefault("llm", {})
             cfg._data["llm"]["provider"] = "claude"
-            cfg._data["llm"]["model"] = "claude-sonnet-4-20250514"
+            cfg._data["llm"]["model"] = "claude-sonnet-4-5-20250929"
             cfg._data["llm"]["hint"] = "Waiting for ANTHROPIC_API_KEY"
             cfg.save()
 

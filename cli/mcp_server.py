@@ -336,7 +336,7 @@ SUPPORTED PROVIDERS:
 - lmstudio: Local LM Studio server (no API key needed)
 
 EXAMPLES:
-  rdst configure llm --provider claude --model claude-sonnet-4-20250514
+  rdst configure llm --provider claude --model claude-sonnet-4-5-20250929
   rdst configure llm --provider openai --model gpt-4
   rdst configure llm --provider lmstudio --base-url http://localhost:1234
 
@@ -355,7 +355,7 @@ REQUIRED ENV VARS:
                     },
                     "model": {
                         "type": "string",
-                        "description": "Model name (e.g., claude-sonnet-4-20250514, gpt-4)"
+                        "description": "Model name (e.g., claude-sonnet-4-5-20250929, gpt-4)"
                     },
                     "base_url": {
                         "type": "string",
