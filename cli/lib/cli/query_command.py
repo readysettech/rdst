@@ -1385,6 +1385,58 @@ class QueryCommand:
     # Run command implementation
     # =========================================================================
 
+    def _execute_with_cancellation(
+        self, conn, sql: str, stop_event: threading.Event,
+        engine: str, target_config: dict
+    ) -> tuple[list | None, Exception | None]:
+        """
+        Execute query in thread with cancellation support.
+
+        Runs the query in a background thread while monitoring stop_event.
+        If stop_event is set (e.g., Ctrl+C), cancels the query on the server.
+
+        Args:
+            conn: Database connection
+            sql: SQL query to execute
+            stop_event: Event that signals cancellation request
+            engine: 'postgresql' or 'mysql'
+            target_config: Target configuration for MySQL cancel connection
+
+        Returns:
+            (results, exception) - results if successful, exception if failed/cancelled
+        """
+        from lib.db_connection import cancel_query
+
+        result: list[list | None] = [None]
+        exception: list[Exception | None] = [None]
+        done = threading.Event()
+
+        def execute():
+            try:
+                cursor = conn.cursor()
+                cursor.execute(sql)
+                result[0] = cursor.fetchall()
+                cursor.close()
+            except Exception as e:
+                exception[0] = e
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=execute, daemon=True)
+        thread.start()
+
+        # Poll for completion or cancellation
+        while not done.is_set():
+            if stop_event.is_set():
+                cancel_query(conn, engine, target_config)
+                done.wait(timeout=2.0)  # Wait for query to abort
+                if exception[0] is None:
+                    exception[0] = KeyboardInterrupt("Query cancelled")
+                break
+            done.wait(timeout=0.1)
+
+        return result[0], exception[0]
+
     def run(self, queries: list[str], target: str | None = None,
             interval: int | None = None, concurrency: int | None = None,
             duration: int | None = None, count: int | None = None,
@@ -1588,6 +1640,8 @@ class QueryCommand:
             print("Connecting to database...")
 
         conn = create_conn(target_config)
+        engine = target_config.get('engine', 'postgresql')
+
         try:
             for entry, sql in queries:
                 if stop_event.is_set():
@@ -1598,20 +1652,23 @@ class QueryCommand:
                     print(f"Executing: {query_name}...", end=" ", flush=True)
 
                 start = time.perf_counter()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute(sql)
-                    cursor.fetchall()  # Consume results
-                    cursor.close()
-                    duration_ms = (time.perf_counter() - start) * 1000
+                results, exc = self._execute_with_cancellation(
+                    conn, sql, stop_event, engine, target_config
+                )
+                duration_ms = (time.perf_counter() - start) * 1000
+
+                if isinstance(exc, KeyboardInterrupt):
+                    if not quiet:
+                        print("CANCELLED")
+                    break
+                elif exc:
+                    stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+                    if not quiet:
+                        print(f"FAILED ({exc})")
+                else:
                     stats.record_execution(entry.hash, query_name, duration_ms, success=True)
                     if not quiet:
                         print(f"{duration_ms:.1f}ms")
-                except Exception as e:
-                    duration_ms = (time.perf_counter() - start) * 1000
-                    stats.record_execution(entry.hash, query_name, duration_ms, success=False)
-                    if not quiet:
-                        print(f"FAILED ({e})")
         finally:
             close_conn(conn)
 
@@ -1622,6 +1679,7 @@ class QueryCommand:
                       quiet: bool, create_conn, close_conn) -> None:
         """Run queries round-robin at fixed interval."""
         conn = create_conn(target_config)
+        engine = target_config.get('engine', 'postgresql')
         query_index = 0
         interval_sec = interval_ms / 1000.0
         last_display_update = 0
@@ -1641,16 +1699,17 @@ class QueryCommand:
                 query_name = entry.tag or entry.hash[:8]
 
                 start = time.perf_counter()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute(sql)
-                    cursor.fetchall()
-                    cursor.close()
-                    duration_ms = (time.perf_counter() - start) * 1000
-                    stats.record_execution(entry.hash, query_name, duration_ms, success=True)
-                except Exception as e:
-                    duration_ms = (time.perf_counter() - start) * 1000
+                results, exc = self._execute_with_cancellation(
+                    conn, sql, stop_event, engine, target_config
+                )
+                duration_ms = (time.perf_counter() - start) * 1000
+
+                if isinstance(exc, KeyboardInterrupt):
+                    break
+                elif exc:
                     stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+                else:
+                    stats.record_execution(entry.hash, query_name, duration_ms, success=True)
 
                 # Update live display periodically
                 if live and (time.perf_counter() - last_display_update) >= display_interval:
@@ -1679,11 +1738,19 @@ class QueryCommand:
                          max_duration: int | None, max_count: int | None,
                          quiet: bool, create_conn, close_conn) -> None:
         """Maintain N concurrent query executions."""
+        from lib.db_connection import cancel_query
+
+        engine = target_config.get('engine', 'postgresql')
+
         # Connection pool - one per worker
         connections: Queue = Queue()
         for _ in range(concurrency):
             conn = create_conn(target_config)
             connections.put(conn)
+
+        # Track active connections for cancellation
+        active_connections: set = set()
+        active_lock = Lock()
 
         query_index = [0]  # Mutable for closure
         index_lock = threading.Lock()
@@ -1695,6 +1762,12 @@ class QueryCommand:
                 entry, sql = queries[query_index[0]]
                 query_index[0] = (query_index[0] + 1) % len(queries)
                 return entry, sql
+
+        def cancel_all_active():
+            """Cancel all currently executing queries."""
+            with active_lock:
+                for conn in active_connections:
+                    cancel_query(conn, engine, target_config)
 
         def execute_query() -> bool:
             """Execute one query. Returns True if should continue."""
@@ -1714,6 +1787,10 @@ class QueryCommand:
                 entry, sql = get_next_query()
                 query_name = entry.tag or entry.hash[:8]
 
+                # Track this connection as active
+                with active_lock:
+                    active_connections.add(conn)
+
                 start = time.perf_counter()
                 try:
                     cursor = conn.cursor()
@@ -1724,7 +1801,12 @@ class QueryCommand:
                     stats.record_execution(entry.hash, query_name, duration_ms, success=True)
                 except Exception as e:
                     duration_ms = (time.perf_counter() - start) * 1000
-                    stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+                    # Don't record cancelled queries as failures
+                    if not stop_event.is_set():
+                        stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+                finally:
+                    with active_lock:
+                        active_connections.discard(conn)
             finally:
                 connections.put(conn)
 
@@ -1765,6 +1847,10 @@ class QueryCommand:
                                     futures.add(executor.submit(execute_query))
                         except Exception:
                             pass
+
+                # Cancel all active queries on stop
+                if stop_event.is_set():
+                    cancel_all_active()
 
                 # Cancel remaining futures
                 for future in futures:

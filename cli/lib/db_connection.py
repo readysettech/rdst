@@ -123,3 +123,44 @@ def close_connection(connection):
             connection.close()
     except Exception:
         pass  # Ignore errors during close
+
+
+def cancel_query(conn, engine: str, target_config: Optional[dict] = None) -> bool:
+    """
+    Cancel a running query on the database server.
+
+    Args:
+        conn: Active database connection with running query
+        engine: 'postgresql' or 'mysql'
+        target_config: For MySQL, needed to create cancel connection
+
+    Returns:
+        True if cancel was sent, False otherwise
+    """
+    try:
+        if engine == 'postgresql':
+            # psycopg2 has built-in cancel support
+            conn.cancel()
+            return True
+        elif engine == 'mysql':
+            # MySQL requires KILL QUERY via separate connection
+            if not target_config:
+                return False
+            thread_id = conn.thread_id()
+            cancel_conn = _create_mysql_connection(
+                target_config['host'],
+                target_config['port'],
+                target_config['user'],
+                os.environ.get(target_config.get('password_env', '')),
+                target_config['database']
+            )
+            try:
+                cursor = cancel_conn.cursor()
+                cursor.execute(f"KILL QUERY {thread_id}")
+                cursor.close()
+                return True
+            finally:
+                cancel_conn.close()
+    except Exception:
+        return False
+    return False
