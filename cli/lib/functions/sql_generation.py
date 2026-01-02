@@ -6,9 +6,12 @@ disambiguation detection, and iterative refinement.
 """
 
 import json
+import logging
 import re
 from typing import Dict, Any, List, Tuple, Optional
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 from ..prompts.ask_prompts import (
     COMPREHENSIVE_ASK_PROMPT,
@@ -130,8 +133,7 @@ def generate_sql_from_nl(
                 'error': f'LLM returned empty response. Full result: {llm_result}'
             }
 
-        # Debug: print first 500 chars
-        print(f"DEBUG: LLM response (first 500 chars): {response_text[:500]}")
+        logger.debug(f"LLM response (first 500 chars): {response_text[:500]}")
 
         # Strip markdown code fences if present (Claude often wraps JSON in ```json...```)
         response_text = response_text.strip()
@@ -202,14 +204,13 @@ def generate_sql_from_nl(
             context_start = max(0, error_pos - 100)
             context_end = min(len(response_text), error_pos + 100)
             error_context = response_text[context_start:context_end]
-            print(f"DEBUG: JSON error context around position {error_pos}:")
-            print(f"  ...{error_context}...")
-            print(f"DEBUG: Full response length: {len(response_text)} chars")
+            logger.debug(f"JSON error context around position {error_pos}: ...{error_context}...")
+            logger.debug(f"Full response length: {len(response_text)} chars")
             # Save to file for inspection
             try:
                 with open('/tmp/rdst_ask_llm_response.json', 'w') as f:
                     f.write(response_text)
-                print(f"DEBUG: Full response saved to /tmp/rdst_ask_llm_response.json")
+                logger.debug("Full response saved to /tmp/rdst_ask_llm_response.json")
             except:
                 pass
 

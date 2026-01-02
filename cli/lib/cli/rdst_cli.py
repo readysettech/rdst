@@ -844,6 +844,10 @@ class RdstCLI:
                 return RdstResult(False, "ask requires a question")
 
         try:
+            # Validate question is provided
+            if not question:
+                return RdstResult(False, "Question required. Usage: rdst ask \"your question here\" --target <target>")
+
             # Load target configuration
             if not target:
                 cfg = TargetsConfig()

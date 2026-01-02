@@ -7,9 +7,12 @@ ReadySet caching recommendations.
 """
 
 import json
+import logging
 import os
 import re
 from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def estimate_tokens(text: str) -> int:
@@ -619,9 +622,7 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
 
 
     except Exception as e:
-        print(f"DEBUG: LLM analysis failed with error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.debug(f"LLM analysis failed with error: {e}", exc_info=True)
         return {
             "success": False,
             "error": f"LLM analysis failed: {str(e)}",

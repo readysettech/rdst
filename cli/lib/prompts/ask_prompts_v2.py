@@ -174,6 +174,7 @@ Rules:
 - If overall_confidence >= 0.85, set can_proceed_with_assumptions = true
 - If total_ambiguities == 0, set requires_clarification = false
 - When in doubt, proceed with the simplest interpretation rather than asking for clarification
+- DO NOT include "Something else", "Other", or open-ended options in clarifying_question - only list the specific interpretations from possible_interpretations
 """
 
 # ═══════════════════════════════════════════════════════════

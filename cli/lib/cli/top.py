@@ -540,7 +540,14 @@ class TopCommand:
                 save_as=""
             )
 
-            print(f"\nQuery selected and stored in registry with hash: {query_hash}")
+            if is_new:
+                print(f"\nQuery added to registry with hash: {query_hash}")
+            else:
+                existing = registry.get_query(query_hash)
+                if existing and existing.tag:
+                    print(f"\nQuery already in registry as '{existing.tag}' (hash: {query_hash})")
+                else:
+                    print(f"\nQuery already in registry (hash: {query_hash})")
             print("Running analysis...")
 
             return analyze_cmd.execute_analyze(resolved_input, target=target_name)

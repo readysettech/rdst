@@ -13,6 +13,7 @@ Handles all query input modes for the 'rdst analyze' command:
 """
 from __future__ import annotations
 
+import logging
 import sys
 import os
 from pathlib import Path
@@ -20,6 +21,8 @@ from typing import Optional
 from dataclasses import dataclass
 from .rdst_cli import RdstResult
 from concurrent.futures import ThreadPoolExecutor
+
+logger = logging.getLogger(__name__)
 
 try:
     from rich.console import Console
@@ -1819,7 +1822,7 @@ class AnalyzeCommand:
                                     sql_preview = rewritten_sql[:60] + "..." if len(rewritten_sql) > 60 else rewritten_sql
                                     lines.append(f"        → {sql_preview}")
                         else:
-                            print("DEBUG: No rewrite suggestions found in llm_result")
+                            logger.debug("No rewrite suggestions found in llm_result")
                 else:
                     lines.append("   WARNING: AI analysis unavailable")
                 lines.append("")

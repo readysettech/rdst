@@ -1,4 +1,7 @@
+import logging
 from typing import Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 def merge_parallel_analysis_results(
@@ -97,13 +100,12 @@ def merge_parallel_analysis_results(
         }
 
         # Debug output
-        print(f"\n=== MERGE DEBUG ===")
-        print(f"analysis_branch type: {type(analysis_branch)}")
-        print(f"readyset_branch type: {type(readyset_branch)}")
-        print(f"explain_results type: {type(explain_results)}, value: {explain_results}")
-        print(f"llm_analysis type: {type(llm_analysis)}, keys: {llm_analysis.keys() if isinstance(llm_analysis, dict) else 'N/A'}")
-        print(f"merged keys: {list(merged.keys())}")
-        print(f"===================\n")
+        logger.debug("=== MERGE DEBUG ===")
+        logger.debug(f"analysis_branch type: {type(analysis_branch)}")
+        logger.debug(f"readyset_branch type: {type(readyset_branch)}")
+        logger.debug(f"explain_results type: {type(explain_results)}, value: {explain_results}")
+        logger.debug(f"llm_analysis type: {type(llm_analysis)}, keys: {llm_analysis.keys() if isinstance(llm_analysis, dict) else 'N/A'}")
+        logger.debug(f"merged keys: {list(merged.keys())}")
 
         return merged
 

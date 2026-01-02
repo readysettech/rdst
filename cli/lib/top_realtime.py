@@ -371,7 +371,7 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
             query_info = format_query_for_save(query)
 
             try:
-                registry.add_query(
+                query_hash, is_new = registry.add_query(
                     tag=tag,
                     sql=query_info['query_text'],
                     source="top",
@@ -381,12 +381,21 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
                     observation_count=query_info['observation_count']
                 )
 
+                # Determine display info based on new vs existing
+                if is_new:
+                    display_tag = tag
+                    status = "[green]new[/green]"
+                else:
+                    existing = registry.get_query(query_hash)
+                    display_tag = existing.tag if existing and existing.tag else None
+                    status = f"[yellow]exists as '{display_tag}'[/yellow]" if display_tag else "[yellow]exists[/yellow]"
+
                 # Store info for return
                 saved_queries.append({
                     'index': idx,
                     'hash': query.query_hash[:8],  # First 8 chars of hash
                     'query_text': query.normalized_query[:80] + '...' if len(query.normalized_query) > 80 else query.normalized_query,
-                    'tag': tag
+                    'tag': display_tag or tag
                 })
 
                 # Print saved query with hash
@@ -403,7 +412,12 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
         console.print(f"\n[green]Saved {len(saved_queries)} queries successfully[/green]")
         console.print("\n[cyan]Next steps:[/cyan]")
         console.print("  - View saved queries:   rdst query list")
-        console.print("  - Analyze a query:      rdst analyze --tag top_query_0")
+        if saved_queries:
+            example_query = saved_queries[0]
+            if example_query.get('tag'):
+                console.print(f"  - Analyze a query:      rdst analyze --tag {example_query['tag']}")
+            else:
+                console.print(f"  - Analyze a query:      rdst analyze --hash {example_query['hash']}")
         return saved_queries
 
     except Exception as e:

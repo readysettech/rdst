@@ -33,7 +33,7 @@ from .phases import (
 )
 from .phases.generate import regenerate_sql_with_error
 from .phases.validate import build_error_message
-from .phases.present import summarize_session
+from .phases.present import summarize_session, prompt_save_query
 from . import escalation
 
 if TYPE_CHECKING:
@@ -159,6 +159,7 @@ class Ask3Engine:
                 # Present results
                 ctx = present_results(ctx, self.presenter)
                 summarize_session(ctx, self.presenter)
+                prompt_save_query(ctx, self.presenter)
                 return ctx
 
             # Normal linear flow continues below...
@@ -202,6 +203,9 @@ class Ask3Engine:
 
             # Show session summary if verbose
             summarize_session(ctx, self.presenter)
+
+            # Offer to save query to registry
+            prompt_save_query(ctx, self.presenter)
 
         except KeyboardInterrupt:
             self.presenter.cancelled()

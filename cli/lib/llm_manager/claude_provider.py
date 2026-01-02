@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from enum import Enum
+import logging
 import os
 from typing import Any, Dict
 
 import json
 import requests
+
+logger = logging.getLogger(__name__)
 
 from .base import LLMError, Provider, ProviderRequest, ProviderResponse
 
@@ -119,9 +122,8 @@ class ClaudeProvider(Provider):
                 err_json = {"error": {"message": resp.text}}
             # Anthropic puts message under "error": {"message": "..."}
             msg = (err_json.get("error") or {}).get("message", f"HTTP {resp.status_code}")
-            # DEBUG: Log full error response for troubleshooting
-            print(f"DEBUG: Full API error response: {json.dumps(err_json, indent=2)}")
-            print(f"DEBUG: Status code: {resp.status_code}")
+            logger.debug(f"Full API error response: {json.dumps(err_json, indent=2)}")
+            logger.debug(f"Status code: {resp.status_code}")
             raise LLMError(f"Claude error: {msg}", code="PROVIDER_HTTP", status=resp.status_code)
 
         data = resp.json()
