@@ -124,6 +124,9 @@ Shows:
 - Normalized query patterns
 - Execution counts
 
+After monitoring, you'll be prompted to save discovered queries to the registry
+for later analysis or benchmarking.
+
 ### rdst query
 Manage saved queries in your registry.
 
@@ -134,9 +137,53 @@ rdst query add my-slow-query -q "SELECT * FROM orders JOIN items ON ..." --targe
 # List saved queries
 rdst query list
 
+# List with filtering
+rdst query list --filter "users"           # Search SQL, names, hash, source
+rdst query list --target prod              # Filter by target database
+rdst query list --interactive              # Paginated selection mode
+
+# Show query details
+rdst query show my-slow-query
+
+# Edit a query (opens $EDITOR)
+rdst query edit my-slow-query
+
 # Delete a saved query
 rdst query delete my-slow-query
 ```
+
+### rdst query run
+Run saved queries for benchmarking and load generation.
+
+```bash
+# Run a query once
+rdst query run my-query
+
+# Run multiple queries round-robin
+rdst query run query1 query2 query3 --target mydb
+
+# Fixed interval mode - run every 100ms
+rdst query run my-query --interval 100
+
+# Concurrency mode - maintain 10 concurrent executions
+rdst query run my-query --concurrency 10
+
+# With limits
+rdst query run my-query --duration 60      # Stop after 60 seconds
+rdst query run my-query --count 1000       # Stop after 1000 executions
+
+# Tight loop (as fast as possible)
+rdst query run my-query --duration 30      # Run for 30s with no delay
+
+# Quiet mode (summary only)
+rdst query run my-query --duration 60 --quiet
+```
+
+Output includes:
+- Live progress table with QPS
+- Per-query statistics (min/avg/p95/max latency)
+- Success/failure counts
+- Final summary
 
 ### rdst report
 Send feedback to the RDST team.
@@ -224,6 +271,27 @@ export PROD_DB_PASSWORD="your-actual-password"
 2. Wait 30-60 seconds for containers to start
 3. Review if query is cacheable
 4. If cacheable, see the CREATE CACHE command for production
+
+### Benchmarking Queries
+1. Discover slow queries with `rdst top --target mydb`
+2. Save them to the registry when prompted
+3. Analyze with `rdst analyze --tag my-query`
+4. Apply recommended optimizations (indexes, rewrites)
+5. Benchmark with `rdst query run my-query --duration 30`
+6. Compare QPS and latency before/after changes
+
+### Load Testing
+Generate sustained load against your database:
+```bash
+# Constant rate: 10 queries/second for 60 seconds
+rdst query run my-query --interval 100 --duration 60
+
+# High concurrency: 50 parallel connections for 60 seconds
+rdst query run my-query --concurrency 50 --duration 60
+
+# Mixed workload: multiple queries round-robin
+rdst query run read_query write_query --concurrency 20 --duration 120
+```
 
 ### Setting Up Multiple Databases
 ```bash
@@ -427,7 +495,53 @@ Options:
 Example:
 ```bash
 rdst top --target mydb --duration 30
+```
+
+After monitoring, you can save queries to the registry for analysis or benchmarking."""
+        elif "list" in question_lower and "query" in question_lower:
+            answer = """To list saved queries:
+
+```bash
+# List all queries
+rdst query list
+
+# Filter by SQL content, name, hash, or source
+rdst query list --filter "users"
+
+# Filter by target database
+rdst query list --target prod
+
+# Interactive mode with pagination
+rdst query list --interactive
+
+# Show details of a specific query
+rdst query show my-query
 ```"""
+        elif "run" in question_lower or "benchmark" in question_lower or "load" in question_lower:
+            answer = """To run queries for benchmarking or load testing:
+
+```bash
+# Run a query once
+rdst query run my-query
+
+# Fixed interval mode (every 100ms)
+rdst query run my-query --interval 100 --duration 60
+
+# Concurrency mode (10 parallel connections)
+rdst query run my-query --concurrency 10 --duration 60
+
+# Multiple queries round-robin
+rdst query run query1 query2 --concurrency 20
+```
+
+Options:
+- --interval MS: Run every N milliseconds
+- --concurrency N: Maintain N concurrent executions
+- --duration SECS: Stop after N seconds
+- --count N: Stop after N executions
+- --quiet: Show only summary
+
+Output includes QPS, latency stats (min/avg/p95/max), and success/failure counts."""
         elif "configure" in question_lower or "add" in question_lower or "target" in question_lower:
             answer = """To configure a database target:
 

@@ -68,6 +68,7 @@ rdst/
 | `rdst ask "question"` | Natural language to SQL |
 | `rdst schema show` | View/manage semantic layer |
 | `rdst query list` | View saved queries |
+| `rdst query run <names>` | Benchmark/load test queries |
 | `rdst howdoi "question"` | Documentation lookup |
 | `rdst claude add` | Register MCP server with Claude Code |
 
