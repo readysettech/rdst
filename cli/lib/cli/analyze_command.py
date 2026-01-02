@@ -1579,7 +1579,7 @@ class AnalyzeCommand:
                 cacheable = final_verdict.get("cacheable", False)
                 confidence = final_verdict.get("confidence", "unknown")
                 method = final_verdict.get("method", "unknown")
-                reason = readyset_analysis.get('explain_cache_result').get("error", "")
+                reason = readyset_analysis.get('explain_cache_result', {}).get("error", "")
 
                 status = "CACHEABLE" if cacheable else "NOT CACHEABLE"
                 lines.append(f"   {status} (confidence: {confidence})")

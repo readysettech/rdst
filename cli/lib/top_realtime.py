@@ -375,7 +375,10 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
                     tag=tag,
                     sql=query_info['query_text'],
                     source="top",
-                    target=target_name
+                    target=target_name,
+                    max_duration_ms=query_info['max_duration_ms'],
+                    avg_duration_ms=query_info['avg_duration_ms'],
+                    observation_count=query_info['observation_count']
                 )
 
                 # Store info for return

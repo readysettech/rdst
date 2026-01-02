@@ -11,6 +11,7 @@ test_query_commands() {
   test_query_delete
   test_query_delete_with_hash
   test_query_bulk_import
+  test_query_run
   test_query_integration_with_analyze
   test_query_empty_registry
 }
@@ -171,18 +172,19 @@ test_query_bulk_import() {
   log_section "5c. Query Command - Bulk Import (${DB_ENGINE})"
 
   # Create test SQL file with multiple queries
+  # Note: Use short names (<=12 chars) to avoid Rich table truncation in assertions
   local import_file="$TMP_RUN/bulk_import.sql"
   cat >"$import_file" <<'SQL'
--- name: import-test-1
+-- name: imp-test-1
 -- target: test-import
 -- frequency: 100
 SELECT tconst, primaryTitle, titleType FROM title_basics WHERE titleType = 'movie' ORDER BY startYear DESC LIMIT 5;
 
--- name: import-test-2
+-- name: imp-test-2
 -- target: test-import
 SELECT COUNT(*) FROM title_basics WHERE startYear > 2020;
 
--- name: import-test-3
+-- name: imp-test-3
 SELECT tconst, primaryTitle FROM title_basics WHERE startYear = 2019 LIMIT 3;
 SQL
 
@@ -195,9 +197,9 @@ SQL
   # Verify queries were imported
   run_cmd "Verify imported queries in registry" \
     "${RDST_CMD[@]}" query list
-  assert_contains "import-test-1" "first imported query should be in registry"
-  assert_contains "import-test-2" "second imported query should be in registry"
-  assert_contains "import-test-3" "third imported query should be in registry"
+  assert_contains "imp-test-1" "first imported query should be in registry"
+  assert_contains "imp-test-2" "second imported query should be in registry"
+  assert_contains "imp-test-3" "third imported query should be in registry"
 
   # Test duplicate handling (should skip)
   run_cmd "Import same file again (test duplicate handling)" \
@@ -217,11 +219,83 @@ SQL
   assert_contains "File not found" "import should fail with file not found error"
 
   # Clean up imported queries
-  "${RDST_CMD[@]}" query delete import-test-1 --force >/dev/null 2>&1 || true
-  "${RDST_CMD[@]}" query delete import-test-2 --force >/dev/null 2>&1 || true
-  "${RDST_CMD[@]}" query delete import-test-3 --force >/dev/null 2>&1 || true
+  "${RDST_CMD[@]}" query delete imp-test-1 --force >/dev/null 2>&1 || true
+  "${RDST_CMD[@]}" query delete imp-test-2 --force >/dev/null 2>&1 || true
+  "${RDST_CMD[@]}" query delete imp-test-3 --force >/dev/null 2>&1 || true
 
   echo "✓ Bulk import feature validated"
+}
+
+test_query_run() {
+  log_section "5d. Query Command - Run (${DB_ENGINE})"
+
+  # Setup: Add test queries for run tests
+  # Use different column aliases to ensure different hashes
+  run_cmd "Add query for run test" \
+    "${RDST_CMD[@]}" query add run-test-1 \
+    --query "SELECT 1 AS a" \
+    --target "$TARGET_NAME"
+  assert_contains "✓ Query added" "query add should succeed"
+
+  run_cmd "Add second query for run test" \
+    "${RDST_CMD[@]}" query add run-test-2 \
+    --query "SELECT 1 AS b" \
+    --target "$TARGET_NAME"
+  assert_contains "✓ Query added" "second query add should succeed"
+
+  # Test 1: Singleton mode (run once)
+  run_cmd "Run query once (singleton mode)" \
+    "${RDST_CMD[@]}" query run run-test-1
+  assert_contains "Completed 1 executions" "singleton should complete 1 execution"
+  assert_contains "Summary" "should show summary"
+
+  # Test 2: Count-limited execution
+  run_cmd "Run query with count limit" \
+    "${RDST_CMD[@]}" query run run-test-1 --count 5
+  assert_contains "Completed 5 executions" "should complete exactly 5 executions"
+  assert_regex "QPS:" "should show queries per second"
+
+  # Test 3: Duration-limited execution (short duration)
+  run_cmd "Run query with duration limit" \
+    "${RDST_CMD[@]}" query run run-test-1 --duration 1
+  assert_regex "Duration: [0-9]" "should show duration"
+  # Should complete at least 1 execution
+  assert_regex "Completed [0-9]+ executions" "should complete some executions"
+
+  # Test 4: Interval mode
+  run_cmd "Run query with interval" \
+    "${RDST_CMD[@]}" query run run-test-1 --interval 200 --count 3
+  assert_contains "Completed 3 executions" "interval mode should complete 3 executions"
+
+  # Test 5: Multiple queries (round-robin)
+  run_cmd "Run multiple queries round-robin" \
+    "${RDST_CMD[@]}" query run run-test-1 run-test-2 --count 4
+  assert_contains "Completed 4 executions" "should complete 4 total executions"
+  # Both queries should appear in output (either in progress or summary)
+  assert_regex "run-test-1" "first query should appear"
+  assert_regex "run-test-2" "second query should appear"
+
+  # Test 6: Quiet mode
+  run_cmd "Run query in quiet mode" \
+    "${RDST_CMD[@]}" query run run-test-1 --count 3 --quiet
+  assert_contains "Summary" "quiet mode should still show summary"
+  assert_contains "Completed 3 executions" "quiet mode should complete executions"
+
+  # Test 7: Validation - conflicting flags
+  run_expect_fail "Run with conflicting interval and concurrency" \
+    "${RDST_CMD[@]}" query run run-test-1 --interval 100 --concurrency 2
+  assert_contains "Cannot specify both" "should reject conflicting flags"
+
+  # Test 8: Validation - nonexistent query
+  run_expect_fail "Run nonexistent query" \
+    "${RDST_CMD[@]}" query run nonexistent-run-query
+  assert_contains "not found" "should fail for nonexistent query"
+
+  # Cleanup
+  "${RDST_CMD[@]}" query delete run-test-1 --force >/dev/null 2>&1 || true
+  "${RDST_CMD[@]}" query delete run-test-2 --force >/dev/null 2>&1 || true
+
+  echo "✓ Query run feature validated"
 }
 
 test_query_integration_with_analyze() {

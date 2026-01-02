@@ -58,10 +58,11 @@ def get_cli_commands():
         with open(rdst_path, 'r') as f:
             content = f.read()
 
-        # Find main subparser commands (exclude subcommand parsers like query_parser)
+        # Find main subparser commands (exclude subcommand parsers like query_subparsers)
         # Only match: subparsers.add_parser('command_name', ...)
+        # Use negative lookbehind (?<!\w) to exclude query_subparsers, schema_subparsers, etc.
         commands = set()
-        for match in re.finditer(r"subparsers\.add_parser\s*\(\s*['\"](\w+)['\"]", content):
+        for match in re.finditer(r"(?<!\w)subparsers\.add_parser\s*\(\s*['\"](\w+)['\"]", content):
             commands.add(match.group(1))
 
         # Filter out query subcommands that use a different parser variable

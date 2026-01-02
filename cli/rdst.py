@@ -329,6 +329,24 @@ Examples:
     query_rm_group.add_argument('--hash', help='Query hash to delete')
     query_rm_parser.add_argument('--force', action='store_true', help='Skip confirmation prompt')
 
+    # query run - run saved queries for benchmarking/load generation
+    query_run_parser = query_subparsers.add_parser('run',
+        help='Run saved queries for benchmarking/load generation')
+    query_run_parser.add_argument('queries', nargs='+',
+        help='Query names or hashes to run (round-robin if multiple)')
+    query_run_parser.add_argument('--target', '-t',
+        help='Target database (uses query\'s stored target if omitted)')
+    query_run_parser.add_argument('--interval', type=int, metavar='MS',
+        help='Fixed interval mode: run every N milliseconds')
+    query_run_parser.add_argument('--concurrency', '-c', type=int, metavar='N',
+        help='Concurrency mode: maintain N concurrent executions')
+    query_run_parser.add_argument('--duration', type=int, metavar='SECS',
+        help='Stop after N seconds')
+    query_run_parser.add_argument('--count', type=int, metavar='N',
+        help='Stop after N total executions')
+    query_run_parser.add_argument('--quiet', '-q', action='store_true',
+        help='Minimal output, only show summary')
+
     # ============================================================================
     # RDST ASK & SCHEMA - Natural language to SQL and semantic layer management
     # ============================================================================
@@ -552,6 +570,14 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             query_kwargs['interactive'] = getattr(args, 'interactive', False)
         if query_subcommand in ['delete', 'rm']:
             query_kwargs['force'] = getattr(args, 'force', False)
+        if query_subcommand == 'run':
+            query_kwargs['queries'] = getattr(args, 'queries', [])
+            query_kwargs['target'] = getattr(args, 'target', None)
+            query_kwargs['interval'] = getattr(args, 'interval', None)
+            query_kwargs['concurrency'] = getattr(args, 'concurrency', None)
+            query_kwargs['duration'] = getattr(args, 'duration', None)
+            query_kwargs['count'] = getattr(args, 'count', None)
+            query_kwargs['quiet'] = getattr(args, 'quiet', False)
 
         result = cli.query(subcommand=query_subcommand, **query_kwargs)
 

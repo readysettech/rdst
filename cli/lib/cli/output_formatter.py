@@ -256,7 +256,7 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
     # Get target config for copy-paste test commands
     target_config = workflow_result.get("target_config") or {}
     storage_result = workflow_result.get("storage_result") or {}
-    analysis_id = storage_result.get("analysis_id", "")[:12] if storage_result else ""
+    analysis_id = (storage_result.get("analysis_id") or "")[:12] if storage_result else ""
 
     engine_display = f"{db_engine.upper()}" if db_engine else "Unknown DB"
 

@@ -8,17 +8,27 @@ from __future__ import annotations
 
 import os
 import shlex
+import signal
+import statistics
 import subprocess  # nosemgrep: gitlab.bandit.B404
 import tempfile
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from dataclasses import dataclass, field
 from pathlib import Path
+from queue import Queue, Empty
 from shutil import which
-from typing import Optional, Tuple
+from threading import Lock
+from typing import Optional, Tuple, Any
 
 try:
     from rich.console import Console
     from rich.table import Table
     from rich.panel import Panel
     from rich.prompt import Prompt, Confirm
+    from rich.live import Live
+    from rich import box
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -30,6 +40,87 @@ except ImportError:
     SQLPARSE_AVAILABLE = False
 
 from lib.query_registry.query_registry import QueryRegistry
+
+
+@dataclass
+class QueryStats:
+    """Statistics for a single query during run execution."""
+    query_name: str
+    query_hash: str
+    executions: int = 0
+    successes: int = 0
+    failures: int = 0
+    timings_ms: list[float] = field(default_factory=list)
+
+    @property
+    def min_ms(self) -> float:
+        return min(self.timings_ms) if self.timings_ms else 0.0
+
+    @property
+    def max_ms(self) -> float:
+        return max(self.timings_ms) if self.timings_ms else 0.0
+
+    @property
+    def avg_ms(self) -> float:
+        return statistics.mean(self.timings_ms) if self.timings_ms else 0.0
+
+    @property
+    def p50_ms(self) -> float:
+        return statistics.median(self.timings_ms) if self.timings_ms else 0.0
+
+    @property
+    def p95_ms(self) -> float:
+        if len(self.timings_ms) < 2:
+            return self.max_ms
+        sorted_times = sorted(self.timings_ms)
+        idx = int(len(sorted_times) * 0.95)
+        return sorted_times[min(idx, len(sorted_times) - 1)]
+
+    @property
+    def p99_ms(self) -> float:
+        if len(self.timings_ms) < 2:
+            return self.max_ms
+        sorted_times = sorted(self.timings_ms)
+        idx = int(len(sorted_times) * 0.99)
+        return sorted_times[min(idx, len(sorted_times) - 1)]
+
+
+@dataclass
+class RunStatistics:
+    """Aggregated statistics for a run session."""
+    start_time: float
+    query_stats: dict[str, QueryStats] = field(default_factory=dict)
+    _lock: Lock = field(default_factory=Lock)
+
+    def record_execution(self, query_hash: str, query_name: str,
+                         duration_ms: float, success: bool) -> None:
+        with self._lock:
+            if query_hash not in self.query_stats:
+                self.query_stats[query_hash] = QueryStats(query_name, query_hash)
+
+            stats = self.query_stats[query_hash]
+            stats.executions += 1
+            if success:
+                stats.successes += 1
+                stats.timings_ms.append(duration_ms)
+            else:
+                stats.failures += 1
+
+    @property
+    def total_executions(self) -> int:
+        return sum(s.executions for s in self.query_stats.values())
+
+    @property
+    def total_successes(self) -> int:
+        return sum(s.successes for s in self.query_stats.values())
+
+    @property
+    def total_failures(self) -> int:
+        return sum(s.failures for s in self.query_stats.values())
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return time.perf_counter() - self.start_time
 
 
 class QueryCommand:
@@ -69,6 +160,8 @@ class QueryCommand:
             return self.show(**kwargs)
         elif subcommand in ["delete", "rm"]:
             return self.delete(**kwargs)
+        elif subcommand == "run":
+            return self.run(**kwargs)
         else:
             return RdstResult(
                 ok=False,
@@ -961,6 +1054,15 @@ class QueryCommand:
 [cyan]Target:[/cyan] {entry.last_target or '(none)'}
 [white]Parameters:[/white] {len(entry.parameter_history) if entry.parameter_history else 0} sets in history"""
 
+            # Add runtime stats if available (from rdst top)
+            if entry.max_duration_ms > 0 or entry.observation_count > 0:
+                details += f"""
+
+[bold]Runtime Statistics[/bold] (from rdst top):
+[red]Max Duration:[/red] {entry.max_duration_ms:,.1f}ms
+[yellow]Avg Duration:[/yellow] {entry.avg_duration_ms:,.1f}ms
+[green]Observations:[/green] {entry.observation_count}"""
+
             panel = Panel(details, title=f"Query: {display_name}", border_style="green")
             self.console.print(panel)
 
@@ -982,6 +1084,12 @@ class QueryCommand:
             print(f"Frequency:      {entry.frequency}")
             print(f"Target:         {entry.last_target or '(none)'}")
             print(f"Parameters:     {len(entry.parameter_history) if entry.parameter_history else 0} sets in history")
+            # Runtime stats if available (from rdst top)
+            if entry.max_duration_ms > 0 or entry.observation_count > 0:
+                print(f"\nRuntime Statistics (from rdst top):")
+                print(f"Max Duration:   {entry.max_duration_ms:,.1f}ms")
+                print(f"Avg Duration:   {entry.avg_duration_ms:,.1f}ms")
+                print(f"Observations:   {entry.observation_count}")
             print(f"\nSQL:")
             print(entry.sql)
             print(f"{'='*80}")
@@ -1008,7 +1116,10 @@ class QueryCommand:
                     "first_analyzed": entry.first_analyzed,
                     "last_analyzed": entry.last_analyzed,
                     "frequency": entry.frequency,
-                    "target": entry.last_target
+                    "target": entry.last_target,
+                    "max_duration_ms": entry.max_duration_ms,
+                    "avg_duration_ms": entry.avg_duration_ms,
+                    "observation_count": entry.observation_count
                 }
             }
         )
@@ -1269,3 +1380,493 @@ class QueryCommand:
             True if command exists, False otherwise
         """
         return which(command) is not None
+
+    # =========================================================================
+    # Run command implementation
+    # =========================================================================
+
+    def run(self, queries: list[str], target: str | None = None,
+            interval: int | None = None, concurrency: int | None = None,
+            duration: int | None = None, count: int | None = None,
+            quiet: bool = False, **kwargs):
+        """
+        Run saved queries for benchmarking and load generation.
+
+        Args:
+            queries: Query names or hashes to run
+            target: Target database (uses query's stored target if omitted)
+            interval: Fixed interval mode - run every N milliseconds
+            concurrency: Concurrency mode - maintain N concurrent executions
+            duration: Stop after N seconds
+            count: Stop after N total executions
+            quiet: Suppress progress output
+
+        Returns:
+            RdstResult with execution statistics
+        """
+        from .rdst_cli import RdstResult, TargetsConfig
+        from lib.db_connection import create_direct_connection, close_connection
+
+        # Validate mode - cannot use both interval and concurrency
+        if interval is not None and concurrency is not None:
+            return RdstResult(
+                ok=False,
+                message="Cannot specify both --interval and --concurrency",
+                data={}
+            )
+
+        # Determine execution mode
+        # If --duration or --count specified without loop mode, default to tight loop (interval=0)
+        if interval is None and concurrency is None:
+            if duration is not None or count is not None:
+                mode = "interval"
+                interval = 0  # Run as fast as possible
+            else:
+                mode = "singleton"
+        elif interval is not None:
+            mode = "interval"
+        else:
+            mode = "concurrency"
+
+        # Resolve queries from registry
+        try:
+            resolved_queries = self._resolve_queries(queries)
+        except ValueError as e:
+            return RdstResult(ok=False, message=str(e), data={})
+
+        if not resolved_queries:
+            return RdstResult(
+                ok=False,
+                message="No queries to run",
+                data={}
+            )
+
+        # Get target configuration
+        cfg = TargetsConfig()
+        cfg.load()
+
+        # Use provided target, or fall back to first query's stored target, or default
+        if not target:
+            first_entry = resolved_queries[0][0]
+            target = first_entry.last_target or cfg.get_default()
+
+        if not target:
+            return RdstResult(
+                ok=False,
+                message="No target specified. Use --target or configure a default.",
+                data={}
+            )
+
+        target_config = cfg.get(target)
+        if not target_config:
+            return RdstResult(
+                ok=False,
+                message=f"Target '{target}' not found in configuration",
+                data={"target": target}
+            )
+
+        # Initialize statistics
+        stats = RunStatistics(start_time=time.perf_counter())
+
+        # Set up signal handler for graceful shutdown
+        stop_event = threading.Event()
+        original_handler = signal.getsignal(signal.SIGINT)
+
+        def signal_handler(signum, frame):
+            if not quiet:
+                print("\nStopping (Ctrl+C)...")
+            stop_event.set()
+
+        signal.signal(signal.SIGINT, signal_handler)
+
+        try:
+            if not quiet:
+                query_names = [e.tag or e.hash[:8] for e, _ in resolved_queries]
+                print(f"Running {len(resolved_queries)} query(s): {', '.join(query_names)}")
+                print(f"Target: {target} | Mode: {mode}")
+                if mode == "interval":
+                    if interval == 0:
+                        print("Interval: tight loop (no delay)")
+                    else:
+                        print(f"Interval: {interval}ms")
+                elif mode == "concurrency":
+                    print(f"Concurrency: {concurrency}")
+                if duration:
+                    print(f"Duration limit: {duration}s")
+                if count:
+                    print(f"Count limit: {count}")
+                print()
+
+            # Execute based on mode
+            if mode == "singleton":
+                self._run_singleton(resolved_queries, target_config, stats,
+                                   stop_event, quiet,
+                                   create_direct_connection, close_connection)
+            elif mode == "interval":
+                self._run_interval(resolved_queries, target_config, stats,
+                                  interval, stop_event, duration, count,
+                                  quiet, create_direct_connection, close_connection)
+            elif mode == "concurrency":
+                self._run_concurrency(resolved_queries, target_config, stats,
+                                     concurrency, stop_event, duration, count,
+                                     quiet, create_direct_connection, close_connection)
+
+        except Exception as e:
+            return RdstResult(
+                ok=False,
+                message=f"Error during execution: {e}",
+                data={"error": str(e)}
+            )
+        finally:
+            # Restore original signal handler
+            signal.signal(signal.SIGINT, original_handler)
+
+        # Print summary
+        self._print_run_summary(stats)
+
+        return RdstResult(
+            ok=True,
+            message=f"Completed {stats.total_executions} executions",
+            data={
+                "total_executions": stats.total_executions,
+                "total_successes": stats.total_successes,
+                "total_failures": stats.total_failures,
+                "elapsed_seconds": stats.elapsed_seconds,
+                "queries": {
+                    h: {
+                        "name": s.query_name,
+                        "executions": s.executions,
+                        "successes": s.successes,
+                        "failures": s.failures,
+                        "min_ms": s.min_ms,
+                        "avg_ms": s.avg_ms,
+                        "p95_ms": s.p95_ms,
+                        "max_ms": s.max_ms
+                    }
+                    for h, s in stats.query_stats.items()
+                }
+            }
+        )
+
+    def _resolve_queries(self, query_specs: list[str]) -> list[tuple[Any, str]]:
+        """
+        Resolve query names/hashes to QueryEntry and executable SQL.
+
+        Args:
+            query_specs: List of query names or hashes
+
+        Returns:
+            List of (QueryEntry, executable_sql) tuples
+
+        Raises:
+            ValueError: If any query not found
+        """
+        resolved = []
+        for spec in query_specs:
+            # Try by name first
+            entry = self.registry.get_query_by_tag(spec)
+            if not entry:
+                # Try by hash
+                entry = self.registry.get_query(spec)
+            if not entry:
+                raise ValueError(f"Query not found: {spec}")
+
+            # Get executable SQL with parameters reconstructed
+            sql = self.registry.get_executable_query(entry.hash, interactive=False)
+            if not sql:
+                sql = entry.sql  # Fallback to parameterized version
+
+            resolved.append((entry, sql))
+
+        return resolved
+
+    def _run_singleton(self, queries: list[tuple[Any, str]], target_config: dict,
+                       stats: RunStatistics, stop_event: threading.Event,
+                       quiet: bool, create_conn, close_conn) -> None:
+        """Run each query once sequentially."""
+        if not quiet:
+            print("Connecting to database...")
+
+        conn = create_conn(target_config)
+        try:
+            for entry, sql in queries:
+                if stop_event.is_set():
+                    break
+
+                query_name = entry.tag or entry.hash[:8]
+                if not quiet:
+                    print(f"Executing: {query_name}...", end=" ", flush=True)
+
+                start = time.perf_counter()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(sql)
+                    cursor.fetchall()  # Consume results
+                    cursor.close()
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    stats.record_execution(entry.hash, query_name, duration_ms, success=True)
+                    if not quiet:
+                        print(f"{duration_ms:.1f}ms")
+                except Exception as e:
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+                    if not quiet:
+                        print(f"FAILED ({e})")
+        finally:
+            close_conn(conn)
+
+    def _run_interval(self, queries: list[tuple[Any, str]], target_config: dict,
+                      stats: RunStatistics, interval_ms: int,
+                      stop_event: threading.Event,
+                      max_duration: int | None, max_count: int | None,
+                      quiet: bool, create_conn, close_conn) -> None:
+        """Run queries round-robin at fixed interval."""
+        conn = create_conn(target_config)
+        query_index = 0
+        interval_sec = interval_ms / 1000.0
+        last_display_update = 0
+        display_interval = 0.25  # Update display every 250ms
+
+        def run_loop(live=None):
+            nonlocal query_index, last_display_update
+            while not stop_event.is_set():
+                # Check stop conditions
+                if max_duration and stats.elapsed_seconds >= max_duration:
+                    break
+                if max_count and stats.total_executions >= max_count:
+                    break
+
+                entry, sql = queries[query_index]
+                query_index = (query_index + 1) % len(queries)
+                query_name = entry.tag or entry.hash[:8]
+
+                start = time.perf_counter()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(sql)
+                    cursor.fetchall()
+                    cursor.close()
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    stats.record_execution(entry.hash, query_name, duration_ms, success=True)
+                except Exception as e:
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+
+                # Update live display periodically
+                if live and (time.perf_counter() - last_display_update) >= display_interval:
+                    live.update(self._create_progress_table(stats))
+                    last_display_update = time.perf_counter()
+
+                # Sleep for remaining interval time
+                elapsed = time.perf_counter() - start
+                sleep_time = max(0, interval_sec - elapsed)
+                if sleep_time > 0 and not stop_event.is_set():
+                    stop_event.wait(sleep_time)
+
+        try:
+            if not quiet and RICH_AVAILABLE and self.console:
+                with Live(self._create_progress_table(stats), console=self.console,
+                         refresh_per_second=4) as live:
+                    run_loop(live)
+            else:
+                run_loop()
+        finally:
+            close_conn(conn)
+
+    def _run_concurrency(self, queries: list[tuple[Any, str]], target_config: dict,
+                         stats: RunStatistics, concurrency: int,
+                         stop_event: threading.Event,
+                         max_duration: int | None, max_count: int | None,
+                         quiet: bool, create_conn, close_conn) -> None:
+        """Maintain N concurrent query executions."""
+        # Connection pool - one per worker
+        connections: Queue = Queue()
+        for _ in range(concurrency):
+            conn = create_conn(target_config)
+            connections.put(conn)
+
+        query_index = [0]  # Mutable for closure
+        index_lock = threading.Lock()
+        last_display_update = [0]  # Mutable for closure
+        display_interval = 0.25
+
+        def get_next_query() -> tuple[Any, str]:
+            with index_lock:
+                entry, sql = queries[query_index[0]]
+                query_index[0] = (query_index[0] + 1) % len(queries)
+                return entry, sql
+
+        def execute_query() -> bool:
+            """Execute one query. Returns True if should continue."""
+            if stop_event.is_set():
+                return False
+            if max_duration and stats.elapsed_seconds >= max_duration:
+                return False
+            if max_count and stats.total_executions >= max_count:
+                return False
+
+            try:
+                conn = connections.get(timeout=1.0)
+            except Empty:
+                return True  # Retry
+
+            try:
+                entry, sql = get_next_query()
+                query_name = entry.tag or entry.hash[:8]
+
+                start = time.perf_counter()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute(sql)
+                    cursor.fetchall()
+                    cursor.close()
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    stats.record_execution(entry.hash, query_name, duration_ms, success=True)
+                except Exception as e:
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+            finally:
+                connections.put(conn)
+
+            return True
+
+        def run_executor(live=None):
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                futures = set()
+
+                # Submit initial batch
+                for _ in range(concurrency):
+                    if stop_event.is_set():
+                        break
+                    futures.add(executor.submit(execute_query))
+
+                # Keep submitting as tasks complete
+                while futures and not stop_event.is_set():
+                    # Check stop conditions
+                    if max_duration and stats.elapsed_seconds >= max_duration:
+                        break
+                    if max_count and stats.total_executions >= max_count:
+                        break
+
+                    # Update live display periodically
+                    if live and (time.perf_counter() - last_display_update[0]) >= display_interval:
+                        live.update(self._create_progress_table(stats))
+                        last_display_update[0] = time.perf_counter()
+
+                    # Wait for any task to complete
+                    done, futures = wait(futures, timeout=0.1, return_when=FIRST_COMPLETED)
+
+                    # Submit replacement tasks
+                    for future in done:
+                        try:
+                            should_continue = future.result()
+                            if should_continue and not stop_event.is_set():
+                                if not (max_count and stats.total_executions >= max_count):
+                                    futures.add(executor.submit(execute_query))
+                        except Exception:
+                            pass
+
+                # Cancel remaining futures
+                for future in futures:
+                    future.cancel()
+
+        try:
+            if not quiet and RICH_AVAILABLE and self.console:
+                with Live(self._create_progress_table(stats), console=self.console,
+                         refresh_per_second=4) as live:
+                    run_executor(live)
+            else:
+                run_executor()
+        finally:
+            # Close all connections
+            while not connections.empty():
+                try:
+                    conn = connections.get_nowait()
+                    close_conn(conn)
+                except Empty:
+                    break
+
+    def _create_progress_table(self, stats: RunStatistics) -> Table:
+        """Create a Rich table showing live progress stats."""
+        table = Table(box=box.ROUNDED, title="rdst query run")
+        table.add_column("Query", style="cyan")
+        table.add_column("Execs", justify="right")
+        table.add_column("OK", justify="right", style="green")
+        table.add_column("Fail", justify="right", style="red")
+        table.add_column("Avg", justify="right")
+        table.add_column("QPS", justify="right", style="yellow")
+
+        elapsed = stats.elapsed_seconds
+        for qs in stats.query_stats.values():
+            qps = qs.successes / elapsed if elapsed > 0 else 0
+            avg_str = f"{qs.avg_ms:.1f}ms" if qs.timings_ms else "-"
+            table.add_row(
+                qs.query_name,
+                str(qs.executions),
+                str(qs.successes),
+                str(qs.failures),
+                avg_str,
+                f"{qps:.1f}",
+            )
+
+        # Add footer with totals
+        table.caption = f"Elapsed: {elapsed:.1f}s | Total: {stats.total_executions:,} | Ctrl+C to stop"
+        return table
+
+    def _print_run_summary(self, stats: RunStatistics) -> None:
+        """Print execution summary table."""
+        if not stats.query_stats:
+            print("No executions recorded.")
+            return
+
+        if RICH_AVAILABLE and self.console:
+            table = Table(title="rdst query run Summary")
+            table.add_column("Query", style="cyan")
+            table.add_column("Execs", justify="right")
+            table.add_column("OK", justify="right", style="green")
+            table.add_column("Fail", justify="right", style="red")
+            table.add_column("Min", justify="right")
+            table.add_column("Avg", justify="right")
+            table.add_column("p95", justify="right")
+            table.add_column("Max", justify="right")
+
+            for qs in stats.query_stats.values():
+                table.add_row(
+                    qs.query_name,
+                    str(qs.executions),
+                    str(qs.successes),
+                    str(qs.failures),
+                    f"{qs.min_ms:.1f}ms" if qs.timings_ms else "-",
+                    f"{qs.avg_ms:.1f}ms" if qs.timings_ms else "-",
+                    f"{qs.p95_ms:.1f}ms" if qs.timings_ms else "-",
+                    f"{qs.max_ms:.1f}ms" if qs.timings_ms else "-",
+                )
+
+            self.console.print()
+            self.console.print(table)
+
+            # Summary line
+            elapsed = stats.elapsed_seconds
+            qps = stats.total_executions / elapsed if elapsed > 0 else 0
+            error_rate = (stats.total_failures / stats.total_executions * 100) if stats.total_executions > 0 else 0
+
+            self.console.print(f"\nDuration: {elapsed:.1f}s | QPS: {qps:.2f} | Errors: {error_rate:.2f}%")
+        else:
+            # Plain text output
+            print("\nrdst query run Summary")
+            print("=" * 80)
+            print(f"{'Query':<20} | {'Execs':>6} | {'OK':>6} | {'Fail':>6} | {'Min':>8} | {'Avg':>8} | {'p95':>8} | {'Max':>8}")
+            print("-" * 80)
+
+            for qs in stats.query_stats.values():
+                min_str = f"{qs.min_ms:.1f}ms" if qs.timings_ms else "-"
+                avg_str = f"{qs.avg_ms:.1f}ms" if qs.timings_ms else "-"
+                p95_str = f"{qs.p95_ms:.1f}ms" if qs.timings_ms else "-"
+                max_str = f"{qs.max_ms:.1f}ms" if qs.timings_ms else "-"
+                print(f"{qs.query_name:<20} | {qs.executions:>6} | {qs.successes:>6} | {qs.failures:>6} | {min_str:>8} | {avg_str:>8} | {p95_str:>8} | {max_str:>8}")
+
+            print("-" * 80)
+            elapsed = stats.elapsed_seconds
+            qps = stats.total_executions / elapsed if elapsed > 0 else 0
+            error_rate = (stats.total_failures / stats.total_executions * 100) if stats.total_executions > 0 else 0
+            print(f"\nDuration: {elapsed:.1f}s | QPS: {qps:.2f} | Errors: {error_rate:.2f}%")

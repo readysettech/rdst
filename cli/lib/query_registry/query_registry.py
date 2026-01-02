@@ -203,6 +203,10 @@ class QueryEntry:
     last_target: str = ""  # Last target used for analysis
     parameter_history: List[ParameterSet] = field(default_factory=list)  # Up to 10 recent parameter sets
     most_recent_params: Dict[str, Any] = field(default_factory=dict)  # Quick access to latest
+    # Runtime stats from rdst top (optional, only populated when saved from top)
+    max_duration_ms: float = 0.0
+    avg_duration_ms: float = 0.0
+    observation_count: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for TOML serialization."""
@@ -218,6 +222,13 @@ class QueryEntry:
             data['parameter_history'] = []
         if 'most_recent_params' not in data:
             data['most_recent_params'] = {}
+        # Runtime stats from rdst top (added in CLD-1645)
+        if 'max_duration_ms' not in data:
+            data['max_duration_ms'] = 0.0
+        if 'avg_duration_ms' not in data:
+            data['avg_duration_ms'] = 0.0
+        if 'observation_count' not in data:
+            data['observation_count'] = 0
 
         # Convert parameter history from dicts to ParameterSet objects
         if 'parameter_history' in data and data['parameter_history']:
@@ -320,7 +331,9 @@ class QueryRegistry:
             raise RuntimeError(f"Failed to save query registry: {e}")
 
     def add_query(self, sql: str, tag: str = "", source: str = "manual",
-                  frequency: int = 0, target: str = "") -> tuple[str, bool]:
+                  frequency: int = 0, target: str = "",
+                  max_duration_ms: float = 0.0, avg_duration_ms: float = 0.0,
+                  observation_count: int = 0) -> tuple[str, bool]:
         """
         Add a query to the registry with parameter extraction and history.
 
@@ -330,6 +343,9 @@ class QueryRegistry:
             source: Source of the query ("manual", "top", "file", "stdin")
             frequency: Query frequency from telemetry (if available)
             target: Target database name for this analysis
+            max_duration_ms: Maximum observed duration in ms (from rdst top)
+            avg_duration_ms: Average observed duration in ms (from rdst top)
+            observation_count: Number of times query was observed (from rdst top)
 
         Returns:
             Tuple of (query_hash, is_new) where is_new is True if this was a new query pattern
@@ -377,6 +393,14 @@ class QueryRegistry:
             if target:  # Update last target used
                 entry.last_target = target
 
+            # Update runtime stats if provided (keep max values)
+            if max_duration_ms > entry.max_duration_ms:
+                entry.max_duration_ms = max_duration_ms
+            if avg_duration_ms > 0:
+                entry.avg_duration_ms = avg_duration_ms
+            if observation_count > 0:
+                entry.observation_count += observation_count
+
             # Add new parameter set to history (if different from most recent)
             if not entry.parameter_history or entry.most_recent_params != parameters:
                 # Add to front of history (most recent first)
@@ -396,7 +420,10 @@ class QueryRegistry:
                 source=source,
                 last_target=target,
                 parameter_history=[param_set],
-                most_recent_params=parameters
+                most_recent_params=parameters,
+                max_duration_ms=max_duration_ms,
+                avg_duration_ms=avg_duration_ms,
+                observation_count=observation_count
             )
             self._queries[query_hash] = entry
 
