@@ -86,12 +86,22 @@ class QueryCommand:
             name: Name/tag for the query (required)
             query: Optional inline query string
             file: Optional file path to read query from
-            target: Optional target database name
+            target: Optional target database name (uses default if not provided)
 
         Returns:
             RdstResult with query hash and status
         """
-        from .rdst_cli import RdstResult
+        from .rdst_cli import RdstResult, TargetsConfig
+
+        # Get default target if none specified
+        if not target:
+            try:
+                cfg = TargetsConfig()
+                cfg.load()
+                target = cfg.get_default()
+            except Exception:
+                pass  # Leave as None if config fails
+
         if not name:
             return RdstResult(
                 ok=False,
@@ -568,18 +578,17 @@ class QueryCommand:
             )
 
     def list(self, limit: int = 10, target: str = None, filter: str = None,
-             no_interactive: bool = False, **kwargs):
+             interactive: bool = False, **kwargs):
         """
-        List all queries in the registry with optional interactive selection.
+        List all queries in the registry.
 
-        By default, shows an interactive list where user can select a query to analyze.
-        Use --no-interactive for plain text output (also auto-detected if not a TTY).
+        By default, shows a plain text list. Use --interactive for selection mode.
 
         Args:
-            limit: Queries per page (default: 10)
+            limit: Number of queries to show (default: 10)
             target: Filter by target database
-            filter: Smart filter across SQL, tags, hash, source
-            no_interactive: Skip interactive mode, just print list
+            filter: Smart filter across SQL, names, hash, source
+            interactive: Enable interactive mode to select queries for analysis
 
         Returns:
             RdstResult with query list (and optional selected query hash)
@@ -615,7 +624,7 @@ class QueryCommand:
             for query in queries:
                 matches = [
                     filter_lower in query.sql.lower(),                    # SQL content
-                    query.tag and filter_lower in query.tag.lower(),      # Tag
+                    query.tag and filter_lower in query.tag.lower(),      # Name/tag
                     filter_lower in query.hash.lower(),                   # Hash
                     filter_lower in query.source.lower(),                 # Source
                     query.last_target and filter_lower in query.last_target.lower(),  # Target
@@ -632,9 +641,8 @@ class QueryCommand:
 
         total_queries = len(queries)
 
-        # Determine if we should use interactive mode
-        # Auto-detect: if not a TTY, use non-interactive mode (for tests/scripts)
-        use_interactive = not no_interactive and sys.stdin.isatty()
+        # Use interactive mode only if explicitly requested AND we have a TTY
+        use_interactive = interactive and sys.stdin.isatty()
 
         if use_interactive:
             return self._interactive_query_list(queries, limit, target, filter)
@@ -660,7 +668,7 @@ class QueryCommand:
         # Format output
         if RICH_AVAILABLE and self.console:
             table = Table(title=title)
-            table.add_column("Tag", style="cyan")
+            table.add_column("Name", style="cyan")
             table.add_column("Hash", style="yellow")
             table.add_column("Target", style="magenta")
             table.add_column("Source", style="green")
@@ -674,7 +682,7 @@ class QueryCommand:
                 sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
 
                 table.add_row(
-                    q.tag or "(untagged)",
+                    q.tag or "(unnamed)",
                     q.hash[:8],
                     q.last_target or "-",
                     q.source,
@@ -691,7 +699,7 @@ class QueryCommand:
                 timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
                 sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
                 target_display = q.last_target or "-"
-                print(f"Tag: {q.tag or '(untagged)':20} Hash: {q.hash[:8]:10} Target: {target_display:15} Source: {q.source:10}")
+                print(f"Name: {q.tag or '(unnamed)':20} Hash: {q.hash[:8]:10} Target: {target_display:15} Source: {q.source:10}")
                 print(f"  Last analyzed: {timestamp}")
                 print(f"  SQL: {sql_preview}")
                 print()
@@ -733,7 +741,7 @@ class QueryCommand:
             if RICH_AVAILABLE and self.console:
                 table = Table(title=title)
                 table.add_column("#", style="bold green", width=3)
-                table.add_column("Tag", style="cyan")
+                table.add_column("Name", style="cyan")
                 table.add_column("Hash", style="yellow")
                 table.add_column("Target", style="magenta")
                 table.add_column("Source", style="green")
@@ -747,7 +755,7 @@ class QueryCommand:
 
                     table.add_row(
                         str(num),
-                        q.tag or "(untagged)",
+                        q.tag or "(unnamed)",
                         q.hash[:8],
                         q.last_target or "-",
                         q.source,
@@ -767,7 +775,7 @@ class QueryCommand:
                     timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
                     sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
                     target_display = q.last_target or "-"
-                    print(f"[{num}] Tag: {q.tag or '(untagged)':20} Hash: {q.hash[:8]:10} Target: {target_display:15}")
+                    print(f"[{num}] Name: {q.tag or '(unnamed)':20} Hash: {q.hash[:8]:10} Target: {target_display:15}")
                     print(f"    Last: {timestamp}  SQL: {sql_preview}")
                     print()
 
@@ -878,61 +886,82 @@ class QueryCommand:
                 data={"selected_hash": query_entry.hash, "error": str(e)}
             )
 
-    def show(self, name: str, **kwargs):
+    def show(self, name: str = None, query_name: str = None, hash: str = None, **kwargs):
         """
         Show detailed information about a specific query.
 
         Args:
-            name: Query name to display
+            name: Query name to display (mutually exclusive with hash)
+            query_name: Query name from argparse (alias for name)
+            hash: Query hash to display (mutually exclusive with name)
 
         Returns:
             RdstResult with query details
         """
         from .rdst_cli import RdstResult
-        entry = self.registry.get_query_by_tag(name)
+
+        # Handle both name and query_name (from argparse)
+        name = name or query_name
+
+        # Look up by name or hash
+        if name:
+            entry = self.registry.get_query_by_tag(name)
+            identifier = name
+            id_type = "name"
+        else:
+            entry = self.registry.get_query(hash)
+            identifier = hash
+            id_type = "hash"
+
         if not entry:
             return RdstResult(
                 ok=False,
-                message=f"No query found with name: {name}",
-                data={"name": name}
+                message=f"No query found with {id_type}: {identifier}",
+                data={id_type: identifier}
             )
 
         # Format output
+        display_name = entry.tag or entry.hash[:12]
         if RICH_AVAILABLE:
-            details = f"""[cyan]Tag:[/cyan] {entry.tag}
+            from rich.syntax import Syntax
+
+            details = f"""[cyan]Name:[/cyan] {entry.tag or '(unnamed)'}
 [yellow]Hash:[/yellow] {entry.hash}
 [green]Source:[/green] {entry.source}
 [blue]First Analyzed:[/blue] {entry.first_analyzed[:19].replace('T', ' ') if entry.first_analyzed else 'never'}
 [blue]Last Analyzed:[/blue] {entry.last_analyzed[:19].replace('T', ' ') if entry.last_analyzed else 'never'}
 [magenta]Frequency:[/magenta] {entry.frequency}
 [cyan]Target:[/cyan] {entry.last_target or '(none)'}
-[white]Parameters:[/white] {len(entry.parameter_history)} sets in history
+[white]Parameters:[/white] {len(entry.parameter_history) if entry.parameter_history else 0} sets in history"""
 
-[bold]SQL:[/bold]
-{entry.sql}"""
-
-            panel = Panel(details, title=f"Query: {name}", border_style="green")
+            panel = Panel(details, title=f"Query: {display_name}", border_style="green")
             self.console.print(panel)
+
+            # SQL with syntax highlighting
+            self.console.print("\n[bold]SQL:[/bold]")
+            sql_syntax = Syntax(entry.sql, "sql", theme="monokai", line_numbers=False, word_wrap=True)
+            self.console.print(sql_syntax)
+            self.console.print()
         else:
             # Plain text output
             print(f"\n{'='*80}")
-            print(f"Query: {name}")
+            print(f"Query: {display_name}")
             print(f"{'='*80}")
-            print(f"Tag:            {entry.tag}")
+            print(f"Name:           {entry.tag or '(unnamed)'}")
             print(f"Hash:           {entry.hash}")
             print(f"Source:         {entry.source}")
             print(f"First Analyzed: {entry.first_analyzed[:19].replace('T', ' ') if entry.first_analyzed else 'never'}")
             print(f"Last Analyzed:  {entry.last_analyzed[:19].replace('T', ' ') if entry.last_analyzed else 'never'}")
             print(f"Frequency:      {entry.frequency}")
             print(f"Target:         {entry.last_target or '(none)'}")
-            print(f"Parameters:     {len(entry.parameter_history)} sets in history")
+            print(f"Parameters:     {len(entry.parameter_history) if entry.parameter_history else 0} sets in history")
             print(f"\nSQL:")
             print(entry.sql)
             print(f"{'='*80}\n")
 
         return RdstResult(
             ok=True,
-            message=f"Showing query: {name}",
+            message=f"Showing query: {display_name}",
             data={
                 "tag": entry.tag,
                 "hash": entry.hash,

@@ -233,15 +233,17 @@ Examples:
     query_edit_group.add_argument('--hash', help='Query hash to edit')
 
     # query list
-    query_list_parser = query_subparsers.add_parser('list', help='List all queries (interactive by default)')
-    query_list_parser.add_argument('--limit', type=int, default=10, help='Queries per page (default: 10)')
+    query_list_parser = query_subparsers.add_parser('list', help='List saved queries')
+    query_list_parser.add_argument('--limit', type=int, default=10, help='Number of queries to show (default: 10)')
     query_list_parser.add_argument('--target', help='Filter queries by target database')
-    query_list_parser.add_argument('--filter', help='Smart filter: search across SQL, tags, hash, source')
-    query_list_parser.add_argument('--no-interactive', action='store_true', help='Plain text output without selection prompt')
+    query_list_parser.add_argument('--filter', help='Smart filter: search across SQL, names, hash, source')
+    query_list_parser.add_argument('-i', '--interactive', action='store_true', help='Interactive mode to select queries for analysis')
 
     # query show
     query_show_parser = query_subparsers.add_parser('show', help='Show details of a specific query')
-    query_show_parser.add_argument('query_name', help='Query name to show')
+    query_show_group = query_show_parser.add_mutually_exclusive_group(required=True)
+    query_show_group.add_argument('query_name', nargs='?', help='Query name to show')
+    query_show_group.add_argument('--hash', help='Query hash to show')
 
     # query delete/rm
     query_delete_parser = query_subparsers.add_parser('delete', help='Delete a query from registry')
@@ -389,7 +391,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         query_kwargs = {}
         if query_subcommand in ['add', 'edit', 'delete', 'rm', 'show']:
             query_kwargs['name'] = getattr(args, 'query_name', None)
-        if query_subcommand in ['edit', 'delete', 'rm']:
+        if query_subcommand in ['edit', 'delete', 'rm', 'show']:
             query_kwargs['hash'] = getattr(args, 'hash', None)
         if query_subcommand == 'add':
             query_kwargs['query'] = getattr(args, 'query', None)
@@ -403,7 +405,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             query_kwargs['limit'] = getattr(args, 'limit', 10)
             query_kwargs['target'] = getattr(args, 'target', None)
             query_kwargs['filter'] = getattr(args, 'filter', None)
-            query_kwargs['no_interactive'] = getattr(args, 'no_interactive', False)
+            query_kwargs['interactive'] = getattr(args, 'interactive', False)
         if query_subcommand in ['delete', 'rm']:
             query_kwargs['force'] = getattr(args, 'force', False)
 

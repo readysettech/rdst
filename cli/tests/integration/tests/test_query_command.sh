@@ -29,7 +29,7 @@ test_query_add() {
 
   # Verify the query is in the registry
   run_cmd "Verify query was added" \
-    "${RDST_CMD[@]}" query list --no-interactive
+    "${RDST_CMD[@]}" query list
   assert_regex "test-movie" "query list should show added query"
 
   # Test duplicate query name (should fail)
@@ -60,13 +60,13 @@ test_query_list() {
 
   # List queries
   run_cmd "List all queries" \
-    "${RDST_CMD[@]}" query list --no-interactive
+    "${RDST_CMD[@]}" query list
   assert_regex "test-movie" "list should show first query"
   assert_regex "test-from" "list should show second query"
 
   # List with limit
   run_cmd "List queries with limit" \
-    "${RDST_CMD[@]}" query list --no-interactive --limit 1
+    "${RDST_CMD[@]}" query list --limit 1
   # Should show at least one query
   assert_regex "Query Registry|test-" "list with limit should show queries"
 }
@@ -125,7 +125,7 @@ test_query_delete() {
 
   # Verify deletion
   run_cmd "Verify query was deleted" \
-    "${RDST_CMD[@]}" query list --no-interactive
+    "${RDST_CMD[@]}" query list
   assert_not_contains "test-from" "deleted query should not appear in list"
   assert_regex "test-movie" "other query should still exist"
 
@@ -194,7 +194,7 @@ SQL
 
   # Verify queries were imported
   run_cmd "Verify imported queries in registry" \
-    "${RDST_CMD[@]}" query list --no-interactive
+    "${RDST_CMD[@]}" query list
   assert_contains "import-test-1" "first imported query should be in registry"
   assert_contains "import-test-2" "second imported query should be in registry"
   assert_contains "import-test-3" "third imported query should be in registry"

@@ -1004,7 +1004,7 @@ Required environment variable: {api_key_info.get(provider, 'Check provider docs'
         return run_rdst_command(args)
 
     elif name == "rdst_query_list":
-        args = ["query", "list", "--no-interactive"]
+        args = ["query", "list"]
         if "target" in arguments:
             args.extend(["--target", arguments["target"]])
         if "filter" in arguments:
