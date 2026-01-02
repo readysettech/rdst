@@ -327,6 +327,9 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
             console.print(f"  [{idx}] {query.query_hash[:8]} - {query.normalized_query[:80]}{'...' if len(query.normalized_query) > 80 else ''}")
 
         console.print(f"\n[green]Saved {len(saved_queries)} queries successfully[/green]")
+        console.print("\n[cyan]Next steps:[/cyan]")
+        console.print("  - View saved queries:   rdst query list")
+        console.print("  - Analyze a query:      rdst analyze --tag top_query_0")
         return saved_queries
 
     except Exception as e:

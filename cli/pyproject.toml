@@ -60,8 +60,8 @@ packages = ["lib"]
 "rdst.py" = "rdst.py"
 "mcp_server.py" = "mcp_server.py"
 
-[tool.uv]
-dev-dependencies = []
+[dependency-groups]
+dev = []
 
 [project.scripts]
 rdst = "rdst:main"

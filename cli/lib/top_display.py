@@ -94,7 +94,7 @@ class TopDisplay:
         table.add_column("Avg Duration", style="yellow", width=12)
         table.add_column("Observations", style="green", width=12)
         table.add_column("Instances Running", style="blue", width=18)
-        table.add_column("Query", style="white")
+        table.add_column("Query", style="white", no_wrap=True)
 
         # Add rows
         for idx, query in enumerate(queries):
@@ -106,6 +106,10 @@ class TopDisplay:
 
             # Use normalized (parameterized) query for display
             query_text = query.normalized_query if query.normalized_query else query.query_text
+            # Collapse whitespace and truncate for single-line display
+            query_text = ' '.join(query_text.split())
+            if len(query_text) > 100:
+                query_text = query_text[:97] + '...'
 
             # Highlight if currently running
             style = "bold" if query.current_instances_running > 0 else "dim"

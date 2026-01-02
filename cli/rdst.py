@@ -155,7 +155,13 @@ Examples:
     configure_parser.add_argument('--skip-verify', action='store_true', help='Skip connection verification (for non-interactive use)')
 
     # top command
-    top_parser = subparsers.add_parser('top', help='Live view of slow queries')
+    top_parser = subparsers.add_parser(
+        'top',
+        help='Live view of slow queries',
+        description='Monitor your database in real-time or using historical statistics '
+                    'to identify the top N queries generating load on your backend database. '
+                    'Queries are ranked by duration and can be saved for later analysis.'
+    )
     top_parser.add_argument('--target', help='Specific configured DB target')
     top_parser.add_argument('--source', choices=['auto', 'pg_stat', 'activity', 'slowlog', 'digest', 'rds', 'pmm'], 
                            default='auto', help='Telemetry source to use')
