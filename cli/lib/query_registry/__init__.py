@@ -5,7 +5,8 @@ This module provides query storage, retrieval, and management functionality for 
 Handles SQL normalization, hashing, and persistent storage in TOML format.
 
 Key features:
-- SQL normalization for consistent hashing
+- SQL normalization using SQLGlot for robust AST-based parsing
+- Named parameter placeholders (:p1, :p2, etc.) with type information
 - TOML-based persistent storage (~/.rdst/queries.toml)
 - Query metadata tracking (tags, timestamps, frequency)
 - Hash-based and tag-based query lookup
@@ -16,11 +17,17 @@ Key features:
 from .query_registry import (
     QueryRegistry,
     QueryEntry,
-    ParameterSet,
     normalize_sql,
     hash_sql,
+    generate_query_name,
+    # Legacy functions - kept for backward compatibility
     extract_parameters_from_sql,
     reconstruct_query_with_params
+)
+from .sql_normalizer import (
+    normalize_and_extract,
+    reconstruct_sql,
+    get_placeholder_names
 )
 from .analysis_results import (
     AnalysisResultsRegistry,
@@ -29,13 +36,21 @@ from .analysis_results import (
 )
 
 __all__ = [
+    # Registry classes
     "QueryRegistry",
     "QueryEntry",
-    "ParameterSet",
+    # Core functions
     "normalize_sql",
     "hash_sql",
+    "generate_query_name",
+    # SQLGlot-based parameterization (preferred)
+    "normalize_and_extract",
+    "reconstruct_sql",
+    "get_placeholder_names",
+    # Legacy functions (backward compatibility)
     "extract_parameters_from_sql",
     "reconstruct_query_with_params",
+    # Analysis results
     "AnalysisResultsRegistry",
     "AnalysisResult",
     "create_analysis_result"

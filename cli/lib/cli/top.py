@@ -486,7 +486,7 @@ class TopCommand:
 
     def _analyze_selected_query(self, selected_query: dict, target_name: str):
         """Analyze the selected query."""
-        from ..query_registry import QueryRegistry
+        from ..query_registry import QueryRegistry, hash_sql, generate_query_name
         from .rdst_cli import RdstResult
         from ..data_manager_service.data_manager_service_command_sets import MAX_QUERY_LENGTH
 
@@ -536,18 +536,10 @@ class TopCommand:
                 normalized_sql=normalized_sql,
                 source="top",
                 hash=query_hash,
-                tag="",
+                tag=tag or "",
                 save_as=""
             )
 
-            if is_new:
-                print(f"\nQuery added to registry with hash: {query_hash}")
-            else:
-                existing = registry.get_query(query_hash)
-                if existing and existing.tag:
-                    print(f"\nQuery already in registry as '{existing.tag}' (hash: {query_hash})")
-                else:
-                    print(f"\nQuery already in registry (hash: {query_hash})")
             print("Running analysis...")
 
             return analyze_cmd.execute_analyze(resolved_input, target=target_name)

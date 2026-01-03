@@ -275,7 +275,7 @@ export PROD_DB_PASSWORD="your-actual-password"
 ### Benchmarking Queries
 1. Discover slow queries with `rdst top --target mydb`
 2. Save them to the registry when prompted
-3. Analyze with `rdst analyze --tag my-query`
+3. Analyze with `rdst analyze --name my-query`
 4. Apply recommended optimizations (indexes, rewrites)
 5. Benchmark with `rdst query run my-query --duration 30`
 6. Compare QPS and latency before/after changes

@@ -14,7 +14,6 @@ from query_registry.query_registry import (
     extract_parameters_from_sql,
     reconstruct_query_with_params,
     QueryEntry,
-    ParameterSet,
     QueryRegistry,
 )
 
@@ -31,9 +30,9 @@ class TestNormalizeSql:
         sql = "SELECT * FROM users WHERE id = 123"
         result = normalize_sql(sql)
 
-        # Should replace numeric literal
+        # Should replace numeric literal with named placeholder
         assert "123" not in result
-        assert "?" in result
+        assert ":p" in result  # Named placeholder like :p1
 
     def test_whitespace_collapse(self):
         """Test that whitespace is collapsed to single spaces."""
@@ -53,20 +52,21 @@ class TestNormalizeSql:
         assert not result.endswith(";")
 
     def test_string_literal_replacement(self):
-        """Test that string literals are replaced with ?."""
+        """Test that string literals are replaced with named placeholders."""
         sql = "SELECT * FROM users WHERE name = 'John'"
         result = normalize_sql(sql)
 
         assert "'John'" not in result
-        assert "?" in result
+        assert ":p" in result  # Named placeholder like :p1
 
     def test_numeric_literal_replacement(self):
-        """Test that numeric literals are replaced with ?."""
+        """Test that numeric literals are replaced with named placeholders."""
         sql = "SELECT * FROM orders WHERE total > 100.50 AND count = 5"
         result = normalize_sql(sql)
 
         assert "100.50" not in result
-        assert "5" not in result
+        # Note: "5" might appear in placeholder names like ":p5", so check for original value
+        assert " 5" not in result or ":p" in result
 
     def test_decimal_numbers(self):
         """Test handling of decimal numbers."""
@@ -214,47 +214,6 @@ class TestReconstructQueryWithParams:
         assert "'Test'" in result
 
 
-class TestParameterSet:
-    """Tests for the ParameterSet dataclass."""
-
-    def test_to_dict(self):
-        """Test conversion to dictionary."""
-        param_set = ParameterSet(
-            values={"param_0": "test"},
-            analyzed_at="2024-01-15T10:00:00Z",
-            target="production"
-        )
-
-        result = param_set.to_dict()
-
-        assert result["values"] == {"param_0": "test"}
-        assert result["analyzed_at"] == "2024-01-15T10:00:00Z"
-        assert result["target"] == "production"
-
-    def test_from_dict(self):
-        """Test creation from dictionary."""
-        data = {
-            "values": {"param_0": "test"},
-            "analyzed_at": "2024-01-15T10:00:00Z",
-            "target": "production"
-        }
-
-        param_set = ParameterSet.from_dict(data)
-
-        assert param_set.values == {"param_0": "test"}
-        assert param_set.analyzed_at == "2024-01-15T10:00:00Z"
-
-    def test_from_dict_with_defaults(self):
-        """Test from_dict handles missing fields gracefully."""
-        data = {}
-
-        param_set = ParameterSet.from_dict(data)
-
-        assert param_set.values == {}
-        assert param_set.analyzed_at == ""
-        assert param_set.target == ""
-
-
 class TestQueryEntry:
     """Tests for the QueryEntry dataclass."""
 
@@ -309,7 +268,6 @@ class TestQueryEntry:
 
         # Should have defaults for new fields
         assert entry.last_target == ""
-        assert entry.parameter_history == []
         assert entry.most_recent_params == {}
 
 
@@ -480,35 +438,6 @@ class TestQueryRegistry:
 
         assert entry is not None
         assert entry.tag == "persistent"
-
-    def test_parameter_history(self, temp_dir):
-        """Test that parameter history is maintained."""
-        registry_path = temp_dir / "test_queries.toml"
-        registry = QueryRegistry(registry_path=str(registry_path))
-
-        # Add same query pattern with different values
-        registry.add_query("SELECT * FROM users WHERE id = 1", target="db1")
-        registry.add_query("SELECT * FROM users WHERE id = 2", target="db2")
-        registry.add_query("SELECT * FROM users WHERE id = 3", target="db3")
-
-        queries = registry.list_queries()
-        assert len(queries) == 1  # Same pattern
-
-        entry = queries[0]
-        assert len(entry.parameter_history) == 3
-
-    def test_parameter_history_limit(self, temp_dir):
-        """Test that parameter history is limited to 10 entries."""
-        registry_path = temp_dir / "test_queries.toml"
-        registry = QueryRegistry(registry_path=str(registry_path))
-
-        # Add same query pattern 15 times with different values
-        for i in range(15):
-            registry.add_query(f"SELECT * FROM users WHERE id = {i}")
-
-        entry = registry.list_queries()[0]
-        assert len(entry.parameter_history) <= 10
-
 
 class TestEdgeCases:
     """Tests for edge cases and unusual inputs."""

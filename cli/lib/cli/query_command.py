@@ -7,6 +7,7 @@ Separate from analysis - purely for query management.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import signal
 import statistics
@@ -1052,7 +1053,7 @@ class QueryCommand:
 [blue]Last Analyzed:[/blue] {entry.last_analyzed[:19].replace('T', ' ') if entry.last_analyzed else 'never'}
 [magenta]Frequency:[/magenta] {entry.frequency}
 [cyan]Target:[/cyan] {entry.last_target or '(none)'}
-[white]Parameters:[/white] {len(entry.parameter_history) if entry.parameter_history else 0} sets in history"""
+[white]Stored Params:[/white] {'yes' if entry.most_recent_params else 'none'}"""
 
             # Add runtime stats if available (from rdst top)
             if entry.max_duration_ms > 0 or entry.observation_count > 0:
@@ -1066,10 +1067,35 @@ class QueryCommand:
             panel = Panel(details, title=f"Query: {display_name}", border_style="green")
             self.console.print(panel)
 
-            # SQL with syntax highlighting
-            self.console.print("\n[bold]SQL:[/bold]")
-            sql_syntax = Syntax(entry.sql, "sql", theme="monokai", line_numbers=False, word_wrap=True)
-            self.console.print(sql_syntax)
+            # SQL pattern with highlighted placeholders
+            self.console.print("\n[bold]SQL Pattern:[/bold]")
+            # Highlight :pN placeholders in bright_magenta for visibility
+            sql_with_highlights = re.sub(r'(:p\d+)', r'[bright_magenta]\1[/bright_magenta]', entry.sql)
+            self.console.print(sql_with_highlights)
+
+            # Show parameters and reconstructed query if parameters exist
+            if entry.parameters:
+                from ..query_registry import reconstruct_sql
+
+                self.console.print("\n[bold]Parameters:[/bold]")
+                for param_name in sorted(entry.parameters.keys(), key=lambda x: int(x[1:]) if x[1:].isdigit() else 0):
+                    param_info = entry.parameters[param_name]
+                    value = param_info['value']
+                    ptype = param_info['type']
+                    if ptype == 'string':
+                        self.console.print(f"  [bright_magenta]:{param_name}[/bright_magenta] = [green]'{value}'[/green] (string)")
+                    else:
+                        self.console.print(f"  [bright_magenta]:{param_name}[/bright_magenta] = [yellow]{value}[/yellow] (number)")
+
+                # Show reconstructed executable SQL
+                try:
+                    executable_sql = reconstruct_sql(entry.sql, entry.parameters)
+                    self.console.print("\n[bold]Executable SQL:[/bold] (with current parameters)")
+                    exec_syntax = Syntax(executable_sql, "sql", theme="monokai", line_numbers=False, word_wrap=True)
+                    self.console.print(exec_syntax)
+                except Exception:
+                    pass  # Reconstruction failed, just skip
+
             self.console.print()
         else:
             # Plain text output
@@ -1083,15 +1109,38 @@ class QueryCommand:
             print(f"Last Analyzed:  {entry.last_analyzed[:19].replace('T', ' ') if entry.last_analyzed else 'never'}")
             print(f"Frequency:      {entry.frequency}")
             print(f"Target:         {entry.last_target or '(none)'}")
-            print(f"Parameters:     {len(entry.parameter_history) if entry.parameter_history else 0} sets in history")
+            print(f"Parameters:     {len(entry.parameters) if entry.parameters else 0} values")
             # Runtime stats if available (from rdst top)
             if entry.max_duration_ms > 0 or entry.observation_count > 0:
                 print(f"\nRuntime Statistics (from rdst top):")
                 print(f"Max Duration:   {entry.max_duration_ms:,.1f}ms")
                 print(f"Avg Duration:   {entry.avg_duration_ms:,.1f}ms")
                 print(f"Observations:   {entry.observation_count}")
-            print(f"\nSQL:")
+            print(f"\nSQL Pattern:")
             print(entry.sql)
+
+            # Show parameters and reconstructed query if parameters exist
+            if entry.parameters:
+                from ..query_registry import reconstruct_sql
+
+                print(f"\nParameters:")
+                for param_name in sorted(entry.parameters.keys(), key=lambda x: int(x[1:]) if x[1:].isdigit() else 0):
+                    param_info = entry.parameters[param_name]
+                    value = param_info['value']
+                    ptype = param_info['type']
+                    if ptype == 'string':
+                        print(f"  :{param_name} = '{value}' (string)")
+                    else:
+                        print(f"  :{param_name} = {value} (number)")
+
+                # Show reconstructed executable SQL
+                try:
+                    executable_sql = reconstruct_sql(entry.sql, entry.parameters)
+                    print(f"\nExecutable SQL (with current parameters):")
+                    print(executable_sql)
+                except Exception:
+                    pass  # Reconstruction failed, just skip
+
             print(f"{'='*80}")
 
             # Breadcrumb for plain text

@@ -20,7 +20,7 @@ from lib.top_display import TopDisplay, format_query_for_save
 
 # Query registry is optional - only needed for saving queries
 try:
-    from lib.query_registry.query_registry import QueryRegistry
+    from lib.query_registry.query_registry import QueryRegistry, hash_sql, generate_query_name
     HAS_QUERY_REGISTRY = True
 except ImportError:
     HAS_QUERY_REGISTRY = False
@@ -349,6 +349,8 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
         registry = QueryRegistry()
         target_name = target_config.get('name', 'default')
         saved_queries = []
+        new_count = 0
+        existing_count = 0
 
         # Determine which queries to save
         if selected_indices is None:
@@ -360,6 +362,9 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
             indices_to_save = selected_indices
             console.print(f"\n[cyan]Saving {len(selected_indices)} selected queries to registry...[/cyan]\n")
 
+        # Get existing names for collision detection
+        existing_names = {e.tag for e in registry.list_queries() if e.tag}
+
         # Save each query
         skipped_queries = []
         for idx in indices_to_save:
@@ -367,55 +372,76 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
                 continue
 
             query = queries[idx]
-            tag = f"top_query_{idx}"
             query_info = format_query_for_save(query)
 
-            try:
-                query_hash, is_new = registry.add_query(
-                    tag=tag,
-                    sql=query_info['query_text'],
-                    source="top",
-                    target=target_name,
-                    max_duration_ms=query_info['max_duration_ms'],
-                    avg_duration_ms=query_info['avg_duration_ms'],
-                    observation_count=query_info['observation_count']
-                )
+            # Check if query already exists by hash FIRST
+            query_hash = hash_sql(query_info['query_text'])
+            existing = registry.get_query(query_hash)
 
-                # Determine display info based on new vs existing
-                if is_new:
-                    display_tag = tag
-                    status = "[green]new[/green]"
-                else:
-                    existing = registry.get_query(query_hash)
-                    display_tag = existing.tag if existing and existing.tag else None
-                    status = f"[yellow]exists as '{display_tag}'[/yellow]" if display_tag else "[yellow]exists[/yellow]"
+            if existing:
+                # Query already exists - don't add again, just report
+                existing_count += 1
+                display_tag = existing.tag if existing.tag else None
+                status = f"[yellow]exists as '{display_tag}'[/yellow]" if display_tag else "[yellow]exists[/yellow]"
 
-                # Store info for return
                 saved_queries.append({
                     'index': idx,
-                    'hash': query.query_hash[:8],  # First 8 chars of hash
+                    'hash': query_hash[:8],
                     'query_text': query.normalized_query[:80] + '...' if len(query.normalized_query) > 80 else query.normalized_query,
-                    'tag': display_tag or tag
+                    'tag': display_tag or query_hash[:8]
                 })
+            else:
+                # New query - generate auto-name and add
+                auto_name = generate_query_name(query.normalized_query, existing_names)
+                existing_names.add(auto_name)  # Track for subsequent collisions
 
-                # Print saved query with hash
-                console.print(f"  [{idx}] {query.query_hash[:8]} - {query.normalized_query[:80]}{'...' if len(query.normalized_query) > 80 else ''}")
-            except ValueError as e:
-                # Query exceeds 1KB limit
-                skipped_queries.append(idx)
-                console.print(f"  [{idx}] [yellow]Skipped - query exceeds 1KB limit[/yellow]")
+                try:
+                    registry.add_query(
+                        tag=auto_name,
+                        sql=query_info['query_text'],
+                        source="top",
+                        target=target_name,
+                        max_duration_ms=query_info['max_duration_ms'],
+                        avg_duration_ms=query_info['avg_duration_ms'],
+                        observation_count=query_info['observation_count']
+                    )
 
+                    new_count += 1
+                    status = f"[green]new: '{auto_name}'[/green]"
+
+                    saved_queries.append({
+                        'index': idx,
+                        'hash': query_hash[:8],
+                        'query_text': query.normalized_query[:80] + '...' if len(query.normalized_query) > 80 else query.normalized_query,
+                        'tag': auto_name
+                    })
+                except ValueError as e:
+                    # Query exceeds 1KB limit
+                    skipped_queries.append(idx)
+                    status = "[yellow]skipped (>1KB)[/yellow]"
+
+            # Print saved query with status
+            query_preview = query.normalized_query[:70] + '...' if len(query.normalized_query) > 70 else query.normalized_query
+            console.print(f"  [{idx}] {query_hash[:8]} - {query_preview} ({status})")
+
+        # Summary
         if skipped_queries:
             console.print(f"\n[yellow]Note: {len(skipped_queries)} queries exceeded the 1KB limit and were not saved.[/yellow]")
             console.print("[yellow]Use 'rdst analyze --large-query-bypass' to analyze large queries.[/yellow]")
 
-        console.print(f"\n[green]Saved {len(saved_queries)} queries successfully[/green]")
+        if new_count > 0 and existing_count > 0:
+            console.print(f"\n[green]Saved {new_count} new, {existing_count} already existed[/green]")
+        elif new_count > 0:
+            console.print(f"\n[green]Saved {new_count} queries[/green]")
+        else:
+            console.print(f"\n[yellow]All {existing_count} queries already in registry[/yellow]")
+
         console.print("\n[cyan]Next steps:[/cyan]")
         console.print("  - View saved queries:   rdst query list")
         if saved_queries:
             example_query = saved_queries[0]
             if example_query.get('tag'):
-                console.print(f"  - Analyze a query:      rdst analyze --tag {example_query['tag']}")
+                console.print(f"  - Analyze a query:      rdst analyze --name {example_query['tag']}")
             else:
                 console.print(f"  - Analyze a query:      rdst analyze --hash {example_query['hash']}")
         return saved_queries

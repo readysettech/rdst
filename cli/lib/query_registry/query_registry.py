@@ -18,49 +18,22 @@ import sqlglot
 from lib.data_manager_service.data_manager_service_command_sets import MAX_QUERY_LENGTH
 
 
-def normalize_sql(query: str) -> str:
+def normalize_sql(query: str, dialect: str = None) -> str:
     """
     Normalize SQL query for consistent hashing and parameterization.
 
-    Normalization steps:
-    1. Strip leading/trailing whitespace
-    2. Collapse multiple whitespace characters to single spaces
-    3. Remove trailing semicolons
-    4. Replace PostgreSQL-style placeholders ($1, $2) with ?
-    5. Replace string literals with ? placeholders
-    6. Replace numeric literals with ? placeholders
+    Uses SQLGlot for robust AST-based normalization that correctly handles
+    comments and complex SQL structures. Falls back to regex for edge cases.
 
     Args:
         query: Raw SQL query string
+        dialect: Optional SQL dialect ('postgres', 'mysql', etc.)
 
     Returns:
-        Normalized and parameterized SQL query string
+        Normalized SQL with :p1, :p2 named placeholders
     """
-    if not query:
-        return ""
-
-    # Strip leading/trailing whitespace
-    normalized = query.strip()
-
-    # Collapse multiple whitespace (spaces, tabs, newlines) to single spaces
-    normalized = re.sub(r'\s+', ' ', normalized)
-
-    # Remove trailing semicolon and any whitespace after it
-    normalized = re.sub(r';\s*$', '', normalized)
-
-    # Replace PostgreSQL-style placeholders ($1, $2, etc.) with ? FIRST
-    # This ensures parameterized queries hash the same as queries with values
-    normalized = re.sub(r'\$\d+', '?', normalized)
-
-    # Replace string literals with ? placeholders
-    normalized = re.sub(r"'[^']*'", '?', normalized)
-
-    # Replace numeric literals with ? placeholders
-    normalized = re.sub(r'\b\d+(?:\.\d+)?\b', '?', normalized)
-
-    # Final trim to ensure no trailing whitespace
-    normalized = normalized.strip()
-
+    from .sql_normalizer import normalize_and_extract
+    normalized, _ = normalize_and_extract(query, dialect)
     return normalized
 
 
@@ -81,6 +54,89 @@ def hash_sql(query: str) -> str:
     # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
     # MD5 is used for query fingerprinting/deduplication, not cryptographic purposes
     return hashlib.md5(normalized.encode('utf-8')).hexdigest()[:12]  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
+
+
+# Stop words to filter out when generating query names
+_STOP_WORDS = {
+    # Articles and basic words
+    'the', 'a', 'an', 'of', 'in', 'on', 'at', 'by', 'for', 'to', 'with', 'from',
+    'as', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+    'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might',
+    'that', 'which', 'who', 'whom', 'whose', 'this', 'these', 'those',
+    'and', 'or', 'but', 'if', 'then', 'else', 'when', 'where', 'why', 'how',
+    'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such',
+    'no', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just',
+    # Common query words to skip
+    'show', 'find', 'get', 'list', 'display', 'give', 'tell', 'what', 'me', 'i',
+    'want', 'need', 'like', 'please', 'can', 'you', 'my', 'your',
+    # SQL keywords
+    'select', 'from', 'where', 'order', 'group', 'having', 'limit', 'offset',
+    'join', 'left', 'right', 'inner', 'outer', 'cross', 'union', 'except',
+    'insert', 'update', 'delete', 'create', 'drop', 'alter', 'table', 'index',
+}
+
+
+def generate_query_name(text: str, existing_names: Optional[set] = None) -> str:
+    """
+    Generate a meaningful name from a natural language question or SQL query.
+
+    Extracts keywords, filters stop words, and creates a snake_case name.
+    Handles collisions by appending numeric suffixes.
+
+    Args:
+        text: Natural language question or SQL query
+        existing_names: Set of names already in use (for collision detection)
+
+    Returns:
+        A snake_case name like 'responsive_users' or 'top_customers_revenue'
+
+    Examples:
+        >>> generate_query_name("Find the most responsive users")
+        'most_responsive_users'
+        >>> generate_query_name("Show me top customers by revenue")
+        'top_customers_revenue'
+        >>> generate_query_name("What are the largest orders")
+        'largest_orders'
+    """
+    if not text:
+        return "query"
+
+    existing_names = existing_names or set()
+
+    # Tokenize: extract words (alphanumeric sequences)
+    words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
+
+    # Filter out stop words and very short words
+    keywords = [w for w in words if w not in _STOP_WORDS and len(w) > 2]
+
+    # Take first 4 keywords
+    name_parts = keywords[:4]
+
+    if not name_parts:
+        # Fallback if all words were filtered
+        name_parts = ['query']
+
+    # Join with underscore
+    base_name = '_'.join(name_parts)
+
+    # Truncate if too long (max 30 chars, don't cut mid-word)
+    if len(base_name) > 30:
+        truncated = base_name[:30]
+        # Find last underscore to avoid cutting mid-word
+        last_underscore = truncated.rfind('_')
+        if last_underscore > 10:  # Keep at least some content
+            base_name = truncated[:last_underscore]
+        else:
+            base_name = truncated
+
+    # Handle collisions
+    final_name = base_name
+    counter = 1
+    while final_name in existing_names:
+        final_name = f"{base_name}_{counter}"
+        counter += 1
+
+    return final_name
 
 
 def extract_parameters_from_sql(original_sql: str, parameterized_sql: str) -> Dict[str, Any]:
@@ -165,35 +221,11 @@ def reconstruct_query_with_params(parameterized_sql: str, params: Dict[str, Any]
 
 
 @dataclass
-class ParameterSet:
-    """
-    Represents a set of parameter values used with a query.
-    """
-    values: Dict[str, Any]
-    analyzed_at: str
-    target: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ParameterSet':
-        # Handle backward compatibility - ensure required fields exist
-        if 'values' not in data:
-            data['values'] = {}
-        if 'analyzed_at' not in data:
-            data['analyzed_at'] = ""
-        if 'target' not in data:
-            data['target'] = ""
-        return cls(**data)
-
-
-@dataclass
 class QueryEntry:
     """
-    Represents a stored query with metadata and parameter history.
+    Represents a stored query with metadata.
     """
-    sql: str  # Parameterized SQL with ? placeholders
+    sql: str  # Normalized SQL with :p1, :p2 placeholders
     hash: str
     tag: str = ""
     first_analyzed: str = ""
@@ -201,8 +233,10 @@ class QueryEntry:
     frequency: int = 0
     source: str = "manual"  # "manual", "top", "file", "stdin"
     last_target: str = ""  # Last target used for analysis
-    parameter_history: List[ParameterSet] = field(default_factory=list)  # Up to 10 recent parameter sets
-    most_recent_params: Dict[str, Any] = field(default_factory=dict)  # Quick access to latest
+    # SQLGlot-extracted parameters as dict: {'p1': {'value': 'x', 'type': 'string'}, ...}
+    parameters: Dict[str, dict] = field(default_factory=dict)
+    # Most recent runtime parameter values (for auto-substitution when re-running queries)
+    most_recent_params: Dict[str, Any] = field(default_factory=dict)
     # Runtime stats from rdst top (optional, only populated when saved from top)
     max_duration_ms: float = 0.0
     avg_duration_ms: float = 0.0
@@ -218,10 +252,10 @@ class QueryEntry:
         # Handle backward compatibility
         if 'last_target' not in data:
             data['last_target'] = ""
-        if 'parameter_history' not in data:
-            data['parameter_history'] = []
         if 'most_recent_params' not in data:
             data['most_recent_params'] = {}
+        if 'parameters' not in data:
+            data['parameters'] = {}
         # Runtime stats from rdst top (added in CLD-1645)
         if 'max_duration_ms' not in data:
             data['max_duration_ms'] = 0.0
@@ -230,15 +264,8 @@ class QueryEntry:
         if 'observation_count' not in data:
             data['observation_count'] = 0
 
-        # Convert parameter history from dicts to ParameterSet objects
-        if 'parameter_history' in data and data['parameter_history']:
-            param_history = []
-            for param_data in data['parameter_history']:
-                if isinstance(param_data, dict):
-                    param_history.append(ParameterSet.from_dict(param_data))
-                else:
-                    param_history.append(param_data)  # Already ParameterSet objects
-            data['parameter_history'] = param_history
+        # Remove deprecated parameter_history if present in old data
+        data.pop('parameter_history', None)
 
         return cls(**data)
 
@@ -331,11 +358,14 @@ class QueryRegistry:
             raise RuntimeError(f"Failed to save query registry: {e}")
 
     def add_query(self, sql: str, tag: str = "", source: str = "manual",
-                  frequency: int = 0, target: str = "",
+                  frequency: int = 0, target: str = "", dialect: str = None,
                   max_duration_ms: float = 0.0, avg_duration_ms: float = 0.0,
                   observation_count: int = 0) -> tuple[str, bool]:
         """
         Add a query to the registry with parameter extraction and history.
+
+        Uses SQLGlot for robust parameter extraction that correctly handles
+        comments and complex SQL structures.
 
         Args:
             sql: SQL query string (with actual parameter values)
@@ -343,6 +373,7 @@ class QueryRegistry:
             source: Source of the query ("manual", "top", "file", "stdin")
             frequency: Query frequency from telemetry (if available)
             target: Target database name for this analysis
+            dialect: Optional SQL dialect ('postgres', 'mysql', etc.)
             max_duration_ms: Maximum observed duration in ms (from rdst top)
             avg_duration_ms: Average observed duration in ms (from rdst top)
             observation_count: Number of times query was observed (from rdst top)
@@ -353,6 +384,8 @@ class QueryRegistry:
         Raises:
             ValueError: If query exceeds 1KB size limit
         """
+        from .sql_normalizer import normalize_and_extract
+
         if not self._loaded:
             self.load()
 
@@ -366,20 +399,15 @@ class QueryRegistry:
                 "Use 'rdst analyze --large-query-bypass' for one-time analysis of large queries."
             )
 
-        # Normalize SQL for hashing and parameterization
-        normalized_sql = normalize_sql(sql)
+        # Use SQLGlot for robust normalization and parameter extraction
+        normalized_sql, params = normalize_and_extract(sql, dialect)
         query_hash = hash_sql(sql)
         now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
-        # Extract parameters from the original SQL
-        parameters = extract_parameters_from_sql(sql, normalized_sql)
-
-        # Create parameter set for this analysis
-        param_set = ParameterSet(
-            values=parameters,
-            analyzed_at=now,
-            target=target
-        )
+        # Convert new params format to simple values for auto-substitution
+        legacy_params = {}
+        for param_name, param_info in params.items():
+            legacy_params[param_name] = param_info['value']
 
         is_new_query = query_hash not in self._queries
 
@@ -393,6 +421,9 @@ class QueryRegistry:
             if target:  # Update last target used
                 entry.last_target = target
 
+            # Update parameters with new SQLGlot format
+            entry.parameters = params
+
             # Update runtime stats if provided (keep max values)
             if max_duration_ms > entry.max_duration_ms:
                 entry.max_duration_ms = max_duration_ms
@@ -401,17 +432,13 @@ class QueryRegistry:
             if observation_count > 0:
                 entry.observation_count += observation_count
 
-            # Add new parameter set to history (if different from most recent)
-            if not entry.parameter_history or entry.most_recent_params != parameters:
-                # Add to front of history (most recent first)
-                entry.parameter_history.insert(0, param_set)
-                # Keep only last 10 parameter sets
-                entry.parameter_history = entry.parameter_history[:10]
-                entry.most_recent_params = parameters
+            # Update most recent params for auto-substitution
+            if legacy_params:
+                entry.most_recent_params = legacy_params
         else:
             # Create new entry
             entry = QueryEntry(
-                sql=normalized_sql,  # Store parameterized version
+                sql=normalized_sql,  # Store normalized SQL with :p1, :p2 placeholders
                 hash=query_hash,
                 tag=tag,
                 first_analyzed=now,
@@ -419,8 +446,8 @@ class QueryRegistry:
                 frequency=frequency,
                 source=source,
                 last_target=target,
-                parameter_history=[param_set],
-                most_recent_params=parameters,
+                parameters=params,
+                most_recent_params=legacy_params,
                 max_duration_ms=max_duration_ms,
                 avg_duration_ms=avg_duration_ms,
                 observation_count=observation_count
@@ -580,49 +607,75 @@ class QueryRegistry:
         """
         Get an executable query for analysis by reconstructing with parameters.
 
+        Uses SQLGlot for robust reconstruction. If parameters are missing,
+        prompts the user to provide values (in interactive mode).
+
         Args:
             query_hash: Hash of the query to retrieve
-            interactive: Whether to prompt user if multiple parameter sets exist
+            interactive: Whether to prompt user for missing parameters
 
         Returns:
-            Executable SQL query string, or None if not found
+            Executable SQL query string, or None if not found or missing required params
         """
+        from .sql_normalizer import reconstruct_sql, get_placeholder_names
+
         entry = self.get_query(query_hash)
         if not entry:
             return None
 
-        param_history = entry.parameter_history
-        if not param_history:
-            # No parameters stored - return the SQL as-is (shouldn't happen)
+        # Get placeholder names in the normalized SQL
+        placeholder_names = get_placeholder_names(entry.sql)
+
+        if not placeholder_names:
+            # No placeholders - query is already executable
             return entry.sql
 
-        if len(param_history) == 1:
-            # Single parameter set - use it
-            return reconstruct_query_with_params(entry.sql, param_history[0].values)
+        # Use the new SQLGlot-extracted parameters if available
+        params = entry.parameters or {}
 
-        if not interactive:
-            # Non-interactive mode - use most recent parameters
-            return reconstruct_query_with_params(entry.sql, entry.most_recent_params)
+        # Find which placeholders are missing values
+        missing = placeholder_names - set(params.keys())
 
-        # Interactive mode - let user choose
-        print(f"Found {len(param_history)} previous analyses for this query pattern:")
-        for i, param_set in enumerate(param_history, 1):
-            reconstructed = reconstruct_query_with_params(entry.sql, param_set.values)
-            timestamp = param_set.analyzed_at[:19].replace('T', ' ')  # Format timestamp
-            print(f"[{i}] {reconstructed} ({timestamp})")
+        if missing:
+            if not interactive:
+                # Non-interactive mode - cannot fill missing params
+                return None
 
-        try:
-            choice = input("Which to analyze [1]: ").strip() or "1"
-            selected_idx = int(choice) - 1
-            if 0 <= selected_idx < len(param_history):
-                selected_params = param_history[selected_idx].values
-                return reconstruct_query_with_params(entry.sql, selected_params)
-            else:
-                # Invalid choice - use most recent
-                return reconstruct_query_with_params(entry.sql, entry.most_recent_params)
-        except (ValueError, KeyboardInterrupt):
-            # Invalid input or user cancelled - use most recent
-            return reconstruct_query_with_params(entry.sql, entry.most_recent_params)
+            # Interactive mode - prompt for missing values
+            params = self._prompt_for_missing_params(params, sorted(missing))
+
+        return reconstruct_sql(entry.sql, params)
+
+    def _prompt_for_missing_params(self, existing: Dict[str, dict], missing: list) -> Dict[str, dict]:
+        """
+        Prompt user to fill in missing parameter values.
+
+        Args:
+            existing: Already-known parameters {'p1': {'value': x, 'type': t}, ...}
+            missing: List of missing parameter names ['p2', 'p3']
+
+        Returns:
+            Combined parameters dict with user-provided values
+        """
+        params = dict(existing)
+
+        print(f"\nQuery requires {len(missing)} parameter(s):")
+        for param_name in missing:
+            try:
+                value = input(f"  Enter value for :{param_name}: ").strip()
+                # Infer type from input
+                try:
+                    params[param_name] = {'value': int(value), 'type': 'number'}
+                except ValueError:
+                    try:
+                        params[param_name] = {'value': float(value), 'type': 'number'}
+                    except ValueError:
+                        params[param_name] = {'value': value, 'type': 'string'}
+            except KeyboardInterrupt:
+                print("\nCancelled.")
+                raise
+
+        return params
 
     def get_executable_query_by_tag(self, tag: str, interactive: bool = True) -> Optional[str]:
         """
@@ -644,14 +697,15 @@ class QueryRegistry:
     def update_parameter_history(self, query_hash: str, parameters: Dict[str, Any],
                                   target: str = "") -> bool:
         """
-        Update the parameter history for an existing query.
+        Update the stored parameters for an existing query.
 
         This is used when a user provides parameter values interactively
-        for a parameterized query that was stored without actual values.
+        for a parameterized query. The values are stored for auto-substitution
+        on subsequent runs.
 
         Args:
             query_hash: Hash of the query to update
-            parameters: Dictionary of parameter values (e.g., {'param_1': 'value1', 'param_2': 123})
+            parameters: Dictionary of parameter values (e.g., {'p1': 'value1', 'p2': 123})
             target: Optional target database name
 
         Returns:
@@ -666,23 +720,7 @@ class QueryRegistry:
 
         now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
-        # Create new parameter set
-        param_set = ParameterSet(
-            values=parameters,
-            analyzed_at=now,
-            target=target
-        )
-
-        # Add to front of history (most recent first)
-        entry.parameter_history.insert(0, param_set)
-
-        # Keep only last 10 parameter sets
-        entry.parameter_history = entry.parameter_history[:10]
-
-        # Update most recent params
         entry.most_recent_params = parameters
-
-        # Update last_analyzed timestamp
         entry.last_analyzed = now
 
         if target:
