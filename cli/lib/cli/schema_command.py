@@ -740,10 +740,9 @@ class SchemaCommand:
                     'enum_columns': enum_columns,
                     'path': str(self.manager.get_path(target)),
                     'next_steps': [
-                        "Edit the semantic layer to add descriptions:",
-                        f"  rdst schema edit {target}",
-                        "Or use the annotation wizard:",
-                        f"  rdst schema annotate {target} <table_name>"
+                        f"  rdst schema annotate --target {target} --use-llm   AI-generate descriptions",
+                        f"  rdst schema edit --target {target}                 Manual editing in $EDITOR",
+                        f"  rdst ask \"How many rows in each table?\" --target {target}   Try natural language queries"
                     ]
                 }
             }

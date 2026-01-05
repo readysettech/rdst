@@ -49,7 +49,7 @@ class TopDisplay:
         self.current_queries = []  # Store latest queries for saving
 
     def create_table(self, queries: List[QueryMetrics], runtime_seconds: float,
-                     total_tracked: int, db_engine: str = None) -> Layout:
+                     total_tracked: int, db_engine: str = None, auto_saved_count: int = 0) -> Layout:
         """
         Create Rich table showing top queries.
 
@@ -58,6 +58,7 @@ class TopDisplay:
             runtime_seconds: How long tracker has been running
             total_tracked: Total unique queries tracked
             db_engine: Database engine type ('mysql' or 'postgresql')
+            auto_saved_count: Number of queries auto-saved to registry this session
 
         Returns:
             Layout with table and header
@@ -68,7 +69,9 @@ class TopDisplay:
         header_text = Text()
         header_text.append("RDST Top - Real-Time Query Monitor\n", style="bold cyan")
         header_text.append(f"Runtime: {int(runtime_seconds)}s  ", style="dim")
-        header_text.append(f"Total Queries Tracked: {total_tracked}  ", style="dim")
+        header_text.append(f"Queries Tracked: {total_tracked}  ", style="dim")
+        if auto_saved_count > 0:
+            header_text.append(f"Auto-Saved to Registry: {auto_saved_count}  ", style="green")
         header_text.append(f"Polling: 200ms\n", style="dim")
 
         # MySQL-specific limitation warning
@@ -308,12 +311,17 @@ class TopDisplay:
         try:
             with Live(console=self.console, refresh_per_second=2, screen=True) as live:
                 while self.running:
-                    # Get current data
-                    queries, runtime, total_tracked = get_queries_func()
+                    # Get current data (supports both 3-tuple and 4-tuple returns for backwards compat)
+                    result = get_queries_func()
+                    if len(result) == 4:
+                        queries, runtime, total_tracked, auto_saved_count = result
+                    else:
+                        queries, runtime, total_tracked = result
+                        auto_saved_count = 0
                     self.current_queries = queries
 
                     # Create table layout
-                    table_layout = self.create_table(queries, runtime, total_tracked, self.db_engine)
+                    table_layout = self.create_table(queries, runtime, total_tracked, self.db_engine, auto_saved_count)
 
                     # Combine table and footer
                     main_layout = Layout()

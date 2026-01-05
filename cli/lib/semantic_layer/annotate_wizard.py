@@ -91,6 +91,14 @@ class AnnotateWizard:
             # Save changes
             self.manager.save(layer)
 
+            # Breadcrumb for next steps
+            # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
+            self.console.print("\n[dim]─[/dim]" * 25)
+            self.console.print("[cyan]Next Steps:[/cyan]")
+            self.console.print(f"  rdst [green]ask[/green] [blue]\"Show me sample data\"[/blue] --target [blue]{target}[/blue]   [dim]Try natural language queries[/dim]")
+            self.console.print(f"  rdst [green]schema show[/green] --target [blue]{target}[/blue]                  [dim]View your semantic layer[/dim]")
+            self.console.print()
+
             return {
                 'ok': True,
                 'message': f"Annotations saved for '{target}'",

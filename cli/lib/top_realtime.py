@@ -43,7 +43,8 @@ def run_realtime_monitor(target_config: Dict[str, Any], console: Optional[Consol
         2. Create collector and tracker
         3. If json_output or duration set: Run polling loop, return results
         4. Otherwise: Display with Rich Live + interactive prompt
-        5. Handle save or analyze requests
+        5. Auto-save new queries to registry as they're discovered
+        6. Handle save or analyze requests
     """
     from rich.console import Console as RichConsole
 
@@ -73,8 +74,26 @@ def run_realtime_monitor(target_config: Dict[str, Any], console: Optional[Consol
         # Create display
         display = TopDisplay(console, db_engine)
 
+        # Auto-save state: track which queries we've already saved to registry this session
+        saved_query_hashes = set()  # Query hashes already in registry (loaded at start)
+        newly_saved_count = 0  # Count of queries we saved during this session
+
+        # Load existing registry hashes to avoid re-saving
+        if HAS_QUERY_REGISTRY:
+            try:
+                registry = QueryRegistry()
+                registry.load()
+                for entry in registry.list_queries():
+                    saved_query_hashes.add(entry.hash)
+            except Exception:
+                pass  # If registry load fails, we'll just save everything
+
+        target_name = target_config.get('name', 'default')
+
         # Define function to get current state (called by display loop)
         def get_current_state():
+            nonlocal newly_saved_count
+
             # Poll database
             try:
                 query_data = collector.fetch_active_queries()
@@ -83,15 +102,57 @@ def run_realtime_monitor(target_config: Dict[str, Any], console: Optional[Consol
                 # If poll fails, just continue with existing data
                 pass
 
+            # Auto-save new queries to registry
+            if HAS_QUERY_REGISTRY:
+                for query_hash, query_metrics in tracker.queries.items():
+                    # Use our normalized hash (12 char) for registry
+                    from lib.query_registry import hash_sql
+                    registry_hash = hash_sql(query_metrics.query_text)
+
+                    if registry_hash not in saved_query_hashes:
+                        try:
+                            registry = QueryRegistry()
+                            registry.add_query(
+                                sql=query_metrics.query_text,
+                                source="top",
+                                target=target_name
+                            )
+                            saved_query_hashes.add(registry_hash)
+                            newly_saved_count += 1
+                        except Exception:
+                            pass  # Don't let save failures break monitoring
+
             # Get top N queries
             top_queries = tracker.get_top_n(limit, sort_by='max')
             runtime = tracker.get_runtime_seconds()
             total_tracked = tracker.get_total_queries_tracked()
 
-            return (top_queries, runtime, total_tracked)
+            return (top_queries, runtime, total_tracked, newly_saved_count)
 
         # Run display loop with interactive input
         display.run(get_current_state)
+
+        # Show exit breadcrumb - always show next steps
+        # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
+        if newly_saved_count > 0:
+            console.print(f"\n[green]Top saved {newly_saved_count} new queries to registry.[/green]")
+            # Show a few example hashes for easy copy-paste
+            if display.current_queries:
+                from lib.query_registry import hash_sql
+                console.print("\n[cyan]Next Steps:[/cyan]")
+                for i, q in enumerate(display.current_queries[:3]):
+                    h = hash_sql(q.query_text)
+                    preview = q.normalized_query[:50] + "..." if len(q.normalized_query) > 50 else q.normalized_query
+                    console.print(f"  rdst [green]analyze[/green] --hash [blue]{h}[/blue] --target [blue]{target_name}[/blue]")
+                    console.print(f"    [dim]{preview}[/dim]")
+                if len(display.current_queries) > 3:
+                    console.print(f"\n  rdst [green]query list[/green]  [dim]View all saved queries[/dim]")
+        else:
+            # No new queries, but still show helpful breadcrumb
+            console.print("\n[cyan]Next Steps:[/cyan]")
+            console.print(f"  rdst [green]query list[/green]              [dim]View saved queries[/dim]")
+            console.print(f"  rdst [green]analyze[/green] -q [blue]\"SELECT ...\"[/blue] --target [blue]{target_name}[/blue]   [dim]Analyze a specific query[/dim]")
+        console.print()
 
         # Handle user action after display exits
         if display.save_all_requested:

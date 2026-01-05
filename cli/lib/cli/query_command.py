@@ -151,9 +151,36 @@ class QueryCommand:
                 target=target or ""
             )
 
-            msg = f"✓ Query added to registry\n  Name: {name}\n  Hash: {query_hash}\n  Source: {source}"
-            if target:
-                msg += f"\n  Target: {target}"
+            # Show formatted output with colors if Rich available
+            if RICH_AVAILABLE and self.console:
+                self.console.print(f"[green]✓ Query added to registry[/green]")
+                self.console.print(f"  Name: [cyan]{name}[/cyan]")
+                self.console.print(f"  Hash: [yellow]{query_hash}[/yellow]")
+                self.console.print(f"  Source: {source}")
+                if target:
+                    self.console.print(f"  Target: [magenta]{target}[/magenta]")
+
+                # Breadcrumb with colors
+                # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
+                self.console.print()
+                self.console.print("[cyan]Next Steps:[/cyan]")
+                if target:
+                    self.console.print(f"  rdst [green]analyze[/green] --hash [blue]{query_hash[:8]}[/blue] --target [blue]{target}[/blue]   [dim]Analyze this query[/dim]")
+                else:
+                    self.console.print(f"  rdst [green]analyze[/green] --hash [blue]{query_hash[:8]}[/blue] --target [blue]<target>[/blue]   [dim]Analyze this query[/dim]")
+                self.console.print(f"  rdst [green]query show[/green] [blue]{name}[/blue]                              [dim]View query details[/dim]")
+
+                msg = ""  # Already printed
+            else:
+                msg = f"✓ Query added to registry\n  Name: {name}\n  Hash: {query_hash}\n  Source: {source}"
+                if target:
+                    msg += f"\n  Target: {target}"
+                msg += "\n\nNext Steps:"
+                if target:
+                    msg += f"\n  rdst analyze --hash {query_hash[:8]} --target {target}   Analyze this query"
+                else:
+                    msg += f"\n  rdst analyze --hash {query_hash[:8]} --target <target>   Analyze this query"
+                msg += f"\n  rdst query show {name}                              View query details"
 
             return RdstResult(
                 ok=True,
@@ -957,7 +984,17 @@ class QueryCommand:
             print(f"Parameters:     {len(entry.parameter_history) if entry.parameter_history else 0} sets in history")
             print(f"\nSQL:")
             print(entry.sql)
-            print(f"{'='*80}\n")
+            print(f"{'='*80}")
+
+            # Breadcrumb for plain text
+            print("\nNext Steps:")
+            if entry.last_target:
+                print(f"  rdst analyze --hash {entry.hash[:8]} --target {entry.last_target}   Analyze this query")
+            else:
+                print(f"  rdst analyze --hash {entry.hash[:8]} --target <target>   Analyze this query")
+            print(f"  rdst query edit {name}                        Edit this query")
+            print(f"  rdst query list                              View all queries")
+            print()
 
         return RdstResult(
             ok=True,

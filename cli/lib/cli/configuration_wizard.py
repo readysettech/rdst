@@ -347,11 +347,29 @@ class ConfigurationWizard:
         # Show success
         action = "updated" if is_edit else "added"
         self._show_success(
-            f"Target {action.title()}",
-            f"'{target_name}' has been {action} successfully!"
+            f"Target '{target_name}'",
+            f"has been {action} successfully!"
         )
 
-        return RdstResult(True, f"Target '{target_name}' {action}", data={
+        # Breadcrumb: show next steps with colors
+        # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
+        if not is_edit:
+            if self._has_rich:
+                self.console.print()
+                self.console.print("[cyan]Next Steps:[/cyan]")
+                self.console.print(f"  rdst [green]top[/green] --target [blue]{target_name}[/blue]              [dim]Monitor slow queries[/dim]")
+                self.console.print(f"  rdst [green]analyze[/green] -q [blue]\"SELECT ...\"[/blue] --target [blue]{target_name}[/blue]   [dim]Analyze a query[/dim]")
+                self.console.print(f"  rdst [green]configure test[/green] [blue]{target_name}[/blue]            [dim]Test connection[/dim]")
+            else:
+                self._show_info(
+                    "Next Steps",
+                    f"  rdst top --target {target_name}              Monitor slow queries\n"
+                    f"  rdst analyze -q \"SELECT ...\" --target {target_name}   Analyze a query\n"
+                    f"  rdst configure test {target_name}            Test connection"
+                )
+
+        # Return empty message since _show_success already displayed status
+        return RdstResult(True, "", data={
             "target": target_name,
             "config": config_data,
             "default": cfg.get_default()
@@ -1156,22 +1174,11 @@ class ConfigurationWizard:
         if has_api_key:
             self._show_success("API Key Detected", "ANTHROPIC_API_KEY is set in your environment")
 
-            # Ask about model preference
-            model_choices = [
-                "claude-sonnet-4-5-20250929 (default - fast, cost-effective)",
-                "claude-opus-4-20250514 (more sophisticated analysis)",
-            ]
-            model_choice = self._interactive_select("Select model", model_choices, default_idx=0)
-
+            # Use Sonnet 4.5 as the default (and only) model
             cfg._data.setdefault("llm", {})
             cfg._data["llm"]["provider"] = "claude"
-
-            if model_choice and "Opus" in model_choice:
-                cfg._data["llm"]["model"] = "claude-opus-4-20250514"
-                cfg._data["llm"]["hint"] = "Using Claude Opus 4"
-            else:
-                cfg._data["llm"]["model"] = "claude-sonnet-4-5-20250929"
-                cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.5"
+            cfg._data["llm"]["model"] = "claude-sonnet-4-5-20250929"
+            cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.5"
 
             cfg.save()
             self._show_success("Configured", cfg._data["llm"]["hint"])

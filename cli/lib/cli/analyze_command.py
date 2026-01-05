@@ -838,7 +838,29 @@ class AnalyzeCommand:
                     # Already printed everything - return empty to avoid duplicate output
                     return RdstResult(True, "")
 
-                return RdstResult(True, formatted_results)
+                # Print formatted results first
+                print(formatted_results)
+
+                # Add breadcrumb for next steps (non-interactive mode) with colors
+                # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
+                if _RICH_AVAILABLE and self._console:
+                    self._console.print()
+                    self._console.print("[cyan]Next Steps:[/cyan]")
+                    if not readyset_cache:
+                        self._console.print(f"  rdst [green]analyze[/green] --hash [blue]{resolved_input.hash[:8]}[/blue] --readyset-cache   [dim]Test ReadySet caching[/dim]")
+                    self._console.print(f"  rdst [green]analyze[/green] --hash [blue]{resolved_input.hash[:8]}[/blue] --interactive      [dim]Ask follow-up questions[/dim]")
+                    self._console.print(f"  rdst [green]query show[/green] [blue]{resolved_input.hash[:8]}[/blue]                        [dim]View saved query details[/dim]")
+                    self._console.print()
+                else:
+                    print("\n" + "─" * 50)
+                    print("Next Steps:")
+                    if not readyset_cache:
+                        print(f"  rdst analyze --hash {resolved_input.hash[:8]} --readyset-cache   Test ReadySet caching")
+                    print(f"  rdst analyze --hash {resolved_input.hash[:8]} --interactive      Ask follow-up questions")
+                    print(f"  rdst query show {resolved_input.hash[:8]}                        View saved query details")
+                    print()
+
+                return RdstResult(True, "")  # Already printed
             else:
                 return RdstResult(False, workflow_result["error"])
 
@@ -1230,7 +1252,7 @@ class AnalyzeCommand:
             from .rdst_cli import TargetsConfig
             config = TargetsConfig()
             config.load()
-            model = config.get_llm_model() or "sonnet-4"
+            model = config.get_llm_model() or "sonnet-4.5"
             llm_display = f"Analysis via {model}"
         except:
             llm_display = "Analysis"

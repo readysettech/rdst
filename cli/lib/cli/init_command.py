@@ -284,40 +284,53 @@ class InitCommand:
             for r in fails:
                 msg = f"{r.name}: {r.message}" if r.message else r.name
                 self._print("Failed", msg)
-        self._print("Next", "You can re-run 'rdst init --force' to modify settings or 'rdst top' to view live queries.")
+
+        # Breadcrumb: show next steps with colors
+        # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
+        self._print("", "")
+        if self._has_rich:
+            self.console.print("[cyan]Next Steps:[/cyan]")
+            # Check if ANTHROPIC_API_KEY is set
+            import os
+            has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+            if not has_api_key:
+                self.console.print("  [yellow]export[/yellow] ANTHROPIC_API_KEY=[blue]\"sk-ant-...\"[/blue]  [dim]Required for AI analysis[/dim]")
+            if default_name:
+                self.console.print(f"  rdst [green]top[/green] --target [blue]{default_name}[/blue]              [dim]Monitor slow queries[/dim]")
+                self.console.print(f"  rdst [green]analyze[/green] -q [blue]\"SELECT ...\"[/blue] --target [blue]{default_name}[/blue]   [dim]Analyze a query[/dim]")
+                self.console.print(f"  rdst [green]schema init[/green] --target [blue]{default_name}[/blue]      [dim]Set up semantic layer for natural language queries[/dim]")
+            else:
+                self.console.print("  rdst [green]top[/green]                    [dim]Monitor slow queries[/dim]")
+                self.console.print("  rdst [green]analyze[/green] -q [blue]\"SELECT ...\"[/blue]   [dim]Analyze a query[/dim]")
+        else:
+            self._print("Next Steps", "")
+            if default_name:
+                self._print("", f"  rdst top --target {default_name}              Monitor slow queries")
+                self._print("", f"  rdst analyze -q \"SELECT ...\" --target {default_name}   Analyze a query")
+                self._print("", f"  rdst schema init --target {default_name}      Set up semantic layer for natural language queries")
+            else:
+                self._print("", "  rdst top                    Monitor slow queries")
+                self._print("", "  rdst analyze -q \"SELECT ...\"   Analyze a query")
+        self._print("", "")
 
     def _make_logger(self):
         class _Logger:
             def __init__(self, printer):
                 self._p = printer
             def debug(self, msg, *args, **kwargs):
-                # keep quiet in init; could enable with env flag
+                # Keep quiet - don't show debug messages
                 pass
             def info(self, msg, *args, **kwargs):
-                # minimal output to avoid NoneType errors in DataManager
-                # route through init's printer if available
-                try:
-                    printer = self._p
-                    if printer:
-                        printer("Info", str(msg))
-                except Exception:
-                    pass
+                # Keep quiet during connection testing - we show our own result
+                pass
             def warning(self, msg, *args, **kwargs):
-                try:
-                    printer = self._p
-                    if printer:
-                        printer("Warning", str(msg))
-                except Exception:
-                    pass
+                # Keep quiet - S3 sync and other warnings aren't relevant for RDST
+                pass
             def error(self, msg, *args, **kwargs):
-                try:
-                    printer = self._p
-                    if printer:
-                        printer("Error", str(msg))
-                except Exception:
-                    pass
-        # Provide a thin wrapper that calls our _print method; avoid Rich-specific objects
-        return _Logger(lambda title, message: self._print(title, message))
+                # Keep quiet - we handle errors gracefully and show our own message
+                pass
+        # Provide a quiet logger that suppresses DataManager's verbose output
+        return _Logger(lambda title, message: None)
 
         # ---- Connectivity ----
     def _test_target(self, target: Dict[str, Any]) -> (bool, str):
@@ -396,9 +409,9 @@ class InitCommand:
             
             if ok and state.get("success"):
                 return True, "Connected"
-            # Prefer detailed error if present
+            # Prefer detailed error if present, but clean it up
             err = state.get("error") or "Unknown connection error"
-            return False, str(err)
+            return False, self._clean_error_message(str(err))
         except Exception as e:
             # Record the exception in the target as well
             import datetime
@@ -413,7 +426,48 @@ class InitCommand:
                 "database": database
             }
             target["verification"] = verification_result
-            return False, str(e)
+            return False, self._clean_error_message(str(e))
+
+    def _clean_error_message(self, err: str) -> str:
+        """Clean up error messages to be more concise and user-friendly."""
+        # Extract key error info from verbose PostgreSQL/MySQL errors
+        err = err.strip()
+
+        # Connection refused
+        if "Connection refused" in err:
+            return "Connection refused (is the server running?)"
+
+        # Authentication failed
+        if "password authentication failed" in err.lower():
+            return "Authentication failed (check password)"
+        if "Access denied" in err:
+            return "Access denied (check credentials)"
+
+        # Host not found
+        if "could not translate host name" in err.lower() or "Name or service not known" in err:
+            return "Host not found"
+
+        # Timeout
+        if "timeout" in err.lower():
+            return "Connection timeout"
+
+        # Database not found
+        if "does not exist" in err and "database" in err.lower():
+            return "Database not found"
+
+        # SSL errors
+        if "SSL" in err or "ssl" in err:
+            return "SSL connection error"
+
+        # If it's a multi-line error, just take the first line
+        if "\n" in err:
+            err = err.split("\n")[0].strip()
+
+        # Truncate if still too long
+        if len(err) > 80:
+            err = err[:77] + "..."
+
+        return err
 
     # ---- Utilities ----
     def _welcome(self) -> None:

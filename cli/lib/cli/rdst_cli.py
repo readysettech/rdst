@@ -540,7 +540,7 @@ class RdstCLI:
     def analyze(self, hash: Optional[str] = None, query: Optional[str] = None,
                 file: Optional[str] = None, stdin: bool = False, name: Optional[str] = None,
                 positional_query: Optional[str] = None, target: Optional[str] = None,
-                save_as: Optional[str] = None, db: Optional[str] = None, readyset: bool = False,
+                save_as: Optional[str] = None, db: Optional[str] = None,
                 readyset_cache: bool = False, fast: bool = False, interactive: bool = False, review: bool = False, **kwargs) -> RdstResult:
         """
         Analyze SQL query with support for multiple input modes.
@@ -564,9 +564,8 @@ class RdstCLI:
             target: Target database
             save_as: Name to save query as after analysis
             db: Legacy parameter for target database
-            readyset: Whether to use local Readyset Docker container
-            readyset_cache: Whether to evaluate ReadySet caching with performance comparison
-            fast: Whether to auto-skip slow EXPLAIN ANALYZE queries after 10 seconds
+            readyset_cache: Whether to test ReadySet caching with Docker container
+            fast: Whether to skip EXPLAIN ANALYZE and use EXPLAIN only
             interactive: Whether to enter interactive mode after analysis
             review: Whether to review conversation history instead of analyzing
             **kwargs: Additional arguments
@@ -616,7 +615,7 @@ class RdstCLI:
                     pass
 
             # Execute analysis
-            result = analyze_cmd.execute_analyze(resolved_input, target=target_db, readyset=readyset, readyset_cache=readyset_cache, fast=fast, interactive=interactive, review=review)
+            result = analyze_cmd.execute_analyze(resolved_input, target=target_db, readyset=readyset_cache, readyset_cache=readyset_cache, fast=fast, interactive=interactive, review=review)
 
             # Extract query hash from result for telemetry
             if result.data:
@@ -624,7 +623,7 @@ class RdstCLI:
 
             # Track telemetry
             duration_ms = int((time.time() - start_time) * 1000)
-            mode = "interactive" if interactive else ("fast" if fast else ("readyset" if readyset else "standard"))
+            mode = "interactive" if interactive else ("fast" if fast else ("readyset_cache" if readyset_cache else "standard"))
 
             try:
                 from lib.telemetry import telemetry
@@ -1059,8 +1058,22 @@ class RdstCLI:
                         message += f"\n  Relationships: {data.get('relationships', 0)}"
                         if data.get('enum_columns'):
                             message += f"\n  Potential enums: {len(data['enum_columns'])}"
+                        # Print message now, then add breadcrumb with colors
+                        print(message)
+                        message = ""  # Clear message since we printed it
                         if data.get('next_steps'):
-                            message += f"\n\nNext steps:\n" + "\n".join(data['next_steps'])
+                            # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
+                            try:
+                                from rich.console import Console
+                                console = Console()
+                                console.print()
+                                console.print("[cyan]Next Steps:[/cyan]")
+                                target_name = data.get('target', target)
+                                console.print(f"  rdst [green]schema annotate[/green] --target [blue]{target_name}[/blue] --use-llm   [dim]AI-generate descriptions[/dim]")
+                                console.print(f"  rdst [green]schema edit[/green] --target [blue]{target_name}[/blue]                 [dim]Manual editing in $EDITOR[/dim]")
+                                console.print(f"  rdst [green]ask[/green] [blue]\"How many rows in each table?\"[/blue] --target [blue]{target_name}[/blue]   [dim]Try natural language queries[/dim]")
+                            except ImportError:
+                                print("\nNext steps:\n" + "\n".join(data['next_steps']))
                     elif subcommand == 'list':
                         targets = data.get('targets', [])
                         if targets:

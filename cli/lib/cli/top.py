@@ -599,6 +599,9 @@ class TopCommand:
                     self.logger.debug(msg)
 
                 def warning(self, msg, **kwargs):
+                    # Filter out S3 sync warnings - not relevant for RDST
+                    if "S3 sync" in str(msg):
+                        return
                     self.logger.warning(msg)
 
                 def error(self, msg, **kwargs):

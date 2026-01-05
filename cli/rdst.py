@@ -133,7 +133,26 @@ Examples:
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
     # configure command
-    configure_parser = subparsers.add_parser('configure', help='Manage database targets')
+    configure_parser = subparsers.add_parser('configure', help='Manage database targets',
+        description='''Manage database connection targets.
+
+Targets are saved connection profiles that RDST uses to connect to your databases.
+Each target has a name, connection details, and an environment variable for the password.
+
+Subcommands:
+  add      Add a new database target
+  list     List all configured targets
+  edit     Edit an existing target
+  remove   Remove a target
+  default  Set the default target
+  test     Test connection to a target
+
+Examples:
+  rdst configure add --target prod --host db.example.com --user admin --database mydb --password-env PROD_DB_PASS
+  rdst configure list
+  rdst configure test prod
+  rdst configure default prod''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     configure_parser.add_argument('subcommand', nargs='?', default='menu',
                                   help='Subcommand: menu (default), add, edit, list, remove, default, test')
     configure_parser.add_argument('name', nargs='?', help='Target name for edit/remove/default')
@@ -155,16 +174,19 @@ Examples:
     configure_parser.add_argument('--skip-verify', action='store_true', help='Skip connection verification (for non-interactive use)')
 
     # top command
-    top_parser = subparsers.add_parser(
-        'top',
-        help='Live view of slow queries',
-        description='Monitor your database in real-time or using historical statistics '
-                    'to identify the top N queries generating load on your backend database. '
-                    'Queries are ranked by duration and can be saved for later analysis.'
-    )
+    top_parser = subparsers.add_parser('top', help='Live view of slow queries',
+        description='''Monitor database queries in real-time and identify slow queries.
+
+Queries are automatically saved to the registry as they're detected.
+Use the displayed hash values with 'rdst analyze' to investigate further.
+
+Examples:
+  rdst top --target mydb              Monitor queries on 'mydb' target
+  rdst top --duration 30              Run for 30 seconds and output results
+  rdst top --json --duration 10       JSON output for scripting
+  rdst top --historical               Use pg_stat_statements instead of live monitoring''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     top_parser.add_argument('--target', help='Specific configured DB target')
-    top_parser.add_argument('--source', choices=['auto', 'pg_stat', 'activity', 'slowlog', 'digest', 'rds', 'pmm'], 
-                           default='auto', help='Telemetry source to use')
     top_parser.add_argument('--limit', type=int, default=10, help='Number of queries to show')
     top_parser.add_argument('--sort', choices=['freq', 'total_time', 'avg_time', 'load'], 
                            default='total_time', help='Sort field')
@@ -177,7 +199,18 @@ Examples:
     top_parser.add_argument('--duration', type=int, help='Run real-time Top for N seconds then output results (snapshot mode, non-interactive)')
 
     # analyze command
-    analyze_parser = subparsers.add_parser('analyze', help='Analyze SQL query')
+    analyze_parser = subparsers.add_parser('analyze', help='Analyze SQL query',
+        description='''Analyze a SQL query for performance issues and get optimization recommendations.
+
+Runs EXPLAIN ANALYZE and uses AI to provide index recommendations, query rewrites,
+and ReadySet caching opportunities.
+
+Examples:
+  rdst analyze -q "SELECT * FROM users WHERE id = 1" --target mydb
+  rdst analyze --hash abc123 --target mydb    Analyze query from registry by hash
+  rdst analyze -f query.sql --target mydb     Analyze query from file
+  rdst analyze -q "SELECT ..." --readyset-cache   Test ReadySet caching performance''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Query input modes (mutually exclusive group)
     query_group = analyze_parser.add_mutually_exclusive_group()
@@ -193,11 +226,13 @@ Examples:
     # Other options
     analyze_parser.add_argument('--target', help='Target database')
     analyze_parser.add_argument('--save-as', help='Name to save query as after analysis')
-    analyze_parser.add_argument('--readyset', action='store_true', help='Run analysis against local Readyset Docker container')
-    analyze_parser.add_argument('--readyset-cache', action='store_true', dest='readyset_cache', help='Evaluate ReadySet caching with performance comparison')
-    analyze_parser.add_argument('--fast', action='store_true', help='Auto-skip slow EXPLAIN ANALYZE queries after 10 seconds (for testing)')
+    analyze_parser.add_argument('--readyset-cache', action='store_true', dest='readyset_cache',
+                               help='Test ReadySet caching: spins up a Docker container with your schema, caches the query, and shows performance comparison and whether the query is supported')
+    analyze_parser.add_argument('--fast', action='store_true',
+                               help='Skip EXPLAIN ANALYZE entirely and use EXPLAIN only (much faster, less accurate timing)')
     analyze_parser.add_argument('--interactive', action='store_true', help='Enter interactive mode after analysis for Q&A about recommendations')
-    analyze_parser.add_argument('--review', action='store_true', help='Review conversation history for this query without re-analyzing')
+    analyze_parser.add_argument('--review', action='store_true',
+                               help='Review conversation history for this query without re-running analysis')
     analyze_parser.add_argument('--workload', action='store_true', help='Analyze multiple queries together for holistic index recommendations (coming soon)')
 
     # tune command
@@ -205,12 +240,43 @@ Examples:
     tune_parser.add_argument('query', help='SQL query to tune')
 
     # init command
-    init_parser = subparsers.add_parser('init', help='First-time setup wizard')
+    init_parser = subparsers.add_parser('init', help='First-time setup wizard',
+        description='''Run the first-time setup wizard to configure RDST.
+
+This interactive wizard helps you:
+  - Set up your Anthropic API key for AI-powered analysis
+  - Add your first database target
+  - Test the connection
+
+Example:
+  rdst init                 Run setup wizard
+  rdst init --force         Re-run even if already configured''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     init_parser.add_argument('--force', action='store_true', help='Re-run setup even if config exists')
     init_parser.add_argument('--interactive', action='store_true', help='Force interactive mode')
 
     # query command - query registry management
-    query_parser = subparsers.add_parser('query', help='Manage query registry (add/edit/list/delete queries)')
+    query_parser = subparsers.add_parser('query', help='Manage query registry (add/edit/list/delete queries)',
+        description='''Manage saved queries in the query registry.
+
+The query registry stores SQL queries for easy reuse with 'rdst analyze' and 'rdst ask'.
+Queries captured by 'rdst top' are automatically saved here as they're detected.
+
+Subcommands:
+  add      Add a new query to the registry
+  list     List all saved queries (interactive selection)
+  show     Show full details of a specific query
+  edit     Edit an existing query in $EDITOR
+  delete   Delete a query by name or hash
+  import   Import multiple queries from a SQL file
+
+Examples:
+  rdst query add my-query -q "SELECT * FROM users"
+  rdst query list
+  rdst query list --filter "users"
+  rdst query show my-query
+  rdst query delete --hash abc123''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     query_subparsers = query_parser.add_subparsers(dest='query_subcommand', help='Query subcommands')
 
     # query add
@@ -263,17 +329,60 @@ Examples:
     # RDST ASK & SCHEMA - Natural language to SQL and semantic layer management
     # ============================================================================
     # ask command - Natural language to SQL
-    ask_parser = subparsers.add_parser('ask', help='Generate SQL from natural language')
-    ask_parser.add_argument('question', nargs='?', help='Natural language question')
+    ask_parser = subparsers.add_parser('ask', help='Ask questions about your database in natural language',
+        description='''Ask questions about your database using natural language.
+
+Converts your question into SQL, executes it, and returns the results.
+Use this to explore data and answer questions - for query optimization, use 'rdst analyze' instead.
+
+The quality of results improves when you have a semantic layer configured (see 'rdst schema').
+The more details you provide with 'rdst schema annotate', the better the SQL generation.
+
+Modes:
+  Default     Linear flow: generate SQL, confirm, execute, show results
+  --agent     Agent mode: explores schema iteratively for complex questions
+
+Examples:
+  rdst ask "How many customers are there?" --target mydb
+  rdst ask "Show top 10 orders by price" --target mydb
+  rdst ask "Which products have the most sales?" --target mydb --agent
+  rdst ask "Count users by country" --target mydb --dry-run''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ask_parser.add_argument('question', nargs='?', help='Natural language question about your data')
     ask_parser.add_argument('--target', help='Target database')
     ask_parser.add_argument('--dry-run', action='store_true', help='Generate SQL but do not execute')
     ask_parser.add_argument('--timeout', type=int, default=30, help='Query timeout in seconds')
     ask_parser.add_argument('--verbose', action='store_true', help='Show detailed information')
-    ask_parser.add_argument('--agent', dest='agent_mode', action='store_true', help='Skip linear flow, use agent exploration')
+    ask_parser.add_argument('--agent', dest='agent_mode', action='store_true', help='Agent mode: iteratively explores schema for complex questions')
     ask_parser.add_argument('--no-interactive', action='store_true', help='Non-interactive mode')
 
     # schema command - Semantic layer management
-    schema_parser = subparsers.add_parser('schema', help='Manage semantic layer for better SQL generation')
+    schema_parser = subparsers.add_parser('schema', help='Manage semantic layer for your database',
+        description='''Manage the semantic layer for your database target.
+
+The semantic layer stores metadata about your schema to improve 'rdst ask' results:
+  - Table and column descriptions
+  - Enum values with their meanings (e.g., status codes, category types)
+  - Business terminology and relationships
+  - Foreign key documentation
+
+The more comprehensive your semantic layer, the better 'rdst ask' can generate accurate SQL.
+
+Subcommands:
+  init       Initialize from database (introspects tables, columns, detects enums)
+  show       Display semantic layer for a target or specific table
+  annotate   Add descriptions interactively or with AI assistance (--use-llm)
+  edit       Open semantic layer in $EDITOR for manual editing
+  export     Export as YAML or JSON
+  delete     Remove semantic layer for a target
+  list       List all configured semantic layers
+
+Examples:
+  rdst schema init --target mydb                Bootstrap from database
+  rdst schema annotate --target mydb --use-llm  AI-generate descriptions
+  rdst schema show --target mydb                View current semantic layer
+  rdst schema show --target mydb customer       Show specific table details''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     schema_subparsers = schema_parser.add_subparsers(dest='schema_subcommand', help='Schema subcommands')
 
     # schema show
@@ -317,12 +426,32 @@ Examples:
     subparsers.add_parser('version', help='Show version')
 
     # claude command - register with Claude Code
-    claude_parser = subparsers.add_parser('claude', help='Register RDST with Claude Code')
+    claude_parser = subparsers.add_parser('claude', help='Register RDST with Claude Code',
+        description='''Register RDST as an MCP server with Claude Code.
+
+This enables Claude Code to use RDST tools directly for database analysis.
+After registration, Claude can analyze queries, monitor slow queries, and
+provide optimization recommendations.
+
+Examples:
+  rdst claude add         Register RDST with Claude Code (default)
+  rdst claude remove      Unregister RDST from Claude Code''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     claude_parser.add_argument('action', nargs='?', default='add', choices=['add', 'remove'],
                                help='Action: add (default) or remove')
 
     # report command - user feedback
-    report_parser = subparsers.add_parser('report', help='Submit feedback about RDST')
+    report_parser = subparsers.add_parser('report', help='Submit feedback about RDST',
+        description='''Submit feedback or bug reports about RDST.
+
+Use this to report issues, suggest improvements, or provide feedback about
+analysis results. Optionally include query details for context.
+
+Examples:
+  rdst report --negative -r "Index suggestion was incorrect"
+  rdst report --positive -r "Great recommendation!"
+  rdst report --hash abc123 --include-query -r "Unexpected result"''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     report_parser.add_argument('--hash', help='Query hash to provide feedback on')
     report_parser.add_argument('--reason', '-r', help='Feedback reason (interactive if not provided)')
     report_parser.add_argument('--email', '-e', help='Email for follow-up (optional)')
@@ -335,8 +464,19 @@ Examples:
     subparsers.add_parser('help', help='Show help')
 
     # howdoi command - quick docs lookup
-    howdoi_parser = subparsers.add_parser('howdoi', help='Ask a question about RDST usage')
-    howdoi_parser.add_argument('question', nargs='*', help='Your question (e.g., "how do I analyze a query?")')
+    howdoi_parser = subparsers.add_parser('howdoi', help='Ask a question about RDST usage',
+        description='''Get quick answers about how to use RDST.
+
+Uses built-in documentation to answer common questions about commands,
+configuration, and workflows.
+
+Examples:
+  rdst howdoi "analyze a query"
+  rdst howdoi "find slow queries"
+  rdst howdoi "configure database"
+  rdst howdoi "test readyset caching"''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    howdoi_parser.add_argument('question', nargs='*', help='Your question in quotes (e.g., "how do I analyze a query?")')
 
     return parser.parse_args()
 
@@ -355,7 +495,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         return cli.top(**kwargs)
     elif command == 'analyze':
         # Create filtered kwargs for analyze (exclude analyze-specific parameters)
-        analyze_exclude_keys = ['query', 'hash', 'inline_query', 'file', 'stdin', 'name', 'target', 'save_as', 'readyset', 'readyset_cache', 'fast', 'interactive', 'review']
+        analyze_exclude_keys = ['query', 'hash', 'inline_query', 'file', 'stdin', 'name', 'target', 'save_as', 'readyset_cache', 'fast', 'interactive', 'review']
         filtered_kwargs = {k: v for k, v in kwargs.items() if k not in analyze_exclude_keys}
 
         return cli.analyze(
@@ -367,7 +507,6 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             positional_query=getattr(args, 'query', None),  # positional argument
             target=getattr(args, 'target', None),
             save_as=getattr(args, 'save_as', None),
-            readyset=getattr(args, 'readyset', False),
             readyset_cache=getattr(args, 'readyset_cache', False),
             fast=getattr(args, 'fast', False),
             interactive=getattr(args, 'interactive', False),
