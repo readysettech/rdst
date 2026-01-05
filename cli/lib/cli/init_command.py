@@ -74,7 +74,12 @@ class InitCommand:
             return RdstResult(True, msg, data={"targets": cfg.list_targets(), "default": cfg.get_default(), "init_completed": True})
 
         if not interactive:
-            return RdstResult(False, "Interactive mode is required for first-time setup. Run: rdst init --interactive")
+            # Check if this is the first-time setup or a forced re-run
+            has_existing_config = bool(cfg.list_targets())
+            if has_existing_config and force:
+                return RdstResult(False, "Interactive mode is required when using --force. Run: rdst init --interactive --force")
+            else:
+                return RdstResult(False, "Interactive mode is required for first-time setup. Run: rdst init --interactive")
 
         # Welcome
         self._welcome()
