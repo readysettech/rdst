@@ -759,7 +759,7 @@ class RdstCLI:
         """Report CLI/library version."""
         try:
             from importlib.metadata import version as get_version
-            pkg_version = get_version("rdst-staging")
+            pkg_version = get_version("rdst")
         except Exception:
             # Fallback to _version.py if package metadata not available
             try:

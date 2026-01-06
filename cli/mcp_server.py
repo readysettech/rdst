@@ -6,7 +6,7 @@ This server exposes RDST functionality to AI assistants like Claude through the 
 It provides tools for database diagnostics, query analysis, and performance tuning.
 
 INSTALLATION:
-    pip install rdst-staging
+    pip install rdst
 
 REGISTRATION WITH CLAUDE CODE:
     claude mcp add rdst -- python3 -m rdst.mcp_server
@@ -49,8 +49,8 @@ It connects to PostgreSQL or MySQL databases and provides AI-powered analysis
 of query performance, index recommendations, and caching suggestions.
 
 ### Installation & Upgrade
-- Install: `pip install rdst-staging`
-- Upgrade: `pip install --upgrade rdst-staging`
+- Install: `pip install rdst`
+- Upgrade: `pip install --upgrade rdst`
 - Check version: `rdst version`
 
 ### Configuration Location
@@ -198,7 +198,7 @@ def run_rdst_command(args: List[str]) -> Dict[str, Any]:
         return {
             "success": False,
             "stdout": "",
-            "stderr": "RDST not found. Install with: pip install rdst-staging",
+            "stderr": "RDST not found. Install with: pip install rdst",
             "returncode": -1
         }
     except Exception as e:
@@ -597,7 +597,7 @@ Displays the installed version of RDST. Use this to:
 - Check if an upgrade is available
 - Report version for troubleshooting
 
-To upgrade: pip install --upgrade rdst-staging
+To upgrade: pip install --upgrade rdst
 """,
             "inputSchema": {
                 "type": "object",
@@ -1266,7 +1266,7 @@ def handle_prompt(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 Please help me:
 1. First, check if RDST is installed (rdst version)
-2. If not installed, tell me to run: pip install rdst-staging
+2. If not installed, tell me to run: pip install rdst
 3. Check if I have any targets configured (rdst configure list)
 4. If no targets, help me add one with rdst_configure_add
 5. Remind me to export the password environment variable

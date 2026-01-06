@@ -32,7 +32,7 @@ It connects to PostgreSQL or MySQL databases and provides AI-powered recommendat
 
 ## Installation
 ```bash
-pip install rdst-staging
+pip install rdst
 ```
 
 ## Quick Start

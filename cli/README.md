@@ -18,8 +18,8 @@ RDST helps you:
 Run RDST directly without installing:
 
 ```bash
-uvx rdst-staging --help
-uvx rdst-staging analyze "SELECT * FROM users WHERE id = 1"
+uvx rdst --help
+uvx rdst analyze "SELECT * FROM users WHERE id = 1"
 ```
 
 ### Using pipx (persistent installation)
@@ -28,19 +28,19 @@ Install globally:
 
 ```bash
 # Install
-pipx install rdst-staging
+pipx install rdst
 
 # Run
 rdst --help
 
 # Upgrade to latest version
-pipx upgrade rdst-staging
+pipx upgrade rdst
 ```
 
 ### Using pip
 
 ```bash
-pip install rdst-staging
+pip install rdst
 ```
 
 ## Quick Start
@@ -49,7 +49,7 @@ pip install rdst-staging
    ```bash
    rdst init
    # Or with uvx (no installation needed):
-   uvx rdst-staging init
+   uvx rdst init
    ```
 
 2. **Configure database connection:**
@@ -67,7 +67,7 @@ pip install rdst-staging
    rdst analyze "SELECT * FROM users WHERE active = true"
 
    # With uvx:
-   uvx rdst-staging analyze "SELECT * FROM users WHERE active = true"
+   uvx rdst analyze "SELECT * FROM users WHERE active = true"
 
    # Analyze with ReadySet cache evaluation
    rdst analyze --readyset-cache "SELECT * FROM products ORDER BY created_at"
@@ -76,12 +76,12 @@ pip install rdst-staging
 4. **Monitor slow queries:**
    ```bash
    rdst top
-   # Or: uvx rdst-staging top
+   # Or: uvx rdst top
    ```
 
 ## Commands
 
-All commands can be run with `rdst` (if installed) or `uvx rdst-staging` (no installation):
+All commands can be run with `rdst` (if installed) or `uvx rdst` (no installation):
 
 - `rdst configure` - Manage database targets and connection profiles
 - `rdst analyze` - Analyze SQL queries and evaluate caching opportunities
@@ -93,7 +93,7 @@ All commands can be run with `rdst` (if installed) or `uvx rdst-staging` (no ins
 
 **Example with uvx:**
 ```bash
-uvx rdst-staging analyze "SELECT * FROM orders WHERE status = 'pending'"
+uvx rdst analyze "SELECT * FROM orders WHERE status = 'pending'"
 ```
 
 ## Requirements

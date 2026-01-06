@@ -1,5 +1,5 @@
 [project]
-name = "rdst-staging"
+name = "rdst"
 dynamic = ["version"]
 description = "ReadySet Diagnostics & SQL Tuning - CLI tool for database diagnostics and query optimization"
 readme = "README.md"
