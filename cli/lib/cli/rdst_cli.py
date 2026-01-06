@@ -831,6 +831,18 @@ class RdstCLI:
         """
         from ..engines.ask3 import Ask3Engine, Ask3Presenter, Status
 
+        # Interactive prompt if no question provided
+        if not question:
+            import sys
+            if not sys.stdin.isatty():
+                return RdstResult(False, "ask requires a question. Example: rdst ask \"How many users are there?\"")
+            try:
+                question = input("Question: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                return RdstResult(False, "Cancelled")
+            if not question:
+                return RdstResult(False, "ask requires a question")
+
         try:
             # Load target configuration
             if not target:
@@ -916,7 +928,7 @@ class RdstCLI:
     # RDST SCHEMA - Semantic layer management
     # NOTE: Not yet exposed in CLI - internal API only
     # ============================================================================
-    def schema(self, subcommand: str, target: str = None, **kwargs) -> RdstResult:
+    def schema(self, subcommand: str = None, target: str = None, **kwargs) -> RdstResult:
         """
         Manage semantic layer for better SQL generation.
 
@@ -931,6 +943,24 @@ class RdstCLI:
         try:
             from .schema_command import SchemaCommand
             schema_cmd = SchemaCommand()
+
+            # Interactive menu if no subcommand provided
+            if not subcommand:
+                import sys
+                if not sys.stdin.isatty():
+                    return RdstResult(False, "Schema command requires a subcommand: show, init, edit, annotate, export, delete, list\nTry: rdst schema --help")
+                print("Schema subcommands:")
+                print("  [1] show - Display semantic layer")
+                print("  [2] init - Initialize from database")
+                print("  [3] annotate - Add descriptions")
+                print("  [4] edit - Edit in $EDITOR")
+                try:
+                    choice = input("Select subcommand [1]: ").strip() or "1"
+                except (EOFError, KeyboardInterrupt):
+                    return RdstResult(False, "Cancelled")
+                subcommand = {"1": "show", "2": "init", "3": "annotate", "4": "edit"}.get(choice)
+                if not subcommand:
+                    return RdstResult(False, "Invalid schema subcommand")
 
             if subcommand == 'show':
                 table = kwargs.get('table')

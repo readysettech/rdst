@@ -47,8 +47,10 @@ def print_rich_help():
         ("configure", "Manage database targets and connection profiles"),
         ("top", "Live view of slow queries"),
         ("analyze", "Analyze SQL query performance"),
+        ("ask", "Ask questions about your database in natural language"),
         ("init", "First-time setup wizard"),
         ("query", "Manage saved queries (add/list/delete)"),
+        ("schema", "Manage semantic layer for your database"),
         ("report", "Submit feedback or bug reports"),
         ("howdoi", "Quick documentation lookup"),
         ("claude", "Register RDST with Claude Code (MCP)"),
@@ -583,10 +585,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         )
 
     elif command == 'schema':
-        if not hasattr(args, 'schema_subcommand') or not args.schema_subcommand:
-            return RdstResult(False, "Schema command requires a subcommand: show, init, edit, annotate, export, delete, list\nTry: rdst schema --help")
-
-        schema_subcommand = args.schema_subcommand
+        schema_subcommand = getattr(args, 'schema_subcommand', None)
         schema_kwargs = {
             'subcommand': schema_subcommand,
             'target': getattr(args, 'target', None),
@@ -792,9 +791,11 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             ("configure", "Manage database targets"),
             ("top", "Live view of slow queries"),
             ("analyze", "Analyze a SQL query"),
+            ("ask", "Ask questions in natural language"),
             ("tune", "Suggest optimizations for a SQL query"),
             ("init", "First-time setup wizard"),
             ("query", "Manage query registry"),
+            ("schema", "Manage semantic layer"),
             ("list", "Show saved queries"),
             ("version", "Show version information"),
             ("report", "Submit feedback or bug reports"),
@@ -894,6 +895,10 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
                 return cli.query(subcommand="delete", name=queryname)
             else:
                 return RdstResult(False, "Invalid query subcommand")
+        elif cmd == "ask":
+            return cli.ask()
+        elif cmd == "schema":
+            return cli.schema()
         elif cmd == "list":
             return cli.list()
         elif cmd == "version":
@@ -904,7 +909,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
                 return RdstResult(False, "report requires a title")
             body = input("Body (optional): ").strip()
             return cli.report(title, body=body)
-        else:  # help
+        else:  # help, Exit
             return cli.help()
     except (EOFError, KeyboardInterrupt):
         return cli.help()
