@@ -5,6 +5,7 @@ rdst - Readyset Diagnostics & SQL Tuning
 A command-line interface for diagnostics, query analysis, performance tuning,
 and caching with Readyset.
 """
+import json
 import os
 import sys
 import argparse
@@ -658,7 +659,11 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
                 mcp_server_path = os.path.join(script_dir, 'mcp_server.py')
                 if not os.path.exists(mcp_server_path):
                     return RdstResult(False, f"MCP server not found at {mcp_server_path}")
-                mcp_command = ['python3', mcp_server_path]
+                # Use uv run to ensure dependencies are available, fallback to python3
+                if shutil.which('uv'):
+                    mcp_command = ['uv', 'run', '--directory', script_dir, 'python', mcp_server_path]
+                else:
+                    mcp_command = ['python3', mcp_server_path]
 
             # Install the /rdst slash command globally
             slash_cmd_content = '''# RDST Mode Activated
@@ -966,6 +971,9 @@ def main():
         if result.ok:
             if result.message:
                 print(result.message)
+            # Print JSON data if present (for --json flag on commands like top)
+            elif result.data:
+                print(json.dumps(result.data, indent=2, default=str))
 
             # Check for periodic NPS prompt (every ~100 commands)
             try:

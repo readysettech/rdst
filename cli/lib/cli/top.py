@@ -9,8 +9,11 @@ Extracted from rdst_cli.py to improve code organization and maintainability.
 from __future__ import annotations
 
 from typing import List, TYPE_CHECKING
+import logging
 import sys
 import os
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..functions.db_config_check import TargetConfig
@@ -193,6 +196,9 @@ class TopCommand:
             # 2. Process and format the results
             actual_source = data.get('source', source)  # Use actual source from execution
             processed_data = self._process_top_data(data, actual_source, limit, sort, filter_pattern)
+
+            # 2.5. Auto-save queries to registry (same as realtime mode)
+            self._auto_save_queries_to_registry(processed_data, target_config.get('name', 'default'))
 
             # 3. Output in requested format
             if json_output:
@@ -694,6 +700,27 @@ class TopCommand:
         if df.empty:
             return []
 
+        # Filter out queries with insufficient privileges (PostgreSQL permission issue)
+        # This happens when pg_stat_statements contains queries from other users
+        if 'query_text' in df.columns:
+            insufficient_mask = df['query_text'].str.contains('<insufficient', case=False, na=False)
+            insufficient_count = insufficient_mask.sum()
+            if insufficient_count > 0:
+                df = df[~insufficient_mask].copy()
+                # Only warn if ALL queries were filtered (actual permission problem)
+                if df.empty:
+                    if _RICH_AVAILABLE and self._console:
+                        self._console.print(
+                            f"[yellow]Warning:[/yellow] All {insufficient_count} queries hidden due to insufficient privileges.\n"
+                            f"[dim]To see query text, grant permissions: GRANT pg_read_all_stats TO your_user;[/dim]\n"
+                        )
+                    else:
+                        print(f"Warning: All {insufficient_count} queries hidden due to insufficient privileges.")
+                        print("To see query text, grant permissions: GRANT pg_read_all_stats TO your_user;\n")
+
+        if df.empty:
+            return []
+
         # For activity sources, remove duplicates and system noise
         if source == 'activity':
             # Remove duplicates by query_hash, keeping the longest running
@@ -797,6 +824,61 @@ class TopCommand:
             })
 
         return results
+
+    def _auto_save_queries_to_registry(self, processed_data: List[dict], target_name: str) -> int:
+        """Auto-save queries to registry (same behavior as realtime mode).
+
+        Args:
+            processed_data: List of processed query dicts from _process_top_data
+            target_name: Database target name
+
+        Returns:
+            Number of newly saved queries
+        """
+        try:
+            from ..query_registry import QueryRegistry
+        except ImportError:
+            logger.debug("QueryRegistry not available, skipping auto-save")
+            return 0
+
+        try:
+            registry = QueryRegistry()
+            registry.load()
+
+            # Get existing hashes to avoid duplicates
+            existing_hashes = set()
+            for entry in registry.list_queries():
+                existing_hashes.add(entry.hash)
+
+            newly_saved = 0
+            for query_data in processed_data:
+                query_hash = query_data.get('query_hash', '')
+                query_text = query_data.get('query_text', '')
+
+                if not query_hash or not query_text:
+                    continue
+
+                if query_hash in existing_hashes:
+                    continue
+
+                try:
+                    registry.add_query(
+                        sql=query_text,
+                        source="top-historical",
+                        target=target_name
+                    )
+                    existing_hashes.add(query_hash)
+                    newly_saved += 1
+                except ValueError as e:
+                    logger.debug("Query %s exceeds size limit: %s", query_hash[:8], e)
+                except Exception as e:
+                    logger.debug("Failed to save query %s: %s", query_hash[:8], e)
+
+            return newly_saved
+
+        except Exception as e:
+            logger.debug("Registry auto-save failed: %s", e)
+            return 0
 
     def _format_top_display(self, data: List[dict], source: str, no_color: bool, db_engine: str, target_name: str, watch_mode: bool = False) -> str:
         """Format the top queries data for display."""

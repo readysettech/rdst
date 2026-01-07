@@ -39,8 +39,25 @@ from typing import Any, Dict, List, Optional
 JSONRPC_VERSION = "2.0"
 MCP_VERSION = "2024-11-05"
 
+# Single source of truth for the slow query workflow
+SLOW_QUERY_WORKFLOW = """1. `rdst_query_list` → Check saved queries FIRST
+2. If queries exist → `rdst_analyze` with `name` parameter
+3. If empty → `rdst_top` (defaults to historical, INSTANT)
+4. ONLY if historical empty → `rdst_top` with `duration=30`
+5. Then `rdst_analyze` with `name` or `hash`
+6. If STILL no queries found → Ask user to provide a slow query, then use `rdst_analyze` with `query` parameter"""
+
+SLOW_QUERY_WORKFLOW_DETAILED = f"""### MANDATORY Workflow for Slow Query Analysis
+
+**CRITICAL: Follow this exact order. Do NOT skip steps or go straight to live monitoring.**
+
+{SLOW_QUERY_WORKFLOW}
+
+**WRONG**: Going straight to `rdst_top` without checking registry first
+**WRONG**: Suggesting users run CLI commands manually when MCP tools work"""
+
 # RDST context information for the AI
-RDST_CONTEXT = """
+RDST_CONTEXT = f"""
 ## RDST (ReadySet Diagnostics & SQL Tuning) - Context for AI Assistants
 
 ### What is RDST?
@@ -53,8 +70,37 @@ of query performance, index recommendations, and caching suggestions.
 - Upgrade: `pip install --upgrade rdst`
 - Check version: `rdst version`
 
-### Configuration Location
-- Main config: `~/.rdst/config.toml`
+{SLOW_QUERY_WORKFLOW_DETAILED}
+
+### CRITICAL: COMMAND SYNTAX
+RDST CLI uses SUBCOMMANDS (not flags):
+
+CORRECT:
+- `rdst configure list` (subcommand)
+- `rdst query list` (subcommand)
+- `rdst analyze --name my-query` (analyze saved query by name)
+- `rdst analyze --hash abc123` (analyze saved query by hash)
+- `rdst analyze -q "SELECT ..."` (analyze inline query)
+
+WRONG - DO NOT USE:
+- `rdst configure --list` (WRONG - no such flag)
+- `rdst query --list` (WRONG - no such flag)
+- `rdst analyze --query-id X` (WRONG - use --name or --hash)
+- `rdst_help` as CLI command (WRONG - MCP tool only, `rdst help` is the CLI command)
+
+### MCP Tools vs CLI Commands
+MCP tool names use underscores; CLI commands use spaces:
+- MCP `rdst_query_list` → CLI `rdst query list`
+- MCP `rdst_analyze` → CLI `rdst analyze`
+- MCP `rdst_help` → CLI `rdst help`
+
+### What is RDST?
+A CLI tool for database diagnostics and SQL optimization. Connects to PostgreSQL
+or MySQL and provides AI-powered query analysis, index recommendations, and
+caching suggestions.
+
+### Configuration
+- Config: `~/.rdst/config.toml`
 - Query registry: `~/.rdst/queries.toml`
 - Conversation history: `~/.rdst/conversations/`
 
@@ -84,33 +130,18 @@ If a command fails with authentication error, check:
 2. Is the password correct?
 3. Can the host/port be reached?
 
-### Common Workflows
+### Common CLI Workflows
 
 1. **First-time setup**: `rdst init` - Interactive wizard
 2. **Add a database target**: `rdst configure add --target NAME --engine postgresql --host HOST --port PORT --user USER --database DB --password-env VAR_NAME`
 3. **List targets**: `rdst configure list`
 4. **Analyze a query**: `rdst analyze -q "SELECT * FROM users WHERE id = 1" --target my-target`
-5. **Monitor slow queries**: `rdst top --target my-target`
-6. **Save query for later**: `rdst query add my-query -q "SELECT ..." --target my-target`
+5. **Save query for later**: `rdst query add my-query -q "SELECT ..." --target my-target`
 
-### Target Selection
-- Use `--target NAME` to specify which database to use
-- If omitted, uses the default target from config
-- List available targets with `rdst configure list`
-
-### CLI-Only Features (Interactive Terminal Required)
-These features require the user to run commands directly in their terminal:
-
-- **Natural Language to SQL**: `rdst ask "Show me top 10 customers" --target mydb`
-  Converts questions to SQL queries interactively (clarifications, execution, results)
-
-- **Schema Annotation**: `rdst schema annotate --target mydb --use-llm`
-  Interactive wizard to add table/column descriptions (AI-assisted option available)
-
-- **Schema Editing**: `rdst schema edit --target mydb`
-  Opens semantic layer YAML in $EDITOR
-
-Tell users to run these commands in their terminal when they need these features.
+### CLI-Only Features (Tell user to run in terminal)
+- `rdst ask "question" --target mydb` - Natural language to SQL
+- `rdst schema annotate --target mydb` - Add descriptions
+- `rdst schema edit --target mydb` - Edit in $EDITOR
 """
 
 
@@ -386,26 +417,47 @@ When running RDST commands without --target, this target will be used.
             "name": "rdst_analyze",
             "description": """Analyze a SQL query for performance optimization.
 
-This is the PRIMARY tool for SQL performance analysis. It:
-1. Connects to the specified database target
-2. Runs EXPLAIN ANALYZE on the query
-3. Sends the execution plan to an AI for analysis
-4. Returns recommendations for:
-   - Index improvements (with CREATE INDEX statements)
-   - Query rewrites (optimized SQL)
-   - ReadySet caching opportunities
+PREFERRED: Analyze queries from the registry using `name` or `hash` parameter.
+Call `rdst_query_list` first to see saved queries, then analyze by name/hash.
 
-IMPORTANT: After this tool returns, ALWAYS display the key findings to the user:
-- Summary of what the query does
-- Any performance issues found
-- Index recommendations (show the CREATE INDEX statements)
+INPUT OPTIONS (use ONE):
+- `name`: Analyze a saved query by name (PREFERRED)
+- `hash`: Analyze a saved query by hash (PREFERRED)
+- `query`: Analyze an inline SQL query
+
+WORKFLOW:
+1. Call `rdst_query_list` to see saved queries
+2. Call `rdst_analyze` with `name="query-name"` to analyze
+
+CLI EQUIVALENT:
+- `rdst analyze --name my-query --target mydb`
+- `rdst analyze --hash abc123 --target mydb`
+- `rdst analyze -q "SELECT ..." --target mydb`
+
+WRONG (do not use):
+- `rdst analyze --query-id X` (no such flag - use --name or --hash)
+
+WHAT IT DOES:
+1. Runs EXPLAIN ANALYZE on the query
+2. AI analyzes the execution plan
+3. Returns index recommendations, query rewrites, caching suggestions
+
+AFTER ANALYSIS: ALWAYS display the key findings to the user:
+- Performance issues found
+- CREATE INDEX statements
 - Query rewrites if suggested
 The user wants to SEE the analysis, not just know it completed.
 
 READYSET CACHING:
-If the query takes >1 second (1000ms), suggest testing ReadySet caching by setting
-readyset_cache=true. This spins up test containers to check if the query can be cached
-and shows the performance improvement.
+If the query takes >1 second (1000ms), suggest testing ReadySet caching using
+the --readyset-cache flag. This will:
+1. Pull ReadySet Docker containers (first run downloads images - may take a while)
+2. Create a test replica of the user's database schema
+3. Attempt to cache the query in ReadySet
+4. Run a performance comparison (original DB vs ReadySet cached)
+5. Show whether the query is cacheable and the speedup achieved
+
+Warn the user this process may take a while, especially on first run.
 
 PREREQUISITES:
 - A database target must be configured (use rdst_configure_add first)
@@ -419,9 +471,17 @@ COMMON ISSUES:
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Query name from registry (PREFERRED - call rdst_query_list first)"
+                    },
+                    "hash": {
+                        "type": "string",
+                        "description": "Query hash from registry (alternative to name)"
+                    },
                     "query": {
                         "type": "string",
-                        "description": "The SQL query to analyze"
+                        "description": "Inline SQL query (use name/hash for saved queries instead)"
                     },
                     "target": {
                         "type": "string",
@@ -435,10 +495,14 @@ COMMON ISSUES:
                         "type": "boolean",
                         "description": """Test if this query can be cached by ReadySet and show performance improvement.
 
-Spins up local Docker containers (test DB + ReadySet), tests if the query is cacheable,
-and runs a performance comparison. Takes 30-60 seconds first time (reuses containers after).
+This process:
+1. Pulls ReadySet Docker containers (first run downloads images - may take a while)
+2. Creates a test replica of the user's database schema
+3. Attempts to cache the query in ReadySet
+4. Runs a performance comparison (original DB vs ReadySet cached)
 
 REQUIRES: Docker installed and running. If Docker error, tell user to install Docker Desktop.
+WARNING: This may take a while, especially on first run. Warn the user before running.
 
 OUTPUT INCLUDES:
 - Whether query is cacheable (and the reason if not)
@@ -446,29 +510,36 @@ OUTPUT INCLUDES:
 - CREATE CACHE command for production deployment"""
                     }
                 },
-                "required": ["query"]
+                "required": []
             }
         },
         {
             "name": "rdst_top",
-            "description": """Show top slow queries from the database.
+            "description": """Capture slow queries from the database.
 
-IMPORTANT: This tool runs for 10 seconds by default (or the specified duration)
-to collect query statistics. TELL THE USER: "Running top for X seconds to collect
-query data..." BEFORE calling this tool so they know to wait.
+DEFAULT: Historical mode (instant results from pg_stat_statements).
+Only use `duration` parameter as fallback when historical returns nothing.
 
-Monitors database query performance by polling active queries.
-For PostgreSQL, uses pg_stat_activity.
-For MySQL, uses performance_schema.
+DATA SOURCES:
+- **Historical mode** (default, instant): Queries pg_stat_statements (PostgreSQL) or
+  performance_schema.events_statements_summary_by_digest (MySQL). Shows aggregated
+  statistics of ALL queries that have run since stats were last reset.
+- **Live monitoring mode** (with duration): Polls pg_stat_activity (PostgreSQL) or
+  INFORMATION_SCHEMA.PROCESSLIST (MySQL) repeatedly. Only captures queries actively
+  running during the monitoring window - fast queries may be missed.
 
 OUTPUT INCLUDES (JSON):
 - query_hash: Unique identifier for the query pattern
 - normalized_query: Query with parameters replaced by $1, $2, etc.
 - max_duration_ms: Slowest observed execution
 - avg_duration_ms: Average execution time
-- observation_count: How many times query was seen running
+- observation_count: How many times query was seen (historical) or caught running (live)
+
+If using duration, tell user "Monitoring for N seconds..." BEFORE calling.
 
 Use this to identify which queries to optimize with rdst_analyze.
+
+Captured queries auto-save to registry for later analysis with rdst_analyze.
 """,
             "inputSchema": {
                 "type": "object",
@@ -659,12 +730,9 @@ The env var persists for the lifetime of this MCP session.
         },
         {
             "name": "rdst_help",
-            "description": """START HERE - Get RDST status and guidance for helping the user.
+            "description": """Get RDST status and configured targets.
 
-This is the PRIMARY entry point for RDST. Call this tool FIRST when:
-- User mentions database optimization, slow queries, or performance
-- User asks about RDST or their database configuration
-- User wants help but you're not sure what they need
+MCP-only tool (no CLI equivalent). Shows configured database targets and setup status.
 
 This tool:
 1. Reads the user's RDST configuration
@@ -676,14 +744,6 @@ After calling this tool, you'll know:
 - Which database targets are available
 - Which ones are ready to use (env vars set)
 - What actions you can take to help the user
-
-Example usage flow:
-1. User says "my database is slow"
-2. You call rdst_help() to understand their setup
-3. Based on the result, you either:
-   - Use rdst_top to find slow queries (if targets are ready)
-   - Guide them to export missing password env vars
-   - Help them add a database target if none configured
 """,
             "inputSchema": {
                 "type": "object",
@@ -971,7 +1031,21 @@ Required environment variable: {api_key_info.get(provider, 'Check provider docs'
         return run_rdst_command(["configure", "default", arguments["target"]])
 
     elif name == "rdst_analyze":
-        args = ["analyze", "-q", arguments["query"]]
+        args = ["analyze"]
+        # Support three input modes: name, hash, or inline query
+        if "name" in arguments:
+            args.extend(["--name", arguments["name"]])
+        elif "hash" in arguments:
+            args.extend(["--hash", arguments["hash"]])
+        elif "query" in arguments:
+            args.extend(["-q", arguments["query"]])
+        else:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": "Must provide one of: name (preferred), hash, or query. Call rdst_query_list first to see saved queries.",
+                "returncode": 1
+            }
         if "target" in arguments:
             args.extend(["--target", arguments["target"]])
         if arguments.get("fast"):
@@ -982,9 +1056,17 @@ Required environment variable: {api_key_info.get(provider, 'Check provider docs'
 
     elif name == "rdst_top":
         # Always use --json for MCP (no interactive TUI in subprocess)
-        # Default to 10 seconds if duration not specified
-        duration = arguments.get("duration", 10)
-        args = ["top", "--json", "--duration", str(duration)]
+        args = ["top", "--json"]
+
+        # WORKFLOW: Default to historical mode for instant results
+        # Only use duration-based live monitoring when explicitly requested
+        if arguments.get("historical") or "duration" not in arguments:
+            # Historical mode: instant results from pg_stat_statements
+            args.append("--historical")
+        else:
+            # Live monitoring: duration must be explicitly specified
+            args.extend(["--duration", str(arguments["duration"])])
+
         if "target" in arguments:
             args.extend(["--target", arguments["target"]])
         if "limit" in arguments:
@@ -993,8 +1075,6 @@ Required environment variable: {api_key_info.get(provider, 'Check provider docs'
             args.extend(["--sort", arguments["sort"]])
         if "filter" in arguments:
             args.extend(["--filter", arguments["filter"]])
-        if arguments.get("historical"):
-            args.append("--historical")
         return run_rdst_command(args)
 
     elif name == "rdst_query_add":
