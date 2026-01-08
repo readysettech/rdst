@@ -1,6 +1,6 @@
-# RDST - ReadySet Diagnostics & SQL Tuning
+# RDST - Readyset Data and SQL Toolkit
 
-A command-line tool for database diagnostics, query analysis, performance tuning, and caching optimization with ReadySet.
+A command-line tool for database diagnostics, query analysis, performance tuning, and caching optimization with Readyset.
 
 ## What is RDST?
 
@@ -8,7 +8,7 @@ RDST helps you:
 - Analyze SQL queries for caching opportunities
 - Identify slow queries in real-time
 - Get optimization suggestions
-- Evaluate query compatibility with ReadySet cache
+- Evaluate query compatibility with Readyset cache
 - Manage database connection profiles
 
 ## Installation
@@ -43,6 +43,8 @@ pipx upgrade rdst
 pip install rdst
 ```
 
+> **After installing**, run `rdst init` to configure your first database connection.
+
 ## Quick Start
 
 1. **Initialize RDST:**
@@ -69,7 +71,7 @@ pip install rdst
    # With uvx:
    uvx rdst analyze "SELECT * FROM users WHERE active = true"
 
-   # Analyze with ReadySet cache evaluation
+   # Analyze with Readyset cache evaluation
    rdst analyze --readyset-cache "SELECT * FROM products ORDER BY created_at"
    ```
 
@@ -101,13 +103,13 @@ uvx rdst analyze "SELECT * FROM orders WHERE status = 'pending'"
 - Python 3.11 or higher
 - PostgreSQL or MySQL database access
 
-## About ReadySet
+## About Readyset
 
-ReadySet is a SQL caching engine that sits between your application and database, automatically caching query results to improve performance. Learn more at [readyset.io](https://readyset.io).
+Readyset is a SQL caching engine that sits between your application and database, automatically caching query results to improve performance. Learn more at [readyset.io](https://readyset.io).
 
 ## Documentation
 
-- [ReadySet Documentation](https://docs.readyset.io)
+- [Readyset Documentation](https://docs.readyset.io)
 - [GitHub Repository](https://github.com/readysettech/readyset)
 - [Report Issues](https://github.com/readysettech/readyset/issues)
 

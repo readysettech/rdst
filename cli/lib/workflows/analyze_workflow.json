@@ -71,7 +71,8 @@
             "Parameters": {
                 "sql": "{{$.query}}",
                 "target": "{{$.target}}",
-                "target_config": "{{$.target_config}}"
+                "target_config": "{{$.target_config}}",
+                "fast_mode": "{{$.fast_mode}}"
             },
             "ResultPath": "$.explain_results",
             "Next": "CheckExplainSuccess",
@@ -80,7 +81,7 @@
                 "IntervalSeconds": 1,
                 "BackoffRate": 2.0
             },
-            "TimeoutSeconds": 30
+            "TimeoutSeconds": 660
         },
         "CheckExplainSuccess": {
             "Type": "Choice",

@@ -55,7 +55,7 @@ class CacheCommand:
         try:
             output_lines = []
             output_lines.append("=" * 70)
-            output_lines.append("ReadySet Cache Performance Analysis")
+            output_lines.append("Readyset Cache Performance Analysis")
             output_lines.append("=" * 70)
             output_lines.append("")
 
@@ -108,7 +108,7 @@ class CacheCommand:
                     for warning in static_result['warnings']:
                         output_lines.append(f"  ⚠ {warning}")
             else:
-                output_lines.append("✗ Query is NOT cacheable by ReadySet")
+                output_lines.append("✗ Query is NOT cacheable by Readyset")
                 if static_result.get('issues'):
                     for issue in static_result['issues']:
                         output_lines.append(f"  • {issue}")
@@ -124,8 +124,8 @@ class CacheCommand:
             if password_env:
                 password = os.environ.get(password_env, '')
 
-            # Step 3: Setup test database and ReadySet containers
-            output_lines.append("Step 3: Setting up Test Database and ReadySet")
+            # Step 3: Setup test database and Readyset containers
+            output_lines.append("Step 3: Setting up Test Database and Readyset")
             output_lines.append("-" * 70)
 
             from .readyset_setup import setup_readyset_containers
@@ -145,11 +145,11 @@ class CacheCommand:
             readyset_port = setup_result["readyset_port"]
             readyset_host = setup_result["readyset_host"]
 
-            output_lines.append("✓ Test database and ReadySet containers ready")
+            output_lines.append("✓ Test database and Readyset containers ready")
             output_lines.append("")
 
-            # Step 4: Cache the query in ReadySet
-            output_lines.append("Step 4: Creating Cache in ReadySet")
+            # Step 4: Cache the query in Readyset
+            output_lines.append("Step 4: Creating Cache in Readyset")
             output_lines.append("-" * 70)
 
             # Get test_db_config from setup result
@@ -167,7 +167,7 @@ class CacheCommand:
             )
 
             if not explain_result.get('success') or not explain_result.get('cacheable'):
-                output_lines.append(f"✗ ReadySet cannot cache this query")
+                output_lines.append(f"✗ Readyset cannot cache this query")
                 if explain_result.get('explanation'):
                     output_lines.append(f"  {explain_result['explanation']}")
                 return RdstResult(False, "\n".join(output_lines))
@@ -183,16 +183,16 @@ class CacheCommand:
                 output_lines.append(f"✗ Failed to create cache: {create_result.get('error')}")
                 return RdstResult(False, "\n".join(output_lines))
 
-            output_lines.append("✓ Cache created successfully in ReadySet")
+            output_lines.append("✓ Cache created successfully in Readyset")
             output_lines.append("")
 
             # Step 5: Performance comparison
-            output_lines.append("Step 5: Performance Comparison (Target DB vs ReadySet)")
+            output_lines.append("Step 5: Performance Comparison (Target DB vs Readyset)")
             output_lines.append("-" * 70)
             output_lines.append("")
 
             # Use the original target DB configuration (production database)
-            # NOT the test database - we want to compare prod DB vs ReadySet with cache
+            # NOT the test database - we want to compare prod DB vs Readyset with cache
             original_db_config = {
                 'engine': target_config.get('engine', 'postgresql'),
                 'host': target_config.get('host', 'localhost'),
@@ -223,7 +223,7 @@ class CacheCommand:
             output_lines.append("Step 6: Deployment Instructions")
             output_lines.append("-" * 70)
             output_lines.append("")
-            output_lines.append("To cache this query in your ReadySet instance:")
+            output_lines.append("To cache this query in your Readyset instance:")
             output_lines.append("")
 
             # Generate the CREATE CACHE command
@@ -234,7 +234,7 @@ class CacheCommand:
                 output_lines.append(f"CREATE CACHE FROM {resolved_query};")
 
             output_lines.append("")
-            output_lines.append("Connect to your ReadySet and run this command:")
+            output_lines.append("Connect to your Readyset and run this command:")
             if target_config.get('engine') == 'mysql':
                 output_lines.append(f"  mysql -h YOUR_READYSET_HOST -P YOUR_READYSET_PORT -u {target_config['user']} -D {target_config['database']}")
             else:

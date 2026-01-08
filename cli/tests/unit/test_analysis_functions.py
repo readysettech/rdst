@@ -127,8 +127,8 @@ class TestCollectTargetSchema:
         assert "Unsupported" in result
 
 
-class TestReadySetCacheability:
-    """Tests for ReadySet cacheability checking."""
+class TestReadysetCacheability:
+    """Tests for Readyset cacheability checking."""
 
     def test_empty_query(self):
         """Test empty query is not cacheable."""
@@ -414,7 +414,7 @@ class TestFormatPerformanceComparison:
         assert "Test error" in formatted
 
     def test_format_success_readyset_faster(self):
-        """Test formatting when ReadySet is faster."""
+        """Test formatting when Readyset is faster."""
         result = {
             "success": True,
             "original": {
@@ -454,7 +454,7 @@ class TestFormatPerformanceComparison:
         formatted = format_performance_comparison(result)
 
         assert "Performance Comparison" in formatted
-        assert "ReadySet" in formatted
+        assert "Readyset" in formatted
         assert "10.0x faster" in formatted or "10.00x faster" in formatted
 
     def test_format_success_original_faster(self):

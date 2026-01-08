@@ -1,4 +1,4 @@
-# RDST - ReadySet Diagnostics & SQL Tuning
+# RDST - Readyset Data and SQL Toolkit
 
 ## Quick Reference
 

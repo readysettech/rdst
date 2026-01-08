@@ -72,7 +72,7 @@ COMMAND_SETS = {
         'override': True,
         'commands': {
             'readyset_status': {
-                'description': 'Get ReadySet status',
+                'description': 'Get Readyset status',
                 'query': "SHOW READYSET STATUS;",
                 'supports_latency_timing': True,
                 'default_interval_ms': 30000,
@@ -87,7 +87,7 @@ COMMAND_SETS = {
         'sync_interval': 300000,
         'commands': {
             'readyset_version': {
-                'description': 'Get ReadySet version',
+                'description': 'Get Readyset version',
                 'query': "SHOW READYSET VERSION;",
                 'default_interval_ms': 300000
             }
@@ -407,17 +407,17 @@ COMMAND_SETS = {
                 'default_interval_ms': 60000
             },
             'readyset_disk_used_bytes': {
-                'description': 'Get ReadySet disk space used in bytes',
+                'description': 'Get Readyset disk space used in bytes',
                 'query': "printf 'readyset_disk_used_bytes,%d' $(df -B1 /readyset 2>/dev/null | awk 'NR==2{print $3}' || echo 0)",
                 'default_interval_ms': 60000
             },
             'readyset_disk_total_bytes': {
-                'description': 'Get total ReadySet disk space in bytes',
+                'description': 'Get total Readyset disk space in bytes',
                 'query': "printf 'readyset_disk_total_bytes,%d' $(df -B1 /readyset 2>/dev/null | awk 'NR==2{print $2}' || echo 0)",
                 'default_interval_ms': 60000
             },
             'readyset_free_disk_space_bytes': {
-                'description': 'Get ReadySet free disk space in bytes',
+                'description': 'Get Readyset free disk space in bytes',
                 'query': "printf 'readyset_free_disk_space_bytes,%d' $(df -B1 /readyset 2>/dev/null | awk 'NR==2{print $4}' || echo 0)",
                 'default_interval_ms': 60000
             },
@@ -473,12 +473,12 @@ COMMAND_SETS = {
                 'default_interval_ms': 60000
             },
             'readyset_cpu': {
-                'description': 'Get ReadySet CPU usage percentage',
+                'description': 'Get Readyset CPU usage percentage',
                 'query': "printf 'readyset_cpu,%s' $(ps -eo comm,%cpu | grep -i readyset | head -1 | awk '{print $2}' || echo 0)",
                 'default_interval_ms': 30000
             },
             'readyset_memory_mb': {
-                'description': 'Get ReadySet memory usage in MB',
+                'description': 'Get Readyset memory usage in MB',
                 'query': "printf 'readyset_memory_mb,%d' $(ps -eo comm,rss | grep -i readyset | head -1 | awk '{printf \"%.0f\", $2/1024}' || echo 0)",
                 'default_interval_ms': 30000
             },

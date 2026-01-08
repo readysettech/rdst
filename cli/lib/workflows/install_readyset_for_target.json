@@ -1,5 +1,5 @@
 {
-    "Comment": "Setup Test Database for ReadySet Cacheability Analysis",
+    "Comment": "Setup Test Database for Readyset Cacheability Analysis",
     "StartAt": "GetTargetConfig",
     "States": {
         "GetTargetConfig": {
@@ -123,9 +123,9 @@
                 "container_name": "{{container_start.container_name}}"
             },
             "ResultPath": "$.data_load_result",
-            "Next": "StartReadySetContainer"
+            "Next": "StartReadysetContainer"
         },
-        "StartReadySetContainer": {
+        "StartReadysetContainer": {
             "Type": "Task",
             "Resource": "start_readyset_container",
             "Parameters": {
@@ -135,9 +135,9 @@
                 "readyset_container_name": "{{readyset_container_name}}"
             },
             "ResultPath": "$.readyset_container",
-            "Next": "WaitForReadySetReady"
+            "Next": "WaitForReadysetReady"
         },
-        "WaitForReadySetReady": {
+        "WaitForReadysetReady": {
             "Type": "Task",
             "Resource": "wait_for_readyset_ready",
             "Parameters": {

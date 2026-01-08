@@ -99,10 +99,10 @@ test_analyze_interactive_flag() {
 test_readyset_flag() {
   log_section "4. Analyze with --readyset Flag (${DB_ENGINE})"
 
-  # Note: --readyset flag requires a running ReadySet container
-  # Cache tests have already created ReadySet containers we can use
+  # Note: --readyset flag requires a running Readyset container
+  # Cache tests have already created Readyset containers we can use
 
-  # Use simple queries that ReadySet can cache (equality comparisons)
+  # Use simple queries that Readyset can cache (equality comparisons)
   local simple_query="SELECT * FROM title_basics WHERE tconst = 'tt0000005'"
 
   run_cmd "Analyze with --readyset using SQL text" \
@@ -111,8 +111,8 @@ test_readyset_flag() {
     --readyset \
     --query "$simple_query"
   assert_contains "RDST Query Analysis" "analyze --readyset should show analysis"
-  # Check that ReadySet analysis was attempted (may succeed or fail gracefully)
-  assert_regex "READYSET|ReadySet|readyset" "analyze --readyset should mention ReadySet"
+  # Check that Readyset analysis was attempted (may succeed or fail gracefully)
+  assert_regex "READYSET|Readyset|readyset" "analyze --readyset should mention Readyset"
 
   # Store query to get hash for next test
   local READYSET_HASH
@@ -122,7 +122,7 @@ test_readyset_flag() {
   run_cmd "Analyze with --readyset using hash (${READYSET_HASH})" \
     "${RDST_CMD[@]}" analyze --readyset "$READYSET_HASH"
   assert_contains "RDST Query Analysis" "analyze --readyset by hash should run analysis"
-  assert_regex "READYSET|ReadySet|readyset" "analyze --readyset by hash should mention ReadySet"
+  assert_regex "READYSET|Readyset|readyset" "analyze --readyset by hash should mention Readyset"
 
   run_cmd "Analyze with --readyset and save tag" \
     "${RDST_CMD[@]}" analyze \
@@ -131,12 +131,12 @@ test_readyset_flag() {
     --save-as "readyset-test" \
     --query "SELECT * FROM title_basics WHERE tconst = 'tt0000006'"
   assert_contains "RDST Query Analysis" "analyze --readyset with tag should run analysis"
-  assert_regex "READYSET|ReadySet|readyset" "analyze --readyset with tag should mention ReadySet"
+  assert_regex "READYSET|Readyset|readyset" "analyze --readyset with tag should mention Readyset"
 
   run_cmd "Analyze with --readyset using name" \
     "${RDST_CMD[@]}" analyze --readyset --name "readyset-test"
   assert_contains "RDST Query Analysis" "analyze --readyset by name should run analysis"
-  assert_regex "READYSET|ReadySet|readyset" "analyze --readyset by name should mention ReadySet"
+  assert_regex "READYSET|Readyset|readyset" "analyze --readyset by name should mention Readyset"
 
   # Test with a basic SELECT to verify functionality
   run_cmd "Analyze with --readyset using basic query" \
@@ -145,5 +145,5 @@ test_readyset_flag() {
     --readyset \
     --query "SELECT * FROM title_basics WHERE tconst = 'tt0000007' LIMIT 1"
   assert_contains "RDST Query Analysis" "basic query should run analysis"
-  # Just verify the command ran - ReadySet analysis may or may not succeed
+  # Just verify the command ran - Readyset analysis may or may not succeed
 }

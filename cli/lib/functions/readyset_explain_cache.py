@@ -13,26 +13,26 @@ def explain_create_cache_readyset(
     **kwargs
 ) -> Dict[str, Any]:
     """
-    Execute EXPLAIN CREATE CACHE against ReadySet instance.
+    Execute EXPLAIN CREATE CACHE against Readyset instance.
 
-    This determines real cacheability from the actual ReadySet container,
+    This determines real cacheability from the actual Readyset container,
     not static analysis.
 
     Args:
         query: SQL query to test
-        readyset_port: Port where ReadySet is listening
-        readyset_host: Host where ReadySet is running
+        readyset_port: Port where Readyset is listening
+        readyset_host: Host where Readyset is running
         test_db_config: Test database configuration (for connection info)
         **kwargs: Additional workflow parameters
 
     Returns:
-        Dict containing cacheability results from ReadySet
+        Dict containing cacheability results from Readyset
     """
     try:
         if not query:
             return {
                 "success": False,
-                "error": "No query provided for ReadySet analysis"
+                "error": "No query provided for Readyset analysis"
             }
 
         # Parse test_db_config if it's a JSON string
@@ -50,7 +50,7 @@ def explain_create_cache_readyset(
         # Build EXPLAIN CREATE CACHE command
         explain_query = f"EXPLAIN CREATE CACHE FROM {query}"
 
-        print(f"Running EXPLAIN CREATE CACHE against ReadySet on port {readyset_port}...")
+        print(f"Running EXPLAIN CREATE CACHE against Readyset on port {readyset_port}...")
 
         if engine == 'mysql':
             result = _run_explain_mysql(
@@ -76,14 +76,14 @@ def explain_create_cache_readyset(
             return {
                 "success": False,
                 "cacheable": False,
-                "error": f"ReadySet EXPLAIN CREATE CACHE failed: {result.stderr}",
+                "error": f"Readyset EXPLAIN CREATE CACHE failed: {result.stderr}",
                 "query": query
             }
 
-        # Parse ReadySet response
+        # Parse Readyset response
         output = result.stdout.strip()
 
-        # ReadySet returns tab-separated output with format:
+        # Readyset returns tab-separated output with format:
         # query_id\tproxied_query\treadyset_supported
         cacheable = False
         confidence = "unknown"
@@ -102,25 +102,25 @@ def explain_create_cache_readyset(
                 query_id = parts[0].strip()
                 readyset_supported = parts[2].lower().strip()
 
-                # Check if ReadySet supports this query
+                # Check if Readyset supports this query
                 if readyset_supported == 'yes':
                     cacheable = True
                     confidence = "high"
-                    explanation = f"ReadySet can cache this query (query_id: {query_id})"
+                    explanation = f"Readyset can cache this query (query_id: {query_id})"
                 elif readyset_supported == 'cached':
                     cacheable = True
                     confidence = "high"
-                    explanation = f"Query is already cached in ReadySet (query_id: {query_id})"
+                    explanation = f"Query is already cached in Readyset (query_id: {query_id})"
                 elif readyset_supported == 'no':
                     cacheable = False
                     confidence = "high"
-                    explanation = "ReadySet does not support caching this query"
-                    issues.append("Query pattern not supported by ReadySet")
+                    explanation = "Readyset does not support caching this query"
+                    issues.append("Query pattern not supported by Readyset")
                 else:
                     # Unknown support status
                     cacheable = False
                     confidence = "low"
-                    explanation = f"Unknown ReadySet support status: {readyset_supported}"
+                    explanation = f"Unknown Readyset support status: {readyset_supported}"
             else:
                 # Unexpected format
                 cacheable = False
@@ -130,17 +130,17 @@ def explain_create_cache_readyset(
         elif "successfully" in output.lower() or "created" in output.lower():
             cacheable = True
             confidence = "high"
-            explanation = "ReadySet successfully validated CREATE CACHE statement."
+            explanation = "Readyset successfully validated CREATE CACHE statement."
         elif "unsupported" in output.lower():
             cacheable = False
             confidence = "high"
-            issues.append(f"ReadySet does not support this query pattern")
+            issues.append(f"Readyset does not support this query pattern")
             explanation = issues[0]
         elif "error" in output.lower() or "failed" in output.lower():
             cacheable = False
             confidence = "high"
             # Extract error details
-            issues.append(f"ReadySet error: {output}")
+            issues.append(f"Readyset error: {output}")
             explanation = issues[0]
         else:
             # Try to parse as JSON
@@ -182,7 +182,7 @@ def explain_create_cache_readyset(
         return {
             "success": False,
             "cacheable": False,
-            "error": "ReadySet EXPLAIN CREATE CACHE timed out",
+            "error": "Readyset EXPLAIN CREATE CACHE timed out",
             "query": query
         }
     except Exception as e:
@@ -202,7 +202,7 @@ def _run_explain_postgres(
     database: str,
     password: str
 ):
-    """Execute EXPLAIN CREATE CACHE using psql against a PostgreSQL ReadySet endpoint."""
+    """Execute EXPLAIN CREATE CACHE using psql against a PostgreSQL Readyset endpoint."""
     # Try using psycopg2 library first
     try:
         import psycopg2
@@ -232,7 +232,7 @@ def _run_explain_postgres(
     import os
     env = os.environ.copy()
     # Set PGPASSWORD even if empty to prevent interactive prompts
-    # ReadySet typically doesn't require authentication
+    # Readyset typically doesn't require authentication
     env['PGPASSWORD'] = password if password else ''
 
     return subprocess.run(
@@ -307,7 +307,7 @@ def _run_explain_mysql(
     database: str,
     password: str
 ):
-    """Execute EXPLAIN CREATE CACHE using mysql client against a MySQL ReadySet endpoint."""
+    """Execute EXPLAIN CREATE CACHE using mysql client against a MySQL Readyset endpoint."""
     # Ensure TCP is used even if host is "localhost"
     normalized_host = host or "127.0.0.1"
     if normalized_host == "localhost":
@@ -418,12 +418,12 @@ def create_cache_readyset(
     **kwargs
 ) -> Dict[str, Any]:
     """
-    Execute CREATE CACHE to actually cache a query in ReadySet.
+    Execute CREATE CACHE to actually cache a query in Readyset.
 
     Args:
         query: SQL query to cache
-        readyset_port: Port where ReadySet is listening
-        readyset_host: Host where ReadySet is running
+        readyset_port: Port where Readyset is listening
+        readyset_host: Host where Readyset is running
         test_db_config: Test database configuration (for connection info)
         **kwargs: Additional workflow parameters
 
@@ -452,7 +452,7 @@ def create_cache_readyset(
         # Build CREATE CACHE command
         cache_query = f"CREATE CACHE FROM {query}"
 
-        print(f"Creating cache in ReadySet on port {readyset_port}...")
+        print(f"Creating cache in Readyset on port {readyset_port}...")
 
         if engine == 'mysql':
             result = _run_cache_mysql(
@@ -482,7 +482,7 @@ def create_cache_readyset(
                 "query": query
             }
 
-        # Parse ReadySet response
+        # Parse Readyset response
         output = result.stdout.strip()
 
         # Check for success indicators
@@ -526,7 +526,7 @@ def _run_cache_postgres(
     database: str,
     password: str
 ):
-    """Execute CREATE CACHE using psql against a PostgreSQL ReadySet endpoint."""
+    """Execute CREATE CACHE using psql against a PostgreSQL Readyset endpoint."""
     # Try using psycopg2 library first
     try:
         import psycopg2
@@ -556,7 +556,7 @@ def _run_cache_postgres(
     import os
     env = os.environ.copy()
     # Set PGPASSWORD even if empty to prevent interactive prompts
-    # ReadySet typically doesn't require authentication
+    # Readyset typically doesn't require authentication
     env['PGPASSWORD'] = password if password else ''
 
     return subprocess.run(
@@ -625,7 +625,7 @@ def _run_cache_mysql(
     database: str,
     password: str
 ):
-    """Execute CREATE CACHE using mysql client against a MySQL ReadySet endpoint."""
+    """Execute CREATE CACHE using mysql client against a MySQL Readyset endpoint."""
     # Ensure TCP is used even if host is "localhost"
     normalized_host = host or "127.0.0.1"
     if normalized_host == "localhost":

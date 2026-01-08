@@ -35,6 +35,7 @@
             "Parameters": {
                 "sql": "{{query}}",
                 "target": "{{target}}",
+                "target_config": "{{target_config}}",
                 "fast_mode": "{{fast_mode}}"
             },
             "ResultPath": "$.explain_results",
@@ -104,10 +105,10 @@
                 "baseline_result": "{{explain_results}}"
             },
             "ResultPath": "$.rewrite_test_results",
-            "Next": "CheckReadySetCacheability",
+            "Next": "CheckReadysetCacheability",
             "TimeoutSeconds": 300
         },
-        "CheckReadySetCacheability": {
+        "CheckReadysetCacheability": {
             "Type": "Task",
             "Resource": "check_readyset_cacheability",
             "Parameters": {

@@ -6,9 +6,9 @@ import socket
 
 
 """
-Shared ReadySet Container Setup Utilities
+Shared Readyset Container Setup Utilities
 
-Provides reusable functions for setting up test database and ReadySet containers
+Provides reusable functions for setting up test database and Readyset containers
 across different commands (analyze, cache, etc.).
 """
 
@@ -77,11 +77,11 @@ def setup_readyset_containers(
     llm_model: str = None  # Use provider's default model
 ) -> Dict[str, Any]:
     """
-    Set up test database and ReadySet containers for a target database.
+    Set up test database and Readyset containers for a target database.
 
     This function handles the complete workflow to:
     1. Start a test database container (PostgreSQL or MySQL) with the same schema as target
-    2. Start a ReadySet container connected to the test database
+    2. Start a Readyset container connected to the test database
     3. Wait for both containers to be ready
     4. Return configuration for connecting to both containers
 
@@ -95,10 +95,10 @@ def setup_readyset_containers(
         Dict containing:
             - success: bool - Whether setup succeeded
             - target_config: dict - Test database connection config
-            - readyset_port: int - Port where ReadySet is listening
-            - readyset_host: str - Host where ReadySet is running
+            - readyset_port: int - Port where Readyset is listening
+            - readyset_host: str - Host where Readyset is running
             - container_name: str - Test database container name
-            - readyset_container_name: str - ReadySet container name
+            - readyset_container_name: str - Readyset container name
             - error: str - Error message if setup failed (only if success=False)
 
     Example:
@@ -111,7 +111,7 @@ def setup_readyset_containers(
         from ..workflow_manager.workflow_manager import WorkflowManager, DEFAULT_FUNCTIONS
         from ..functions import DATABASE_SETUP_FUNCTIONS, READYSET_FUNCTIONS
         from ..functions.readyset_container import check_readyset_container_status
-        import subprocess  # nosemgrep: gitlab.bandit.B404 - subprocess used for ReadySet container status checks only
+        import subprocess  # nosemgrep: gitlab.bandit.B404 - subprocess used for Readyset container status checks only
 
         # Get database engine from target config
         engine = target_config.get("engine", "postgresql").lower()
@@ -164,7 +164,7 @@ def setup_readyset_containers(
         readyset_running = readyset_status.get("running", False)
 
         if test_db_running and readyset_running:
-            print(f"✓ Test database and ReadySet containers already running for '{target_name}'")
+            print(f"✓ Test database and Readyset containers already running for '{target_name}'")
 
             # Get actual ports from running containers
             test_port_result = subprocess.run(
@@ -188,7 +188,7 @@ def setup_readyset_containers(
                         actual_test_port = int(line.split(':')[-1])
                         break
 
-            # Parse actual ReadySet port
+            # Parse actual Readyset port
             actual_readyset_port = readyset_port  # fallback
             if readyset_port_result.returncode == 0:
                 for line in readyset_port_result.stdout.strip().split('\n'):
@@ -245,20 +245,20 @@ def setup_readyset_containers(
                 "already_running": True
             }
 
-        # Set up workflow manager with ReadySet functions
+        # Set up workflow manager with Readyset functions
         workflow_functions = {
             **DEFAULT_FUNCTIONS,
             **DATABASE_SETUP_FUNCTIONS,
             **READYSET_FUNCTIONS,
         }
 
-        # Load the ReadySet setup workflow
+        # Load the Readyset setup workflow
         workflow_path = Path(__file__).parent.parent / "workflows" / "install_readyset_for_target.json"
 
         if not workflow_path.exists():
             return {
                 "success": False,
-                "error": f"ReadySet workflow file not found: {workflow_path}"
+                "error": f"Readyset workflow file not found: {workflow_path}"
             }
 
         mgr = WorkflowManager.from_file(str(workflow_path), resources=workflow_functions)
@@ -278,14 +278,14 @@ def setup_readyset_containers(
             "llm_model": llm_model,
         }
 
-        # Run the ReadySet setup workflow
-        print(f"Setting up test database and ReadySet containers for '{target_name}'...")
+        # Run the Readyset setup workflow
+        print(f"Setting up test database and Readyset containers for '{target_name}'...")
         setup_result = mgr.run(readyset_input)
 
         if not setup_result:
             return {
                 "success": False,
-                "error": "ReadySet setup workflow failed to return results"
+                "error": "Readyset setup workflow failed to return results"
             }
 
         # Extract configuration from workflow results
@@ -306,13 +306,13 @@ def setup_readyset_containers(
     except Exception as e:
         return {
             "success": False,
-            "error": f"Failed to setup ReadySet containers: {str(e)}"
+            "error": f"Failed to setup Readyset containers: {str(e)}"
         }
 
 
 def get_container_ports(engine: str, find_available: bool = False) -> tuple[int, int]:
     """
-    Get the test database and ReadySet ports for a given database engine.
+    Get the test database and Readyset ports for a given database engine.
 
     Args:
         engine: Database engine ("mysql" or "postgresql")
@@ -340,7 +340,7 @@ def get_container_ports(engine: str, find_available: bool = False) -> tuple[int,
 
 def get_container_names(target_name: str, engine: str) -> tuple[str, str]:
     """
-    Get the container names for test database and ReadySet containers.
+    Get the container names for test database and Readyset containers.
 
     Args:
         target_name: Name of the target database

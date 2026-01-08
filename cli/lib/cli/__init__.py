@@ -2,7 +2,7 @@
 rdst CLI stubs package
 
 This package provides a modern, extensible interface surface for a future CLI
-that will control and inspect the ReadySet Cloud Agent. It purposefully exports
+that will control and inspect the Readyset Cloud Agent. It purposefully exports
 lightweight stubs that can be wired up to the concrete cloud agent modules.
 
 Key goals:

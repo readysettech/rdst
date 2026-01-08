@@ -127,7 +127,7 @@ TMP_HOME="$(mktemp -d)"
 TMP_RUN="$(mktemp -d)"
 export HOME="$TMP_HOME"
 
-# ReadySet container configuration
+# Readyset container configuration
 READYSET_CONTAINER_NAME="rdst-integration-test-readyset"
 READYSET_PORT="${READYSET_PORT:-5433}"
 

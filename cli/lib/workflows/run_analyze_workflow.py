@@ -63,11 +63,11 @@ def run_analyze_workflow(query: str, target: str = None, test_rewrites: bool = T
             **DEFAULT_FUNCTIONS,  # Built-in workflow functions
             **ANALYZE_WORKFLOW_FUNCTIONS,  # Our analyze functions
             **DATABASE_SETUP_FUNCTIONS,  # Database setup functions
-            **READYSET_FUNCTIONS,  # ReadySet container functions
+            **READYSET_FUNCTIONS,  # Readyset container functions
         }
 
         # Load workflow definition - use simple workflow for analysis only
-        # Note: ReadySet parallelization is handled at the CLI level via ThreadPoolExecutor
+        # Note: Readyset parallelization is handled at the CLI level via ThreadPoolExecutor
         workflow_path = Path(__file__).parent / "analyze_workflow_simple.json"
         if not workflow_path.exists():
             return {
@@ -197,10 +197,10 @@ def print_analysis_results(result: Dict[str, Any]) -> None:
             print(f"   Best rewrite: {improvement_pct:+.1f}% performance change")
         print()
 
-    # ReadySet Cacheability
+    # Readyset Cacheability
     readyset_cache = formatted_output.get("readyset_cacheability", {})
     if readyset_cache.get("checked", False):
-        print("🚀 ReadySet Cacheability:")
+        print("🚀 Readyset Cacheability:")
         if readyset_cache.get("cacheable"):
             print(f"   ✓ Query is CACHEABLE (confidence: {readyset_cache.get('confidence', 'unknown')})")
             if readyset_cache.get("create_cache_command"):

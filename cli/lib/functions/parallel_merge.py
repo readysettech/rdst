@@ -12,11 +12,11 @@ def merge_parallel_analysis_results(
     **kwargs
 ) -> Dict[str, Any]:
     """
-    Merge results from parallel analysis and ReadySet testing branches.
+    Merge results from parallel analysis and Readyset testing branches.
 
     Args:
         analysis_branch: Results from regular analysis (Branch A)
-        readyset_branch: Results from ReadySet setup and testing (Branch B)
+        readyset_branch: Results from Readyset setup and testing (Branch B)
         query: Original SQL query
         target: Target database name
         **kwargs: Additional workflow parameters
@@ -34,7 +34,7 @@ def merge_parallel_analysis_results(
         if not readyset_branch:
             return {
                 "success": False,
-                "error": f"Missing ReadySet branch results (type: {type(readyset_branch)}, value: {readyset_branch})"
+                "error": f"Missing Readyset branch results (type: {type(readyset_branch)}, value: {readyset_branch})"
             }
 
         # Extract analysis results from Branch A
@@ -47,13 +47,13 @@ def merge_parallel_analysis_results(
         rewrite_test_results = analysis_branch.get('rewrite_test_results', {})
         readyset_cacheability_static = analysis_branch.get('readyset_cacheability', {})
 
-        # Extract ReadySet results from Branch B
+        # Extract Readyset results from Branch B
         readyset_explain_cache = readyset_branch.get('readyset_explain_cache', {})
         readyset_container = readyset_branch.get('readyset_container', {})
         readyset_ready = readyset_branch.get('readyset_ready', {})
 
-        # Merge ReadySet cacheability results
-        # Prefer real ReadySet EXPLAIN CREATE CACHE results over static analysis
+        # Merge Readyset cacheability results
+        # Prefer real Readyset EXPLAIN CREATE CACHE results over static analysis
         readyset_final = {
             "static_analysis": readyset_cacheability_static,
             "readyset_explain_cache": readyset_explain_cache,
@@ -66,7 +66,7 @@ def merge_parallel_analysis_results(
         }
 
         # Determine final cacheability verdict
-        # ReadySet EXPLAIN CREATE CACHE takes precedence over static analysis
+        # Readyset EXPLAIN CREATE CACHE takes precedence over static analysis
         if readyset_explain_cache.get('success'):
             final_cacheable = readyset_explain_cache.get('cacheable', False)
             final_confidence = readyset_explain_cache.get('confidence', 'unknown')

@@ -209,9 +209,9 @@ GUIDELINES:
 5. Flag potential index maintenance issues
 6. Never suggest dropping existing indexes without analysis"""
 
-READYSET_CACHING_PROMPT = """You are a ReadySet caching optimization expert. Analyze queries for ReadySet caching opportunities.
+READYSET_CACHING_PROMPT = """You are a Readyset caching optimization expert. Analyze queries for Readyset caching opportunities.
 
-TASK: Evaluate whether this query is a good candidate for ReadySet caching and provide optimization recommendations.
+TASK: Evaluate whether this query is a good candidate for Readyset caching and provide optimization recommendations.
 
 QUERY (parameterized):
 {parameterized_sql}
@@ -225,7 +225,7 @@ PERFORMANCE METRICS:
 EXECUTION FREQUENCY: {execution_frequency}
 READ/WRITE RATIO: {read_write_ratio}
 
-Please provide ReadySet caching analysis in JSON format:
+Please provide Readyset caching analysis in JSON format:
 
 {{
   "caching_assessment": {{
@@ -258,13 +258,13 @@ Please provide ReadySet caching analysis in JSON format:
     }}
   ],
   "readyset_specific_notes": [
-    "any ReadySet-specific considerations or limitations"
+    "any Readyset-specific considerations or limitations"
   ],
   "summary": "overall caching recommendation and key points"
 }}
 
 READYSET CACHING GUIDELINES:
-1. ReadySet works best with frequently executed, relatively stable queries
+1. Readyset works best with frequently executed, relatively stable queries
 2. Avoid caching queries with rapidly changing data
 3. Consider query complexity vs. caching benefit
 4. Account for cache warm-up time

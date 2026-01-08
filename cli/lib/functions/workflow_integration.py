@@ -286,11 +286,11 @@ def _format_index_suggestions(indexes: list) -> list:
 def _format_readyset_cacheability(cacheability_results: Dict[str, Any],
                                    readyset_explain_cache: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Format ReadySet cacheability check results.
+    Format Readyset cacheability check results.
 
     Args:
         cacheability_results: Merged cacheability results (from parallel_merge)
-        readyset_explain_cache: Raw EXPLAIN CREATE CACHE results from ReadySet container
+        readyset_explain_cache: Raw EXPLAIN CREATE CACHE results from Readyset container
 
     Returns:
         Formatted cacheability information
@@ -313,7 +313,7 @@ def _format_readyset_cacheability(cacheability_results: Dict[str, Any],
         "method": final_verdict.get('method', 'unknown'),  # 'readyset_container' or 'static_analysis'
     }
 
-    # If we have real ReadySet EXPLAIN CREATE CACHE results, include them
+    # If we have real Readyset EXPLAIN CREATE CACHE results, include them
     if readyset_explain_cache and readyset_explain_cache.get('success'):
         result["readyset_tested"] = True
         result["readyset_container_status"] = readyset_container.get('status', False)

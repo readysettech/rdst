@@ -222,7 +222,7 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
                 lines.extend(_format_query_rewrite_suggestions(recommendations, target_config, db_engine))
                 lines.append(_divider())
 
-        # ReadySet cacheability
+        # Readyset cacheability
         readyset_analysis = workflow_result.get("readyset_analysis") or {}
         readyset_cacheability = formatted_output.get("readyset_cacheability") or {}
         if readyset_analysis.get("success") or readyset_cacheability.get("checked"):
@@ -864,10 +864,10 @@ def _format_query_rewrite_suggestions(recommendations: Dict[str, Any],
 
 def _format_readyset_cacheability(readyset_analysis: Dict[str, Any],
                                    readyset_cacheability: Dict[str, Any]) -> List[str]:
-    """Format ReadySet cacheability results."""
+    """Format Readyset cacheability results."""
     lines = ["🚀 READYSET CACHEABILITY", ""]
 
-    # Use actual ReadySet analysis if available, otherwise use static analysis
+    # Use actual Readyset analysis if available, otherwise use static analysis
     if readyset_analysis.get("success"):
         final_verdict = readyset_analysis.get("final_verdict") or {}
         cacheable = final_verdict.get("cacheable", False)
@@ -899,10 +899,10 @@ def _format_readyset_cacheability(readyset_analysis: Dict[str, Any],
             create_result = readyset_analysis.get("create_cache_result") or {}
             if cacheable and create_result.get("already_cached"):
                 lines.append("")
-                lines.append("ℹ️  Query already cached in ReadySet")
+                lines.append("ℹ️  Query already cached in Readyset")
             elif cacheable and cached:
                 lines.append("")
-                lines.append("✅ Cache created successfully in ReadySet")
+                lines.append("✅ Cache created successfully in Readyset")
             elif cacheable and create_result:
                 error = create_result.get("error", "Unknown error")
                 lines.append("")

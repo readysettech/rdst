@@ -5,10 +5,10 @@ test_cache_commands() {
 
   # Note: Cache tests check for section existence, not exact values
   # This ensures tests are robust against performance variations
-  # Use simple queries that ReadySet can definitely cache (single table, equality WHERE)
+  # Use simple queries that Readyset can definitely cache (single table, equality WHERE)
 
   # Use simplest possible queries that work across both MySQL and PostgreSQL
-  # ReadySet has best support for: SELECT * FROM table WHERE column = value LIMIT n
+  # Readyset has best support for: SELECT * FROM table WHERE column = value LIMIT n
   local simple_query="SELECT * FROM title_basics WHERE tconst = 'tt0000001'"
 
   run_cmd "Cache query by SQL text" \
@@ -16,7 +16,7 @@ test_cache_commands() {
     --readyset-cache \
     --target "$TARGET_NAME" \
     "$simple_query"
-  assert_contains "ReadySet Cache Performance Analysis" "cache text header"
+  assert_contains "Readyset Cache Performance Analysis" "cache text header"
   assert_contains "Performance Comparison" "cache performance comparison"
   assert_not_contains "ERROR:" "cache should not error"
 
@@ -27,7 +27,7 @@ test_cache_commands() {
 
   run_cmd "Cache query by registry hash (${CACHE_HASH})" \
     "${RDST_CMD[@]}" analyze --readyset-cache --target "$TARGET_NAME" --hash "$CACHE_HASH"
-  assert_contains "ReadySet Cache Performance Analysis" "cache hash header"
+  assert_contains "Readyset Cache Performance Analysis" "cache hash header"
   assert_not_contains "ERROR:" "cache by hash should not error"
 
   # Note: analyze command doesn't have --json flag, removed from test
@@ -38,12 +38,12 @@ test_cache_commands() {
     --readyset-cache \
     --target "$TARGET_NAME" \
     "SELECT * FROM title_basics WHERE tconst = 'tt0000003' LIMIT 5"
-  assert_contains "ReadySet Cache Performance Analysis" "cache duplicate first run"
+  assert_contains "Readyset Cache Performance Analysis" "cache duplicate first run"
 
   run_cmd "Cache duplicate query second run" \
     "${RDST_CMD[@]}" analyze \
     --readyset-cache \
     --target "$TARGET_NAME" \
     "SELECT * FROM title_basics WHERE tconst = 'tt0000003' LIMIT 5"
-  assert_contains "ReadySet Cache Performance Analysis" "cache duplicate second run"
+  assert_contains "Readyset Cache Performance Analysis" "cache duplicate second run"
 }

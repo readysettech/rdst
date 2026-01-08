@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RDST MCP Server - Model Context Protocol server for RDST (ReadySet Diagnostics & SQL Tuning)
+RDST MCP Server - Model Context Protocol server for RDST (Readyset Data and SQL Toolkit)
 
 This server exposes RDST functionality to AI assistants like Claude through the MCP protocol.
 It provides tools for database diagnostics, query analysis, and performance tuning.
@@ -58,7 +58,7 @@ SLOW_QUERY_WORKFLOW_DETAILED = f"""### MANDATORY Workflow for Slow Query Analysi
 
 # RDST context information for the AI
 RDST_CONTEXT = f"""
-## RDST (ReadySet Diagnostics & SQL Tuning) - Context for AI Assistants
+## RDST (Readyset Data and SQL Toolkit) - Context for AI Assistants
 
 ### What is RDST?
 RDST is a command-line tool for database diagnostics and SQL query optimization.
@@ -449,12 +449,12 @@ AFTER ANALYSIS: ALWAYS display the key findings to the user:
 The user wants to SEE the analysis, not just know it completed.
 
 READYSET CACHING:
-If the query takes >1 second (1000ms), suggest testing ReadySet caching using
+If the query takes >1 second (1000ms), suggest testing Readyset caching using
 the --readyset-cache flag. This will:
-1. Pull ReadySet Docker containers (first run downloads images - may take a while)
+1. Pull Readyset Docker containers (first run downloads images - may take a while)
 2. Create a test replica of the user's database schema
-3. Attempt to cache the query in ReadySet
-4. Run a performance comparison (original DB vs ReadySet cached)
+3. Attempt to cache the query in Readyset
+4. Run a performance comparison (original DB vs Readyset cached)
 5. Show whether the query is cacheable and the speedup achieved
 
 Warn the user this process may take a while, especially on first run.
@@ -493,20 +493,20 @@ COMMON ISSUES:
                     },
                     "readyset_cache": {
                         "type": "boolean",
-                        "description": """Test if this query can be cached by ReadySet and show performance improvement.
+                        "description": """Test if this query can be cached by Readyset and show performance improvement.
 
 This process:
-1. Pulls ReadySet Docker containers (first run downloads images - may take a while)
+1. Pulls Readyset Docker containers (first run downloads images - may take a while)
 2. Creates a test replica of the user's database schema
-3. Attempts to cache the query in ReadySet
-4. Runs a performance comparison (original DB vs ReadySet cached)
+3. Attempts to cache the query in Readyset
+4. Runs a performance comparison (original DB vs Readyset cached)
 
 REQUIRES: Docker installed and running. If Docker error, tell user to install Docker Desktop.
 WARNING: This may take a while, especially on first run. Warn the user before running.
 
 OUTPUT INCLUDES:
 - Whether query is cacheable (and the reason if not)
-- Performance comparison: original DB vs ReadySet cache
+- Performance comparison: original DB vs Readyset cache
 - CREATE CACHE command for production deployment"""
                     }
                 },

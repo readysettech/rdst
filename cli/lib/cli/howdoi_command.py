@@ -24,7 +24,7 @@ except ImportError:
 
 # Embedded documentation for RDST
 RDST_DOCS = """
-# RDST (ReadySet Diagnostics & SQL Tuning) Documentation
+# RDST (Readyset Data and SQL Toolkit) Documentation
 
 ## Overview
 RDST is a CLI tool for database performance analysis and SQL query optimization.
@@ -91,7 +91,7 @@ rdst analyze -q "SELECT * FROM orders WHERE status = 'pending'" --target mydb
 # Fast mode (10s timeout for slow queries)
 rdst analyze -q "SELECT * FROM big_table" --target mydb --fast
 
-# Test ReadySet cacheability (requires Docker)
+# Test Readyset cacheability (requires Docker)
 rdst analyze -q "SELECT * FROM orders" --target mydb --readyset-cache
 
 # Continue previous analysis interactively
@@ -266,7 +266,7 @@ export PROD_DB_PASSWORD="your-actual-password"
 4. Create suggested indexes
 5. Re-run analysis to verify improvement
 
-### Testing ReadySet Caching
+### Testing Readyset Caching
 1. Run `rdst analyze -q "..." --target mydb --readyset-cache`
 2. Wait 30-60 seconds for containers to start
 3. Review if query is cacheable
@@ -323,9 +323,9 @@ rdst configure default --target prod
 - Run `rdst configure llm --provider anthropic`
 - Export ANTHROPIC_API_KEY environment variable
 
-### ReadySet cache errors
+### Readyset cache errors
 - Docker not found: Install Docker Desktop
-- If a query can't be cached, ReadySet will explain why in the output
+- If a query can't be cached, Readyset will explain why in the output
 
 ## Config File Location
 - Main config: ~/.rdst/config.toml
@@ -474,7 +474,7 @@ rdst analyze -q "YOUR SQL QUERY" --target your-target
 
 Options:
 - --fast: Skip slow queries (10s timeout)
-- --readyset-cache: Test if query can be cached by ReadySet
+- --readyset-cache: Test if query can be cached by Readyset
 - --interactive: Continue analysis conversation
 
 Example:
@@ -565,7 +565,7 @@ Set default: `rdst configure default --target NAME`"""
 
 The password must be exported before each session."""
         elif "cache" in question_lower or "readyset" in question_lower:
-            answer = """To test ReadySet caching:
+            answer = """To test Readyset caching:
 
 ```bash
 rdst analyze -q "YOUR QUERY" --target your-target --readyset-cache

@@ -7,6 +7,7 @@ actual execution plans and performance metrics for analysis.
 
 import time
 import sys
+import signal
 import select
 import termios
 import tty
@@ -24,6 +25,9 @@ try:
     import pymysql.cursors
 except ImportError:
     pymysql = None
+
+# Import shared cancellation utilities
+from lib.db_connection import cancel_postgres_by_pid, cancel_mysql_by_thread_id
 
 
 def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str, Any]:
@@ -276,8 +280,31 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
 
         user_skipped = False
         rewrite_timeout_exceeded = False
+        max_wait_timeout = False
+        ctrl_c_pressed = False
         prompt_shown = False
         max_wait_time = 600  # 10 minutes total
+
+        # Helper to cancel the backend query using shared utility
+        def cancel_backend_query():
+            with query_lock:
+                backend_pid = query_result.get('backend_pid')
+            if backend_pid:
+                return cancel_postgres_by_pid(conn_params, backend_pid, verbose=True)
+            else:
+                print(f"   >> No backend PID available to cancel", flush=True)
+                return False
+
+        # SIGINT handler for Ctrl+C cancellation (only works in main thread)
+        original_sigint_handler = None
+        sigint_supported = False
+        def sigint_handler(signum, frame):
+            nonlocal ctrl_c_pressed, user_skipped
+            ctrl_c_pressed = True
+            user_skipped = True
+            print(f"\n>> Ctrl+C pressed - cancelling query...\n")
+            sys.stdout.flush()
+            cancel_backend_query()
 
         # TTY for interactive skip
         tty_fd = None
@@ -291,7 +318,19 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
                 pass
 
         try:
+            # Install SIGINT handler (only works in main thread)
+            try:
+                original_sigint_handler = signal.getsignal(signal.SIGINT)
+                signal.signal(signal.SIGINT, sigint_handler)
+                sigint_supported = True
+            except ValueError:
+                pass  # Not in main thread, signal handling not available
+
             while time.perf_counter() - start_time < max_wait_time:
+                # Check if Ctrl+C was pressed
+                if ctrl_c_pressed:
+                    break
+
                 with query_lock:
                     if query_result['completed']:
                         break
@@ -303,26 +342,18 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
                 if rewrite_max_time_ms and elapsed_ms >= rewrite_max_time_ms:
                     rewrite_timeout_exceeded = True
                     user_skipped = True
-
-                    try:
-                        with query_lock:
-                            backend_pid = query_result.get('backend_pid')
-                        if backend_pid:
-                            cancel_conn = psycopg2.connect(**conn_params)
-                            with cancel_conn.cursor() as cancel_cursor:
-                                cancel_cursor.execute(f"SELECT pg_cancel_backend({backend_pid})")  # nosem
-                            cancel_conn.close()
-                    except Exception:
-                        pass  # Cancellation is best-effort
+                    cancel_backend_query()
                     break
 
                 # Interactive mode: show prompt after 10 seconds
                 if elapsed >= 10 and not prompt_shown and not rewrite_max_time_ms:
                     prompt_shown = True
+                    # Always show the prompt (Ctrl+C works even without TTY)
+                    print(f"\n** EXPLAIN ANALYZE has been running for 10 seconds...", flush=True)
                     if tty_fd:
-                        print(f"\n** EXPLAIN ANALYZE has been running for 10 seconds...")
-                        print(f"   Press ENTER to skip and continue with EXPLAIN plan only")
-                        print(f"   Or wait for full analysis (max 10 minutes)", flush=True)
+                        print(f"   Press ENTER to skip and continue with EXPLAIN plan only", flush=True)
+                    print(f"   Press Ctrl+C to cancel and exit", flush=True)
+                    print(f"   Or wait for full analysis (max 10 minutes)", flush=True)
 
                 # Check for user input
                 if prompt_shown and tty_fd and not rewrite_max_time_ms:
@@ -333,24 +364,31 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
                                 user_skipped = True
                                 print(f"\n>> Skipping EXPLAIN ANALYZE - using EXPLAIN plan only\n")
                                 sys.stdout.flush()
-
-                                try:
-                                    with query_lock:
-                                        backend_pid = query_result.get('backend_pid')
-                                    if backend_pid:
-                                        cancel_conn = psycopg2.connect(**conn_params)
-                                        with cancel_conn.cursor() as cancel_cursor:
-                                            cancel_cursor.execute(f"SELECT pg_cancel_backend({backend_pid})")  # nosem
-                                        cancel_conn.close()
-                                except:
-                                    pass
+                                cancel_backend_query()
                                 break
                     except (OSError, ValueError):
                         tty_fd.close()
                         tty_fd = None
 
                 time.sleep(0.1)
+            else:
+                # Loop completed due to max_wait_time timeout (not break)
+                # Cancel the still-running backend query
+                with query_lock:
+                    if not query_result['completed']:
+                        max_wait_timeout = True
+                        user_skipped = True
+                        print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
+                        sys.stdout.flush()
+                        cancel_backend_query()
         finally:
+            # Restore original SIGINT handler if we installed one
+            if sigint_supported and original_sigint_handler is not None:
+                try:
+                    signal.signal(signal.SIGINT, original_sigint_handler)
+                except ValueError:
+                    pass  # Not in main thread
+
             if old_settings and tty_fd:
                 try:
                     termios.tcsetattr(tty_fd, termios.TCSADRAIN, old_settings)
@@ -392,6 +430,10 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
 
                 if rewrite_timeout_exceeded:
                     skip_reason = f"Rewrite slower than baseline (cancelled after {elapsed_str})"
+                elif ctrl_c_pressed:
+                    skip_reason = f"Cancelled by user (Ctrl+C) after {elapsed_str}"
+                elif max_wait_timeout:
+                    skip_reason = f"Max wait time exceeded (cancelled after {elapsed_str})"
                 elif user_skipped:
                     skip_reason = f"User skipped after {elapsed_str}"
                 else:
@@ -521,7 +563,7 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
                     }
 
                 # PHASE 2: Try EXPLAIN ANALYZE with interactive skip option
-                # After 30 seconds, user can press 1 to skip and continue with EXPLAIN only
+                # After 10 seconds, user can press ENTER to skip and continue with EXPLAIN only
                 import threading
                 import select
                 import sys
@@ -576,8 +618,31 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
 
                 # Monitor for 10 seconds, then offer skip option
                 user_skipped = False
+                max_wait_timeout = False
+                ctrl_c_pressed = False
                 prompt_shown = False
                 max_wait_time = 600  # 10 minutes total timeout
+
+                # Helper to kill the MySQL query using shared utility
+                def kill_mysql_query():
+                    with query_lock:
+                        thread_conn_id = query_result.get('connection_id')
+                    if thread_conn_id:
+                        return cancel_mysql_by_thread_id(target_config, thread_conn_id, verbose=True)
+                    else:
+                        print(f"   >> No MySQL connection ID available to kill", flush=True)
+                        return False
+
+                # SIGINT handler for Ctrl+C cancellation (only works in main thread)
+                original_sigint_handler = None
+                sigint_supported = False
+                def sigint_handler(signum, frame):
+                    nonlocal ctrl_c_pressed, user_skipped
+                    ctrl_c_pressed = True
+                    user_skipped = True
+                    print(f"\n>> Ctrl+C pressed - cancelling query...\n")
+                    sys.stdout.flush()
+                    kill_mysql_query()
 
                 # Try to open /dev/tty for interactive input (works even if stdin is redirected)
                 tty_fd = None
@@ -591,7 +656,19 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
                     pass  # No TTY available, will just timeout normally
 
                 try:
+                    # Install SIGINT handler (only works in main thread)
+                    try:
+                        original_sigint_handler = signal.getsignal(signal.SIGINT)
+                        signal.signal(signal.SIGINT, sigint_handler)
+                        sigint_supported = True
+                    except ValueError:
+                        pass  # Not in main thread, signal handling not available
+
                     while time.perf_counter() - start_time < max_wait_time:
+                        # Check if Ctrl+C was pressed
+                        if ctrl_c_pressed:
+                            break
+
                         with query_lock:
                             if query_result['completed']:
                                 break
@@ -607,29 +684,16 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
                                 user_skipped = True
                                 print(f"\n>> Auto-skipping EXPLAIN ANALYZE after 10 seconds (fast mode)\n")
                                 sys.stdout.flush()
-    
-                                # Kill the running query using its connection ID
-                                try:
-                                    with query_lock:
-                                        thread_conn_id = query_result.get('connection_id')
-    
-                                    if thread_conn_id:
-                                        kill_conn = pymysql.connect(**conn_params)
-                                        with kill_conn.cursor() as kill_cursor:
-                                            # Safe: thread_conn_id is numeric ID from CONNECTION_ID(), not user input
-
-                                            kill_cursor.execute(f"KILL QUERY {thread_conn_id}")  # nosem
-                                        kill_conn.close()
-                                except Exception as e_kill:
-                                    pass  # Query may have already completed
-    
+                                kill_mysql_query()
                                 break  # Exit the waiting loop
-                            elif tty_fd:
-                                # Show interactive prompt when TTY available
-                                print(f"\n** EXPLAIN ANALYZE has been running for 10 seconds...")
-                                print(f"   Press ENTER to skip and continue with EXPLAIN plan only")
+                            else:
+                                # Always show the prompt (Ctrl+C works even without TTY)
+                                print(f"\n** EXPLAIN ANALYZE has been running for 10 seconds...", flush=True)
+                                if tty_fd:
+                                    print(f"   Press ENTER to skip and continue with EXPLAIN plan only", flush=True)
+                                print(f"   Press Ctrl+C to cancel and exit", flush=True)
                                 print(f"   Or wait for full analysis (max 10 minutes)", flush=True)
-    
+
                         # Check for user input from /dev/tty (non-blocking) - only if not fast_mode
                         if prompt_shown and tty_fd and not fast_mode:
                             try:
@@ -640,30 +704,32 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
                                         user_skipped = True
                                         print(f"\n>> Skipping EXPLAIN ANALYZE - using EXPLAIN plan only\n")
                                         sys.stdout.flush()
-    
-                                        # Kill the running query using its connection ID
-                                        try:
-                                            with query_lock:
-                                                thread_conn_id = query_result.get('connection_id')
-    
-                                            if thread_conn_id:
-                                                kill_conn = pymysql.connect(**conn_params)
-                                                with kill_conn.cursor() as kill_cursor:
-                                                    # Safe: thread_conn_id is numeric ID from CONNECTION_ID(), not user input
-
-                                                    kill_cursor.execute(f"KILL QUERY {thread_conn_id}")  # nosem
-                                                kill_conn.close()
-                                        except:
-                                            pass  # Ignore errors during kill
-    
+                                        kill_mysql_query()
                                         break
                             except (OSError, ValueError):
                                 # select() failed, disable interactive prompt
                                 tty_fd.close()
                                 tty_fd = None
-    
+
                             time.sleep(0.1)
+                    else:
+                        # Loop completed due to max_wait_time timeout (not break)
+                        # Kill the still-running query
+                        with query_lock:
+                            if not query_result['completed']:
+                                max_wait_timeout = True
+                                user_skipped = True
+                                print(f"\n>> Max wait time ({max_wait_time}s) exceeded - cancelling query...\n")
+                                sys.stdout.flush()
+                                kill_mysql_query()
                 finally:
+                    # Restore original SIGINT handler if we installed one
+                    if sigint_supported and original_sigint_handler is not None:
+                        try:
+                            signal.signal(signal.SIGINT, original_sigint_handler)
+                        except ValueError:
+                            pass  # Not in main thread
+
                     # Restore terminal settings and clean up TTY file descriptor
                     if old_settings and tty_fd:
                         try:
@@ -703,8 +769,14 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
                         else:
                             elapsed_str = f"{int(elapsed_seconds)} sec"
 
-                        skip_reason = f"User skipped after {elapsed_str}" if user_skipped else \
-                                     f"EXPLAIN ANALYZE timed out after {elapsed_str}: {query_result.get('error', 'timeout')}"
+                        if ctrl_c_pressed:
+                            skip_reason = f"Cancelled by user (Ctrl+C) after {elapsed_str}"
+                        elif max_wait_timeout:
+                            skip_reason = f"Max wait time exceeded (cancelled after {elapsed_str})"
+                        elif user_skipped:
+                            skip_reason = f"User skipped after {elapsed_str}"
+                        else:
+                            skip_reason = f"EXPLAIN ANALYZE timed out after {elapsed_str}: {query_result.get('error', 'timeout')}"
 
                         return {
                             "success": True,

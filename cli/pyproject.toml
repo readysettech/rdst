@@ -1,11 +1,11 @@
 [project]
 name = "rdst"
 dynamic = ["version"]
-description = "ReadySet Diagnostics & SQL Tuning - CLI tool for database diagnostics and query optimization"
+description = "Readyset Diagnostics & SQL Tuning - CLI tool for database diagnostics and query optimization"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "ReadySet", email = "support@readyset.io" }]
+authors = [{ name = "Readyset", email = "support@readyset.io" }]
 keywords = [
     "database",
     "sql",

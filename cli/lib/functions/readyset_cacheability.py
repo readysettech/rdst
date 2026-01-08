@@ -38,9 +38,9 @@ WARNING_PATTERNS = {
 
 def check_readyset_cacheability(query: str = None, sql: str = None, **kwargs) -> Dict[str, Any]:
     """
-    Check if a query can be cached by ReadySet.
+    Check if a query can be cached by Readyset.
 
-    Analyzes the SQL query against known ReadySet limitations and generates
+    Analyzes the SQL query against known Readyset limitations and generates
     a CREATE CACHE command if the query appears cacheable.
 
     Args:
@@ -79,10 +79,10 @@ def check_readyset_cacheability(query: str = None, sql: str = None, **kwargs) ->
             return {
                 "cacheable": False,
                 "confidence": "high",
-                "issues": ["Only SELECT queries can be cached by ReadySet"],
+                "issues": ["Only SELECT queries can be cached by Readyset"],
                 "warnings": [],
                 "create_cache_command": None,
-                "explanation": "ReadySet can only cache SELECT queries. INSERT, UPDATE, DELETE, and DDL statements cannot be cached."
+                "explanation": "Readyset can only cache SELECT queries. INSERT, UPDATE, DELETE, and DDL statements cannot be cached."
             }
 
         # Check for blocking issues
@@ -259,7 +259,7 @@ def _generate_explanation(is_cacheable: bool, issues: List[str],
                          warnings: List[str], confidence: str) -> str:
     """Generate human-readable explanation of cacheability."""
     if is_cacheable:
-        explanation = f"✓ This query appears cacheable by ReadySet (confidence: {confidence})."
+        explanation = f"✓ This query appears cacheable by Readyset (confidence: {confidence})."
 
         if warnings:
             explanation += f"\n\nWarnings ({len(warnings)}):"
@@ -272,7 +272,7 @@ def _generate_explanation(is_cacheable: bool, issues: List[str],
         return explanation
 
     else:
-        explanation = f"✗ This query is NOT cacheable by ReadySet."
+        explanation = f"✗ This query is NOT cacheable by Readyset."
 
         if issues:
             explanation += f"\n\nBlocking issues ({len(issues)}):"
@@ -293,7 +293,7 @@ def generate_explain_create_cache(query: str = None, sql: str = None, **kwargs) 
     """
     Generate an EXPLAIN CREATE CACHE command for testing.
 
-    This generates a command that can be used to test if ReadySet
+    This generates a command that can be used to test if Readyset
     will accept the query without actually creating the cache.
 
     Args:
@@ -320,6 +320,6 @@ def generate_explain_create_cache(query: str = None, sql: str = None, **kwargs) 
 
     return {
         "explain_command": explain_command,
-        "usage": "Run this command against your ReadySet instance to verify cacheability",
+        "usage": "Run this command against your Readyset instance to verify cacheability",
         "note": "This will not create the cache, only validate if it can be created"
     }

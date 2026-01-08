@@ -16,13 +16,11 @@ import sys
 import os
 
 # Commands that are intentionally NOT exposed via MCP
-# tune: Not implemented yet
 # claude: Meta command for registering with Claude Code
 # help: Handled by rdst_help tool differently
 # howdoi: CLI-only docs lookup (MCP has its own tool descriptions)
 # ask: Requires interactive TTY for best experience
 MCP_EXCLUDED_COMMANDS = {
-    "tune",      # N/A - not implemented
     "claude",    # N/A - meta command for MCP registration itself
     "help",      # N/A - rdst_help handles this differently
     "howdoi",    # N/A - CLI-only, MCP has its own tool descriptions

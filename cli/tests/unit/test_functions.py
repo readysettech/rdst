@@ -38,14 +38,14 @@ class TestMergeParallelAnalysisResults:
         assert "Missing analysis branch" in result["error"]
 
     def test_missing_readyset_branch(self):
-        """Test error when ReadySet branch is missing."""
+        """Test error when Readyset branch is missing."""
         result = merge_parallel_analysis_results(
             analysis_branch={"some": "data"},
             readyset_branch=None
         )
 
         assert result["success"] is False
-        assert "Missing ReadySet branch" in result["error"]
+        assert "Missing Readyset branch" in result["error"]
 
     def test_successful_merge(self):
         """Test successful merging of both branches."""
@@ -89,7 +89,7 @@ class TestMergeParallelAnalysisResults:
         assert "readyset_cacheability" in result
 
     def test_readyset_container_verdict(self):
-        """Test final verdict uses ReadySet container results."""
+        """Test final verdict uses Readyset container results."""
         analysis_branch = {
             "explain_results": {},
             "readyset_cacheability": {"cacheable": False, "confidence": "low"}
@@ -116,7 +116,7 @@ class TestMergeParallelAnalysisResults:
         assert final_verdict["method"] == "readyset_container"
 
     def test_fallback_to_static_analysis(self):
-        """Test fallback to static analysis when ReadySet fails."""
+        """Test fallback to static analysis when Readyset fails."""
         analysis_branch = {
             "explain_results": {},
             "readyset_cacheability": {"cacheable": True, "confidence": "medium"}

@@ -164,3 +164,79 @@ def cancel_query(conn, engine: str, target_config: Optional[dict] = None) -> boo
     except Exception:
         return False
     return False
+
+
+def cancel_postgres_by_pid(conn_params: Dict[str, Any], backend_pid: int, verbose: bool = False) -> bool:
+    """
+    Cancel a PostgreSQL query by its backend PID.
+
+    This is useful when cancelling from a different thread/connection
+    than the one running the query.
+
+    Args:
+        conn_params: Connection parameters dict for creating cancel connection
+        backend_pid: The backend process ID to cancel
+        verbose: If True, print status messages
+
+    Returns:
+        True if query was cancelled, False otherwise
+    """
+    try:
+        import psycopg2
+        cancel_conn = psycopg2.connect(**conn_params)
+        try:
+            with cancel_conn.cursor() as cursor:
+                cursor.execute(f"SELECT pg_cancel_backend({backend_pid})")  # nosem
+                result = cursor.fetchone()
+                cancelled = result[0] if result else False
+            if verbose:
+                if cancelled:
+                    print(f"   >> Backend query (PID {backend_pid}) cancelled successfully", flush=True)
+                else:
+                    print(f"   >> Backend query (PID {backend_pid}) could not be cancelled (may have already finished)", flush=True)
+            return cancelled
+        finally:
+            cancel_conn.close()
+    except Exception as e:
+        if verbose:
+            print(f"   >> Error cancelling PostgreSQL query: {e}", flush=True)
+        return False
+
+
+def cancel_mysql_by_thread_id(target_config: Dict[str, Any], thread_id: int, verbose: bool = False) -> bool:
+    """
+    Cancel a MySQL query by its connection thread ID.
+
+    This is useful when cancelling from a different connection
+    than the one running the query.
+
+    Args:
+        target_config: Target configuration for creating cancel connection
+        thread_id: The MySQL connection thread ID to cancel
+        verbose: If True, print status messages
+
+    Returns:
+        True if KILL QUERY was executed, False otherwise
+    """
+    try:
+        cancel_conn = _create_mysql_connection(
+            target_config['host'],
+            target_config['port'],
+            target_config['user'],
+            os.environ.get(target_config.get('password_env', '')),
+            target_config['database'],
+            target_config.get('tls', False)
+        )
+        try:
+            cursor = cancel_conn.cursor()
+            cursor.execute(f"KILL QUERY {thread_id}")  # nosem
+            cursor.close()
+            if verbose:
+                print(f"   >> MySQL query (thread {thread_id}) killed successfully", flush=True)
+            return True
+        finally:
+            cancel_conn.close()
+    except Exception as e:
+        if verbose:
+            print(f"   >> Error killing MySQL query: {e}", flush=True)
+        return False

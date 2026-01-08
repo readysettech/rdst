@@ -1,5 +1,5 @@
 """
-Integration tests for ReadySet cacheability checks.
+Integration tests for Readyset cacheability checks.
 
 Adapted from cloud/cloud_agent/test_readyset_cacheability.py
 """

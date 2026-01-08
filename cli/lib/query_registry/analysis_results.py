@@ -400,7 +400,7 @@ def create_analysis_result(query_hash: str, target: str,
         query_metrics: Additional metrics from database telemetry
         rewrite_suggestions: Query rewrite suggestions
         index_suggestions: Index recommendations
-        caching_recommendations: ReadySet caching recommendations
+        caching_recommendations: Readyset caching recommendations
         **kwargs: Additional metadata
 
     Returns:

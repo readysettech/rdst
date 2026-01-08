@@ -17,19 +17,19 @@ def compare_query_performance(
     **kwargs
 ) -> Dict[str, Any]:
     """
-    Compare query performance between original database and ReadySet.
+    Compare query performance between original database and Readyset.
 
     Executes the query multiple times against both the original database
-    and ReadySet, collecting timing statistics.
+    and Readyset, collecting timing statistics.
 
     Args:
         query: SQL query to benchmark
         original_db_config: Original database configuration
-        readyset_port: Port where ReadySet is listening
-        readyset_host: Host where ReadySet is running
+        readyset_port: Port where Readyset is listening
+        readyset_host: Host where Readyset is running
         iterations: Number of benchmark iterations
         warmup_iterations: Number of warmup runs (not counted in stats)
-        readyset_db_config: ReadySet database configuration (for auth). If not provided, uses original_db_config credentials
+        readyset_db_config: Readyset database configuration (for auth). If not provided, uses original_db_config credentials
         **kwargs: Additional workflow parameters
 
     Returns:
@@ -68,8 +68,8 @@ def compare_query_performance(
         for i in range(warmup_iterations):
             _execute_query_timed(query, original_db_config, is_readyset=False)
 
-        # Warmup - ReadySet
-        print("Warming up ReadySet...")
+        # Warmup - Readyset
+        print("Warming up Readyset...")
         # Use readyset_db_config if provided (for test container auth), otherwise fall back to original creds
         if readyset_db_config:
             readyset_config = {
@@ -114,8 +114,8 @@ def compare_query_performance(
 
         print()
 
-        # Benchmark ReadySet
-        print(f"Testing ReadySet ({readyset_host}:{readyset_port})...")
+        # Benchmark Readyset
+        print(f"Testing Readyset ({readyset_host}:{readyset_port})...")
         readyset_times = []
         for i in range(iterations):
             result = _execute_query_timed(query, readyset_config, is_readyset=True)
@@ -128,7 +128,7 @@ def compare_query_performance(
         if not readyset_times:
             return {
                 "success": False,
-                "error": "All ReadySet queries failed"
+                "error": "All Readyset queries failed"
             }
 
         # Calculate statistics
@@ -181,7 +181,7 @@ def _execute_query_timed(
     Args:
         query: SQL query to execute
         db_config: Database configuration
-        is_readyset: Whether this is a ReadySet connection
+        is_readyset: Whether this is a Readyset connection
 
     Returns:
         Dict with success, execution_time_ms, and optional error
@@ -360,7 +360,7 @@ def _execute_mysql_query(
     if normalized_host == "localhost":
         normalized_host = "127.0.0.1"
 
-    # Try pymysql first (works with ReadySet's mysql_native_password auth)
+    # Try pymysql first (works with Readyset's mysql_native_password auth)
     try:
         import pymysql
         return _execute_mysql_query_pymysql(
@@ -535,9 +535,9 @@ def format_performance_comparison(result: Dict[str, Any]) -> str:
     lines.append(f"  P99:      {orig['stats']['p99']:>8.2f} ms")
     lines.append("")
 
-    # ReadySet stats
+    # Readyset stats
     rs = result['readyset']
-    lines.append(f"ReadySet Cache ({rs['host']}:{rs['port']})")
+    lines.append(f"Readyset Cache ({rs['host']}:{rs['port']})")
     lines.append("-" * 60)
     lines.append(f"  Mean:     {rs['stats']['mean']:>8.2f} ms")
     lines.append(f"  Median:   {rs['stats']['median']:>8.2f} ms")
@@ -554,10 +554,10 @@ def format_performance_comparison(result: Dict[str, Any]) -> str:
     lines.append("-" * 60)
 
     if speedup['mean'] > 1:
-        lines.append(f"  ✓ ReadySet is {speedup['mean']:.2f}x faster (mean)")
+        lines.append(f"  ✓ Readyset is {speedup['mean']:.2f}x faster (mean)")
         lines.append(f"  ✓ {speedup['improvement_pct']:.1f}% improvement")
     elif speedup['mean'] < 1:
-        lines.append(f"  ✗ ReadySet is {(1/speedup['mean']):.2f}x slower (mean)")
+        lines.append(f"  ✗ Readyset is {(1/speedup['mean']):.2f}x slower (mean)")
         lines.append(f"  ✗ {abs(speedup['improvement_pct']):.1f}% slower")
     else:
         lines.append(f"  = Performance is roughly equal")
@@ -568,7 +568,7 @@ def format_performance_comparison(result: Dict[str, Any]) -> str:
     # Summary
     winner = result['winner']
     if winner == 'readyset':
-        lines.append("🎉 ReadySet cache provides better performance!")
+        lines.append("🎉 Readyset cache provides better performance!")
     else:
         lines.append("⚠️  Original database is faster for this query")
         lines.append("   Consider query optimization or check if cache is warmed up")

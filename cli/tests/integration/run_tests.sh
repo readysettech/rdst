@@ -65,7 +65,7 @@ run_test_suite() {
   # Run test suite
   local suite_failed=0
   (
-    # Basic tests (no ReadySet required)
+    # Basic tests (no Readyset required)
     test_config_commands
     test_config_connection_string
     test_config_connection_string_override
@@ -78,10 +78,10 @@ run_test_suite() {
     # Interactive test (optional - may skip if TTY unavailable)
     test_top_interactive_flow
 
-    # Cache tests (create ReadySet containers)
+    # Cache tests (create Readyset containers)
     test_cache_commands
 
-    # ReadySet analysis tests (use containers from cache tests)
+    # Readyset analysis tests (use containers from cache tests)
     test_readyset_flag
 
     # Query command tests

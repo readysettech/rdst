@@ -119,7 +119,7 @@ mgr = WorkflowManager.from_file(workflow_path, resources=registry)
 
 ```json
 {
-    "Comment": "ReadySet optimization workflow",
+    "Comment": "Readyset optimization workflow",
     "StartAt": "GetCachedQueries",
     "States": {
         "GetCachedQueries": {
@@ -136,7 +136,7 @@ mgr = WorkflowManager.from_file(workflow_path, resources=registry)
             "Type": "Task",
             "Resource": "call_llm",
             "Parameters": {
-                "prompt": "ReadySet has {{States.GetCachedQueries.count}} cached queries and {{States.GetDBStats.size_mb}}MB data. Optimize?",
+                "prompt": "Readyset has {{States.GetCachedQueries.count}} cached queries and {{States.GetDBStats.size_mb}}MB data. Optimize?",
                 "model": "claude-3-5-sonnet-latest"
             },
             "Next": "ApplyCacheChanges"

@@ -302,11 +302,11 @@ class CacheManager:
         denylist_file_path = self.readyset_query_pilot_denylist_file_path
 
         try:
-            self.logger.info(f"Starting update of ReadySet query pilot denylist file {denylist_file_path}...",
+            self.logger.info(f"Starting update of Readyset query pilot denylist file {denylist_file_path}...",
                              file_path=denylist_file_path, highlight=True)
 
             blacklisted_cache_names = self.get_blacklisted_cache_names()
-            self.logger.info(f"ReadySet query pilot denylist file {denylist_file_path} "
+            self.logger.info(f"Readyset query pilot denylist file {denylist_file_path} "
                              f"contains {len(blacklisted_cache_names)} blacklisted caches.", highlight=True)
             os.makedirs(os.path.dirname(denylist_file_path), exist_ok=True)
 
@@ -358,13 +358,13 @@ class CacheManager:
 
             os.chmod(denylist_file_path, 0o644)
 
-            self.logger.info("Successfully updated ReadySet query pilot denylist file",
+            self.logger.info("Successfully updated Readyset query pilot denylist file",
                              file_path=denylist_file_path,
                              db_name=self.config_manager.db_name,
                              highlight=True)
 
         except Exception as e:
-            self.logger.error(f"Failed to update ReadySet query pilot denylist file: {e}",
+            self.logger.error(f"Failed to update Readyset query pilot denylist file: {e}",
                               error_type=type(e).__name__,
                               file_path=denylist_file_path,
                               highlight=True)

@@ -259,7 +259,7 @@ def start_test_db_container(
                     '-e', f'POSTGRES_DB={target_db}'
                 ]
                 port_mapping = f'{test_port}:5432'
-                # PostgreSQL command args for ReadySet logical replication
+                # PostgreSQL command args for Readyset logical replication
                 pg_args = [
                     'postgres',
                     '-c', 'wal_level=logical',
@@ -276,7 +276,7 @@ def start_test_db_container(
                     '-e', f'MYSQL_PASSWORD={target_password}'
                 ]
                 port_mapping = f'{test_port}:3306'
-                # MySQL command args for binlog (ReadySet replication)
+                # MySQL command args for binlog (Readyset replication)
                 pg_args = [
                     '--binlog-format=ROW',
                     '--gtid-mode=ON',
@@ -334,7 +334,7 @@ def start_test_db_container(
                         print(f"⚠️  Warning: MySQL did not become ready in {max_wait}s, proceeding anyway...")
 
                     # Update authentication plugin and grant replication privileges
-                    # These need to succeed for ReadySet to work
+                    # These need to succeed for Readyset to work
                     alter_cmds = [
                         f"ALTER USER 'root'@'%' IDENTIFIED WITH caching_sha2_password BY '{target_password}';",
                         f"ALTER USER '{target_user}'@'%' IDENTIFIED WITH caching_sha2_password BY '{target_password}';",

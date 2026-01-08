@@ -131,7 +131,7 @@ echo "Validating prerequisites..."
 # Check Docker
 if ! command -v docker &> /dev/null; then
   echo "ERROR: Docker is not installed or not in PATH"
-  echo "Docker is required for ReadySet containers created by cache tests"
+  echo "Docker is required for Readyset containers created by cache tests"
   exit 1
 fi
 echo "  ✓ Docker: $(docker --version | head -1)"
@@ -154,7 +154,7 @@ echo "  ✓ RDST source: $SCRIPT_DIR/../../rdst.py"
 # Check for running containers on port 5433 (may conflict with tests)
 if docker ps --filter "publish=5433" --format '{{.Names}}' 2>/dev/null | grep -q .; then
   echo
-  echo "WARNING: Found containers using port 5433 (used by ReadySet tests):"
+  echo "WARNING: Found containers using port 5433 (used by Readyset tests):"
   docker ps --filter "publish=5433" --format '  - {{.Names}}'
   echo
   echo "These may interfere with tests. Consider stopping them first."

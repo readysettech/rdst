@@ -531,9 +531,9 @@ class DataManager:
             self._connection_error[query_type] = None
             return True
 
-        # Add specific logging for ReadySet connection attempts
+        # Add specific logging for Readyset connection attempts
         if query_type == DataManagerQueryType.READYSET:
-            self.logger.debug(f"Starting ReadySet connection process for query_type: {query_type}")
+            self.logger.debug(f"Starting Readyset connection process for query_type: {query_type}")
             self.logger.debug(f"Connection configs type: {type(self.connection_configs)}")
             if isinstance(self.connection_configs, dict):
                 self.logger.debug(f"Available connection config keys: {list(self.connection_configs.keys())}")

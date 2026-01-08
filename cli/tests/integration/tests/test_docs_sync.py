@@ -18,11 +18,11 @@ import os
 # Commands that are intentionally NOT documented in howdoi
 # These are either internal, meta commands, or subcommands
 DOCS_EXCLUDED_COMMANDS = {
-    "tune",      # Not implemented yet
     "help",      # Meta command
     "howdoi",    # Self-referential - the howdoi command itself
     "version",   # Simple utility command
     "claude",    # MCP registration - specialized
+    "run",       # Internal command for running arbitrary SQL
     # Query subcommands (documented under "rdst query" section)
     "add",
     "edit",

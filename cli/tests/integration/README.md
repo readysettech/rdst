@@ -56,7 +56,7 @@ SKIP_BUILD=1 ./rdst/tests/integration/test_al23_locally.sh postgresql
 1. **Builds AL23 binary** (unless `SKIP_BUILD=1`) via `orchestrate_rdst.sh`
 2. **Extracts binary** from RPM package (automatically skips if already extracted)
 3. **Runs tests** inside `amazonlinux:2023` container (on macOS) or natively (on Linux)
-4. **Uses host networking** so ReadySet containers are accessible
+4. **Uses host networking** so Readyset containers are accessible
 5. **Cleans up** test containers on completion
 
 #### Testing on Native Linux (Alternative)
@@ -114,7 +114,7 @@ tests/integration/
 - Hash-based caching
 - JSON output format
 - Duplicate query handling
-- ReadySet container management
+- Readyset container management
 
 ### 4. Top & List Commands
 - Query listing with limits
@@ -182,7 +182,7 @@ See `rdst/.buildkite/pipeline.yml` for pipeline configuration.
 ### Prerequisites
 
 **For Python Source Testing:**
-- Docker (for ReadySet containers created by cache tests)
+- Docker (for Readyset containers created by cache tests)
 - Network access to admin API (or provide connection strings)
 
 **For AL23 Binary Testing:**
@@ -268,7 +268,7 @@ The AL23 binary is built using Nuitka to compile Python to a standalone executab
 ### Test Containers
 - **Upstream Database** - Created by admin API or user-provided
 - **Test Database** - Created by cache command for testing
-- **ReadySet Container** - Created by cache command for performance testing
+- **Readyset Container** - Created by cache command for performance testing
 
 ### Test Isolation
 - Each test run uses temporary HOME directory

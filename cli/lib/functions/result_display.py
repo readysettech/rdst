@@ -333,7 +333,7 @@ def generate_next_actions_menu(
         actions.append({
             'key': '3',
             'name': 'Test Caching',
-            'description': f'Check if this query can be cached with ReadySet',
+            'description': f'Check if this query can be cached with Readyset',
             'command': f'cache --hash {query_hash}'
         })
 

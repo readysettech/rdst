@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rdst - Readyset Diagnostics & SQL Tuning
+rdst - Readyset Data and SQL Toolkit
 
 A command-line interface for diagnostics, query analysis, performance tuning,
 and caching with Readyset.
@@ -11,6 +11,7 @@ import sys
 import argparse
 import shutil
 import subprocess
+from pathlib import Path
 
 # Optional pretty output
 try:
@@ -36,7 +37,7 @@ def print_rich_help():
 
     # Header
     console.print()
-    console.print("[bold blue]rdst[/bold blue] - [dim]ReadySet Diagnostics & SQL Tuning[/dim]")
+    console.print("[bold blue]rdst[/bold blue] - [dim]Readyset Data and SQL Toolkit[/dim]")
     console.print()
 
     # Commands table
@@ -71,7 +72,7 @@ def print_rich_help():
         ("rdst init", "First-time setup wizard"),
         ("rdst top --target mydb", "Monitor slow queries"),
         ("rdst analyze -q \"SELECT * FROM users\" --target mydb", "Analyze a query"),
-        ("rdst analyze -q \"SELECT ...\" --readyset-cache", "Test ReadySet caching"),
+        ("rdst analyze -q \"SELECT ...\" --readyset-cache", "Test Readyset caching"),
         ("rdst howdoi \"how do I find slow queries?\"", "Quick docs lookup"),
     ]
 
@@ -85,6 +86,71 @@ def print_rich_help():
 
     return True
 
+
+def _show_first_run_message():
+    """Show welcome message on first run after pip install."""
+    rdst_dir = Path.home() / ".rdst"
+    marker_file = rdst_dir / ".installed"
+
+    # Check if this is the first run
+    if marker_file.exists():
+        return
+
+    # Create the directory if needed
+    rdst_dir.mkdir(parents=True, exist_ok=True)
+
+    # Show welcome message
+    version = _get_version()
+    version_str = f" - v{version}" if version != "unknown" else ""
+
+    if _RICH_AVAILABLE:
+        console = Console()
+        console.print()
+        console.print("[bold green]Welcome to RDST![/bold green]")
+        console.print()
+        console.print(f"[dim]Readyset Data and SQL Toolkit{version_str}[/dim]")
+        console.print()
+        console.print("[bold]Quick Start:[/bold]")
+        console.print("  1. Run [cyan]rdst init[/cyan] to configure your first database connection")
+        console.print("  2. Use [cyan]rdst top[/cyan] to see slow queries in real-time")
+        console.print("  3. Use [cyan]rdst analyze -q \"SELECT ...\"[/cyan] to analyze specific queries")
+        console.print()
+        console.print("[dim]For more help: [cyan]rdst howdoi \"How do I get started with RDST?\"[/cyan][/dim]")
+        console.print()
+    else:
+        print()
+        print("Welcome to RDST!")
+        print()
+        print(f"Readyset Data and SQL Toolkit{version_str}")
+        print()
+        print("Quick Start:")
+        print("  1. Run 'rdst init' to configure your first database connection")
+        print("  2. Use 'rdst top' to see slow queries in real-time")
+        print("  3. Use 'rdst analyze -q \"SELECT ...\"' to analyze specific queries")
+        print()
+        print("For more help: rdst howdoi \"How do I get started with RDST?\"")
+        print()
+
+    # Create marker file to prevent showing again
+    try:
+        marker_file.touch()
+    except Exception:
+        pass  # Don't fail if we can't create marker
+
+
+def _get_version():
+    """Get the rdst version string."""
+    try:
+        from lib._version import __version__
+        return __version__
+    except ImportError:
+        try:
+            from _version_build import __version__
+            return __version__
+        except ImportError:
+            return "unknown"
+
+
 # Import the CLI functionality
 from lib.cli import RdstCLI, RdstResult
 
@@ -93,14 +159,13 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         prog='rdst',
-        description='Readyset Diagnostics & SQL Tuning - Diagnose, analyze, and tune SQL performance',
+        description='Readyset Data and SQL Toolkit - Diagnose, analyze, and optimize SQL performance',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
   configure     Manage database targets and connection profiles
   top          Live view of top slow queries
   analyze      Analyze and explain SQL queries
-  tune         Get optimization suggestions for queries
   init         First-time setup wizard
   tag          Tag and store queries for later reference
   list         Show saved queries
@@ -114,7 +179,6 @@ Examples:
   rdst configure list
   rdst analyze "SELECT * FROM users WHERE active = true"
   rdst analyze "SELECT COUNT(*) FROM orders WHERE status = 'pending'" --readyset-cache
-  rdst tune "SELECT u.name, p.title FROM users u JOIN posts p ON u.id = p.user_id"
   rdst top --limit 10
         """
     )
@@ -207,13 +271,13 @@ Examples:
         description='''Analyze a SQL query for performance issues and get optimization recommendations.
 
 Runs EXPLAIN ANALYZE and uses AI to provide index recommendations, query rewrites,
-and ReadySet caching opportunities.
+and Readyset caching opportunities.
 
 Examples:
   rdst analyze -q "SELECT * FROM users WHERE id = 1" --target mydb
   rdst analyze --hash abc123 --target mydb    Analyze query from registry by hash
   rdst analyze -f query.sql --target mydb     Analyze query from file
-  rdst analyze -q "SELECT ..." --readyset-cache   Test ReadySet caching performance''',
+  rdst analyze -q "SELECT ..." --readyset-cache   Test Readyset caching performance''',
         formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Query input modes (mutually exclusive group)
@@ -231,7 +295,7 @@ Examples:
     analyze_parser.add_argument('--target', help='Target database')
     analyze_parser.add_argument('--save-as', help='Name to save query as after analysis')
     analyze_parser.add_argument('--readyset-cache', action='store_true', dest='readyset_cache',
-                               help='Test ReadySet caching: spins up a Docker container with your schema, caches the query, and shows performance comparison and whether the query is supported')
+                               help='Test Readyset caching: spins up a Docker container with your schema, caches the query, and shows performance comparison and whether the query is supported')
     analyze_parser.add_argument('--fast', action='store_true',
                                help='Skip EXPLAIN ANALYZE entirely and use EXPLAIN only (much faster, less accurate timing)')
     analyze_parser.add_argument('--interactive', action='store_true', help='Enter interactive mode after analysis for Q&A about recommendations')
@@ -239,10 +303,6 @@ Examples:
                                help='Review conversation history for this query without re-running analysis')
     analyze_parser.add_argument('--workload', action='store_true', help='Analyze multiple queries together for holistic index recommendations (coming soon)')
     analyze_parser.add_argument('--large-query-bypass', action='store_true', help='Bypass the 1KB query size limit (allows up to 10KB) for -q, -f, or --stdin input')
-
-    # tune command
-    tune_parser = subparsers.add_parser('tune', help='Get optimization suggestions')
-    tune_parser.add_argument('query', help='SQL query to tune')
 
     # init command
     init_parser = subparsers.add_parser('init', help='First-time setup wizard',
@@ -537,10 +597,6 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             large_query_bypass=getattr(args, 'large_query_bypass', None),
             **filtered_kwargs
         )
-    elif command == 'tune':
-        tune_exclude_keys = ['query']
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k not in tune_exclude_keys}
-        return cli.tune(args.query, **filtered_kwargs)
     elif command == 'init':
         return cli.init(**kwargs)
     elif command == 'query':
@@ -668,7 +724,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             # Install the /rdst slash command globally
             slash_cmd_content = '''# RDST Mode Activated
 
-You have RDST (ReadySet Diagnostics & SQL Tuning) tools available.
+You have RDST (Readyset Data and SQL Toolkit) tools available.
 
 **First, call the `rdst_help` tool to check the user's setup.**
 
@@ -823,7 +879,6 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             ("top", "Live view of slow queries"),
             ("analyze", "Analyze a SQL query"),
             ("ask", "Ask questions in natural language"),
-            ("tune", "Suggest optimizations for a SQL query"),
             ("init", "First-time setup wizard"),
             ("query", "Manage query registry"),
             ("schema", "Manage semantic layer"),
@@ -843,7 +898,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             )
             console.print(Panel.fit(
                 header_text,
-                title="Readyset Diagnostics & SQL Tuning (rdst)",
+                title="Readyset Data and SQL Toolkit (rdst)",
                 title_align="left",
                 subtitle="Readyset",
                 subtitle_align="right",
@@ -860,7 +915,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             prompt = "Select option [1]: "
             choice = input(prompt).strip()
         else:
-            print("rdst - Readyset Diagnostics & SQL Tuning")
+            print("rdst - Readyset Data and SQL Toolkit")
             print("Select a command to run:")
             for i, (cmd, desc) in enumerate(commands, start=1):
                 print(f"  [{i}] {cmd} - {desc}")
@@ -887,14 +942,11 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             except ValueError:
                 limit = 20
             return cli.top(limit=limit)
-        elif cmd in ("analyze", "tune"):
+        elif cmd == "analyze":
             query = input("SQL query: ").strip()
             if not query:
-                return RdstResult(False, f"{cmd} requires a SQL query")
-            if cmd == "analyze":
-                return cli.analyze(query)
-            if cmd == "tune":
-                return cli.tune(query)
+                return RdstResult(False, "analyze requires a SQL query")
+            return cli.analyze(query)
         elif cmd == "init":
             return cli.init()
         elif cmd == "query":
@@ -949,6 +1001,9 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
 def main():
     """Main entry point for the rdst CLI wrapper."""
     try:
+        # Show first-run welcome message after pip install
+        _show_first_run_message()
+
         # Intercept top-level --help for Rich formatted output
         if len(sys.argv) == 2 and sys.argv[1] in ('--help', '-h', 'help'):
             if print_rich_help():

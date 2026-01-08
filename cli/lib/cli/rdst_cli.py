@@ -562,7 +562,7 @@ class RdstCLI:
             target: Target database
             save_as: Name to save query as after analysis
             db: Legacy parameter for target database
-            readyset_cache: Whether to test ReadySet caching with Docker container
+            readyset_cache: Whether to test Readyset caching with Docker container
             fast: Whether to skip EXPLAIN ANALYZE and use EXPLAIN only
             interactive: Whether to enter interactive mode after analysis
             review: Whether to review conversation history instead of analyzing
@@ -674,19 +674,6 @@ class RdstCLI:
                 pass
             return RdstResult(False, f"analyze failed: {e}")
 
-    # rdst tune "<query>"
-    def tune(self, query: str, **kwargs) -> RdstResult:
-        """Stub: Suggest rewrites, indexes, caching.
-
-        Intended integration:
-        - Static analysis + DataManagerService schema info
-        - Recommend indexes or Readyset caching
-        """
-        if not query:
-            return RdstResult(False, "tune requires a SQL query")
-        msg = "Tune stub – would suggest rewrites/indexes/caching."
-        return RdstResult(True, msg, data={"query": query})
-
     # rdst init
     def init(self, **kwargs) -> RdstResult:
         """First-time guided setup (init)."""
@@ -728,7 +715,7 @@ class RdstCLI:
         banner = (
             "\n"
             "==============================================\n"
-            "  Readyset Diagnostics & SQL Tuning (rdst)\n"
+            "  Readyset Data and SQL Toolkit (rdst)\n"
             "==============================================\n"
         )
         intro = (
@@ -738,7 +725,6 @@ class RdstCLI:
             "  - rdst configure        Manage database targets and profiles\n"
             "  - rdst configure llm    Configure AI analysis provider (independent of targets)\n"
             "  - rdst analyze          Explain a SQL query\n"
-            "  - rdst tune             Get optimization suggestions\n"
             "  - rdst cache            Evaluate Readyset caching benefits\n"
             "  - rdst top              Live view of top slow queries\n"
             "  - rdst init             First-time setup wizard\n"
@@ -751,7 +737,6 @@ class RdstCLI:
             "  rdst configure add --target prod --host db.example.com --user admin\n"
             "  rdst configure llm\n"
             "  rdst analyze \"SELECT * FROM users WHERE active = true\"\n"
-            "  rdst tune \"SELECT u.name, p.title FROM users u JOIN posts p ON u.id=p.user_id\"\n"
         )
         return RdstResult(True, f"{banner}{intro}")
 
@@ -768,7 +753,7 @@ class RdstCLI:
             except Exception:
                 pkg_version = "unknown"
 
-        return RdstResult(True, f"Readyset Diagnostics & SQL Tuning (rdst) version {pkg_version}")
+        return RdstResult(True, f"Readyset Data and SQL Toolkit (rdst) version {pkg_version}")
 
     # rdst report
     def report(self, title: str, body: str = "", **kwargs) -> RdstResult:

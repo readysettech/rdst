@@ -3,7 +3,7 @@ LLM Analysis Functions for RDST Analyze
 
 Provides functions to analyze query performance using LLMs and extract
 actionable insights including query rewrites, index suggestions, and
-ReadySet caching recommendations.
+Readyset caching recommendations.
 """
 
 import json
@@ -650,7 +650,7 @@ def extract_rewrites(analysis_results: Dict[str, Any], parameterized_sql: str,
         - success: boolean indicating if extraction succeeded
         - rewrite_suggestions: list of suggested query rewrites
         - index_suggestions: list of suggested indexes
-        - caching_recommendations: ReadySet caching analysis
+        - caching_recommendations: Readyset caching analysis
         - error: error message if failed
     """
     try:
@@ -674,7 +674,7 @@ def extract_rewrites(analysis_results: Dict[str, Any], parameterized_sql: str,
             "extraction_results": {}
         }
 
-        # 3. ReadySet Caching Analysis
+        # 3. Readyset Caching Analysis
         caching_results = _get_caching_recommendations(
             llm_manager, parameterized_sql, analysis_results, kwargs
         )
@@ -775,7 +775,7 @@ def _get_index_suggestions(llm_manager: LLMManager, parameterized_sql: str,
 
 def _get_caching_recommendations(llm_manager: LLMManager, parameterized_sql: str,
                                 analysis_results: Dict[str, Any], kwargs: Dict) -> Dict[str, Any]:
-    """Get ReadySet caching recommendations from LLM."""
+    """Get Readyset caching recommendations from LLM."""
     try:
         # Analyze query characteristics for caching
         query_characteristics = _analyze_query_characteristics(parameterized_sql)
@@ -796,7 +796,7 @@ def _get_caching_recommendations(llm_manager: LLMManager, parameterized_sql: str
         llm_response = llm_manager.generate_response(
             prompt=prompt,
             model=kwargs.get('model'),  # Use provider's default model
-            system_message="You are a ReadySet caching optimization expert.",
+            system_message="You are a Readyset caching optimization expert.",
             max_tokens=1500,
             temperature=0.0  # Deterministic output for consistent recommendations
         )

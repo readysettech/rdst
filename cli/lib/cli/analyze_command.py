@@ -192,9 +192,17 @@ class AnalyzeCommand:
         """
         Enforce query size limits.
 
+        Query size limits are database-dependent:
+        - PostgreSQL 14+: Up to 4KB supported
+        - PostgreSQL 13 and below: Up to 1KB supported
+        - MySQL: Up to 1KB supported
+
+        This initial check enforces a 4KB hard cap. Engine-specific limits
+        are enforced later in execute_analyze() when we know the target.
+
         Args:
             query: The SQL query string to check
-            bypass: If True, use 10KB limit instead of 1KB
+            bypass: If True, skip the default 1KB warning (still enforces 4KB max)
 
         Raises:
             AnalyzeInputError: If query exceeds the size limit
@@ -202,27 +210,120 @@ class AnalyzeCommand:
         from lib.data_manager_service.data_manager_service_command_sets import MAX_QUERY_LENGTH
         query_bytes = len(query.encode('utf-8'))
 
-        if bypass:
-            # With bypass flag, allow up to 10KB
-            max_bypass_size = 10 * 1024  # 10KB
-            if query_bytes > max_bypass_size:
-                raise AnalyzeInputError(
-                    f"Query size ({query_bytes:,} bytes) exceeds maximum allowed size (10KB).\n\n"
-                    "Even with --large-query-bypass, queries cannot exceed 10KB due to LLM context limits."
-                )
-            # Warn if query is very large (> 5KB)
-            if query_bytes > 5 * 1024:
-                print(f"Note: Large query ({query_bytes:,} bytes). Analysis may use significant LLM tokens.")
-        else:
-            # Default 1KB limit
+        # Hard cap at 4KB - this is the maximum any database engine supports
+        max_size = 4 * 1024  # 4KB
+        if query_bytes > max_size:
+            raise AnalyzeInputError(
+                f"Query size ({query_bytes:,} bytes) exceeds maximum allowed size (4KB).\n\n"
+                "Database engines have hard limits on query size for EXPLAIN ANALYZE:\n"
+                "  - PostgreSQL 14+: Up to 4KB\n"
+                "  - PostgreSQL 13 and below: Up to 1KB\n"
+                "  - MySQL: Up to 1KB\n\n"
+                "Please reduce your query size or break it into smaller parts."
+            )
+
+        if not bypass:
+            # Default 1KB limit - warn about potential issues with older databases
             if query_bytes > MAX_QUERY_LENGTH:
                 raise AnalyzeInputError(
                     f"Query size ({query_bytes:,} bytes) exceeds the default limit (1KB).\n\n"
-                    "To analyze large queries, use --large-query-bypass:\n"
+                    "Queries over 1KB may fail on:\n"
+                    "  - MySQL (all versions)\n"
+                    "  - PostgreSQL 13 and below\n\n"
+                    "If you're using PostgreSQL 14+, use --large-query-bypass:\n"
                     "  rdst analyze --large-query-bypass -f your_file.sql\n"
                     "  rdst analyze --large-query-bypass -q '<your query>'\n\n"
-                    "This allows queries up to 10KB."
+                    "This allows queries up to 4KB (PostgreSQL 14+ only)."
                 )
+        else:
+            # With bypass, warn if query is between 1KB and 4KB about compatibility
+            if query_bytes > MAX_QUERY_LENGTH:
+                print(f"Note: Large query ({query_bytes:,} bytes). This requires PostgreSQL 14+ - may fail on MySQL or older PostgreSQL.")
+
+    def _validate_query_size_for_engine(self, query: str, target_config: dict, target_name: str) -> Optional[str]:
+        """
+        Validate query size against engine-specific limits.
+
+        This is called after we know the target database engine and can
+        enforce appropriate limits:
+        - PostgreSQL 14+: Up to 4KB
+        - PostgreSQL 13 and below: Up to 1KB
+        - MySQL: Up to 1KB
+
+        Args:
+            query: The SQL query to validate
+            target_config: Target database configuration
+            target_name: Name of the target (for error messages)
+
+        Returns:
+            Error message string if validation fails, None if OK
+        """
+        from lib.data_manager_service.data_manager_service_command_sets import MAX_QUERY_LENGTH
+
+        query_bytes = len(query.encode('utf-8'))
+        engine = target_config.get('engine', '').lower()
+
+        # MySQL: 1KB limit
+        if engine in ['mysql', 'mariadb']:
+            if query_bytes > MAX_QUERY_LENGTH:
+                return (
+                    f"Query size ({query_bytes:,} bytes) exceeds MySQL limit (1KB).\n\n"
+                    f"MySQL does not support queries larger than 1KB for EXPLAIN ANALYZE.\n"
+                    f"Please reduce your query size."
+                )
+            return None
+
+        # PostgreSQL: Check version for limit
+        if engine in ['postgresql', 'postgres']:
+            # Try to get the PostgreSQL version to determine limit
+            pg_version = self._get_postgres_major_version(target_config)
+
+            if pg_version is not None and pg_version < 14:
+                # PostgreSQL 13 and below: 1KB limit
+                if query_bytes > MAX_QUERY_LENGTH:
+                    return (
+                        f"Query size ({query_bytes:,} bytes) exceeds PostgreSQL {pg_version} limit (1KB).\n\n"
+                        f"PostgreSQL versions before 14 have a 1KB query size limit for EXPLAIN ANALYZE.\n"
+                        f"Options:\n"
+                        f"  1. Reduce your query size\n"
+                        f"  2. Upgrade to PostgreSQL 14+ (supports up to 4KB)"
+                    )
+            # PostgreSQL 14+ or unknown version: 4KB limit (already enforced in _enforce_query_size_limit)
+            return None
+
+        # Unknown engine: be permissive (4KB limit already enforced)
+        return None
+
+    def _get_postgres_major_version(self, target_config: dict) -> Optional[int]:
+        """
+        Get the major PostgreSQL version from the target database.
+
+        Returns:
+            Major version number (e.g., 14, 15, 16) or None if unable to determine
+        """
+        import psycopg2
+        try:
+            conn_params = {
+                'host': target_config.get('host', 'localhost'),
+                'port': target_config.get('port', 5432),
+                'user': target_config.get('user') or target_config.get('username'),
+                'password': target_config.get('password'),
+                'database': target_config.get('database') or target_config.get('dbname'),
+                'connect_timeout': 5
+            }
+            # Remove None values
+            conn_params = {k: v for k, v in conn_params.items() if v is not None}
+
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SHOW server_version")
+                    version_str = cursor.fetchone()[0]
+                    # Parse version string like "14.5" or "15.2 (Ubuntu 15.2-1.pgdg22.04+1)"
+                    major_version = int(version_str.split('.')[0])
+                    return major_version
+        except Exception:
+            # If we can't determine version, return None (be permissive)
+            return None
 
     def _resolve_inline_query(self, query: str, save_as: str, bypass: bool = False) -> AnalyzeInput:
         """Resolve inline query string."""
@@ -590,8 +691,8 @@ class AnalyzeCommand:
         Args:
             resolved_input: Resolved input from resolve_input()
             target: Target database name
-            readyset: Whether to run parallel workflow with ReadySet testing
-            readyset_cache: Whether to evaluate ReadySet caching with performance comparison
+            readyset: Whether to run parallel workflow with Readyset testing
+            readyset_cache: Whether to evaluate Readyset caching with performance comparison
             fast: Whether to auto-skip slow EXPLAIN ANALYZE queries after 10 seconds
             interactive: Whether to enter interactive mode after analysis
             review: Whether to review conversation history instead of analyzing
@@ -730,6 +831,13 @@ class AnalyzeCommand:
                 targets_str = ', '.join(available_targets) if available_targets else 'none'
                 return RdstResult(False, f"Target '{target_name}' not found. Available targets: {targets_str}")
 
+            # Engine-aware query size validation
+            query_size_error = self._validate_query_size_for_engine(
+                resolved_input.sql, target_config, target_name
+            )
+            if query_size_error:
+                return RdstResult(False, query_size_error)
+
             readyset_analysis_result = None
             cache_performance_result = None
 
@@ -761,7 +869,7 @@ class AnalyzeCommand:
                     except Exception as exc:  # pragma: no cover - defensive
                         readyset_analysis_result = {
                             "success": False,
-                            "error": f"ReadySet analysis failed: {exc}"
+                            "error": f"Readyset analysis failed: {exc}"
                         }
             else:
                 workflow_result = self._run_analyze_workflow(
@@ -777,7 +885,7 @@ class AnalyzeCommand:
                 if workflow_result.get("success"):
                     readyset_analysis_result.setdefault(
                         "static_cacheability",
-                        workflow_result["result"].get("CheckReadySetCacheability", {})
+                        workflow_result["result"].get("CheckReadysetCacheability", {})
                     )
                     context = workflow_result["result"]
                     context["readyset_analysis"] = readyset_analysis_result
@@ -840,7 +948,7 @@ class AnalyzeCommand:
                 if readyset_cache and cache_performance_result:
                     from ..functions.performance_comparison import format_performance_comparison
                     formatted_results += "\n\n" + "="*70 + "\n"
-                    formatted_results += "ReadySet Cache Performance Analysis\n"
+                    formatted_results += "Readyset Cache Performance Analysis\n"
                     formatted_results += "="*70 + "\n\n"
 
                     if cache_performance_result.get("success"):
@@ -891,7 +999,7 @@ class AnalyzeCommand:
                     self._console.print()
                     self._console.print("[cyan]Next Steps:[/cyan]")
                     if not readyset_cache:
-                        self._console.print(f"  rdst [green]analyze[/green] --hash [blue]{resolved_input.hash[:8]}[/blue] --readyset-cache   [dim]Test ReadySet caching[/dim]")
+                        self._console.print(f"  rdst [green]analyze[/green] --hash [blue]{resolved_input.hash[:8]}[/blue] --readyset-cache   [dim]Test Readyset caching[/dim]")
                     self._console.print(f"  rdst [green]analyze[/green] --hash [blue]{resolved_input.hash[:8]}[/blue] --interactive      [dim]Ask follow-up questions[/dim]")
                     self._console.print(f"  rdst [green]query show[/green] [blue]{resolved_input.hash[:8]}[/blue]                        [dim]View saved query details[/dim]")
                     self._console.print()
@@ -899,7 +1007,7 @@ class AnalyzeCommand:
                     print("\n" + "─" * 50)
                     print("Next Steps:")
                     if not readyset_cache:
-                        print(f"  rdst analyze --hash {resolved_input.hash[:8]} --readyset-cache   Test ReadySet caching")
+                        print(f"  rdst analyze --hash {resolved_input.hash[:8]} --readyset-cache   Test Readyset caching")
                     print(f"  rdst analyze --hash {resolved_input.hash[:8]} --interactive      Ask follow-up questions")
                     print(f"  rdst query show {resolved_input.hash[:8]}                        View saved query details")
                     print()
@@ -1033,7 +1141,7 @@ class AnalyzeCommand:
         analyze_workflow_output: Optional[dict] = None
     ) -> dict:
         """
-        Run ReadySet container setup and cacheability testing.
+        Run Readyset container setup and cacheability testing.
 
         Args:
             resolved_input: Resolved input with query info
@@ -1042,13 +1150,13 @@ class AnalyzeCommand:
             analyze_workflow_output: Results from the regular analysis workflow (optional)
 
         Returns:
-            Dict containing ReadySet analysis results
+            Dict containing Readyset analysis results
         """
         try:
             from .rdst_cli import TargetsConfig
             from .readyset_setup import setup_readyset_containers
 
-            print("\n🔧 Setting up ReadySet container for cacheability testing...")
+            print("\n🔧 Setting up Readyset container for cacheability testing...")
 
             # Load target configuration
             cfg = TargetsConfig()
@@ -1065,7 +1173,7 @@ class AnalyzeCommand:
             target_name = effective_target_name
 
             # Use shared setup function
-            print("  -> Setting up test database and ReadySet containers...")
+            print("  -> Setting up test database and Readyset containers...")
             setup_result_wrapper = setup_readyset_containers(
                 target_name=target_name,
                 target_config=target_config,
@@ -1087,7 +1195,7 @@ class AnalyzeCommand:
             if not readyset_port:
                 return {
                     "success": False,
-                    "error": f"ReadySet port not found in setup result. Available keys: {list(setup_result_wrapper.keys())}"
+                    "error": f"Readyset port not found in setup result. Available keys: {list(setup_result_wrapper.keys())}"
                 }
 
             # For target_config, check both top level and nested
@@ -1112,8 +1220,8 @@ class AnalyzeCommand:
             if not test_db_config.get('password'):
                 test_db_config['password'] = password
 
-            # Now run EXPLAIN CREATE CACHE against ReadySet
-            print("  -> Running EXPLAIN CREATE CACHE on ReadySet...")
+            # Now run EXPLAIN CREATE CACHE against Readyset
+            print("  -> Running EXPLAIN CREATE CACHE on Readyset...")
             from ..functions.readyset_explain_cache import explain_create_cache_readyset, create_cache_readyset
 
             explain_result = explain_create_cache_readyset(
@@ -1122,7 +1230,7 @@ class AnalyzeCommand:
                 test_db_config=test_db_config
             )
 
-            print("  DONE: ReadySet cacheability analysis complete")
+            print("  DONE: Readyset cacheability analysis complete")
 
             # If the query is cacheable, try to create the cache (unless already cached)
             create_result = {}
@@ -1183,10 +1291,10 @@ class AnalyzeCommand:
                     print(f"     Reason: {explanation}")
                 print("     Note: Will attempt to create cache anyway (EXPLAIN can be conservative)")
 
-            # Merge static cacheability check with actual ReadySet result
+            # Merge static cacheability check with actual Readyset result
             static_cacheability = {}
             if analyze_workflow_output:
-                static_cacheability = analyze_workflow_output.get("CheckReadySetCacheability", {})
+                static_cacheability = analyze_workflow_output.get("CheckReadysetCacheability", {})
 
             return {
                 "success": True,
@@ -1206,10 +1314,10 @@ class AnalyzeCommand:
             }
 
         except Exception as e:
-            print(f"  ERROR: ReadySet analysis failed: {str(e)}")
+            print(f"  ERROR: Readyset analysis failed: {str(e)}")
             return {
                 "success": False,
-                "error": f"ReadySet analysis failed: {str(e)}"
+                "error": f"Readyset analysis failed: {str(e)}"
             }
 
     def _check_api_key_configured(self) -> Optional[str]:
@@ -1566,7 +1674,7 @@ class AnalyzeCommand:
                     lines.append(f"   Best rewrite: {improvement_pct:+.1f}% performance change")
                 lines.append("")
 
-            # ReadySet Cacheability (check both formatted output and sequential result)
+            # Readyset Cacheability (check both formatted output and sequential result)
             readyset_analysis = (
                 workflow_result.get("readyset_analysis")
                 or workflow_result.get("States", {}).get("readyset_analysis")
@@ -1575,9 +1683,9 @@ class AnalyzeCommand:
             )
             readyset_cacheability = formatted_output.get("readyset_cacheability", {})
 
-            # Use sequential ReadySet result if available, otherwise use formatted output
+            # Use sequential Readyset result if available, otherwise use formatted output
             if readyset_analysis.get("success"):
-                lines.append("🚀 ReadySet Cacheability:")
+                lines.append("🚀 Readyset Cacheability:")
                 final_verdict = readyset_analysis.get("final_verdict", {})
                 cacheable = final_verdict.get("cacheable", False)
                 confidence = final_verdict.get("confidence", "unknown")
@@ -1594,9 +1702,9 @@ class AnalyzeCommand:
                 cached = final_verdict.get("cached", False)
                 create_result = readyset_analysis.get("create_cache_result", {})
                 if cacheable and create_result.get("already_cached"):
-                    lines.append("   ℹ️  Query already cached in ReadySet")
+                    lines.append("   ℹ️  Query already cached in Readyset")
                 elif cacheable and cached:
-                    lines.append("   Cache created in ReadySet")
+                    lines.append("   Cache created in Readyset")
                 elif cacheable and create_result:
                     # Cache creation was attempted but failed
                     error = create_result.get("error", "Unknown error")
@@ -1616,7 +1724,7 @@ class AnalyzeCommand:
                         lines.append(f"   Details: {details}")
                 lines.append("")
             elif readyset_cacheability.get("checked"):
-                lines.append("🚀 ReadySet Cacheability:")
+                lines.append("🚀 Readyset Cacheability:")
                 cacheable = readyset_cacheability.get("cacheable", False)
                 confidence = readyset_cacheability.get("confidence", "unknown")
 
@@ -2095,10 +2203,10 @@ class AnalyzeCommand:
                     lines.append(f"      SQL: {sql}")
                 lines.append("")
 
-        # ReadySet Cacheability Results (from parallel analysis)
+        # Readyset Cacheability Results (from parallel analysis)
         readyset_analysis = workflow_result.get("readyset_analysis", {})
         if readyset_analysis and readyset_analysis.get("success"):
-            lines.append("🚀 ReadySet Cacheability:")
+            lines.append("🚀 Readyset Cacheability:")
             final_verdict = readyset_analysis.get("final_verdict", {})
             cacheable = final_verdict.get("cacheable", False)
             confidence = final_verdict.get("confidence", "unknown")
@@ -2115,9 +2223,9 @@ class AnalyzeCommand:
             cached = final_verdict.get("cached", False)
             create_result = readyset_analysis.get("create_cache_result", {})
             if cacheable and create_result.get("already_cached"):
-                lines.append("   ℹ️  Query already cached in ReadySet")
+                lines.append("   ℹ️  Query already cached in Readyset")
             elif cacheable and cached:
-                lines.append("   Cache created in ReadySet")
+                lines.append("   Cache created in Readyset")
             elif cacheable and create_result:
                 # Cache creation was attempted but failed
                 error = create_result.get("error", "Unknown error")
@@ -2164,7 +2272,7 @@ class AnalyzeCommand:
 
         Args:
             query: SQL query to find cache for
-            readyset_port: ReadySet port
+            readyset_port: Readyset port
             db_config: Database configuration
 
         Returns:
@@ -2277,7 +2385,7 @@ class AnalyzeCommand:
             resolved_input: Resolved input with query info
             target_name: Name of the target database
             target_config: Resolved target configuration
-            readyset_analysis_result: Results from ReadySet analysis (contains container info)
+            readyset_analysis_result: Results from Readyset analysis (contains container info)
 
         Returns:
             Dict containing cache performance comparison results
@@ -2289,18 +2397,18 @@ class AnalyzeCommand:
 
             print("\n🚀 Running cache performance comparison...")
 
-            # Extract ReadySet container info from analysis result
+            # Extract Readyset container info from analysis result
             if not readyset_analysis_result.get("success"):
                 return {
                     "success": False,
-                    "error": "ReadySet analysis failed, cannot run cache comparison"
+                    "error": "Readyset analysis failed, cannot run cache comparison"
                 }
 
             readyset_port = readyset_analysis_result.get("readyset_port")
             if not readyset_port:
                 return {
                     "success": False,
-                    "error": "ReadySet port not available from setup"
+                    "error": "Readyset port not available from setup"
                 }
 
             # Get test_db_config from setup result
@@ -2320,8 +2428,8 @@ class AnalyzeCommand:
             create_result = readyset_analysis_result.get("create_cache_result", {})
 
             if not create_result.get("cached") and not create_result.get("already_cached"):
-                # Cache wasn't created in ReadySet analysis, create it now
-                print("  -> Creating cache in ReadySet...")
+                # Cache wasn't created in Readyset analysis, create it now
+                print("  -> Creating cache in Readyset...")
                 print(f"     Query: {resolved_input.sql[:100]}{'...' if len(resolved_input.sql) > 100 else ''}")
                 create_result = create_cache_readyset(
                     query=resolved_input.sql,
@@ -2405,11 +2513,11 @@ class AnalyzeCommand:
             deployment_instructions.append("Deployment Instructions")
             deployment_instructions.append("="*70)
             deployment_instructions.append("")
-            deployment_instructions.append("To cache this query in your ReadySet instance:")
+            deployment_instructions.append("To cache this query in your Readyset instance:")
             deployment_instructions.append("")
             deployment_instructions.append(cache_command)
             deployment_instructions.append("")
-            deployment_instructions.append("Connect to your ReadySet and run this command:")
+            deployment_instructions.append("Connect to your Readyset and run this command:")
             if target_config.get('engine') == 'mysql':
                 deployment_instructions.append(f"  mysql -h YOUR_READYSET_HOST -P YOUR_READYSET_PORT -u {target_config['user']} -D {target_config['database']}")
             else:
@@ -2420,7 +2528,7 @@ class AnalyzeCommand:
             deployment_instructions.append("=" * 70)
             deployment_instructions.append("")
             deployment_instructions.append("• Test containers are persistent and reused across runs")
-            deployment_instructions.append(f"• ReadySet container port: {readyset_port}")
+            deployment_instructions.append(f"• Readyset container port: {readyset_port}")
             deployment_instructions.append(f"• To view all caches: psql -h localhost -p {readyset_port} -U {target_config['user']} -d {target_config['database']} -c 'SHOW CACHES;'")
             deployment_instructions.append(f"• To drop this cache: psql -h localhost -p {readyset_port} -U {target_config['user']} -d {target_config['database']} -c \"DROP CACHE <cache_name>;\"")
             deployment_instructions.append("")
@@ -2446,7 +2554,7 @@ class AnalyzeCommand:
                 "error": f"Invalid configuration - missing required key {str(e)}. Please check your target configuration."
             }
         except ConnectionError as e:
-            print(f"  ERROR: Failed to connect to database or ReadySet: {str(e)}")
+            print(f"  ERROR: Failed to connect to database or Readyset: {str(e)}")
             return {
                 "success": False,
                 "error": f"Database connection failed: {str(e)}. Ensure containers are running and accessible."
@@ -2455,7 +2563,7 @@ class AnalyzeCommand:
             print(f"  ERROR: Operation timed out: {str(e)}")
             return {
                 "success": False,
-                "error": f"Performance comparison timed out: {str(e)}. Database or ReadySet may be unresponsive."
+                "error": f"Performance comparison timed out: {str(e)}. Database or Readyset may be unresponsive."
             }
         except Exception as e:
             # Catch-all for unexpected errors - include more context

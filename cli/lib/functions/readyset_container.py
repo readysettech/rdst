@@ -14,19 +14,19 @@ def start_readyset_container(
     **kwargs
 ) -> Dict[str, Any]:
     """
-    Start ReadySet container connected to test database.
+    Start Readyset container connected to test database.
 
-    ReadySet will snapshot from the test database and cache queries.
+    Readyset will snapshot from the test database and cache queries.
 
     Args:
         test_db_container: Name of test database container
         test_db_config: Test database configuration
-        readyset_port: Port to expose ReadySet on
-        readyset_container_name: Name for ReadySet container
+        readyset_port: Port to expose Readyset on
+        readyset_container_name: Name for Readyset container
         **kwargs: Additional workflow parameters
 
     Returns:
-        Dict containing ReadySet container status
+        Dict containing Readyset container status
     """
     try:
         # Parse test_db_config if it's a JSON string
@@ -35,7 +35,7 @@ def start_readyset_container(
 
         readyset_port = int(readyset_port)
 
-        # Check if ReadySet container already exists
+        # Check if Readyset container already exists
         check_cmd = [
             'docker', 'ps', '-a',
             '--filter', f'name={readyset_container_name}',
@@ -49,7 +49,7 @@ def start_readyset_container(
             timeout=5
         )
 
-        # Build target database URL for ReadySet
+        # Build target database URL for Readyset
         engine = test_db_config.get('engine', 'postgresql')
 
         # Determine the readyset_url protocol based on engine
@@ -62,7 +62,7 @@ def start_readyset_container(
         if result.returncode == 0 and result.stdout.strip():
             parts = result.stdout.strip().split('\t')
             if len(parts) >= 2 and 'Up' in parts[1]:
-                print(f"✓ ReadySet container already running: {readyset_container_name}")
+                print(f"✓ Readyset container already running: {readyset_container_name}")
                 return {
                     "success": True,
                     "container_name": readyset_container_name,
@@ -72,7 +72,7 @@ def start_readyset_container(
                 }
             elif len(parts) >= 1:
                 # Container exists but not running, start it
-                print(f"Starting existing ReadySet container...")
+                print(f"Starting existing Readyset container...")
                 start_result = subprocess.run(
                     ['docker', 'start', readyset_container_name],
                     capture_output=True,
@@ -92,7 +92,7 @@ def start_readyset_container(
                     )
 
                     if verify_result.returncode == 0 and readyset_container_name in verify_result.stdout:
-                        print(f"✓ Successfully started existing ReadySet container")
+                        print(f"✓ Successfully started existing Readyset container")
                         return {
                             "success": True,
                             "container_name": readyset_container_name,
@@ -122,15 +122,15 @@ def start_readyset_container(
         else:
             return {
                 "success": False,
-                "error": f"Unsupported database engine for ReadySet: {engine}"
+                "error": f"Unsupported database engine for Readyset: {engine}"
             }
 
-        print(f"Creating ReadySet container: {readyset_container_name}...")
+        print(f"Creating Readyset container: {readyset_container_name}...")
         print(f"  Database Type: {db_type}")
         print(f"  Target DB: {db_type}://host.docker.internal:{port}/{database}")
-        print(f"  ReadySet port: {readyset_port}")
+        print(f"  Readyset port: {readyset_port}")
 
-        # Create and start ReadySet container using the same pattern as control_plane
+        # Create and start Readyset container using the same pattern as control_plane
         docker_cmd = [
             'docker', 'run',
             '-d',
@@ -168,7 +168,7 @@ def start_readyset_container(
 
             if is_ecr_auth_error:
                 error_message = (
-                    "Failed to pull ReadySet image from ECR - Authentication required.\n"
+                    "Failed to pull Readyset image from ECR - Authentication required.\n"
                     "\n"
                     "Please authenticate with AWS ECR:\n"
                     "  aws ecr-public get-login-password --region us-east-1 | \\\n"
@@ -180,17 +180,17 @@ def start_readyset_container(
                 raise Exception(error_message)
 
             # Generic docker error
-            error_message = f"Failed to create ReadySet container: {error_msg}"
+            error_message = f"Failed to create Readyset container: {error_msg}"
             print(f"\n❌ {error_message}\n")
             raise Exception(error_message)
 
-        print("✓ ReadySet container created, waiting for initialization...")
+        print("✓ Readyset container created, waiting for initialization...")
 
         # Give container a moment to start
         time.sleep(2)
 
         # Test connectivity from inside the container to the database (optional diagnostic)
-        print(f"Testing connectivity from ReadySet container to {db_type}://host.docker.internal:{port}...")
+        print(f"Testing connectivity from Readyset container to {db_type}://host.docker.internal:{port}...")
 
         if db_type == 'mysql':
             # Test MySQL connection from inside container
@@ -208,9 +208,9 @@ def start_readyset_container(
 
         conn_test = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
         if conn_test.returncode == 0:
-            print(f"✓ ReadySet container can reach test database")
+            print(f"✓ Readyset container can reach test database")
         else:
-            print(f"⚠️  Warning: ReadySet container cannot reach test database")
+            print(f"⚠️  Warning: Readyset container cannot reach test database")
             print(f"  Error: {conn_test.stderr[:200]}")
 
         # Quick check if container is still running
@@ -231,12 +231,12 @@ def start_readyset_container(
             )
             crash_logs = (logs_result.stdout + logs_result.stderr) if logs_result.returncode == 0 else "Unable to retrieve logs"
 
-            print(f"\n⚠️  ReadySet container crashed immediately after creation")
+            print(f"\n⚠️  Readyset container crashed immediately after creation")
             print(f"Container logs:\n{crash_logs}\n")
 
             return {
                 "success": False,
-                "error": f"ReadySet container crashed immediately. Logs:\n{crash_logs[:1000]}",
+                "error": f"Readyset container crashed immediately. Logs:\n{crash_logs[:1000]}",
                 "container_name": readyset_container_name,
                 "crash_logs": crash_logs
             }
@@ -253,12 +253,12 @@ def start_readyset_container(
     except subprocess.TimeoutExpired:
         return {
             "success": False,
-            "error": "ReadySet container creation timed out"
+            "error": "Readyset container creation timed out"
         }
     except Exception as e:
         return {
             "success": False,
-            "error": f"Failed to start ReadySet container: {str(e)}"
+            "error": f"Failed to start Readyset container: {str(e)}"
         }
 
 
@@ -268,10 +268,10 @@ def wait_for_readyset_ready(
     **kwargs
 ) -> Dict[str, Any]:
     """
-    Wait for ReadySet to finish snapshotting and be ready for queries.
+    Wait for Readyset to finish snapshotting and be ready for queries.
 
     Args:
-        readyset_container_name: Name of ReadySet container
+        readyset_container_name: Name of Readyset container
         timeout: Maximum time to wait in seconds
         **kwargs: Additional workflow parameters
 
@@ -282,7 +282,7 @@ def wait_for_readyset_ready(
         timeout = int(timeout)
         start_time = time.time()
 
-        print("Waiting for ReadySet snapshot to complete...")
+        print("Waiting for Readyset snapshot to complete...")
 
         while (time.time() - start_time) < timeout:
             # Check if container is still running
@@ -321,7 +321,7 @@ def wait_for_readyset_ready(
                        "unauthorized" in logs.lower() or \
                        "authentication required" in logs.lower():
                         error_message = (
-                            f"ReadySet container failed to start - ECR authentication required.\n"
+                            f"Readyset container failed to start - ECR authentication required.\n"
                             f"Container status: {status}\n"
                             "Please run: aws ecr-public get-login-password --region us-east-1 | "
                             "docker login --username AWS --password-stdin public.ecr.aws"
@@ -331,17 +331,17 @@ def wait_for_readyset_ready(
                         print(f"\n❌ {error_message}\n")
                         raise Exception(error_message)
 
-                    error_message = f"ReadySet container {readyset_container_name} not running (status: {status})"
+                    error_message = f"Readyset container {readyset_container_name} not running (status: {status})"
                     if logs:
                         error_message += f"\n\nContainer logs:\n{logs[-500:]}"
                     print(f"\n❌ {error_message}\n")
                     raise Exception(error_message)
 
-                error_message = f"ReadySet container {readyset_container_name} not running"
+                error_message = f"Readyset container {readyset_container_name} not running"
                 print(f"\n❌ {error_message}\n")
                 raise Exception(error_message)
 
-            # Check ReadySet logs for "Streaming replication started" message
+            # Check Readyset logs for "Streaming replication started" message
             # Avoid shell=True for security - use list form and do filtering in Python
             log_result = subprocess.run(
                 ["docker", "logs", readyset_container_name],
@@ -354,14 +354,14 @@ def wait_for_readyset_ready(
             if log_result.returncode == 0:
                 log_output = log_result.stdout + log_result.stderr
                 if "streaming replication started" in log_output.lower():
-                    print("✓ ReadySet snapshot complete and ready!")
+                    print("✓ Readyset snapshot complete and ready!")
                     return {
                         "success": True,
                         "ready": True,
                         "wait_time": time.time() - start_time
                     }
 
-            # Also check for errors in ReadySet logs (not Grafana)
+            # Also check for errors in Readyset logs (not Grafana)
             # Filter in Python for security (avoid shell=True)
             error_lines = []
             if log_result.returncode == 0:
@@ -376,7 +376,7 @@ def wait_for_readyset_ready(
                                 error_lines.append(lines[i + j])
 
             if error_lines:
-                error_message = f"ReadySet encountered errors during initialization:\n" + "\n".join(error_lines[-10:])
+                error_message = f"Readyset encountered errors during initialization:\n" + "\n".join(error_lines[-10:])
                 print(f"\n❌ {error_message}\n")
                 raise Exception(error_message)
 
@@ -392,7 +392,7 @@ def wait_for_readyset_ready(
         logs = (logs_result.stdout + logs_result.stderr)[-1000:] if logs_result.returncode == 0 else ""
 
         error_message = (
-            f"ReadySet did not become ready within {timeout}s.\n"
+            f"Readyset did not become ready within {timeout}s.\n"
             f"Container logs (last 30 lines):\n{logs}\n\n"
             f"Check full logs: docker logs {readyset_container_name}"
         )
@@ -400,7 +400,7 @@ def wait_for_readyset_ready(
         raise Exception(error_message)
 
     except subprocess.TimeoutExpired as e:
-        error_message = f"Timeout waiting for ReadySet: {str(e)}"
+        error_message = f"Timeout waiting for Readyset: {str(e)}"
         print(f"\n❌ {error_message}\n")
         raise Exception(error_message)
     except Exception:
@@ -413,10 +413,10 @@ def check_readyset_container_status(
     **kwargs
 ) -> Dict[str, Any]:
     """
-    Check if ReadySet container exists and is running.
+    Check if Readyset container exists and is running.
 
     Args:
-        readyset_container_name: Name of ReadySet container
+        readyset_container_name: Name of Readyset container
         **kwargs: Additional workflow parameters
 
     Returns:
@@ -462,5 +462,5 @@ def check_readyset_container_status(
             "success": False,
             "exists": False,
             "running": False,
-            "error": f"Failed to check ReadySet container status: {str(e)}"
+            "error": f"Failed to check Readyset container status: {str(e)}"
         }
