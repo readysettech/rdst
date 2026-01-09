@@ -77,9 +77,9 @@ class TelemetryManager:
     POSTHOG_HOST = "https://us.i.posthog.com"
     SENTRY_DSN = os.environ.get("RDST_SENTRY_DSN", "")  # Optional - not currently used
     # Slack webhooks - only used for: installation, first successful analyze, user feedback
-    SLACK_WEBHOOK_INSTALLS = os.environ.get("RDST_SLACK_WEBHOOK_INSTALLS", "https://hooks.slack.com/services/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")
-    SLACK_WEBHOOK_FEEDBACK = os.environ.get("RDST_SLACK_WEBHOOK_FEEDBACK", "https://hooks.slack.com/services/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")
-    SLACK_WEBHOOK_ANALYZE = os.environ.get("RDST_SLACK_WEBHOOK_ANALYZE", "https://hooks.slack.com/services/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")
+    SLACK_WEBHOOK_INSTALLS = os.environ.get("RDST_SLACK_WEBHOOK_INSTALLS", "https://hooks.slack.com/services/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")
+    SLACK_WEBHOOK_FEEDBACK = os.environ.get("RDST_SLACK_WEBHOOK_FEEDBACK", "https://hooks.slack.com/services/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")
+    SLACK_WEBHOOK_ANALYZE = os.environ.get("RDST_SLACK_WEBHOOK_ANALYZE", "https://hooks.slack.com/services/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")
 
     def __init__(self):
         self._device_id: Optional[str] = None
