@@ -7,12 +7,15 @@ import time
 
 from lib.workflow_manager.workflow_manager import WorkflowManager, WorkflowStatus
 from lib.workflows import resources
+from lib.ui import get_console, SectionBox
+
 
 def print_separator(title, char="="):
     """Print a nice separator"""
-    print(f"\n{char * 60}")
-    print(f" {title}")
-    print(f"{char * 60}")
+    console = get_console()
+    console.print()
+    console.print(SectionBox(title, content=""))
+
 
 def print_step_details(step_name, step_result):
     """Print detailed information about a step"""
@@ -36,6 +39,7 @@ def print_step_details(step_name, step_result):
         print(f"    Result: {result_str}")
     print()
 
+
 def test_llm_integration():
     """Test all LLM integration features"""
     print_separator("LLM INTEGRATION TESTS", "-")
@@ -50,11 +54,11 @@ def test_llm_integration():
                 "Resource": "call_llm",
                 "Parameters": {
                     "prompt": "Explain what a database is in one sentence.",
-                    "model": None
+                    "model": None,
                 },
-                "End": True
+                "End": True,
             }
-        }
+        },
     }
 
     manager = WorkflowManager.from_dict(workflow)
@@ -70,24 +74,25 @@ def test_llm_integration():
             "GetDBInfo": {
                 "Type": "Task",
                 "Resource": "get_db_size",
-                "Next": "AnalyzeWithLLM"
+                "Next": "AnalyzeWithLLM",
             },
             "AnalyzeWithLLM": {
                 "Type": "Task",
                 "Resource": "call_llm",
                 "Parameters": {
                     "prompt": "I have a database with {{States.GetDBInfo.size_mb}}MB. What are 2 optimization tips?",
-                    "model": None
+                    "model": None,
                 },
-                "End": True
-            }
-        }
+                "End": True,
+            },
+        },
     }
 
     manager = WorkflowManager.from_dict(db_workflow)
     result = manager.run()
     print(f"DB Size: {result['States']['GetDBInfo']['size_mb']}MB")
     print(f"   LLM Analysis: {result['States']['AnalyzeWithLLM']['response']}")
+
 
 def test_database_functions():
     """Test all database functions"""
@@ -103,16 +108,21 @@ def test_database_functions():
 
     # Test get_table_count
     table_count = manager.resources["get_table_count"]()
-    print(f"  📋 Tables: {table_count['table_count']}, Views: {table_count['view_count']}")
+    print(
+        f"  📋 Tables: {table_count['table_count']}, Views: {table_count['view_count']}"
+    )
 
     # Test get_query_stats
     query_stats = manager.resources["get_query_stats"]()
-    print(f"  Queries: {query_stats['total_queries']}, Avg: {query_stats['avg_response_time_ms']}ms")
+    print(
+        f"  Queries: {query_stats['total_queries']}, Avg: {query_stats['avg_response_time_ms']}ms"
+    )
 
     # Test analyze_schema
     schema = manager.resources["analyze_schema"]()
     print(f"  Schema: {schema['tables']} tables, {schema['indexes']} indexes")
     print(f"      Recommendations: {', '.join(schema['recommendations'][:2])}...")
+
 
 def test_async_execution():
     """Test async execution with status tracking"""
@@ -121,26 +131,18 @@ def test_async_execution():
     workflow = {
         "StartAt": "Step1",
         "States": {
-            "Step1": {
-                "Type": "Task",
-                "Resource": "get_db_size",
-                "Next": "Step2"
-            },
-            "Step2": {
-                "Type": "Task",
-                "Resource": "get_table_count",
-                "Next": "Step3"
-            },
+            "Step1": {"Type": "Task", "Resource": "get_db_size", "Next": "Step2"},
+            "Step2": {"Type": "Task", "Resource": "get_table_count", "Next": "Step3"},
             "Step3": {
                 "Type": "Task",
                 "Resource": "call_llm",
                 "Parameters": {
                     "prompt": "Analyze database: {{States.Step1.size_mb}}MB, {{States.Step2.table_count}} tables",
-                    "model": None
+                    "model": None,
                 },
-                "End": True
-            }
-        }
+                "End": True,
+            },
+        },
     }
 
     manager = WorkflowManager.from_dict(workflow)
@@ -157,7 +159,9 @@ def test_async_execution():
 
         print(f"  ⏰ Check #{check + 1}: {status.status.value}")
         print(f"    Current Step: {status.current_step or 'None'}")
-        print(f"    Completed: {len([s for s in status.steps.values() if s.status == WorkflowStatus.COMPLETED])}/{len(status.steps)}")
+        print(
+            f"    Completed: {len([s for s in status.steps.values() if s.status == WorkflowStatus.COMPLETED])}/{len(status.steps)}"
+        )
 
         if status.status in [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED]:
             break
@@ -174,6 +178,7 @@ def test_async_execution():
     print("\n📋 Step Details:")
     for step_name, step_result in final_status.steps.items():
         print_step_details(step_name, step_result)
+
 
 def run_workflow_file(workflow_path, input_data=None, show_tracking=False):
     """Run a workflow from JSON file with optional status tracking"""
@@ -221,14 +226,16 @@ def run_workflow_file(workflow_path, input_data=None, show_tracking=False):
     # Show prompt if available (for fetch_user_data_workflow)
     try:
         if "BuildPrompt" in ctx and "prompt" in ctx["BuildPrompt"]:
-            print("\n💬 Generated Prompt:")
-            print("-" * 40)
-            print(ctx["BuildPrompt"]["prompt"])
-            print("-" * 40)
+            console = get_console()
+            console.print()
+            console.print(
+                SectionBox("Generated Prompt", content=ctx["BuildPrompt"]["prompt"])
+            )
     except (KeyError, TypeError):
         pass
 
     return ctx
+
 
 def main():
     ap = argparse.ArgumentParser(
@@ -252,15 +259,19 @@ Examples:
   python run_workflow.py --test-llm
   python run_workflow.py --test-db
   python run_workflow.py --test-async
-"""
+""",
     )
 
     ap.add_argument("--workflow", help="Path to workflow JSON file")
     ap.add_argument("--input", help="Initial input JSON string", default="{}")
-    ap.add_argument("--track", action="store_true", help="Show detailed status tracking")
+    ap.add_argument(
+        "--track", action="store_true", help="Show detailed status tracking"
+    )
 
     # Test options
-    ap.add_argument("--test-all", action="store_true", help="Run all tests (LLM, DB, Async)")
+    ap.add_argument(
+        "--test-all", action="store_true", help="Run all tests (LLM, DB, Async)"
+    )
     ap.add_argument("--test-llm", action="store_true", help="Test LLM integration")
     ap.add_argument("--test-db", action="store_true", help="Test database functions")
     ap.add_argument("--test-async", action="store_true", help="Test async execution")
@@ -316,8 +327,10 @@ Examples:
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

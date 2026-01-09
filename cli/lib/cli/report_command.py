@@ -5,27 +5,30 @@ Allows users to submit feedback about RDST analysis results.
 Feedback is sent to PostHog for analytics and Slack for immediate visibility.
 """
 
-import os
 import sys
-from typing import Optional, Tuple
-from pathlib import Path
+from typing import Optional, Tuple, List
 
-try:
-    from rich.console import Console
-    from rich.prompt import Prompt, Confirm
-    from rich.panel import Panel
-    from rich.text import Text
-    _RICH_AVAILABLE = True
-except ImportError:
-    _RICH_AVAILABLE = False
+# Import UI system - handles Rich availability internally
+from lib.ui import (
+    get_console,
+    StyleTokens,
+    Prompt,
+    MessagePanel,
+    SelectPrompt,
+    SelectionTableBase,
+    QueryPanel,
+    KeyValueTable,
+    Group,
+    Text,
+    StatusLine,
+)
 
 
 class ReportCommand:
     """Implements the `rdst report` command for user feedback."""
 
     def __init__(self, console=None):
-        self.console = console if console and _RICH_AVAILABLE else (Console() if _RICH_AVAILABLE else None)
-        self._has_rich = _RICH_AVAILABLE and self.console is not None
+        self.console = console or get_console()
 
     def run(
         self,
@@ -66,8 +69,7 @@ class ReportCommand:
                 include_plan=include_plan,
             )
         except (KeyboardInterrupt, EOFError):
-            print("\n")  # Clean line after ^C or ^D
-            self._print_info("Feedback cancelled")
+            self.console.print(MessagePanel("Feedback cancelled", variant="warning"))
             return False
 
     def _run_report_flow(
@@ -85,11 +87,11 @@ class ReportCommand:
 
         # Check if we're in fully interactive mode (no args provided)
         fully_interactive = (
-            not reason and
-            not query_hash and
-            not positive and
-            not negative and
-            sys.stdin.isatty()
+            not reason
+            and not query_hash
+            and not positive
+            and not negative
+            and sys.stdin.isatty()
         )
 
         # Determine sentiment from flags
@@ -108,36 +110,54 @@ class ReportCommand:
         if query_hash:
             query_sql, plan_json, suggestion_text = self._load_query_context(query_hash)
             if not query_sql:
-                self._print_warning(f"Could not find query with hash '{query_hash}' in registry")
+                self.console.print(
+                    MessagePanel(
+                        f"Could not find query with hash '{query_hash}' in registry",
+                        variant="warning",
+                    )
+                )
 
         # Fully interactive mode - guide through everything
         if fully_interactive:
             result = self._run_interactive_flow()
             if result is None:
-                self._print_info("\nFeedback cancelled")
+                self.console.print(
+                    MessagePanel("Feedback cancelled", variant="warning")
+                )
                 return False
 
             query_hash, reason, sentiment, email, include_query, include_plan = result
 
             # Load query context if hash was selected
             if query_hash:
-                query_sql, plan_json, suggestion_text = self._load_query_context(query_hash)
+                query_sql, plan_json, suggestion_text = self._load_query_context(
+                    query_hash
+                )
 
         # Partial interactive - just need reason
         elif not reason:
             if not sys.stdin.isatty():
-                self._print_error("Reason is required when not running interactively. Use --reason 'your feedback'")
+                self.console.print(
+                    MessagePanel(
+                        "Reason is required when not running interactively. Use --reason 'your feedback'",
+                        variant="error",
+                    )
+                )
                 return False
 
             self._print_header()
 
             if query_hash:
-                self._print_info(f"Providing feedback for query: {query_hash}")
+                self.console.print(
+                    StatusLine("Context", f"Providing feedback for query: {query_hash}")
+                )
 
             reason = self._prompt_feedback_text(sentiment)
 
             if not reason:
-                self._print_info("Feedback cancelled")
+                self.console.print(
+                    MessagePanel("Feedback cancelled", variant="warning")
+                )
                 return False
 
             if not email:
@@ -163,12 +183,14 @@ class ReportCommand:
                 include_plan=include_plan,
             )
 
-            self._print_success("Thank you for your feedback!")
+            self.console.print(
+                MessagePanel("Thank you for your feedback!", variant="success")
+            )
 
             return True
 
         except Exception as e:
-            self._print_error(f"Failed to submit feedback: {e}")
+            self.console.print(MessagePanel(f"Error: {e}", variant="error"))
             return False
 
     def _run_interactive_flow(self) -> Optional[Tuple]:
@@ -182,11 +204,15 @@ class ReportCommand:
             self._print_header()
 
             # Step 1: Ask if about a specific query
-            self._print("\nIs this feedback about a specific query analysis?")
-            self._print("  [1] Yes, about a specific query")
-            self._print("  [2] No, general feedback about RDST")
-
-            choice = self._prompt_choice(["1", "2"], default="2")
+            choice = SelectPrompt.ask(
+                "Is this feedback about a specific query analysis?",
+                options=[
+                    "Yes, about a specific query",
+                    "No, general feedback about RDST",
+                ],
+                default=2,
+                allow_cancel=True,
+            )
             if choice is None:
                 return None
 
@@ -194,7 +220,7 @@ class ReportCommand:
             include_query = False
             include_plan = False
 
-            if choice == "1":
+            if choice == 1:
                 # Show recent queries and let them pick or enter hash
                 query_hash = self._prompt_query_selection()
                 if query_hash == "CANCEL":
@@ -205,46 +231,43 @@ class ReportCommand:
 
                     # Show what query they selected (parameterized for privacy)
                     if query_sql:
-                        self._print("")
-                        if self._has_rich:
-                            self.console.print(f"[bold]Selected query:[/bold] [yellow]{query_hash[:12]}[/yellow]")
-                            # Truncate for display, show parameterized version
-                            display_sql = query_sql[:200].replace('\n', ' ')
-                            if len(query_sql) > 200:
-                                display_sql += "..."
-                            self.console.print(f"[dim]{display_sql}[/dim]")
-                        else:
-                            self._print(f"Selected query: {query_hash[:12]}")
-                            display_sql = query_sql[:200].replace('\n', ' ')
-                            if len(query_sql) > 200:
-                                display_sql += "..."
-                            self._print(f"  {display_sql}")
+                        # Truncate for display, show parameterized version
+                        display_sql = query_sql[:200]
+                        if len(query_sql) > 200:
+                            display_sql += "..."
+
+                        self.console.print(
+                            QueryPanel(
+                                display_sql, title=f"Selected Query ({query_hash[:12]})"
+                            )
+                        )
 
                         # Auto-include query since they explicitly selected it
                         include_query = True
                         include_plan = plan_json is not None
                     else:
-                        self._print_warning(f"Could not load query details for {query_hash[:12]}")
+                        self.console.print(
+                            MessagePanel(
+                                f"Could not load query details for {query_hash[:12]}",
+                                variant="warning",
+                            )
+                        )
 
             # Step 2: Ask for sentiment directly
-            self._print("\nHow was your experience with RDST?")
-            self._print("  [1] Positive")
-            self._print("  [2] Negative")
-            self._print("  [3] Neutral")
-
-            sentiment_choice = self._prompt_choice(["1", "2", "3"], default="3")
+            sentiment_choice = SelectPrompt.ask(
+                "How was your experience with RDST?",
+                options=["Positive", "Negative", "Neutral"],
+                default=3,
+                allow_cancel=True,
+            )
             if sentiment_choice is None:
                 return None
 
-            sentiment_map = {
-                "1": "positive",
-                "2": "negative",
-                "3": "neutral",
-            }
+            sentiment_map = {1: "positive", 2: "negative", 3: "neutral"}
             sentiment = sentiment_map[sentiment_choice]
 
             # Step 3: Get feedback text
-            reason = self._prompt_input("\nPlease share your feedback: ")
+            reason = self._prompt_feedback_text(sentiment)
             if not reason:
                 return None
 
@@ -260,56 +283,70 @@ class ReportCommand:
         """Prompt user to select a query or enter a hash."""
         try:
             from lib.query_registry.query_registry import QueryRegistry
+
             registry = QueryRegistry()
 
             # Get recent queries (sorted by last_analyzed descending)
             recent = registry.list_queries(limit=10)
 
             if recent:
-                self._print("\nRecent queries:")
-                self._print("")
+                self.console.print(
+                    MessagePanel(
+                        "Recent queries:", title="Select Query", variant="info"
+                    )
+                )
+
+                table = SelectionTableBase()
+
                 for i, entry in enumerate(recent, 1):
                     # Show tag if available, otherwise show hash prefix
                     tag_display = entry.tag if entry.tag else "(untagged)"
                     # Truncate query for display - show more context
-                    query_preview = entry.sql[:60].replace('\n', ' ')
+                    query_preview = entry.sql[:60].replace("\n", " ")
                     if len(entry.sql) > 60:
                         query_preview += "..."
 
-                    if self._has_rich:
-                        self.console.print(f"  [cyan][{i:2}][/cyan] {tag_display} [yellow]({entry.hash[:8]})[/yellow]")
-                        self.console.print(f"       [dim]{query_preview}[/dim]")
-                    else:
-                        self._print(f"  [{i:2}] {tag_display} ({entry.hash[:8]})")
-                        self._print(f"       {query_preview}")
+                    label = f"{tag_display} [{StyleTokens.HASH}]({entry.hash[:8]})[/{StyleTokens.HASH}]\n[{StyleTokens.MUTED}]{query_preview}[/{StyleTokens.MUTED}]"
+                    table.add_choice(i, label)
 
-                self._print("")
-                self._print("  [0]  Enter hash manually")
-                self._print("  [q]  Cancel feedback")
-                self._print("  [Enter] Skip - general feedback")
+                table.add_choice(0, "Enter hash manually")
+                table.add_choice("q", "Cancel feedback")
+                table.add_choice("Enter", "Skip - general feedback")
 
-                choice = self._prompt_input("\nSelect query: ", default="")
+                self.console.print(table.table)
+
+                choice = Prompt.ask("\nSelect query", default="", show_default=False)
 
                 # Allow 'q' to cancel entire feedback
-                if choice.lower() == 'q':
+                if choice.lower() == "q":
                     return "CANCEL"  # Special sentinel to cancel entire flow
 
                 if not choice:
                     return None  # Skip query selection, continue with general feedback
                 elif choice == "0":
-                    return self._prompt_input("Enter query hash: ")
+                    return Prompt.ask(
+                        "Enter query hash", default="", show_default=False
+                    )
                 elif choice.isdigit() and 1 <= int(choice) <= len(recent):
                     return recent[int(choice) - 1].hash
                 else:
                     # Maybe they entered a hash directly
                     return choice
             else:
-                self._print("\nNo queries found in registry.")
-                hash_input = self._prompt_input("Enter query hash (or press Enter to skip): ", default="")
+                self.console.print("\nNo queries found in registry.")
+                hash_input = Prompt.ask(
+                    "Enter query hash (or press Enter to skip)",
+                    default="",
+                    show_default=False,
+                )
                 return hash_input if hash_input else None
 
-        except Exception as e:
-            hash_input = self._prompt_input(f"\nEnter query hash (or press Enter to skip): ", default="")
+        except Exception:
+            hash_input = Prompt.ask(
+                "Enter query hash (or press Enter to skip)",
+                default="",
+                show_default=False,
+            )
             return hash_input if hash_input else None
 
     def _prompt_feedback_text(self, sentiment: str) -> Optional[str]:
@@ -321,18 +358,23 @@ class ReportCommand:
         else:
             prompt_text = "Please describe your feedback:"
 
-        self._print(f"\n{prompt_text}")
+        self.console.print(f"\n{prompt_text}")
         return self._prompt_multiline()
 
     def _prompt_multiline(self) -> Optional[str]:
         """Collect multi-line input."""
-        self._print_dim("(Type your message, then press Enter twice to submit)")
-        self._print("")
+        self.console.print(
+            Text(
+                "(Type your message, then press Enter twice to submit)",
+                style=StyleTokens.MUTED,
+            )
+        )
+        self.console.print("")
 
         lines = []
         try:
             while True:
-                line = self._prompt_input("> ", default="")
+                line = Prompt.ask(">", default="", show_default=False)
 
                 if not line and lines:
                     # Empty line after content = done
@@ -344,41 +386,6 @@ class ReportCommand:
             raise  # Re-raise so top-level handler catches it
 
         return "\n".join(lines) if lines else None
-
-    def _prompt_choice(self, valid: list, default: str = None) -> Optional[str]:
-        """Prompt for a single choice. 'q' or empty cancels."""
-        try:
-            prompt = f"Enter choice [{'/'.join(valid)}] (q to cancel)"
-            if default:
-                prompt += f" (default: {default})"
-            prompt += ": "
-
-            choice = self._prompt_input(prompt, default=default or "")
-
-            # Allow 'q' or escape to cancel
-            if choice.lower() == 'q' or choice == '\x1b':
-                return None
-            if not choice and default:
-                return default
-            elif choice in valid:
-                return choice
-            else:
-                self._print_warning(f"Invalid choice. Please enter one of: {', '.join(valid)}")
-                return self._prompt_choice(valid, default)
-
-        except (EOFError, KeyboardInterrupt):
-            raise  # Re-raise so top-level handler catches it
-
-    def _prompt_input(self, prompt: str, default: str = "") -> str:
-        """Simple input prompt. Re-raises KeyboardInterrupt/EOFError for clean exit."""
-        try:
-            if self._has_rich:
-                return Prompt.ask(prompt.rstrip(": "), default=default, show_default=False)
-            else:
-                result = input(prompt).strip()
-                return result if result else default
-        except (EOFError, KeyboardInterrupt):
-            raise  # Re-raise so top-level handler catches it
 
     def _load_query_context(self, query_hash: str):
         """Load query context from registry."""
@@ -404,13 +411,19 @@ class ReportCommand:
     def _prompt_email(self) -> Optional[str]:
         """Prompt for optional email."""
         try:
-            email = self._prompt_input("\nEmail for follow-up (optional, press Enter to skip): ", default="")
+            email = Prompt.ask(
+                "\nEmail for follow-up (optional, press Enter to skip)",
+                default="",
+                show_default=False,
+            )
 
             # Basic validation
             if email and "@" in email and "." in email:
                 return email
             elif email:
-                self._print_warning("Invalid email format, skipping")
+                self.console.print(
+                    MessagePanel("Invalid email format, skipping", variant="warning")
+                )
                 return None
 
             return None
@@ -418,75 +431,15 @@ class ReportCommand:
         except (EOFError, KeyboardInterrupt):
             raise  # Re-raise so top-level handler catches it
 
-    def _confirm(self, question: str, default: bool = True) -> bool:
-        """Confirm with the user. Re-raises KeyboardInterrupt/EOFError for clean exit."""
-        try:
-            if self._has_rich:
-                return Confirm.ask(question, default=default)
-            else:
-                suffix = " [Y/n]" if default else " [y/N]"
-                response = input(f"{question}{suffix}: ").strip().lower()
-                if not response:
-                    return default
-                return response in ("y", "yes")
-        except (EOFError, KeyboardInterrupt):
-            raise  # Re-raise so top-level handler catches it
-
     def _print_header(self):
         """Print feedback header."""
-        if self._has_rich:
-            self.console.print()
-            self.console.print(Panel(
+        self.console.print("")
+        self.console.print(
+            MessagePanel(
                 "[bold]RDST Feedback[/bold]\n\n"
                 "Help us improve RDST by sharing your experience.\n"
                 "Your feedback goes directly to our team.",
+                variant="info",
                 title="Report",
-                border_style="cyan"
-            ))
-        else:
-            print("\n" + "=" * 50)
-            print("RDST Feedback")
-            print("=" * 50)
-            print("Help us improve RDST by sharing your experience.")
-
-    def _print(self, message: str):
-        """Print a message."""
-        if self._has_rich:
-            self.console.print(message)
-        else:
-            print(message)
-
-    def _print_dim(self, message: str):
-        """Print a dimmed message."""
-        if self._has_rich:
-            self.console.print(f"[dim]{message}[/dim]")
-        else:
-            print(message)
-
-    def _print_success(self, message: str):
-        """Print success message."""
-        if self._has_rich:
-            self.console.print(f"[bold green]{message}[/bold green]")
-        else:
-            print(message)
-
-    def _print_error(self, message: str):
-        """Print error message."""
-        if self._has_rich:
-            self.console.print(f"[bold red]Error:[/bold red] {message}")
-        else:
-            print(f"Error: {message}")
-
-    def _print_warning(self, message: str):
-        """Print warning message."""
-        if self._has_rich:
-            self.console.print(f"[yellow]{message}[/yellow]")
-        else:
-            print(f"Warning: {message}")
-
-    def _print_info(self, message: str):
-        """Print info message."""
-        if self._has_rich:
-            self.console.print(f"[dim]{message}[/dim]")
-        else:
-            print(message)
+            )
+        )

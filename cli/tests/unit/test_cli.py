@@ -9,6 +9,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+
 # Import module directly to avoid package __init__.py issues
 def _import_module_directly(module_name, file_path):
     spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -17,8 +18,11 @@ def _import_module_directly(module_name, file_path):
     spec.loader.exec_module(module)
     return module
 
+
 _lib_path = Path(__file__).parent.parent.parent / "lib"
-output_formatter = _import_module_directly("output_formatter", _lib_path / "cli" / "output_formatter.py")
+output_formatter = _import_module_directly(
+    "output_formatter", _lib_path / "cli" / "output_formatter.py"
+)
 rdst_cli = _import_module_directly("rdst_cli", _lib_path / "cli" / "rdst_cli.py")
 
 # Import functions
@@ -77,8 +81,9 @@ class TestDivider:
     def test_divider_length(self):
         """Test divider has correct length."""
         result = _divider()
-        assert len(result) == 65
-        assert result == "━" * 65
+        # Rule component renders as 80-char horizontal line
+        assert len(result) == 80
+        assert "─" * 80 in result or len(result.strip()) == 80
 
 
 class TestFormatQuery:
@@ -87,17 +92,21 @@ class TestFormatQuery:
     def test_single_line_query(self):
         """Test formatting single line query."""
         result = _format_query("SELECT * FROM users")
-        assert result[0] == "Query:"
-        assert "  SELECT * FROM users" in result
+        # Now returns a QueryPanel box
+        output = result[0] if isinstance(result, list) else result
+        assert "Query" in output
+        assert "SELECT * FROM users" in output
 
     def test_multiline_query(self):
         """Test formatting multiline query."""
         query = "SELECT *\nFROM users\nWHERE id = 1"
         result = _format_query(query)
-        assert result[0] == "Query:"
-        assert "  SELECT *" in result
-        assert "  FROM users" in result
-        assert "  WHERE id = 1" in result
+        # Now returns a QueryPanel box with content
+        output = result[0] if isinstance(result, list) else result
+        assert "Query" in output
+        assert "SELECT" in output
+        assert "FROM users" in output
+        assert "WHERE id = 1" in output
 
 
 class TestFormatHeader:
@@ -109,7 +118,7 @@ class TestFormatHeader:
             "metadata": {
                 "target": "test-target",
                 "database_engine": "postgresql",
-                "analysis_id": "abc123456789xyz"
+                "analysis_id": "abc123456789xyz",
             }
         }
         result = _format_header(formatted_output)
@@ -141,21 +150,20 @@ class TestFormatPerformanceSummary:
             "execution_time_rating": "fast",
             "overall_rating": "good",
             "efficiency_score": 85,
-            "rows_processed": {
-                "examined": 1000,
-                "returned": 10
-            },
+            "rows_processed": {"examined": 1000, "returned": 10},
             "cost_estimate": 500.0,
-            "primary_concerns": []
+            "primary_concerns": [],
         }
         perf_metrics = {}
 
         result = _format_performance_summary(summary, perf_metrics)
 
-        assert any("PERFORMANCE SUMMARY" in line for line in result)
-        assert any("45.5ms" in line for line in result)
-        assert any("1,000" in line for line in result)  # Rows examined
-        assert any("10" in line for line in result)  # Rows returned
+        # Output is now a SectionBox with "Performance Summary" title
+        output = "\n".join(result) if isinstance(result, list) else result
+        assert "Performance Summary" in output
+        assert "45.5ms" in output
+        assert "1,000" in output  # Rows examined
+        assert "10" in output  # Rows returned
 
     def test_summary_with_concerns(self):
         """Test performance summary with primary concerns."""
@@ -165,7 +173,7 @@ class TestFormatPerformanceSummary:
             "overall_rating": "poor",
             "efficiency_score": 30,
             "rows_processed": {"examined": 100000, "returned": 100},
-            "primary_concerns": ["Full table scan detected", "Missing index"]
+            "primary_concerns": ["Full table scan detected", "Missing index"],
         }
 
         result = _format_performance_summary(summary, {})
@@ -191,14 +199,14 @@ class TestFormatAnalyzeOutput:
                     "target": "test",
                     "database_engine": "postgresql",
                     "analysis_id": "abc123",
-                    "query": "SELECT * FROM users"
+                    "query": "SELECT * FROM users",
                 },
                 "analysis_summary": {
                     "execution_time_ms": 10.0,
                     "overall_rating": "good",
                     "efficiency_score": 90,
-                    "rows_processed": {"examined": 100, "returned": 10}
-                }
+                    "rows_processed": {"examined": 100, "returned": 10},
+                },
             }
         }
 
@@ -216,8 +224,8 @@ class TestFormatAnalyzeOutput:
                 "database_engine": "postgresql",
                 "execution_time_ms": 20.0,
                 "rows_examined": 500,
-                "rows_returned": 25
-            }
+                "rows_returned": 25,
+            },
         }
 
         result = format_analyze_output(workflow_result)
@@ -247,19 +255,27 @@ class TestTargetsConfig:
         cfg = TargetsConfig(path=str(temp_config_file))
         cfg.load()
 
-        assert cfg._data == {"targets": {}, "default": None, "init": {"completed": False}, "llm": {}}
+        assert cfg._data == {
+            "targets": {},
+            "default": None,
+            "init": {"completed": False},
+            "llm": {},
+        }
 
     def test_save_and_load(self, temp_config_file):
         """Test saving and loading configuration."""
         cfg = TargetsConfig(path=str(temp_config_file))
         cfg.load()
-        cfg.upsert("test-target", {
-            "host": "localhost",
-            "port": 5432,
-            "database": "testdb",
-            "user": "testuser",
-            "engine": "postgresql"
-        })
+        cfg.upsert(
+            "test-target",
+            {
+                "host": "localhost",
+                "port": 5432,
+                "database": "testdb",
+                "user": "testuser",
+                "engine": "postgresql",
+            },
+        )
         cfg.save()
 
         # Load in a new instance
@@ -353,7 +369,9 @@ class TestTargetsConfig:
         cfg = TargetsConfig(path=str(temp_config_file))
         cfg.load()
 
-        cfg.set_llm_provider("lmstudio", base_url="http://localhost:1234", model="qwen-2.5")
+        cfg.set_llm_provider(
+            "lmstudio", base_url="http://localhost:1234", model="qwen-2.5"
+        )
 
         assert cfg.get_llm_provider() == "lmstudio"
         assert cfg.get_llm_base_url() == "http://localhost:1234"

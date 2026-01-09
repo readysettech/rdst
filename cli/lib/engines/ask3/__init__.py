@@ -27,7 +27,7 @@ Usage:
         print(f"Error: {result.error_message}")
 
     # With custom presenter
-    presenter = Ask3Presenter(verbose=True, use_rich=True)
+    presenter = Ask3Presenter(verbose=True)
     engine = Ask3Engine(presenter=presenter)
 
 Flow:

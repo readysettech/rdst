@@ -17,7 +17,7 @@ test_cache_commands() {
     --target "$TARGET_NAME" \
     "$simple_query"
   assert_contains "Readyset Cache Performance Analysis" "cache text header"
-  assert_contains "Performance Comparison" "cache performance comparison"
+  assert_contains "PERFORMANCE COMPARISON" "cache performance comparison"
   assert_not_contains "ERROR:" "cache should not error"
 
   # Get hash of the simple query we just cached

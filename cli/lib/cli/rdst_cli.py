@@ -8,6 +8,7 @@ integration with cloud agent modules can be added.
 No side-effects: Nothing executes long-running operations or requires external
 services simply by importing this module.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,15 +18,10 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs, unquote
 import toml
 
-try:
-    # Rich is optional; if unavailable, we still work without pretty output
-    from rich.console import Console
-    from rich.panel import Panel
-    _RICH_AVAILABLE = True
-except Exception:  # pragma: no cover - we keep imports soft
-    _RICH_AVAILABLE = False
-    Console = None  # type: ignore
-    Panel = None  # type: ignore
+# Import UI system
+from rich.console import Group
+
+from lib.ui import KeyValueTable, MessagePanel, SimpleTree, get_console
 
 # Local cloud agent modules (will be used by future implementations)
 # We import lazily inside methods to avoid side-effects and heavy imports at module load time.
@@ -49,29 +45,34 @@ class CloudAgentClient:
     """
 
     def __init__(self):
-        self._console = Console() if _RICH_AVAILABLE else None
+        self._console = get_console()
 
     # Example accessors (add more as needed)
     def configuration_manager(self):  # -> ConfigurationManager
         from configuration_manager import ConfigurationManager  # local import
+
         return ConfigurationManager()
 
     def data_manager_service(self):  # -> DataManagerService
-        from lib.data_manager_service.data_manager_service import DataManagerService  # local import
+        from lib.data_manager_service.data_manager_service import (
+            DataManagerService,
+        )  # local import
+
         return DataManagerService
 
     def cache_manager(self):  # -> CacheManager
         # Note: CacheManager currently requires initialization context; defer wiring
         from lib.cache_manager.cache_manager import CacheManager  # local import
+
         return CacheManager
 
     def llm_manager(self):  # -> LLMManager
         from lib.llm_manager.llm_manager import LLMManager  # local import
+
         return LLMManager()
 
     def print_panel(self, title: str, message: str):
-        if self._console and _RICH_AVAILABLE:
-            self._console.print(Panel.fit(message, title=title))
+        self._console.print(MessagePanel(message, title=title))
 
 
 # ---- Configure targets persistence helpers ----
@@ -139,14 +140,14 @@ def parse_connection_string(connection_string: str) -> dict:
 
     # Validate and extract scheme (engine)
     scheme = parsed.scheme.lower()
-    if scheme not in ('postgresql', 'postgres', 'mysql'):
+    if scheme not in ("postgresql", "postgres", "mysql"):
         raise ValueError(
             f"Unsupported database engine '{scheme}'. "
             f"Supported: postgresql, postgres, mysql"
         )
 
     # Normalize engine name
-    engine = 'postgresql' if scheme in ('postgresql', 'postgres') else 'mysql'
+    engine = "postgresql" if scheme in ("postgresql", "postgres") else "mysql"
 
     # Extract host
     if not parsed.hostname:
@@ -165,7 +166,7 @@ def parse_connection_string(connection_string: str) -> dict:
     password = unquote(parsed.password) if parsed.password else None
 
     # Extract database name from path
-    database = parsed.path.lstrip('/') if parsed.path else None
+    database = parsed.path.lstrip("/") if parsed.path else None
     if not database:
         raise ValueError("Connection string missing database name")
 
@@ -175,42 +176,46 @@ def parse_connection_string(connection_string: str) -> dict:
         params = parse_qs(parsed.query)
 
         # PostgreSQL SSL parameters
-        if 'sslmode' in params:
-            ssl_params['sslmode'] = params['sslmode'][0]
-        if 'sslrootcert' in params:
-            ssl_params['sslrootcert'] = params['sslrootcert'][0]
-        if 'sslcert' in params:
-            ssl_params['sslcert'] = params['sslcert'][0]
-        if 'sslkey' in params:
-            ssl_params['sslkey'] = params['sslkey'][0]
+        if "sslmode" in params:
+            ssl_params["sslmode"] = params["sslmode"][0]
+        if "sslrootcert" in params:
+            ssl_params["sslrootcert"] = params["sslrootcert"][0]
+        if "sslcert" in params:
+            ssl_params["sslcert"] = params["sslcert"][0]
+        if "sslkey" in params:
+            ssl_params["sslkey"] = params["sslkey"][0]
 
         # MySQL SSL parameters
-        if 'ssl' in params:
-            ssl_params['ssl'] = params['ssl'][0]
-        if 'ssl-mode' in params:
-            ssl_params['ssl-mode'] = params['ssl-mode'][0]
-        if 'ssl-ca' in params:
-            ssl_params['ssl-ca'] = params['ssl-ca'][0]
+        if "ssl" in params:
+            ssl_params["ssl"] = params["ssl"][0]
+        if "ssl-mode" in params:
+            ssl_params["ssl-mode"] = params["ssl-mode"][0]
+        if "ssl-ca" in params:
+            ssl_params["ssl-ca"] = params["ssl-ca"][0]
 
     # Determine TLS setting from SSL parameters
     tls = False
-    if engine == 'postgresql':
-        sslmode = ssl_params.get('sslmode', '')
-        tls = sslmode in ('require', 'verify-ca', 'verify-full')
-    elif engine == 'mysql':
-        ssl = ssl_params.get('ssl', '')
-        ssl_mode = ssl_params.get('ssl-mode', '')
-        tls = ssl in ('true', '1') or ssl_mode in ('REQUIRED', 'VERIFY_CA', 'VERIFY_IDENTITY')
+    if engine == "postgresql":
+        sslmode = ssl_params.get("sslmode", "")
+        tls = sslmode in ("require", "verify-ca", "verify-full")
+    elif engine == "mysql":
+        ssl = ssl_params.get("ssl", "")
+        ssl_mode = ssl_params.get("ssl-mode", "")
+        tls = ssl in ("true", "1") or ssl_mode in (
+            "REQUIRED",
+            "VERIFY_CA",
+            "VERIFY_IDENTITY",
+        )
 
     return {
-        'engine': engine,
-        'host': host,
-        'port': port,
-        'user': user,
-        'password': password,
-        'database': database,
-        'ssl_params': ssl_params,
-        'tls': tls
+        "engine": engine,
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "database": database,
+        "ssl_params": ssl_params,
+        "tls": tls,
     }
 
 
@@ -219,16 +224,30 @@ class TargetsConfig:
 
     def __init__(self, path: Optional[str] = None):
         self.path = Path(path) if path else Path.home() / ".rdst" / "config.toml"
-        self._data: Dict[str, Any] = {"targets": {}, "default": None, "init": {"completed": False}}
+        self._data: Dict[str, Any] = {
+            "targets": {},
+            "default": None,
+            "init": {"completed": False},
+        }
 
     def load(self) -> None:
         if self.path.exists():
             try:
                 self._data = toml.load(self.path)
             except Exception:
-                self._data = {"targets": {}, "default": None, "init": {"completed": False}, "llm": {}}
+                self._data = {
+                    "targets": {},
+                    "default": None,
+                    "init": {"completed": False},
+                    "llm": {},
+                }
         else:
-            self._data = {"targets": {}, "default": None, "init": {"completed": False}, "llm": {}}
+            self._data = {
+                "targets": {},
+                "default": None,
+                "init": {"completed": False},
+                "llm": {},
+            }
 
         # Ensure structural defaults
         self._data.setdefault("targets", {})
@@ -274,9 +293,12 @@ class TargetsConfig:
 
     def mark_init_completed(self, version: Optional[str] = None) -> None:
         import datetime
+
         self._data.setdefault("init", {})
         self._data["init"]["completed"] = True
-        self._data["init"]["completed_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+        self._data["init"]["completed_at"] = (
+            datetime.datetime.utcnow().isoformat() + "Z"
+        )
         if version is not None:
             self._data["init"]["version"] = version
 
@@ -302,7 +324,9 @@ class TargetsConfig:
         """Get configured LLM model."""
         return self._data.get("llm", {}).get("model")
 
-    def set_llm_provider(self, provider: str, base_url: Optional[str] = None, model: Optional[str] = None) -> None:
+    def set_llm_provider(
+        self, provider: str, base_url: Optional[str] = None, model: Optional[str] = None
+    ) -> None:
         """Set LLM provider configuration."""
         self._data.setdefault("llm", {})
         self._data["llm"]["provider"] = provider
@@ -326,10 +350,21 @@ class RdstCLI:
             if config_path:
                 cm = self.client.configuration_manager()
                 cm.load_from_json_config(config_path)
-                self.client.print_panel("configure", f"Loaded agent config from {config_path}")
+                self.client.print_panel(
+                    "configure", f"Loaded agent config from {config_path}"
+                )
 
             subcmd = (kwargs.get("subcommand") or "menu").lower()
-            valid_subcommands = {"add", "edit", "list", "remove", "default", "menu", "llm", "test"}
+            valid_subcommands = {
+                "add",
+                "edit",
+                "list",
+                "remove",
+                "default",
+                "menu",
+                "llm",
+                "test",
+            }
 
             if subcmd not in valid_subcommands:
                 return RdstResult(False, f"Unknown subcommand: {subcmd}")
@@ -344,7 +379,8 @@ class RdstCLI:
 
             # Use the modern configuration wizard
             from .configuration_wizard import ConfigurationWizard
-            wizard = ConfigurationWizard(console=self.client._console if _RICH_AVAILABLE else None)
+
+            wizard = ConfigurationWizard(console=self.client._console)
 
             # Handle LLM configuration separately (independent of targets)
             if subcmd == "llm":
@@ -365,13 +401,19 @@ class RdstCLI:
         if not target_name:
             target_name = cfg.get_default()
             if not target_name:
-                result = {"success": False, "error": "No target specified and no default target configured"}
+                result = {
+                    "success": False,
+                    "error": "No target specified and no default target configured",
+                }
                 return RdstResult(False, json.dumps(result, indent=2))
 
         # Get target configuration
         target_config = cfg.get(target_name)
         if not target_config:
-            result = {"success": False, "error": f"Target '{target_name}' not found in configuration"}
+            result = {
+                "success": False,
+                "error": f"Target '{target_name}' not found in configuration",
+            }
             return RdstResult(False, json.dumps(result, indent=2))
 
         # Extract connection parameters
@@ -388,7 +430,7 @@ class RdstCLI:
             result = {
                 "success": False,
                 "target": target_name,
-                "error": f"Password environment variable '{password_env}' is not set"
+                "error": f"Password environment variable '{password_env}' is not set",
             }
             return RdstResult(False, json.dumps(result, indent=2))
 
@@ -396,13 +438,14 @@ class RdstCLI:
         try:
             if engine == "postgresql":
                 import psycopg2
+
                 conn = psycopg2.connect(
                     host=host,
                     port=port or 5432,
                     user=user,
                     password=password,
                     database=database,
-                    connect_timeout=10
+                    connect_timeout=10,
                 )
                 cursor = conn.cursor()
                 cursor.execute("SELECT version()")
@@ -417,19 +460,20 @@ class RdstCLI:
                     "host": host,
                     "port": port or 5432,
                     "database": database,
-                    "server_version": version
+                    "server_version": version,
                 }
                 return RdstResult(True, json.dumps(result, indent=2))
 
             elif engine == "mysql":
                 import pymysql
+
                 conn = pymysql.connect(
                     host=host,
                     port=port or 3306,
                     user=user,
                     password=password,
                     database=database,
-                    connect_timeout=10
+                    connect_timeout=10,
                 )
                 cursor = conn.cursor()
                 cursor.execute("SELECT version()")
@@ -444,7 +488,7 @@ class RdstCLI:
                     "host": host,
                     "port": port or 3306,
                     "database": database,
-                    "server_version": version
+                    "server_version": version,
                 }
                 return RdstResult(True, json.dumps(result, indent=2))
 
@@ -456,11 +500,21 @@ class RdstCLI:
             error_msg = str(e)
             # Provide helpful hints for common errors
             hints = []
-            if "authentication failed" in error_msg.lower() or "access denied" in error_msg.lower():
+            if (
+                "authentication failed" in error_msg.lower()
+                or "access denied" in error_msg.lower()
+            ):
                 hints.append("Check that your password is correct")
-                hints.append(f"Verify the password environment variable '{password_env}' is set correctly")
-            elif "could not connect" in error_msg.lower() or "connection refused" in error_msg.lower():
-                hints.append(f"Check that the database server is running on {host}:{port or (5432 if engine == 'postgresql' else 3306)}")
+                hints.append(
+                    f"Verify the password environment variable '{password_env}' is set correctly"
+                )
+            elif (
+                "could not connect" in error_msg.lower()
+                or "connection refused" in error_msg.lower()
+            ):
+                hints.append(
+                    f"Check that the database server is running on {host}:{port or (5432 if engine == 'postgresql' else 3306)}"
+                )
                 hints.append("Verify the host and port are correct")
             elif "does not exist" in error_msg.lower():
                 hints.append(f"Check that the database '{database}' exists")
@@ -472,14 +526,23 @@ class RdstCLI:
                 "host": host,
                 "port": port or (5432 if engine == "postgresql" else 3306),
                 "error": error_msg,
-                "hints": hints if hints else None
+                "hints": hints if hints else None,
             }
             return RdstResult(False, json.dumps(result, indent=2))
 
     # rdst top
-    def top(self, target: str = None, source: str = "auto", limit: int = 10,
-            sort: str = "total_time", filter: str = None, json: bool = False,
-            watch: bool = False, no_color: bool = False, **kwargs) -> RdstResult:
+    def top(
+        self,
+        target: str = None,
+        source: str = "auto",
+        limit: int = 10,
+        sort: str = "total_time",
+        filter: str = None,
+        json: bool = False,
+        watch: bool = False,
+        no_color: bool = False,
+        **kwargs,
+    ) -> RdstResult:
         """Live view of top slow queries from database telemetry."""
         from .top import TopCommand
         import time
@@ -501,11 +564,15 @@ class RdstCLI:
                     pass
 
             top_command = TopCommand(client=self.client)
-            result = top_command.execute(target, source, limit, sort, filter, json, watch, no_color, **kwargs)
+            result = top_command.execute(
+                target, source, limit, sort, filter, json, watch, no_color, **kwargs
+            )
 
             # Extract queries found from result
             if result.data:
-                queries_found = result.data.get("queries_found", result.data.get("total_queries_tracked", 0))
+                queries_found = result.data.get(
+                    "queries_found", result.data.get("total_queries_tracked", 0)
+                )
 
             # Track telemetry
             duration_seconds = int(time.time() - start_time)
@@ -513,6 +580,7 @@ class RdstCLI:
 
             try:
                 from lib.telemetry import telemetry
+
                 telemetry.track_top(
                     mode=mode,
                     duration_seconds=duration_seconds,
@@ -528,18 +596,31 @@ class RdstCLI:
             # Track crash
             try:
                 from lib.telemetry import telemetry
+
                 telemetry.report_crash(e, context={"command": "top", "target": target})
             except Exception:
                 pass
             return RdstResult(False, f"top failed: {e}")
 
     # rdst analyze
-    def analyze(self, hash: Optional[str] = None, query: Optional[str] = None,
-                file: Optional[str] = None, stdin: bool = False, name: Optional[str] = None,
-                positional_query: Optional[str] = None, target: Optional[str] = None,
-                save_as: Optional[str] = None, db: Optional[str] = None,
-                readyset_cache: bool = False, fast: bool = False, interactive: bool = False, review: bool = False,
-                large_query_bypass: Optional[str] = None, **kwargs) -> RdstResult:
+    def analyze(
+        self,
+        hash: Optional[str] = None,
+        query: Optional[str] = None,
+        file: Optional[str] = None,
+        stdin: bool = False,
+        name: Optional[str] = None,
+        positional_query: Optional[str] = None,
+        target: Optional[str] = None,
+        save_as: Optional[str] = None,
+        db: Optional[str] = None,
+        readyset_cache: bool = False,
+        fast: bool = False,
+        interactive: bool = False,
+        review: bool = False,
+        large_query_bypass: Optional[str] = None,
+        **kwargs,
+    ) -> RdstResult:
         """
         Analyze SQL query with support for multiple input modes.
 
@@ -593,7 +674,7 @@ class RdstCLI:
                 name=name,
                 positional_query=positional_query,
                 save_as=save_as,
-                large_query_bypass=large_query_bypass
+                large_query_bypass=large_query_bypass,
             )
 
             # Use target parameter, fallback to db for backward compatibility, then to default
@@ -614,7 +695,15 @@ class RdstCLI:
                     pass
 
             # Execute analysis
-            result = analyze_cmd.execute_analyze(resolved_input, target=target_db, readyset=readyset_cache, readyset_cache=readyset_cache, fast=fast, interactive=interactive, review=review)
+            result = analyze_cmd.execute_analyze(
+                resolved_input,
+                target=target_db,
+                readyset=readyset_cache,
+                readyset_cache=readyset_cache,
+                fast=fast,
+                interactive=interactive,
+                review=review,
+            )
 
             # Extract query hash from result for telemetry
             if result.data:
@@ -622,10 +711,19 @@ class RdstCLI:
 
             # Track telemetry
             duration_ms = int((time.time() - start_time) * 1000)
-            mode = "interactive" if interactive else ("fast" if fast else ("readyset_cache" if readyset_cache else "standard"))
+            mode = (
+                "interactive"
+                if interactive
+                else (
+                    "fast"
+                    if fast
+                    else ("readyset_cache" if readyset_cache else "standard")
+                )
+            )
 
             try:
                 from lib.telemetry import telemetry
+
                 telemetry.track_analyze(
                     query_hash=query_hash or "unknown",
                     mode=mode,
@@ -643,6 +741,7 @@ class RdstCLI:
             # Track failed analysis
             try:
                 from lib.telemetry import telemetry
+
                 duration_ms = int((time.time() - start_time) * 1000)
                 telemetry.track_analyze(
                     query_hash="unknown",
@@ -660,6 +759,7 @@ class RdstCLI:
             # Track crash and report to Sentry
             try:
                 from lib.telemetry import telemetry
+
                 duration_ms = int((time.time() - start_time) * 1000)
                 telemetry.track_analyze(
                     query_hash=query_hash or "unknown",
@@ -669,7 +769,9 @@ class RdstCLI:
                     error_type=error_type,
                     target_engine=target_engine,
                 )
-                telemetry.report_crash(e, context={"command": "analyze", "target": target_db})
+                telemetry.report_crash(
+                    e, context={"command": "analyze", "target": target_db}
+                )
             except Exception:
                 pass
             return RdstResult(False, f"analyze failed: {e}")
@@ -679,11 +781,12 @@ class RdstCLI:
         """First-time guided setup (init)."""
         try:
             # Determine interactivity and force flags from kwargs
-            force = bool(kwargs.get('force', False))
-            interactive = kwargs.get('interactive', None)
+            force = bool(kwargs.get("force", False))
+            interactive = kwargs.get("interactive", None)
             # Run the init command
             from .init_command import InitCommand
-            wizard = InitCommand(console=self.client._console if _RICH_AVAILABLE else None, cli=self)
+
+            wizard = InitCommand(console=self.client._console, cli=self)
             return wizard.run(force=force, interactive=interactive)
         except Exception as e:
             return RdstResult(False, f"init failed: {e}")
@@ -704,6 +807,7 @@ class RdstCLI:
         """
         try:
             from .query_command import QueryCommand
+
             query_cmd = QueryCommand()
             return query_cmd.execute(subcommand, **kwargs)
         except Exception as e:
@@ -736,7 +840,7 @@ class RdstCLI:
             "Examples:\n"
             "  rdst configure add --target prod --host db.example.com --user admin\n"
             "  rdst configure llm\n"
-            "  rdst analyze \"SELECT * FROM users WHERE active = true\"\n"
+            '  rdst analyze "SELECT * FROM users WHERE active = true"\n'
         )
         return RdstResult(True, f"{banner}{intro}")
 
@@ -744,16 +848,20 @@ class RdstCLI:
         """Report CLI/library version."""
         try:
             from importlib.metadata import version as get_version
+
             pkg_version = get_version("rdst")
         except Exception:
             # Fallback to _version.py if package metadata not available
             try:
                 from _version import __version__
+
                 pkg_version = __version__
             except Exception:
                 pkg_version = "unknown"
 
-        return RdstResult(True, f"Readyset Data and SQL Toolkit (rdst) version {pkg_version}")
+        return RdstResult(
+            True, f"Readyset Data and SQL Toolkit (rdst) version {pkg_version}"
+        )
 
     # rdst report
     def report(self, title: str, body: str = "", **kwargs) -> RdstResult:
@@ -775,7 +883,7 @@ class RdstCLI:
         timeout: int = 30,
         verbose: bool = False,
         agent_mode: bool = False,
-        **kwargs
+        **kwargs,
     ) -> RdstResult:
         """
         Generate SQL from natural language using hybrid linear + agent architecture.
@@ -819,8 +927,12 @@ class RdstCLI:
         # Interactive prompt if no question provided
         if not question:
             import sys
+
             if not sys.stdin.isatty():
-                return RdstResult(False, "ask requires a question. Example: rdst ask \"How many users are there?\"")
+                return RdstResult(
+                    False,
+                    'ask requires a question. Example: rdst ask "How many users are there?"',
+                )
             try:
                 question = input("Question: ").strip()
             except (EOFError, KeyboardInterrupt):
@@ -831,7 +943,10 @@ class RdstCLI:
         try:
             # Validate question is provided
             if not question:
-                return RdstResult(False, "Question required. Usage: rdst ask \"your question here\" --target <target>")
+                return RdstResult(
+                    False,
+                    'Question required. Usage: rdst ask "your question here" --target <target>',
+                )
 
             # Load target configuration
             if not target:
@@ -840,24 +955,29 @@ class RdstCLI:
                 target = cfg.get_default()
 
             if not target:
-                return RdstResult(False, "No target specified and no default configured. Run 'rdst configure' first.")
+                return RdstResult(
+                    False,
+                    "No target specified and no default configured. Run 'rdst configure' first.",
+                )
 
             cfg = TargetsConfig()
             cfg.load()
             target_config = cfg._data.get("targets", {}).get(target)
 
             if not target_config:
-                return RdstResult(False, f"Target '{target}' not found in configuration")
+                return RdstResult(
+                    False, f"Target '{target}' not found in configuration"
+                )
 
             # Determine database type
-            engine_type = target_config.get('engine', 'postgresql').lower()
-            if 'mysql' in engine_type:
-                db_type = 'mysql'
+            engine_type = target_config.get("engine", "postgresql").lower()
+            if "mysql" in engine_type:
+                db_type = "mysql"
             else:
-                db_type = 'postgresql'
+                db_type = "postgresql"
 
             # Create presenter and engine
-            presenter = Ask3Presenter(verbose=verbose, use_rich=_RICH_AVAILABLE)
+            presenter = Ask3Presenter(verbose=verbose)
             engine = Ask3Engine(presenter=presenter)
 
             # Run the engine
@@ -868,14 +988,20 @@ class RdstCLI:
                 db_type=db_type,
                 timeout_seconds=timeout,
                 verbose=verbose,
-                no_interactive=kwargs.get('no_interactive', False),
-                agent_mode=agent_mode
+                no_interactive=kwargs.get("no_interactive", False),
+                agent_mode=agent_mode,
             )
 
             # Build result
             if ctx.status == Status.SUCCESS:
-                row_count = ctx.execution_result.row_count if ctx.execution_result else 0
-                exec_time = ctx.execution_result.execution_time_ms if ctx.execution_result else 0
+                row_count = (
+                    ctx.execution_result.row_count if ctx.execution_result else 0
+                )
+                exec_time = (
+                    ctx.execution_result.execution_time_ms
+                    if ctx.execution_result
+                    else 0
+                )
 
                 message = f"\nSQL: {ctx.sql}\n"
                 message += f"Rows: {row_count}\n"
@@ -887,15 +1013,19 @@ class RdstCLI:
                     ok=True,
                     message=message,
                     data={
-                        'sql': ctx.sql,
-                        'rows': ctx.execution_result.rows if ctx.execution_result else [],
-                        'columns': ctx.execution_result.columns if ctx.execution_result else [],
-                        'row_count': row_count,
-                        'execution_time_ms': exec_time,
-                        'llm_calls': len(ctx.llm_calls),
-                        'total_tokens': ctx.total_tokens,
-                        'status': ctx.status,
-                    }
+                        "sql": ctx.sql,
+                        "rows": ctx.execution_result.rows
+                        if ctx.execution_result
+                        else [],
+                        "columns": ctx.execution_result.columns
+                        if ctx.execution_result
+                        else [],
+                        "row_count": row_count,
+                        "execution_time_ms": exec_time,
+                        "llm_calls": len(ctx.llm_calls),
+                        "total_tokens": ctx.total_tokens,
+                        "status": ctx.status,
+                    },
                 )
 
             elif ctx.status == Status.CANCELLED:
@@ -905,11 +1035,12 @@ class RdstCLI:
                 return RdstResult(
                     ok=False,
                     message=f"Error: {ctx.error_message}",
-                    data={'status': ctx.status, 'phase': ctx.phase}
+                    data={"status": ctx.status, "phase": ctx.phase},
                 )
 
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return RdstResult(False, f"ask command failed: {e}")
 
@@ -917,7 +1048,9 @@ class RdstCLI:
     # RDST SCHEMA - Semantic layer management
     # NOTE: Not yet exposed in CLI - internal API only
     # ============================================================================
-    def schema(self, subcommand: str = None, target: str = None, **kwargs) -> RdstResult:
+    def schema(
+        self, subcommand: str = None, target: str = None, **kwargs
+    ) -> RdstResult:
         """
         Manage semantic layer for better SQL generation.
 
@@ -931,224 +1064,297 @@ class RdstCLI:
         """
         try:
             from .schema_command import SchemaCommand
+
             schema_cmd = SchemaCommand()
 
             # Interactive menu if no subcommand provided
             if not subcommand:
                 import sys
+
                 if not sys.stdin.isatty():
-                    return RdstResult(False, "Schema command requires a subcommand: show, init, edit, annotate, export, delete, list\nTry: rdst schema --help")
-                print("Schema subcommands:")
-                print("  [1] show - Display semantic layer")
-                print("  [2] init - Initialize from database")
-                print("  [3] annotate - Add descriptions")
-                print("  [4] edit - Edit in $EDITOR")
+                    return RdstResult(
+                        False,
+                        "Schema command requires a subcommand: show, init, edit, annotate, export, delete, list\nTry: rdst schema --help",
+                    )
+                from lib.ui import SelectPrompt
+
+                options = [
+                    "show - Display semantic layer",
+                    "init - Initialize from database",
+                    "annotate - Add descriptions",
+                    "edit - Edit in $EDITOR",
+                ]
                 try:
-                    choice = input("Select subcommand [1]: ").strip() or "1"
+                    choice = SelectPrompt.ask(
+                        "Schema subcommands:", options, default=1, allow_cancel=True
+                    )
                 except (EOFError, KeyboardInterrupt):
                     return RdstResult(False, "Cancelled")
-                subcommand = {"1": "show", "2": "init", "3": "annotate", "4": "edit"}.get(choice)
-                if not subcommand:
-                    return RdstResult(False, "Invalid schema subcommand")
+                if choice is None:
+                    return RdstResult(False, "Cancelled")
+                subcommand = ["show", "init", "annotate", "edit"][choice - 1]
 
-            if subcommand == 'show':
-                table = kwargs.get('table')
+            if subcommand == "show":
+                table = kwargs.get("table")
                 if not target:
                     default_target = self._get_default_target()
                     if not default_target:
-                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                        )
                     target = default_target
                 result = schema_cmd.show(target, table)
 
-            elif subcommand == 'init':
+            elif subcommand == "init":
                 if not target:
                     default_target = self._get_default_target()
                     if not default_target:
-                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                        )
                     target = default_target
 
                 # Get target config
                 target_config = self._get_target_config(target)
                 if not target_config:
-                    return RdstResult(False, f"Target '{target}' not found. Run 'rdst configure' first.")
+                    return RdstResult(
+                        False,
+                        f"Target '{target}' not found. Run 'rdst configure' first.",
+                    )
 
-                enum_threshold = kwargs.get('enum_threshold', 20)
-                force = kwargs.get('force', False)
-                interactive = kwargs.get('interactive', False)
-                result = schema_cmd.init(target, target_config, enum_threshold, force, interactive)
+                enum_threshold = kwargs.get("enum_threshold", 20)
+                force = kwargs.get("force", False)
+                interactive = kwargs.get("interactive", False)
+                result = schema_cmd.init(
+                    target, target_config, enum_threshold, force, interactive
+                )
 
-            elif subcommand == 'edit':
-                table = kwargs.get('table')
+            elif subcommand == "edit":
+                table = kwargs.get("table")
                 if not target:
                     default_target = self._get_default_target()
                     if not default_target:
-                        return RdstResult(False, "No target specified and no default target configured.")
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured.",
+                        )
                     target = default_target
                 result = schema_cmd.edit(target, table)
 
-            elif subcommand == 'annotate':
-                table = kwargs.get('table')
+            elif subcommand == "annotate":
+                table = kwargs.get("table")
                 if not target:
                     default_target = self._get_default_target()
                     if not default_target:
-                        return RdstResult(False, "No target specified and no default target configured.")
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured.",
+                        )
                     target = default_target
-                use_llm = kwargs.get('use_llm', False)
-                sample_rows = kwargs.get('sample_rows', 5)
+                use_llm = kwargs.get("use_llm", False)
+                sample_rows = kwargs.get("sample_rows", 5)
 
                 # Always try to get target config (needed for AI suggestions in wizard)
                 target_config = self._get_target_config(target)
 
                 # Only error if --use-llm specified but config missing
                 if use_llm and not target_config:
-                    return RdstResult(False, f"Target '{target}' not found. Run 'rdst configure' first.")
+                    return RdstResult(
+                        False,
+                        f"Target '{target}' not found. Run 'rdst configure' first.",
+                    )
 
-                result = schema_cmd.annotate(target, table, use_llm, sample_rows, target_config)
+                result = schema_cmd.annotate(
+                    target, table, use_llm, sample_rows, target_config
+                )
 
-            elif subcommand == 'export':
+            elif subcommand == "export":
                 if not target:
                     default_target = self._get_default_target()
                     if not default_target:
-                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                        )
                     target = default_target
-                output_format = kwargs.get('output_format', 'yaml')
+                output_format = kwargs.get("output_format", "yaml")
                 result = schema_cmd.export(target, output_format)
 
-            elif subcommand == 'delete':
+            elif subcommand == "delete":
                 if not target:
                     default_target = self._get_default_target()
                     if not default_target:
-                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                        )
                     target = default_target
 
-                force = kwargs.get('force', False)
+                force = kwargs.get("force", False)
                 if not force:
                     # Prompt for confirmation
                     try:
                         confirm = input(f"Delete semantic layer for '{target}'? [y/N] ")
-                        if confirm.lower() != 'y':
+                        if confirm.lower() != "y":
                             return RdstResult(False, "Cancelled")
                     except EOFError:
-                        return RdstResult(False, "Cannot prompt for confirmation in non-interactive mode. Use --force")
+                        return RdstResult(
+                            False,
+                            "Cannot prompt for confirmation in non-interactive mode. Use --force",
+                        )
 
                 result = schema_cmd.delete(target)
 
-            elif subcommand == 'list':
+            elif subcommand == "list":
                 result = schema_cmd.list_targets()
 
-            elif subcommand == 'add-table':
+            elif subcommand == "add-table":
                 if not target:
                     default_target = self._get_default_target()
                     if not default_target:
-                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                        )
                     target = default_target
-                table = kwargs.get('table')
-                description = kwargs.get('description', '')
-                context = kwargs.get('context', '')
+                table = kwargs.get("table")
+                description = kwargs.get("description", "")
+                context = kwargs.get("context", "")
                 result = schema_cmd.add_table(target, table, description, context)
 
-            elif subcommand == 'add-term':
+            elif subcommand == "add-term":
                 if not target:
                     default_target = self._get_default_target()
                     if not default_target:
-                        return RdstResult(False, "No target specified and no default target configured. Use --target or run 'rdst configure'")
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                        )
                     target = default_target
-                term = kwargs.get('term')
-                definition = kwargs.get('definition', '')
-                sql_pattern = kwargs.get('sql_pattern', '')
-                result = schema_cmd.add_terminology(target, term, definition, sql_pattern)
+                term = kwargs.get("term")
+                definition = kwargs.get("definition", "")
+                sql_pattern = kwargs.get("sql_pattern", "")
+                result = schema_cmd.add_terminology(
+                    target, term, definition, sql_pattern
+                )
 
             else:
                 return RdstResult(False, f"Unknown schema subcommand: {subcommand}")
 
             # Format result for display
-            if result['ok']:
-                message = result['message']
-                if result.get('data'):
+            if result["ok"]:
+                message = result["message"]
+                if result.get("data"):
                     # Format data for display
-                    data = result['data']
-                    if subcommand == 'show' and 'tables' in data:
+                    data = result["data"]
+                    if subcommand == "show" and "tables" in data:
                         message += self._format_schema_show(data)
-                    elif subcommand == 'init':
-                        message += "\n\nDiscovered:"
-                        message += f"\n  Tables: {data.get('tables', 0)}"
-                        message += f"\n  Columns: {data.get('columns', 0)}"
-                        message += f"\n  Relationships: {data.get('relationships', 0)}"
-                        if data.get('enum_columns'):
-                            message += f"\n  Potential enums: {len(data['enum_columns'])}"
-                        # Print message now, then add breadcrumb with colors
-                        print(message)
-                        message = ""  # Clear message since we printed it
-                        if data.get('next_steps'):
-                            # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
-                            try:
-                                from rich.console import Console
-                                console = Console()
-                                console.print()
-                                console.print("[cyan]Next Steps:[/cyan]")
-                                target_name = data.get('target', target)
-                                console.print(f"  rdst [green]schema annotate[/green] --target [blue]{target_name}[/blue] --use-llm   [dim]AI-generate descriptions[/dim]")
-                                console.print(f"  rdst [green]schema edit[/green] --target [blue]{target_name}[/blue]                 [dim]Manual editing in $EDITOR[/dim]")
-                                console.print(f"  rdst [green]ask[/green] [blue]\"How many rows in each table?\"[/blue] --target [blue]{target_name}[/blue]   [dim]Try natural language queries[/dim]")
-                            except ImportError:
-                                print("\nNext steps:\n" + "\n".join(data['next_steps']))
-                    elif subcommand == 'list':
-                        targets = data.get('targets', [])
+                    elif subcommand == "init":
+                        summary = {
+                            "Tables": data.get("tables", 0),
+                            "Columns": data.get("columns", 0),
+                            "Relationships": data.get("relationships", 0),
+                        }
+                        if data.get("enum_columns"):
+                            summary["Potential enums"] = len(data["enum_columns"])
+
+                        self.client._console.print(
+                            MessagePanel(
+                                "Semantic layer initialized", variant="success"
+                            )
+                        )
+                        self.client._console.print(KeyValueTable(summary))
+                        message = ""
+
+                        if data.get("next_steps"):
+                            from lib.ui import NextSteps
+
+                            target_name = data.get("target", target)
+                            steps = [
+                                (
+                                    f"rdst schema annotate --target {target_name} --use-llm",
+                                    "AI-generate descriptions",
+                                ),
+                                (
+                                    f"rdst schema edit --target {target_name}",
+                                    "Manual editing in $EDITOR",
+                                ),
+                                (
+                                    f'rdst ask "How many rows in each table?" --target {target_name}',
+                                    "Try natural language queries",
+                                ),
+                            ]
+                            self.client._console.print(NextSteps(steps))
+                    elif subcommand == "list":
+                        targets = data.get("targets", [])
                         if targets:
                             message += "\n"
                             for t in targets:
                                 message += f"\n  {t['name']}: {t['tables']} tables, {t['terminology']} terms"
-                    elif subcommand == 'export':
-                        message = result['data'].get('content', '')
+                    elif subcommand == "export":
+                        message = result["data"].get("content", "")
 
                 return RdstResult(True, message)
             else:
-                return RdstResult(False, result['message'])
+                return RdstResult(False, result["message"])
 
         except Exception as e:
             return RdstResult(False, f"schema command failed: {e}")
 
     def _format_schema_show(self, data: dict) -> str:
         """Format schema show output for display."""
-        lines = []
+        console = get_console()
+        renderables: list[Any] = []
 
-        # Summary
-        summary = data.get('summary', {})
-        lines.append(f"\n\nSummary: {summary.get('tables', 0)} tables, {summary.get('columns', 0)} columns, {summary.get('terminology', 0)} terms")
+        summary = data.get("summary", {})
+        renderables.append(
+            KeyValueTable(
+                {
+                    "Tables": summary.get("tables", 0),
+                    "Columns": summary.get("columns", 0),
+                    "Terminology": summary.get("terminology", 0),
+                },
+                title="Summary",
+            )
+        )
 
-        # Tables
-        tables = data.get('tables', {})
+        tables = data.get("tables", {})
         if tables:
-            lines.append("\n\nTables:")
+            tree = SimpleTree("Tables")
             for name, table in tables.items():
-                desc = table.get('description', 'No description')
-                lines.append(f"  {name}: {desc}")
-                if table.get('columns'):
-                    for col_name, col in table['columns'].items():
-                        col_desc = col.get('description', '')
-                        col_type = col.get('type', '')
-                        if col.get('enum_values'):
-                            enum_preview = list(col['enum_values'].keys())[:3]
+                desc = table.get("description", "No description")
+                table_node = tree.add(f"{name}: {desc}")
+                if table.get("columns"):
+                    for col_name, col in table["columns"].items():
+                        col_desc = col.get("description", "")
+                        col_type = col.get("type", "")
+                        if col.get("enum_values"):
+                            enum_preview = list(col["enum_values"].keys())[:3]
                             col_type = f"enum({', '.join(enum_preview)}...)"
-                        lines.append(f"    - {col_name} ({col_type}): {col_desc}")
+                        table_node.add(f"{col_name} ({col_type}): {col_desc}")
+            renderables.append(tree)
 
-        # Terminology
-        terminology = data.get('terminology', {})
+        terminology = data.get("terminology", {})
         if terminology:
-            lines.append("\n\nTerminology:")
+            term_tree = SimpleTree("Terminology")
             for term, info in terminology.items():
-                lines.append(f"  {term}: {info.get('definition', '')}")
+                term_tree.add(f"{term}: {info.get('definition', '')}")
+            renderables.append(term_tree)
 
-        return "\n".join(lines)
+        with console.capture() as capture:
+            console.print(Group(*renderables))
+        return capture.get().rstrip()
 
     def _get_default_target(self) -> str:
         """Get the default target from config."""
         try:
             cfg = TargetsConfig()
             cfg.load()
-            return cfg.get_default() or ''
+            return cfg.get_default() or ""
         except Exception:
-            return ''
+            return ""
 
     def _get_target_config(self, target: str) -> dict:
         """Get target configuration by name."""
@@ -1158,11 +1364,6 @@ class RdstCLI:
             return cfg.get(target) or {}
         except Exception:
             return {}
-
-
-
-
-
 
 
 # Ready-to-use singleton for simple imports: from lib.cli import rdst

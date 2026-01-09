@@ -4,11 +4,11 @@ Query Command Implementation
 Manages query registry: add, edit, list, delete queries.
 Separate from analysis - purely for query management.
 """
+
 from __future__ import annotations
 
 import os
 import re
-import shlex
 import signal
 import statistics
 import subprocess  # nosemgrep: gitlab.bandit.B404
@@ -21,21 +21,32 @@ from pathlib import Path
 from queue import Queue, Empty
 from shutil import which
 from threading import Lock
-from typing import Optional, Tuple, Any
+from typing import Optional, Any
 
-try:
-    from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
-    from rich.prompt import Prompt, Confirm
-    from rich.live import Live
-    from rich import box
-    RICH_AVAILABLE = True
-except ImportError:
-    RICH_AVAILABLE = False
+# Import UI system
+from lib.ui import (
+    get_console,
+    StyleTokens,
+    Layout as UILayout,
+    RegistryTable,
+    QueryStatsTable,
+    KeyValueTable,
+    Confirm,
+    NextSteps,
+    QueryPanel,
+    Live,
+    MessagePanel,
+    EmptyState,
+    SectionBox,
+    StatusLine,
+    DurationDisplay,
+    DataTable,
+    QueryTable,
+)
 
 try:
     import sqlparse
+
     SQLPARSE_AVAILABLE = True
 except ImportError:
     SQLPARSE_AVAILABLE = False
@@ -46,6 +57,7 @@ from lib.query_registry.query_registry import QueryRegistry
 @dataclass
 class QueryStats:
     """Statistics for a single query during run execution."""
+
     query_name: str
     query_hash: str
     executions: int = 0
@@ -89,12 +101,14 @@ class QueryStats:
 @dataclass
 class RunStatistics:
     """Aggregated statistics for a run session."""
+
     start_time: float
     query_stats: dict[str, QueryStats] = field(default_factory=dict)
     _lock: Lock = field(default_factory=Lock)
 
-    def record_execution(self, query_hash: str, query_name: str,
-                         duration_ms: float, success: bool) -> None:
+    def record_execution(
+        self, query_hash: str, query_name: str, duration_ms: float, success: bool
+    ) -> None:
         with self._lock:
             if query_hash not in self.query_stats:
                 self.query_stats[query_hash] = QueryStats(query_name, query_hash)
@@ -134,7 +148,7 @@ class QueryCommand:
 
     def __init__(self):
         self.registry = QueryRegistry()
-        self.console = Console() if RICH_AVAILABLE else None
+        self.console = get_console()
 
     def execute(self, subcommand: str, **kwargs):
         """
@@ -149,6 +163,7 @@ class QueryCommand:
         """
         # Lazy import to avoid circular dependency
         from .rdst_cli import RdstResult
+
         if subcommand == "add":
             return self.add(**kwargs)
         elif subcommand == "import":
@@ -167,12 +182,17 @@ class QueryCommand:
             return RdstResult(
                 ok=False,
                 message=f"Unknown query subcommand: {subcommand}",
-                data={"subcommand": subcommand}
+                data={"subcommand": subcommand},
             )
 
-    def add(self, name: str, query: Optional[str] = None,
-            file: Optional[str] = None, target: Optional[str] = None,
-            **kwargs):
+    def add(
+        self,
+        name: str,
+        query: Optional[str] = None,
+        file: Optional[str] = None,
+        target: Optional[str] = None,
+        **kwargs,
+    ):
         """
         Add a new query to the registry.
 
@@ -198,9 +218,7 @@ class QueryCommand:
 
         if not name:
             return RdstResult(
-                ok=False,
-                message="Query name is required for 'rdst query add'",
-                data={}
+                ok=False, message="Query name is required for 'rdst query add'", data={}
             )
 
         # Check if query name already exists
@@ -209,7 +227,7 @@ class QueryCommand:
             return RdstResult(
                 ok=False,
                 message=f"Query '{name}' already exists (hash: {existing.hash}). Use 'rdst query edit {name}' to modify.",
-                data={"name": name, "existing_hash": existing.hash}
+                data={"name": name, "existing_hash": existing.hash},
             )
 
         # Determine query source
@@ -222,7 +240,7 @@ class QueryCommand:
                 return RdstResult(
                     ok=False,
                     message=f"Could not read query from file: {file}",
-                    data={"file": file}
+                    data={"file": file},
                 )
             source = "file"
         else:
@@ -232,68 +250,68 @@ class QueryCommand:
                 return RdstResult(
                     ok=False,
                     message="No query provided (editor was empty or cancelled)",
-                    data={"name": name}
+                    data={"name": name},
                 )
             source = "manual"
 
         # Add to registry
         try:
             query_hash, is_new = self.registry.add_query(
-                sql=sql,
-                tag=name,
-                source=source,
-                target=target or ""
+                sql=sql, tag=name, source=source, target=target or ""
             )
 
-            # Show formatted output with colors if Rich available
-            if RICH_AVAILABLE and self.console:
-                self.console.print(f"[green]✓ Query added to registry[/green]")
-                self.console.print(f"  Name: [cyan]{name}[/cyan]")
-                self.console.print(f"  Hash: [yellow]{query_hash}[/yellow]")
-                self.console.print(f"  Source: {source}")
-                if target:
-                    self.console.print(f"  Target: [magenta]{target}[/magenta]")
+            self.console.print(
+                MessagePanel("Query added to registry", variant="success")
+            )
+            summary = {
+                "Name": name,
+                "Hash": query_hash,
+                "Source": source,
+            }
+            if target:
+                summary["Target"] = target
+            self.console.print(KeyValueTable(summary))
 
-                # Breadcrumb with colors
-                # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
-                self.console.print()
-                self.console.print("[cyan]Next Steps:[/cyan]")
-                if target:
-                    self.console.print(f"  rdst [green]analyze[/green] --hash [blue]{query_hash[:8]}[/blue] --target [blue]{target}[/blue]   [dim]Analyze this query[/dim]")
-                else:
-                    self.console.print(f"  rdst [green]analyze[/green] --hash [blue]{query_hash[:8]}[/blue] --target [blue]<target>[/blue]   [dim]Analyze this query[/dim]")
-                self.console.print(f"  rdst [green]query show[/green] [blue]{name}[/blue]                              [dim]View query details[/dim]")
-
-                msg = ""  # Already printed
+            steps = []
+            if target:
+                steps.append(
+                    (
+                        f"rdst analyze --hash {query_hash[:8]} --target {target}",
+                        "Analyze this query",
+                    )
+                )
             else:
-                msg = f"✓ Query added to registry\n  Name: {name}\n  Hash: {query_hash}\n  Source: {source}"
-                if target:
-                    msg += f"\n  Target: {target}"
-                msg += "\n\nNext Steps:"
-                if target:
-                    msg += f"\n  rdst analyze --hash {query_hash[:8]} --target {target}   Analyze this query"
-                else:
-                    msg += f"\n  rdst analyze --hash {query_hash[:8]} --target <target>   Analyze this query"
-                msg += f"\n  rdst query show {name}                              View query details"
+                steps.append(
+                    (
+                        f"rdst analyze --hash {query_hash[:8]} --target <target>",
+                        "Analyze this query",
+                    )
+                )
+            steps.append(
+                (
+                    f"rdst query show {name}",
+                    "View query details",
+                )
+            )
+            self.console.print(NextSteps(steps))
+
+            msg = ""
 
             return RdstResult(
                 ok=True,
                 message=msg,
-                data={
-                    "name": name,
-                    "hash": query_hash,
-                    "is_new": is_new,
-                    "sql": sql
-                }
+                data={"name": name, "hash": query_hash, "is_new": is_new, "sql": sql},
             )
         except Exception as e:
             return RdstResult(
                 ok=False,
                 message=f"Failed to add query: {str(e)}",
-                data={"name": name, "error": str(e)}
+                data={"name": name, "error": str(e)},
             )
 
-    def import_queries(self, file: str, update: bool = False, target: Optional[str] = None, **kwargs):
+    def import_queries(
+        self, file: str, update: bool = False, target: Optional[str] = None, **kwargs
+    ):
         """
         Import multiple queries from a SQL file.
 
@@ -314,9 +332,7 @@ class QueryCommand:
 
         if not file:
             return RdstResult(
-                ok=False,
-                message="File path is required for import",
-                data={}
+                ok=False, message="File path is required for import", data={}
             )
 
         # Read file
@@ -324,18 +340,16 @@ class QueryCommand:
             file_path = Path(file)
             if not file_path.exists():
                 return RdstResult(
-                    ok=False,
-                    message=f"File not found: {file}",
-                    data={"file": file}
+                    ok=False, message=f"File not found: {file}", data={"file": file}
                 )
 
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
         except Exception as e:
             return RdstResult(
                 ok=False,
                 message=f"Failed to read file: {str(e)}",
-                data={"file": file, "error": str(e)}
+                data={"file": file, "error": str(e)},
             )
 
         # Parse queries from file
@@ -345,7 +359,7 @@ class QueryCommand:
             return RdstResult(
                 ok=False,
                 message=f"No queries found in file: {file}",
-                data={"file": file}
+                data={"file": file},
             )
 
         # Import each query
@@ -355,9 +369,9 @@ class QueryCommand:
         errors = []
 
         for query_data in queries:
-            name = query_data.get('name')
-            sql = query_data.get('sql')
-            query_target = query_data.get('target', target)
+            name = query_data.get("name")
+            sql = query_data.get("sql")
+            query_target = query_data.get("target", target)
 
             if not name or not sql:
                 errors.append(f"Query missing name or SQL: {name or '(unnamed)'}")
@@ -374,7 +388,7 @@ class QueryCommand:
                             sql=sql,
                             tag=name,
                             source="import",
-                            target=query_target or ""
+                            target=query_target or "",
                         )
                         if new_hash != existing.hash:
                             self.registry.remove_query(existing.hash)
@@ -388,10 +402,7 @@ class QueryCommand:
                 # Add new query
                 try:
                     self.registry.add_query(
-                        sql=sql,
-                        tag=name,
-                        source="import",
-                        target=query_target or ""
+                        sql=sql, tag=name, source="import", target=query_target or ""
                     )
                     imported += 1
                 except Exception as e:
@@ -422,11 +433,13 @@ class QueryCommand:
                 "updated": updated,
                 "skipped": skipped,
                 "errors": errors,
-                "file": file
-            }
+                "file": file,
+            },
         )
 
-    def _parse_import_file(self, content: str, default_target: Optional[str] = None) -> list:
+    def _parse_import_file(
+        self, content: str, default_target: Optional[str] = None
+    ) -> list:
         """
         Parse SQL file content to extract queries and metadata.
 
@@ -444,7 +457,7 @@ class QueryCommand:
             List of dicts with keys: name, sql, target, frequency
         """
         queries = []
-        lines = content.split('\n')
+        lines = content.split("\n")
 
         i = 0
         while i < len(lines):
@@ -457,19 +470,19 @@ class QueryCommand:
                 line = lines[i].strip()
 
                 # Check for metadata comment
-                if line.startswith('-- name:'):
-                    metadata['name'] = line.split(':', 1)[1].strip()
+                if line.startswith("-- name:"):
+                    metadata["name"] = line.split(":", 1)[1].strip()
                     i += 1
-                elif line.startswith('-- target:'):
-                    metadata['target'] = line.split(':', 1)[1].strip()
+                elif line.startswith("-- target:"):
+                    metadata["target"] = line.split(":", 1)[1].strip()
                     i += 1
-                elif line.startswith('-- frequency:'):
+                elif line.startswith("-- frequency:"):
                     try:
-                        metadata['frequency'] = int(line.split(':', 1)[1].strip())
+                        metadata["frequency"] = int(line.split(":", 1)[1].strip())
                     except:
                         pass
                     i += 1
-                elif line.startswith('--') and not line.startswith('---'):
+                elif line.startswith("--") and not line.startswith("---"):
                     # Skip other comments
                     i += 1
                 elif not line:
@@ -485,31 +498,32 @@ class QueryCommand:
                 sql_lines.append(line)
 
                 # Check if line contains semicolon (end of query)
-                if ';' in line:
+                if ";" in line:
                     i += 1
                     break
                 i += 1
 
             # Extract SQL and clean up
             if sql_lines:
-                sql = '\n'.join(sql_lines).strip()
+                sql = "\n".join(sql_lines).strip()
                 # Remove trailing semicolon for consistency
-                if sql.endswith(';'):
+                if sql.endswith(";"):
                     sql = sql[:-1].strip()
 
                 # Only add if we have both name and SQL
-                if metadata.get('name') and sql:
-                    queries.append({
-                        'name': metadata['name'],
-                        'sql': sql,
-                        'target': metadata.get('target', default_target),
-                        'frequency': metadata.get('frequency')
-                    })
+                if metadata.get("name") and sql:
+                    queries.append(
+                        {
+                            "name": metadata["name"],
+                            "sql": sql,
+                            "target": metadata.get("target", default_target),
+                            "frequency": metadata.get("frequency"),
+                        }
+                    )
 
         return queries
 
-    def edit(self, name: Optional[str] = None, hash: Optional[str] = None,
-             **kwargs):
+    def edit(self, name: Optional[str] = None, hash: Optional[str] = None, **kwargs):
         """
         Edit an existing query in the registry.
 
@@ -524,6 +538,7 @@ class QueryCommand:
             RdstResult with updated query information
         """
         from .rdst_cli import RdstResult
+
         # Load existing query
         if name:
             entry = self.registry.get_query_by_tag(name)
@@ -531,7 +546,7 @@ class QueryCommand:
                 return RdstResult(
                     ok=False,
                     message=f"No query found with name: {name}",
-                    data={"name": name}
+                    data={"name": name},
                 )
             identifier = name
             identifier_type = "name"
@@ -541,7 +556,7 @@ class QueryCommand:
                 return RdstResult(
                     ok=False,
                     message=f"No query found with hash: {hash}",
-                    data={"hash": hash}
+                    data={"hash": hash},
                 )
             identifier = hash
             identifier_type = "hash"
@@ -549,7 +564,7 @@ class QueryCommand:
             return RdstResult(
                 ok=False,
                 message="Must provide either a query name or --hash for edit",
-                data={}
+                data={},
             )
 
         # Get executable SQL with most recent parameters
@@ -564,14 +579,14 @@ class QueryCommand:
         new_sql = self._open_editor_for_query(
             name=old_tag or identifier,
             existing_sql=old_sql,
-            target_name=entry.last_target
+            target_name=entry.last_target,
         )
 
         if not new_sql:
             return RdstResult(
                 ok=False,
                 message="Edit cancelled (no changes or empty query)",
-                data={identifier_type: identifier}
+                data={identifier_type: identifier},
             )
 
         # Check if SQL actually changed
@@ -579,7 +594,7 @@ class QueryCommand:
             return RdstResult(
                 ok=True,
                 message=f"No changes made to query {identifier_type}: {identifier}",
-                data={identifier_type: identifier, "hash": old_hash}
+                data={identifier_type: identifier, "hash": old_hash},
             )
 
         # Update registry
@@ -590,7 +605,7 @@ class QueryCommand:
                 sql=new_sql,
                 tag=old_tag,  # Preserve tag
                 source=entry.source,
-                target=entry.last_target
+                target=entry.last_target,
             )
 
             # If hash changed, remove old entry
@@ -608,18 +623,23 @@ class QueryCommand:
                     "old_hash": old_hash,
                     "new_hash": new_hash,
                     "hash_changed": new_hash != old_hash,
-                    "sql": new_sql
-                }
+                    "sql": new_sql,
+                },
             )
         except Exception as e:
             return RdstResult(
                 ok=False,
                 message=f"Failed to update query: {str(e)}",
-                data={identifier_type: identifier, "error": str(e)}
+                data={identifier_type: identifier, "error": str(e)},
             )
 
-    def delete(self, name: Optional[str] = None, hash: Optional[str] = None,
-               force: bool = False, **kwargs):
+    def delete(
+        self,
+        name: Optional[str] = None,
+        hash: Optional[str] = None,
+        force: bool = False,
+        **kwargs,
+    ):
         """
         Delete a query from the registry.
 
@@ -632,6 +652,7 @@ class QueryCommand:
             RdstResult with deletion status
         """
         from .rdst_cli import RdstResult
+
         # Find query to delete
         if name:
             entry = self.registry.get_query_by_tag(name)
@@ -639,7 +660,7 @@ class QueryCommand:
                 return RdstResult(
                     ok=False,
                     message=f"No query found with name: {name}",
-                    data={"name": name}
+                    data={"name": name},
                 )
             query_hash = entry.hash
             identifier = f"query '{name}'"
@@ -649,7 +670,7 @@ class QueryCommand:
                 return RdstResult(
                     ok=False,
                     message=f"No query found with hash: {hash}",
-                    data={"hash": hash}
+                    data={"hash": hash},
                 )
             query_hash = entry.hash  # Use full hash from entry, not the input prefix
             identifier = f"hash {hash}"
@@ -657,22 +678,18 @@ class QueryCommand:
             return RdstResult(
                 ok=False,
                 message="Must provide either a query name or --hash for delete",
-                data={}
+                data={},
             )
 
         # Confirm deletion unless --force
         if not force:
-            if RICH_AVAILABLE:
-                confirmed = Confirm.ask(f"Delete query {identifier}?", default=False)
-            else:
-                response = input(f"Delete query {identifier}? (y/N): ").strip().lower()
-                confirmed = response == 'y'
+            confirmed = Confirm.ask(f"Delete query {identifier}?", default=False)
 
             if not confirmed:
                 return RdstResult(
                     ok=False,
                     message="Deletion cancelled",
-                    data={"identifier": identifier}
+                    data={"identifier": identifier},
                 )
 
         # Delete from registry
@@ -681,25 +698,29 @@ class QueryCommand:
             if removed:
                 msg = f"✓ Query deleted: {identifier} (hash: {query_hash})"
                 return RdstResult(
-                    ok=True,
-                    message=msg,
-                    data={"hash": query_hash, "name": name or ""}
+                    ok=True, message=msg, data={"hash": query_hash, "name": name or ""}
                 )
             else:
                 return RdstResult(
                     ok=False,
                     message=f"Failed to delete query {identifier}",
-                    data={"hash": query_hash}
+                    data={"hash": query_hash},
                 )
         except Exception as e:
             return RdstResult(
                 ok=False,
                 message=f"Error deleting query: {str(e)}",
-                data={"identifier": identifier, "error": str(e)}
+                data={"identifier": identifier, "error": str(e)},
             )
 
-    def list(self, limit: int = 10, target: str = None, filter: str = None,
-             interactive: bool = False, **kwargs):
+    def list(
+        self,
+        limit: int = 10,
+        target: str = None,
+        filter: str = None,
+        interactive: bool = False,
+        **kwargs,
+    ):
         """
         List all queries in the registry.
 
@@ -724,18 +745,22 @@ class QueryCommand:
             return RdstResult(
                 ok=True,
                 message="No queries in registry. Use 'rdst query add' to add queries.",
-                data={"queries": []}
+                data={"queries": []},
             )
 
         # Apply target filter if specified
         if target:
             target_lower = target.lower()
-            queries = [q for q in queries if q.last_target and target_lower in q.last_target.lower()]
+            queries = [
+                q
+                for q in queries
+                if q.last_target and target_lower in q.last_target.lower()
+            ]
             if not queries:
                 return RdstResult(
                     ok=True,
                     message=f"No queries found for target: '{target}'",
-                    data={"queries": []}
+                    data={"queries": []},
                 )
 
         # Apply smart filter if specified
@@ -744,11 +769,12 @@ class QueryCommand:
             filtered_queries = []
             for query in queries:
                 matches = [
-                    filter_lower in query.sql.lower(),                    # SQL content
-                    query.tag and filter_lower in query.tag.lower(),      # Name/tag
-                    filter_lower in query.hash.lower(),                   # Hash
-                    filter_lower in query.source.lower(),                 # Source
-                    query.last_target and filter_lower in query.last_target.lower(),  # Target
+                    filter_lower in query.sql.lower(),  # SQL content
+                    query.tag and filter_lower in query.tag.lower(),  # Name/tag
+                    filter_lower in query.hash.lower(),  # Hash
+                    filter_lower in query.source.lower(),  # Source
+                    query.last_target
+                    and filter_lower in query.last_target.lower(),  # Target
                 ]
                 if any(matches):
                     filtered_queries.append(query)
@@ -757,7 +783,7 @@ class QueryCommand:
                 return RdstResult(
                     ok=True,
                     message=f"No queries found matching filter: '{filter}'",
-                    data={"queries": []}
+                    data={"queries": []},
                 )
 
         total_queries = len(queries)
@@ -770,7 +796,9 @@ class QueryCommand:
         else:
             return self._plain_query_list(queries, limit, target, filter)
 
-    def _plain_query_list(self, queries: list, limit: int, target: str = None, filter: str = None):
+    def _plain_query_list(
+        self, queries: list, limit: int, target: str = None, filter: str = None
+    ):
         """Plain text output for query list (non-interactive)."""
         from .rdst_cli import RdstResult
 
@@ -786,53 +814,29 @@ class QueryCommand:
         title_parts.append(")")
         title = "".join(title_parts)
 
-        # Format output
-        if RICH_AVAILABLE and self.console:
-            table = Table(title=title)
-            table.add_column("Name", style="cyan")
-            table.add_column("Hash", style="yellow")
-            table.add_column("Target", style="magenta")
-            table.add_column("Source", style="green")
-            table.add_column("Last Analyzed", style="blue")
-            table.add_column("SQL Preview", style="white")
-
-            for q in queries:
-                # Format timestamp
-                timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
-                # Preview SQL (first 50 chars)
-                sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
-
-                table.add_row(
-                    q.tag or "(unnamed)",
-                    q.hash[:8],
-                    q.last_target or "-",
-                    q.source,
-                    timestamp,
-                    sql_preview
-                )
-
-            self.console.print(table)
-        else:
-            # Plain text output
-            print(f"\n{title}")
-            print("-" * 100)
-            for q in queries:
-                timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
-                sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
-                target_display = q.last_target or "-"
-                print(f"Name: {q.tag or '(unnamed)':20} Hash: {q.hash[:8]:10} Target: {target_display:15} Source: {q.source:10}")
-                print(f"  Last analyzed: {timestamp}")
-                print(f"  SQL: {sql_preview}")
-                print()
+        # Format output using UI component
+        table = RegistryTable(queries, title=title, show_numbers=False)
+        self.console.print(table)
 
         return RdstResult(
             ok=True,
             message=f"Listed {len(queries)} queries",
-            data={"queries": [{"tag": q.tag, "hash": q.hash, "sql": q.sql, "target": q.last_target} for q in queries]}
+            data={
+                "queries": [
+                    {
+                        "tag": q.tag,
+                        "hash": q.hash,
+                        "sql": q.sql,
+                        "target": q.last_target,
+                    }
+                    for q in queries
+                ]
+            },
         )
 
-    def _interactive_query_list(self, queries: list, page_size: int = 10,
-                                 target: str = None, filter: str = None):
+    def _interactive_query_list(
+        self, queries: list, page_size: int = 10, target: str = None, filter: str = None
+    ):
         """Interactive query list with pagination and selection - uses table format."""
         from .rdst_cli import RdstResult
 
@@ -847,7 +851,7 @@ class QueryCommand:
             page_queries = queries[start:end]
 
             # Clear screen
-            print("\033[H\033[J", end="")
+            self.console.print("\033[H\033[J", end="")
 
             # Build title with filter info
             title_parts = [f"Query Registry ({total} queries"]
@@ -858,50 +862,15 @@ class QueryCommand:
             title_parts.append(")")
             title = "".join(title_parts)
 
-            # Show table with selection numbers
-            if RICH_AVAILABLE and self.console:
-                table = Table(title=title)
-                table.add_column("#", style="bold green", width=3)
-                table.add_column("Name", style="cyan")
-                table.add_column("Hash", style="yellow")
-                table.add_column("Target", style="magenta")
-                table.add_column("Source", style="green")
-                table.add_column("Last Analyzed", style="blue")
-                table.add_column("SQL Preview", style="white")
-
-                for i, q in enumerate(page_queries):
-                    num = i + 1
-                    timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
-                    sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
-
-                    table.add_row(
-                        str(num),
-                        q.tag or "(unnamed)",
-                        q.hash[:8],
-                        q.last_target or "-",
-                        q.source,
-                        timestamp,
-                        sql_preview
-                    )
-
-                self.console.print(table)
-                self.console.print(f"\n[dim]Page {page+1}/{max_page+1} (showing {start+1}-{end} of {total})[/dim]")
-            else:
-                # Plain text table
-                print(f"\n{title}")
-                print(f"Page {page+1}/{max_page+1} (showing {start+1}-{end} of {total})\n")
-                print("-" * 100)
-                for i, q in enumerate(page_queries):
-                    num = i + 1
-                    timestamp = q.last_analyzed[:19].replace('T', ' ') if q.last_analyzed else "never"
-                    sql_preview = (q.sql[:50] + '...') if len(q.sql) > 50 else q.sql
-                    target_display = q.last_target or "-"
-                    print(f"[{num}] Name: {q.tag or '(unnamed)':20} Hash: {q.hash[:8]:10} Target: {target_display:15}")
-                    print(f"    Last: {timestamp}  SQL: {sql_preview}")
-                    print()
+            # Show table with selection numbers using UI component
+            table = RegistryTable(page_queries, title=title, show_numbers=True)
+            self.console.print(table)
+            self.console.print(
+                f"\n[{StyleTokens.MUTED}]Page {page + 1}/{max_page + 1} (showing {start + 1}-{end} of {total})[/{StyleTokens.MUTED}]"
+            )
 
             # Show navigation options
-            print()
+            self.console.print()
             nav_options = []
             if page > 0:
                 nav_options.append("[p] Prev")
@@ -909,29 +878,40 @@ class QueryCommand:
                 nav_options.append("[n] Next")
             nav_options.append("[q/Esc] Quit")
 
-            if RICH_AVAILABLE and self.console:
-                self.console.print(f"[dim]Enter # to analyze | {' | '.join(nav_options)}[/dim]")
-            else:
-                print(f"Enter # to analyze | {' | '.join(nav_options)}")
+            self.console.print(
+                f"[{StyleTokens.MUTED}]Enter # to analyze | {' | '.join(nav_options)}[/{StyleTokens.MUTED}]"
+            )
 
             # Get user input
             try:
                 choice = input("> ").strip()
             except (EOFError, KeyboardInterrupt):
-                print("\nCancelled")
-                return RdstResult(ok=True, message="Query list cancelled", data={"queries": []})
+                self.console.print(MessagePanel("Cancelled", variant="warning"))
+                return RdstResult(
+                    ok=True, message="Query list cancelled", data={"queries": []}
+                )
 
             # Handle escape key (shows as empty or \x1b)
-            if choice == '' or choice == '\x1b' or choice.lower() == 'q':
+            if choice == "" or choice == "\x1b" or choice.lower() == "q":
                 return RdstResult(
                     ok=True,
                     message=f"Listed {total} queries",
-                    data={"queries": [{"tag": q.tag, "hash": q.hash, "sql": q.sql, "target": q.last_target} for q in queries[:page_size]]}
+                    data={
+                        "queries": [
+                            {
+                                "tag": q.tag,
+                                "hash": q.hash,
+                                "sql": q.sql,
+                                "target": q.last_target,
+                            }
+                            for q in queries[:page_size]
+                        ]
+                    },
                 )
-            elif choice.lower() == 'n' and page < max_page:
+            elif choice.lower() == "n" and page < max_page:
                 page += 1
                 continue
-            elif choice.lower() == 'p' and page > 0:
+            elif choice.lower() == "p" and page > 0:
                 page -= 1
                 continue
             elif choice.isdigit():
@@ -940,7 +920,7 @@ class QueryCommand:
                     selected = page_queries[num - 1]
                     # Exit interactive mode and return selection for analyze
                     # Clear screen to restore normal terminal
-                    print("\033[H\033[J", end="")
+                    self.console.print("\033[H\033[J", end="")
                     return RdstResult(
                         ok=True,
                         message="",  # Message will be handled by caller
@@ -949,32 +929,45 @@ class QueryCommand:
                             "selected_hash": selected.hash,
                             "selected_tag": selected.tag,
                             "selected_sql": selected.sql,
-                            "selected_target": selected.last_target
-                        }
+                            "selected_target": selected.last_target,
+                        },
                     )
                 else:
-                    print(f"Invalid selection. Enter 1-{len(page_queries)}")
+                    self.console.print(
+                        MessagePanel(
+                            "Invalid selection",
+                            variant="warning",
+                            hint=f"Enter 1-{len(page_queries)}",
+                        )
+                    )
                     input("Press Enter to continue...")
             else:
-                print(f"Unknown option: {choice}")
+                self.console.print(
+                    MessagePanel(
+                        f"Unknown option: {choice}",
+                        variant="warning",
+                    )
+                )
                 input("Press Enter to continue...")
 
     def _analyze_selected_query(self, query_entry):
         """Analyze the selected query."""
         from .rdst_cli import RdstResult
 
-        if RICH_AVAILABLE and self.console:
-            self.console.print(f"\n[bold]Analyzing query:[/bold] {query_entry.tag or query_entry.hash[:8]}")
-        else:
-            print(f"\nAnalyzing query: {query_entry.tag or query_entry.hash[:8]}")
+        self.console.print(
+            f"\n[bold]Analyzing query:[/bold] {query_entry.tag or query_entry.hash[:8]}"
+        )
 
         # Import and run analyze
         try:
             from .analyze_command import AnalyzeCommand, AnalyzeInput
+
             analyze_cmd = AnalyzeCommand()
 
             # Get executable query (with parameters if available)
-            sql = self.registry.get_executable_query(query_entry.hash, interactive=False)
+            sql = self.registry.get_executable_query(
+                query_entry.hash, interactive=False
+            )
             if not sql:
                 sql = query_entry.sql
 
@@ -985,29 +978,31 @@ class QueryCommand:
                 source="registry",
                 hash=query_entry.hash,
                 tag=query_entry.tag or "",
-                save_as=""
+                save_as="",
             )
 
             # Run analysis
             result = analyze_cmd.execute_analyze(
                 resolved_input=resolved_input,
                 target=query_entry.last_target,
-                interactive=False
+                interactive=False,
             )
 
             return RdstResult(
                 ok=True,
                 message="Analysis complete",
-                data={"selected_hash": query_entry.hash, "analysis": result}
+                data={"selected_hash": query_entry.hash, "analysis": result},
             )
         except Exception as e:
             return RdstResult(
                 ok=False,
                 message=f"Failed to analyze query: {e}",
-                data={"selected_hash": query_entry.hash, "error": str(e)}
+                data={"selected_hash": query_entry.hash, "error": str(e)},
             )
 
-    def show(self, name: str = None, query_name: str = None, hash: str = None, **kwargs):
+    def show(
+        self, name: str = None, query_name: str = None, hash: str = None, **kwargs
+    ):
         """
         Show detailed information about a specific query.
 
@@ -1038,120 +1033,85 @@ class QueryCommand:
             return RdstResult(
                 ok=False,
                 message=f"No query found with {id_type}: {identifier}",
-                data={id_type: identifier}
+                data={id_type: identifier},
             )
 
         # Format output
         display_name = entry.tag or entry.hash[:12]
-        if RICH_AVAILABLE:
-            from rich.syntax import Syntax
 
-            details = f"""[cyan]Name:[/cyan] {entry.tag or '(unnamed)'}
-[yellow]Hash:[/yellow] {entry.hash}
-[green]Source:[/green] {entry.source}
-[blue]First Analyzed:[/blue] {entry.first_analyzed[:19].replace('T', ' ') if entry.first_analyzed else 'never'}
-[blue]Last Analyzed:[/blue] {entry.last_analyzed[:19].replace('T', ' ') if entry.last_analyzed else 'never'}
-[magenta]Frequency:[/magenta] {entry.frequency}
-[cyan]Target:[/cyan] {entry.last_target or '(none)'}
-[white]Stored Params:[/white] {'yes' if entry.most_recent_params else 'none'}"""
+        details = f"""[{StyleTokens.SECONDARY}]Name:[/{StyleTokens.SECONDARY}] {entry.tag or "(unnamed)"}
+[{StyleTokens.HASH}]Hash:[/{StyleTokens.HASH}] {entry.hash}
+[{StyleTokens.SUCCESS}]Source:[/{StyleTokens.SUCCESS}] {entry.source}
+[{StyleTokens.ACCENT}]First Analyzed:[/{StyleTokens.ACCENT}] {entry.first_analyzed[:19].replace("T", " ") if entry.first_analyzed else "never"}
+[{StyleTokens.ACCENT}]Last Analyzed:[/{StyleTokens.ACCENT}] {entry.last_analyzed[:19].replace("T", " ") if entry.last_analyzed else "never"}
+[{StyleTokens.ACCENT}]Frequency:[/{StyleTokens.ACCENT}] {entry.frequency}
+[{StyleTokens.SECONDARY}]Target:[/{StyleTokens.SECONDARY}] {entry.last_target or "(none)"}
+[{StyleTokens.SQL}]Stored Params:[/{StyleTokens.SQL}] {"yes" if entry.most_recent_params else "none"}"""
 
-            # Add runtime stats if available (from rdst top)
-            if entry.max_duration_ms > 0 or entry.observation_count > 0:
-                details += f"""
+        # Add runtime stats if available (from rdst top)
+        if entry.max_duration_ms > 0 or entry.observation_count > 0:
+            details += f"""
 
 [bold]Runtime Statistics[/bold] (from rdst top):
-[red]Max Duration:[/red] {entry.max_duration_ms:,.1f}ms
-[yellow]Avg Duration:[/yellow] {entry.avg_duration_ms:,.1f}ms
-[green]Observations:[/green] {entry.observation_count}"""
+[{StyleTokens.ERROR}]Max Duration:[/{StyleTokens.ERROR}] {entry.max_duration_ms:,.1f}ms
+[{StyleTokens.WARNING}]Avg Duration:[/{StyleTokens.WARNING}] {entry.avg_duration_ms:,.1f}ms
+[{StyleTokens.SUCCESS}]Observations:[/{StyleTokens.SUCCESS}] {entry.observation_count}"""
 
-            panel = Panel(details, title=f"Query: {display_name}", border_style="green")
-            self.console.print(panel)
+        panel = MessagePanel(
+            details,
+            title=f"Query: {display_name}",
+            variant="success",
+        )
+        self.console.print(panel)
 
-            # SQL pattern with highlighted placeholders
-            self.console.print("\n[bold]SQL Pattern:[/bold]")
-            # Highlight :pN placeholders in bright_magenta for visibility
-            sql_with_highlights = re.sub(r'(:p\d+)', r'[bright_magenta]\1[/bright_magenta]', entry.sql)
-            self.console.print(sql_with_highlights)
+        # SQL pattern with highlighted placeholders
+        self.console.print(f"\n[{StyleTokens.TITLE}]SQL Pattern:[/{StyleTokens.TITLE}]")
+        # Highlight :pN placeholders in bright_magenta for visibility
+        sql_with_highlights = re.sub(
+            r"(:p\d+)", f"[{StyleTokens.PARAM}]\\1[/{StyleTokens.PARAM}]", entry.sql
+        )
+        self.console.print(sql_with_highlights)
 
-            # Show parameters and reconstructed query if parameters exist
-            if entry.parameters:
-                from ..query_registry import reconstruct_sql
+        # Show parameters and reconstructed query if parameters exist
+        if entry.parameters:
+            from ..query_registry import reconstruct_sql
 
-                self.console.print("\n[bold]Parameters:[/bold]")
-                for param_name in sorted(entry.parameters.keys(), key=lambda x: int(x[1:]) if x[1:].isdigit() else 0):
-                    param_info = entry.parameters[param_name]
-                    value = param_info['value']
-                    ptype = param_info['type']
-                    if ptype == 'string':
-                        self.console.print(f"  [bright_magenta]:{param_name}[/bright_magenta] = [green]'{value}'[/green] (string)")
-                    else:
-                        self.console.print(f"  [bright_magenta]:{param_name}[/bright_magenta] = [yellow]{value}[/yellow] (number)")
+            self.console.print(
+                f"\n[{StyleTokens.TITLE}]Parameters:[/{StyleTokens.TITLE}]"
+            )
+            for param_name in sorted(
+                entry.parameters.keys(),
+                key=lambda x: int(x[1:]) if x[1:].isdigit() else 0,
+            ):
+                param_info = entry.parameters[param_name]
+                value = param_info["value"]
+                ptype = param_info["type"]
+                if ptype == "string":
+                    self.console.print(
+                        f"  [{StyleTokens.ACCENT}]{f':{param_name}'}[/{StyleTokens.ACCENT}] = [{StyleTokens.SUCCESS}]{repr(value)}[/{StyleTokens.SUCCESS}] (string)"
+                    )
+                else:
+                    self.console.print(
+                        f"  [{StyleTokens.ACCENT}]{f':{param_name}'}[/{StyleTokens.ACCENT}] = [{StyleTokens.WARNING}]{str(value)}[/{StyleTokens.WARNING}] (number)"
+                    )
 
-                # Show reconstructed executable SQL
-                try:
-                    executable_sql = reconstruct_sql(entry.sql, entry.parameters)
-                    self.console.print("\n[bold]Executable SQL:[/bold] (with current parameters)")
-                    exec_syntax = Syntax(executable_sql, "sql", theme="monokai", line_numbers=False, word_wrap=True)
-                    self.console.print(exec_syntax)
-                except Exception:
-                    pass  # Reconstruction failed, just skip
+            # Show reconstructed executable SQL
+            try:
+                executable_sql = reconstruct_sql(entry.sql, entry.parameters)
+                self.console.print(
+                    f"\n[{StyleTokens.TITLE}]Executable SQL:[/{StyleTokens.TITLE}] (with current parameters)"
+                )
+                self.console.print(
+                    QueryPanel(
+                        executable_sql,
+                        title="Executable SQL",
+                        border_style=StyleTokens.PANEL_BORDER,
+                    )
+                )
+            except Exception:
+                pass  # Reconstruction failed, just skip
 
-            self.console.print()
-        else:
-            # Plain text output
-            print(f"\n{'='*80}")
-            print(f"Query: {display_name}")
-            print(f"{'='*80}")
-            print(f"Name:           {entry.tag or '(unnamed)'}")
-            print(f"Hash:           {entry.hash}")
-            print(f"Source:         {entry.source}")
-            print(f"First Analyzed: {entry.first_analyzed[:19].replace('T', ' ') if entry.first_analyzed else 'never'}")
-            print(f"Last Analyzed:  {entry.last_analyzed[:19].replace('T', ' ') if entry.last_analyzed else 'never'}")
-            print(f"Frequency:      {entry.frequency}")
-            print(f"Target:         {entry.last_target or '(none)'}")
-            print(f"Parameters:     {len(entry.parameters) if entry.parameters else 0} values")
-            # Runtime stats if available (from rdst top)
-            if entry.max_duration_ms > 0 or entry.observation_count > 0:
-                print(f"\nRuntime Statistics (from rdst top):")
-                print(f"Max Duration:   {entry.max_duration_ms:,.1f}ms")
-                print(f"Avg Duration:   {entry.avg_duration_ms:,.1f}ms")
-                print(f"Observations:   {entry.observation_count}")
-            print(f"\nSQL Pattern:")
-            print(entry.sql)
-
-            # Show parameters and reconstructed query if parameters exist
-            if entry.parameters:
-                from ..query_registry import reconstruct_sql
-
-                print(f"\nParameters:")
-                for param_name in sorted(entry.parameters.keys(), key=lambda x: int(x[1:]) if x[1:].isdigit() else 0):
-                    param_info = entry.parameters[param_name]
-                    value = param_info['value']
-                    ptype = param_info['type']
-                    if ptype == 'string':
-                        print(f"  :{param_name} = '{value}' (string)")
-                    else:
-                        print(f"  :{param_name} = {value} (number)")
-
-                # Show reconstructed executable SQL
-                try:
-                    executable_sql = reconstruct_sql(entry.sql, entry.parameters)
-                    print(f"\nExecutable SQL (with current parameters):")
-                    print(executable_sql)
-                except Exception:
-                    pass  # Reconstruction failed, just skip
-
-            print(f"{'='*80}")
-
-            # Breadcrumb for plain text
-            print("\nNext Steps:")
-            if entry.last_target:
-                print(f"  rdst analyze --hash {entry.hash[:8]} --target {entry.last_target}   Analyze this query")
-            else:
-                print(f"  rdst analyze --hash {entry.hash[:8]} --target <target>   Analyze this query")
-            print(f"  rdst query edit {name}                        Edit this query")
-            print(f"  rdst query list                              View all queries")
-            print()
+        self.console.print()
 
         return RdstResult(
             ok=True,
@@ -1168,9 +1128,9 @@ class QueryCommand:
                     "target": entry.last_target,
                     "max_duration_ms": entry.max_duration_ms,
                     "avg_duration_ms": entry.avg_duration_ms,
-                    "observation_count": entry.observation_count
-                }
-            }
+                    "observation_count": entry.observation_count,
+                },
+            },
         )
 
     def _validate_editor(self, editor_name: str) -> Optional[str]:
@@ -1208,8 +1168,12 @@ class QueryCommand:
 
         return resolved_path
 
-    def _open_editor_for_query(self, name: str, existing_sql: Optional[str] = None,
-                                target_name: Optional[str] = None) -> Optional[str]:
+    def _open_editor_for_query(
+        self,
+        name: str,
+        existing_sql: Optional[str] = None,
+        target_name: Optional[str] = None,
+    ) -> Optional[str]:
         """
         Open $EDITOR for multi-line query input.
 
@@ -1222,27 +1186,33 @@ class QueryCommand:
             SQL query string, or None if cancelled/empty
         """
         # Determine editor to use from environment
-        editor_name = os.environ.get('EDITOR') or os.environ.get('VISUAL')
+        editor_name = os.environ.get("EDITOR") or os.environ.get("VISUAL")
 
         # Validate editor from environment
         editor = self._validate_editor(editor_name) if editor_name else None
 
         if not editor:
             # Try common editors in order of preference
-            for candidate in ['vim', 'nano', 'vi', 'emacs']:
+            for candidate in ["vim", "nano", "vi", "emacs"]:
                 editor = self._validate_editor(candidate)
                 if editor:
                     break
 
         if not editor:
-            print("Error: No editor found. Set $EDITOR environment variable or install vim/nano.")
+            self.console.print(
+                MessagePanel(
+                    "No editor found.",
+                    variant="error",
+                    hint="Set $EDITOR environment variable or install vim/nano.",
+                )
+            )
             return None
 
         # Create template content
         template = self._create_editor_template(name, existing_sql, target_name)
 
         # Create temporary file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".sql", delete=False) as f:
             f.write(template)
             f.flush()
             temp_path = f.name
@@ -1260,7 +1230,7 @@ class QueryCommand:
             subprocess.call([editor, temp_path])  # nosemgrep
 
             # Read edited content
-            with open(temp_path, 'r') as f:
+            with open(temp_path, "r") as f:
                 content = f.read()
 
             # Parse SQL from content
@@ -1290,29 +1260,44 @@ class QueryCommand:
         if SQLPARSE_AVAILABLE:
             # Use sqlparse for professional formatting
             formatted = sqlparse.format(
-                sql,
-                reindent=True,
-                keyword_case='upper',
-                indent_width=2,
-                wrap_after=80
+                sql, reindent=True, keyword_case="upper", indent_width=2, wrap_after=80
             )
             return formatted
         else:
             # Fallback: basic formatting without sqlparse
             # Add newlines before major keywords
-            keywords = ['SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN',
-                       'INNER JOIN', 'OUTER JOIN', 'ON', 'GROUP BY', 'ORDER BY',
-                       'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'WITH']
+            keywords = [
+                "SELECT",
+                "FROM",
+                "WHERE",
+                "JOIN",
+                "LEFT JOIN",
+                "RIGHT JOIN",
+                "INNER JOIN",
+                "OUTER JOIN",
+                "ON",
+                "GROUP BY",
+                "ORDER BY",
+                "HAVING",
+                "LIMIT",
+                "OFFSET",
+                "UNION",
+                "WITH",
+            ]
 
             formatted = sql
             for kw in keywords:
                 # Add newline before keyword if not already at start of line
-                formatted = formatted.replace(f' {kw} ', f'\n{kw} ')
+                formatted = formatted.replace(f" {kw} ", f"\n{kw} ")
 
             return formatted
 
-    def _create_editor_template(self, name: str, existing_sql: Optional[str] = None,
-                                 target_name: Optional[str] = None) -> str:
+    def _create_editor_template(
+        self,
+        name: str,
+        existing_sql: Optional[str] = None,
+        target_name: Optional[str] = None,
+    ) -> str:
         """
         Create template content for editor.
 
@@ -1333,28 +1318,32 @@ class QueryCommand:
         else:
             template_lines.append("-- Target: (will prompt if needed)")
 
-        template_lines.extend([
-            "--",
-            "-- Enter your SQL query below this line.",
-            "-- Lines starting with -- will be ignored.",
-            "-- Save and exit to save to registry.",
-            "",
-        ])
+        template_lines.extend(
+            [
+                "--",
+                "-- Enter your SQL query below this line.",
+                "-- Lines starting with -- will be ignored.",
+                "-- Save and exit to save to registry.",
+                "",
+            ]
+        )
 
         if existing_sql:
             # Format the SQL for better readability
             formatted_sql = self._format_sql(existing_sql.strip())
             template_lines.append(formatted_sql)
         else:
-            template_lines.extend([
-                "SELECT ",
-                "  -- your columns here",
-                "FROM ",
-                "  -- your table here",
-                "WHERE ",
-                "  -- your conditions here",
-                ";"
-            ])
+            template_lines.extend(
+                [
+                    "SELECT ",
+                    "  -- your columns here",
+                    "FROM ",
+                    "  -- your table here",
+                    "WHERE ",
+                    "  -- your conditions here",
+                    ";",
+                ]
+            )
 
         return "\n".join(template_lines)
 
@@ -1368,13 +1357,13 @@ class QueryCommand:
         Returns:
             SQL query string, or None if empty
         """
-        lines = content.split('\n')
+        lines = content.split("\n")
         sql_lines = []
 
         for line in lines:
             stripped = line.strip()
             # Skip comment lines (starting with --)
-            if stripped.startswith('--'):
+            if stripped.startswith("--"):
                 continue
             # Skip empty lines
             if not stripped:
@@ -1382,7 +1371,7 @@ class QueryCommand:
             # Keep SQL lines
             sql_lines.append(line.rstrip())
 
-        sql = '\n'.join(sql_lines).strip()
+        sql = "\n".join(sql_lines).strip()
 
         # Return None if no actual SQL content
         if not sql:
@@ -1405,17 +1394,23 @@ class QueryCommand:
             if not path.exists():
                 return None
 
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 content = f.read().strip()
 
             # If file contains multiple statements, take the first one
-            if ';' in content:
-                statements = content.split(';')
+            if ";" in content:
+                statements = content.split(";")
                 return statements[0].strip()
 
             return content
         except Exception as e:
-            print(f"Error reading file {file_path}: {e}")
+            self.console.print(
+                MessagePanel(
+                    f"Failed to read file: {file_path}",
+                    variant="error",
+                    hint=str(e),
+                )
+            )
             return None
 
     def _command_exists(self, command: str) -> bool:
@@ -1435,8 +1430,12 @@ class QueryCommand:
     # =========================================================================
 
     def _execute_with_cancellation(
-        self, conn, sql: str, stop_event: threading.Event,
-        engine: str, target_config: dict
+        self,
+        conn,
+        sql: str,
+        stop_event: threading.Event,
+        engine: str,
+        target_config: dict,
     ) -> tuple[list | None, Exception | None]:
         """
         Execute query in thread with cancellation support.
@@ -1486,10 +1485,17 @@ class QueryCommand:
 
         return result[0], exception[0]
 
-    def run(self, queries: list[str], target: str | None = None,
-            interval: int | None = None, concurrency: int | None = None,
-            duration: int | None = None, count: int | None = None,
-            quiet: bool = False, **kwargs):
+    def run(
+        self,
+        queries: list[str],
+        target: str | None = None,
+        interval: int | None = None,
+        concurrency: int | None = None,
+        duration: int | None = None,
+        count: int | None = None,
+        quiet: bool = False,
+        **kwargs,
+    ):
         """
         Run saved queries for benchmarking and load generation.
 
@@ -1513,7 +1519,7 @@ class QueryCommand:
             return RdstResult(
                 ok=False,
                 message="Cannot specify both --interval and --concurrency",
-                data={}
+                data={},
             )
 
         # Determine execution mode
@@ -1536,11 +1542,7 @@ class QueryCommand:
             return RdstResult(ok=False, message=str(e), data={})
 
         if not resolved_queries:
-            return RdstResult(
-                ok=False,
-                message="No queries to run",
-                data={}
-            )
+            return RdstResult(ok=False, message="No queries to run", data={})
 
         # Get target configuration
         cfg = TargetsConfig()
@@ -1555,7 +1557,7 @@ class QueryCommand:
             return RdstResult(
                 ok=False,
                 message="No target specified. Use --target or configure a default.",
-                data={}
+                data={},
             )
 
         target_config = cfg.get(target)
@@ -1563,7 +1565,7 @@ class QueryCommand:
             return RdstResult(
                 ok=False,
                 message=f"Target '{target}' not found in configuration",
-                data={"target": target}
+                data={"target": target},
             )
 
         # Initialize statistics
@@ -1575,7 +1577,9 @@ class QueryCommand:
 
         def signal_handler(signum, frame):
             if not quiet:
-                print("\nStopping (Ctrl+C)...")
+                self.console.print(
+                    MessagePanel("Stopping (Ctrl+C)...", variant="warning")
+                )
             stop_event.set()
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -1583,40 +1587,67 @@ class QueryCommand:
         try:
             if not quiet:
                 query_names = [e.tag or e.hash[:8] for e, _ in resolved_queries]
-                print(f"Running {len(resolved_queries)} query(s): {', '.join(query_names)}")
-                print(f"Target: {target} | Mode: {mode}")
+                summary = {
+                    "Queries": f"{len(resolved_queries)} ({', '.join(query_names)})",
+                    "Target": target,
+                    "Mode": mode,
+                }
                 if mode == "interval":
-                    if interval == 0:
-                        print("Interval: tight loop (no delay)")
-                    else:
-                        print(f"Interval: {interval}ms")
+                    summary["Interval"] = (
+                        "tight loop (no delay)" if interval == 0 else f"{interval}ms"
+                    )
                 elif mode == "concurrency":
-                    print(f"Concurrency: {concurrency}")
+                    summary["Concurrency"] = f"{concurrency}"
                 if duration:
-                    print(f"Duration limit: {duration}s")
+                    summary["Duration limit"] = f"{duration}s"
                 if count:
-                    print(f"Count limit: {count}")
-                print()
+                    summary["Count limit"] = f"{count}"
+                self.console.print(
+                    SectionBox("Query run", content=KeyValueTable(summary))
+                )
+                self.console.print()
 
             # Execute based on mode
             if mode == "singleton":
-                self._run_singleton(resolved_queries, target_config, stats,
-                                   stop_event, quiet,
-                                   create_direct_connection, close_connection)
+                self._run_singleton(
+                    resolved_queries,
+                    target_config,
+                    stats,
+                    stop_event,
+                    quiet,
+                    create_direct_connection,
+                    close_connection,
+                )
             elif mode == "interval":
-                self._run_interval(resolved_queries, target_config, stats,
-                                  interval, stop_event, duration, count,
-                                  quiet, create_direct_connection, close_connection)
+                self._run_interval(
+                    resolved_queries,
+                    target_config,
+                    stats,
+                    interval,
+                    stop_event,
+                    duration,
+                    count,
+                    quiet,
+                    create_direct_connection,
+                    close_connection,
+                )
             elif mode == "concurrency":
-                self._run_concurrency(resolved_queries, target_config, stats,
-                                     concurrency, stop_event, duration, count,
-                                     quiet, create_direct_connection, close_connection)
+                self._run_concurrency(
+                    resolved_queries,
+                    target_config,
+                    stats,
+                    concurrency,
+                    stop_event,
+                    duration,
+                    count,
+                    quiet,
+                    create_direct_connection,
+                    close_connection,
+                )
 
         except Exception as e:
             return RdstResult(
-                ok=False,
-                message=f"Error during execution: {e}",
-                data={"error": str(e)}
+                ok=False, message=f"Error during execution: {e}", data={"error": str(e)}
             )
         finally:
             # Restore original signal handler
@@ -1642,11 +1673,11 @@ class QueryCommand:
                         "min_ms": s.min_ms,
                         "avg_ms": s.avg_ms,
                         "p95_ms": s.p95_ms,
-                        "max_ms": s.max_ms
+                        "max_ms": s.max_ms,
                     }
                     for h, s in stats.query_stats.items()
-                }
-            }
+                },
+            },
         )
 
     def _resolve_queries(self, query_specs: list[str]) -> list[tuple[Any, str]]:
@@ -1681,15 +1712,24 @@ class QueryCommand:
 
         return resolved
 
-    def _run_singleton(self, queries: list[tuple[Any, str]], target_config: dict,
-                       stats: RunStatistics, stop_event: threading.Event,
-                       quiet: bool, create_conn, close_conn) -> None:
+    def _run_singleton(
+        self,
+        queries: list[tuple[Any, str]],
+        target_config: dict,
+        stats: RunStatistics,
+        stop_event: threading.Event,
+        quiet: bool,
+        create_conn,
+        close_conn,
+    ) -> None:
         """Run each query once sequentially."""
         if not quiet:
-            print("Connecting to database...")
+            self.console.print(
+                MessagePanel("Connecting to database...", variant="info")
+            )
 
         conn = create_conn(target_config)
-        engine = target_config.get('engine', 'postgresql')
+        engine = target_config.get("engine", "postgresql")
 
         try:
             for entry, sql in queries:
@@ -1698,7 +1738,7 @@ class QueryCommand:
 
                 query_name = entry.tag or entry.hash[:8]
                 if not quiet:
-                    print(f"Executing: {query_name}...", end=" ", flush=True)
+                    self.console.print(StatusLine("Executing", query_name))
 
                 start = time.perf_counter()
                 results, exc = self._execute_with_cancellation(
@@ -1708,27 +1748,49 @@ class QueryCommand:
 
                 if isinstance(exc, KeyboardInterrupt):
                     if not quiet:
-                        print("CANCELLED")
+                        self.console.print(
+                            StatusLine(
+                                query_name, "CANCELLED", style=StyleTokens.WARNING
+                            )
+                        )
                     break
                 elif exc:
-                    stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+                    stats.record_execution(
+                        entry.hash, query_name, duration_ms, success=False
+                    )
                     if not quiet:
-                        print(f"FAILED ({exc})")
+                        self.console.print(
+                            StatusLine(
+                                query_name, f"FAILED ({exc})", style=StyleTokens.ERROR
+                            )
+                        )
                 else:
-                    stats.record_execution(entry.hash, query_name, duration_ms, success=True)
+                    stats.record_execution(
+                        entry.hash, query_name, duration_ms, success=True
+                    )
                     if not quiet:
-                        print(f"{duration_ms:.1f}ms")
+                        self.console.print(
+                            DurationDisplay(duration_ms, label=query_name)
+                        )
         finally:
             close_conn(conn)
 
-    def _run_interval(self, queries: list[tuple[Any, str]], target_config: dict,
-                      stats: RunStatistics, interval_ms: int,
-                      stop_event: threading.Event,
-                      max_duration: int | None, max_count: int | None,
-                      quiet: bool, create_conn, close_conn) -> None:
+    def _run_interval(
+        self,
+        queries: list[tuple[Any, str]],
+        target_config: dict,
+        stats: RunStatistics,
+        interval_ms: int,
+        stop_event: threading.Event,
+        max_duration: int | None,
+        max_count: int | None,
+        quiet: bool,
+        create_conn,
+        close_conn,
+    ) -> None:
         """Run queries round-robin at fixed interval."""
         conn = create_conn(target_config)
-        engine = target_config.get('engine', 'postgresql')
+        engine = target_config.get("engine", "postgresql")
         query_index = 0
         interval_sec = interval_ms / 1000.0
         last_display_update = 0
@@ -1756,12 +1818,19 @@ class QueryCommand:
                 if isinstance(exc, KeyboardInterrupt):
                     break
                 elif exc:
-                    stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+                    stats.record_execution(
+                        entry.hash, query_name, duration_ms, success=False
+                    )
                 else:
-                    stats.record_execution(entry.hash, query_name, duration_ms, success=True)
+                    stats.record_execution(
+                        entry.hash, query_name, duration_ms, success=True
+                    )
 
                 # Update live display periodically
-                if live and (time.perf_counter() - last_display_update) >= display_interval:
+                if (
+                    live
+                    and (time.perf_counter() - last_display_update) >= display_interval
+                ):
                     live.update(self._create_progress_table(stats))
                     last_display_update = time.perf_counter()
 
@@ -1772,24 +1841,35 @@ class QueryCommand:
                     stop_event.wait(sleep_time)
 
         try:
-            if not quiet and RICH_AVAILABLE and self.console:
-                with Live(self._create_progress_table(stats), console=self.console,
-                         refresh_per_second=4) as live:
+            if not quiet:
+                with Live(
+                    self._create_progress_table(stats),
+                    console=self.console,
+                    refresh_per_second=4,
+                ) as live:
                     run_loop(live)
             else:
                 run_loop()
         finally:
             close_conn(conn)
 
-    def _run_concurrency(self, queries: list[tuple[Any, str]], target_config: dict,
-                         stats: RunStatistics, concurrency: int,
-                         stop_event: threading.Event,
-                         max_duration: int | None, max_count: int | None,
-                         quiet: bool, create_conn, close_conn) -> None:
+    def _run_concurrency(
+        self,
+        queries: list[tuple[Any, str]],
+        target_config: dict,
+        stats: RunStatistics,
+        concurrency: int,
+        stop_event: threading.Event,
+        max_duration: int | None,
+        max_count: int | None,
+        quiet: bool,
+        create_conn,
+        close_conn,
+    ) -> None:
         """Maintain N concurrent query executions."""
         from lib.db_connection import cancel_query
 
-        engine = target_config.get('engine', 'postgresql')
+        engine = target_config.get("engine", "postgresql")
 
         # Connection pool - one per worker
         connections: Queue = Queue()
@@ -1847,12 +1927,16 @@ class QueryCommand:
                     cursor.fetchall()
                     cursor.close()
                     duration_ms = (time.perf_counter() - start) * 1000
-                    stats.record_execution(entry.hash, query_name, duration_ms, success=True)
-                except Exception as e:
+                    stats.record_execution(
+                        entry.hash, query_name, duration_ms, success=True
+                    )
+                except Exception:
                     duration_ms = (time.perf_counter() - start) * 1000
                     # Don't record cancelled queries as failures
                     if not stop_event.is_set():
-                        stats.record_execution(entry.hash, query_name, duration_ms, success=False)
+                        stats.record_execution(
+                            entry.hash, query_name, duration_ms, success=False
+                        )
                 finally:
                     with active_lock:
                         active_connections.discard(conn)
@@ -1880,19 +1964,27 @@ class QueryCommand:
                         break
 
                     # Update live display periodically
-                    if live and (time.perf_counter() - last_display_update[0]) >= display_interval:
+                    if (
+                        live
+                        and (time.perf_counter() - last_display_update[0])
+                        >= display_interval
+                    ):
                         live.update(self._create_progress_table(stats))
                         last_display_update[0] = time.perf_counter()
 
                     # Wait for any task to complete
-                    done, futures = wait(futures, timeout=0.1, return_when=FIRST_COMPLETED)
+                    done, futures = wait(
+                        futures, timeout=0.1, return_when=FIRST_COMPLETED
+                    )
 
                     # Submit replacement tasks
                     for future in done:
                         try:
                             should_continue = future.result()
                             if should_continue and not stop_event.is_set():
-                                if not (max_count and stats.total_executions >= max_count):
+                                if not (
+                                    max_count and stats.total_executions >= max_count
+                                ):
                                     futures.add(executor.submit(execute_query))
                         except Exception:
                             pass
@@ -1906,9 +1998,12 @@ class QueryCommand:
                     future.cancel()
 
         try:
-            if not quiet and RICH_AVAILABLE and self.console:
-                with Live(self._create_progress_table(stats), console=self.console,
-                         refresh_per_second=4) as live:
+            if not quiet:
+                with Live(
+                    self._create_progress_table(stats),
+                    console=self.console,
+                    refresh_per_second=4,
+                ) as live:
                     run_executor(live)
             else:
                 run_executor()
@@ -1921,87 +2016,44 @@ class QueryCommand:
                 except Empty:
                     break
 
-    def _create_progress_table(self, stats: RunStatistics) -> Table:
+    def _create_progress_table(self, stats: RunStatistics):
         """Create a Rich table showing live progress stats."""
-        table = Table(box=box.ROUNDED, title="rdst query run")
-        table.add_column("Query", style="cyan")
-        table.add_column("Execs", justify="right")
-        table.add_column("OK", justify="right", style="green")
-        table.add_column("Fail", justify="right", style="red")
-        table.add_column("Avg", justify="right")
-        table.add_column("QPS", justify="right", style="yellow")
-
-        elapsed = stats.elapsed_seconds
-        for qs in stats.query_stats.values():
-            qps = qs.successes / elapsed if elapsed > 0 else 0
-            avg_str = f"{qs.avg_ms:.1f}ms" if qs.timings_ms else "-"
-            table.add_row(
-                qs.query_name,
-                str(qs.executions),
-                str(qs.successes),
-                str(qs.failures),
-                avg_str,
-                f"{qps:.1f}",
-            )
-
-        # Add footer with totals
-        table.caption = f"Elapsed: {elapsed:.1f}s | Total: {stats.total_executions:,} | Ctrl+C to stop"
-        return table
+        return QueryStatsTable(
+            stats,
+            title="rdst query run",
+            show_qps=True,
+            show_percentiles=False,
+            show_caption=True,
+        )
 
     def _print_run_summary(self, stats: RunStatistics) -> None:
         """Print execution summary table."""
         if not stats.query_stats:
-            print("No executions recorded.")
+            self.console.print(
+                EmptyState("No executions recorded.", title="rdst query run Summary")
+            )
             return
 
-        if RICH_AVAILABLE and self.console:
-            table = Table(title="rdst query run Summary")
-            table.add_column("Query", style="cyan")
-            table.add_column("Execs", justify="right")
-            table.add_column("OK", justify="right", style="green")
-            table.add_column("Fail", justify="right", style="red")
-            table.add_column("Min", justify="right")
-            table.add_column("Avg", justify="right")
-            table.add_column("p95", justify="right")
-            table.add_column("Max", justify="right")
+        # Use UI component with consistent styling
+        table = QueryStatsTable(stats, title="rdst query run Summary")
+        self.console.print()
+        self.console.print(table)
 
-            for qs in stats.query_stats.values():
-                table.add_row(
-                    qs.query_name,
-                    str(qs.executions),
-                    str(qs.successes),
-                    str(qs.failures),
-                    f"{qs.min_ms:.1f}ms" if qs.timings_ms else "-",
-                    f"{qs.avg_ms:.1f}ms" if qs.timings_ms else "-",
-                    f"{qs.p95_ms:.1f}ms" if qs.timings_ms else "-",
-                    f"{qs.max_ms:.1f}ms" if qs.timings_ms else "-",
-                )
+        # Summary line
+        elapsed = stats.elapsed_seconds
+        qps = stats.total_executions / elapsed if elapsed > 0 else 0
+        error_rate = (
+            (stats.total_failures / stats.total_executions * 100)
+            if stats.total_executions > 0
+            else 0
+        )
 
-            self.console.print()
-            self.console.print(table)
-
-            # Summary line
-            elapsed = stats.elapsed_seconds
-            qps = stats.total_executions / elapsed if elapsed > 0 else 0
-            error_rate = (stats.total_failures / stats.total_executions * 100) if stats.total_executions > 0 else 0
-
-            self.console.print(f"\nDuration: {elapsed:.1f}s | QPS: {qps:.2f} | Errors: {error_rate:.2f}%")
-        else:
-            # Plain text output
-            print("\nrdst query run Summary")
-            print("=" * 80)
-            print(f"{'Query':<20} | {'Execs':>6} | {'OK':>6} | {'Fail':>6} | {'Min':>8} | {'Avg':>8} | {'p95':>8} | {'Max':>8}")
-            print("-" * 80)
-
-            for qs in stats.query_stats.values():
-                min_str = f"{qs.min_ms:.1f}ms" if qs.timings_ms else "-"
-                avg_str = f"{qs.avg_ms:.1f}ms" if qs.timings_ms else "-"
-                p95_str = f"{qs.p95_ms:.1f}ms" if qs.timings_ms else "-"
-                max_str = f"{qs.max_ms:.1f}ms" if qs.timings_ms else "-"
-                print(f"{qs.query_name:<20} | {qs.executions:>6} | {qs.successes:>6} | {qs.failures:>6} | {min_str:>8} | {avg_str:>8} | {p95_str:>8} | {max_str:>8}")
-
-            print("-" * 80)
-            elapsed = stats.elapsed_seconds
-            qps = stats.total_executions / elapsed if elapsed > 0 else 0
-            error_rate = (stats.total_failures / stats.total_executions * 100) if stats.total_executions > 0 else 0
-            print(f"\nDuration: {elapsed:.1f}s | QPS: {qps:.2f} | Errors: {error_rate:.2f}%")
+        self.console.print(
+            KeyValueTable(
+                {
+                    "Duration": f"{elapsed:.1f}s",
+                    "QPS": f"{qps:.2f}",
+                    "Errors": f"{error_rate:.2f}%",
+                }
+            )
+        )

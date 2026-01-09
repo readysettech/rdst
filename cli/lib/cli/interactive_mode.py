@@ -4,31 +4,44 @@ Interactive Mode for RDST Analyze
 Provides educational conversation mode after query analysis where users can ask
 questions about recommendations and understand performance implications.
 """
+
 from __future__ import annotations
 
-import sys
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from ..query_registry.conversation_registry import ConversationRegistry, InteractiveConversation
+from ..query_registry.conversation_registry import (
+    ConversationRegistry,
+    InteractiveConversation,
+)
 from ..query_registry.query_registry import QueryRegistry
 from ..llm_manager.llm_manager import LLMManager
 
-# Try to import Rich for colored output
-try:
-    from rich.console import Console
-    from rich.markdown import Markdown
-    from rich.panel import Panel
-    _RICH_AVAILABLE = True
-    console = Console()
-except ImportError:
-    _RICH_AVAILABLE = False
-    console = None
+# Import UI system - handles Rich availability internally
+from lib.ui import (
+    get_console,
+    MarkdownContent,
+    StyleTokens,
+    Prompt,
+    Banner,
+    MessagePanel,
+    SectionHeader,
+    StatusLine,
+    EmptyState,
+    Rule,
+    SectionBox,
+    NextSteps,
+)
+
+# Module-level console
+console = get_console()
 
 
-def run_interactive_mode(conversation: InteractiveConversation,
-                        analysis_results: Dict[str, Any],
-                        llm_manager: Optional[LLMManager] = None) -> None:
+def run_interactive_mode(
+    conversation: InteractiveConversation,
+    analysis_results: Dict[str, Any],
+    llm_manager: Optional[LLMManager] = None,
+) -> None:
     """
     Enter interactive mode for educational Q&A about analysis results.
 
@@ -49,40 +62,29 @@ def run_interactive_mode(conversation: InteractiveConversation,
         conversation.add_message("system", interactive_prompt)
         conv_registry.save_conversation(conversation)
 
-    # Display header with color
-    if _RICH_AVAILABLE and console:
-        console.print("\n" + "=" * 80, style="bold cyan")
-        console.print("Interactive Mode - Explore the analysis", style="bold cyan")
-        console.print("=" * 80, style="bold cyan")
-    else:
-        print("\n" + "=" * 80)
-        print("Interactive Mode - Explore the analysis")
-        print("=" * 80)
+    # Display header
+    console.print()
+    console.print(Banner("Interactive Mode - Explore the analysis"))
 
     # RDST uses Claude exclusively
     provider_name = "Claude"
 
     if conversation.total_exchanges == 0:
-        if _RICH_AVAILABLE and console:
-            console.print(f"\nYou can now interact with [bold green]{provider_name}[/bold green] to explore this query analysis.")
-        else:
-            print(f"\nYou can now interact with {provider_name} to explore this query analysis.")
+        console.print(
+            f"\nYou can now interact with [{StyleTokens.STATUS_SUCCESS}]{provider_name}[/{StyleTokens.STATUS_SUCCESS}] to explore this query analysis."
+        )
     else:
-        if _RICH_AVAILABLE and console:
-            console.print(f"\nContinuing conversation with [bold green]{provider_name}[/bold green].")
-        else:
-            print(f"\nContinuing conversation with {provider_name}.")
+        console.print(
+            f"\nContinuing conversation with [{StyleTokens.STATUS_SUCCESS}]{provider_name}[/{StyleTokens.STATUS_SUCCESS}]."
+        )
 
     # If continuing conversation, show recent exchanges
     if conversation.total_exchanges > 0:
-        if _RICH_AVAILABLE and console:
-            console.print(f"\n[dim]Continuing conversation ({conversation.total_exchanges} exchanges so far)[/dim]")
-            console.print("\nRecent conversation:", style="bold")
-            console.print("-" * 80, style="dim")
-        else:
-            print(f"\nContinuing conversation ({conversation.total_exchanges} exchanges so far)")
-            print("\nRecent conversation:")
-            print("-" * 80)
+        console.print(
+            f"\n[{StyleTokens.MUTED}]Continuing conversation ({conversation.total_exchanges} exchanges so far)[/{StyleTokens.MUTED}]"
+        )
+        console.print(SectionHeader("Recent conversation"))
+        console.print(Rule())
 
         # Get user/assistant messages (not system messages)
         user_assistant_msgs = conversation.get_user_assistant_messages()
@@ -93,81 +95,71 @@ def run_interactive_mode(conversation: InteractiveConversation,
 
         for msg in user_assistant_msgs[start_idx:]:
             if msg.role == "user":
-                if _RICH_AVAILABLE and console:
-                    console.print(f"\n[bold cyan]You:[/bold cyan] {msg.content}")
-                else:
-                    print(f"\nYou: {msg.content}")
+                console.print(
+                    f"\n[{StyleTokens.HEADER}]You:[/{StyleTokens.HEADER}] {msg.content}"
+                )
             elif msg.role == "assistant":
-                if _RICH_AVAILABLE and console:
-                    console.print(f"\n[bold green]{provider_name}:[/bold green]")
-                    console.print(Markdown(msg.content))
-                else:
-                    print(f"\n{provider_name}: {msg.content}")
+                console.print(
+                    f"\n[{StyleTokens.STATUS_SUCCESS}]{provider_name}:[/{StyleTokens.STATUS_SUCCESS}]"
+                )
+                console.print(MarkdownContent(msg.content))
 
-        if _RICH_AVAILABLE and console:
-            console.print("\n" + "-" * 80, style="dim")
-        else:
-            print("\n" + "-" * 80)
+        console.print()
+        console.print(Rule())
 
-    # Show command hints with color
-    if _RICH_AVAILABLE and console:
-        console.print("\n[dim]Ask questions about the recommendations, or type[/dim] [bold yellow]'help'[/bold yellow] [dim]for commands.[/dim]")
-        console.print("[dim]Type[/dim] [bold yellow]'exit'[/bold yellow] [dim]or[/dim] [bold yellow]'quit'[/bold yellow] [dim]to end the session.[/dim]\n")
-    else:
-        print("\nAsk questions about the recommendations, or type 'help' for commands.")
-        print("Type 'exit' or 'quit' to end the session.")
-        print()
+    # Show command hints
+    console.print(
+        f"\n[{StyleTokens.MUTED}]Ask questions about the recommendations, or type[/{StyleTokens.MUTED}] [{StyleTokens.STATUS_WARNING}]help[/{StyleTokens.STATUS_WARNING}] [{StyleTokens.MUTED}]for commands.[/{StyleTokens.MUTED}]"
+    )
+    console.print(
+        f"[{StyleTokens.MUTED}]Type[/{StyleTokens.MUTED}] [{StyleTokens.STATUS_WARNING}]exit[/{StyleTokens.STATUS_WARNING}] [{StyleTokens.MUTED}]or[/{StyleTokens.MUTED}] [{StyleTokens.STATUS_WARNING}]quit[/{StyleTokens.STATUS_WARNING}] [{StyleTokens.MUTED}]to end the session.[/{StyleTokens.MUTED}]\n"
+    )
 
     # REPL loop
     while True:
         try:
-            user_input = input("> ").strip()
+            user_input = Prompt.ask(">", default="", show_default=False).strip()
 
             if not user_input:
                 continue
 
             # Handle exit
-            if user_input.lower() in ['exit', 'quit', 'q']:
+            if user_input.lower() in ["exit", "quit", "q"]:
                 conv_registry.save_conversation(conversation)
                 saved_name = _prompt_for_tag_if_needed(conversation.query_hash)
                 _print_exit_message(conversation.query_hash, saved_name)
                 break
 
             # Handle help
-            if user_input.lower() == 'help':
+            if user_input.lower() == "help":
                 _show_help()
                 continue
 
             # Handle summary
-            if user_input.lower() == 'summary':
+            if user_input.lower() == "summary":
                 _show_analysis_summary(analysis_results)
                 continue
 
             # Handle review
-            if user_input.lower() == 'review':
+            if user_input.lower() == "review":
                 display_conversation_history(conversation)
                 continue
 
             # Free-form question - send to LLM (always uses Claude)
-
-            if _RICH_AVAILABLE and console:
-                console.print(f"\n[dim]Getting response from {provider_name}...[/dim]", end="")
-            else:
-                print(f"\nGetting response from {provider_name}...", end="", flush=True)
+            console.print(
+                StatusLine("Getting response", f"{provider_name}..."),
+                end="",
+            )
 
             response = _ask_llm(conversation, user_input, llm_manager)
 
             if response:
                 # Clear the "Calling AI..." line
-                if _RICH_AVAILABLE and console:
-                    console.print("\r" + " " * 30 + "\r", end='')
-                    # Render response as markdown with syntax highlighting
-                    console.print("\n")
-                    console.print(Markdown(response))
-                    console.print()
-                else:
-                    print("\r" + " " * 30 + "\r", end='')  # Clear the line
-                    print(f"\n{response}\n")
+                console.print("\r" + " " * 30 + "\r", end="")
+                # Render response as markdown with syntax highlighting
+                console.print("\n")
+                console.print(MarkdownContent(response))
+                console.print()
 
                 # Add exchange to conversation and save
                 conversation.add_exchange(user_input, response)
@@ -175,21 +167,27 @@ def run_interactive_mode(conversation: InteractiveConversation,
 
                 # Simple warning for long conversations
                 if conversation.total_exchanges >= 50:
-                    print("Note: This conversation has 50+ exchanges. Consider starting fresh if responses slow down.\n")
+                    console.print(
+                        MessagePanel(
+                            "This conversation has 50+ exchanges. Consider starting fresh if responses slow down.",
+                            variant="warning",
+                        )
+                    )
 
         except KeyboardInterrupt:
-            print("\n\nExiting interactive mode.")
+            console.print(MessagePanel("Exiting interactive mode.", variant="info"))
             conv_registry.save_conversation(conversation)
             saved_name = _prompt_for_tag_if_needed(conversation.query_hash)
             _print_exit_message(conversation.query_hash, saved_name)
             break
         except Exception as e:
-            print(f"\nError: {e}\n")
+            console.print(MessagePanel(f"Error: {e}", variant="error"))
             continue
 
 
-def display_conversation_history(conversation: InteractiveConversation,
-                                show_system_messages: bool = False) -> None:
+def display_conversation_history(
+    conversation: InteractiveConversation, show_system_messages: bool = False
+) -> None:
     """
     Display conversation history.
 
@@ -197,17 +195,18 @@ def display_conversation_history(conversation: InteractiveConversation,
         conversation: InteractiveConversation to display
         show_system_messages: If True, show system messages (default: False)
     """
-    print("\n" + "=" * 80)
-    print("Conversation History")
-    print("=" * 80)
-    print(f"Started: {conversation.started_at}")
-    print(f"Total exchanges: {conversation.total_exchanges}")
-    print(f"Provider: {conversation.provider} ({conversation.model})")
-    print()
+    console.print()
+    console.print(Banner("Conversation History"))
+    console.print(StatusLine("Started", str(conversation.started_at)))
+    console.print(StatusLine("Total exchanges", str(conversation.total_exchanges)))
+    console.print(
+        StatusLine("Provider", f"{conversation.provider} ({conversation.model})")
+    )
+    console.print()
 
     if not conversation.messages:
-        print("No messages yet.")
-        print()
+        console.print(EmptyState("No messages yet."))
+        console.print()
         return
 
     # Get messages to display (filter system if not requested)
@@ -221,18 +220,25 @@ def display_conversation_history(conversation: InteractiveConversation,
         timestamp_str = _format_timestamp(msg.timestamp)
 
         if msg.role == "user":
-            print(f"[{timestamp_str}]")
-            print(f"You: {msg.content}")
-            print()
+            console.print(f"[{StyleTokens.MUTED}]{timestamp_str}[/{StyleTokens.MUTED}]")
+            console.print(
+                f"[{StyleTokens.HEADER}]You:[/{StyleTokens.HEADER}] {msg.content}"
+            )
+            console.print()
         elif msg.role == "assistant":
-            print(f"AI: {msg.content}")
-            print()
+            console.print(
+                f"[{StyleTokens.STATUS_SUCCESS}]AI:[/{StyleTokens.STATUS_SUCCESS}] {msg.content}"
+            )
+            console.print()
         elif msg.role == "system" and show_system_messages:
-            print(f"[{timestamp_str}] [SYSTEM MESSAGE]")
-            print(f"{msg.content[:200]}...")  # Truncate system messages
-            print()
+            console.print(
+                f"[{StyleTokens.MUTED}]{timestamp_str}[/{StyleTokens.MUTED}] [SYSTEM MESSAGE]"
+            )
+            console.print(f"{msg.content[:200]}...")  # Truncate system messages
+            console.print()
 
-    print("=" * 80 + "\n")
+    console.print(Rule())
+    console.print()
 
 
 def _has_interactive_mode_message(conversation: InteractiveConversation) -> bool:
@@ -320,9 +326,9 @@ TONE: Experienced database engineer explaining to another engineer. Direct, tech
 """
 
 
-def _ask_llm(conversation: InteractiveConversation,
-            user_question: str,
-            llm_manager: LLMManager) -> Optional[str]:
+def _ask_llm(
+    conversation: InteractiveConversation, user_question: str, llm_manager: LLMManager
+) -> Optional[str]:
     """
     Send user question to LLM with full conversation context.
 
@@ -342,7 +348,9 @@ def _ask_llm(conversation: InteractiveConversation,
         messages = conversation.get_messages_for_llm()
 
         # Build system message from all system messages in conversation
-        system_messages = [msg["content"] for msg in messages if msg["role"] == "system"]
+        system_messages = [
+            msg["content"] for msg in messages if msg["role"] == "system"
+        ]
         combined_system_message = "\n\n".join(system_messages)
 
         # Call LLM with full conversation context
@@ -368,32 +376,47 @@ def _ask_llm(conversation: InteractiveConversation,
         # Remove the temporarily added user message
         if conversation.messages and conversation.messages[-1].role == "user":
             conversation.messages.pop()
-        print(f"Error calling LLM: {e}")
+        console.print(MessagePanel(f"Error calling LLM: {e}", variant="error"))
         return None
 
 
 def _show_help() -> None:
     """Display help for interactive mode commands."""
-    print("\n" + "=" * 80)
-    print("Interactive Mode Commands")
-    print("=" * 80)
-    print()
-    print("Commands:")
-    print("  help          Show this help message")
-    print("  exit / quit   Exit interactive mode")
-    print("  summary       Re-display analysis summary")
-    print("  review        Show full conversation history")
-    print()
-    print("Free-form Questions:")
-    print("  Just type your question and press Enter")
-    print()
-    print("Examples:")
-    print('  "Why did you recommend an index on post_type_id?"')
-    print('  "What\'s the tradeoff of adding this index?"')
-    print('  "What if my table has heavy writes?"')
-    print('  "Can you explain what a full table scan means?"')
-    print()
-    print("=" * 80 + "\n")
+    console.print()
+    console.print(Banner("Interactive Mode Commands"))
+    console.print(
+        SectionBox(
+            "Commands",
+            content="\n".join(
+                [
+                    "  help          Show this help message",
+                    "  exit / quit   Exit interactive mode",
+                    "  summary       Re-display analysis summary",
+                    "  review        Show full conversation history",
+                ]
+            ),
+        )
+    )
+    console.print(
+        SectionBox(
+            "Free-form Questions",
+            content="  Just type your question and press Enter",
+        )
+    )
+    console.print(
+        SectionBox(
+            "Examples",
+            content="\n".join(
+                [
+                    '  "Why did you recommend an index on post_type_id?"',
+                    '  "What\'s the tradeoff of adding this index?"',
+                    '  "What if my table has heavy writes?"',
+                    '  "Can you explain what a full table scan means?"',
+                ]
+            ),
+        )
+    )
+    console.print()
 
 
 def _show_analysis_summary(analysis_results: Dict[str, Any]) -> None:
@@ -403,10 +426,8 @@ def _show_analysis_summary(analysis_results: Dict[str, Any]) -> None:
     Args:
         analysis_results: Analysis results from workflow
     """
-    print("\n" + "=" * 80)
-    print("Analysis Summary")
-    print("=" * 80)
-    print()
+    console.print()
+    console.print(Banner("Analysis Summary"))
 
     # Extract key information
     explain_results = analysis_results.get("explain_results", {})
@@ -417,37 +438,40 @@ def _show_analysis_summary(analysis_results: Dict[str, Any]) -> None:
     rows_examined = explain_results.get("rows_examined", 0)
     rows_returned = explain_results.get("rows_returned", 0)
 
-    print(f"Execution Time: {exec_time:.1f}ms")
-    print(f"Rows Examined: {rows_examined:,}")
-    print(f"Rows Returned: {rows_returned:,}")
-    print()
+    console.print(StatusLine("Execution Time", f"{exec_time:.1f}ms"))
+    console.print(StatusLine("Rows Examined", f"{rows_examined:,}"))
+    console.print(StatusLine("Rows Returned", f"{rows_returned:,}"))
+    console.print()
 
     # Index recommendations
     index_recs = llm_analysis.get("index_recommendations", [])
     if index_recs:
-        print(f"Index Recommendations: {len(index_recs)}")
-        for i, rec in enumerate(index_recs, 1):
-            print(f"  [{i}] {rec.get('sql', 'N/A')}")
-        print()
+        index_content = "\n".join(
+            [f"  [{i}] {rec.get('sql', 'N/A')}" for i, rec in enumerate(index_recs, 1)]
+        )
+        console.print(SectionBox("Index Recommendations", content=index_content))
+        console.print()
 
     # Rewrite suggestions
     rewrite_sug = llm_analysis.get("rewrite_suggestions", [])
     if rewrite_sug:
-        print(f"Query Rewrites: {len(rewrite_sug)}")
-        for i, sug in enumerate(rewrite_sug, 1):
-            print(f"  [{i}] {sug.get('description', 'N/A')}")
-        print()
+        rewrite_content = "\n".join(
+            [
+                f"  [{i}] {sug.get('description', 'N/A')}"
+                for i, sug in enumerate(rewrite_sug, 1)
+            ]
+        )
+        console.print(SectionBox("Query Rewrites", content=rewrite_content))
+        console.print()
     else:
-        print("Query Rewrites: None recommended")
-        print()
-
-    print("=" * 80 + "\n")
+        console.print(SectionBox("Query Rewrites", content="None recommended"))
+        console.print()
 
 
 def _format_timestamp(timestamp_str: str) -> str:
     """Format ISO timestamp for display."""
     try:
-        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d %H:%M:%S")
     except:
         return timestamp_str
@@ -475,26 +499,30 @@ def _prompt_for_tag_if_needed(query_hash: str) -> Optional[str]:
             return entry.tag
 
         # Prompt for tag
-        if _RICH_AVAILABLE and console:
-            console.print("\n[dim]💾 Save this query with a name for easy access later?[/dim]")
-            tag_name = input("   Name (leave blank to skip): ").strip()
-        else:
-            print("\n💾 Save this query with a name for easy access later?")
-            tag_name = input("   Name (leave blank to skip): ").strip()
+        console.print(
+            f"\n[{StyleTokens.MUTED}]Save this query with a name for easy access later?[/{StyleTokens.MUTED}]"
+        )
+        tag_name = Prompt.ask(
+            "   Name (leave blank to skip)", default="", show_default=False
+        ).strip()
 
         if tag_name:
             # Check if tag already exists
             existing = registry.get_query_by_tag(tag_name)
             if existing and existing.hash != query_hash:
-                print(f"   Name '{tag_name}' already used by another query. Skipping.")
+                console.print(
+                    MessagePanel(
+                        f"Name '{tag_name}' already used by another query. Skipping.",
+                        variant="warning",
+                    )
+                )
                 return None
 
             # Update the tag
             registry.update_query_tag(query_hash, tag_name)
-            if _RICH_AVAILABLE and console:
-                console.print(f"   [green]✓ Saved as '{tag_name}'[/green]")
-            else:
-                print(f"   ✓ Saved as '{tag_name}'")
+            console.print(
+                f"   [{StyleTokens.SUCCESS}]Saved as[/{StyleTokens.SUCCESS}] '{tag_name}'"
+            )
             return tag_name
 
         return None
@@ -511,20 +539,20 @@ def _print_exit_message(query_hash: str, saved_name: Optional[str]) -> None:
         query_hash: Hash of the query
         saved_name: Name if saved, None otherwise
     """
-    print(f"\nConversation saved. Continue with:")
-
+    steps = []
     if saved_name:
-        # Show both options - name first (easier), then hash
-        if _RICH_AVAILABLE and console:
-            console.print(f"  [cyan]rdst analyze --name {saved_name} --interactive[/cyan]")
-            console.print(f"  [dim]rdst analyze --hash {query_hash} --interactive[/dim]")
-        else:
-            print(f"  rdst analyze --name {saved_name} --interactive")
-            print(f"  rdst analyze --hash {query_hash} --interactive")
-    else:
-        # Only hash available
-        if _RICH_AVAILABLE and console:
-            console.print(f"  [cyan]rdst analyze --hash {query_hash} --interactive[/cyan]")
-        else:
-            print(f"  rdst analyze --hash {query_hash} --interactive")
-    print()
+        steps.append(
+            (
+                f"rdst analyze --name {saved_name} --interactive",
+                "Continue interactive analysis",
+            )
+        )
+
+    steps.append(
+        (
+            f"rdst analyze --hash {query_hash} --interactive",
+            "Continue interactive analysis",
+        )
+    )
+
+    console.print(NextSteps(steps, title="Continue with"))

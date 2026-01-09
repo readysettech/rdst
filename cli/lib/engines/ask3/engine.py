@@ -37,8 +37,7 @@ from .phases.present import summarize_session, prompt_save_query
 from . import escalation
 
 if TYPE_CHECKING:
-    from ..semantic_layer.manager import SemanticLayerManager
-    from ..llm_manager import LLMManager
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -393,19 +392,15 @@ class Ask3Engine:
         return False
 
 
-def create_engine(
-    verbose: bool = False,
-    use_rich: bool = True
-) -> Ask3Engine:
+def create_engine(verbose: bool = False) -> Ask3Engine:
     """
     Factory function to create a configured Ask3Engine.
 
     Args:
         verbose: Enable verbose output
-        use_rich: Use Rich library for formatting
 
     Returns:
         Configured Ask3Engine instance
     """
-    presenter = Ask3Presenter(verbose=verbose, use_rich=use_rich)
+    presenter = Ask3Presenter(verbose=verbose)
     return Ask3Engine(presenter=presenter)

@@ -12,15 +12,14 @@ from dataclasses import dataclass
 from typing import Optional
 import os
 
-# Rich for terminal formatting
-try:
-    from rich.console import Console
-    from rich.markdown import Markdown
-    from rich.panel import Panel
-    from rich.status import Status
-    RICH_AVAILABLE = True
-except ImportError:
-    RICH_AVAILABLE = False
+from lib.ui import (
+    get_console,
+    MarkdownContent,
+    Spinner,
+    StyleTokens,
+    Layout as UILayout,
+    StyledPanel,
+)
 
 # Embedded documentation for RDST
 RDST_DOCS = """
@@ -337,6 +336,7 @@ rdst configure default --target prod
 @dataclass
 class HelpResult:
     """Result from help command."""
+
     success: bool
     answer: str
     error: Optional[str] = None
@@ -346,16 +346,18 @@ class HelpCommand:
     """Implements `rdst help` quick docs lookup."""
 
     def __init__(self):
-        self.console = Console() if RICH_AVAILABLE else None
+        self.console = get_console()
 
     def print_formatted(self, text: str) -> None:
-        """Print text with Rich formatting if available."""
-        if RICH_AVAILABLE and self.console:
-            # Render as markdown in a panel
-            md = Markdown(text)
-            self.console.print(Panel(md, title="[bold blue]RDST Help[/bold blue]", border_style="blue"))
-        else:
-            print(text)
+        """Print text with markdown formatting."""
+        self.console.print(
+            StyledPanel(
+                MarkdownContent(text),
+                title=f"[{StyleTokens.HEADER}]RDST Help[/{StyleTokens.HEADER}]",
+                border_style=StyleTokens.PANEL_BORDER,
+                box=UILayout.BOX_DEFAULT,
+            )
+        )
 
     def run(self, question: str) -> HelpResult:
         """
@@ -383,7 +385,7 @@ To use 'rdst help "question"', you need to set up your API key:
 
 Or configure RDST with:
    rdst configure llm --provider anthropic
-"""
+""",
             )
 
         try:
@@ -406,54 +408,21 @@ Include command examples when relevant. If the question isn't covered in the doc
 ## Answer (be concise, include command examples):"""
 
             # Call LLM with spinner feedback
-            if RICH_AVAILABLE and self.console:
-                with self.console.status("Thinking...", spinner="dots", spinner_style="white"):
-                    response = llm.query(
-                        system_message=system_message,
-                        user_query=user_query,
-                        max_tokens=1000
-                    )
-            else:
-                # Simple fallback spinner
-                import sys
-                import threading
-                import time
-
-                stop_spinner = False
-                def spinner():
-                    chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-                    i = 0
-                    while not stop_spinner:
-                        sys.stderr.write(f"\r{chars[i % len(chars)]} Thinking...")
-                        sys.stderr.flush()
-                        time.sleep(0.1)
-                        i += 1
-                    sys.stderr.write("\r" + " " * 20 + "\r")
-                    sys.stderr.flush()
-
-                spinner_thread = threading.Thread(target=spinner)
-                spinner_thread.start()
-
+            with Spinner("Thinking..."):
                 response = llm.query(
                     system_message=system_message,
                     user_query=user_query,
-                    max_tokens=1000
+                    max_tokens=1000,
                 )
-
-                stop_spinner = True
-                spinner_thread.join()
 
             # Response format: {"text": "...", "usage": {...}, "provider": "...", "model": "..."}
             if response.get("text"):
-                return HelpResult(
-                    success=True,
-                    answer=response["text"].strip()
-                )
+                return HelpResult(success=True, answer=response["text"].strip())
             else:
                 return HelpResult(
                     success=False,
                     answer="",
-                    error=response.get("error") or "Failed to get response from LLM"
+                    error=response.get("error") or "Failed to get response from LLM",
                 )
 
         except Exception as e:
@@ -481,7 +450,11 @@ Example:
 ```bash
 rdst analyze -q "SELECT * FROM users WHERE id = 1" --target mydb
 ```"""
-        elif "top" in question_lower or "slow" in question_lower or "monitor" in question_lower:
+        elif (
+            "top" in question_lower
+            or "slow" in question_lower
+            or "monitor" in question_lower
+        ):
             answer = """To monitor slow queries:
 
 ```bash
@@ -517,7 +490,11 @@ rdst query list --interactive
 # Show details of a specific query
 rdst query show my-query
 ```"""
-        elif "run" in question_lower or "benchmark" in question_lower or "load" in question_lower:
+        elif (
+            "run" in question_lower
+            or "benchmark" in question_lower
+            or "load" in question_lower
+        ):
             answer = """To run queries for benchmarking or load testing:
 
 ```bash
@@ -542,7 +519,11 @@ Options:
 - --quiet: Show only summary
 
 Output includes QPS, latency stats (min/avg/p95/max), and success/failure counts."""
-        elif "configure" in question_lower or "add" in question_lower or "target" in question_lower:
+        elif (
+            "configure" in question_lower
+            or "add" in question_lower
+            or "target" in question_lower
+        ):
             answer = """To configure a database target:
 
 ```bash
@@ -577,7 +558,11 @@ Shows:
 - Whether query is cacheable
 - Performance comparison (original vs cached)
 - CREATE CACHE command for production"""
-        elif "init" in question_lower or "setup" in question_lower or "start" in question_lower:
+        elif (
+            "init" in question_lower
+            or "setup" in question_lower
+            or "start" in question_lower
+        ):
             answer = """To set up RDST for the first time:
 
 ```bash
@@ -605,7 +590,4 @@ Try:
 
 (LLM unavailable: {error})"""
 
-        return HelpResult(
-            success=True,
-            answer=answer
-        )
+        return HelpResult(success=True, answer=answer)

@@ -14,10 +14,9 @@ class TestAsk3Presenter:
 
     def test_create_presenter(self):
         """Test basic presenter creation."""
-        presenter = Ask3Presenter(verbose=True, use_rich=False)
+        presenter = Ask3Presenter(verbose=True)
 
         assert presenter.verbose is True
-        assert presenter.use_rich is False
 
     def test_format_value_none(self):
         """Test formatting None values."""
@@ -72,7 +71,7 @@ class TestPresenterOutput:
 
     def test_interpretations_output(self, capsys):
         """Test interpretations are displayed."""
-        presenter = Ask3Presenter(use_rich=False)
+        presenter = Ask3Presenter()
 
         interpretations = [
             Interpretation(
@@ -97,7 +96,7 @@ class TestPresenterOutput:
 
     def test_validation_error_output(self, capsys):
         """Test validation errors are displayed."""
-        presenter = Ask3Presenter(use_rich=False)
+        presenter = Ask3Presenter()
 
         errors = [
             ValidationError(
@@ -117,7 +116,7 @@ class TestPresenterOutput:
 
     def test_execution_result_empty(self, capsys):
         """Test empty result display."""
-        presenter = Ask3Presenter(use_rich=False)
+        presenter = Ask3Presenter()
 
         presenter.execution_result(
             columns=["id", "name"],
@@ -130,7 +129,7 @@ class TestPresenterOutput:
 
     def test_execution_result_with_data(self, capsys):
         """Test result display with data."""
-        presenter = Ask3Presenter(use_rich=False)
+        presenter = Ask3Presenter()
 
         presenter.execution_result(
             columns=["id", "name"],

@@ -9,6 +9,7 @@
 ## Running RDST
 
 ### Local Development (Recommended)
+
 ```bash
 # Run directly from source - no installation needed
 python3 rdst.py <command>
@@ -18,6 +19,7 @@ uv run rdst.py <command>
 ```
 
 ### Installation Options
+
 ```bash
 # Using uv (recommended - doesn't pollute system Python)
 uv pip install -e .
@@ -59,18 +61,18 @@ rdst/
 
 ## Key Commands
 
-| Command | Description |
-|---------|-------------|
-| `rdst init` | First-time setup wizard |
-| `rdst configure` | Manage database targets |
-| `rdst analyze -q "SQL"` | Analyze query performance |
-| `rdst top --target X` | Monitor slow queries |
-| `rdst ask "question"` | Natural language to SQL |
-| `rdst schema show` | View/manage semantic layer |
-| `rdst query list` | View saved queries |
-| `rdst query run <names>` | Benchmark/load test queries |
-| `rdst help "question"` | Documentation lookup |
-| `rdst claude add` | Register MCP server with Claude Code |
+| Command                  | Description                          |
+| ------------------------ | ------------------------------------ |
+| `rdst init`              | First-time setup wizard              |
+| `rdst configure`         | Manage database targets              |
+| `rdst analyze -q "SQL"`  | Analyze query performance            |
+| `rdst top --target X`    | Monitor slow queries                 |
+| `rdst ask "question"`    | Natural language to SQL              |
+| `rdst schema show`       | View/manage semantic layer           |
+| `rdst query list`        | View saved queries                   |
+| `rdst query run <names>` | Benchmark/load test queries          |
+| `rdst help "question"`   | Documentation lookup                 |
+| `rdst claude add`        | Register MCP server with Claude Code |
 
 ## Configuration
 
@@ -108,11 +110,31 @@ python3 rdst.py --help
 - **RdstResult** dataclass for all command returns
 - **TargetsConfig** class for config file access
 
+### Domain-Specific Guidelines
+
+- **UI Components**: See `lib/ui/AGENTS.md` for Rich component patterns (StyledPanel, DataTable, etc.)
+- **Devtools**: See `devtools/AGENTS.md` for storybook rendering
+
+### Rich Component Imports (CRITICAL)
+
+**Never import Rich components directly.** Always import from `lib.ui`:
+
+```python
+# WRONG
+from rich.console import Group
+from rich.text import Text
+
+# CORRECT
+from lib.ui import Group, Text, Tree, Spinner, Live
+```
+
+If you need a Rich component not yet exported, add it to `lib/ui/components.py` and `lib/ui/__init__.py`.
+
 ### Critical Files to Preserve
 
 These files contain important improvements - be careful when merging:
 
-- `lib/functions/llm_analysis.py` - Anti-pattern rules, SELECT * column variance fix
+- `lib/functions/llm_analysis.py` - Anti-pattern rules, SELECT \* column variance fix
 - `lib/functions/explain_analysis.py` - Interactive skip mechanism
 - `lib/cli/analyze_command.py` - All UX improvements
 
@@ -132,6 +154,7 @@ rdst ask "Which suppliers have the most orders?" --target tpch --agent
 ```
 
 **How it works**:
+
 1. Loads database schema (from semantic layer if available, otherwise introspects DB)
 2. LLM generates SQL based on question and schema context
 3. Validates SQL (read-only, columns exist, has LIMIT)
@@ -170,6 +193,7 @@ rdst schema delete --target tpch
 **Storage**: `~/.rdst/semantic-layer/<target>.yaml`
 
 **What it stores**:
+
 - Table descriptions and row estimates
 - Column descriptions and types
 - Enum values with meanings (e.g., `AUTOMOBILE` = "Automotive industry customers")
@@ -177,6 +201,7 @@ rdst schema delete --target tpch
 - Foreign key relationships
 
 **Workflow**:
+
 1. `rdst schema init` - Bootstrap from database
 2. `rdst schema annotate --use-llm` - AI fills in descriptions
 3. `rdst schema edit` - Manual tweaks if needed
@@ -210,9 +235,9 @@ export OPENAI_API_KEY="..."      # For OpenAI
 
 ## Common Issues
 
-| Issue | Solution |
-|-------|----------|
-| "Authentication failed" | Check password_env is exported |
-| Import errors | Run from `rdst/` directory |
-| LLM timeout | Check API key, try `--fast` flag |
-| Test failures | Ensure test DB is accessible |
+| Issue                   | Solution                         |
+| ----------------------- | -------------------------------- |
+| "Authentication failed" | Check password_env is exported   |
+| Import errors           | Run from `rdst/` directory       |
+| LLM timeout             | Check API key, try `--fast` flag |
+| Test failures           | Ensure test DB is accessible     |

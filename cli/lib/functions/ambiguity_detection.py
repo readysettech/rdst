@@ -13,12 +13,21 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List
+
+from lib.ui import (
+    MessagePanel,
+    SectionHeader,
+    SelectionTable,
+    StyleTokens,
+    get_console,
+    Prompt,
+)
 
 from ..prompts.ask_prompts_v2 import (
     AMBIGUITY_DETECTION_PROMPT,
     format_schema_for_prompt,
-    format_preference_tree_for_prompt
+    format_preference_tree_for_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,24 +47,24 @@ class Ambiguity:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
-            'category': self.category,
-            'term': self.term,
-            'reason': self.reason,
-            'possible_interpretations': self.possible_interpretations,
-            'clarifying_question': self.clarifying_question,
-            'priority': self.priority
+            "category": self.category,
+            "term": self.term,
+            "reason": self.reason,
+            "possible_interpretations": self.possible_interpretations,
+            "clarifying_question": self.clarifying_question,
+            "priority": self.priority,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Ambiguity:
         """Deserialize from dictionary."""
         return cls(
-            category=data['category'],
-            term=data['term'],
-            reason=data['reason'],
-            possible_interpretations=data['possible_interpretations'],
-            clarifying_question=data['clarifying_question'],
-            priority=data.get('priority', 'medium')
+            category=data["category"],
+            term=data["term"],
+            reason=data["reason"],
+            possible_interpretations=data["possible_interpretations"],
+            clarifying_question=data["clarifying_question"],
+            priority=data.get("priority", "medium"),
         )
 
 
@@ -84,11 +93,11 @@ class AmbiguityReport:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary."""
         return {
-            'ambiguities': [a.to_dict() for a in self.ambiguities],
-            'total_ambiguities': self.total_ambiguities,
-            'requires_clarification': self.requires_clarification,
-            'can_proceed_with_assumptions': self.can_proceed_with_assumptions,
-            'overall_confidence': self.overall_confidence
+            "ambiguities": [a.to_dict() for a in self.ambiguities],
+            "total_ambiguities": self.total_ambiguities,
+            "requires_clarification": self.requires_clarification,
+            "can_proceed_with_assumptions": self.can_proceed_with_assumptions,
+            "overall_confidence": self.overall_confidence,
         }
 
 
@@ -99,7 +108,7 @@ def detect_ambiguities(
     llm_manager,
     preference_tree=None,
     confidence_threshold: float = 0.85,
-    callback=None
+    callback=None,
 ) -> Dict[str, Any]:
     """
     Detect ambiguities in a natural language question.
@@ -131,7 +140,7 @@ def detect_ambiguities(
         prompt = AMBIGUITY_DETECTION_PROMPT.format(
             nl_question=nl_question,
             filtered_schema=schema_formatted,
-            preference_tree_summary=pref_context
+            preference_tree_summary=pref_context,
         )
 
         # Call LLM with JSON mode
@@ -141,18 +150,18 @@ def detect_ambiguities(
             prompt=prompt,
             temperature=0.0,  # Deterministic detection
             max_tokens=1500,
-            extra={"response_format": {"type": "json_object"}}
+            extra={"response_format": {"type": "json_object"}},
         )
 
         if not response:
             return {
-                'success': False,
-                'error': 'LLM call failed',
-                'raw_response': str(response)
+                "success": False,
+                "error": "LLM call failed",
+                "raw_response": str(response),
             }
 
         # Parse JSON response
-        raw_text = response.get('response', '{}')
+        raw_text = response.get("response", "{}")
 
         # Extract JSON from response - handle various formats:
         # 1. Pure JSON
@@ -161,20 +170,23 @@ def detect_ambiguities(
         json_text = raw_text
 
         # Try to extract JSON from markdown code fence
-        if '```' in raw_text:
+        if "```" in raw_text:
             import re
+
             # Match ```json ... ``` or ``` ... ```
-            json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', raw_text, re.DOTALL)
+            json_match = re.search(
+                r"```(?:json)?\s*\n?(.*?)\n?```", raw_text, re.DOTALL
+            )
             if json_match:
                 json_text = json_match.group(1).strip()
 
         # If no code fence, try to find JSON object directly
-        if not json_text.strip().startswith('{'):
+        if not json_text.strip().startswith("{"):
             # Look for first { and last }
-            start = raw_text.find('{')
-            end = raw_text.rfind('}')
+            start = raw_text.find("{")
+            end = raw_text.rfind("}")
             if start != -1 and end != -1 and end > start:
-                json_text = raw_text[start:end + 1]
+                json_text = raw_text[start : end + 1]
 
         try:
             parsed = json.loads(json_text)
@@ -182,26 +194,32 @@ def detect_ambiguities(
             logger.error(f"JSON parse error: {e}")
             logger.error(f"Raw response: {raw_text[:500]}")
             return {
-                'success': False,
-                'error': f'Invalid JSON from LLM: {str(e)}',
-                'raw_response': raw_text
+                "success": False,
+                "error": f"Invalid JSON from LLM: {str(e)}",
+                "raw_response": raw_text,
             }
 
         # Validate response structure
-        if 'ambiguities' not in parsed:
+        if "ambiguities" not in parsed:
             return {
-                'success': False,
-                'error': 'LLM response missing "ambiguities" field',
-                'raw_response': raw_text
+                "success": False,
+                "error": 'LLM response missing "ambiguities" field',
+                "raw_response": raw_text,
             }
 
         # Build Ambiguity objects
         ambiguities = []
 
-        for a_data in parsed['ambiguities']:
+        for a_data in parsed["ambiguities"]:
             try:
                 # Validate required fields
-                required_fields = ['category', 'term', 'reason', 'possible_interpretations', 'clarifying_question']
+                required_fields = [
+                    "category",
+                    "term",
+                    "reason",
+                    "possible_interpretations",
+                    "clarifying_question",
+                ]
                 missing = [f for f in required_fields if f not in a_data]
 
                 if missing:
@@ -218,10 +236,14 @@ def detect_ambiguities(
         # Create report
         report = AmbiguityReport(
             ambiguities=ambiguities,
-            total_ambiguities=parsed.get('total_ambiguities', len(ambiguities)),
-            requires_clarification=parsed.get('requires_clarification', len(ambiguities) > 0),
-            can_proceed_with_assumptions=parsed.get('can_proceed_with_assumptions', False),
-            overall_confidence=parsed.get('overall_confidence', 0.5)
+            total_ambiguities=parsed.get("total_ambiguities", len(ambiguities)),
+            requires_clarification=parsed.get(
+                "requires_clarification", len(ambiguities) > 0
+            ),
+            can_proceed_with_assumptions=parsed.get(
+                "can_proceed_with_assumptions", False
+            ),
+            overall_confidence=parsed.get("overall_confidence", 0.5),
         )
 
         # Override can_proceed based on confidence threshold
@@ -229,21 +251,23 @@ def detect_ambiguities(
             report.can_proceed_with_assumptions = True
             report.requires_clarification = False
 
-        logger.info(f"Detected {len(ambiguities)} ambiguities (confidence: {report.overall_confidence:.0%})")
+        logger.info(
+            f"Detected {len(ambiguities)} ambiguities (confidence: {report.overall_confidence:.0%})"
+        )
 
         return {
-            'success': True,
-            'report': report,
-            'raw_response': raw_text,
-            'token_count': response.get('usage', {}).get('total_tokens', 0)
+            "success": True,
+            "report": report,
+            "raw_response": raw_text,
+            "token_count": response.get("usage", {}).get("total_tokens", 0),
         }
 
     except Exception as e:
         logger.error(f"Ambiguity detection error: {e}", exc_info=True)
         return {
-            'success': False,
-            'error': f'Unexpected error: {str(e)}',
-            'raw_response': ''
+            "success": False,
+            "error": f"Unexpected error: {str(e)}",
+            "raw_response": "",
         }
 
 
@@ -251,7 +275,7 @@ def collect_clarifications(
     ambiguities: List[Ambiguity],
     preference_tree,
     console=None,
-    no_interactive: bool = False
+    no_interactive: bool = False,
 ) -> Dict[str, str]:
     """
     Collect clarifications from user for detected ambiguities.
@@ -265,117 +289,60 @@ def collect_clarifications(
         Dict mapping category -> user answer
     """
     answers = {}
+    console = console or get_console()
 
     try:
-        if console:
-            from rich.prompt import Prompt, Confirm
+        console.print(
+            MessagePanel(
+                "I need some clarifications to better understand your question.",
+                variant="warning",
+            )
+        )
 
-            console.print("\n[bold yellow]I need some clarifications to better understand your question:[/bold yellow]\n")
+        for amb in ambiguities:
+            if preference_tree and preference_tree.has_answer_for(amb.category):
+                logger.debug(f"Skipping {amb.category} - already answered")
+                continue
 
-            for amb in ambiguities:
-                # Skip if we already have an answer
-                if preference_tree and preference_tree.has_answer_for(amb.category):
-                    logger.debug(f"Skipping {amb.category} - already answered")
-                    continue
+            if amb.possible_interpretations:
+                question_text = amb.clarifying_question.split(":")[0].strip()
+                if not question_text.endswith("?"):
+                    question_text += "?"
 
-                # If interpretations are provided, offer as choices
-                if amb.possible_interpretations and len(amb.possible_interpretations) <= 4:
-                    # Extract just the question part (before the colon if present)
-                    # E.g., "How many users: [1] ... [2] ..." → "How many users"
-                    question_text = amb.clarifying_question.split(':')[0].strip()
-                    if not question_text.endswith('?'):
-                        question_text += '?'
+                console.print(SectionHeader(question_text))
+                console.print()
+                console.print(SelectionTable(amb.possible_interpretations))
+                console.print()
 
-                    console.print(f"[bold]{question_text}[/bold]\n")
+                choice = Prompt.ask(
+                    "Your choice",
+                    choices=[
+                        str(i) for i in range(1, len(amb.possible_interpretations) + 1)
+                    ],
+                )
+                answer = amb.possible_interpretations[int(choice) - 1]
+            else:
+                console.print(SectionHeader(amb.clarifying_question))
+                answer = Prompt.ask("Your answer")
 
-                    for i, interp in enumerate(amb.possible_interpretations, 1):
-                        console.print(f"  [{i}] {interp}")
-                    console.print()
+            if preference_tree:
+                preference_tree.add_preference(
+                    category=amb.category,
+                    question=amb.clarifying_question,
+                    answer=answer,
+                    confidence=1.0,
+                )
 
-                    # Get choice
-                    choice = Prompt.ask(
-                        "Your choice",
-                        choices=[str(i) for i in range(1, len(amb.possible_interpretations) + 1)]
-                    )
-
-                    answer = amb.possible_interpretations[int(choice) - 1]
-
-                else:
-                    # Free-form answer - show full question
-                    console.print(f"[bold]{amb.clarifying_question}[/bold]")
-                    answer = Prompt.ask("Your answer")
-
-                # Store in preference tree
-                if preference_tree:
-                    preference_tree.add_preference(
-                        category=amb.category,
-                        question=amb.clarifying_question,
-                        answer=answer,
-                        confidence=1.0  # User-provided = max confidence
-                    )
-
-                answers[amb.category] = answer
-
-                console.print()  # Blank line between questions
-
-        else:
-            # Fallback to plain text
-            print("\nI need some clarifications to better understand your question:\n")
-
-            for amb in ambiguities:
-                # Skip if we already have an answer
-                if preference_tree and preference_tree.has_answer_for(amb.category):
-                    continue
-
-                # If interpretations provided, offer as choices
-                if amb.possible_interpretations and len(amb.possible_interpretations) <= 4:
-                    # Extract just the question part (before the colon if present)
-                    question_text = amb.clarifying_question.split(':')[0].strip()
-                    if not question_text.endswith('?'):
-                        question_text += '?'
-
-                    print(f"{question_text}\n")
-
-                    for i, interp in enumerate(amb.possible_interpretations, 1):
-                        print(f"  [{i}] {interp}")
-                    print()
-
-                    # Get choice
-                    while True:
-                        choice_str = input(f"Your choice [1-{len(amb.possible_interpretations)}]: ").strip()
-                        try:
-                            choice_int = int(choice_str)
-                            if 1 <= choice_int <= len(amb.possible_interpretations):
-                                answer = amb.possible_interpretations[choice_int - 1]
-                                break
-                            else:
-                                print(f"Please enter a number between 1 and {len(amb.possible_interpretations)}")
-                        except ValueError:
-                            print("Please enter a valid number")
-
-                else:
-                    # Free-form answer - show full question
-                    print(f"{amb.clarifying_question}\n")
-                    answer = input("Your answer: ").strip()
-
-                # Store in preference tree
-                if preference_tree:
-                    preference_tree.add_preference(
-                        category=amb.category,
-                        question=amb.clarifying_question,
-                        answer=answer,
-                        confidence=1.0
-                    )
-
-                answers[amb.category] = answer
-                print()
+            answers[amb.category] = answer
+            console.print()
 
         logger.info(f"Collected {len(answers)} clarifications")
-
         return answers
 
     except KeyboardInterrupt:
-        print("\n\nClarification cancelled.")
+        console.print(
+            f"\n[{StyleTokens.MUTED}]Clarification cancelled.[/{StyleTokens.MUTED}]"
+        )
         return answers
 
     except Exception as e:

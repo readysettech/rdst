@@ -8,37 +8,39 @@ Handles:
 - Result insights (optional LLM-powered)
 """
 
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from decimal import Decimal
 from datetime import datetime, date
-import sys
 
-try:
-    from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
-    from rich.text import Text
-    _RICH_AVAILABLE = True
-except ImportError:
-    _RICH_AVAILABLE = False
+from rich.console import Group
+
+# Import UI system
+from lib.ui import (
+    DataTable,
+    Icons,
+    KeyValueTable,
+    Layout,
+    NextSteps,
+    QueryPanel,
+    StyleTokens,
+    get_console,
+)
 
 
 def format_query_results(
     rows: List[Tuple],
     columns: List[str],
     execution_time_ms: float,
-    use_rich: bool = True,
     max_rows_display: int = 50,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """
-    Format query results for display with Rich tables or plain text fallback.
+    Format query results for display with Rich tables.
 
     Args:
         rows: List of result tuples
         columns: List of column names
         execution_time_ms: Query execution time in milliseconds
-        use_rich: Whether to use Rich formatting
         max_rows_display: Maximum rows to display
         **kwargs: Additional parameters
 
@@ -48,37 +50,26 @@ def format_query_results(
         - row_count: Number of rows returned
         - column_count: Number of columns
         - truncated: Whether output was truncated
-        - display_method: 'rich' or 'plain'
+        - display_method: 'rich'
     """
     row_count = len(rows)
     column_count = len(columns)
     truncated = row_count > max_rows_display
 
-    if use_rich and _RICH_AVAILABLE:
-        output = _format_with_rich(
-            rows[:max_rows_display],
-            columns,
-            execution_time_ms,
-            total_rows=row_count,
-            truncated=truncated
-        )
-        display_method = 'rich'
-    else:
-        output = _format_plain_text(
-            rows[:max_rows_display],
-            columns,
-            execution_time_ms,
-            total_rows=row_count,
-            truncated=truncated
-        )
-        display_method = 'plain'
+    output = _format_with_rich(
+        rows[:max_rows_display],
+        columns,
+        execution_time_ms,
+        total_rows=row_count,
+        truncated=truncated,
+    )
 
     return {
-        'formatted_output': output,
-        'row_count': row_count,
-        'column_count': column_count,
-        'truncated': truncated,
-        'display_method': display_method
+        "formatted_output": output,
+        "row_count": row_count,
+        "column_count": column_count,
+        "truncated": truncated,
+        "display_method": "rich",
     }
 
 
@@ -87,29 +78,25 @@ def _format_with_rich(
     columns: List[str],
     execution_time_ms: float,
     total_rows: int,
-    truncated: bool
+    truncated: bool,
 ) -> str:
     """Format results using Rich library for beautiful terminal output."""
-    console = Console()
+    c = get_console()
 
-    # Create Rich table
-    table = Table(title=f"Query Results ({total_rows} rows, {execution_time_ms:.2f}ms)")
-
-    # Add columns
-    for col in columns:
-        table.add_column(col, style="cyan", no_wrap=False)
-
-    # Add rows
-    for row in rows:
-        # Convert values to strings, handling None and special types
-        str_row = [_format_value(val) for val in row]
-        table.add_row(*str_row)
+    # Create Rich table with consistent styling
+    table = DataTable(
+        columns=columns,
+        rows=rows,
+        title=f"Query Results ({total_rows} rows, {execution_time_ms:.2f}ms)",
+    )
 
     # Capture table output
-    with console.capture() as capture:
-        console.print(table)
+    with c.capture() as capture:
+        c.print(table)
         if truncated:
-            console.print(f"\n[yellow]Note: Showing first {len(rows)} of {total_rows} rows[/yellow]")
+            c.print(
+                f"\n[{StyleTokens.WARNING}]Note: Showing first {len(rows)} of {total_rows} rows[/{StyleTokens.WARNING}]"
+            )
 
     return capture.get()
 
@@ -119,7 +106,7 @@ def _format_plain_text(
     columns: List[str],
     execution_time_ms: float,
     total_rows: int,
-    truncated: bool
+    truncated: bool,
 ) -> str:
     """Format results as plain text table (fallback when Rich not available)."""
     output_lines = []
@@ -135,15 +122,16 @@ def _format_plain_text(
     header = " | ".join(col.ljust(col_widths[i]) for i, col in enumerate(columns))
     separator = "-+-".join("-" * width for width in col_widths)
 
-    output_lines.append(f"\nQuery Results ({total_rows} rows, {execution_time_ms:.2f}ms)")
+    output_lines.append(
+        f"\nQuery Results ({total_rows} rows, {execution_time_ms:.2f}ms)"
+    )
     output_lines.append(header)
     output_lines.append(separator)
 
     # Rows
     for row in rows:
         row_str = " | ".join(
-            _format_value(val).ljust(col_widths[i])
-            for i, val in enumerate(row)
+            _format_value(val).ljust(col_widths[i]) for i, val in enumerate(row)
         )
         output_lines.append(row_str)
 
@@ -170,9 +158,7 @@ def _format_value(val: Any) -> str:
 
 
 def compute_quick_stats(
-    rows: List[Tuple],
-    columns: List[str],
-    **kwargs
+    rows: List[Tuple], columns: List[str], **kwargs
 ) -> Dict[str, Any]:
     """
     Compute quick statistics on numeric columns.
@@ -186,11 +172,7 @@ def compute_quick_stats(
         Dict containing statistics for each numeric column
     """
     if not rows:
-        return {
-            'row_count': 0,
-            'column_count': len(columns),
-            'stats_by_column': {}
-        }
+        return {"row_count": 0, "column_count": len(columns), "stats_by_column": {}}
 
     column_count = len(columns)
     stats_by_column = {}
@@ -208,91 +190,99 @@ def compute_quick_stats(
             numeric_values = [float(v) for v in col_values]
 
             stats_by_column[col_name] = {
-                'type': 'numeric',
-                'count': len(numeric_values),
-                'min': min(numeric_values),
-                'max': max(numeric_values),
-                'avg': sum(numeric_values) / len(numeric_values),
-                'null_count': len(rows) - len(col_values)
+                "type": "numeric",
+                "count": len(numeric_values),
+                "min": min(numeric_values),
+                "max": max(numeric_values),
+                "avg": sum(numeric_values) / len(numeric_values),
+                "null_count": len(rows) - len(col_values),
             }
         elif isinstance(first_val, str):
             stats_by_column[col_name] = {
-                'type': 'string',
-                'count': len(col_values),
-                'unique_count': len(set(col_values)),
-                'null_count': len(rows) - len(col_values),
-                'max_length': max(len(v) for v in col_values),
-                'avg_length': sum(len(v) for v in col_values) / len(col_values)
+                "type": "string",
+                "count": len(col_values),
+                "unique_count": len(set(col_values)),
+                "null_count": len(rows) - len(col_values),
+                "max_length": max(len(v) for v in col_values),
+                "avg_length": sum(len(v) for v in col_values) / len(col_values),
             }
         elif isinstance(first_val, (datetime, date)):
             stats_by_column[col_name] = {
-                'type': 'datetime',
-                'count': len(col_values),
-                'min': min(col_values),
-                'max': max(col_values),
-                'null_count': len(rows) - len(col_values)
+                "type": "datetime",
+                "count": len(col_values),
+                "min": min(col_values),
+                "max": max(col_values),
+                "null_count": len(rows) - len(col_values),
             }
 
     return {
-        'row_count': len(rows),
-        'column_count': column_count,
-        'stats_by_column': stats_by_column
+        "row_count": len(rows),
+        "column_count": column_count,
+        "stats_by_column": stats_by_column,
     }
 
 
-def format_quick_stats(stats: Dict[str, Any], use_rich: bool = True) -> str:
+def format_quick_stats(stats: Dict[str, Any]) -> str:
     """
     Format statistics for display.
 
     Args:
         stats: Statistics dict from compute_quick_stats
-        use_rich: Whether to use Rich formatting
 
     Returns:
         Formatted statistics string
     """
-    if stats['row_count'] == 0:
+    if stats["row_count"] == 0:
         return "No rows returned"
 
-    output_lines = []
-    output_lines.append(f"\nQuick Statistics:")
-    output_lines.append(f"  Total Rows: {stats['row_count']}")
-    output_lines.append(f"  Columns: {stats['column_count']}")
+    summary_table = KeyValueTable(
+        {
+            "Total Rows": str(stats["row_count"]),
+            "Columns": str(stats["column_count"]),
+        },
+        title="Quick Statistics",
+    )
 
-    stats_by_col = stats.get('stats_by_column', {})
+    stats_by_col = stats.get("stats_by_column", {})
+    column_rows = []
     if stats_by_col:
-        output_lines.append("\n  Column Statistics:")
         for col_name, col_stats in stats_by_col.items():
-            col_type = col_stats.get('type', 'unknown')
+            col_type = col_stats.get("type", "unknown")
+            if col_type == "numeric":
+                details = (
+                    f"min={col_stats['min']:.2f}, max={col_stats['max']:.2f}, "
+                    f"avg={col_stats['avg']:.2f}"
+                )
+                if col_stats["null_count"] > 0:
+                    details += f", nulls={col_stats['null_count']}"
+            elif col_type == "string":
+                details = f"unique={col_stats['unique_count']}, max_len={col_stats['max_length']}"
+                if col_stats["null_count"] > 0:
+                    details += f", nulls={col_stats['null_count']}"
+            elif col_type == "datetime":
+                details = f"earliest={col_stats['min']}, latest={col_stats['max']}"
+            else:
+                details = ""
+            column_rows.append((col_name, col_type, details))
 
-            if col_type == 'numeric':
-                output_lines.append(f"    {col_name} (numeric):")
-                output_lines.append(f"      Min: {col_stats['min']:.2f}")
-                output_lines.append(f"      Max: {col_stats['max']:.2f}")
-                output_lines.append(f"      Avg: {col_stats['avg']:.2f}")
-                if col_stats['null_count'] > 0:
-                    output_lines.append(f"      Nulls: {col_stats['null_count']}")
+    renderables = [summary_table]
+    if column_rows:
+        renderables.append(
+            DataTable(
+                columns=["Column", "Type", "Details"],
+                rows=column_rows,
+                title="Column Statistics",
+            )
+        )
 
-            elif col_type == 'string':
-                output_lines.append(f"    {col_name} (string):")
-                output_lines.append(f"      Unique: {col_stats['unique_count']}")
-                output_lines.append(f"      Max Length: {col_stats['max_length']}")
-                if col_stats['null_count'] > 0:
-                    output_lines.append(f"      Nulls: {col_stats['null_count']}")
-
-            elif col_type == 'datetime':
-                output_lines.append(f"    {col_name} (datetime):")
-                output_lines.append(f"      Earliest: {col_stats['min']}")
-                output_lines.append(f"      Latest: {col_stats['max']}")
-
-    return "\n".join(output_lines)
+    console = get_console()
+    with console.capture() as capture:
+        console.print(Group(*renderables))
+    return capture.get().rstrip()
 
 
 def generate_next_actions_menu(
-    query_hash: str,
-    has_results: bool,
-    confidence: float,
-    **kwargs
+    query_hash: str, has_results: bool, confidence: float, **kwargs
 ) -> Dict[str, Any]:
     """
     Generate context-aware next actions menu for ask command.
@@ -312,73 +302,77 @@ def generate_next_actions_menu(
 
     # Always offer refinement if confidence is not perfect
     if confidence < 1.0:
-        actions.append({
-            'key': '1',
-            'name': 'Refine Query',
-            'description': 'Modify the SQL or ask a refined question',
-            'command': 'refine'
-        })
+        actions.append(
+            {
+                "key": "1",
+                "name": "Refine Query",
+                "description": "Modify the SQL or ask a refined question",
+                "command": "refine",
+            }
+        )
 
     # Offer to analyze performance if we have results
     if has_results:
-        actions.append({
-            'key': '2',
-            'name': 'Analyze Performance',
-            'description': f'Run rdst analyze on this query (hash: {query_hash[:8]})',
-            'command': f'analyze --hash {query_hash}'
-        })
+        actions.append(
+            {
+                "key": "2",
+                "name": "Analyze Performance",
+                "description": f"Run rdst analyze on this query (hash: {query_hash[:8]})",
+                "command": f"analyze --hash {query_hash}",
+            }
+        )
 
     # Offer to test caching if we have results
     if has_results:
-        actions.append({
-            'key': '3',
-            'name': 'Test Caching',
-            'description': f'Check if this query can be cached with Readyset',
-            'command': f'cache --hash {query_hash}'
-        })
+        actions.append(
+            {
+                "key": "3",
+                "name": "Test Caching",
+                "description": "Check if this query can be cached with Readyset",
+                "command": f"cache --hash {query_hash}",
+            }
+        )
 
     # Always offer to save
-    actions.append({
-        'key': '4',
-        'name': 'Save Query',
-        'description': 'Save this query to registry with a name',
-        'command': 'save'
-    })
+    actions.append(
+        {
+            "key": "4",
+            "name": "Save Query",
+            "description": "Save this query to registry with a name",
+            "command": "save",
+        }
+    )
 
     # Offer to ask another question
-    actions.append({
-        'key': '5',
-        'name': 'Ask Another Question',
-        'description': 'Start a new natural language query',
-        'command': 'ask_again'
-    })
+    actions.append(
+        {
+            "key": "5",
+            "name": "Ask Another Question",
+            "description": "Start a new natural language query",
+            "command": "ask_again",
+        }
+    )
 
     # Quit option
-    actions.append({
-        'key': 'q',
-        'name': 'Quit',
-        'description': 'Exit rdst ask',
-        'command': 'quit'
-    })
+    actions.append(
+        {"key": "q", "name": "Quit", "description": "Exit rdst ask", "command": "quit"}
+    )
 
-    # Format menu
-    formatted_lines = ["\nWhat would you like to do next?"]
-    for action in actions:
-        formatted_lines.append(f"  [{action['key']}] {action['name']}: {action['description']}")
+    steps = [
+        (f"[{action['key']}] {action['name']}", action["description"])
+        for action in actions
+    ]
+    formatted_menu = str(NextSteps(steps, title="What would you like to do next?"))
 
-    return {
-        'actions': actions,
-        'formatted_menu': "\n".join(formatted_lines)
-    }
+    return {"actions": actions, "formatted_menu": formatted_menu}
 
 
 def display_sql_preview(
     sql: str,
     explanation: str,
     confidence: float,
-    warnings: List[str] = None,
-    use_rich: bool = True,
-    **kwargs
+    warnings: Optional[List[str]] = None,
+    **kwargs,
 ) -> str:
     """
     Display SQL preview before execution with explanation.
@@ -388,7 +382,6 @@ def display_sql_preview(
         explanation: Plain English explanation
         confidence: Confidence score (0.0-1.0)
         warnings: List of warning messages
-        use_rich: Whether to use Rich formatting
         **kwargs: Additional parameters
 
     Returns:
@@ -396,50 +389,39 @@ def display_sql_preview(
     """
     warnings = warnings or []
 
-    if use_rich and _RICH_AVAILABLE:
-        console = Console()
-        with console.capture() as capture:
-            # SQL panel
-            console.print(Panel(sql, title="Generated SQL", border_style="cyan"))
+    c = get_console()
+    with c.capture() as capture:
+        # SQL panel using UI component
+        c.print(QueryPanel(sql, title="Generated SQL"))
 
-            # Explanation
-            console.print(f"\n[bold]Explanation:[/bold] {explanation}")
+        # Explanation
+        c.print(f"\n[bold]Explanation:[/bold] {explanation}")
 
-            # Confidence
-            confidence_pct = confidence * 100
-            if confidence >= 0.9:
-                color = "green"
-            elif confidence >= 0.7:
-                color = "yellow"
-            else:
-                color = "red"
+        # Confidence with color from theme
+        confidence_pct = confidence * 100
+        if confidence >= 0.9:
+            conf_text = (
+                f"[{StyleTokens.SUCCESS}]{confidence_pct:.1f}%[/{StyleTokens.SUCCESS}]"
+            )
+        elif confidence >= 0.7:
+            conf_text = (
+                f"[{StyleTokens.WARNING}]{confidence_pct:.1f}%[/{StyleTokens.WARNING}]"
+            )
+        else:
+            conf_text = (
+                f"[{StyleTokens.ERROR}]{confidence_pct:.1f}%[/{StyleTokens.ERROR}]"
+            )
 
-            console.print(f"\n[bold]Confidence:[/bold] [{color}]{confidence_pct:.1f}%[/{color}]")
+        c.print(
+            f"\n[{StyleTokens.HEADER}]Confidence:[/{StyleTokens.HEADER}] {conf_text}"
+        )
 
-            # Warnings
-            if warnings:
-                console.print("\n[bold yellow]Warnings:[/bold yellow]")
-                for warning in warnings:
-                    console.print(f"  ⚠️  {warning}")
-
-        return capture.get()
-
-    else:
-        # Plain text fallback
-        output_lines = []
-        output_lines.append("\n" + "="*60)
-        output_lines.append("Generated SQL:")
-        output_lines.append("-"*60)
-        output_lines.append(sql)
-        output_lines.append("-"*60)
-        output_lines.append(f"\nExplanation: {explanation}")
-        output_lines.append(f"Confidence: {confidence*100:.1f}%")
-
+        # Warnings
         if warnings:
-            output_lines.append("\nWarnings:")
+            c.print(
+                f"\n[{StyleTokens.STATUS_WARNING}]Warnings:[/{StyleTokens.STATUS_WARNING}]"
+            )
             for warning in warnings:
-                output_lines.append(f"  - {warning}")
+                c.print(f"  {Icons.WARNING} {warning}")
 
-        output_lines.append("="*60)
-
-        return "\n".join(output_lines)
+    return capture.get()

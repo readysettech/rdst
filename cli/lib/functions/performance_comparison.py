@@ -3,18 +3,29 @@ from __future__ import annotations
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404 - subprocess required for Docker/database operations
 import time
 import statistics
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional, cast
+
+from lib.ui import (
+    get_console,
+    StyleTokens,
+    SectionHeader,
+    StatusLine,
+    Rule,
+    Icons,
+    Text,
+)
+from lib.ui.theme import duration_style
 
 
 def compare_query_performance(
-    query: str = None,
-    original_db_config: Dict[str, Any] = None,
+    query: Optional[str] = None,
+    original_db_config: Optional[Dict[str, Any]] = None,
     readyset_port: int | str = 5433,
     readyset_host: str = "localhost",
     iterations: int | str = 10,
     warmup_iterations: int | str = 2,
-    readyset_db_config: Dict[str, Any] = None,
-    **kwargs
+    readyset_db_config: Optional[Dict[str, Any]] = None,
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Compare query performance between original database and Readyset.
@@ -36,144 +47,173 @@ def compare_query_performance(
         Dict containing performance comparison results
     """
     try:
-        if not query:
+        if not query or not original_db_config:
             return {
                 "success": False,
-                "error": "No query provided for performance comparison"
-            }
-
-        if not original_db_config:
-            return {
-                "success": False,
-                "error": "Original database configuration required"
+                "error": "Query and original database configuration are required",
             }
 
         # Parse config if it's a JSON string
         if isinstance(original_db_config, str):
             import json
+
             original_db_config = json.loads(original_db_config)
 
+        original_db_config = cast(Dict[str, Any], original_db_config)
+        readyset_db_config = cast(Dict[str, Any], readyset_db_config or {})
+
         iterations = int(iterations)
+
         warmup_iterations = int(warmup_iterations)
         readyset_port = int(readyset_port)
 
-        engine = (original_db_config.get('engine') or 'postgresql').lower()
+        engine = (original_db_config.get("engine") or "postgresql").lower()
 
-        print(f"Benchmarking query performance ({iterations} iterations)...")
-        print(f"  Warmup: {warmup_iterations} iterations")
-        print()
+        console = get_console()
+        console.print(SectionHeader("Benchmarking Query Performance"))
+        console.print(StatusLine("Iterations", str(iterations)))
+        console.print(StatusLine("Warmup", f"{warmup_iterations} iterations"))
+        console.print()
 
         # Warmup - Original DB
-        print("Warming up original database...")
+        console.print(StatusLine("Warmup", "Original database"))
         for i in range(warmup_iterations):
             _execute_query_timed(query, original_db_config, is_readyset=False)
 
         # Warmup - Readyset
-        print("Warming up Readyset...")
+        console.print(StatusLine("Warmup", "Readyset"))
         # Use readyset_db_config if provided (for test container auth), otherwise fall back to original creds
         if readyset_db_config:
             readyset_config = {
-                'engine': engine,
-                'host': readyset_host,
-                'port': readyset_port,
-                'database': readyset_db_config.get('database', original_db_config.get('database')),
-                'user': readyset_db_config.get('user', original_db_config.get('user')),
-                'password': readyset_db_config.get('password', '')
+                "engine": engine,
+                "host": readyset_host,
+                "port": readyset_port,
+                "database": readyset_db_config.get(
+                    "database", original_db_config.get("database")
+                ),
+                "user": readyset_db_config.get("user", original_db_config.get("user")),
+                "password": readyset_db_config.get("password", ""),
             }
         else:
             readyset_config = {
-                'engine': engine,
-                'host': readyset_host,
-                'port': readyset_port,
-                'database': original_db_config.get('database'),
-                'user': original_db_config.get('user'),
-                'password': original_db_config.get('password', '')
+                "engine": engine,
+                "host": readyset_host,
+                "port": readyset_port,
+                "database": original_db_config.get("database"),
+                "user": original_db_config.get("user"),
+                "password": original_db_config.get("password", ""),
             }
         for i in range(warmup_iterations):
             _execute_query_timed(query, readyset_config, is_readyset=True)
 
-        print()
-        print("Running benchmarks...")
+        console.print()
+        console.print(SectionHeader("Running Benchmarks"))
 
         # Benchmark Original DB
-        print(f"Testing original database ({original_db_config.get('host')}:{original_db_config.get('port')})...")
+        console.print(
+            StatusLine(
+                "Original",
+                f"{original_db_config.get('host')}:{original_db_config.get('port')}",
+            )
+        )
         original_times = []
         for i in range(iterations):
             result = _execute_query_timed(query, original_db_config, is_readyset=False)
-            if result['success']:
-                original_times.append(result['execution_time_ms'])
-                print(f"  Run {i+1}/{iterations}: {result['execution_time_ms']:.2f}ms")
+            if result["success"]:
+                original_times.append(result["execution_time_ms"])
+                console.print(
+                    StatusLine(
+                        f"Run {i + 1}/{iterations}",
+                        f"{result['execution_time_ms']:.2f}ms",
+                    )
+                )
             else:
-                print(f"  Run {i+1}/{iterations}: FAILED - {result.get('error')}")
+                console.print(
+                    StatusLine(
+                        f"Run {i + 1}/{iterations}",
+                        f"FAILED - {result.get('error')}",
+                        style=StyleTokens.ERROR,
+                    )
+                )
 
         if not original_times:
-            return {
-                "success": False,
-                "error": "All original database queries failed"
-            }
+            return {"success": False, "error": "All original database queries failed"}
 
-        print()
+        console.print()
 
         # Benchmark Readyset
-        print(f"Testing Readyset ({readyset_host}:{readyset_port})...")
+        console.print(StatusLine("Readyset", f"{readyset_host}:{readyset_port}"))
         readyset_times = []
         for i in range(iterations):
             result = _execute_query_timed(query, readyset_config, is_readyset=True)
-            if result['success']:
-                readyset_times.append(result['execution_time_ms'])
-                print(f"  Run {i+1}/{iterations}: {result['execution_time_ms']:.2f}ms")
+            if result["success"]:
+                readyset_times.append(result["execution_time_ms"])
+                console.print(
+                    StatusLine(
+                        f"Run {i + 1}/{iterations}",
+                        f"{result['execution_time_ms']:.2f}ms",
+                    )
+                )
             else:
-                print(f"  Run {i+1}/{iterations}: FAILED - {result.get('error')}")
+                console.print(
+                    StatusLine(
+                        f"Run {i + 1}/{iterations}",
+                        f"FAILED - {result.get('error')}",
+                        style=StyleTokens.ERROR,
+                    )
+                )
 
         if not readyset_times:
-            return {
-                "success": False,
-                "error": "All Readyset queries failed"
-            }
+            return {"success": False, "error": "All Readyset queries failed"}
 
         # Calculate statistics
         original_stats = _calculate_statistics(original_times)
         readyset_stats = _calculate_statistics(readyset_times)
 
         # Calculate speedup
-        speedup = original_stats['mean'] / readyset_stats['mean'] if readyset_stats['mean'] > 0 else 0
-        speedup_median = original_stats['median'] / readyset_stats['median'] if readyset_stats['median'] > 0 else 0
+        speedup = (
+            original_stats["mean"] / readyset_stats["mean"]
+            if readyset_stats["mean"] > 0
+            else 0
+        )
+        speedup_median = (
+            original_stats["median"] / readyset_stats["median"]
+            if readyset_stats["median"] > 0
+            else 0
+        )
 
         return {
             "success": True,
             "query": query,
             "iterations": iterations,
             "original": {
-                "host": original_db_config.get('host'),
-                "port": original_db_config.get('port'),
+                "host": original_db_config.get("host"),
+                "port": original_db_config.get("port"),
                 "stats": original_stats,
-                "times": original_times
+                "times": original_times,
             },
             "readyset": {
                 "host": readyset_host,
                 "port": readyset_port,
                 "stats": readyset_stats,
-                "times": readyset_times
+                "times": readyset_times,
             },
             "speedup": {
                 "mean": speedup,
                 "median": speedup_median,
-                "improvement_pct": ((speedup - 1) * 100) if speedup >= 1 else -((1 - speedup) * 100)
+                "improvement_pct": ((speedup - 1) * 100)
+                if speedup >= 1
+                else -((1 - speedup) * 100),
             },
-            "winner": "readyset" if speedup > 1 else "original"
+            "winner": "readyset" if speedup > 1 else "original",
         }
 
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Performance comparison failed: {str(e)}"
-        }
+        return {"success": False, "error": f"Performance comparison failed: {str(e)}"}
 
 
 def _execute_query_timed(
-    query: str,
-    db_config: Dict[str, Any],
-    is_readyset: bool = False
+    query: str, db_config: Dict[str, Any], is_readyset: bool = False
 ) -> Dict[str, Any]:
     """
     Execute a query and measure its execution time.
@@ -187,23 +227,24 @@ def _execute_query_timed(
         Dict with success, execution_time_ms, and optional error
     """
     try:
-        engine = (db_config.get('engine') or 'postgresql').lower()
-        host = db_config.get('host', 'localhost')
-        port = db_config.get('port')
-        database = db_config.get('database')
-        user = db_config.get('user')
-        password = db_config.get('password', '')
+        engine = (db_config.get("engine") or "postgresql").lower()
+        host = str(db_config.get("host") or "localhost")
+        default_port = 3306 if engine == "mysql" else 5432
+        port = int(db_config.get("port") or default_port)
+        database = str(db_config.get("database") or "")
+        user = str(db_config.get("user") or "")
+        password = db_config.get("password", "")
 
         start_time = time.perf_counter()
 
-        if engine == 'mysql':
+        if engine == "mysql":
             result = _execute_mysql_query(
                 query=query,
                 host=host,
                 port=port,
                 user=user,
                 database=database,
-                password=password
+                password=password,
             )
         else:
             result = _execute_postgres_query(
@@ -212,7 +253,7 @@ def _execute_query_timed(
                 port=port,
                 user=user,
                 database=database,
-                password=password
+                password=password,
             )
 
         end_time = time.perf_counter()
@@ -221,84 +262,71 @@ def _execute_query_timed(
         if result.returncode != 0:
             return {
                 "success": False,
-                "error": result.stderr.strip() if result.stderr else "Query execution failed",
-                "execution_time_ms": execution_time_ms
+                "error": result.stderr.strip()
+                if result.stderr
+                else "Query execution failed",
+                "execution_time_ms": execution_time_ms,
             }
 
         return {
             "success": True,
             "execution_time_ms": execution_time_ms,
-            "rows": result.stdout.count('\n') if result.stdout else 0
+            "rows": result.stdout.count("\n") if result.stdout else 0,
         }
 
     except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "error": "Query execution timed out"
-        }
+        return {"success": False, "error": "Query execution timed out"}
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Query execution failed: {str(e)}"
-        }
+        return {"success": False, "error": f"Query execution failed: {str(e)}"}
 
 
 def _execute_postgres_query(
-    query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute query using psycopg2 library or psql client as fallback."""
     # Try psycopg2 first
     try:
         import psycopg2
+
         return _execute_postgres_query_psycopg2(
             query=query,
             host=host,
             port=port,
             user=user,
             database=database,
-            password=password
+            password=password,
         )
     except ImportError:
         # Fall back to psql CLI if psycopg2 not available
         pass
 
     psql_cmd = [
-        'psql',
-        '-h', host,
-        '-p', str(port),
-        '-U', user,
-        '-d', database,
-        '-c', query,
-        '-t',  # Tuples only
-        '-A',  # Unaligned
-        '-q'   # Quiet
+        "psql",
+        "-h",
+        host,
+        "-p",
+        str(port),
+        "-U",
+        user,
+        "-d",
+        database,
+        "-c",
+        query,
+        "-t",  # Tuples only
+        "-A",  # Unaligned
+        "-q",  # Quiet
     ]
 
     import os
-    env = os.environ.copy()
-    env['PGPASSWORD'] = password if password else ''
 
-    return subprocess.run(
-        psql_cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30
-    )
+    env = os.environ.copy()
+    env["PGPASSWORD"] = password if password else ""
+
+    return subprocess.run(psql_cmd, capture_output=True, text=True, env=env, timeout=30)
 
 
 def _execute_postgres_query_psycopg2(
-    query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute query using psycopg2 library."""
     import psycopg2
@@ -317,7 +345,7 @@ def _execute_postgres_query_psycopg2(
             user=user,
             password=password,
             database=database,
-            connect_timeout=30
+            connect_timeout=30,
         )
 
         try:
@@ -328,31 +356,22 @@ def _execute_postgres_query_psycopg2(
                 # Format output similar to psql CLI (pipe-separated rows)
                 output_lines = []
                 for row in result:
-                    output_lines.append('|'.join(str(val) if val is not None else '' for val in row))
+                    output_lines.append(
+                        "|".join(str(val) if val is not None else "" for val in row)
+                    )
 
                 return CompletedProcess(
-                    returncode=0,
-                    stdout='\n'.join(output_lines),
-                    stderr=''
+                    returncode=0, stdout="\n".join(output_lines), stderr=""
                 )
         finally:
             connection.close()
 
     except Exception as e:
-        return CompletedProcess(
-            returncode=1,
-            stdout='',
-            stderr=str(e)
-        )
+        return CompletedProcess(returncode=1, stdout="", stderr=str(e))
 
 
 def _execute_mysql_query(
-    query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute query using mysql client or pymysql as fallback."""
     # Ensure TCP is used even if host is "localhost"
@@ -363,52 +382,46 @@ def _execute_mysql_query(
     # Try pymysql first (works with Readyset's mysql_native_password auth)
     try:
         import pymysql
+
         return _execute_mysql_query_pymysql(
             query=query,
             host=normalized_host,
             port=port,
             user=user,
             database=database,
-            password=password
+            password=password,
         )
     except ImportError:
         # Fall back to mysql CLI if pymysql not available
         pass
 
     mysql_cmd = [
-        'mysql',
-        '--protocol=TCP',
-        f'--host={normalized_host}',
-        f'--port={port}',
-        f'--user={user}',
-        f'--database={database}',
-        '--batch',
-        '--skip-column-names',
-        '--raw',
-        '--execute', query
+        "mysql",
+        "--protocol=TCP",
+        f"--host={normalized_host}",
+        f"--port={port}",
+        f"--user={user}",
+        f"--database={database}",
+        "--batch",
+        "--skip-column-names",
+        "--raw",
+        "--execute",
+        query,
     ]
 
     import os
+
     env = os.environ.copy()
     if password:
-        env['MYSQL_PWD'] = password
+        env["MYSQL_PWD"] = password
 
     return subprocess.run(
-        mysql_cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30
+        mysql_cmd, capture_output=True, text=True, env=env, timeout=30
     )
 
 
 def _execute_mysql_query_pymysql(
-    query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute query using PyMySQL library (handles mysql_native_password)."""
     import pymysql
@@ -428,7 +441,7 @@ def _execute_mysql_query_pymysql(
             user=user,
             password=password,
             database=database,
-            connect_timeout=30
+            connect_timeout=30,
         )
 
         try:
@@ -439,22 +452,20 @@ def _execute_mysql_query_pymysql(
                 # Format output similar to mysql CLI (tab-separated rows)
                 output_lines = []
                 for row in result:
-                    output_lines.append('\t'.join(str(val) if val is not None else 'NULL' for val in row))
+                    output_lines.append(
+                        "\t".join(
+                            str(val) if val is not None else "NULL" for val in row
+                        )
+                    )
 
                 return CompletedProcess(
-                    returncode=0,
-                    stdout='\n'.join(output_lines),
-                    stderr=''
+                    returncode=0, stdout="\n".join(output_lines), stderr=""
                 )
         finally:
             connection.close()
 
     except Exception as e:
-        return CompletedProcess(
-            returncode=1,
-            stdout='',
-            stderr=str(e)
-        )
+        return CompletedProcess(returncode=1, stdout="", stderr=str(e))
 
 
 def _calculate_statistics(times: List[float]) -> Dict[str, float]:
@@ -468,7 +479,7 @@ def _calculate_statistics(times: List[float]) -> Dict[str, float]:
             "stddev": 0,
             "p50": 0,
             "p95": 0,
-            "p99": 0
+            "p99": 0,
         }
 
     sorted_times = sorted(times)
@@ -481,7 +492,7 @@ def _calculate_statistics(times: List[float]) -> Dict[str, float]:
         "stddev": statistics.stdev(times) if len(times) > 1 else 0,
         "p50": _percentile(sorted_times, 50),
         "p95": _percentile(sorted_times, 95),
-        "p99": _percentile(sorted_times, 99)
+        "p99": _percentile(sorted_times, 99),
     }
 
 
@@ -513,67 +524,111 @@ def format_performance_comparison(result: Dict[str, Any]) -> str:
     Returns:
         Formatted string with performance comparison
     """
-    if not result.get('success'):
+    if not result.get("success"):
         return f"Performance comparison failed: {result.get('error')}"
 
-    lines = []
-    lines.append("=" * 60)
-    lines.append("Performance Comparison Results")
-    lines.append("=" * 60)
-    lines.append("")
+    console = get_console()
+    with console.capture() as capture:
+        console.print(SectionHeader("PERFORMANCE COMPARISON", icon=Icons.CHART))
+        console.print()
 
-    # Original DB stats
-    orig = result['original']
-    lines.append(f"Original Database ({orig['host']}:{orig['port']})")
-    lines.append("-" * 60)
-    lines.append(f"  Mean:     {orig['stats']['mean']:>8.2f} ms")
-    lines.append(f"  Median:   {orig['stats']['median']:>8.2f} ms")
-    lines.append(f"  Min:      {orig['stats']['min']:>8.2f} ms")
-    lines.append(f"  Max:      {orig['stats']['max']:>8.2f} ms")
-    lines.append(f"  Std Dev:  {orig['stats']['stddev']:>8.2f} ms")
-    lines.append(f"  P95:      {orig['stats']['p95']:>8.2f} ms")
-    lines.append(f"  P99:      {orig['stats']['p99']:>8.2f} ms")
-    lines.append("")
+        # Original DB stats
+        orig = result["original"]
+        console.print(
+            f"Original Database ({orig['host']}:{orig['port']})",
+            style=StyleTokens.HEADER,
+        )
+        console.print(Rule(style=StyleTokens.MUTED))
+        console.print(
+            "  ",
+            StatusLine("Mean", f"{orig['stats']['mean']:>8.2f} ms"),
+            "  ",
+            StatusLine("Median", f"{orig['stats']['median']:>8.2f} ms"),
+        )
+        console.print(
+            "  ",
+            StatusLine("Min", f"{orig['stats']['min']:>8.2f} ms"),
+            "   ",
+            StatusLine("Max", f"{orig['stats']['max']:>8.2f} ms"),
+        )
+        console.print(
+            "  ",
+            StatusLine("P95", f"{orig['stats']['p95']:>8.2f} ms"),
+            "   ",
+            StatusLine("P99", f"{orig['stats']['p99']:>8.2f} ms"),
+        )
+        console.print()
 
-    # Readyset stats
-    rs = result['readyset']
-    lines.append(f"Readyset Cache ({rs['host']}:{rs['port']})")
-    lines.append("-" * 60)
-    lines.append(f"  Mean:     {rs['stats']['mean']:>8.2f} ms")
-    lines.append(f"  Median:   {rs['stats']['median']:>8.2f} ms")
-    lines.append(f"  Min:      {rs['stats']['min']:>8.2f} ms")
-    lines.append(f"  Max:      {rs['stats']['max']:>8.2f} ms")
-    lines.append(f"  Std Dev:  {rs['stats']['stddev']:>8.2f} ms")
-    lines.append(f"  P95:      {rs['stats']['p95']:>8.2f} ms")
-    lines.append(f"  P99:      {rs['stats']['p99']:>8.2f} ms")
-    lines.append("")
+        # Readyset stats
+        rs = result["readyset"]
+        console.print(
+            f"Readyset Cache ({rs['host']}:{rs['port']})", style=StyleTokens.HEADER
+        )
+        console.print(Rule(style=StyleTokens.MUTED))
+        console.print(
+            "  ",
+            StatusLine(
+                "Mean",
+                f"{rs['stats']['mean']:>8.2f} ms",
+                style=duration_style(rs["stats"]["mean"]),
+            ),
+            "  ",
+            StatusLine("Median", f"{rs['stats']['median']:>8.2f} ms"),
+        )
+        console.print(
+            "  ",
+            StatusLine("Min", f"{rs['stats']['min']:>8.2f} ms"),
+            "   ",
+            StatusLine("Max", f"{rs['stats']['max']:>8.2f} ms"),
+        )
+        console.print(
+            "  ",
+            StatusLine("P95", f"{rs['stats']['p95']:>8.2f} ms"),
+            "   ",
+            StatusLine("P99", f"{rs['stats']['p99']:>8.2f} ms"),
+        )
+        console.print()
 
-    # Speedup
-    speedup = result['speedup']
-    lines.append("Performance Improvement")
-    lines.append("-" * 60)
+        # Speedup
+        speedup = result["speedup"]
+        console.print("Performance Improvement", style=StyleTokens.HEADER)
+        console.print(Rule(style=StyleTokens.MUTED))
 
-    if speedup['mean'] > 1:
-        lines.append(f"  ✓ Readyset is {speedup['mean']:.2f}x faster (mean)")
-        lines.append(f"  ✓ {speedup['improvement_pct']:.1f}% improvement")
-    elif speedup['mean'] < 1:
-        lines.append(f"  ✗ Readyset is {(1/speedup['mean']):.2f}x slower (mean)")
-        lines.append(f"  ✗ {abs(speedup['improvement_pct']):.1f}% slower")
-    else:
-        lines.append(f"  = Performance is roughly equal")
+        if speedup["mean"] > 1:
+            console.print(
+                f"  {Icons.SUCCESS} Readyset is [{StyleTokens.SUCCESS}]{speedup['mean']:.2f}x faster[/{StyleTokens.SUCCESS}] (mean)"
+            )
+            console.print(
+                f"  {Icons.SUCCESS} [{StyleTokens.SUCCESS}]{speedup['improvement_pct']:.1f}% improvement[/{StyleTokens.SUCCESS}]"
+            )
+        elif speedup["mean"] < 1:
+            console.print(
+                f"  {Icons.ERROR} Readyset is [{StyleTokens.ERROR}]{(1 / speedup['mean']):.2f}x slower[/{StyleTokens.ERROR}] (mean)"
+            )
+            console.print(
+                f"  {Icons.ERROR} [{StyleTokens.ERROR}]{abs(speedup['improvement_pct']):.1f}% slower[/{StyleTokens.ERROR}]"
+            )
+        else:
+            console.print(f"  {Icons.INFO} Performance is roughly equal")
 
-    lines.append(f"  Median speedup: {speedup['median']:.2f}x")
-    lines.append("")
+        console.print(f"  Median speedup: {speedup['median']:.2f}x")
+        console.print()
 
-    # Summary
-    winner = result['winner']
-    if winner == 'readyset':
-        lines.append("🎉 Readyset cache provides better performance!")
-    else:
-        lines.append("⚠️  Original database is faster for this query")
-        lines.append("   Consider query optimization or check if cache is warmed up")
+        # Summary
+        winner = result["winner"]
+        if winner == "readyset":
+            console.print(
+                f"{Icons.ROCKET} [{StyleTokens.SUCCESS}]Readyset cache provides better performance![/{StyleTokens.SUCCESS}]"
+            )
+        else:
+            console.print(
+                f"{Icons.WARNING} [{StyleTokens.WARNING}]Original database is faster for this query[/{StyleTokens.WARNING}]"
+            )
+            console.print(
+                f"   [{StyleTokens.MUTED}]Consider query optimization or check if cache is warmed up[/{StyleTokens.MUTED}]"
+            )
 
-    lines.append("")
-    lines.append("=" * 60)
+        console.print()
+        console.print(Rule(style=StyleTokens.MUTED))
 
-    return "\n".join(lines)
+    return capture.get()

@@ -25,7 +25,7 @@ test_query_add() {
     "${RDST_CMD[@]}" query add test-movie-query \
     --query "$test_query" \
     --target "$TARGET_NAME"
-  assert_contains "✓ Query added" "query add should succeed"
+  assert_contains "Query added" "query add should succeed"
   assert_regex "test-movie" "query add should show query name"
 
   # Verify the query is in the registry
@@ -52,7 +52,7 @@ SQL
     "${RDST_CMD[@]}" query add test-from-file \
     --file "$query_file" \
     --target "$TARGET_NAME"
-  assert_contains "✓ Query added" "query add from file should succeed"
+  assert_contains "Query added" "query add from file should succeed"
   assert_regex "test-from" "query add should show file-based query name"
 }
 
@@ -144,7 +144,7 @@ test_query_delete_with_hash() {
     "${RDST_CMD[@]}" query add test-hash-delete \
     --query "SELECT * FROM title_basics WHERE startYear = 2021 LIMIT 5" \
     --target "$TARGET_NAME"
-  assert_contains "✓ Query added" "query add should succeed"
+  assert_contains "Query added" "query add should succeed"
 
   # Get the hash
   local query_hash
@@ -235,13 +235,13 @@ test_query_run() {
     "${RDST_CMD[@]}" query add run-test-1 \
     --query "SELECT 1 AS a" \
     --target "$TARGET_NAME"
-  assert_contains "✓ Query added" "query add should succeed"
+  assert_contains "Query added" "query add should succeed"
 
   run_cmd "Add second query for run test" \
     "${RDST_CMD[@]}" query add run-test-2 \
     --query "SELECT 1 AS b" \
     --target "$TARGET_NAME"
-  assert_contains "✓ Query added" "second query add should succeed"
+  assert_contains "Query added" "second query add should succeed"
 
   # Test 1: Singleton mode (run once)
   run_cmd "Run query once (singleton mode)" \
@@ -253,12 +253,12 @@ test_query_run() {
   run_cmd "Run query with count limit" \
     "${RDST_CMD[@]}" query run run-test-1 --count 5
   assert_contains "Completed 5 executions" "should complete exactly 5 executions"
-  assert_regex "QPS:" "should show queries per second"
+  assert_regex "QPS" "should show queries per second"
 
   # Test 3: Duration-limited execution (short duration)
   run_cmd "Run query with duration limit" \
     "${RDST_CMD[@]}" query run run-test-1 --duration 1
-  assert_regex "Duration: [0-9]" "should show duration"
+  assert_regex "Duration.*[0-9]" "should show duration"
   # Should complete at least 1 execution
   assert_regex "Completed [0-9]+ executions" "should complete some executions"
 
@@ -307,7 +307,7 @@ test_query_integration_with_analyze() {
     "${RDST_CMD[@]}" query add integration-test \
     --query "$integration_query" \
     --target "$TARGET_NAME"
-  assert_contains "✓ Query added" "query add should succeed"
+  assert_contains "Query added" "query add should succeed"
 
   # Analyze using the name
   run_cmd "Analyze query by name" \

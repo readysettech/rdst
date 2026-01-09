@@ -6,16 +6,23 @@ import os
 
 from .rdst_cli import RdstResult, TargetsConfig
 from .configuration_wizard import ConfigurationWizard
+
 # Use DataManager for connectivity checks
 from lib.data_manager.data_manager import DataManager, ConnectionConfig
 from lib.data_manager_service import DMSDbType, DataManagerQueryType
 
-try:
-    from rich.console import Console
-    _RICH_AVAILABLE = True
-except Exception:  # pragma: no cover
-    Console = None  # type: ignore
-    _RICH_AVAILABLE = False
+# Import UI system - handles Rich availability internally
+from lib.ui import (
+    get_console,
+    StyleTokens,
+    Prompt,
+    Confirm,
+    SelectPrompt,
+    MessagePanel,
+    NextSteps,
+    StatusLine,
+    Text,
+)
 
 
 @dataclass
@@ -37,13 +44,16 @@ class InitCommand:
     - Save configuration to ~/.rdst/config.toml (TargetsConfig)
     """
 
-    def __init__(self, console: Optional[Console] = None, cli=None):
-        self.console = console if console and _RICH_AVAILABLE else (Console() if _RICH_AVAILABLE else None)
-        self._has_rich = _RICH_AVAILABLE and self.console is not None
-        self.cli = cli  # Optional RdstCLI instance for invoking other commands (e.g., top)
+    def __init__(self, console=None, cli=None):
+        self.console = console or get_console()
+        self.cli = (
+            cli  # Optional RdstCLI instance for invoking other commands (e.g., top)
+        )
 
     # ---- Public API ----
-    def run(self, force: bool = False, interactive: Optional[bool] = None) -> RdstResult:
+    def run(
+        self, force: bool = False, interactive: Optional[bool] = None
+    ) -> RdstResult:
         """Run the init flow.
 
         Args:
@@ -69,17 +79,36 @@ class InitCommand:
             wizard = ConfigurationWizard(console=self.console)
             list_res = wizard.configure_targets("list", cfg)
             found = len(cfg.list_targets())
-            msg = list_res.message or f"Found {found} configured target(s). Use --force to re-run setup."
-            self._print("Init", "Existing configuration detected. Use --force to re-run setup.")
-            return RdstResult(True, msg, data={"targets": cfg.list_targets(), "default": cfg.get_default(), "init_completed": True})
+            msg = (
+                list_res.message
+                or f"Found {found} configured target(s). Use --force to re-run setup."
+            )
+            self._print(
+                "Init", "Existing configuration detected. Use --force to re-run setup."
+            )
+            return RdstResult(
+                True,
+                msg,
+                data={
+                    "targets": cfg.list_targets(),
+                    "default": cfg.get_default(),
+                    "init_completed": True,
+                },
+            )
 
         if not interactive:
             # Check if this is the first-time setup or a forced re-run
             has_existing_config = bool(cfg.list_targets())
             if has_existing_config and force:
-                return RdstResult(False, "Interactive mode is required when using --force. Run: rdst init --interactive --force")
+                return RdstResult(
+                    False,
+                    "Interactive mode is required when using --force. Run: rdst init --interactive --force",
+                )
             else:
-                return RdstResult(False, "Interactive mode is required for first-time setup. Run: rdst init --interactive")
+                return RdstResult(
+                    False,
+                    "Interactive mode is required for first-time setup. Run: rdst init --interactive",
+                )
 
         # Welcome
         self._welcome()
@@ -128,7 +157,7 @@ class InitCommand:
 
         # Final summary
         self._success_summary(cfg, test_results)
-        return RdstResult(True, f"Setup complete. Try running: rdst top")
+        return RdstResult(True, "Setup complete. Try running: rdst top")
 
     # ---- Steps ----
     def _step_targets_first_run(self, cfg: TargetsConfig) -> bool:
@@ -158,11 +187,17 @@ class InitCommand:
             options = [
                 "Set default from existing targets",
                 "Add another target",
-                "Done configuring targets"
+                "Done configuring targets",
             ]
-            choice = self._select("Targets setup options", options, default_idx=0 if not has_default else 2)
+            choice = self._select(
+                "Targets setup options",
+                options,
+                default_idx=0 if not has_default else 2,
+            )
             if choice == options[0]:
-                selection = self._select("Select default target", targets, default_idx=0)
+                selection = self._select(
+                    "Select default target", targets, default_idx=0
+                )
                 if selection:
                     cfg.set_default(selection)
                     cfg.save()
@@ -207,9 +242,13 @@ class InitCommand:
                 pass
             results.append(TargetTestResult(name=name, ok=ok, message=msg))
             status = "success" if ok else "failed"
-            color_style = "green" if ok else "red"
-            self._print("Result", f"Target {name}: {status}{' - ' + msg if msg else ''}", style=color_style)
-        
+            color_style = StyleTokens.SUCCESS if ok else StyleTokens.ERROR
+            self._print(
+                "Result",
+                f"Target {name}: {status}{' - ' + msg if msg else ''}",
+                style=color_style,
+            )
+
             # Update the target configuration with verification results
             cfg.upsert(name, target_config)
 
@@ -220,11 +259,13 @@ class InitCommand:
         llm = (cfg._data or {}).get("llm", {})
         if llm.get("provider") == "claude":
             import os
+
             has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
             if has_api_key:
                 try:
                     from lib.llm_manager.llm_manager import LLMManager
+
                     llm_mgr = LLMManager(defaults={"max_tokens": 8, "temperature": 0.0})
 
                     self._print("Anthropic", "Testing API connection...")
@@ -238,20 +279,29 @@ class InitCommand:
                     model = llm.get("model", "claude-sonnet-4-20250514")
                     self._print("Anthropic", f"Configured and reachable ({model})")
                 except Exception as e:
-                    self._print("Anthropic", f"Connection test failed: {e}", style="red")
+                    self._print(
+                        "Anthropic",
+                        f"Connection test failed: {e}",
+                        style=StyleTokens.ERROR,
+                    )
             else:
                 # API key not set - remind user
-                self._print("Anthropic", "ANTHROPIC_API_KEY not set", style="yellow")
-                self._print("", "")
-                self._print("Setup Required", "Set your Anthropic API key:", style="yellow")
-                self._print("", "  export ANTHROPIC_API_KEY=\"sk-ant-...\"", style="yellow")
-                self._print("", "")
-                self._print("", "Get an API key at: https://console.anthropic.com/", style="yellow")
+                self.console.print(
+                    MessagePanel(
+                        "ANTHROPIC_API_KEY not set\n\n"
+                        'Set: export ANTHROPIC_API_KEY="sk-ant-..."',
+                        variant="warning",
+                        title="Anthropic Setup Required",
+                        hint="Get an API key at: https://console.anthropic.com/",
+                    )
+                )
         else:
             self._print("Anthropic", "Not configured (run 'rdst configure llm')")
         return results
 
-    def _maybe_run_top(self, cfg: TargetsConfig, results: List[TargetTestResult]) -> None:
+    def _maybe_run_top(
+        self, cfg: TargetsConfig, results: List[TargetTestResult]
+    ) -> None:
         default_name = cfg.get_default()
         if not default_name:
             return
@@ -268,8 +318,10 @@ class InitCommand:
                 pass
 
         # ---- Summary ----
-        
-    def _success_summary(self, cfg: TargetsConfig, results: List[TargetTestResult]) -> None:
+
+    def _success_summary(
+        self, cfg: TargetsConfig, results: List[TargetTestResult]
+    ) -> None:
         try:
             default_name = cfg.get_default()
         except Exception:
@@ -277,7 +329,10 @@ class InitCommand:
         total = len(results) if results else 0
         oks = [r for r in (results or []) if r.ok]
         fails = [r for r in (results or []) if not r.ok]
-        self._print("Summary", f"Validated {total} target(s): {len(oks)} ok, {len(fails)} failed")
+        self._print(
+            "Summary",
+            f"Validated {total} target(s): {len(oks)} ok, {len(fails)} failed",
+        )
         if default_name:
             self._print("Default", f"{default_name}")
         if fails:
@@ -285,54 +340,74 @@ class InitCommand:
                 msg = f"{r.name}: {r.message}" if r.message else r.name
                 self._print("Failed", msg)
 
-        # Breadcrumb: show next steps with colors
-        # Colors: rdst=white, subcommand=green, values/quoted=blue, descriptions=dim
-        self._print("", "")
-        if self._has_rich:
-            self.console.print("[cyan]Next Steps:[/cyan]")
-            # Check if ANTHROPIC_API_KEY is set
-            import os
-            has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-            if not has_api_key:
-                self.console.print("  [yellow]export[/yellow] ANTHROPIC_API_KEY=[blue]\"sk-ant-...\"[/blue]  [dim]Required for AI analysis[/dim]")
-            if default_name:
-                self.console.print(f"  rdst [green]top[/green] --target [blue]{default_name}[/blue]              [dim]Monitor slow queries[/dim]")
-                self.console.print(f"  rdst [green]analyze[/green] -q [blue]\"SELECT ...\"[/blue] --target [blue]{default_name}[/blue]   [dim]Analyze a query[/dim]")
-                self.console.print(f"  rdst [green]schema init[/green] --target [blue]{default_name}[/blue]      [dim]Set up semantic layer for natural language queries[/dim]")
-            else:
-                self.console.print("  rdst [green]top[/green]                    [dim]Monitor slow queries[/dim]")
-                self.console.print("  rdst [green]analyze[/green] -q [blue]\"SELECT ...\"[/blue]   [dim]Analyze a query[/dim]")
+        # Breadcrumb: show next steps using NextSteps component
+        has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        steps = []
+        if not has_api_key:
+            steps.append(
+                (
+                    f'[{StyleTokens.WARNING}]export[/{StyleTokens.WARNING}] ANTHROPIC_API_KEY=[{StyleTokens.ACCENT}]"sk-ant-..."[/{StyleTokens.ACCENT}]',
+                    "Required for AI analysis",
+                )
+            )
+        if default_name:
+            steps.extend(
+                [
+                    (
+                        f"rdst [{StyleTokens.SUCCESS}]top[/{StyleTokens.SUCCESS}] --target [{StyleTokens.ACCENT}]{default_name}[/{StyleTokens.ACCENT}]",
+                        "Monitor slow queries",
+                    ),
+                    (
+                        f'rdst [{StyleTokens.SUCCESS}]analyze[/{StyleTokens.SUCCESS}] -q [{StyleTokens.ACCENT}]"SELECT ..."[/{StyleTokens.ACCENT}] --target [{StyleTokens.ACCENT}]{default_name}[/{StyleTokens.ACCENT}]',
+                        "Analyze a query",
+                    ),
+                    (
+                        f"rdst [{StyleTokens.SUCCESS}]schema init[/{StyleTokens.SUCCESS}] --target [{StyleTokens.ACCENT}]{default_name}[/{StyleTokens.ACCENT}]",
+                        "Set up semantic layer",
+                    ),
+                ]
+            )
         else:
-            self._print("Next Steps", "")
-            if default_name:
-                self._print("", f"  rdst top --target {default_name}              Monitor slow queries")
-                self._print("", f"  rdst analyze -q \"SELECT ...\" --target {default_name}   Analyze a query")
-                self._print("", f"  rdst schema init --target {default_name}      Set up semantic layer for natural language queries")
-            else:
-                self._print("", "  rdst top                    Monitor slow queries")
-                self._print("", "  rdst analyze -q \"SELECT ...\"   Analyze a query")
-        self._print("", "")
+            steps.extend(
+                [
+                    (
+                        f"rdst [{StyleTokens.SUCCESS}]top[/{StyleTokens.SUCCESS}]",
+                        "Monitor slow queries",
+                    ),
+                    (
+                        f'rdst [{StyleTokens.SUCCESS}]analyze[/{StyleTokens.SUCCESS}] -q [{StyleTokens.ACCENT}]"SELECT ..."[/{StyleTokens.ACCENT}]',
+                        "Analyze a query",
+                    ),
+                ]
+            )
+        self.console.print(NextSteps(steps))
 
     def _make_logger(self):
         class _Logger:
             def __init__(self, printer):
                 self._p = printer
+
             def debug(self, msg, *args, **kwargs):
                 # Keep quiet - don't show debug messages
                 pass
+
             def info(self, msg, *args, **kwargs):
                 # Keep quiet during connection testing - we show our own result
                 pass
+
             def warning(self, msg, *args, **kwargs):
                 # Keep quiet - S3 sync and other warnings aren't relevant for RDST
                 pass
+
             def error(self, msg, *args, **kwargs):
                 # Keep quiet - we handle errors gracefully and show our own message
                 pass
+
         # Provide a quiet logger that suppresses DataManager's verbose output
         return _Logger(lambda title, message: None)
 
         # ---- Connectivity ----
+
     def _test_target(self, target: Dict[str, Any]) -> (bool, str):
         """Use DataManager to validate connectivity and report detailed failure reasons.
         Records the verification result with the target for later use.
@@ -386,9 +461,10 @@ class InitCommand:
             # Explicitly connect to record attempt and get error details
             ok = dm.connect(DataManagerQueryType.UPSTREAM)
             state = dm.get_connection_state(DataManagerQueryType.UPSTREAM)
-            
+
             # Record the verification result in the target
             import datetime
+
             verification_result = {
                 "attempted": state.get("attempted", False),
                 "success": state.get("success", False),
@@ -397,16 +473,16 @@ class InitCommand:
                 "engine": engine,
                 "host": host,
                 "port": port,
-                "database": database
+                "database": database,
             }
             target["verification"] = verification_result
-        
+
             # Clean up connection
             try:
                 dm.disconnect(DataManagerQueryType.UPSTREAM)
             except Exception:
                 pass
-            
+
             if ok and state.get("success"):
                 return True, "Connected"
             # Prefer detailed error if present, but clean it up
@@ -415,6 +491,7 @@ class InitCommand:
         except Exception as e:
             # Record the exception in the target as well
             import datetime
+
             verification_result = {
                 "attempted": True,
                 "success": False,
@@ -423,7 +500,7 @@ class InitCommand:
                 "engine": engine,
                 "host": host,
                 "port": port,
-                "database": database
+                "database": database,
             }
             target["verification"] = verification_result
             return False, self._clean_error_message(str(e))
@@ -444,7 +521,10 @@ class InitCommand:
             return "Access denied (check credentials)"
 
         # Host not found
-        if "could not translate host name" in err.lower() or "Name or service not known" in err:
+        if (
+            "could not translate host name" in err.lower()
+            or "Name or service not known" in err
+        ):
             return "Host not found"
 
         # Timeout
@@ -471,70 +551,48 @@ class InitCommand:
 
     # ---- Utilities ----
     def _welcome(self) -> None:
-        intro_lines = [
-            "Welcome to Readyset Data and SQL Toolkit (rdst).",
-            "",
-            "Let's get you set up in a few steps.",
-        ]
-        self._print_lines(intro_lines)
+        self.console.print(
+            MessagePanel(
+                "Welcome to Readyset Data and SQL Toolkit (rdst).\n\nLet's get you set up in a few steps.",
+                variant="info",
+                title="Welcome",
+            )
+        )
 
     def _print_lines(self, lines: List[str]) -> None:
         for line in lines:
             self._print_raw(line)
 
     def _print(self, title: str, message: str, style: Optional[str] = None) -> None:
-        if self._has_rich and style:
-            self.console.print(f"[{style}]{title}: {message}[/{style}]")
-        elif self._has_rich:
-            self.console.print(f"{title}: {message}")
+        if title:
+            self.console.print(StatusLine(title, message, style=style))
+            return
+
+        if style:
+            self.console.print(Text(message, style=style))
         else:
-            print(f"{title}: {message}")
+            self.console.print(message)
 
     def _print_raw(self, message: str) -> None:
-        if self._has_rich:
-            self.console.print(message)
-        else:
-            print(message)
+        self.console.print(message)
 
     def _prompt(self, label: str, default: Optional[str] = None) -> str:
-        if self._has_rich:
-            from rich.prompt import Prompt
-            return Prompt.ask(label, default=default, show_default=bool(default))
-        prompt = label
-        if default:
-            prompt += f" [{default}]"
-        prompt += ": "
-        resp = input(prompt).strip()
-        return resp or (default or "")
+        return Prompt.ask(label, default=default or "", show_default=bool(default))
 
     def _confirm(self, question: str, default: bool = True) -> bool:
-        if self._has_rich:
-            from rich.prompt import Confirm
-            return Confirm.ask(question, default=default)
-        suffix = " [Y/n]" if default else " [y/N]"
-        resp = input(f"{question}{suffix}: ").strip().lower()
-        return resp in ("y", "yes") if resp else default
+        return Confirm.ask(question, default=default)
 
-    def _select(self, prompt: str, choices: List[str], default_idx: int = 0) -> Optional[str]:
-        # Very simple selector
-        if self._has_rich:
-            # Render a numbered list and ask for index
-            items = "\n".join([f"  [{i+1}] {c}" for i, c in enumerate(choices)])
-            self._print_raw(prompt)
-            self._print_raw(items)
-            idx_s = self._prompt("Select option", default=str(default_idx + 1))
-        else:
-            print(prompt)
-            for i, c in enumerate(choices, start=1):
-                print(f"  [{i}] {c}")
-            idx_s = self._prompt("Select option", default=str(default_idx + 1))
-        try:
-            idx = int(idx_s) - 1
-        except Exception:
-            idx = default_idx
-        if idx < 0 or idx >= len(choices):
-            idx = default_idx
-        return choices[idx]
+    def _select(
+        self, prompt_text: str, choices: List[str], default_idx: int = 0
+    ) -> Optional[str]:
+        # Use SelectPrompt component for numbered selection
+        result = SelectPrompt.ask(
+            prompt_text,
+            options=choices,
+            default=default_idx + 1,  # SelectPrompt uses 1-based indexing
+            return_index=False,  # Return the actual choice string
+        )
+        return result
 
     def _llm_section_exists(self, cfg: TargetsConfig) -> bool:
         return bool((getattr(cfg, "_data", {}) or {}).get("llm"))
@@ -542,6 +600,7 @@ class InitCommand:
     def _is_tty(self) -> bool:
         try:
             import sys
+
             return sys.stdin.isatty()
         except Exception:
             return False

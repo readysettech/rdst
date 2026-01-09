@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 # Import module directly to avoid package __init__.py issues
 def _import_module_directly(module_name, file_path):
     spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -19,12 +20,19 @@ def _import_module_directly(module_name, file_path):
     spec.loader.exec_module(module)
     return module
 
+
 _lib_path = Path(__file__).parent.parent.parent / "lib"
 
 # Import modules
-schema_collector = _import_module_directly("schema_collector", _lib_path / "functions" / "schema_collector.py")
-readyset_cacheability = _import_module_directly("readyset_cacheability", _lib_path / "functions" / "readyset_cacheability.py")
-performance_comparison = _import_module_directly("performance_comparison", _lib_path / "functions" / "performance_comparison.py")
+schema_collector = _import_module_directly(
+    "schema_collector", _lib_path / "functions" / "schema_collector.py"
+)
+readyset_cacheability = _import_module_directly(
+    "readyset_cacheability", _lib_path / "functions" / "readyset_cacheability.py"
+)
+performance_comparison = _import_module_directly(
+    "performance_comparison", _lib_path / "functions" / "performance_comparison.py"
+)
 
 # Functions to test
 collect_target_schema = schema_collector.collect_target_schema
@@ -107,22 +115,22 @@ class TestCollectTargetSchema:
         """Test error when target_config is missing."""
         result = collect_target_schema("SELECT * FROM users", target="test")
         assert result["success"] is False
-        assert "not available" in result["schema_info"].lower() or "no target_config" in result.get("error", "").lower()
+        assert (
+            "not available" in result["schema_info"].lower()
+            or "no target_config" in result.get("error", "").lower()
+        )
 
     def test_invalid_string_target_config(self):
         """Test error when target_config is invalid string."""
         result = collect_target_schema(
-            "SELECT * FROM users",
-            target="test",
-            target_config="invalid json"
+            "SELECT * FROM users", target="test", target_config="invalid json"
         )
         assert result["success"] is False
 
     def test_unsupported_engine(self):
         """Test unsupported database engine."""
         result = collect_schema_for_query(
-            "SELECT * FROM users",
-            {"engine": "oracle", "host": "localhost"}
+            "SELECT * FROM users", {"engine": "oracle", "host": "localhost"}
         )
         assert "Unsupported" in result
 
@@ -388,17 +396,15 @@ class TestCompareQueryPerformance:
     def test_missing_query(self):
         """Test error when query is missing."""
         result = compare_query_performance(
-            query=None,
-            original_db_config={"host": "localhost"}
+            query=None, original_db_config={"host": "localhost"}
         )
         assert result["success"] is False
-        assert "No query" in result["error"]
+        assert "Query" in result["error"] and "required" in result["error"]
 
     def test_missing_db_config(self):
         """Test error when db config is missing."""
         result = compare_query_performance(
-            query="SELECT * FROM users",
-            original_db_config=None
+            query="SELECT * FROM users", original_db_config=None
         )
         assert result["success"] is False
         assert "configuration" in result["error"].lower()
@@ -427,8 +433,8 @@ class TestFormatPerformanceComparison:
                     "max": 120.0,
                     "stddev": 10.0,
                     "p95": 115.0,
-                    "p99": 118.0
-                }
+                    "p99": 118.0,
+                },
             },
             "readyset": {
                 "host": "localhost",
@@ -440,20 +446,16 @@ class TestFormatPerformanceComparison:
                     "max": 12.0,
                     "stddev": 1.0,
                     "p95": 11.5,
-                    "p99": 11.8
-                }
+                    "p99": 11.8,
+                },
             },
-            "speedup": {
-                "mean": 10.0,
-                "median": 10.0,
-                "improvement_pct": 900.0
-            },
-            "winner": "readyset"
+            "speedup": {"mean": 10.0, "median": 10.0, "improvement_pct": 900.0},
+            "winner": "readyset",
         }
 
         formatted = format_performance_comparison(result)
 
-        assert "Performance Comparison" in formatted
+        assert "PERFORMANCE COMPARISON" in formatted
         assert "Readyset" in formatted
         assert "10.0x faster" in formatted or "10.00x faster" in formatted
 
@@ -471,8 +473,8 @@ class TestFormatPerformanceComparison:
                     "max": 12.0,
                     "stddev": 1.0,
                     "p95": 11.5,
-                    "p99": 11.8
-                }
+                    "p99": 11.8,
+                },
             },
             "readyset": {
                 "host": "localhost",
@@ -484,15 +486,11 @@ class TestFormatPerformanceComparison:
                     "max": 120.0,
                     "stddev": 10.0,
                     "p95": 115.0,
-                    "p99": 118.0
-                }
+                    "p99": 118.0,
+                },
             },
-            "speedup": {
-                "mean": 0.1,
-                "median": 0.1,
-                "improvement_pct": -900.0
-            },
-            "winner": "original"
+            "speedup": {"mean": 0.1, "median": 0.1, "improvement_pct": -900.0},
+            "winner": "original",
         }
 
         formatted = format_performance_comparison(result)

@@ -17,7 +17,7 @@ LIMIT 25"
     --query "$inline_query" \
     --save-as "$PRIMARY_TAG"
   assert_contains "RDST Query Analysis" "analysis header"
-  assert_contains "Query:" "analysis query section"
+  assert_contains "─ Query ─" "analysis query section"
   assert_contains "NEXT STEPS" "analysis footer"
   assert_not_contains "ERROR:" "analysis inline should not error"
 

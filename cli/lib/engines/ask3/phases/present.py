@@ -16,13 +16,13 @@ if TYPE_CHECKING:
 
 from ..types import Status
 
+# Import UI system for consistent styling
+from lib.ui import StyleTokens, Prompt, QueryPanel, NextSteps
+
 logger = logging.getLogger(__name__)
 
 
-def present_results(
-    ctx: 'Ask3Context',
-    presenter: 'Ask3Presenter'
-) -> 'Ask3Context':
+def present_results(ctx: "Ask3Context", presenter: "Ask3Presenter") -> "Ask3Context":
     """
     Present query results to the user.
 
@@ -33,7 +33,7 @@ def present_results(
     Returns:
         Updated context (status finalized)
     """
-    ctx.phase = 'present'
+    ctx.phase = "present"
 
     # Check if we have results
     if not ctx.execution_result:
@@ -50,7 +50,7 @@ def present_results(
         columns=ctx.execution_result.columns,
         rows=ctx.execution_result.rows,
         time_ms=ctx.execution_result.execution_time_ms,
-        truncated=ctx.execution_result.truncated
+        truncated=ctx.execution_result.truncated,
     )
 
     # Finalize success status if not already set
@@ -60,7 +60,7 @@ def present_results(
     return ctx
 
 
-def summarize_session(ctx: 'Ask3Context', presenter: 'Ask3Presenter') -> None:
+def summarize_session(ctx: "Ask3Context", presenter: "Ask3Presenter") -> None:
     """
     Display a summary of the session.
 
@@ -72,7 +72,7 @@ def summarize_session(ctx: 'Ask3Context', presenter: 'Ask3Presenter') -> None:
     if not ctx.verbose:
         return
 
-    presenter.info(f"\nSession Summary:")
+    presenter.info("\nSession Summary:")
     presenter.info(f"  Status: {ctx.status}")
     presenter.info(f"  LLM Calls: {len(ctx.llm_calls)}")
     presenter.info(f"  Total Tokens: {ctx.total_tokens}")
@@ -86,7 +86,7 @@ def summarize_session(ctx: 'Ask3Context', presenter: 'Ask3Presenter') -> None:
         presenter.info(f"  Retries: {ctx.retry_count}")
 
 
-def prompt_save_query(ctx: 'Ask3Context', presenter: 'Ask3Presenter') -> None:
+def prompt_save_query(ctx: "Ask3Context", presenter: "Ask3Presenter") -> None:
     """
     Prompt user to save the query to the registry for later analysis.
 
@@ -122,20 +122,23 @@ def prompt_save_query(ctx: 'Ask3Context', presenter: 'Ask3Presenter') -> None:
             existing_name = existing.tag if existing.tag else None
             presenter._print("")
             if existing_name:
-                presenter._print(f"[cyan]Query already in registry as '{existing_name}' (hash: {query_hash[:8]})[/cyan]"
-                               if presenter.use_rich else f"Query already in registry as '{existing_name}' (hash: {query_hash[:8]})")
+                presenter._print(
+                    f"[{StyleTokens.SECONDARY}]Query already in registry as '{existing_name}' (hash: {query_hash[:8]})[/{StyleTokens.SECONDARY}]"
+                )
             else:
-                presenter._print(f"[cyan]Query already in registry (hash: {query_hash[:8]})[/cyan]"
-                               if presenter.use_rich else f"Query already in registry (hash: {query_hash[:8]})")
+                presenter._print(
+                    f"[{StyleTokens.SECONDARY}]Query already in registry (hash: {query_hash[:8]})[/{StyleTokens.SECONDARY}]"
+                )
 
             # Show next steps with existing name/hash
-            presenter._print("\nNext steps:")
-            if existing_name:
-                presenter._print(f"  - Analyze: rdst analyze --name {existing_name}")
-                presenter._print(f"  - Run again: rdst query run {existing_name}")
-            else:
-                presenter._print(f"  - Analyze: rdst analyze --hash {query_hash[:8]}")
-                presenter._print(f"  - Run again: rdst query run {query_hash[:8]}")
+            name_ref = existing_name or query_hash[:8]
+            steps = NextSteps(
+                [
+                    (f"rdst analyze --name {name_ref}", "Analyze query"),
+                    (f"rdst query run {name_ref}", "Run again"),
+                ]
+            )
+            presenter._console.print(steps)
             return
 
         # New query - generate auto-name and prompt
@@ -143,47 +146,44 @@ def prompt_save_query(ctx: 'Ask3Context', presenter: 'Ask3Presenter') -> None:
         existing_names = {e.tag for e in registry.list_queries() if e.tag}
         auto_name = generate_query_name(ctx.question, existing_names)
 
-        # Display the query that will be saved
+        # Display the query that will be saved using QueryPanel
         presenter._print("")
-        if presenter.use_rich:
-            try:
-                from rich.syntax import Syntax
-                from rich.panel import Panel
-                import sqlparse
-                formatted_sql = sqlparse.format(ctx.sql, reindent=True, keyword_case='upper', wrap_after=80)
-                syntax = Syntax(formatted_sql, "sql", theme="monokai", line_numbers=False)
-                presenter._console.print(Panel(syntax, title="Query to save", border_style="green"))
-            except ImportError:
-                presenter._print("[bold]Query to save:[/bold]")
-                presenter._print(f"  {ctx.sql}")
-        else:
-            presenter._print("Query to save:")
-            presenter._print(f"  {ctx.sql}")
+        presenter._console.print(
+            QueryPanel(ctx.sql, title="Query to save", border_style=StyleTokens.SUCCESS)
+        )
         presenter._print("")
-        response = input(f"Save as '{auto_name}'? [Y/n/rename]: ").strip().lower()
 
-        if response in ('n', 'no'):
+        response = (
+            Prompt.ask(f"Save as '{auto_name}'? [Y/n/rename]", default="y")
+            .strip()
+            .lower()
+        )
+
+        if response in ("n", "no"):
             return
 
-        if response in ('r', 'rename'):
-            custom_name = input("Enter name: ").strip()
+        if response in ("r", "rename"):
+            custom_name = Prompt.ask("Enter name", default="").strip()
             if custom_name:
                 auto_name = custom_name
 
         # Save the query
         _, _ = registry.add_query(
-            sql=ctx.sql,
-            tag=auto_name,
-            source="ask",
-            target=ctx.target
+            sql=ctx.sql, tag=auto_name, source="ask", target=ctx.target
         )
 
-        presenter._print(f"\n[green]Query saved as '{auto_name}' (hash: {query_hash[:8]})[/green]"
-                       if presenter.use_rich else f"\nQuery saved as '{auto_name}' (hash: {query_hash[:8]})")
+        presenter._print(
+            f"\n[{StyleTokens.SUCCESS}]Query saved as {auto_name!r} (hash: {query_hash[:8]})[/{StyleTokens.SUCCESS}]"
+        )
 
-        presenter._print("\nNext steps:")
-        presenter._print(f"  - Analyze: rdst analyze --name {auto_name}")
-        presenter._print(f"  - Run again: rdst query run {auto_name}")
+        # Show next steps
+        steps = NextSteps(
+            [
+                (f"rdst analyze --name {auto_name}", "Analyze query"),
+                (f"rdst query run {auto_name}", "Run again"),
+            ]
+        )
+        presenter._console.print(steps)
 
     except KeyboardInterrupt:
         presenter._print("\nSkipped saving.")

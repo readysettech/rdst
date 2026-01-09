@@ -11,19 +11,16 @@ Provides a consistent UX for asking clarification questions:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
-try:
-    from rich.console import Console
-    from rich.prompt import Prompt
-    _RICH_AVAILABLE = True
-except ImportError:
-    _RICH_AVAILABLE = False
+# Import UI system - handles Rich availability internally
+from lib.ui import SectionHeader, SelectionTable, StyleTokens, get_console, Prompt
 
 
 @dataclass
 class ClarificationOption:
     """A single option for a clarification question."""
+
     text: str
     likelihood: float = 0.5
 
@@ -39,18 +36,14 @@ class ClarificationPrompt:
     - Sample hints when "Other" is selected
     """
 
-    def __init__(self, console: Optional[Console] = None, use_rich: bool = True):
+    def __init__(self, console=None):
         """
         Initialize the clarification prompt.
 
         Args:
-            console: Rich Console instance (optional, creates one if needed)
-            use_rich: Whether to use Rich formatting
+            console: Console instance (optional, creates one if needed)
         """
-        self.use_rich = use_rich and _RICH_AVAILABLE
-        self._console = console if self.use_rich else None
-        if self.use_rich and self._console is None:
-            self._console = Console()
+        self._console = console or get_console()
 
     def ask(
         self,
@@ -58,7 +51,7 @@ class ClarificationPrompt:
         options: List[ClarificationOption],
         category: str = "",
         term: str = "",
-        allow_custom: bool = True
+        allow_custom: bool = True,
     ) -> str:
         """
         Ask a clarification question with consistent UX.
@@ -107,12 +100,12 @@ class ClarificationPrompt:
         import re
 
         # Pattern: [1] or (1) or 1. or 1)
-        pattern = r'\s*[\[\(]?[1]\s*[\]\)]?\s*'
+        pattern = r"\s*[\[\(]?[1]\s*[\]\)]?\s*"
         match = re.search(pattern, question)
 
         if match:
             # Return text before the options
-            return question[:match.start()].strip()
+            return question[: match.start()].strip()
 
         return question.strip()
 
@@ -132,50 +125,37 @@ class ClarificationPrompt:
         return max_idx
 
     def _display_question(self, question: str) -> None:
-        """Display the question."""
-        if self.use_rich and self._console:
-            self._console.print(f"\n[bold]{question}[/bold]\n")
-        else:
-            print(f"\n{question}\n")
+        self._console.print(SectionHeader(question))
 
     def _display_options(
-        self,
-        options: List[ClarificationOption],
-        allow_custom: bool
+        self, options: List[ClarificationOption], allow_custom: bool
     ) -> None:
-        """Display numbered options with likelihood styling."""
-        for i, opt in enumerate(options, 1):
-            if self.use_rich and self._console:
-                style = self._get_likelihood_style(opt.likelihood)
-                if style:
-                    self._console.print(f"  [{style}][{i}] {opt.text}[/{style}]")
-                else:
-                    self._console.print(f"  [{i}] {opt.text}")
+        option_texts: List[str] = []
+        for opt in options:
+            label = self._get_likelihood_label(opt.likelihood)
+            style = self._get_likelihood_style(opt.likelihood)
+            if style:
+                option_texts.append(f"{opt.text} [{style}][{label}][/{style}]")
             else:
-                label = self._get_likelihood_label(opt.likelihood)
-                print(f"  [{i}] {opt.text} [{label}]")
+                option_texts.append(f"{opt.text} [{label}]")
 
-        # Add "Other" option
         if allow_custom:
-            other_idx = len(options) + 1
-            if self.use_rich and self._console:
-                self._console.print(f"  [dim][{other_idx}] Other (enter custom value)[/dim]")
-            else:
-                print(f"  [{other_idx}] Other (enter custom value)")
+            option_texts.append("Other (enter custom value)")
 
-        print()  # Blank line after options
+        self._console.print(SelectionTable(option_texts))
+        self._console.print()
 
     def _get_likelihood_style(self, likelihood: float) -> str:
         """Get Rich style based on likelihood threshold."""
         if likelihood >= 0.7:
-            return "bold cyan"  # High confidence
+            return StyleTokens.SUCCESS
         elif likelihood >= 0.3:
-            return ""  # Normal (medium)
+            return StyleTokens.WARNING
         else:
-            return "dim"  # Low confidence
+            return StyleTokens.MUTED
 
     def _get_likelihood_label(self, likelihood: float) -> str:
-        """Get text label for likelihood (plain text fallback)."""
+        """Get text label for likelihood."""
         if likelihood >= 0.7:
             return "High"
         elif likelihood >= 0.3:
@@ -185,51 +165,42 @@ class ClarificationPrompt:
 
     def _prompt_choice(self, min_val: int, max_val: int, default: int) -> int:
         """Prompt user for a choice in range."""
-        prompt_text = f"Your choice [{min_val}-{max_val}] (default: {default})"
+        prompt_text = f"Your choice [{min_val}-{max_val}]"
 
         while True:
             try:
-                if self.use_rich and self._console:
-                    response = Prompt.ask(prompt_text, default=str(default))
-                else:
-                    response = input(f"{prompt_text}: ").strip()
-                    if not response:
-                        response = str(default)
-
+                response = Prompt.ask(prompt_text, default=str(default))
                 choice = int(response)
                 if min_val <= choice <= max_val:
                     return choice
 
-                self._print_error(f"Please enter a number between {min_val} and {max_val}")
+                self._console.print(
+                    f"[{StyleTokens.ERROR}]Please enter a number between {min_val} and {max_val}[/{StyleTokens.ERROR}]"
+                )
             except ValueError:
-                self._print_error("Please enter a valid number")
+                self._console.print(
+                    f"[{StyleTokens.ERROR}]Please enter a valid number[/{StyleTokens.ERROR}]"
+                )
 
     def _prompt_custom_input(self, category: str, term: str) -> str:
         """Prompt for custom input with sample hints."""
         hints = self._get_sample_hints(category, term)
 
-        if self.use_rich and self._console:
-            self._console.print(f"\n[dim]Examples: {hints}[/dim]")
-            return Prompt.ask("Enter your clarification")
-        else:
-            print(f"\nExamples: {hints}")
-            return input("Enter your clarification: ").strip()
+        self._console.print(
+            f"\n[{StyleTokens.MUTED}]Examples: {hints}[/{StyleTokens.MUTED}]"
+        )
+        return Prompt.ask("Enter your clarification")
 
     def _get_sample_hints(self, category: str, term: str) -> str:
         """Get context-aware sample hints for custom input."""
         hints_by_category = {
-            'unclear_value_reference': f'"{term} > 5000", "{term} >= 1000", "top 100 by {term}"',
-            'unclear_schema_reference': f'"use {term} table", "join with {term}", "{term} column"',
-            'missing_sql_keywords': '"count only", "list all", "show top 10", "group by category"',
-            'temporal_spatial_ambiguity': '"last 30 days", "this year", "all time", "since 2020"',
-            'unclear_knowledge_source': f'"{term} means X", "define {term} as Y"',
-            'insufficient_reasoning_context': '"include inactive", "exclude deleted", "only verified"',
+            "unclear_value_reference": f'"{term} > 5000", "{term} >= 1000", "top 100 by {term}"',
+            "unclear_schema_reference": f'"use {term} table", "join with {term}", "{term} column"',
+            "missing_sql_keywords": '"count only", "list all", "show top 10", "group by category"',
+            "temporal_spatial_ambiguity": '"last 30 days", "this year", "all time", "since 2020"',
+            "unclear_knowledge_source": f'"{term} means X", "define {term} as Y"',
+            "insufficient_reasoning_context": '"include inactive", "exclude deleted", "only verified"',
         }
-        return hints_by_category.get(category, f'"{term} = specific_value", "custom criteria"')
-
-    def _print_error(self, message: str) -> None:
-        """Print an error message."""
-        if self.use_rich and self._console:
-            self._console.print(f"[red]{message}[/red]")
-        else:
-            print(message)
+        return hints_by_category.get(
+            category, f'"{term} = specific_value", "custom criteria"'
+        )

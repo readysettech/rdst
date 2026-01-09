@@ -84,10 +84,9 @@ class TestAsk3Engine:
 
     def test_factory_function(self):
         """Test create_engine factory."""
-        engine = create_engine(verbose=True, use_rich=False)
+        engine = create_engine(verbose=True)
 
         assert engine.presenter.verbose is True
-        assert engine.presenter.use_rich is False
 
     def test_is_schema_error(self):
         """Test schema error detection."""
