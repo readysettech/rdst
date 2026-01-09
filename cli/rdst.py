@@ -437,6 +437,13 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
         else:
             # Show general help
             return cli.help()
+    elif command == 'slack':
+        from lib.cli.slack_command import SlackCommand
+        slack_cmd = SlackCommand()
+        return slack_cmd.execute(
+            subcommand=getattr(args, 'subcommand', 'list'),
+            agent=getattr(args, 'agent', None),
+        )
     else:
         return RdstResult(False, f"Unknown command: {command}")
 

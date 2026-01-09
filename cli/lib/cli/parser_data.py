@@ -785,6 +785,36 @@ provide optimization recommendations.""",
         args=[],
         examples=[("rdst version", "Show version")],
     ),
+    "slack": CommandDef(
+        name="slack",
+        short_help="Deploy a Slack bot for database queries",
+        description="""Deploy a Slack bot that answers database questions in natural language.
+
+The bot uses Socket Mode (no public URL needed) and connects to your configured
+database targets. Users can @mention the bot or DM it to ask questions.""",
+        args=[
+            ArgDef(
+                "subcommand",
+                nargs="?",
+                default="list",
+                choices=["setup", "start", "list", "status"],
+                help="Subcommand: setup, start, list, status",
+            ),
+            ArgDef("--agent", short="-a", help="Agent name (for start/status)"),
+        ],
+        subcommands=[
+            ("setup", "Interactive setup wizard"),
+            ("start", "Start the bot"),
+            ("list", "List configured agents"),
+            ("status", "Show agent status"),
+        ],
+        examples=[
+            ("rdst slack setup", "Interactive setup wizard"),
+            ("rdst slack start --agent sales-bot", "Start the bot"),
+            ("rdst slack list", "List configured agents"),
+            ("rdst slack status --agent sales-bot", "Show agent status"),
+        ],
+    ),
 }
 
 COMMAND_ORDER = [
@@ -795,6 +825,7 @@ COMMAND_ORDER = [
     "init",
     "query",
     "schema",
+    "slack",
     "report",
     "help",
     "claude",
