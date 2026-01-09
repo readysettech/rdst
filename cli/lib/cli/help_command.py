@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 """
-RDST How Do I - Quick documentation lookup using Haiku.
+RDST Help - Quick documentation lookup using Haiku.
 
 Usage:
-    rdst howdoi "how do I analyze a query?"
-    rdst howdoi "what's the difference between top and analyze?"
+    rdst help "how do I analyze a query?"
+    rdst help "what's the difference between top and analyze?"
 """
 
 from dataclasses import dataclass
@@ -335,15 +335,15 @@ rdst configure default --target prod
 
 
 @dataclass
-class HowDoIResult:
-    """Result from howdoi command."""
+class HelpResult:
+    """Result from help command."""
     success: bool
     answer: str
     error: Optional[str] = None
 
 
-class HowDoICommand:
-    """Implements `rdst howdoi` quick docs lookup."""
+class HelpCommand:
+    """Implements `rdst help` quick docs lookup."""
 
     def __init__(self):
         self.console = Console() if RICH_AVAILABLE else None
@@ -357,7 +357,7 @@ class HowDoICommand:
         else:
             print(text)
 
-    def run(self, question: str) -> HowDoIResult:
+    def run(self, question: str) -> HelpResult:
         """
         Answer a question about RDST using embedded docs and Haiku.
 
@@ -365,17 +365,17 @@ class HowDoICommand:
             question: Natural language question like "how do I analyze a query?"
 
         Returns:
-            HowDoIResult with the answer
+            HelpResult with the answer
         """
         # Check for API key first
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
-            return HowDoIResult(
+            return HelpResult(
                 success=False,
                 answer="",
                 error="""No Anthropic API key found.
 
-To use 'rdst howdoi', you need to set up your API key:
+To use 'rdst help "question"', you need to set up your API key:
 
 1. Get an API key from https://console.anthropic.com/
 2. Export it:
@@ -445,12 +445,12 @@ Include command examples when relevant. If the question isn't covered in the doc
 
             # Response format: {"text": "...", "usage": {...}, "provider": "...", "model": "..."}
             if response.get("text"):
-                return HowDoIResult(
+                return HelpResult(
                     success=True,
                     answer=response["text"].strip()
                 )
             else:
-                return HowDoIResult(
+                return HelpResult(
                     success=False,
                     answer="",
                     error=response.get("error") or "Failed to get response from LLM"
@@ -460,7 +460,7 @@ Include command examples when relevant. If the question isn't covered in the doc
             # Fallback: simple keyword search if LLM fails
             return self._fallback_search(question, str(e))
 
-    def _fallback_search(self, question: str, error: str) -> HowDoIResult:
+    def _fallback_search(self, question: str, error: str) -> HelpResult:
         """Fallback when LLM is unavailable - basic keyword matching."""
         question_lower = question.lower()
 
@@ -605,7 +605,7 @@ Try:
 
 (LLM unavailable: {error})"""
 
-        return HowDoIResult(
+        return HelpResult(
             success=True,
             answer=answer
         )

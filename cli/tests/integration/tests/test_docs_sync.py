@@ -2,7 +2,7 @@
 """
 Documentation Sync Check
 
-Verifies that the howdoi embedded docs match the CLI commands.
+Verifies that the embedded help docs match the CLI commands.
 This test should run in CI to catch documentation drift early.
 
 Exit codes:
@@ -15,11 +15,10 @@ import re
 import sys
 import os
 
-# Commands that are intentionally NOT documented in howdoi
+# Commands that are intentionally NOT documented in the help docs
 # These are either internal, meta commands, or subcommands
 DOCS_EXCLUDED_COMMANDS = {
-    "help",      # Meta command
-    "howdoi",    # Self-referential - the howdoi command itself
+    "help",      # Meta command (also handles questions via rdst help "question")
     "version",   # Simple utility command
     "claude",    # MCP registration - specialized
     "run",       # Internal command for running arbitrary SQL
@@ -81,18 +80,18 @@ def get_cli_commands():
 
 
 def get_documented_commands():
-    """Get commands documented in RDST_DOCS from howdoi_command.py."""
+    """Get commands documented in RDST_DOCS from the help command module."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    howdoi_path = os.path.join(script_dir, "..", "..", "..", "lib", "cli", "howdoi_command.py")
+    help_docs_path = os.path.join(script_dir, "..", "..", "..", "lib", "cli", "help_command.py")
 
     try:
-        with open(howdoi_path, "r") as f:
+        with open(help_docs_path, "r") as f:
             content = f.read()
 
         # Extract RDST_DOCS string
         docs_match = re.search(r'RDST_DOCS\s*=\s*"""(.+?)"""', content, re.DOTALL)
         if not docs_match:
-            print("Could not find RDST_DOCS in howdoi_command.py", file=sys.stderr)
+            print("Could not find RDST_DOCS in help_command.py", file=sys.stderr)
             return set()
 
         docs = docs_match.group(1)
@@ -139,7 +138,7 @@ def check_sync():
         if cmd in DOCS_EXCLUDED_COMMANDS:
             continue
         if cmd not in doc_commands and cmd not in DOCS_ALIASES:
-            errors.append(f"CLI command '{cmd}' is missing from howdoi docs (RDST_DOCS)")
+            errors.append(f"CLI command '{cmd}' is missing from help docs (RDST_DOCS)")
 
     # Check for documented commands that don't exist in CLI
     # (This catches stale documentation)
@@ -157,7 +156,7 @@ def check_sync():
             print(f"  - {error}")
         print()
         print("To fix:")
-        print("  - Add missing commands to RDST_DOCS in lib/cli/howdoi_command.py")
+        print("  - Add missing commands to RDST_DOCS in lib/cli/help_command.py")
         print("  - Or add command to DOCS_EXCLUDED_COMMANDS if intentionally excluded")
         print("  - Or remove stale documentation for removed commands")
         return False

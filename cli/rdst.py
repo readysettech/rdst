@@ -54,7 +54,7 @@ def print_rich_help():
         ("query", "Manage saved queries (add/list/delete)"),
         ("schema", "Manage semantic layer for your database"),
         ("report", "Submit feedback or bug reports"),
-        ("howdoi", "Quick documentation lookup"),
+        ("help", "Show help or ask a question (rdst help \"...\")"),
         ("claude", "Register RDST with Claude Code (MCP)"),
         ("version", "Show version information"),
     ]
@@ -73,7 +73,7 @@ def print_rich_help():
         ("rdst top --target mydb", "Monitor slow queries"),
         ("rdst analyze -q \"SELECT * FROM users\" --target mydb", "Analyze a query"),
         ("rdst analyze -q \"SELECT ...\" --readyset-cache", "Test Readyset caching"),
-        ("rdst howdoi \"how do I find slow queries?\"", "Quick docs lookup"),
+        ("rdst help \"how do I find slow queries?\"", "Quick docs lookup"),
     ]
 
     for cmd, desc in examples:
@@ -115,7 +115,7 @@ def _show_first_run_message():
         console.print("  2. Use [cyan]rdst top[/cyan] to see slow queries in real-time")
         console.print("  3. Use [cyan]rdst analyze -q \"SELECT ...\"[/cyan] to analyze specific queries")
         console.print()
-        console.print("[dim]For more help: [cyan]rdst howdoi \"How do I get started with RDST?\"[/cyan][/dim]")
+        console.print("[dim]For more help: [cyan]rdst help \"How do I get started with RDST?\"[/cyan][/dim]")
         console.print()
     else:
         print()
@@ -128,7 +128,7 @@ def _show_first_run_message():
         print("  2. Use 'rdst top' to see slow queries in real-time")
         print("  3. Use 'rdst analyze -q \"SELECT ...\"' to analyze specific queries")
         print()
-        print("For more help: rdst howdoi \"How do I get started with RDST?\"")
+        print("For more help: rdst help \"How do I get started with RDST?\"")
         print()
 
     # Create marker file to prevent showing again
@@ -543,23 +543,21 @@ Examples:
     report_parser.add_argument('--include-query', action='store_true', help='Include raw SQL in feedback')
     report_parser.add_argument('--include-plan', action='store_true', help='Include execution plan in feedback')
 
-    # help command
-    subparsers.add_parser('help', help='Show help')
+    # help command - shows help, or answers questions if a question is provided
+    help_parser = subparsers.add_parser('help', help='Show help or ask a question',
+        description='''Show help or get quick answers about how to use RDST.
 
-    # howdoi command - quick docs lookup
-    howdoi_parser = subparsers.add_parser('howdoi', help='Ask a question about RDST usage',
-        description='''Get quick answers about how to use RDST.
-
-Uses built-in documentation to answer common questions about commands,
-configuration, and workflows.
+Without arguments: shows general help and available commands.
+With a question: uses built-in documentation to answer your question.
 
 Examples:
-  rdst howdoi "analyze a query"
-  rdst howdoi "find slow queries"
-  rdst howdoi "configure database"
-  rdst howdoi "test readyset caching"''',
+  rdst help                           # Show general help
+  rdst help "analyze a query"         # Ask a question
+  rdst help "find slow queries"       # Ask a question
+  rdst help "configure database"      # Ask a question
+  rdst help "test readyset caching"   # Ask a question''',
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    howdoi_parser.add_argument('question', nargs='*', help='Your question in quotes (e.g., "how do I analyze a query?")')
+    help_parser.add_argument('question', nargs='*', help='Your question in quotes (e.g., "how do I analyze a query?")')
 
     return parser.parse_args()
 
@@ -844,20 +842,22 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             include_plan=getattr(args, 'include_plan', False),
         )
         return RdstResult(success, "")
-    elif command == 'howdoi':
-        from lib.cli.howdoi_command import HowDoICommand
-        howdoi_cmd = HowDoICommand()
-        question = ' '.join(args.question) if args.question else ''
-        if not question:
-            return RdstResult(False, "Please provide a question. Example: rdst howdoi \"how do I analyze a query?\"")
-        result = howdoi_cmd.run(question)
-        if result.success:
-            howdoi_cmd.print_formatted(result.answer)
-            return RdstResult(True, "")
-        else:
-            return RdstResult(False, result.error or "Failed to answer question")
     elif command == 'help' or command is None:
-        return cli.help()
+        # Check if a question was provided
+        question = ' '.join(getattr(args, 'question', []) or [])
+        if question:
+            # Answer the question using the help command
+            from lib.cli.help_command import HelpCommand
+            help_cmd = HelpCommand()
+            result = help_cmd.run(question)
+            if result.success:
+                help_cmd.print_formatted(result.answer)
+                return RdstResult(True, "")
+            else:
+                return RdstResult(False, result.error or "Failed to answer question")
+        else:
+            # Show general help
+            return cli.help()
     else:
         return RdstResult(False, f"Unknown command: {command}")
 

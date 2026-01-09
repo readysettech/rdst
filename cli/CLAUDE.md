@@ -42,7 +42,7 @@ rdst/
 │   │   ├── analyze_command.py   # Main analyze logic (~2400 lines)
 │   │   ├── top.py          # Top slow queries command
 │   │   ├── configuration_wizard.py  # Target setup wizard
-│   │   ├── howdoi_command.py    # Documentation lookup
+│   │   ├── help_command.py      # Help/documentation lookup (rdst help "question")
 │   │   └── query_command.py     # Query registry management
 │   ├── functions/          # Core business logic
 │   │   ├── llm_analysis.py      # LLM prompts & analysis (~950 lines)
@@ -69,7 +69,7 @@ rdst/
 | `rdst schema show` | View/manage semantic layer |
 | `rdst query list` | View saved queries |
 | `rdst query run <names>` | Benchmark/load test queries |
-| `rdst howdoi "question"` | Documentation lookup |
+| `rdst help "question"` | Documentation lookup |
 | `rdst claude add` | Register MCP server with Claude Code |
 
 ## Configuration
@@ -98,7 +98,7 @@ python3 rdst.py --help
 
 1. **Add CLI command** in `rdst.py` (argparse) and `lib/cli/rdst_cli.py` (method)
 2. **Add tests** - look at existing patterns in `test/`
-3. **Update howdoi docs** if user-facing - see `lib/cli/howdoi_command.py`
+3. **Update help docs** if user-facing - see `lib/cli/help_command.py` (RDST_DOCS constant)
 4. **Update MCP tools** if should be exposed to Claude - see `mcp_server.py`
 
 ### Code Patterns
