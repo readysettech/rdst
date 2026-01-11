@@ -2,12 +2,17 @@
 Phase 1.5: Schema Filtering
 
 Filters the full schema to only include tables relevant to the user's question.
-Uses a tiered approach:
-1. Terminology matching (semantic layer terms)
-2. Heuristic table + column name matching
-2.3. Negative clause detection ("never asked", "without comments")
-2.5. FK relationship expansion (bidirectional)
-3. LLM-based table selection (fallback)
+Uses a semantic-first approach with heuristic augmentation:
+
+1. Semantic concept extraction (Haiku LLM) - understands intent
+2. Terminology matching (semantic layer terms)
+3. Heuristic table + column name matching
+3.3. Negative clause detection ("never asked", "without comments")
+3.5. FK relationship expansion (bidirectional)
+
+The semantic-first approach ensures we don't miss tables that are
+semantically required but not literally mentioned (e.g., "posts" for
+"users who posted about X").
 """
 
 from __future__ import annotations
@@ -70,6 +75,86 @@ JOIN_TABLES = {
 }
 
 
+def _extract_semantic_concepts(
+    question: str,
+    all_tables: List[str],
+    llm_manager,
+    model: str = "claude-3-haiku-20240307"
+) -> Dict[str, Any]:
+    """
+    Use Haiku to identify semantic concepts and required tables.
+
+    This runs FIRST to understand the user's intent before heuristic matching.
+    It catches semantically-related tables that wouldn't match via string matching
+    (e.g., "users who posted about X" -> needs "posts" table).
+
+    Args:
+        question: User's natural language question
+        all_tables: List of available table names
+        llm_manager: LLM client instance
+        model: Model to use (default: Haiku for cost efficiency)
+
+    Returns:
+        {
+            "concepts": ["users", "posts"],
+            "actions": ["posted", "searched"],
+            "suggested_tables": ["users", "posts"],
+            "reasoning": "brief explanation"
+        }
+    """
+    try:
+        table_list = ", ".join(all_tables)
+
+        prompt = f"""Analyze this database question and identify which tables are needed.
+
+Question: "{question}"
+
+Available tables: {table_list}
+
+Think about:
+- What entities are mentioned or implied (e.g., "posted" implies a posts/content table)
+- What actions require which tables (e.g., "asked a question" needs questions/posts)
+- What JOINs would be needed
+
+Return JSON only:
+{{"suggested_tables": ["table1", "table2"], "reasoning": "brief explanation"}}
+
+Rules:
+- Only suggest tables from the available list
+- Be inclusive - suggest all tables that MIGHT be needed
+- Consider implied relationships (e.g., "posted about X" needs posts table)"""
+
+        response = llm_manager.query(
+            system_message="You are a database expert. Return only valid JSON.",
+            user_query=prompt,
+            max_tokens=200,
+            temperature=0.0,
+            model=model,
+            extra={"response_format": {"type": "json_object"}}
+        )
+
+        if not response or 'text' not in response:
+            logger.warning("Semantic extraction returned no response")
+            return {"suggested_tables": [], "reasoning": "LLM returned no response"}
+
+        result = json.loads(response['text'])
+
+        # Validate suggested tables exist
+        suggested = result.get('suggested_tables', [])
+        valid_tables = [t for t in suggested if t in all_tables]
+
+        logger.info(f"Semantic extraction: {valid_tables} (reasoning: {result.get('reasoning', 'none')})")
+
+        return {
+            "suggested_tables": valid_tables,
+            "reasoning": result.get('reasoning', '')
+        }
+
+    except Exception as e:
+        logger.error(f"Semantic extraction failed: {e}")
+        return {"suggested_tables": [], "reasoning": f"Error: {e}"}
+
+
 def filter_schema(
     ctx: 'Ask3Context',
     presenter: 'Ask3Presenter',
@@ -78,16 +163,20 @@ def filter_schema(
     """
     Filter schema to tables relevant to the question.
 
-    Tiered approach:
-    1. Semantic terminology matching (free, instant)
-    2. Heuristic table + column name matching (free, instant)
-    2.5. FK relationship expansion (free, instant)
-    3. LLM table selection (cheap, ~300ms) - only if needed
+    Semantic-first approach with heuristic augmentation:
+    1. Semantic concept extraction (Haiku) - understands intent (~$0.0002)
+    2. Terminology matching (semantic layer terms) - free
+    3. Heuristic table + column name matching - free
+    3.3. Negative clause detection - free
+    3.5. FK relationship expansion - free
+
+    The semantic-first approach ensures we don't miss tables that are
+    semantically required but not literally mentioned.
 
     Args:
         ctx: Ask3Context with schema_info and schema_formatted populated
         presenter: For progress output
-        llm_manager: LLMManager instance (optional, for Tier 3)
+        llm_manager: LLMManager instance (required for semantic extraction)
 
     Returns:
         Updated context with filtered schema_formatted and filtered_tables
@@ -104,44 +193,40 @@ def filter_schema(
     if not all_tables:
         return ctx
 
-    # Tier 1: Terminology matching
+    # Initialize LLM manager for semantic extraction
+    if llm_manager is None:
+        from ....llm_manager import LLMManager
+        llm_manager = LLMManager()
+
+    # Step 1: Semantic concept extraction (Haiku) - runs FIRST
+    semantic_result = _extract_semantic_concepts(ctx.question, all_tables, llm_manager)
+    semantic_tables = set(semantic_result.get('suggested_tables', []))
+    logger.debug(f"Step 1 (semantic): {semantic_tables}")
+
+    # Step 2: Terminology matching (augments semantic results)
     term_tables = _match_via_terminology(ctx.question, ctx.schema_info)
-    logger.debug(f"Tier 1 (terminology): {term_tables}")
+    logger.debug(f"Step 2 (terminology): {term_tables}")
 
-    # Tier 2: Heuristic matching (tables AND columns)
+    # Step 3: Heuristic matching (tables AND columns)
     heuristic_tables = _match_tables_and_columns(ctx.question, ctx.schema_info)
-    logger.debug(f"Tier 2 (heuristic): {heuristic_tables}")
+    logger.debug(f"Step 3 (heuristic): {heuristic_tables}")
 
-    # Tier 2.3: Negative clause detection ("never asked", "without comments")
+    # Step 3.3: Negative clause detection ("never asked", "without comments")
     negative_tables = _detect_negative_clause_tables(ctx.question, ctx.schema_info)
-    logger.debug(f"Tier 2.3 (negative clauses): {negative_tables}")
+    logger.debug(f"Step 3.3 (negative clauses): {negative_tables}")
 
-    # Combine tiers 1, 2, and 2.3
-    candidate_tables = term_tables | heuristic_tables | negative_tables
+    # Combine all sources
+    candidate_tables = semantic_tables | term_tables | heuristic_tables | negative_tables
 
-    # Tier 2.5: FK expansion (bidirectional - always run if we have candidates)
+    # Step 3.5: FK expansion (bidirectional - always run if we have candidates)
     if candidate_tables:
         expanded = _expand_via_fk_relationships(candidate_tables, ctx.schema_info)
-        logger.debug(f"Tier 2.5 (FK expansion): {expanded - candidate_tables} added")
+        logger.debug(f"Step 3.5 (FK expansion): {expanded - candidate_tables} added")
         candidate_tables = expanded
-
-    # Tier 3: LLM selection (always used when heuristics find nothing)
-    if not candidate_tables:
-        logger.info("Tiers 1-2 found no matches, using LLM for table selection")
-        if llm_manager is None:
-            from ....llm_manager import LLMManager
-            llm_manager = LLMManager()
-
-        candidate_tables = _llm_select_tables(
-            ctx.question,
-            all_tables,
-            llm_manager
-        )
-        logger.debug(f"Tier 3 (LLM): {candidate_tables}")
 
     # If still nothing, use full schema
     if not candidate_tables:
-        logger.warning("All tiers failed, using full schema")
+        logger.warning("All methods failed, using full schema")
         candidate_tables = set(all_tables)
 
     final_tables = list(candidate_tables)

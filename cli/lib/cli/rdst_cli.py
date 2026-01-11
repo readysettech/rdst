@@ -880,7 +880,7 @@ class RdstCLI:
         question: Optional[str] = None,
         target: Optional[str] = None,
         dry_run: bool = False,
-        timeout: int = 30,
+        timeout: int = 600,
         verbose: bool = False,
         agent_mode: bool = False,
         **kwargs,
@@ -901,7 +901,7 @@ class RdstCLI:
             question: Natural language question (if None, prompt user interactively)
             target: Target database name (if None, use default)
             dry_run: Generate SQL but don't execute (default: False)
-            timeout: Query timeout in seconds (default: 30)
+            timeout: Query timeout in seconds (default: 600)
             verbose: Show detailed information
             agent_mode: Skip linear flow and go directly to agent exploration
             **kwargs: Additional parameters

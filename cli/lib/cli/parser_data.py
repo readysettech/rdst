@@ -330,7 +330,7 @@ Modes:
             ArgDef(
                 "--dry-run", action="store_true", help="Generate SQL but do not execute"
             ),
-            ArgDef("--timeout", type=int, default=30, help="Query timeout in seconds"),
+            ArgDef("--timeout", type=int, default=600, help="Query timeout in seconds (default: 600)"),
             ArgDef("--verbose", action="store_true", help="Show detailed information"),
             ArgDef(
                 "--agent",
