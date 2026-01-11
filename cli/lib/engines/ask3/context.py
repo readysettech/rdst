@@ -37,10 +37,13 @@ class Ask3Context:
 
     # === Configuration ===
     max_retries: int = 2
-    timeout_seconds: int = 30
+    timeout_seconds: int = 600  # 10 minutes default
     max_rows: int = 100
     verbose: bool = False
     no_interactive: bool = False
+
+    # === Conversation Context (for agent chat mode) ===
+    conversation_context: str = ""
 
     # === Target Config (for database connection) ===
     target_config: Optional[Dict[str, Any]] = None

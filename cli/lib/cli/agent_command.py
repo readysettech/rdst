@@ -271,7 +271,7 @@ Examples:
         manager.delete(name)
         return RdstResult(ok=True, message=f"Deleted agent '{name}'")
 
-    def _chat(self, name: str | None = None, **kwargs) -> RdstResult:
+    def _chat(self, name: str | None = None, timeout: int = 600, **kwargs) -> RdstResult:
         """Interactive chat with an agent."""
         if not name:
             return RdstResult(ok=False, message="Agent name is required. Use --name")
@@ -280,12 +280,17 @@ Examples:
             manager = self._get_manager()
             agent = manager.get(name)
 
-            from ..agent import AgentRuntime
+            # Use CLI timeout (overrides agent's saved config for this session)
+            agent.safety.timeout_seconds = timeout
+
+            from ..agent import AgentRuntime, ConversationSession, ConversationTurn
 
             runtime = AgentRuntime(agent)
+            session = ConversationSession(agent_name=name)
 
-            print(f"\nChat with agent '{name}' (target: {agent.target})")
-            print("Type 'exit' or 'quit' to end, 'help' for commands\n")
+            timeout_display = f"{timeout}s" if timeout < 60 else f"{timeout // 60}m"
+            print(f"\nChat with agent '{name}' (target: {agent.target}, timeout: {timeout_display})")
+            print("Type 'exit' to end, 'clear' to reset history, 'help' for commands\n")
 
             while True:
                 try:
@@ -303,8 +308,28 @@ Examples:
 
                 if question.lower() == "help":
                     print("  exit/quit - End chat")
-                    print("  schema - Show database schema")
+                    print("  clear     - Clear conversation history")
+                    print("  schema    - Show database schema")
+                    print("  history   - Show conversation history")
                     print("  <question> - Ask a question about your data")
+                    continue
+
+                if question.lower() == "clear":
+                    session.clear()
+                    print("Conversation history cleared.\n")
+                    continue
+
+                if question.lower() == "history":
+                    if not session.turns:
+                        print("No conversation history.\n")
+                    else:
+                        print(f"\nConversation history ({len(session.turns)} exchanges):")
+                        for i, turn in enumerate(session.turns, 1):
+                            print(f"  {i}. Q: {turn.question}")
+                            if turn.sql:
+                                print(f"     SQL: {turn.sql[:60]}...")
+                            print(f"     Result: {turn.result_summary}")
+                        print()
                     continue
 
                 if question.lower() == "schema":
@@ -320,9 +345,17 @@ Examples:
                     print()
                     continue
 
-                # Ask the question
+                # Ask the question with conversation history
                 print("\nThinking...")
-                response = runtime.ask(question)
+                response = runtime.ask_with_history(question, session)
+
+                # Add to conversation history
+                turn = ConversationTurn(
+                    question=question,
+                    sql=response.sql,
+                    result_summary=session.summarize_result(response),
+                )
+                session.add_turn(turn)
 
                 if response.success:
                     if response.sql:

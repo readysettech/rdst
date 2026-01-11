@@ -1,18 +1,31 @@
-# rdst agent - Phase 1 MVP TODO
+# rdst agent - Phase 1 & 2 TODO
 
 ## Pending Manual Tests
 
 - [ ] `rdst agent serve --name NAME --port PORT` - Test HTTP API server
 - [ ] `rdst agent slack --name NAME` - Test Slack bot integration
 
-## Phase 2 Improvements
+## Phase 3+ Ideas
 
-- [ ] **Conversation history for chat mode** - Currently each question in `rdst agent chat` is independent with no memory of prior Q&A. Implement conversation history to enable follow-up questions like "break that down by month" or "same query but for last year".
+- [ ] Session persistence across chat restarts
+- [ ] Semantic layer integration with agents
+- [ ] Institutional memory (cross-session learning)
+- [ ] Query caching
 
-- [ ] **Address chat mode naming/documentation** - The "chat" command implies conversational memory which doesn't exist yet. Either:
-  - Rename to `query` or `repl` to set correct expectations
-  - Document the limitation clearly in help text
-  - Keep as-is once conversation history is implemented
+## UX Improvements
+
+- [ ] **Visual feedback during processing** - When `rdst ask` or `rdst agent chat` is generating a query or executing SQL, show a spinner or progress indicator so users know work is happening in the background (currently just shows "Thinking..." with no animation)
+
+## Completed (Phase 2)
+
+- [x] **Conversation history for chat mode** - Agent chat now maintains history of Q&A exchanges, enabling follow-up questions like "break that down by month". Use `clear` to reset, `history` to view.
+- [x] `lib/agent/conversation.py` - ConversationTurn, ConversationSession
+- [x] `lib/engines/ask3/context.py` - Added conversation_context field
+- [x] `lib/engines/ask3/engine.py` - Added conversation_context parameter
+- [x] `lib/engines/ask3/phases/generate.py` - Injects context into LLM prompt
+- [x] `lib/agent/runtime.py` - Added ask_with_history() method
+- [x] `lib/cli/agent_command.py` - Updated _chat() with session tracking
+- [x] Unit tests (95 tests passing)
 
 ## Completed (Phase 1)
 
@@ -25,7 +38,6 @@
 - [x] `rdst.py` - Added agent subparser
 - [x] `mcp_server.py` - Added agent tools (list, ask, create)
 - [x] `pyproject.toml` - Added aiohttp optional dependency
-- [x] Unit tests (77 tests passing)
 - [x] Manual test: `rdst agent create`
 - [x] Manual test: `rdst agent list`
 - [x] Manual test: `rdst agent show`

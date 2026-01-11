@@ -36,7 +36,7 @@ class TestAsk3Context:
         ctx = Ask3Context(question="test", target="test")
 
         assert ctx.max_retries == 2
-        assert ctx.timeout_seconds == 30
+        assert ctx.timeout_seconds == 600  # 10 minutes default
         assert ctx.max_rows == 100
         assert ctx.verbose is False
         assert ctx.no_interactive is False

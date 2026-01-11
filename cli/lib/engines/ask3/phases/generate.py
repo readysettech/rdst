@@ -28,7 +28,8 @@ def generate_sql(
     Generate SQL from natural language question.
 
     Uses refined question if clarifications were collected,
-    otherwise uses original question.
+    otherwise uses original question. Includes conversation context
+    for follow-up questions if available.
 
     Args:
         ctx: Ask3Context with question and schema
@@ -51,6 +52,10 @@ def generate_sql(
 
     # Use refined question if available
     question = ctx.refined_question or ctx.question
+
+    # Prepend conversation context if available (for follow-up questions)
+    if ctx.conversation_context:
+        question = f"{ctx.conversation_context}\nCurrent question: {question}"
 
     # Generate SQL
     result = generate_sql_from_nl(

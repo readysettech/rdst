@@ -8,6 +8,7 @@ data agents that provide safe, scalable database access for AI applications.
 from .config import AgentConfig, SafetyConfig, RestrictionsConfig
 from .manager import AgentManager
 from .runtime import AgentRuntime, AgentResponse
+from .conversation import ConversationTurn, ConversationSession
 
 __all__ = [
     "AgentConfig",
@@ -16,4 +17,6 @@ __all__ = [
     "AgentManager",
     "AgentRuntime",
     "AgentResponse",
+    "ConversationTurn",
+    "ConversationSession",
 ]

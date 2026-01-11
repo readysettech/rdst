@@ -96,11 +96,12 @@ class Ask3Engine:
         target_config: Optional[Dict[str, Any]] = None,
         db_type: str = DbType.POSTGRESQL,
         max_retries: int = 2,
-        timeout_seconds: int = 30,
+        timeout_seconds: int = 600,  # 10 minutes default
         max_rows: int = 100,
         verbose: bool = False,
         no_interactive: bool = False,
-        agent_mode: bool = False
+        agent_mode: bool = False,
+        conversation_context: str = "",
     ) -> Ask3Context:
         """
         Run the complete ask3 flow.
@@ -116,6 +117,7 @@ class Ask3Engine:
             verbose: Show detailed progress
             no_interactive: Auto-select first option for clarifications
             agent_mode: Skip linear flow and go directly to agent exploration
+            conversation_context: Previous conversation history for follow-up questions
 
         Returns:
             Ask3Context with all results (check ctx.status for outcome)
@@ -130,7 +132,8 @@ class Ask3Engine:
             timeout_seconds=timeout_seconds,
             max_rows=max_rows,
             verbose=verbose,
-            no_interactive=no_interactive
+            no_interactive=no_interactive,
+            conversation_context=conversation_context,
         )
 
         # Update presenter verbosity

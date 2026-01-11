@@ -23,6 +23,8 @@ MCP_EXCLUDED_COMMANDS = {
     "claude",  # N/A - meta command for MCP registration itself
     "help",  # N/A - rdst_help handles this differently
     "ask",  # CLI-only - requires interactive TTY for multi-step flow
+    "slack",  # CLI-only - requires running bot process with Socket Mode
+    "guard",  # CLI-only - interactive guard management
     # Schema subcommands (handled via rdst_schema tool, some are CLI-only)
     "annotate",  # Schema subcommand - interactive wizard, CLI-only
     "export",  # Schema subcommand - handled by rdst_schema tool
@@ -42,6 +44,7 @@ MCP_ONLY_TOOLS = {
 SUBCOMMAND_MAPPING = {
     "configure": ["add", "list", "remove", "default", "llm"],
     "query": ["add", "list", "delete"],
+    "agent": ["list", "ask", "create"],
 }
 
 

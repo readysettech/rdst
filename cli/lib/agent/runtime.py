@@ -8,12 +8,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
-from typing import Any
+from typing import Any, TYPE_CHECKING
 import logging
 
 import sqlglot
 
 from .config import AgentConfig
+
+if TYPE_CHECKING:
+    from .conversation import ConversationSession
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +298,92 @@ class AgentRuntime:
                 max_rows=self.config.safety.max_rows,
                 timeout_seconds=self.config.safety.timeout_seconds,
                 no_interactive=True,
+            )
+
+            # Check if successful
+            from ..engines.ask3.types import Status
+
+            if ctx.status != Status.SUCCESS:
+                return AgentResponse(
+                    success=False,
+                    error=ctx.error_message or "Query failed",
+                    sql=ctx.sql,
+                )
+
+            # Validate safety on generated SQL
+            if ctx.sql:
+                try:
+                    self._validate_safety(ctx.sql)
+                except SafetyViolationError as e:
+                    return AgentResponse(
+                        success=False,
+                        error=str(e),
+                        sql=ctx.sql,
+                    )
+
+            # Build response
+            result = ctx.execution_result
+            return AgentResponse(
+                success=True,
+                sql=ctx.sql,
+                columns=result.columns if result else [],
+                rows=result.rows if result else [],
+                row_count=result.row_count if result else 0,
+                execution_time_ms=result.execution_time_ms if result else 0.0,
+                truncated=result.truncated if result else False,
+                explanation=ctx.sql_explanation,
+            )
+
+        except Exception as e:
+            logger.exception("Agent query failed")
+            return AgentResponse(
+                success=False,
+                error=str(e),
+            )
+
+    def ask_with_history(
+        self,
+        question: str,
+        session: "ConversationSession | None" = None,
+        interactive: bool = True,
+    ) -> AgentResponse:
+        """
+        Execute a natural language question with conversation context.
+
+        This method enables follow-up questions by including previous
+        conversation exchanges in the LLM context.
+
+        Args:
+            question: Natural language question.
+            session: Active conversation session with history (optional).
+            interactive: If True, allow clarification prompts (for terminal use).
+                        If False, auto-select first interpretation (for API use).
+
+        Returns:
+            AgentResponse with results.
+        """
+        try:
+            engine = self._get_engine()
+            target_config = self._get_target_config()
+
+            # Determine database type
+            db_type = target_config.get("db_type", "postgresql")
+
+            # Build conversation context from session history
+            conversation_context = ""
+            if session and session.turns:
+                conversation_context = session.format_history()
+
+            # Run Ask3Engine with conversation context
+            ctx = engine.run(
+                question=question,
+                target=self.config.target,
+                target_config=target_config,
+                db_type=db_type,
+                max_rows=self.config.safety.max_rows,
+                timeout_seconds=self.config.safety.timeout_seconds,
+                no_interactive=not interactive,  # Allow clarifications in interactive mode
+                conversation_context=conversation_context,
             )
 
             # Check if successful
