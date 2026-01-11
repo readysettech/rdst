@@ -49,6 +49,9 @@ slack = [
     "slack-bolt>=1.18.0",
     "slack-sdk>=3.21.0",
 ]
+agent = [
+    "aiohttp>=3.9.0",
+]
 
 [project.urls]
 Homepage = "https://readyset.io"

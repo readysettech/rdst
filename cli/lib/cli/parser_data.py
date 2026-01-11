@@ -815,6 +815,48 @@ database targets. Users can @mention the bot or DM it to ask questions.""",
             ("rdst slack status --agent sales-bot", "Show agent status"),
         ],
     ),
+    "agent": CommandDef(
+        name="agent",
+        short_help="Manage and run data agents with safety policies",
+        description="""Data agents provide safe, scalable database access for AI applications.
+
+Create named agents that wrap your database targets with safety policies,
+then expose them via HTTP API, MCP, or Slack.""",
+        args=[
+            ArgDef(
+                "subcommand",
+                nargs="?",
+                default=None,
+                choices=["create", "list", "show", "delete", "chat", "serve", "mcp", "slack"],
+                help="Subcommand: create, list, show, delete, chat, serve, mcp, slack",
+            ),
+            ArgDef("agent_name", nargs="?", help="Agent name (positional for show/delete)"),
+            ArgDef("--name", short="-n", help="Agent name"),
+            ArgDef("--target", short="-t", help="Database target (for create)"),
+            ArgDef("--description", short="-d", default="", help="Agent description (for create)"),
+            ArgDef("--max-rows", type=int, default=1000, help="Maximum rows to return (default 1000)"),
+            ArgDef("--timeout", type=int, default=30, help="Query timeout in seconds (default 30)"),
+            ArgDef("--port", short="-p", type=int, default=8080, help="HTTP port (for serve)"),
+            ArgDef("--deny-columns", nargs="*", help="Column patterns to deny access"),
+            ArgDef("--allow-tables", nargs="*", help="Tables to allow (whitelist)"),
+        ],
+        subcommands=[
+            ("create", "Create a new data agent"),
+            ("list", "List all configured agents"),
+            ("show", "Show agent details"),
+            ("delete", "Delete an agent"),
+            ("chat", "Interactive chat with an agent"),
+            ("serve", "Start HTTP API server"),
+            ("mcp", "Start MCP server mode"),
+            ("slack", "Start Slack bot mode"),
+        ],
+        examples=[
+            ('rdst agent create --name sales-agent --target prod-db --description "Sales data"', "Create agent"),
+            ("rdst agent list", "List agents"),
+            ("rdst agent chat --name sales-agent", "Interactive chat"),
+            ("rdst agent serve --name sales-agent --port 8080", "Start HTTP server"),
+        ],
+    ),
 }
 
 COMMAND_ORDER = [
@@ -822,6 +864,7 @@ COMMAND_ORDER = [
     "top",
     "analyze",
     "ask",
+    "agent",
     "init",
     "query",
     "schema",

@@ -444,6 +444,22 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             subcommand=getattr(args, 'subcommand', 'list'),
             agent=getattr(args, 'agent', None),
         )
+    elif command == 'agent':
+        from lib.cli.agent_command import AgentCommand
+        agent_cmd = AgentCommand()
+        # Support both --name and positional agent_name
+        name = getattr(args, 'name', None) or getattr(args, 'agent_name', None)
+        return agent_cmd.execute(
+            subcommand=getattr(args, 'subcommand', None),
+            name=name,
+            target=getattr(args, 'target', None),
+            description=getattr(args, 'description', ''),
+            max_rows=getattr(args, 'max_rows', 1000),
+            timeout=getattr(args, 'timeout', 30),
+            port=getattr(args, 'port', 8080),
+            deny_columns=getattr(args, 'deny_columns', None),
+            allow_tables=getattr(args, 'allow_tables', None),
+        )
     else:
         return RdstResult(False, f"Unknown command: {command}")
 

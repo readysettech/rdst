@@ -946,6 +946,100 @@ EXAMPLES:
                 },
                 "required": ["subcommand"]
             }
+        },
+        {
+            "name": "rdst_agent_list",
+            "description": """List all configured data agents.
+
+Data agents provide safe, scalable database access for AI applications.
+Each agent wraps a database target with safety policies like row limits,
+column restrictions, and read-only enforcement.
+
+Use this to see what agents are available for querying.
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "rdst_agent_ask",
+            "description": """Ask a natural language question to a data agent.
+
+Data agents convert natural language questions into SQL queries, execute them
+safely with configured restrictions, and return the results.
+
+Example:
+  rdst_agent_ask(agent_name="sales-agent", question="How many orders were placed last month?")
+
+The agent will:
+1. Generate SQL from the question
+2. Validate against safety policies (read-only, column restrictions)
+3. Execute with timeout and row limits
+4. Return structured results
+
+IMPORTANT: If no agents exist, tell the user to create one with:
+  rdst agent create --name <name> --target <database-target>
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_name": {
+                        "type": "string",
+                        "description": "Name of the agent to query"
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "Natural language question about the data"
+                    }
+                },
+                "required": ["agent_name", "question"]
+            }
+        },
+        {
+            "name": "rdst_agent_create",
+            "description": """Create a new data agent.
+
+Data agents wrap database targets with safety policies for AI access.
+
+Example:
+  rdst_agent_create(
+    name="sales-agent",
+    target="prod-db",
+    description="Sales data analysis agent",
+    max_rows=1000,
+    timeout=30
+  )
+
+After creation, use rdst_agent_ask to query the agent.
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique name for the agent"
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Database target name (from rdst configure list)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Human-readable description of what this agent does"
+                    },
+                    "max_rows": {
+                        "type": "integer",
+                        "description": "Maximum rows to return (default 1000)"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Query timeout in seconds (default 30)"
+                    }
+                },
+                "required": ["name", "target"]
+            }
         }
     ]
 
@@ -1337,6 +1431,134 @@ Just describe your database and we'll get connected!
             args.extend(["--format", arguments["output_format"]])
 
         return run_rdst_command(args)
+
+    elif name == "rdst_agent_list":
+        # List all configured data agents
+        try:
+            from lib.agent import AgentManager
+            manager = AgentManager()
+            names = manager.list()
+
+            if not names:
+                return {
+                    "success": True,
+                    "stdout": "No agents configured.\n\nCreate one with:\n  rdst agent create --name <name> --target <database-target>",
+                    "stderr": "",
+                    "returncode": 0
+                }
+
+            lines = ["Configured agents:\n"]
+            for name_item in names:
+                try:
+                    agent = manager.get(name_item)
+                    lines.append(f"  {name_item} -> {agent.target} ({agent.description or 'no description'})")
+                except Exception:
+                    lines.append(f"  {name_item} -> (error loading)")
+
+            return {
+                "success": True,
+                "stdout": "\n".join(lines),
+                "stderr": "",
+                "returncode": 0
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": str(e),
+                "returncode": 1
+            }
+
+    elif name == "rdst_agent_ask":
+        # Ask a question to a data agent
+        agent_name = arguments.get("agent_name")
+        question = arguments.get("question")
+
+        if not agent_name or not question:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": "Both 'agent_name' and 'question' are required",
+                "returncode": 1
+            }
+
+        try:
+            from lib.agent import AgentManager, AgentRuntime
+            manager = AgentManager()
+
+            if not manager.exists(agent_name):
+                return {
+                    "success": False,
+                    "stdout": "",
+                    "stderr": f"Agent '{agent_name}' not found. Use rdst_agent_list to see available agents.",
+                    "returncode": 1
+                }
+
+            agent = manager.get(agent_name)
+            runtime = AgentRuntime(agent)
+            response = runtime.ask(question)
+
+            if response.success:
+                result_lines = []
+                if response.sql:
+                    result_lines.append(f"SQL:\n{response.sql}\n")
+                if response.columns and response.rows:
+                    result_lines.append(f"Columns: {', '.join(response.columns)}")
+                    result_lines.append(f"Rows ({response.row_count}):")
+                    for row in response.rows[:20]:  # Limit display
+                        result_lines.append(f"  {row}")
+                    if response.row_count > 20:
+                        result_lines.append(f"  ... and {response.row_count - 20} more rows")
+                    if response.truncated:
+                        result_lines.append("(Results truncated)")
+                elif response.row_count == 0:
+                    result_lines.append("No results found")
+
+                return {
+                    "success": True,
+                    "stdout": "\n".join(result_lines),
+                    "stderr": "",
+                    "returncode": 0
+                }
+            else:
+                return {
+                    "success": False,
+                    "stdout": "",
+                    "stderr": response.error or "Query failed",
+                    "returncode": 1
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": str(e),
+                "returncode": 1
+            }
+
+    elif name == "rdst_agent_create":
+        # Create a new data agent
+        args = ["agent", "create"]
+        args.extend(["--name", arguments["name"]])
+        args.extend(["--target", arguments["target"]])
+        if "description" in arguments:
+            args.extend(["--description", arguments["description"]])
+        if "max_rows" in arguments:
+            args.extend(["--max-rows", str(arguments["max_rows"])])
+        if "timeout" in arguments:
+            args.extend(["--timeout", str(arguments["timeout"])])
+
+        result = run_rdst_command(args)
+        if result["success"]:
+            result["next_steps"] = f"""
+Agent '{arguments["name"]}' created successfully.
+
+You can now query it with:
+  rdst_agent_ask(agent_name="{arguments["name"]}", question="<your question>")
+
+Or start an HTTP API server:
+  rdst agent serve --name {arguments["name"]} --port 8080
+"""
+        return result
 
     else:
         return {
