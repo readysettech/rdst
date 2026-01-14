@@ -189,6 +189,7 @@ class AgentRuntime:
     - Column denial/masking
     - Table whitelisting
     - Query timeout
+    - Guard-based policies (when guard is specified)
     """
 
     def __init__(self, agent_config: AgentConfig):
@@ -201,6 +202,18 @@ class AgentRuntime:
         self.config = agent_config
         self._engine = None
         self._target_config = None
+        self._guard_config = None
+
+    def _get_guard_config(self):
+        """Load guard configuration if agent has a guard reference."""
+        if self._guard_config is None and self.config.guard:
+            from ..guard import GuardManager, GuardNotFoundError
+            manager = GuardManager()
+            try:
+                self._guard_config = manager.get(self.config.guard)
+            except GuardNotFoundError:
+                logger.warning(f"Guard '{self.config.guard}' not found, using inline config")
+        return self._guard_config
 
     def _get_engine(self):
         """Lazy-load Ask3Engine."""
@@ -250,27 +263,67 @@ class AgentRuntime:
         """
         Validate SQL against safety configuration.
 
+        Uses guard config if agent has a guard reference, otherwise falls back
+        to inline safety/restrictions config.
+
         Args:
             sql: SQL to validate.
 
         Raises:
             SafetyViolationError: If SQL violates safety policy.
         """
-        # Check read-only
-        if self.config.safety.read_only:
-            ok, msg = validate_read_only(sql)
+        guard = self._get_guard_config()
+
+        if guard:
+            # Use guard-based validation
+            from ..guard import check_query
+
+            results = check_query(sql, guard)
+            for result in results:
+                if not result.passed and result.level == "block":
+                    raise SafetyViolationError(result.message)
+        else:
+            # Use legacy inline config
+            # Check read-only
+            if self.config.safety.read_only:
+                ok, msg = validate_read_only(sql)
+                if not ok:
+                    raise SafetyViolationError(msg)
+
+            # Check denied columns
+            ok, msg = validate_columns(sql, self.config.restrictions.denied_columns)
             if not ok:
                 raise SafetyViolationError(msg)
 
-        # Check denied columns
-        ok, msg = validate_columns(sql, self.config.restrictions.denied_columns)
-        if not ok:
-            raise SafetyViolationError(msg)
+            # Check allowed tables
+            ok, msg = validate_tables(sql, self.config.restrictions.allowed_tables)
+            if not ok:
+                raise SafetyViolationError(msg)
 
-        # Check allowed tables
-        ok, msg = validate_tables(sql, self.config.restrictions.allowed_tables)
-        if not ok:
-            raise SafetyViolationError(msg)
+    def _apply_masking(self, columns: list[str], rows: list[list[Any]]) -> list[list[Any]]:
+        """
+        Apply masking to query results.
+
+        Uses guard config if agent has a guard reference, otherwise falls back
+        to inline restrictions config.
+
+        Args:
+            columns: Column names from query result.
+            rows: Row data from query result.
+
+        Returns:
+            Masked rows.
+        """
+        guard = self._get_guard_config()
+
+        if guard and guard.masking.patterns:
+            from ..guard import mask_results
+            return mask_results(columns, rows, guard.masking.patterns)
+        elif self.config.restrictions.masked_columns:
+            from ..guard import mask_results
+            return mask_results(columns, rows, self.config.restrictions.masked_columns)
+
+        return rows
 
     def ask(self, question: str) -> AgentResponse:
         """
@@ -289,15 +342,31 @@ class AgentRuntime:
             # Determine database type
             db_type = target_config.get("db_type", "postgresql")
 
-            # Run Ask3Engine
+            # Get limits from guard or inline config
+            guard = self._get_guard_config()
+            if guard:
+                max_rows = guard.limits.max_rows
+                timeout_seconds = guard.limits.timeout_seconds
+            else:
+                max_rows = self.config.safety.max_rows
+                timeout_seconds = self.config.safety.timeout_seconds
+
+            # Create pre-execution validator callback if guard is configured
+            pre_execute_validator = None
+            if guard or self.config.safety.read_only:
+                def pre_execute_validator(sql: str) -> None:
+                    self._validate_safety(sql)
+
+            # Run Ask3Engine with pre-execution validation
             ctx = engine.run(
                 question=question,
                 target=self.config.target,
                 target_config=target_config,
                 db_type=db_type,
-                max_rows=self.config.safety.max_rows,
-                timeout_seconds=self.config.safety.timeout_seconds,
+                max_rows=max_rows,
+                timeout_seconds=timeout_seconds,
                 no_interactive=True,
+                pre_execute_validator=pre_execute_validator,
             )
 
             # Check if successful
@@ -310,24 +379,19 @@ class AgentRuntime:
                     sql=ctx.sql,
                 )
 
-            # Validate safety on generated SQL
-            if ctx.sql:
-                try:
-                    self._validate_safety(ctx.sql)
-                except SafetyViolationError as e:
-                    return AgentResponse(
-                        success=False,
-                        error=str(e),
-                        sql=ctx.sql,
-                    )
-
-            # Build response
+            # Build response with masking applied
             result = ctx.execution_result
+            columns = result.columns if result else []
+            rows = result.rows if result else []
+
+            # Apply masking to results
+            masked_rows = self._apply_masking(columns, rows)
+
             return AgentResponse(
                 success=True,
                 sql=ctx.sql,
-                columns=result.columns if result else [],
-                rows=result.rows if result else [],
+                columns=columns,
+                rows=masked_rows,
                 row_count=result.row_count if result else 0,
                 execution_time_ms=result.execution_time_ms if result else 0.0,
                 truncated=result.truncated if result else False,
@@ -374,16 +438,32 @@ class AgentRuntime:
             if session and session.turns:
                 conversation_context = session.format_history()
 
-            # Run Ask3Engine with conversation context
+            # Get limits from guard or inline config
+            guard = self._get_guard_config()
+            if guard:
+                max_rows = guard.limits.max_rows
+                timeout_seconds = guard.limits.timeout_seconds
+            else:
+                max_rows = self.config.safety.max_rows
+                timeout_seconds = self.config.safety.timeout_seconds
+
+            # Create pre-execution validator callback if guard is configured
+            pre_execute_validator = None
+            if guard or self.config.safety.read_only:
+                def pre_execute_validator(sql: str) -> None:
+                    self._validate_safety(sql)
+
+            # Run Ask3Engine with conversation context and pre-execution validation
             ctx = engine.run(
                 question=question,
                 target=self.config.target,
                 target_config=target_config,
                 db_type=db_type,
-                max_rows=self.config.safety.max_rows,
-                timeout_seconds=self.config.safety.timeout_seconds,
+                max_rows=max_rows,
+                timeout_seconds=timeout_seconds,
                 no_interactive=not interactive,  # Allow clarifications in interactive mode
                 conversation_context=conversation_context,
+                pre_execute_validator=pre_execute_validator,
             )
 
             # Check if successful
@@ -396,24 +476,19 @@ class AgentRuntime:
                     sql=ctx.sql,
                 )
 
-            # Validate safety on generated SQL
-            if ctx.sql:
-                try:
-                    self._validate_safety(ctx.sql)
-                except SafetyViolationError as e:
-                    return AgentResponse(
-                        success=False,
-                        error=str(e),
-                        sql=ctx.sql,
-                    )
-
-            # Build response
+            # Build response with masking applied
             result = ctx.execution_result
+            columns = result.columns if result else []
+            rows = result.rows if result else []
+
+            # Apply masking to results
+            masked_rows = self._apply_masking(columns, rows)
+
             return AgentResponse(
                 success=True,
                 sql=ctx.sql,
-                columns=result.columns if result else [],
-                rows=result.rows if result else [],
+                columns=columns,
+                rows=masked_rows,
                 row_count=result.row_count if result else 0,
                 execution_time_ms=result.execution_time_ms if result else 0.0,
                 truncated=result.truncated if result else False,

@@ -4,18 +4,10 @@ Agent CLI command implementation.
 Handles rdst agent subcommands: create, list, show, delete, chat, serve, mcp, slack.
 """
 
-import sys
 from dataclasses import dataclass
 from typing import Any
 
-try:
-    from rich.console import Console
-    from rich.prompt import Prompt
-    from rich.table import Table
-
-    _RICH_AVAILABLE = True
-except ImportError:
-    _RICH_AVAILABLE = False
+from lib.ui import DataTableBase, Prompt, StyleTokens, get_console
 
 
 @dataclass
@@ -32,7 +24,7 @@ class AgentCommand:
 
     def __init__(self):
         """Initialize the agent command handler."""
-        self._console = Console() if _RICH_AVAILABLE else None
+        self._console = get_console()
         self._manager = None
 
     def _get_manager(self):
@@ -54,6 +46,7 @@ class AgentCommand:
         port: int = 8080,
         deny_columns: list[str] | None = None,
         allow_tables: list[str] | None = None,
+        guard: str | None = None,
         **kwargs,
     ) -> RdstResult:
         """
@@ -69,6 +62,7 @@ class AgentCommand:
             port: Port for serve command.
             deny_columns: Columns to deny for create.
             allow_tables: Tables to allow for create.
+            guard: Guard name to apply to agent.
             **kwargs: Additional arguments.
 
         Returns:
@@ -104,6 +98,7 @@ class AgentCommand:
             port=port,
             deny_columns=deny_columns,
             allow_tables=allow_tables,
+            guard=guard,
             **kwargs,
         )
 
@@ -140,6 +135,7 @@ Examples:
         timeout: int = 30,
         deny_columns: list[str] | None = None,
         allow_tables: list[str] | None = None,
+        guard: str | None = None,
         **kwargs,
     ) -> RdstResult:
         """Create a new agent."""
@@ -158,11 +154,16 @@ Examples:
                 timeout_seconds=timeout,
                 denied_columns=deny_columns,
                 allowed_tables=allow_tables,
+                guard=guard,
             )
+
+            msg = f"Created agent '{name}' targeting '{target}'"
+            if guard:
+                msg += f" with guard '{guard}'"
 
             return RdstResult(
                 ok=True,
-                message=f"Created agent '{name}' targeting '{target}'",
+                message=msg,
                 data=agent.to_dict(),
             )
         except Exception as e:
@@ -176,38 +177,29 @@ Examples:
         if not names:
             return RdstResult(ok=True, message="No agents configured")
 
-        if _RICH_AVAILABLE and self._console:
-            table = Table(title="Data Agents")
-            table.add_column("Name", style="cyan")
-            table.add_column("Target", style="green")
-            table.add_column("Description")
-            table.add_column("Max Rows", justify="right")
-            table.add_column("Timeout", justify="right")
+        table = DataTableBase(title="Data Agents")
+        table.add_column("Name", style=StyleTokens.ACCENT)
+        table.add_column("Target", style=StyleTokens.SUCCESS)
+        table.add_column("Guard", style=StyleTokens.WARNING)
+        table.add_column("Description")
+        table.add_column("Max Rows", justify="right")
 
-            for name in names:
-                try:
-                    agent = manager.get(name)
-                    table.add_row(
-                        agent.name,
-                        agent.target,
-                        agent.description or "-",
-                        str(agent.safety.max_rows),
-                        f"{agent.safety.timeout_seconds}s",
-                    )
-                except Exception:
-                    table.add_row(name, "?", "Error loading", "-", "-")
+        for name in names:
+            try:
+                agent = manager.get(name)
+                table.add_row(
+                    agent.name,
+                    agent.target,
+                    agent.guard or "-",
+                    agent.description or "-",
+                    str(agent.safety.max_rows),
+                )
+            except Exception:
+                table.add_row(name, "?", "-", "Error loading", "-")
 
-            self._console.print(table)
-        else:
-            print(f"\nAgents ({len(names)}):")
-            for name in names:
-                try:
-                    agent = manager.get(name)
-                    print(f"  {name} -> {agent.target} ({agent.description or 'no description'})")
-                except Exception:
-                    print(f"  {name} -> (error loading)")
+        self._console.print(table)
 
-        return RdstResult(ok=True, data={"agents": names})
+        return RdstResult(ok=True)
 
     def _show(self, name: str | None = None, **kwargs) -> RdstResult:
         """Show agent details."""
@@ -218,14 +210,29 @@ Examples:
             manager = self._get_manager()
             agent = manager.get(name)
 
-            if _RICH_AVAILABLE and self._console:
-                console = self._console
-                console.print(f"\n[bold]Agent: {agent.name}[/bold]\n")
-                console.print(f"  Target: [cyan]{agent.target}[/cyan]")
-                console.print(f"  Description: {agent.description or '(none)'}")
-                console.print(f"  Created: {agent.created_at}")
+            console = self._console
+            console.print(f"\n[bold]Agent: {agent.name}[/bold]\n")
+            console.print(f"  Target: [{StyleTokens.ACCENT}]{agent.target}[/{StyleTokens.ACCENT}]")
+            console.print(f"  Description: {agent.description or '(none)'}")
+            console.print(f"  Created: {agent.created_at}")
 
-                console.print("\n[bold]Safety:[/bold]")
+            if agent.guard:
+                console.print(f"\n[bold]Guard:[/bold] [{StyleTokens.WARNING}]{agent.guard}[/{StyleTokens.WARNING}]")
+                # Show guard details
+                try:
+                    from ..guard import GuardManager
+                    guard_mgr = GuardManager()
+                    guard = guard_mgr.get(agent.guard)
+                    if guard.masking.patterns:
+                        console.print(f"  Masks: {len(guard.masking.patterns)} pattern(s)")
+                    if guard.guards.require_where:
+                        console.print("  Requires: WHERE clause")
+                    if guard.guards.require_limit:
+                        console.print("  Requires: LIMIT clause")
+                except Exception:
+                    console.print("  (guard details unavailable)")
+            else:
+                console.print("\n[bold]Safety (inline):[/bold]")
                 console.print(f"  Read-only: {agent.safety.read_only}")
                 console.print(f"  Max rows: {agent.safety.max_rows}")
                 console.print(f"  Timeout: {agent.safety.timeout_seconds}s")
@@ -245,14 +252,7 @@ Examples:
                     for col, mask in agent.restrictions.masked_columns.items():
                         console.print(f"  - {col} -> {mask}")
 
-                console.print()
-            else:
-                print(f"\nAgent: {agent.name}")
-                print(f"  Target: {agent.target}")
-                print(f"  Description: {agent.description or '(none)'}")
-                print(f"  Created: {agent.created_at}")
-                print(f"  Max rows: {agent.safety.max_rows}")
-                print(f"  Timeout: {agent.safety.timeout_seconds}s")
+            console.print()
 
             return RdstResult(ok=True, data=agent.to_dict())
         except Exception as e:
@@ -283,10 +283,10 @@ Examples:
             # Use CLI timeout (overrides agent's saved config for this session)
             agent.safety.timeout_seconds = timeout
 
-            from ..agent import AgentRuntime, ConversationSession, ConversationTurn
+            from ..agent.chat_agent import ChatAgent
+            from ..agent.chat_tools import format_tool_result_for_display
 
-            runtime = AgentRuntime(agent)
-            session = ConversationSession(agent_name=name)
+            chat_agent = ChatAgent(agent)
 
             timeout_display = f"{timeout}s" if timeout < 60 else f"{timeout // 60}m"
             print(f"\nChat with agent '{name}' (target: {agent.target}, timeout: {timeout_display})")
@@ -315,61 +315,56 @@ Examples:
                     continue
 
                 if question.lower() == "clear":
-                    session.clear()
+                    chat_agent.clear_history()
                     print("Conversation history cleared.\n")
                     continue
 
                 if question.lower() == "history":
-                    if not session.turns:
+                    history = chat_agent.get_history_summary()
+                    if not history:
                         print("No conversation history.\n")
                     else:
-                        print(f"\nConversation history ({len(session.turns)} exchanges):")
-                        for i, turn in enumerate(session.turns, 1):
-                            print(f"  {i}. Q: {turn.question}")
-                            if turn.sql:
-                                print(f"     SQL: {turn.sql[:60]}...")
-                            print(f"     Result: {turn.result_summary}")
+                        print(f"\nConversation history ({len(history)} messages):")
+                        for i, msg in enumerate(history, 1):
+                            print(f"  {i}. [{msg['role']}] {msg['summary']}")
                         print()
                     continue
 
                 if question.lower() == "schema":
-                    schema = runtime.get_schema_summary()
+                    schema = chat_agent.get_schema_summary()
                     print(f"\nSchema ({schema.get('source', 'unknown')}):")
                     for table in schema.get("tables", []):
                         print(f"  {table['name']}")
                         if "columns" in table:
-                            cols = ", ".join(table["columns"][:5])
-                            if len(table["columns"]) > 5:
-                                cols += f", ... ({len(table['columns'])} total)"
-                            print(f"    Columns: {cols}")
+                            cols = table["columns"]
+                            if isinstance(cols, list):
+                                col_str = ", ".join(cols[:5])
+                                if len(cols) > 5:
+                                    col_str += f", ... ({len(cols)} total)"
+                                print(f"    Columns: {col_str}")
                     print()
                     continue
 
-                # Ask the question with conversation history
+                # Chat with the agent
                 print("\nThinking...")
-                response = runtime.ask_with_history(question, session)
+                response = chat_agent.chat(question)
 
-                # Add to conversation history
-                turn = ConversationTurn(
-                    question=question,
-                    sql=response.sql,
-                    result_summary=session.summarize_result(response),
-                )
-                session.add_turn(turn)
-
-                if response.success:
-                    if response.sql:
-                        print(f"\nSQL: {response.sql}\n")
-
-                    if response.columns and response.rows:
-                        self._print_results(response.columns, response.rows)
-                        print(f"\n({response.row_count} rows, {response.execution_time_ms:.1f}ms)")
-                        if response.truncated:
+                # Display tool results if any
+                for result in response.tool_results:
+                    if result.data and result.data.get("sql"):
+                        print(f"\nSQL: {result.data['sql']}")
+                    if result.data and result.data.get("columns") and result.data.get("rows"):
+                        print()
+                        self._print_results(result.data["columns"], result.data["rows"])
+                        row_count = result.data.get("row_count", len(result.data["rows"]))
+                        exec_time = result.data.get("execution_time_ms", 0)
+                        print(f"\n({row_count} rows, {exec_time:.1f}ms)")
+                        if result.data.get("truncated"):
                             print("(Results truncated)")
-                    elif response.row_count == 0:
-                        print("No results found")
-                else:
-                    print(f"\nError: {response.error}")
+
+                # Display the agent's response text
+                if response.text:
+                    print(f"\nAssistant: {response.text}")
 
                 print()
 
@@ -379,19 +374,12 @@ Examples:
 
     def _print_results(self, columns: list[str], rows: list[list[Any]]) -> None:
         """Print query results as a table."""
-        if _RICH_AVAILABLE and self._console:
-            table = Table()
-            for col in columns:
-                table.add_column(col)
-            for row in rows[:50]:  # Limit display
-                table.add_row(*[str(v) if v is not None else "" for v in row])
-            self._console.print(table)
-        else:
-            # Simple text table
-            print(" | ".join(columns))
-            print("-" * (sum(len(c) for c in columns) + 3 * (len(columns) - 1)))
-            for row in rows[:50]:
-                print(" | ".join(str(v) if v is not None else "" for v in row))
+        table = DataTableBase()
+        for col in columns:
+            table.add_column(col)
+        for row in rows[:50]:  # Limit display
+            table.add_row(*[str(v) if v is not None else "" for v in row])
+        self._console.print(table)
 
     def _serve(
         self,
@@ -444,7 +432,7 @@ Examples:
             return RdstResult(ok=False, message=str(e))
 
     def _slack(self, name: str | None = None, **kwargs) -> RdstResult:
-        """Start Slack bot for an agent."""
+        """Start Slack bot for an agent (conversational mode)."""
         if not name:
             return RdstResult(ok=False, message="Agent name is required. Use --name")
 
@@ -466,28 +454,76 @@ Examples:
             workspace_id = list(credentials.keys())[0]
             creds = credentials[workspace_id]
 
-            print(f"Starting Slack bot for agent '{name}'...")
+            print(f"Starting conversational Slack bot for agent '{name}'...")
             print(f"  Workspace: {creds.workspace_name or workspace_id}")
             print(f"  Target: {agent.target}")
+            print("  Mode: Conversational (ChatAgent)")
             print("\nPress Ctrl+C to stop\n")
 
-            # Create runtime and start bot
-            from ..agent import AgentRuntime
-            from ..slack.bot import SlackBot
+            # Use ChatAgent for conversational responses
+            from ..agent.chat_agent import ChatAgent
 
-            runtime = AgentRuntime(agent)
+            # Create a conversational Slack bot
+            class ConversationalSlackBot:
+                """Slack bot using ChatAgent for conversational responses."""
 
-            # Create a wrapper to use AgentRuntime with SlackBot
-            # The existing SlackBot expects a different interface,
-            # so we need to create an adapter
-
-            # For MVP, we'll create a simple adapter
-            class AgentSlackBot:
-                """Adapter to run SlackBot with AgentRuntime."""
-
-                def __init__(self, runtime: AgentRuntime, creds):
-                    self.runtime = runtime
+                def __init__(self, agent_config, creds):
+                    self.agent_config = agent_config
                     self.creds = creds
+                    # Track conversations by thread (thread_ts or channel+user for DMs)
+                    self.conversations: dict[str, ChatAgent] = {}
+
+                def _get_conversation(self, thread_key: str) -> ChatAgent:
+                    """Get or create a ChatAgent for a conversation thread."""
+                    if thread_key not in self.conversations:
+                        self.conversations[thread_key] = ChatAgent(self.agent_config)
+                    return self.conversations[thread_key]
+
+                def _format_response(self, response) -> list[dict]:
+                    """Format ChatAgent response as Slack blocks."""
+                    blocks = []
+
+                    # Show tool results (SQL and data)
+                    for result in response.tool_results:
+                        if result.data and result.data.get("sql"):
+                            blocks.append({
+                                "type": "section",
+                                "text": {"type": "mrkdwn", "text": f"```{result.data['sql']}```"},
+                            })
+
+                        if result.data and result.data.get("columns") and result.data.get("rows"):
+                            columns = result.data["columns"]
+                            rows = result.data["rows"][:10]
+                            row_count = result.data.get("row_count", len(rows))
+
+                            header = " | ".join(str(c) for c in columns)
+                            row_strs = "\n".join(
+                                " | ".join(str(v) if v is not None else "NULL" for v in row)
+                                for row in rows
+                            )
+                            table_text = f"```{header}\n{row_strs}```"
+
+                            if row_count > 10:
+                                table_text += f"\n_({row_count} total rows)_"
+
+                            blocks.append({
+                                "type": "section",
+                                "text": {"type": "mrkdwn", "text": table_text},
+                            })
+
+                    # Show agent's text response
+                    if response.text:
+                        # Truncate if too long for Slack
+                        text = response.text
+                        if len(text) > 2900:
+                            text = text[:2900] + "..."
+
+                        blocks.append({
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": text},
+                        })
+
+                    return blocks if blocks else [{"type": "section", "text": {"type": "mrkdwn", "text": "_No response_"}}]
 
                 def start(self):
                     from slack_bolt import App
@@ -505,47 +541,53 @@ Examples:
                             say("Please ask me a question about your data!")
                             return
 
-                        response = self.runtime.ask(question)
+                        # Use thread_ts for conversation continuity
+                        thread_ts = event.get("thread_ts") or event.get("ts")
+                        channel = event.get("channel")
+                        thread_key = f"{channel}:{thread_ts}"
 
-                        if response.success:
-                            blocks = []
+                        chat_agent = self._get_conversation(thread_key)
 
-                            if response.sql:
-                                blocks.append({
-                                    "type": "section",
-                                    "text": {"type": "mrkdwn", "text": f"```{response.sql}```"},
-                                })
+                        try:
+                            response = chat_agent.chat(question)
+                            blocks = self._format_response(response)
+                            say(blocks=blocks, thread_ts=thread_ts)
+                        except Exception as e:
+                            say(f":x: Error: {e}", thread_ts=thread_ts)
 
-                            if response.columns and response.rows:
-                                # Format as simple table
-                                header = " | ".join(response.columns)
-                                rows = "\n".join(
-                                    " | ".join(str(v) for v in row)
-                                    for row in response.rows[:10]
-                                )
-                                table_text = f"```{header}\n{rows}```"
+                    @app.event("message")
+                    def handle_dm(event, say):
+                        # Handle DMs (no mention needed)
+                        channel_type = event.get("channel_type")
+                        if channel_type != "im":
+                            return  # Only handle DMs here
 
-                                if response.row_count > 10:
-                                    table_text += f"\n_({response.row_count} total rows)_"
+                        # Ignore bot's own messages
+                        if event.get("bot_id"):
+                            return
 
-                                blocks.append({
-                                    "type": "section",
-                                    "text": {"type": "mrkdwn", "text": table_text},
-                                })
-                            elif response.row_count == 0:
-                                blocks.append({
-                                    "type": "section",
-                                    "text": {"type": "mrkdwn", "text": "_No results found_"},
-                                })
+                        text = event.get("text", "").strip()
+                        if not text:
+                            return
 
+                        # Use channel + user as conversation key for DMs
+                        channel = event.get("channel")
+                        user = event.get("user")
+                        thread_key = f"dm:{channel}:{user}"
+
+                        chat_agent = self._get_conversation(thread_key)
+
+                        try:
+                            response = chat_agent.chat(text)
+                            blocks = self._format_response(response)
                             say(blocks=blocks)
-                        else:
-                            say(f":x: Error: {response.error}")
+                        except Exception as e:
+                            say(f":x: Error: {e}")
 
                     handler = SocketModeHandler(app, self.creds.app_token)
                     handler.start()
 
-            bot = AgentSlackBot(runtime, creds)
+            bot = ConversationalSlackBot(agent, creds)
             bot.start()
 
             return RdstResult(ok=True)

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict, Any, Callable
 
 from .context import Ask3Context
 from .presenter import Ask3Presenter
@@ -102,6 +102,7 @@ class Ask3Engine:
         no_interactive: bool = False,
         agent_mode: bool = False,
         conversation_context: str = "",
+        pre_execute_validator: Callable[[str], None] | None = None,
     ) -> Ask3Context:
         """
         Run the complete ask3 flow.
@@ -118,6 +119,8 @@ class Ask3Engine:
             no_interactive: Auto-select first option for clarifications
             agent_mode: Skip linear flow and go directly to agent exploration
             conversation_context: Previous conversation history for follow-up questions
+            pre_execute_validator: Optional callback to validate SQL before execution.
+                Takes SQL string, raises exception if blocked. Used by guards.
 
         Returns:
             Ask3Context with all results (check ctx.status for outcome)
@@ -177,7 +180,7 @@ class Ask3Engine:
                 return ctx
 
             # Phases 3-4: Generate and validate SQL (with retry loop)
-            ctx = self._generate_and_validate(ctx)
+            ctx = self._generate_and_validate(ctx, pre_execute_validator)
             if ctx.status == Status.ERROR:
                 return ctx
 
@@ -220,52 +223,78 @@ class Ask3Engine:
 
         return ctx
 
-    def _generate_and_validate(self, ctx: Ask3Context) -> Ask3Context:
+    def _generate_and_validate(
+        self,
+        ctx: Ask3Context,
+        pre_execute_validator: Callable[[str], None] | None = None,
+    ) -> Ask3Context:
         """
         Generate SQL with validation retry loop AND schema expansion loop.
 
         Flow:
-        1. Generate SQL
+        1. Generate SQL (skip if just regenerated with error feedback)
         2. Check for schema_insufficient signal from LLM
            - If true AND can_expand_schema(): expand schema, goto 1
         3. Validate SQL
-        4. If validation errors AND can_retry(): regenerate with error, goto 3
+        4. If valid AND pre_execute_validator: run guard check
+           - If blocked AND can_retry(): regenerate with guard feedback, goto 3
+        5. If validation errors AND can_retry(): regenerate with error, goto 3
         """
+        skip_generate = False  # Skip generate_sql after regenerate_sql_with_error
+
         while True:
-            # Generate SQL
-            ctx = generate_sql(ctx, self.presenter, self.llm_manager)
-            if ctx.status == Status.ERROR:
-                return ctx
+            # Generate SQL (skip if we just regenerated with error feedback)
+            if not skip_generate:
+                ctx = generate_sql(ctx, self.presenter, self.llm_manager)
+                if ctx.status == Status.ERROR:
+                    return ctx
 
-            # Check for schema expansion request
-            expansion_request = self._detect_expansion_request(ctx)
-            if expansion_request and ctx.can_expand_schema():
-                self.presenter.info(
-                    f"LLM signaled schema insufficiency "
-                    f"(expansion {ctx.schema_expansion_count + 1}/{ctx.max_schema_expansions})"
-                )
+                # Check for schema expansion request
+                expansion_request = self._detect_expansion_request(ctx)
+                if expansion_request and ctx.can_expand_schema():
+                    self.presenter.info(
+                        f"LLM signaled schema insufficiency "
+                        f"(expansion {ctx.schema_expansion_count + 1}/{ctx.max_schema_expansions})"
+                    )
 
-                # Perform expansion
-                prev_table_count = len(ctx.filtered_tables)
-                ctx = expand_schema(
-                    ctx,
-                    self.presenter,
-                    expansion_request.missing_concepts,
-                    expansion_request.requested_tables
-                )
+                    # Perform expansion
+                    prev_table_count = len(ctx.filtered_tables)
+                    ctx = expand_schema(
+                        ctx,
+                        self.presenter,
+                        expansion_request.missing_concepts,
+                        expansion_request.requested_tables
+                    )
 
-                # Only retry if expansion actually added tables
-                if len(ctx.filtered_tables) > prev_table_count:
-                    continue  # Retry generation with expanded schema
-                else:
-                    self.presenter.warning("Expansion found no new tables, proceeding with current schema")
+                    # Only retry if expansion actually added tables
+                    if len(ctx.filtered_tables) > prev_table_count:
+                        continue  # Retry generation with expanded schema
+                    else:
+                        self.presenter.warning("Expansion found no new tables, proceeding with current schema")
+
+            skip_generate = False  # Reset for next iteration
 
             # Validate SQL
             ctx = validate_sql(ctx, self.presenter)
 
-            # If valid, we're done
+            # If valid, run pre-execute guard check
             if not ctx.has_validation_errors():
-                break
+                if pre_execute_validator and ctx.sql:
+                    try:
+                        pre_execute_validator(ctx.sql)
+                    except Exception as e:
+                        # Guard blocked - treat like validation error, can retry
+                        if ctx.can_retry():
+                            ctx.increment_retry()
+                            error_msg = f"Query blocked by guard: {e}"
+                            self.presenter.warning(error_msg)
+                            ctx = regenerate_sql_with_error(ctx, self.presenter, error_msg, self.llm_manager)
+                            skip_generate = True  # Don't overwrite the regenerated SQL
+                            continue  # Retry validation/guard with regenerated SQL
+                        else:
+                            ctx.mark_error(f"Guard blocked: {e}")
+                            return ctx
+                break  # Valid and guard passed (or no guard)
 
             # If we can't retry, fail
             if not ctx.can_retry():
@@ -277,6 +306,7 @@ class Ask3Engine:
             ctx.increment_retry()
             error_msg = build_error_message(ctx.validation_errors)
             ctx = regenerate_sql_with_error(ctx, self.presenter, error_msg, self.llm_manager)
+            skip_generate = True  # Don't overwrite the regenerated SQL
 
         return ctx
 

@@ -12,11 +12,10 @@ from typing import Dict, Any, List, Optional, Tuple
 from decimal import Decimal
 from datetime import datetime, date
 
-from rich.console import Group
-
 # Import UI system
 from lib.ui import (
     DataTable,
+    Group,
     Icons,
     KeyValueTable,
     Layout,

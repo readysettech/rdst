@@ -211,10 +211,17 @@ class LLMManager:
             raise e
 
     def _safe_load_key_for_query(self, provider: str) -> str:
-        """Load API key from ANTHROPIC_API_KEY environment variable.
+        """Load API key from environment variable.
 
         RDST uses Bring Your Own Key (BYOK) - users must set their own API key.
+        Checks RDST_ANTHROPIC_API_KEY first (to avoid conflicts with Claude Code),
+        then falls back to ANTHROPIC_API_KEY.
         """
+        # Check RDST-specific key first to avoid conflicts with Claude Code
+        api_key = os.getenv("RDST_ANTHROPIC_API_KEY")
+        if api_key:
+            return api_key
+
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if api_key:
             return api_key
@@ -222,6 +229,7 @@ class LLMManager:
         raise LLMError(
             "No LLM API key configured.\n\n"
             "Please provide your Anthropic API key to enable query analysis.\n"
+            "Set RDST_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY.\n"
             "You can get one at: https://console.anthropic.com/",
             code="NO_API_KEY"
         )

@@ -42,6 +42,7 @@ dependencies = [
     "sqlparse",
     "pyyaml",
     "sqlglot",
+    "anthropic>=0.76.0",
 ]
 
 [project.optional-dependencies]

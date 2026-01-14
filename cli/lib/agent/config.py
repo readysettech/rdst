@@ -79,13 +79,24 @@ class RestrictionsConfig:
 
 @dataclass
 class AgentConfig:
-    """Configuration for a data agent."""
+    """Configuration for a data agent.
+
+    Agents can use either:
+    1. A guard reference (preferred): `guard: "pii-safe"` references ~/.rdst/guards/pii-safe.yaml
+    2. Inline config (legacy): `safety` and `restrictions` fields
+
+    When a guard is specified, it takes precedence over inline config.
+    """
 
     name: str
     target: str
     description: str = ""
     created_at: str = field(default_factory=_utcnow_iso)
 
+    # Guard reference (preferred) - references a guard by name
+    guard: str | None = None
+
+    # Legacy inline config (used when no guard specified)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     restrictions: RestrictionsConfig = field(default_factory=RestrictionsConfig)
 
@@ -101,6 +112,11 @@ class AgentConfig:
         if self.description:
             result["description"] = self.description
 
+        # Guard reference (preferred)
+        if self.guard:
+            result["guard"] = self.guard
+
+        # Legacy inline config
         result["safety"] = self.safety.to_dict()
 
         restrictions = self.restrictions.to_dict()
@@ -123,6 +139,7 @@ class AgentConfig:
             target=data["target"],
             description=data.get("description", ""),
             created_at=data.get("created_at", _utcnow_iso()),
+            guard=data.get("guard"),
             safety=SafetyConfig.from_dict(safety_data),
             restrictions=RestrictionsConfig.from_dict(restrictions_data),
             semantic_layer=data.get("semantic_layer"),

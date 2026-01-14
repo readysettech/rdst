@@ -19,9 +19,7 @@ from urllib.parse import urlsplit, parse_qs, unquote
 import toml
 
 # Import UI system
-from rich.console import Group
-
-from lib.ui import KeyValueTable, MessagePanel, SimpleTree, get_console
+from lib.ui import Group, KeyValueTable, MessagePanel, SimpleTree, get_console
 
 # Local cloud agent modules (will be used by future implementations)
 # We import lazily inside methods to avoid side-effects and heavy imports at module load time.

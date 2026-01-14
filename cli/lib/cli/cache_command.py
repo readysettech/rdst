@@ -3,11 +3,9 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
-from rich.console import Group
-from rich.text import Text
-
 from lib.ui import (
     get_console,
+    Group,
     InlineSQL,
     MessagePanel,
     NextSteps,
@@ -16,6 +14,7 @@ from lib.ui import (
     SectionBox,
     SectionHeader,
     StatusLine,
+    Text,
 )
 
 

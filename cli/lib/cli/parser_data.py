@@ -857,6 +857,67 @@ then expose them via HTTP API, MCP, or Slack.""",
             ("rdst agent serve --name sales-agent --port 8080", "Start HTTP server"),
         ],
     ),
+    "guard": CommandDef(
+        name="guard",
+        short_help="Manage query guards for safe SQL execution",
+        description="""Manage query guards that enforce safety policies on SQL queries.
+
+Guards provide:
+  - Column masking (redact sensitive data like SSN, email)
+  - Query restrictions (require WHERE, LIMIT, deny SELECT *)
+  - Cost-based limits (estimated rows, table count)
+  - Intent validation (ensure queries match stated purpose)
+
+Use guards with 'rdst ask --guard <name>' or data agents.""",
+        args=[
+            ArgDef(
+                "subcommand",
+                nargs="?",
+                default="list",
+                choices=["create", "list", "show", "delete", "test"],
+                help="Subcommand: create, list, show, delete, test",
+            ),
+            ArgDef("guard_name", nargs="?", help="Guard name (positional)"),
+            ArgDef("--name", short="-n", help="Guard name"),
+            ArgDef("--description", short="-d", default="", help="Guard description"),
+            # Masking options
+            ArgDef("--mask", nargs="*", help="Column patterns to mask (e.g., '*ssn*', 'email')"),
+            # Restriction options
+            ArgDef("--deny-columns", nargs="*", help="Column patterns to deny entirely"),
+            ArgDef("--allow-tables", nargs="*", help="Tables to allow (whitelist)"),
+            ArgDef("--require-where", action="store_true", help="Require WHERE clause"),
+            ArgDef("--require-limit", action="store_true", help="Require LIMIT clause"),
+            ArgDef("--no-select-star", action="store_true", help="Deny SELECT *"),
+            # Cost limits
+            ArgDef("--max-tables", type=int, help="Max tables in query"),
+            ArgDef("--cost-limit", type=int, help="Max query cost estimate"),
+            ArgDef("--max-estimated-rows", type=int, help="Max estimated rows"),
+            # Intent validation
+            ArgDef("--required-filters", nargs="*", help="Required filter columns"),
+            ArgDef("--intent", help="Required intent description"),
+            ArgDef("--schema-context", help="Schema context for validation"),
+            # Execution limits
+            ArgDef("--max-rows", type=int, default=1000, help="Max rows to return"),
+            ArgDef("--timeout", type=int, default=30, help="Query timeout in seconds"),
+            # Test options
+            ArgDef("--sql", help="SQL to test against guard"),
+            ArgDef("--check-guard", help="Guard name to test against (for test subcommand)"),
+            ArgDef("--target", short="-t", help="Target database"),
+        ],
+        subcommands=[
+            ("create", "Create a new query guard"),
+            ("list", "List all configured guards"),
+            ("show", "Show guard details"),
+            ("delete", "Delete a guard"),
+            ("test", "Test SQL against a guard"),
+        ],
+        examples=[
+            ('rdst guard create --name pii-safe --mask "*ssn*" "*email*" --require-where', "Create guard with masking"),
+            ("rdst guard list", "List all guards"),
+            ("rdst guard show pii-safe", "Show guard details"),
+            ('rdst guard test --sql "SELECT * FROM users" --check-guard pii-safe', "Test query against guard"),
+        ],
+    ),
 }
 
 COMMAND_ORDER = [
@@ -869,6 +930,7 @@ COMMAND_ORDER = [
     "query",
     "schema",
     "slack",
+    "guard",
     "report",
     "help",
     "claude",

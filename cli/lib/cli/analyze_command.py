@@ -26,10 +26,9 @@ from concurrent.futures import ThreadPoolExecutor
 logger = logging.getLogger(__name__)
 
 # Import UI system
-from rich.console import Group
-
 from lib.ui import (
     Banner,
+    Group,
     KeyValueTable,
     Layout,
     MessagePanel,

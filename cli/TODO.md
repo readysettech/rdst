@@ -1,16 +1,36 @@
-# rdst agent - Phase 1 & 2 TODO
+# rdst agent - TODO
+
+## Phase 4: Safety Enhancement (Next Up)
+
+See [PRD](../aidoc/projects/rdst-cli/prd/rdst-guard-prd.md) for full design.
+
+### `rdst guard` Command
+- [ ] `lib/guard/config.py` - GuardConfig dataclass
+- [ ] `lib/guard/manager.py` - GuardManager (CRUD)
+- [ ] `lib/guard/checker.py` - Query checking logic
+- [ ] `lib/guard/masking.py` - Output masking functions
+- [ ] `lib/cli/guard_command.py` - CLI implementation
+- [ ] `rdst.py` - Add guard subparser
+- [ ] Tests for all guard modules
+
+### Agent Integration
+- [ ] Update `AgentConfig` to reference guard by name
+- [ ] Update `AgentRuntime` to load and apply guard
+- [ ] Apply masking to query results
 
 ## Pending Manual Tests
 
 - [ ] `rdst agent serve --name NAME --port PORT` - Test HTTP API server
 - [ ] `rdst agent slack --name NAME` - Test Slack bot integration
 
-## Phase 3+ Ideas
+## Phase 5+ Ideas
 
 - [ ] Session persistence across chat restarts
 - [ ] Semantic layer integration with agents
 - [ ] Institutional memory (cross-session learning)
 - [ ] Query caching
+- [ ] Guard inheritance (enterprise)
+- [ ] Audit logging
 
 ## UX Improvements
 

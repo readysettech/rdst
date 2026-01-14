@@ -348,18 +348,14 @@ class SlackCommand:
         if agent_config.workspace_id in all_creds:
             workspace_name = all_creds[agent_config.workspace_id].workspace_name or workspace_name
 
-        if self._console and _RICH_AVAILABLE:
-            self._console.print(f"\n[bold]Agent: {agent}[/bold]")
-            self._console.print(f"  Description: {agent_config.description}")
-            self._console.print(f"  Target: {agent_config.target}")
-            self._console.print(f"  Workspace: {workspace_name}")
-            self._console.print(f"  Max rows: {agent_config.max_rows}")
-            self._console.print(f"  Timeout: {agent_config.timeout_seconds}s")
-            self._console.print(f"\n  Start with: rdst slack start --agent {agent}")
-        else:
-            print(f"\nAgent: {agent}")
-            print(f"  Target: {agent_config.target}")
-            print(f"  Workspace: {workspace_name}")
+        console = self._console
+        console.print(f"\n[bold]Agent: {agent}[/bold]")
+        console.print(f"  Description: {agent_config.description}")
+        console.print(f"  Target: [{StyleTokens.SUCCESS}]{agent_config.target}[/{StyleTokens.SUCCESS}]")
+        console.print(f"  Workspace: {workspace_name}")
+        console.print(f"  Max rows: {agent_config.max_rows}")
+        console.print(f"  Timeout: {agent_config.timeout_seconds}s")
+        console.print(f"\n  Start with: [{StyleTokens.ACCENT}]rdst slack start --agent {agent}[/{StyleTokens.ACCENT}]")
 
         return RdstResult(
             ok=True,

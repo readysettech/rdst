@@ -459,6 +459,34 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             port=getattr(args, 'port', 8080),
             deny_columns=getattr(args, 'deny_columns', None),
             allow_tables=getattr(args, 'allow_tables', None),
+            guard=getattr(args, 'guard', None),
+        )
+    elif command == 'guard':
+        from lib.cli.guard_command import GuardCommand
+        guard_cmd = GuardCommand()
+        # Support both --name and positional guard_name
+        name = getattr(args, 'name', None) or getattr(args, 'guard_name', None)
+        return guard_cmd.execute(
+            subcommand=getattr(args, 'subcommand', None),
+            name=name,
+            description=getattr(args, 'description', ''),
+            mask=getattr(args, 'mask', None),
+            deny_columns=getattr(args, 'deny_columns', None),
+            allow_tables=getattr(args, 'allow_tables', None),
+            require_where=getattr(args, 'require_where', False),
+            require_limit=getattr(args, 'require_limit', False),
+            no_select_star=getattr(args, 'no_select_star', False),
+            max_tables=getattr(args, 'max_tables', None),
+            cost_limit=getattr(args, 'cost_limit', None),
+            max_estimated_rows=getattr(args, 'max_estimated_rows', None),
+            required_filters=getattr(args, 'required_filters', None),
+            intent=getattr(args, 'intent', None),
+            schema_context=getattr(args, 'schema_context', None),
+            max_rows=getattr(args, 'max_rows', 1000),
+            timeout=getattr(args, 'timeout', 30),
+            sql=getattr(args, 'sql', None),
+            check_guard=getattr(args, 'check_guard', None),
+            target=getattr(args, 'target', None),
         )
     else:
         return RdstResult(False, f"Unknown command: {command}")

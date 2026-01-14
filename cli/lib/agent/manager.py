@@ -141,6 +141,7 @@ class AgentManager:
         denied_columns: list[str] | None = None,
         allowed_tables: list[str] | None = None,
         masked_columns: dict[str, str] | None = None,
+        guard: str | None = None,
         validate_target: bool = True,
     ) -> AgentConfig:
         """
@@ -155,6 +156,7 @@ class AgentManager:
             denied_columns: List of column patterns to deny access.
             allowed_tables: List of tables to allow (None = all).
             masked_columns: Dict of column -> mask pattern.
+            guard: Name of guard to apply (from ~/.rdst/guards/).
             validate_target: Whether to validate target exists.
 
         Returns:
@@ -173,6 +175,10 @@ class AgentManager:
         if validate_target:
             self._validate_target(target)
 
+        # Validate guard exists if specified
+        if guard:
+            self._validate_guard(guard)
+
         safety = SafetyConfig(
             read_only=True,
             max_rows=max_rows,
@@ -189,6 +195,7 @@ class AgentManager:
             name=name,
             target=target,
             description=description,
+            guard=guard,
             safety=safety,
             restrictions=restrictions,
         )
@@ -254,3 +261,26 @@ class AgentManager:
             else:
                 msg = f"Target '{target}' not found. No targets configured. Run 'rdst configure' first."
             raise TargetNotFoundError(msg)
+
+    def _validate_guard(self, guard: str) -> None:
+        """
+        Validate that a guard exists.
+
+        Args:
+            guard: Guard name.
+
+        Raises:
+            AgentManagerError: If guard does not exist.
+        """
+        from ..guard import GuardManager, GuardNotFoundError
+
+        mgr = GuardManager()
+        try:
+            mgr.get(guard)
+        except GuardNotFoundError:
+            available = mgr.list()
+            if available:
+                msg = f"Guard '{guard}' not found. Available guards: {', '.join(available)}"
+            else:
+                msg = f"Guard '{guard}' not found. No guards configured. Run 'rdst guard create' first."
+            raise AgentManagerError(msg)
