@@ -5,6 +5,8 @@ Defines GuardConfig and related dataclasses for persisting guard definitions.
 Storage: ~/.rdst/guards/<name>.yaml
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path

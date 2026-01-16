@@ -4,6 +4,8 @@ Guard manager - CRUD operations for guard configurations.
 Handles creating, listing, loading, and deleting guards stored in ~/.rdst/guards/.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Iterator
 

@@ -6,6 +6,8 @@ enforceable guard rules. The LLM is only used at creation time - runtime
 enforcement is fully deterministic.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from typing import Any

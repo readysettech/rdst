@@ -1,5 +1,6 @@
 """Tests for ChatAgent and chat tools."""
 
+import os
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -290,8 +291,9 @@ class TestChatAgentIntegration:
         mock_response.stop_reason = "end_turn"
         mock_client.messages.create.return_value = mock_response
 
-        # Patch anthropic in sys.modules
-        with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
+        # Patch anthropic in sys.modules and provide fake API key
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic}), \
+             patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
             # Create agent with mocked config
             config = MagicMock()
             config.target = "test"
@@ -333,8 +335,9 @@ class TestChatAgentIntegration:
 
         mock_client.messages.create.side_effect = [tool_response, final_response]
 
-        # Patch anthropic in sys.modules
-        with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
+        # Patch anthropic in sys.modules and provide fake API key
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic}), \
+             patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
             # Create agent with mocked runtime
             config = MagicMock()
             config.target = "test"

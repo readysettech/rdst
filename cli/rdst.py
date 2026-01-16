@@ -455,7 +455,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             target=getattr(args, 'target', None),
             description=getattr(args, 'description', ''),
             max_rows=getattr(args, 'max_rows', 1000),
-            timeout=getattr(args, 'timeout', 30),
+            timeout=getattr(args, 'timeout', 600),
             port=getattr(args, 'port', 8080),
             deny_columns=getattr(args, 'deny_columns', None),
             allow_tables=getattr(args, 'allow_tables', None),

@@ -4,6 +4,8 @@ Agent CLI command implementation.
 Handles rdst agent subcommands: create, list, show, delete, chat, serve, mcp, slack.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any
 

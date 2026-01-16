@@ -8,6 +8,8 @@ Supported mask types:
     hash        -> a1b2c3d4 (SHA256 truncated)
 """
 
+from __future__ import annotations
+
 import fnmatch
 import hashlib
 import re

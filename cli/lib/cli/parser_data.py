@@ -839,6 +839,7 @@ then expose them via HTTP API, MCP, or Slack.""",
             ArgDef("--port", short="-p", type=int, default=8080, help="HTTP port (for serve)"),
             ArgDef("--deny-columns", nargs="*", help="Column patterns to deny access"),
             ArgDef("--allow-tables", nargs="*", help="Tables to allow (whitelist)"),
+            ArgDef("--guard", short="-g", help="Guard to apply (created via rdst guard create)"),
         ],
         subcommands=[
             ("create", "Create a new data agent"),
@@ -859,63 +860,54 @@ then expose them via HTTP API, MCP, or Slack.""",
     ),
     "guard": CommandDef(
         name="guard",
-        short_help="Manage query guards for safe SQL execution",
-        description="""Manage query guards that enforce safety policies on SQL queries.
+        short_help="Manage reusable safety policies",
+        description="""Guards define reusable safety policies for data agents.
 
-Guards provide:
-  - Column masking (redact sensitive data like SSN, email)
-  - Query restrictions (require WHERE, LIMIT, deny SELECT *)
-  - Cost-based limits (estimated rows, table count)
-  - Intent validation (ensure queries match stated purpose)
-
-Use guards with 'rdst ask --guard <name>' or data agents.""",
+A guard specifies output masking, query restrictions, and execution limits
+that can be applied to one or more agents.""",
         args=[
             ArgDef(
                 "subcommand",
                 nargs="?",
-                default="list",
-                choices=["create", "list", "show", "delete", "test"],
-                help="Subcommand: create, list, show, delete, test",
+                default=None,
+                choices=["create", "list", "show", "delete", "edit", "check"],
+                help="Subcommand: create, list, show, delete, edit, check",
             ),
-            ArgDef("guard_name", nargs="?", help="Guard name (positional)"),
+            ArgDef("guard_name", nargs="?", help="Guard name (positional for show/delete/edit)"),
             ArgDef("--name", short="-n", help="Guard name"),
             ArgDef("--description", short="-d", default="", help="Guard description"),
-            # Masking options
-            ArgDef("--mask", nargs="*", help="Column patterns to mask (e.g., '*ssn*', 'email')"),
-            # Restriction options
-            ArgDef("--deny-columns", nargs="*", help="Column patterns to deny entirely"),
+            ArgDef("--mask", action="append", metavar="PATTERN:TYPE", help='Add masking pattern (e.g., "*.email:email", "*.ssn:redact")'),
+            ArgDef("--deny-columns", nargs="*", help="Column patterns to deny access"),
             ArgDef("--allow-tables", nargs="*", help="Tables to allow (whitelist)"),
             ArgDef("--require-where", action="store_true", help="Require WHERE clause"),
             ArgDef("--require-limit", action="store_true", help="Require LIMIT clause"),
-            ArgDef("--no-select-star", action="store_true", help="Deny SELECT *"),
-            # Cost limits
-            ArgDef("--max-tables", type=int, help="Max tables in query"),
-            ArgDef("--cost-limit", type=int, help="Max query cost estimate"),
-            ArgDef("--max-estimated-rows", type=int, help="Max estimated rows"),
-            # Intent validation
-            ArgDef("--required-filters", nargs="*", help="Required filter columns"),
-            ArgDef("--intent", help="Required intent description"),
-            ArgDef("--schema-context", help="Schema context for validation"),
-            # Execution limits
-            ArgDef("--max-rows", type=int, default=1000, help="Max rows to return"),
+            ArgDef("--no-select-star", action="store_true", help="Disallow SELECT *"),
+            ArgDef("--max-tables", type=int, help="Maximum tables in JOIN"),
+            ArgDef("--cost-limit", type=int, help="EXPLAIN cost threshold"),
+            ArgDef("--max-estimated-rows", type=int, help="Max rows from EXPLAIN estimate"),
+            ArgDef("--required-filters", action="append", metavar="TABLE:COLS", help='Require filter on columns (e.g., "users:id,email")'),
+            ArgDef("--intent", help="Natural language policy intent (LLM derives rules)"),
+            ArgDef("--schema-context", help="Database schema context for intent derivation"),
+            ArgDef("--max-rows", type=int, default=1000, help="Maximum rows to return"),
             ArgDef("--timeout", type=int, default=30, help="Query timeout in seconds"),
-            # Test options
-            ArgDef("--sql", help="SQL to test against guard"),
-            ArgDef("--check-guard", help="Guard name to test against (for test subcommand)"),
-            ArgDef("--target", short="-t", help="Target database"),
+            ArgDef("--sql", help="SQL to check (alternative to positional)"),
+            ArgDef("--guard", short="-g", dest="check_guard", help="Guard to check against"),
+            ArgDef("--target", short="-t", help="Target database (for cost estimation)"),
         ],
         subcommands=[
-            ("create", "Create a new query guard"),
+            ("create", "Create a new guard"),
             ("list", "List all configured guards"),
             ("show", "Show guard details"),
             ("delete", "Delete a guard"),
-            ("test", "Test SQL against a guard"),
+            ("edit", "Edit guard in $EDITOR"),
+            ("check", "Test SQL against a guard (pre-flight validation)"),
         ],
         examples=[
-            ('rdst guard create --name pii-safe --mask "*ssn*" "*email*" --require-where', "Create guard with masking"),
-            ("rdst guard list", "List all guards"),
+            ('rdst guard create --name pii-safe --mask "*.email:email" --require-where', "Create guard"),
+            ("rdst guard list", "List guards"),
             ("rdst guard show pii-safe", "Show guard details"),
-            ('rdst guard test --sql "SELECT * FROM users" --check-guard pii-safe', "Test query against guard"),
+            ('rdst guard check "SELECT * FROM users" --guard pii-safe', "Check SQL"),
+            ("rdst agent create --name bot --target prod --guard pii-safe", "Create agent with guard"),
         ],
     ),
 }
