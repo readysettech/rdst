@@ -1,0 +1,21 @@
+{
+  "name": "@rs/ui-icons",
+  "type": "module",
+  "scripts": {
+    "build:local": "npx tsx ./scripts/build.mts",
+    "clean": "rm -rf node_modules"
+  },
+  "exports": {
+    "./icon-name": "./types/name.d.ts"
+  },
+  "devDependencies": {
+    "@rs/typescript-config": "workspace:*",
+    "react": "catalog:react19",
+    "fs-extra": "11.3.2",
+    "glob": "11.0.3",
+    "node-html-parser": "7.0.1",
+    "@types/fs-extra": "11.0.4",
+    "@types/react": "catalog:react19",
+    "typescript": "catalog:common"
+  }
+}

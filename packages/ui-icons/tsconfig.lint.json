@@ -1,0 +1,8 @@
+{
+  "extends": "@rs/typescript-config/react-library.json",
+  "compilerOptions": {
+    "outDir": "dist"
+  },
+  "include": ["svg", "scripts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,263 @@
+@layer components {
+  .rs-highlight {
+    color: var(--color-content-layout-1);
+    font-family: var(
+      --font-mono,
+      ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Monaco,
+      Consolas,
+      'Liberation Mono',
+      'Courier New',
+      monospace
+    );
+    font-size: var(--text-mono-large);
+    line-height: var(--text-mono-large--line-height);
+    font-weight: var(--text-mono-large--font-weight);
+    letter-spacing: var(--text-mono-large--letter-spacing);
+
+    & code,
+    & pre,
+    & span {
+      font-family: inherit;
+      font-size: inherit;
+      line-height: inherit;
+      font-weight: inherit;
+      letter-spacing: inherit;
+    }
+
+    & code {
+      display: block;      text-wrap: wrap !important;
+      overflow-wrap: break-word !important;
+      white-space: pre-wrap !important;
+    }
+
+    & code[class*='language-'],
+    & pre[class*='language-'] {
+      background: none;
+      color: var(--color-content-layout-1);
+      text-align: left;
+      word-spacing: normal;
+      word-break: normal;
+      text-wrap: wrap !important;
+      overflow-wrap: break-word !important;
+      white-space: pre-wrap !important;
+      line-height: 1.5;
+    }
+
+    & pre[class*='language-']::-moz-selection,
+    & code[class*='language-']::-moz-selection,
+    & pre[class*='language-']::selection,
+    & code[class*='language-']::selection {
+      background: #3c526d;
+    }
+
+    & pre[class*='language-'] {
+      padding: 0 !important;
+      margin: 0.5em 0;
+      overflow: auto;
+    }
+
+    & :not(pre) > code[class*='language-'] {
+      padding: 0 !important;
+      border-radius: 0.3em;
+      white-space: normal;
+    }
+
+    & .token.comment,
+    & .token.prolog,
+    & .token.doctype,
+    & .token.cdata {
+      color: #8da1b9;
+    }
+
+    & .token.punctuation {
+      color: var(--color-content-layout-2);
+    }
+
+    & .token.delimiter.important,
+    & .token.selector .parent,
+    & .token.tag,
+    & .token.tag .token.punctuation {
+      color: #66cccc;
+    }
+
+    & .token.attr-name,
+    & .token.boolean,
+    & .token.number,
+    & .token.constant,
+    & .token.selector .token.attribute {
+      color: #e6d37a;
+    }
+
+    & .token.class-name,
+    & .token.key,
+    & .token.parameter,
+    & .token.property,
+    & .token.variable {
+      color: #6cb8e6;
+    }
+
+    & .token.attr-value,
+    & .token.string,
+    & .token.inserted {
+      color: #91d076;
+    }
+
+    & .token.builtin,
+    & .token.regex,
+    & .token.package {
+      color: #f4adf4;
+    }
+
+    & .token.function,
+    & .token.selector .token.class,
+    & .token.selector .token.id {
+      color: #c699e3;
+    }
+
+    & .token.keyword,
+    & .token.operator,
+    & .token.pseudo-class {
+      color: var(--color-content-warning-plain);
+    }
+
+    & .token.deleted,
+    & .token.important {
+      color: #cd6660;
+      font-weight: 700;
+    }
+
+    & .token.this {
+      color: #6cb8e6;
+    }
+
+    & .token.bold {
+      font-weight: 700;
+    }
+
+    & .token.italic {
+      font-style: italic;
+    }
+
+    & .token.entity {
+      cursor: help;
+    }
+
+    & .language-markdown .token.title,
+    & .language-markdown .token.title .token.punctuation {
+      color: #6cb8e6;
+      font-weight: 700;
+    }
+
+    & .language-markdown .token.blockquote.punctuation {
+      color: #f4adf4;
+    }
+
+    & .language-markdown .token.code {
+      color: #66cccc;
+    }
+
+    & .language-markdown .token.hr.punctuation {
+      color: #6cb8e6;
+    }
+
+    & .language-markdown .token.url .token.content {
+      color: #91d076;
+    }
+
+    & .language-json .token.operator {
+      color: var(--color-content-layout-2);
+    }
+
+    & .language-scss .token.variable {
+      color: #66cccc;
+    }
+
+    & .token.tab:before,
+    & .token.cr:before,
+    & .token.lf:before,
+    & .token.space:before {
+      color: #8da1b9;
+    }
+
+    & .line-highlight.line-highlight {
+      background: linear-gradient(to right, #3c526d5f 70%, #3c526d55);
+    }
+
+    & .line-highlight.line-highlight:before,
+    & .line-highlight.line-highlight[data-end]:after {
+      background-color: #8da1b9;
+      color: var(--color-surface-layout-1);
+      box-shadow: 0 1px #3c526d;
+    }
+
+    & .line-numbers .line-numbers-rows {
+      border-right: 1px solid #0b121b;
+      background: #0b121b7a;
+    }
+
+    & .line-numbers .line-numbers-rows > span:before {
+      color: #8da1b9da;
+    }
+
+    & .rainbow-braces .token.punctuation.brace-level-1,
+    & .rainbow-braces .token.punctuation.brace-level-5 {
+      color: #e6d37a;
+    }
+
+    & .rainbow-braces .token.punctuation.brace-level-2,
+    & .rainbow-braces .token.punctuation.brace-level-6 {
+      color: #f4adf4;
+    }
+
+    & .rainbow-braces .token.punctuation.brace-level-3,
+    & .rainbow-braces .token.punctuation.brace-level-7 {
+      color: #6cb8e6;
+    }
+
+    & .rainbow-braces .token.punctuation.brace-level-4,
+    & .rainbow-braces .token.punctuation.brace-level-8 {
+      color: #c699e3;
+    }
+
+    & pre.diff-highlight > code .token.deleted {
+      background-color: #cd66601f;
+    }
+
+    & pre.diff-highlight > code .token.inserted {
+      background-color: #91d0761f;
+    }
+
+    & .command-line .command-line-prompt {
+      border-right: 1px solid #0b121b;
+    }
+
+    & .command-line .command-line-prompt > span:before {
+      color: #8da1b9da;
+    }
+
+    & div.code-toolbar > .toolbar.toolbar > .toolbar-item > a,
+    & div.code-toolbar > .toolbar.toolbar > .toolbar-item > button {
+      color: var(--color-surface-layout-1);
+      background: #6cb8e6;
+    }
+
+    & div.code-toolbar > .toolbar.toolbar > .toolbar-item > a:hover,
+    & div.code-toolbar > .toolbar.toolbar > .toolbar-item > button:hover {
+      color: var(--color-surface-layout-1);
+      background: #6cb8e6da;
+    }
+  }
+
+  .rs-highlight--marketing {
+    & code,
+    & * code,
+    & code[class*='language-'],
+    & pre[class*='language-'] {
+      white-space: pre !important;
+    }
+  }
+}
+
