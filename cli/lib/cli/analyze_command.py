@@ -100,7 +100,7 @@ class AnalyzeCommand:
             name: Query name for registry lookup
             positional_query: Positional query argument (backward compatibility)
             save_as: Name to save query as after analysis
-            large_query_bypass: If True, allows queries up to 10KB instead of 1KB
+            large_query_bypass: If True, allows queries up to 10KB instead of 4KB
 
         Returns:
             AnalyzeInput with resolved SQL and metadata
@@ -221,17 +221,12 @@ class AnalyzeCommand:
         """
         Enforce query size limits.
 
-        Query size limits are database-dependent:
-        - PostgreSQL 14+: Up to 4KB supported
-        - PostgreSQL 13 and below: Up to 1KB supported
-        - MySQL: Up to 1KB supported
-
-        This initial check enforces a 4KB hard cap. Engine-specific limits
-        are enforced later in execute_analyze() when we know the target.
+        Default limit is 4KB (MAX_QUERY_LENGTH). Use --large-query-bypass
+        for one-time analysis of queries up to 10KB.
 
         Args:
             query: The SQL query string to check
-            bypass: If True, skip the default 1KB warning (still enforces 4KB max)
+            bypass: If True, allow up to 10KB instead of 4KB
 
         Raises:
             AnalyzeInputError: If query exceeds the size limit
@@ -242,131 +237,24 @@ class AnalyzeCommand:
 
         query_bytes = len(query.encode("utf-8"))
 
-        # Hard cap at 4KB - this is the maximum any database engine supports
-        max_size = 4 * 1024  # 4KB
-        if query_bytes > max_size:
-            raise AnalyzeInputError(
-                f"Query size ({query_bytes:,} bytes) exceeds maximum allowed size (4KB).\n\n"
-                "Database engines have hard limits on query size for EXPLAIN ANALYZE:\n"
-                "  - PostgreSQL 14+: Up to 4KB\n"
-                "  - PostgreSQL 13 and below: Up to 1KB\n"
-                "  - MySQL: Up to 1KB\n\n"
-                "Please reduce your query size or break it into smaller parts."
-            )
-
         if not bypass:
-            # Default 1KB limit - warn about potential issues with older databases
+            # Default 4KB limit (MAX_QUERY_LENGTH) - registry limit
             if query_bytes > MAX_QUERY_LENGTH:
                 raise AnalyzeInputError(
-                    f"Query size ({query_bytes:,} bytes) exceeds the default limit (1KB).\n\n"
-                    "Queries over 1KB may fail on:\n"
-                    "  - MySQL (all versions)\n"
-                    "  - PostgreSQL 13 and below\n\n"
-                    "If you're using PostgreSQL 14+, use --large-query-bypass:\n"
+                    f"Query size ({query_bytes:,} bytes) exceeds the default limit (4KB).\n\n"
+                    "Use --large-query-bypass for one-time analysis of larger queries:\n"
                     "  rdst analyze --large-query-bypass -f your_file.sql\n"
                     "  rdst analyze --large-query-bypass -q '<your query>'\n\n"
-                    "This allows queries up to 4KB (PostgreSQL 14+ only)."
+                    "This allows queries up to 10KB (will not be saved to registry)."
                 )
         else:
-            # With bypass, warn if query is between 1KB and 4KB about compatibility
-            if query_bytes > MAX_QUERY_LENGTH:
-                self._console.print(
-                    MessagePanel(
-                        f"Large query ({query_bytes:,} bytes). This requires PostgreSQL 14+ - may fail on MySQL or older PostgreSQL.",
-                        variant="warning",
-                    )
+            # With bypass, allow up to 10KB
+            max_size = 10 * 1024  # 10KB
+            if query_bytes > max_size:
+                raise AnalyzeInputError(
+                    f"Query size ({query_bytes:,} bytes) exceeds maximum allowed size (10KB).\n\n"
+                    "Please reduce your query size or break it into smaller parts."
                 )
-
-    def _validate_query_size_for_engine(
-        self, query: str, target_config: dict, target_name: str
-    ) -> Optional[str]:
-        """
-        Validate query size against engine-specific limits.
-
-        This is called after we know the target database engine and can
-        enforce appropriate limits:
-        - PostgreSQL 14+: Up to 4KB
-        - PostgreSQL 13 and below: Up to 1KB
-        - MySQL: Up to 1KB
-
-        Args:
-            query: The SQL query to validate
-            target_config: Target database configuration
-            target_name: Name of the target (for error messages)
-
-        Returns:
-            Error message string if validation fails, None if OK
-        """
-        from lib.data_manager_service.data_manager_service_command_sets import (
-            MAX_QUERY_LENGTH,
-        )
-
-        query_bytes = len(query.encode("utf-8"))
-        engine = target_config.get("engine", "").lower()
-
-        # MySQL: 1KB limit
-        if engine in ["mysql", "mariadb"]:
-            if query_bytes > MAX_QUERY_LENGTH:
-                return (
-                    f"Query size ({query_bytes:,} bytes) exceeds MySQL limit (1KB).\n\n"
-                    f"MySQL does not support queries larger than 1KB for EXPLAIN ANALYZE.\n"
-                    f"Please reduce your query size."
-                )
-            return None
-
-        # PostgreSQL: Check version for limit
-        if engine in ["postgresql", "postgres"]:
-            # Try to get the PostgreSQL version to determine limit
-            pg_version = self._get_postgres_major_version(target_config)
-
-            if pg_version is not None and pg_version < 14:
-                # PostgreSQL 13 and below: 1KB limit
-                if query_bytes > MAX_QUERY_LENGTH:
-                    return (
-                        f"Query size ({query_bytes:,} bytes) exceeds PostgreSQL {pg_version} limit (1KB).\n\n"
-                        f"PostgreSQL versions before 14 have a 1KB query size limit for EXPLAIN ANALYZE.\n"
-                        f"Options:\n"
-                        f"  1. Reduce your query size\n"
-                        f"  2. Upgrade to PostgreSQL 14+ (supports up to 4KB)"
-                    )
-            # PostgreSQL 14+ or unknown version: 4KB limit (already enforced in _enforce_query_size_limit)
-            return None
-
-        # Unknown engine: be permissive (4KB limit already enforced)
-        return None
-
-    def _get_postgres_major_version(self, target_config: dict) -> Optional[int]:
-        """
-        Get the major PostgreSQL version from the target database.
-
-        Returns:
-            Major version number (e.g., 14, 15, 16) or None if unable to determine
-        """
-        import psycopg2
-
-        try:
-            conn_params = {
-                "host": target_config.get("host", "localhost"),
-                "port": target_config.get("port", 5432),
-                "user": target_config.get("user") or target_config.get("username"),
-                "password": target_config.get("password"),
-                "database": target_config.get("database")
-                or target_config.get("dbname"),
-                "connect_timeout": 5,
-            }
-            # Remove None values
-            conn_params = {k: v for k, v in conn_params.items() if v is not None}
-
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute("SHOW server_version")
-                    version_str = cursor.fetchone()[0]
-                    # Parse version string like "14.5" or "15.2 (Ubuntu 15.2-1.pgdg22.04+1)"
-                    major_version = int(version_str.split(".")[0])
-                    return major_version
-        except Exception:
-            # If we can't determine version, return None (be permissive)
-            return None
 
     def _resolve_inline_query(
         self, query: str, save_as: str, bypass: bool = False
@@ -863,13 +751,6 @@ class AnalyzeCommand:
                     False,
                     f"Target '{target_name}' not found. Available targets: {targets_str}",
                 )
-
-            # Engine-aware query size validation
-            query_size_error = self._validate_query_size_for_engine(
-                resolved_input.sql, target_config, target_name
-            )
-            if query_size_error:
-                return RdstResult(False, query_size_error)
 
             readyset_analysis_result = None
             cache_performance_result = None

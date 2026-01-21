@@ -13,6 +13,7 @@ from query_registry.query_registry import (
     hash_sql,
     extract_parameters_from_sql,
     reconstruct_query_with_params,
+    verify_query_completeness,
     QueryEntry,
     QueryRegistry,
 )
@@ -226,7 +227,7 @@ class TestQueryEntry:
             first_analyzed="2024-01-15T10:00:00Z",
             last_analyzed="2024-01-15T10:00:00Z",
             frequency=100,
-            source="top"
+            source="top",
         )
 
         result = entry.to_dict()
@@ -244,7 +245,7 @@ class TestQueryEntry:
             "first_analyzed": "2024-01-15T10:00:00Z",
             "last_analyzed": "2024-01-15T10:00:00Z",
             "frequency": 100,
-            "source": "top"
+            "source": "top",
         }
 
         entry = QueryEntry.from_dict(data)
@@ -261,7 +262,7 @@ class TestQueryEntry:
             "first_analyzed": "",
             "last_analyzed": "",
             "frequency": 0,
-            "source": "manual"
+            "source": "manual",
         }
 
         entry = QueryEntry.from_dict(data)
@@ -439,6 +440,7 @@ class TestQueryRegistry:
         assert entry is not None
         assert entry.tag == "persistent"
 
+
 class TestEdgeCases:
     """Tests for edge cases and unusual inputs."""
 
@@ -465,15 +467,15 @@ class TestEdgeCases:
         assert entry is not None
 
     def test_query_at_size_limit(self, temp_dir):
-        """Test handling queries at the 1KB size limit."""
+        """Test handling queries at the 4KB size limit."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Create a query just under 1KB
+        # Create a query just under 4KB
         # "SELECT col0, col1, ... FROM table WHERE id = 1" pattern
-        columns = ", ".join([f"col{i}" for i in range(80)])  # ~400 bytes
+        columns = ", ".join([f"col{i}" for i in range(400)])  # ~2KB
         sql = f"SELECT {columns} FROM small_table WHERE id = 1"
-        assert len(sql.encode('utf-8')) < 1024, "Test query should be under 1KB"
+        assert len(sql.encode("utf-8")) < 4096, "Test query should be under 4KB"
 
         query_hash, _ = registry.add_query(sql)
         entry = registry.get_query(query_hash)
@@ -481,78 +483,78 @@ class TestEdgeCases:
         assert entry is not None
 
     def test_query_exceeds_size_limit(self, temp_dir):
-        """Test that queries exceeding 1KB are rejected."""
+        """Test that queries exceeding 4KB are rejected."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Create a query over 1KB
-        columns = ", ".join([f"col{i}" for i in range(200)])  # >1KB
+        # Create a query over 4KB
+        columns = ", ".join([f"col{i}" for i in range(800)])  # >4KB
         sql = f"SELECT {columns} FROM large_table WHERE id = 1"
-        assert len(sql.encode('utf-8')) > 1024, "Test query should be over 1KB"
+        assert len(sql.encode("utf-8")) > 4096, "Test query should be over 4KB"
 
         with pytest.raises(ValueError) as exc_info:
             registry.add_query(sql)
 
         assert "exceeds registry limit" in str(exc_info.value)
-        assert "1KB" in str(exc_info.value)
+        assert "4KB" in str(exc_info.value)
 
 
 class TestQuerySizeLimits:
-    """Tests for query size limit enforcement (1KB default, 10KB bypass max)."""
+    """Tests for query size limit enforcement (4KB default, 10KB bypass max)."""
 
-    def test_registry_accepts_query_under_1kb(self, temp_dir):
-        """Test that queries under 1KB are accepted by registry."""
+    def test_registry_accepts_query_under_4kb(self, temp_dir):
+        """Test that queries under 4KB are accepted by registry."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Query well under 1KB
+        # Query well under 4KB
         sql = "SELECT * FROM users WHERE id = 1"
-        assert len(sql.encode('utf-8')) < 1024
+        assert len(sql.encode("utf-8")) < 4096
 
         query_hash, is_new = registry.add_query(sql)
         assert is_new is True
         assert registry.get_query(query_hash) is not None
 
-    def test_registry_rejects_query_over_1kb(self, temp_dir):
-        """Test that queries over 1KB are rejected by registry."""
+    def test_registry_rejects_query_over_4kb(self, temp_dir):
+        """Test that queries over 4KB are rejected by registry."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Create query over 1KB
-        columns = ", ".join([f"column_{i}" for i in range(150)])
+        # Create query over 4KB
+        columns = ", ".join([f"column_{i}" for i in range(600)])
         sql = f"SELECT {columns} FROM large_table WHERE id = 1"
-        assert len(sql.encode('utf-8')) > 1024
+        assert len(sql.encode("utf-8")) > 4096
 
         with pytest.raises(ValueError) as exc_info:
             registry.add_query(sql)
 
         assert "exceeds registry limit" in str(exc_info.value)
 
-    def test_query_exactly_at_1kb_limit(self, temp_dir):
-        """Test query at exactly 1024 bytes boundary."""
+    def test_query_exactly_at_4kb_limit(self, temp_dir):
+        """Test query at exactly 4096 bytes boundary."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Build query that's exactly 1024 bytes
+        # Build query that's exactly 4096 bytes
         base = "SELECT * FROM t WHERE x = "
-        padding_needed = 1024 - len(base.encode('utf-8'))
+        padding_needed = 4096 - len(base.encode("utf-8"))
         sql = base + "'" + "x" * (padding_needed - 2) + "'"
-        assert len(sql.encode('utf-8')) == 1024
+        assert len(sql.encode("utf-8")) == 4096
 
         # Exactly at limit should be accepted
         query_hash, is_new = registry.add_query(sql)
         assert is_new is True
 
     def test_query_one_byte_over_limit(self, temp_dir):
-        """Test query at 1025 bytes is rejected."""
+        """Test query at 4097 bytes is rejected."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Build query that's 1025 bytes
+        # Build query that's 4097 bytes
         base = "SELECT * FROM t WHERE x = "
-        padding_needed = 1025 - len(base.encode('utf-8'))
+        padding_needed = 4097 - len(base.encode("utf-8"))
         sql = base + "'" + "x" * (padding_needed - 2) + "'"
-        assert len(sql.encode('utf-8')) == 1025
+        assert len(sql.encode("utf-8")) == 4097
 
         with pytest.raises(ValueError):
             registry.add_query(sql)
@@ -562,10 +564,96 @@ class TestQuerySizeLimits:
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        columns = ", ".join([f"col{i}" for i in range(200)])
+        columns = ", ".join([f"col{i}" for i in range(800)])
         sql = f"SELECT {columns} FROM table WHERE id = 1"
 
         with pytest.raises(ValueError) as exc_info:
             registry.add_query(sql)
 
         assert "--large-query-bypass" in str(exc_info.value)
+
+
+class TestVerifyQueryCompleteness:
+    """Tests for verify_query_completeness function (truncation detection)."""
+
+    def test_valid_select(self):
+        """Valid SELECT query passes."""
+        is_valid, error = verify_query_completeness("SELECT * FROM users WHERE id = 1")
+        assert is_valid is True
+        assert error is None
+
+    def test_valid_insert(self):
+        """Valid INSERT query passes."""
+        is_valid, error = verify_query_completeness(
+            "INSERT INTO users (name) VALUES ('test')"
+        )
+        assert is_valid is True
+        assert error is None
+
+    def test_valid_update(self):
+        """Valid UPDATE query passes."""
+        is_valid, error = verify_query_completeness(
+            "UPDATE users SET name = 'test' WHERE id = 1"
+        )
+        assert is_valid is True
+        assert error is None
+
+    def test_empty_query(self):
+        """Empty query is rejected."""
+        is_valid, error = verify_query_completeness("")
+        assert is_valid is False
+        assert "Empty" in error
+
+    def test_truncated_ends_with_where(self):
+        """Query ending with WHERE is detected as truncated."""
+        is_valid, error = verify_query_completeness("SELECT * FROM users WHERE")
+        assert is_valid is False
+        assert "truncated" in error.lower()
+
+    def test_truncated_ends_with_and(self):
+        """Query ending with AND is detected as truncated."""
+        is_valid, error = verify_query_completeness(
+            "SELECT * FROM users WHERE id = 1 AND"
+        )
+        assert is_valid is False
+        assert "truncated" in error.lower()
+
+    def test_truncated_ends_with_comma(self):
+        """Query ending with comma is detected as truncated."""
+        is_valid, error = verify_query_completeness("SELECT id, name,")
+        assert is_valid is False
+        assert "truncated" in error.lower()
+
+    def test_truncated_ends_with_open_paren(self):
+        """Query ending with open parenthesis is detected as truncated."""
+        is_valid, error = verify_query_completeness("SELECT * FROM users WHERE id IN (")
+        assert is_valid is False
+        assert "truncated" in error.lower()
+
+    def test_truncated_ends_with_equals(self):
+        """Query ending with equals is detected as truncated."""
+        is_valid, error = verify_query_completeness("SELECT * FROM users WHERE id =")
+        assert is_valid is False
+        assert "truncated" in error.lower()
+
+    def test_truncated_ends_with_from(self):
+        """Query ending with FROM is detected as truncated."""
+        is_valid, error = verify_query_completeness("SELECT * FROM")
+        assert is_valid is False
+        assert "truncated" in error.lower()
+
+    def test_truncated_ends_with_join(self):
+        """Query ending with JOIN is detected as truncated."""
+        is_valid, error = verify_query_completeness("SELECT * FROM users JOIN")
+        assert is_valid is False
+        assert "truncated" in error.lower()
+
+    def test_registry_rejects_truncated_query(self, temp_dir):
+        """Registry rejects truncated queries."""
+        registry_path = temp_dir / "test_queries.toml"
+        registry = QueryRegistry(registry_path=str(registry_path))
+
+        with pytest.raises(ValueError) as exc_info:
+            registry.add_query("SELECT * FROM users WHERE id = 1 AND")
+
+        assert "truncated" in str(exc_info.value).lower()

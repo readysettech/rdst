@@ -20,20 +20,20 @@ import os
 # help: Handled by rdst_help tool differently (rdst help "question" for docs lookup)
 # ask: Requires interactive TTY for best experience
 MCP_EXCLUDED_COMMANDS = {
-    "claude",    # N/A - meta command for MCP registration itself
-    "help",      # N/A - rdst_help handles this differently
-    "ask",       # CLI-only - requires interactive TTY for multi-step flow
+    "claude",  # N/A - meta command for MCP registration itself
+    "help",  # N/A - rdst_help handles this differently
+    "ask",  # CLI-only - requires interactive TTY for multi-step flow
     # Schema subcommands (handled via rdst_schema tool, some are CLI-only)
     "annotate",  # Schema subcommand - interactive wizard, CLI-only
-    "export",    # Schema subcommand - handled by rdst_schema tool
+    "export",  # Schema subcommand - handled by rdst_schema tool
 }
 
 # MCP-only tools that don't map directly to CLI commands
 # These are helper tools for the MCP integration
 MCP_ONLY_TOOLS = {
-    "read_config",      # Reads ~/.rdst/config.toml directly
-    "set_env",          # Sets env vars in MCP session
-    "help",             # Entry point tool, different from CLI help
+    "read_config",  # Reads ~/.rdst/config.toml directly
+    "set_env",  # Sets env vars in MCP session
+    "help",  # Entry point tool, different from CLI help
     "test_connection",  # Maps to 'configure test' subcommand
 }
 
@@ -46,25 +46,26 @@ SUBCOMMAND_MAPPING = {
 
 
 def get_cli_commands():
-    """Get CLI commands by parsing rdst.py source file."""
+    """Get CLI commands from parser_data.py COMMAND_ORDER."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    rdst_path = os.path.join(script_dir, "..", "..", "..", "rdst.py")
+    parser_data_path = os.path.join(
+        script_dir, "..", "..", "..", "lib", "cli", "parser_data.py"
+    )
 
     try:
-        with open(rdst_path, 'r') as f:
+        with open(parser_data_path, "r") as f:
             content = f.read()
 
-        # Find main subparser commands (exclude subcommand parsers like query_subparsers)
-        # Only match: subparsers.add_parser('command_name', ...)
-        # Use negative lookbehind (?<!\w) to exclude query_subparsers, schema_subparsers, etc.
-        commands = set()
-        for match in re.finditer(r"(?<!\w)subparsers\.add_parser\s*\(\s*['\"](\w+)['\"]", content):
-            commands.add(match.group(1))
+        # Find COMMAND_ORDER list which defines all top-level commands
+        match = re.search(r"COMMAND_ORDER\s*[=:]\s*\[([^\]]+)\]", content)
+        if not match:
+            print("Could not find COMMAND_ORDER in parser_data.py", file=sys.stderr)
+            return set()
 
-        # Filter out query subcommands that use a different parser variable
-        # These are defined with query_subparsers.add_parser, not subparsers.add_parser
-        query_subcommands = {'add', 'edit', 'delete', 'rm', 'show', 'list', 'import'}
-        commands = commands - query_subcommands
+        # Extract command names from the list
+        commands = set()
+        for cmd_match in re.finditer(r'["\'](\w+)["\']', match.group(1)):
+            commands.add(cmd_match.group(1))
 
         return commands
     except Exception as e:
@@ -144,7 +145,7 @@ def check_sync():
     # Check for MCP tools that don't match CLI commands
     for tool in actual_mcp_tools:
         # Handle subcommand pattern
-        base_cmd = tool.split('_')[0]
+        base_cmd = tool.split("_")[0]
 
         if base_cmd in SUBCOMMAND_MAPPING:
             # This is a subcommand tool, check if it's expected

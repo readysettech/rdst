@@ -614,11 +614,11 @@ class TopCommand:
             query_bytes = len(query_text.encode("utf-8")) if query_text else 0
 
             if query_bytes > MAX_QUERY_LENGTH:
-                # Query exceeds 1KB limit - cannot save to registry
+                # Query exceeds 4KB limit - cannot save to registry
                 return RdstResult(
                     False,
-                    f"Query size ({query_bytes:,} bytes) exceeds the 1KB limit.\n\n"
-                    "Queries captured from 'rdst top' cannot exceed 1KB.\n"
+                    f"Query size ({query_bytes:,} bytes) exceeds the 4KB limit.\n\n"
+                    "Queries captured from 'rdst top' cannot exceed 4KB.\n"
                     "To analyze this query, get the full SQL from your application and run:\n"
                     f"  rdst analyze --large-query-bypass '<full query>'\n\n"
                     "This allows one-time analysis of queries up to 10KB.",

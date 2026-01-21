@@ -4,18 +4,88 @@ Query Registry Implementation
 Core functionality for storing, retrieving, and managing SQL queries with
 normalized hashing and TOML-based persistence.
 """
+
 from __future__ import annotations
 
 import hashlib
 import re
+import logging
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import toml
 import sqlglot
+from sqlglot.errors import ParseError
 
 from lib.data_manager_service.data_manager_service_command_sets import MAX_QUERY_LENGTH
+
+logger = logging.getLogger(__name__)
+
+
+def verify_query_completeness(
+    sql: str, dialect: str = None
+) -> Tuple[bool, Optional[str]]:
+    """
+    Verify that a SQL query is complete and parseable using sqlglot.
+
+    Detects truncated queries that may have been cut off by database
+    capture limits (e.g., track_activity_query_size for PostgreSQL).
+
+    Args:
+        sql: SQL query string to verify
+        dialect: Optional SQL dialect ('postgres', 'mysql', etc.)
+
+    Returns:
+        Tuple of (is_valid, error_message). If is_valid is True, error_message is None.
+    """
+    if not sql or not sql.strip():
+        return False, "Empty query"
+
+    stripped = sql.strip()
+    upper_sql = stripped.upper()
+
+    truncation_suffixes = (
+        " AND",
+        " OR",
+        " WHERE",
+        " FROM",
+        " JOIN",
+        " ON",
+        " IN",
+        " IN (",
+        " LIKE",
+        " BETWEEN",
+        " NOT",
+        " IS",
+        " AS",
+        " SET",
+        " VALUES",
+        " VALUES(",
+        "(",
+        ",",
+        "=",
+        "<",
+        ">",
+        "!",
+        "+",
+        "-",
+        "/",
+    )
+    for suffix in truncation_suffixes:
+        if upper_sql.endswith(suffix) or upper_sql.endswith(suffix.strip()):
+            return False, f"Query appears truncated (ends with '{suffix.strip()}')"
+
+    try:
+        sqlglot.parse_one(sql, dialect=dialect)
+        return True, None
+    except ParseError as e:
+        error_str = str(e).lower()
+        if "unexpected" in error_str or "expected" in error_str:
+            return False, f"Query appears to be truncated or malformed: {e}"
+        return False, f"SQL parse error: {e}"
+    except Exception as e:
+        return False, f"Failed to parse SQL: {e}"
 
 
 def normalize_sql(query: str, dialect: str = None) -> str:
@@ -33,6 +103,7 @@ def normalize_sql(query: str, dialect: str = None) -> str:
         Normalized SQL with :p1, :p2 named placeholders
     """
     from .sql_normalizer import normalize_and_extract
+
     normalized, _ = normalize_and_extract(query, dialect)
     return normalized
 
@@ -53,26 +124,130 @@ def hash_sql(query: str) -> str:
     normalized = normalize_sql(query)
     # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
     # MD5 is used for query fingerprinting/deduplication, not cryptographic purposes
-    return hashlib.md5(normalized.encode('utf-8')).hexdigest()[:12]  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
+    return hashlib.md5(
+        normalized.encode("utf-8")
+    ).hexdigest()[
+        :12
+    ]  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
 
 
 # Stop words to filter out when generating query names
 _STOP_WORDS = {
     # Articles and basic words
-    'the', 'a', 'an', 'of', 'in', 'on', 'at', 'by', 'for', 'to', 'with', 'from',
-    'as', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
-    'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might',
-    'that', 'which', 'who', 'whom', 'whose', 'this', 'these', 'those',
-    'and', 'or', 'but', 'if', 'then', 'else', 'when', 'where', 'why', 'how',
-    'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such',
-    'no', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just',
+    "the",
+    "a",
+    "an",
+    "of",
+    "in",
+    "on",
+    "at",
+    "by",
+    "for",
+    "to",
+    "with",
+    "from",
+    "as",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "that",
+    "which",
+    "who",
+    "whom",
+    "whose",
+    "this",
+    "these",
+    "those",
+    "and",
+    "or",
+    "but",
+    "if",
+    "then",
+    "else",
+    "when",
+    "where",
+    "why",
+    "how",
+    "all",
+    "each",
+    "every",
+    "both",
+    "few",
+    "more",
+    "most",
+    "other",
+    "some",
+    "such",
+    "no",
+    "not",
+    "only",
+    "own",
+    "same",
+    "so",
+    "than",
+    "too",
+    "very",
+    "just",
     # Common query words to skip
-    'show', 'find', 'get', 'list', 'display', 'give', 'tell', 'what', 'me', 'i',
-    'want', 'need', 'like', 'please', 'can', 'you', 'my', 'your',
+    "show",
+    "find",
+    "get",
+    "list",
+    "display",
+    "give",
+    "tell",
+    "what",
+    "me",
+    "i",
+    "want",
+    "need",
+    "like",
+    "please",
+    "can",
+    "you",
+    "my",
+    "your",
     # SQL keywords
-    'select', 'from', 'where', 'order', 'group', 'having', 'limit', 'offset',
-    'join', 'left', 'right', 'inner', 'outer', 'cross', 'union', 'except',
-    'insert', 'update', 'delete', 'create', 'drop', 'alter', 'table', 'index',
+    "select",
+    "from",
+    "where",
+    "order",
+    "group",
+    "having",
+    "limit",
+    "offset",
+    "join",
+    "left",
+    "right",
+    "inner",
+    "outer",
+    "cross",
+    "union",
+    "except",
+    "insert",
+    "update",
+    "delete",
+    "create",
+    "drop",
+    "alter",
+    "table",
+    "index",
 }
 
 
@@ -104,7 +279,7 @@ def generate_query_name(text: str, existing_names: Optional[set] = None) -> str:
     existing_names = existing_names or set()
 
     # Tokenize: extract words (alphanumeric sequences)
-    words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
+    words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
 
     # Filter out stop words and very short words
     keywords = [w for w in words if w not in _STOP_WORDS and len(w) > 2]
@@ -114,16 +289,16 @@ def generate_query_name(text: str, existing_names: Optional[set] = None) -> str:
 
     if not name_parts:
         # Fallback if all words were filtered
-        name_parts = ['query']
+        name_parts = ["query"]
 
     # Join with underscore
-    base_name = '_'.join(name_parts)
+    base_name = "_".join(name_parts)
 
     # Truncate if too long (max 30 chars, don't cut mid-word)
     if len(base_name) > 30:
         truncated = base_name[:30]
         # Find last underscore to avoid cutting mid-word
-        last_underscore = truncated.rfind('_')
+        last_underscore = truncated.rfind("_")
         if last_underscore > 10:  # Keep at least some content
             base_name = truncated[:last_underscore]
         else:
@@ -139,7 +314,9 @@ def generate_query_name(text: str, existing_names: Optional[set] = None) -> str:
     return final_name
 
 
-def extract_parameters_from_sql(original_sql: str, parameterized_sql: str) -> Dict[str, Any]:
+def extract_parameters_from_sql(
+    original_sql: str, parameterized_sql: str
+) -> Dict[str, Any]:
     """
     Extract parameter values from original SQL by comparing with parameterized version.
 
@@ -158,10 +335,10 @@ def extract_parameters_from_sql(original_sql: str, parameterized_sql: str) -> Di
     # Find all string literals in original
     string_literals = re.findall(r"'([^']*)'", original_sql)
     # Find all numeric literals in original
-    numeric_literals = re.findall(r'\b(\d+(?:\.\d+)?)\b', original_sql)
+    numeric_literals = re.findall(r"\b(\d+(?:\.\d+)?)\b", original_sql)
 
     # Count placeholders in parameterized version
-    placeholder_count = parameterized_sql.count('?')
+    placeholder_count = parameterized_sql.count("?")
 
     # Combine all literals in order they appear
     all_literals = []
@@ -179,7 +356,7 @@ def extract_parameters_from_sql(original_sql: str, parameterized_sql: str) -> Di
         else:
             # Numeric literal
             try:
-                if '.' in token:
+                if "." in token:
                     params[f"param_{i}"] = float(token)
                 else:
                     params[f"param_{i}"] = int(token)
@@ -189,7 +366,9 @@ def extract_parameters_from_sql(original_sql: str, parameterized_sql: str) -> Di
     return params
 
 
-def reconstruct_query_with_params(parameterized_sql: str, params: Dict[str, Any]) -> str:
+def reconstruct_query_with_params(
+    parameterized_sql: str, params: Dict[str, Any]
+) -> str:
     """
     Reconstruct executable SQL by substituting parameter values.
 
@@ -215,7 +394,7 @@ def reconstruct_query_with_params(parameterized_sql: str, params: Dict[str, Any]
             replacement = str(value)
 
         # Replace first occurrence of ?
-        result = result.replace('?', replacement, 1)
+        result = result.replace("?", replacement, 1)
 
     return result
 
@@ -225,6 +404,7 @@ class QueryEntry:
     """
     Represents a stored query with metadata.
     """
+
     sql: str  # Normalized SQL with :p1, :p2 placeholders
     hash: str
     tag: str = ""
@@ -247,25 +427,25 @@ class QueryEntry:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'QueryEntry':
+    def from_dict(cls, data: Dict[str, Any]) -> "QueryEntry":
         """Create QueryEntry from dictionary (TOML deserialization)."""
         # Handle backward compatibility
-        if 'last_target' not in data:
-            data['last_target'] = ""
-        if 'most_recent_params' not in data:
-            data['most_recent_params'] = {}
-        if 'parameters' not in data:
-            data['parameters'] = {}
+        if "last_target" not in data:
+            data["last_target"] = ""
+        if "most_recent_params" not in data:
+            data["most_recent_params"] = {}
+        if "parameters" not in data:
+            data["parameters"] = {}
         # Runtime stats from rdst top (added in CLD-1645)
-        if 'max_duration_ms' not in data:
-            data['max_duration_ms'] = 0.0
-        if 'avg_duration_ms' not in data:
-            data['avg_duration_ms'] = 0.0
-        if 'observation_count' not in data:
-            data['observation_count'] = 0
+        if "max_duration_ms" not in data:
+            data["max_duration_ms"] = 0.0
+        if "avg_duration_ms" not in data:
+            data["avg_duration_ms"] = 0.0
+        if "observation_count" not in data:
+            data["observation_count"] = 0
 
         # Remove deprecated parameter_history if present in old data
-        data.pop('parameter_history', None)
+        data.pop("parameter_history", None)
 
         return cls(**data)
 
@@ -313,11 +493,11 @@ class QueryRegistry:
             return
 
         try:
-            with open(self.registry_path, 'r', encoding='utf-8') as f:
+            with open(self.registry_path, "r", encoding="utf-8") as f:
                 data = toml.load(f)
 
             # Load queries from TOML structure
-            queries_data = data.get('queries', {})
+            queries_data = data.get("queries", {})
             self._queries = {}
 
             for query_hash, query_data in queries_data.items():
@@ -344,23 +524,29 @@ class QueryRegistry:
         self._ensure_directory()
 
         # Convert to TOML structure
-        toml_data = {
-            'queries': {}
-        }
+        toml_data = {"queries": {}}
 
         for query_hash, entry in self._queries.items():
-            toml_data['queries'][query_hash] = entry.to_dict()
+            toml_data["queries"][query_hash] = entry.to_dict()
 
         try:
-            with open(self.registry_path, 'w', encoding='utf-8') as f:
+            with open(self.registry_path, "w", encoding="utf-8") as f:
                 toml.dump(toml_data, f)
         except Exception as e:
             raise RuntimeError(f"Failed to save query registry: {e}")
 
-    def add_query(self, sql: str, tag: str = "", source: str = "manual",
-                  frequency: int = 0, target: str = "", dialect: str = None,
-                  max_duration_ms: float = 0.0, avg_duration_ms: float = 0.0,
-                  observation_count: int = 0) -> tuple[str, bool]:
+    def add_query(
+        self,
+        sql: str,
+        tag: str = "",
+        source: str = "manual",
+        frequency: int = 0,
+        target: str = "",
+        dialect: str = None,
+        max_duration_ms: float = 0.0,
+        avg_duration_ms: float = 0.0,
+        observation_count: int = 0,
+    ) -> tuple[str, bool]:
         """
         Add a query to the registry with parameter extraction and history.
 
@@ -382,32 +568,40 @@ class QueryRegistry:
             Tuple of (query_hash, is_new) where is_new is True if this was a new query pattern
 
         Raises:
-            ValueError: If query exceeds 1KB size limit
+            ValueError: If query exceeds 4KB size limit
         """
         from .sql_normalizer import normalize_and_extract
 
         if not self._loaded:
             self.load()
 
-        # Enforce 1KB size limit for registry storage
-        query_bytes = len(sql.encode('utf-8')) if sql else 0
+        # Enforce 4KB size limit for registry storage
+        query_bytes = len(sql.encode("utf-8")) if sql else 0
 
         if query_bytes > MAX_QUERY_LENGTH:
             raise ValueError(
-                f"Query size ({query_bytes:,} bytes) exceeds registry limit (1KB). "
+                f"Query size ({query_bytes:,} bytes) exceeds registry limit (4KB). "
                 "Large queries cannot be saved to the registry. "
                 "Use 'rdst analyze --large-query-bypass' for one-time analysis of large queries."
+            )
+
+        is_valid, parse_error = verify_query_completeness(sql, dialect)
+        if not is_valid:
+            raise ValueError(
+                f"Query appears truncated. {parse_error}\n"
+                "Queries >1KB captured from 'rdst top' may be truncated by database settings.\n"
+                "Provide the full query with: rdst analyze -q '<full query>'"
             )
 
         # Use SQLGlot for robust normalization and parameter extraction
         normalized_sql, params = normalize_and_extract(sql, dialect)
         query_hash = hash_sql(sql)
-        now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         # Convert new params format to simple values for auto-substitution
         legacy_params = {}
         for param_name, param_info in params.items():
-            legacy_params[param_name] = param_info['value']
+            legacy_params[param_name] = param_info["value"]
 
         is_new_query = query_hash not in self._queries
 
@@ -450,7 +644,7 @@ class QueryRegistry:
                 most_recent_params=legacy_params,
                 max_duration_ms=max_duration_ms,
                 avg_duration_ms=avg_duration_ms,
-                observation_count=observation_count
+                observation_count=observation_count,
             )
             self._queries[query_hash] = entry
 
@@ -480,7 +674,8 @@ class QueryRegistry:
         # Try prefix matching (minimum 4 characters)
         if len(query_hash) >= 4:
             matches = [
-                entry for hash_key, entry in self._queries.items()
+                entry
+                for hash_key, entry in self._queries.items()
                 if hash_key.startswith(query_hash)
             ]
 
@@ -603,7 +798,9 @@ class QueryRegistry:
         query_hash = hash_sql(sql)
         return self.get_query(query_hash) is not None
 
-    def get_executable_query(self, query_hash: str, interactive: bool = True) -> Optional[str]:
+    def get_executable_query(
+        self, query_hash: str, interactive: bool = True
+    ) -> Optional[str]:
         """
         Get an executable query for analysis by reconstructing with parameters.
 
@@ -646,7 +843,9 @@ class QueryRegistry:
 
         return reconstruct_sql(entry.sql, params)
 
-    def _prompt_for_missing_params(self, existing: Dict[str, dict], missing: list) -> Dict[str, dict]:
+    def _prompt_for_missing_params(
+        self, existing: Dict[str, dict], missing: list
+    ) -> Dict[str, dict]:
         """
         Prompt user to fill in missing parameter values.
 
@@ -665,19 +864,21 @@ class QueryRegistry:
                 value = input(f"  Enter value for :{param_name}: ").strip()
                 # Infer type from input
                 try:
-                    params[param_name] = {'value': int(value), 'type': 'number'}
+                    params[param_name] = {"value": int(value), "type": "number"}
                 except ValueError:
                     try:
-                        params[param_name] = {'value': float(value), 'type': 'number'}
+                        params[param_name] = {"value": float(value), "type": "number"}
                     except ValueError:
-                        params[param_name] = {'value': value, 'type': 'string'}
+                        params[param_name] = {"value": value, "type": "string"}
             except KeyboardInterrupt:
                 print("\nCancelled.")
                 raise
 
         return params
 
-    def get_executable_query_by_tag(self, tag: str, interactive: bool = True) -> Optional[str]:
+    def get_executable_query_by_tag(
+        self, tag: str, interactive: bool = True
+    ) -> Optional[str]:
         """
         Get an executable query for analysis by tag.
 
@@ -694,8 +895,9 @@ class QueryRegistry:
 
         return self.get_executable_query(entry.hash, interactive)
 
-    def update_parameter_history(self, query_hash: str, parameters: Dict[str, Any],
-                                  target: str = "") -> bool:
+    def update_parameter_history(
+        self, query_hash: str, parameters: Dict[str, Any], target: str = ""
+    ) -> bool:
         """
         Update the stored parameters for an existing query.
 
@@ -718,7 +920,7 @@ class QueryRegistry:
         if not entry:
             return False
 
-        now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         entry.most_recent_params = parameters
         entry.last_analyzed = now

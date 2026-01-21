@@ -267,7 +267,7 @@ and Readyset caching opportunities.""",
             ArgDef(
                 "--large-query-bypass",
                 action="store_true",
-                help="Bypass the 1KB query size limit (allows up to 10KB) for -q, -f, or --stdin input",
+                help="Bypass the 4KB query size limit (allows up to 10KB) for -q, -f, or --stdin input",
             ),
         ],
         examples=[
@@ -897,4 +897,3 @@ def build_all_subparsers(subparsers, *, formatter_class=None) -> dict[str, Any]:
         name: build_subparser(subparsers, name, formatter_class=formatter_class)
         for name in COMMAND_ORDER
     }
-
