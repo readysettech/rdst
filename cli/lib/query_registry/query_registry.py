@@ -545,7 +545,6 @@ def reconstruct_query_with_params(
 
     return result
 
-
 @dataclass
 class QueryEntry:
     """

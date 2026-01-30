@@ -200,23 +200,21 @@ def _collect_postgres_schema(config: dict, target: str) -> tuple[Optional[Schema
     """Collect schema from PostgreSQL database."""
     try:
         import psycopg2
+        from ....db_connection import resolve_connection_params
 
-        host = config.get('host', 'localhost')
-        port = config.get('port', 5432)
-        user = config.get('user') or config.get('username')
-        password = config.get('password')
-        database = config.get('database') or config.get('dbname')
+        params = resolve_connection_params(target_config=config)
 
-        if not all([host, user, database]):
+        if not all([params['host'], params['user'], params['database']]):
             return None, "Schema information: Missing connection parameters"
 
         conn = psycopg2.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=10
+            host=params['host'],
+            port=params['port'],
+            user=params['user'],
+            password=params['password'],
+            database=params['database'],
+            connect_timeout=10,
+            sslmode=params['sslmode']
         )
 
         schema_info = SchemaInfo(target=target, db_type=DbType.POSTGRESQL, source=SchemaSource.DATABASE)
@@ -274,23 +272,21 @@ def _collect_mysql_schema(config: dict, target: str) -> tuple[Optional[SchemaInf
     """Collect schema from MySQL database."""
     try:
         import pymysql
+        from ....db_connection import resolve_connection_params
 
-        host = config.get('host', 'localhost')
-        port = config.get('port', 3306)
-        user = config.get('user') or config.get('username')
-        password = config.get('password')
-        database = config.get('database') or config.get('dbname')
+        params = resolve_connection_params(target_config=config)
 
-        if not all([host, user, database]):
+        if not all([params['host'], params['user'], params['database']]):
             return None, "Schema information: Missing connection parameters"
 
         conn = pymysql.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=10
+            host=params['host'],
+            port=params['port'],
+            user=params['user'],
+            password=params['password'],
+            database=params['database'],
+            connect_timeout=10,
+            ssl={'ssl': {}} if params['tls'] else None
         )
 
         schema_info = SchemaInfo(target=target, db_type=DbType.MYSQL, source=SchemaSource.DATABASE)

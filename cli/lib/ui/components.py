@@ -60,6 +60,7 @@ from rich.text import Text
 from rich.syntax import Syntax
 from rich.console import Group
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.status import Status
 
 
 # =============================================================================

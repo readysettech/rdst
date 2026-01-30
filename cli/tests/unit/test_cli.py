@@ -231,6 +231,53 @@ class TestFormatAnalyzeOutput:
         result = format_analyze_output(workflow_result)
         assert isinstance(result, str)
 
+    def test_uses_workflow_query_when_formatted_metadata_query_missing(self):
+        """Query panel should render from workflow-level query fields when metadata omits it."""
+        workflow_result = {
+            "FormatFinalResults": {
+                "success": True,
+                "metadata": {
+                    "target": "test",
+                    "database_engine": "mysql",
+                    "analysis_id": "abc123",
+                },
+                "analysis_summary": {
+                    "execution_time_ms": 10.0,
+                    "overall_rating": "good",
+                    "efficiency_score": 90,
+                    "rows_processed": {"examined": 100, "returned": 10},
+                },
+            },
+            "normalized_query": "SELECT * FROM title_basics LIMIT ?",
+        }
+
+        result = format_analyze_output(workflow_result)
+        assert "SELECT * FROM title_basics LIMIT ?" in result
+
+    def test_readyset_cache_section_labels_present(self):
+        """Readyset section should include compatibility labels expected by integration tests."""
+        workflow_result = {
+            "FormatFinalResults": {"success": False},
+            "query": "SELECT 1",
+            "explain_results": {
+                "success": True,
+                "database_engine": "postgresql",
+                "execution_time_ms": 1.0,
+                "rows_examined": 1,
+                "rows_returned": 1,
+                "cost_estimate": 1.0,
+            },
+            "readyset_analysis": {
+                "success": True,
+                "final_verdict": {"cacheable": True, "confidence": "high", "method": "readyset_container"},
+                "explain_cache_result": {"explanation": "Cacheable"},
+            },
+        }
+
+        result = format_analyze_output(workflow_result)
+        assert "Readyset Cache Performance Analysis" in result
+        assert "PERFORMANCE COMPARISON" in result
+
 
 class TestTargetsConfig:
     """Tests for TargetsConfig class."""

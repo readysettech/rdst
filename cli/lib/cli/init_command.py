@@ -8,8 +8,7 @@ from .rdst_cli import RdstResult, TargetsConfig
 from .configuration_wizard import ConfigurationWizard
 
 # Use DataManager for connectivity checks
-from lib.data_manager.data_manager import DataManager, ConnectionConfig
-from lib.data_manager_service import DMSDbType, DataManagerQueryType
+from lib.services.init_service import InitService
 
 # Import UI system - handles Rich availability internally
 from lib.ui import (
@@ -225,67 +224,58 @@ class InitCommand:
         return bool(cfg.list_targets())
 
     def _step_validate(self, cfg: TargetsConfig) -> List[TargetTestResult]:
+        import asyncio
+        from lib.services.types import (
+            InitCompleteEvent,
+            InitLlmValidationEvent,
+            InitStatusEvent,
+            InitTargetValidationEvent,
+        )
+
         results: List[TargetTestResult] = []
         targets = cfg.list_targets()
-        default_name = cfg.get_default()
 
-        for name in targets:
-            self._print("Validating", f"Connecting to target '{name}'...")
-            target_config = cfg.get(name) or {}
-            ok, msg = self._test_target(target_config)
-            # Persist a simple boolean flag used by 'rdst configure list'
-            try:
-                target_config["endpoint_verified"] = bool(ok)
-                # Backward-compat: some views may still read 'verified'
-                target_config["verified"] = bool(ok)
-            except Exception:
-                pass
-            results.append(TargetTestResult(name=name, ok=ok, message=msg))
-            status = "success" if ok else "failed"
-            color_style = StyleTokens.SUCCESS if ok else StyleTokens.ERROR
-            self._print(
-                "Result",
-                f"Target {name}: {status}{' - ' + msg if msg else ''}",
-                style=color_style,
-            )
+        service = InitService()
+        llm_result: Dict[str, Any] = {}
 
-            # Update the target configuration with verification results
-            cfg.upsert(name, target_config)
-
-        # Save the updated configuration with verification results
-        cfg.save()
-
-        # LLM access check (Anthropic API with ANTHROPIC_API_KEY)
-        llm = (cfg._data or {}).get("llm", {})
-        if llm.get("provider") == "claude":
-            import os
-
-            has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
-
-            if has_api_key:
-                try:
-                    from lib.llm_manager.llm_manager import LLMManager
-
-                    llm_mgr = LLMManager(defaults={"max_tokens": 8, "temperature": 0.0})
-
-                    self._print("Anthropic", "Testing API connection...")
-                    resp = llm_mgr.query(
-                        system_message="You are a terse assistant.",
-                        user_query="ping",
-                        context=None,
-                        max_tokens=8,
-                        temperature=0.0,
+        async def _run_validation() -> None:
+            nonlocal llm_result
+            async for event in service.validate_all_events(targets):
+                if isinstance(event, InitStatusEvent):
+                    self._print("Validate", event.message)
+                elif isinstance(event, InitTargetValidationEvent):
+                    results.append(
+                        TargetTestResult(
+                            name=event.name,
+                            ok=event.success,
+                            message=event.error or "",
+                        )
                     )
-                    model = llm.get("model", "claude-sonnet-4-20250514")
-                    self._print("Anthropic", f"Configured and reachable ({model})")
-                except Exception as e:
+                    status = "success" if event.success else "failed"
+                    color_style = (
+                        StyleTokens.SUCCESS if event.success else StyleTokens.ERROR
+                    )
                     self._print(
-                        "Anthropic",
-                        f"Connection test failed: {e}",
-                        style=StyleTokens.ERROR,
+                        "Result",
+                        f"Target {event.name}: {status}{' - ' + event.error if event.error else ''}",
+                        style=color_style,
                     )
-            else:
-                # API key not set - remind user
+                elif isinstance(event, InitLlmValidationEvent):
+                    llm_result = event.result or {}
+                elif (
+                    isinstance(event, InitCompleteEvent)
+                    and event.validation is not None
+                ):
+                    llm_result = event.validation.llm_result or llm_result
+
+        asyncio.run(_run_validation())
+
+        if llm_result.get("success"):
+            model = llm_result.get("model", "claude-sonnet-4-20250514")
+            self._print("Anthropic", f"Configured and reachable ({model})")
+        else:
+            error = llm_result.get("error", "Unknown error")
+            if error == "ANTHROPIC_API_KEY not set":
                 self.console.print(
                     MessagePanel(
                         "ANTHROPIC_API_KEY not set\n\n"
@@ -295,8 +285,15 @@ class InitCommand:
                         hint="Get an API key at: https://console.anthropic.com/",
                     )
                 )
-        else:
-            self._print("Anthropic", "Not configured (run 'rdst configure llm')")
+            elif error == "LLM not configured":
+                self._print("Anthropic", "Not configured (run 'rdst configure llm')")
+            else:
+                self._print(
+                    "Anthropic",
+                    f"Connection test failed: {error}",
+                    style=StyleTokens.ERROR,
+                )
+
         return results
 
     def _maybe_run_top(
@@ -405,149 +402,6 @@ class InitCommand:
 
         # Provide a quiet logger that suppresses DataManager's verbose output
         return _Logger(lambda title, message: None)
-
-        # ---- Connectivity ----
-
-    def _test_target(self, target: Dict[str, Any]) -> (bool, str):
-        """Use DataManager to validate connectivity and report detailed failure reasons.
-        Records the verification result with the target for later use.
-        """
-        engine = (target.get("engine") or "").lower()
-        host = target.get("host")
-        port = int(target.get("port") or 0)
-        database = target.get("database")
-        user = target.get("user")
-        password_env = target.get("password_env")
-        tls = bool(target.get("tls", False))
-
-        password = os.environ.get(password_env) if password_env else None
-
-        # Map engine to DMSDbType and defaults
-        if engine == "postgres" or engine == "psql":
-            engine = "postgresql"
-
-        if engine not in ("postgresql", "mysql"):
-            return False, f"Unsupported engine: {engine}"
-
-        db_type = DMSDbType.PostgreSQL if engine == "postgresql" else DMSDbType.MySql
-        default_port = 5432 if engine == "postgresql" else 3306
-        port = port or default_port
-
-        try:
-            # Build a ConnectionConfig for UPSTREAM
-            cfg = ConnectionConfig(
-                host=host or "",
-                port=port,
-                database=database or "",
-                username=user or "",
-                password=password or "",
-                db_type=db_type,
-                ssl_mode=("require" if tls else "disable"),
-                connect_timeout=3,
-                query_type=DataManagerQueryType.UPSTREAM,
-            )
-            # Instantiate DataManager with a minimal setup; no S3 needed
-            dm = DataManager(
-                connection_config={DataManagerQueryType.UPSTREAM: cfg},
-                global_logger=self._make_logger(),
-                command_sets=["system_info"],  # minimal
-                data_directory="./.rdst-init",
-                max_workers=1,
-                available_commands=None,
-                instance_s3_data_folder="",  # Non-None to satisfy DataManager guard
-                s3_operation=None,
-                # disable_s3_sync=True
-            )
-            # Explicitly connect to record attempt and get error details
-            ok = dm.connect(DataManagerQueryType.UPSTREAM)
-            state = dm.get_connection_state(DataManagerQueryType.UPSTREAM)
-
-            # Record the verification result in the target
-            import datetime
-
-            verification_result = {
-                "attempted": state.get("attempted", False),
-                "success": state.get("success", False),
-                "error": state.get("error"),
-                "verified_at": datetime.datetime.utcnow().isoformat() + "Z",
-                "engine": engine,
-                "host": host,
-                "port": port,
-                "database": database,
-            }
-            target["verification"] = verification_result
-
-            # Clean up connection
-            try:
-                dm.disconnect(DataManagerQueryType.UPSTREAM)
-            except Exception:
-                pass
-
-            if ok and state.get("success"):
-                return True, "Connected"
-            # Prefer detailed error if present, but clean it up
-            err = state.get("error") or "Unknown connection error"
-            return False, self._clean_error_message(str(err))
-        except Exception as e:
-            # Record the exception in the target as well
-            import datetime
-
-            verification_result = {
-                "attempted": True,
-                "success": False,
-                "error": str(e),
-                "verified_at": datetime.datetime.utcnow().isoformat() + "Z",
-                "engine": engine,
-                "host": host,
-                "port": port,
-                "database": database,
-            }
-            target["verification"] = verification_result
-            return False, self._clean_error_message(str(e))
-
-    def _clean_error_message(self, err: str) -> str:
-        """Clean up error messages to be more concise and user-friendly."""
-        # Extract key error info from verbose PostgreSQL/MySQL errors
-        err = err.strip()
-
-        # Connection refused
-        if "Connection refused" in err:
-            return "Connection refused (is the server running?)"
-
-        # Authentication failed
-        if "password authentication failed" in err.lower():
-            return "Authentication failed (check password)"
-        if "Access denied" in err:
-            return "Access denied (check credentials)"
-
-        # Host not found
-        if (
-            "could not translate host name" in err.lower()
-            or "Name or service not known" in err
-        ):
-            return "Host not found"
-
-        # Timeout
-        if "timeout" in err.lower():
-            return "Connection timeout"
-
-        # Database not found
-        if "does not exist" in err and "database" in err.lower():
-            return "Database not found"
-
-        # SSL errors
-        if "SSL" in err or "ssl" in err:
-            return "SSL connection error"
-
-        # If it's a multi-line error, just take the first line
-        if "\n" in err:
-            err = err.split("\n")[0].strip()
-
-        # Truncate if still too long
-        if len(err) > 80:
-            err = err[:77] + "..."
-
-        return err
 
     # ---- Utilities ----
     def _welcome(self) -> None:

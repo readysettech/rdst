@@ -49,6 +49,8 @@ Key differences from ask3_engine.py:
 from .engine import Ask3Engine, create_engine
 from .context import Ask3Context
 from .presenter import Ask3Presenter, QuietPresenter
+from .renderer import AskRenderer, QuietRenderer
+from .input_handler import AskInputHandler, NonInteractiveInputHandler
 from .types import (
     Interpretation,
     ValidationError,
@@ -69,9 +71,17 @@ __all__ = [
     # Context
     'Ask3Context',
 
-    # Presenters
+    # Presenters (legacy)
     'Ask3Presenter',
     'QuietPresenter',
+
+    # Event-driven rendering
+    'AskRenderer',
+    'QuietRenderer',
+
+    # Input handling
+    'AskInputHandler',
+    'NonInteractiveInputHandler',
 
     # Types
     'Interpretation',

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, replace
-from typing import List, Optional, Protocol, Any, Dict, Sequence
+from typing import List, Optional, Protocol, Any, Dict, Sequence, Generator
 
 
 class Provider(Protocol):
@@ -8,6 +8,12 @@ class Provider(Protocol):
     def complete(
         self, request: "ProviderRequest", *, api_key: str, debug: bool = False
     ) -> "ProviderResponse": ...
+
+    def stream(
+        self, request: "ProviderRequest", *, api_key: str
+    ) -> Generator[str, None, None]:
+        """Sync generator that yields tokens. Optional - may raise NotImplementedError."""
+        raise NotImplementedError("Streaming not supported by this provider")
 
 
 class LLMError(Exception):
@@ -103,7 +109,7 @@ class Conversation:
 
         self.assistant(resp.text)
         return resp
-    
+
 
 @dataclass
 class LLMDefaults:

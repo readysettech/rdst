@@ -10,6 +10,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "ask_experimental: tests for Ask/Schema features (not run by default, require database)"
     )
+    config.addinivalue_line(
+        "markers", "asyncio: mark test to run in asyncio event loop"
+    )
 
 
 # Exclude ask_experimental tests from default runs

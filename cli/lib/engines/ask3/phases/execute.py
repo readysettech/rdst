@@ -8,7 +8,6 @@ Handles timeouts and execution errors.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from typing import TYPE_CHECKING, Dict, Any, List
 
@@ -115,17 +114,11 @@ def _execute_postgres(sql: str, config: Dict[str, Any], timeout_seconds: int) ->
     """Execute query against PostgreSQL."""
     try:
         import psycopg2
+        from ....db_connection import resolve_connection_params
 
-        host = config.get('host', 'localhost')
-        port = config.get('port', 5432)
-        user = config.get('user') or config.get('username')
-        database = config.get('database') or config.get('dbname')
+        params = resolve_connection_params(target_config=config)
 
-        # Get password from environment or config
-        password_env = config.get('password_env')
-        password = os.environ.get(password_env) if password_env else config.get('password')
-
-        if not all([host, user, database]):
+        if not all([params['host'], params['user'], params['database']]):
             return {
                 'success': False,
                 'error': 'Missing connection parameters (host, user, or database)',
@@ -133,19 +126,15 @@ def _execute_postgres(sql: str, config: Dict[str, Any], timeout_seconds: int) ->
                 'columns': []
             }
 
-        # Determine SSL mode
-        tls_enabled = config.get('tls', False)
-        sslmode = 'prefer' if tls_enabled else 'disable'
-
         # Connect
         conn = psycopg2.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
+            host=params['host'],
+            port=params['port'],
+            user=params['user'],
+            password=params['password'],
+            database=params['database'],
             connect_timeout=10,
-            sslmode=sslmode
+            sslmode=params['sslmode']
         )
 
         try:
@@ -192,17 +181,11 @@ def _execute_mysql(sql: str, config: Dict[str, Any], timeout_seconds: int) -> Di
     """Execute query against MySQL."""
     try:
         import pymysql
+        from ....db_connection import resolve_connection_params
 
-        host = config.get('host', 'localhost')
-        port = config.get('port', 3306)
-        user = config.get('user') or config.get('username')
-        database = config.get('database') or config.get('dbname')
+        params = resolve_connection_params(target_config=config)
 
-        # Get password from environment or config
-        password_env = config.get('password_env')
-        password = os.environ.get(password_env) if password_env else config.get('password')
-
-        if not all([host, user, database]):
+        if not all([params['host'], params['user'], params['database']]):
             return {
                 'success': False,
                 'error': 'Missing connection parameters (host, user, or database)',
@@ -212,12 +195,13 @@ def _execute_mysql(sql: str, config: Dict[str, Any], timeout_seconds: int) -> Di
 
         # Connect
         conn = pymysql.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=10
+            host=params['host'],
+            port=params['port'],
+            user=params['user'],
+            password=params['password'],
+            database=params['database'],
+            connect_timeout=10,
+            ssl={'ssl': {}} if params['tls'] else None
         )
 
         try:

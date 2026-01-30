@@ -6,7 +6,72 @@ without using DataManager infrastructure.
 """
 
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+
+
+def resolve_connection_params(target: Optional[str] = None, target_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Resolve all connection parameters from target name or configuration.
+
+    Handles password resolution from environment variables and TLS settings.
+
+    Args:
+        target: Target name (loads config from TargetsConfig)
+        target_config: Target configuration dict (alternative to target name)
+
+    Returns:
+        Dict with resolved connection parameters:
+            - engine: 'postgresql' or 'mysql'
+            - host: Database host
+            - port: Database port
+            - user: Database username
+            - password: Resolved password (from env var or direct)
+            - database: Database name
+            - tls: Boolean TLS flag
+            - sslmode: PostgreSQL SSL mode ('require' if tls, else 'prefer')
+            - read_only: Boolean read-only flag
+
+    Raises:
+        ValueError: If neither target nor target_config provided, or target not found
+    """
+    # Load config from target name if not provided directly
+    if target_config is None:
+        if target is None:
+            raise ValueError("Either target name or target_config must be provided")
+        from lib.cli.rdst_cli import TargetsConfig
+        cfg = TargetsConfig()
+        cfg.load()
+        target_config = cfg.get(target)
+        if target_config is None:
+            raise ValueError(f"Target '{target}' not found in configuration")
+
+    engine = target_config.get('engine', 'postgresql').lower()
+    host = target_config.get('host', 'localhost')
+    port = target_config.get('port', 5432 if 'postgres' in engine else 3306)
+    user = target_config.get('user') or target_config.get('username')
+    database = target_config.get('database') or target_config.get('dbname')
+    tls = target_config.get('tls', False)
+    read_only = target_config.get('read_only', False)
+
+    # Resolve password from environment variable or direct value
+    password_env = target_config.get('password_env')
+    password = os.environ.get(password_env) if password_env else target_config.get('password')
+
+    # Determine SSL mode for PostgreSQL
+    sslmode = 'require' if tls else 'prefer'
+
+    return {
+        'engine': engine,
+        'host': host,
+        'port': port,
+        'user': user,
+        'password': password,
+        'database': database,
+        'tls': tls,
+        'sslmode': sslmode,
+        'read_only': read_only,
+        'password_env': password_env,  # Keep for error messages
+    }
 
 
 def create_direct_connection(target_config: Dict[str, Any]):

@@ -21,9 +21,12 @@ from .readyset_setup import check_container_needs_start
 from .readyset_container import (
     start_readyset_container,
     wait_for_readyset_ready,
-    check_readyset_container_status
+    check_readyset_container_status,
 )
-from .readyset_explain_cache import explain_create_cache_readyset
+from .readyset_explain_cache import (
+    explain_create_cache_readyset,
+    get_cache_id_for_query,
+)
 from .target_setup import (
     get_target_config,
     detect_test_db_container,
@@ -31,13 +34,13 @@ from .target_setup import (
     wait_for_database_ready,
     recreate_schema_from_target,
     create_test_db_target_config,
-    return_target_config
+    return_target_config,
 )
 from .test_data_generator import (
     check_tables_have_data,
     get_test_database_schema,
     generate_test_data_with_llm,
-    load_test_data_to_database
+    load_test_data_to_database,
 )
 from .workflow_integration import store_analysis_results, format_analysis_output
 from .parallel_merge import merge_parallel_analysis_results

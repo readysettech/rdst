@@ -438,7 +438,7 @@ class AnnotateWizard:
             self.console.print(
                 f"  [{StyleTokens.SECONDARY}][s][/{StyleTokens.SECONDARY}] - Get AI suggestion"
             )
-            prompt_text = f"New description ([{StyleTokens.SECONDARY}s][/{StyleTokens.SECONDARY}] for AI, Enter to keep)"
+            prompt_text = f"New description ([{StyleTokens.SECONDARY}]s[/{StyleTokens.SECONDARY}] for AI, Enter to keep)"
         else:
             prompt_text = "New description (Enter to keep)"
 
@@ -527,7 +527,7 @@ class AnnotateWizard:
                 f"  [{StyleTokens.SECONDARY}][s][/{StyleTokens.SECONDARY}] - Get AI suggestions for all values"
             )
             self.console.print(
-                f"\nEnter values (format: value=meaning). [{StyleTokens.SECONDARY}s][/{StyleTokens.SECONDARY}] for AI suggestions. Empty line to finish."
+                f"\nEnter values (format: value=meaning). [{StyleTokens.SECONDARY}]s[/{StyleTokens.SECONDARY}] for AI suggestions. Empty line to finish."
             )
         else:
             self.console.print(

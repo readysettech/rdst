@@ -1,0 +1,1 @@
+export { useTarget } from './useTarget';

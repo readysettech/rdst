@@ -125,6 +125,9 @@ from .components import (
     Progress,
     SpinnerColumn,
     TextColumn,
+    # Rich primitives
+    Syntax,
+    Status,
 )
 
 __all__ = [
@@ -211,4 +214,7 @@ __all__ = [
     "Progress",
     "SpinnerColumn",
     "TextColumn",
+    # Rich primitives
+    "Syntax",
+    "Status",
 ]

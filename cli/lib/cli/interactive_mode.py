@@ -7,6 +7,7 @@ questions about recommendations and understand performance implications.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Optional, Dict, Any
 
@@ -15,7 +16,8 @@ from ..query_registry.conversation_registry import (
     InteractiveConversation,
 )
 from ..query_registry.query_registry import QueryRegistry
-from ..llm_manager.llm_manager import LLMManager
+from ..services.interactive_service import InteractiveService
+from ..services.types import ChunkEvent, InteractiveCompleteEvent, InteractiveErrorEvent
 
 # Import UI system - handles Rich availability internally
 from lib.ui import (
@@ -31,16 +33,55 @@ from lib.ui import (
     Rule,
     SectionBox,
     NextSteps,
+    Live,
 )
 
 # Module-level console
 console = get_console()
 
 
+def _ask_llm_streaming(
+    service: InteractiveService,
+    query_hash: str,
+    message: str,
+    analysis_results: Dict[str, Any],
+) -> str:
+    """Send message to LLM via InteractiveService with streaming display.
+
+    Args:
+        service: InteractiveService instance
+        query_hash: Hash of the query being discussed
+        message: User's message/question
+        analysis_results: Full analysis results for context
+
+    Returns:
+        Complete response text from LLM
+    """
+
+    async def _send_with_display() -> str:
+        response_text = ""
+
+        with Live(MarkdownContent(""), console=console, refresh_per_second=10) as live:
+            async for event in service.send_message(
+                query_hash=query_hash,
+                message=message,
+                analysis_results=analysis_results,
+                continue_existing=True,
+            ):
+                if isinstance(event, ChunkEvent):
+                    response_text += event.text
+                    live.update(MarkdownContent(response_text))
+                elif isinstance(event, InteractiveErrorEvent):
+                    raise Exception(event.error)
+
+        return response_text
+
+    return asyncio.run(_send_with_display())
+
+
 def run_interactive_mode(
     conversation: InteractiveConversation,
     analysis_results: Dict[str, Any],
-    llm_manager: Optional[LLMManager] = None,
 ) -> None:
     """
     Enter interactive mode for educational Q&A about analysis results.
@@ -48,19 +89,9 @@ def run_interactive_mode(
     Args:
         conversation: InteractiveConversation object (may have existing messages from analyze)
         analysis_results: Full analysis results from workflow
-        llm_manager: Optional LLMManager instance (creates new if not provided)
     """
     conv_registry = ConversationRegistry()
-
-    # Initialize LLM manager if not provided
-    if llm_manager is None:
-        llm_manager = LLMManager()
-
-    # Add interactive mode transition message to conversation
-    if not _has_interactive_mode_message(conversation):
-        interactive_prompt = _get_interactive_mode_prompt()
-        conversation.add_message("system", interactive_prompt)
-        conv_registry.save_conversation(conversation)
+    service = InteractiveService(conv_registry=conv_registry)
 
     # Display header
     console.print()
@@ -146,33 +177,30 @@ def run_interactive_mode(
                 continue
 
             # Free-form question - send to LLM (always uses Claude)
-            console.print(
-                StatusLine("Getting response", f"{provider_name}..."),
-                end="",
+            console.print()
+            response = _ask_llm_streaming(
+                service=service,
+                query_hash=conversation.query_hash,
+                message=user_input,
+                analysis_results=analysis_results,
             )
+            console.print()
 
-            response = _ask_llm(conversation, user_input, llm_manager)
+            # Reload conversation to sync state (service saves the exchange)
+            reloaded = conv_registry.load_conversation(
+                conversation.query_hash, conversation.provider
+            )
+            if reloaded:
+                conversation = reloaded
 
-            if response:
-                # Clear the "Calling AI..." line
-                console.print("\r" + " " * 30 + "\r", end="")
-                # Render response as markdown with syntax highlighting
-                console.print("\n")
-                console.print(MarkdownContent(response))
-                console.print()
-
-                # Add exchange to conversation and save
-                conversation.add_exchange(user_input, response)
-                conv_registry.save_conversation(conversation)
-
-                # Simple warning for long conversations
-                if conversation.total_exchanges >= 50:
-                    console.print(
-                        MessagePanel(
-                            "This conversation has 50+ exchanges. Consider starting fresh if responses slow down.",
-                            variant="warning",
-                        )
+            # Simple warning for long conversations
+            if conversation.total_exchanges >= 50:
+                console.print(
+                    MessagePanel(
+                        "This conversation has 50+ exchanges. Consider starting fresh if responses slow down.",
+                        variant="warning",
                     )
+                )
 
         except KeyboardInterrupt:
             console.print(MessagePanel("Exiting interactive mode.", variant="info"))
@@ -249,137 +277,6 @@ def _has_interactive_mode_message(conversation: InteractiveConversation) -> bool
     return False
 
 
-def _get_interactive_mode_prompt() -> str:
-    """Get the interactive mode transition prompt."""
-    return """INTERACTIVE MODE ACTIVATED
-
-The user wants to understand your recommendations in depth.
-
-YOUR ROLE: Database performance expert answering questions about this specific query analysis.
-
-COMMUNICATION STYLE:
-- Be direct and technical. Avoid storytelling phrases like "But Here's the Reality Check", "The Real Question", "My Honest Assessment"
-- Skip dramatic intros. Start with the answer.
-- Use concrete numbers from the analysis data
-- Explain reasoning, not just conclusions
-- When discussing tradeoffs, be matter-of-fact, not dramatic
-
-CRITICAL - ABOUT QUERY REWRITES & ANALYSIS INTEGRITY:
-- The original analysis was thorough and correct based on available information
-- Query rewrites MUST produce IDENTICAL results - this is a hard constraint
-- If no rewrites were found, that's the correct answer given the constraint
-- You CAN question the analysis, but ONLY when user provides NEW information:
-  * "Actually, the query runs 50 times per second" → may change index recommendations
-  * "We're planning to add a column X" → may unlock new rewrites
-  * "The table is partitioned by date" → may change execution plan analysis
-  * "We can change the query requirements" → now alternative queries are valid
-
-TONE GUIDELINES:
-✓ GOOD: "The analysis is correct given the constraint. However, if you're open to changing X, we could consider Y..."
-✓ GOOD: "Based on the schema shown, there are no equivalent rewrites. Is there additional context about your use case that might open up options?"
-❌ BAD: "The analysis missed obvious rewrites like..." (dismissive, assumes error)
-❌ BAD: "There are several rewrites that should have been suggested" (contradicts without new info)
-
-EXAMPLES OF CORRECT RESPONSES:
-
-Scenario: User asks "Why no rewrites?"
-❌ WRONG: "There are obvious rewrites like adding ORDER BY"
-✓ CORRECT: "The analysis found no equivalent rewrites because adding ORDER BY would change which rows are returned with LIMIT. That makes it a different query, not an optimization. The original analysis is correct. If you need deterministic results and are willing to change the query behavior, I can suggest adding ORDER BY - but that's changing requirements, not optimizing."
-
-Scenario: User says "We can relax the exact output requirement"
-✓ CORRECT: "Ah, that changes things! If you're open to different output, here are approaches that might be faster: [suggestions]. Note these produce different results than the original query."
-
-Scenario: User asks "Could we use a different index?"
-✓ CORRECT: "The analysis already considered the available indexes. With the current schema, a covering index on (score, id) would help. Are there other indexes I should know about, or are you asking if we should create new ones?"
-
-YOU CAN:
-✓ Ask clarifying questions about their use case
-✓ Request context not in the analysis (traffic patterns, replication setup, etc.)
-✓ Probe the analysis with questions: "Is there additional schema info? Different use case constraints?"
-✓ Revise recommendations when user provides NEW information that changes the analysis
-✓ Say "I don't know" or "The analysis doesn't show that" when appropriate
-✓ Suggest additional tests or metrics to gather
-✓ Suggest alternative queries when user indicates they're open to changing requirements
-✓ Challenge assumptions - but only when user provides contradictory evidence
-
-YOU CANNOT:
-✗ Dismiss the original analysis without new information from the user
-✗ Make assumptions about data not in the analysis
-✗ Recommend changes without explaining risks and tradeoffs
-✗ Use phrases like "game-changer", "unlock", "transform", "journey"
-✗ Suggest rewrites that would change query output (unless user explicitly wants different output)
-✗ Be overly deferential - you can question, just respectfully and with cause
-
-BALANCE:
-- The original analysis is correct given available information
-- New user input CAN invalidate parts of the analysis - that's fine
-- Question to understand, not to dismiss
-- If user says "but I think X would work", explore it: "Let's think through X. Here's what would happen..."
-- Default: trust the analysis. Override: user provides new facts.
-
-BOUNDARIES:
-- Only answer questions about DATABASE PERFORMANCE and the ANALYSIS RESULTS
-- If asked about unrelated topics: "I can only discuss this query's performance. What would you like to know about the analysis?"
-- If you need information not in the analysis, ask for it directly
-
-TONE: Experienced database engineer explaining to another engineer. Direct, technical, helpful. Trust but verify when new information emerges.
-"""
-
-
-def _ask_llm(
-    conversation: InteractiveConversation, user_question: str, llm_manager: LLMManager
-) -> Optional[str]:
-    """
-    Send user question to LLM with full conversation context.
-
-    Args:
-        conversation: InteractiveConversation with full history
-        user_question: User's question
-        llm_manager: LLMManager instance
-
-    Returns:
-        LLM response string or None if error
-    """
-    try:
-        # Add user question to conversation temporarily (for LLM API call)
-        conversation.add_message("user", user_question)
-
-        # Get messages in LLM format
-        messages = conversation.get_messages_for_llm()
-
-        # Build system message from all system messages in conversation
-        system_messages = [
-            msg["content"] for msg in messages if msg["role"] == "system"
-        ]
-        combined_system_message = "\n\n".join(system_messages)
-
-        # Call LLM with full conversation context
-        # Always use Claude (default provider) regardless of what's stored in old conversations
-        response_data = llm_manager.query(
-            system_message=combined_system_message,
-            user_query=user_question,
-            context="",  # Context is already in system message
-            max_tokens=2000,
-            temperature=0.1,  # Low temperature for consistent, deterministic responses
-        )
-
-        # Remove the temporarily added user message (we'll add it properly with the response)
-        conversation.messages.pop()
-
-        # LLM query() returns a dict with "text" key, not "response"
-        if response_data and "text" in response_data:
-            return response_data["text"]
-        else:
-            return "Sorry, I couldn't generate a response. Please try again."
-
-    except Exception as e:
-        # Remove the temporarily added user message
-        if conversation.messages and conversation.messages[-1].role == "user":
-            conversation.messages.pop()
-        console.print(MessagePanel(f"Error calling LLM: {e}", variant="error"))
-        return None
-
-
 def _show_help() -> None:
     """Display help for interactive mode commands."""
     console.print()
@@ -428,6 +325,15 @@ def _show_analysis_summary(analysis_results: Dict[str, Any]) -> None:
     """
     console.print()
     console.print(Banner("Analysis Summary"))
+
+    if not analysis_results or not analysis_results.get("explain_results"):
+        console.print(
+            MessagePanel(
+                "Analysis results not available. Run full analysis to see summary.",
+                variant="info",
+            )
+        )
+        return
 
     # Extract key information
     explain_results = analysis_results.get("explain_results", {})

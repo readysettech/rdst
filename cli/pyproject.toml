@@ -43,6 +43,11 @@ dependencies = [
     "pyyaml",
     "sqlglot",
     "anthropic>=0.76.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sse-starlette>=2.0.0",
+    "fastapi-ai-sdk>=0.1.0",
+    "keyring>=25.0.0",
 ]
 
 [project.optional-dependencies]
@@ -80,7 +85,9 @@ exclude = [
 "mcp_server.py" = "mcp_server.py"
 
 [dependency-groups]
-dev = []
+dev = [
+    "httpx>=0.28.1",
+]
 
 [project.scripts]
 rdst = "rdst:main"

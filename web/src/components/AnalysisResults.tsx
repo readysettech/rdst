@@ -1,0 +1,1056 @@
+import { Spinner } from "@rs/ui-new/spinner";
+import { Tag } from "@rs/ui-new/tag";
+import { Text } from "@rs/ui-new/text";
+import { Card } from "@rs/ui-new/card";
+import { Icon } from "@rs/ui-new/icon";
+import { HStack, VStack } from "@rs/ui-new/stack";
+import { m } from "@rs/ui-new/motion";
+import { SQLDisplay } from "./SQLDisplay";
+import {
+  AnalysisState,
+  ProgressEvent,
+  CompleteEvent,
+  RewriteTesting,
+  ReadysetCacheability,
+  TestedRewrite,
+} from "../lib/api";
+
+interface AnalysisResultsProps {
+  state: AnalysisState;
+  progress?: ProgressEvent;
+  results?: CompleteEvent;
+  rewriteTesting?: RewriteTesting;
+  readysetCacheability?: ReadysetCacheability;
+  error?: string;
+  target?: string;
+}
+
+type TagVariant = "positive" | "informative" | "warning" | "negative";
+
+// Valid icon names from @rs/ui-icons
+type ValidIconName = "access" | "add" | "alert" | "arrow-down" | "arrow-left" | "arrow-right" | "arrow-up" | "close" | "database" | "database-settings" | "edit" | "info" | "key" | "play" | "search" | "settings" | "sparkles" | "speedometer" | "tick-double" | "tick" | "trash" | "layers" | "dashboard" | "observe" | "querypilot" | "test-tube";
+
+const getRatingVariant = (rating: string): TagVariant => {
+  switch (rating?.toLowerCase()) {
+    case "excellent":
+      return "positive";
+    case "good":
+      return "informative";
+    case "fair":
+      return "warning";
+    case "poor":
+      return "negative";
+    default:
+      return "informative";
+  }
+};
+
+const getRatingIcon = (rating: string): ValidIconName => {
+  switch (rating?.toLowerCase()) {
+    case "excellent":
+      return "sparkles";
+    case "good":
+      return "tick-double";
+    case "fair":
+      return "alert";
+    case "poor":
+      return "close";
+    default:
+      return "info";
+  }
+};
+
+const getPriorityVariant = (priority: string): TagVariant => {
+  switch (priority?.toLowerCase()) {
+    case "high":
+      return "negative";
+    case "medium":
+      return "warning";
+    case "low":
+      return "positive";
+    default:
+      return "informative";
+  }
+};
+
+function normalizeRewriteTesting(candidate: unknown): RewriteTesting | undefined {
+  if (!candidate || typeof candidate !== "object") {
+    return undefined;
+  }
+
+  const testing = candidate as RewriteTesting & {
+    success?: boolean;
+    rewrite_results?: unknown;
+    best_rewrite?: unknown;
+  };
+
+  if (typeof testing.tested === "boolean") {
+    return testing;
+  }
+
+  if (testing.skipped_reason || testing.success === false) {
+    return { ...testing, tested: false };
+  }
+
+  if (testing.success === true) {
+    const rewriteResults = Array.isArray(testing.rewrite_results)
+      ? testing.rewrite_results
+      : [];
+    return {
+      ...testing,
+      tested: rewriteResults.length > 0 || Boolean(testing.best_rewrite),
+      rewrite_results: rewriteResults as RewriteTesting["rewrite_results"],
+    };
+  }
+
+  return undefined;
+}
+
+function resolveRewriteTesting(
+  rewriteTesting?: RewriteTesting,
+  resultsRewriteTesting?: RewriteTesting,
+  formattedRewriteTesting?: RewriteTesting
+): RewriteTesting | undefined {
+  return (
+    normalizeRewriteTesting(rewriteTesting) ||
+    normalizeRewriteTesting(resultsRewriteTesting) ||
+    normalizeRewriteTesting(formattedRewriteTesting)
+  );
+}
+
+type StyleVariant = "positive" | "info" | "warning" | "negative";
+
+const getScoreVariant = (score: number): StyleVariant => {
+  if (score >= 80) return "positive";
+  if (score >= 50) return "warning";
+  return "negative";
+};
+
+const variantStyles: Record<StyleVariant, { bg: string; text: string; border: string; glow: string }> = {
+  positive: {
+    bg: "bg-surface-positive-soft",
+    text: "text-content-positive-soft",
+    border: "border-border-positive-soft",
+    glow: "shadow-[0_0_20px_rgba(34,197,94,0.15)]",
+  },
+  info: {
+    bg: "bg-surface-info-soft",
+    text: "text-content-info-soft",
+    border: "border-border-info-soft",
+    glow: "shadow-[0_0_20px_rgba(59,130,246,0.15)]",
+  },
+  warning: {
+    bg: "bg-surface-warning-soft",
+    text: "text-content-warning-soft",
+    border: "border-border-warning-soft",
+    glow: "shadow-[0_0_20px_rgba(234,179,8,0.15)]",
+  },
+  negative: {
+    bg: "bg-surface-negative-soft",
+    text: "text-content-negative-soft",
+    border: "border-border-negative-soft",
+    glow: "shadow-[0_0_20px_rgba(239,68,68,0.15)]",
+  },
+};
+
+// Animated score gauge component
+function ScoreGauge({ score, size = 80 }: { score: number; size?: number }) {
+  const variant = getScoreVariant(score);
+  const style = variantStyles[variant];
+  const radius = (size - 8) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const offset = circumference - (score / 100) * circumference;
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="6"
+          className="text-surface-layout-2"
+        />
+        <m.circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth="6"
+          strokeLinecap="round"
+          className={style.text}
+          stroke="currentColor"
+          initial={{ strokeDashoffset: circumference }}
+          animate={{ strokeDashoffset: offset }}
+          style={{ strokeDasharray: circumference }}
+          transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <m.span
+          className={`text-xl font-bold tabular-nums ${style.text}`}
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4, delay: 0.5 }}
+        >
+          {score}
+        </m.span>
+      </div>
+    </div>
+  );
+}
+
+// Animated metric card component
+function MetricCard({
+  label,
+  value,
+  icon,
+  delay = 0,
+}: {
+  label: string;
+  value: string | number;
+  icon?: "speedometer" | "layers" | "dashboard" | "observe";
+  delay?: number;
+}) {
+  return (
+    <m.div
+      className="bg-surface-layout-2 rounded-xl p-4 border border-border-layout-1 hover:border-border-layout-2 transition-colors"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay }}
+    >
+      <HStack className="gap-2 mb-2 items-center">
+        {icon && <Icon name={icon} label={label} className="w-4 h-4 text-content-layout-3" />}
+        <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">{label}</Text>
+      </HStack>
+      <Text level="mono-large" className="text-content-layout-1 font-semibold">{String(value)}</Text>
+    </m.div>
+  );
+}
+
+// Section header component for visual consistency
+function SectionHeader({
+  icon,
+  title,
+  subtitle,
+  action,
+}: {
+  icon: ValidIconName;
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <HStack className="justify-between items-start mb-5">
+      <HStack className="gap-3 items-center">
+        <div className="w-10 h-10 rounded-xl bg-surface-layout-2 flex items-center justify-center">
+          <Icon name={icon} label={title} className="w-5 h-5 text-content-layout-2" />
+        </div>
+        <VStack className="gap-0.5 items-start">
+          <Text as="h2" level="headline-4" className="text-content-layout-1">{title}</Text>
+          {subtitle && <Text level="body-small" className="text-content-layout-3">{subtitle}</Text>}
+        </VStack>
+      </HStack>
+      {action}
+    </HStack>
+  );
+}
+
+function AnalysisHeader({ results, target: targetProp }: { results: CompleteEvent; target?: string }) {
+  const formatted = results.formatted;
+  const metadata = formatted?.metadata;
+  const tokenUsage = results.llm_analysis?.token_usage;
+  const llmInfo = metadata?.llm_info;
+
+  const target = metadata?.target || targetProp;
+  const databaseEngine = metadata?.database_engine || results.explain_results?.database_engine;
+  const analysisId = metadata?.analysis_id || results.analysis_id;
+
+  if (!target && !databaseEngine && !analysisId) return null;
+
+  const model = llmInfo?.model || "claude";
+  const tokens = llmInfo?.tokens || tokenUsage?.total || 0;
+  const cost = llmInfo?.cost || tokenUsage?.estimated_cost_usd || 0;
+
+  return (
+    <m.div
+      className="bg-gradient-to-r from-surface-layout-1 to-surface-layout-2 rounded-xl p-4 border border-border-layout-1"
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      <HStack className="justify-between items-center flex-wrap gap-3">
+        <HStack className="gap-6 flex-wrap">
+          {target && (
+            <HStack className="gap-2 items-center">
+              <Icon name="database" label="Target" className="w-4 h-4 text-content-layout-3" />
+              <Text as="span" level="mono-small" className="text-content-layout-1">{target}</Text>
+            </HStack>
+          )}
+          {databaseEngine && (
+            <HStack className="gap-2 items-center">
+              <Icon name="database-settings" label="Engine" className="w-4 h-4 text-content-layout-3" />
+              <Text as="span" level="mono-small" className="text-content-layout-1 uppercase">
+                {databaseEngine}
+              </Text>
+            </HStack>
+          )}
+          {analysisId && (
+            <HStack className="gap-2 items-center">
+              <Icon name="key" label="Analysis ID" className="w-4 h-4 text-content-layout-3" />
+              <Text as="span" level="mono-small" className="text-content-layout-2">
+                {analysisId.slice(0, 12)}
+              </Text>
+            </HStack>
+          )}
+        </HStack>
+        {(llmInfo || tokenUsage) && (
+          <HStack className="gap-2 items-center px-3 py-1.5 bg-surface-layout-1/50 rounded-lg">
+            <Icon name="sparkles" label="AI Analysis" className="w-3.5 h-3.5 text-content-primary-soft" />
+            <Text as="span" level="caption" className="text-content-layout-3">
+              {model} · {tokens.toLocaleString()} tokens · ${cost.toFixed(3)}
+            </Text>
+          </HStack>
+        )}
+      </HStack>
+    </m.div>
+  );
+}
+
+function TestedOptimizationsSection({ testing }: { testing: RewriteTesting }) {
+  if (!testing.tested) {
+    if (testing.skipped_reason === "parameterized_query") {
+      return (
+        <m.div
+          className="bg-surface-warning-soft/50 border border-border-warning-soft rounded-xl p-5"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+        >
+          <HStack className="gap-3 items-start">
+            <div className="w-8 h-8 rounded-lg bg-surface-warning-soft flex items-center justify-center shrink-0">
+              <Icon name="alert" label="Warning" className="w-4 h-4 text-content-warning-soft" />
+            </div>
+            <VStack className="gap-1 items-start">
+              <Text level="label-medium" className="text-content-warning-soft">
+                Rewrite Testing Skipped
+              </Text>
+              <Text level="body-small" className="text-content-layout-2">
+                Query contains parameter placeholders ($1, $2 or ?) without actual values.
+              </Text>
+            </VStack>
+          </HStack>
+        </m.div>
+      );
+    }
+    return null;
+  }
+
+  const rewriteResults = testing.rewrite_results || [];
+  const originalTime = testing.original_performance?.execution_time_ms || 0;
+
+  if (rewriteResults.length === 0) {
+    return (
+      <Card>
+        <Card.Content>
+          <SectionHeader icon="test-tube" title="Tested Optimizations" subtitle="Query rewrite performance comparison" />
+          <div className="bg-surface-info-soft/50 border border-border-info-soft rounded-xl p-5">
+            <HStack className="gap-3 items-center">
+              <Icon name="info" label="Info" className="w-5 h-5 text-content-info-soft" />
+              <Text level="body-small" className="text-content-info-soft">No rewrites were tested successfully</Text>
+            </HStack>
+          </div>
+        </Card.Content>
+      </Card>
+    );
+  }
+
+  return (
+    <m.div
+      className="space-y-4"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.2 }}
+    >
+      <SectionHeader
+        icon="test-tube"
+        title="Tested Optimizations"
+        subtitle={`${rewriteResults.length} rewrite${rewriteResults.length > 1 ? "s" : ""} tested against original`}
+      />
+      <div className="space-y-3">
+        {rewriteResults.map((rewrite: TestedRewrite, i: number) => {
+          const improvement = rewrite.improvement?.overall?.improvement_pct || 0;
+          const rewriteTime = rewrite.performance?.execution_time_ms || 0;
+
+          let status: { icon: ValidIconName; text: string; variant: TagVariant };
+          if (improvement >= 10) {
+            status = { icon: "arrow-up", text: "FASTER", variant: "positive" };
+          } else if (improvement >= 0) {
+            status = { icon: "arrow-right", text: "SIMILAR", variant: "informative" };
+          } else {
+            status = { icon: "arrow-down", text: "SLOWER", variant: "negative" };
+          }
+
+          const styleVariant: StyleVariant =
+            status.variant === "informative" ? "info" : status.variant;
+          const style = variantStyles[styleVariant];
+
+          return (
+            <m.div
+              key={i}
+              className={`bg-surface-layout-1 rounded-xl overflow-hidden border border-border-layout-1 hover:border-border-layout-2 transition-all ${style.glow}`}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.3, delay: 0.1 * i }}
+            >
+              <div className="p-5 border-b border-border-layout-1">
+                <HStack className="justify-between items-start gap-4">
+                  <VStack className="gap-3 items-start flex-1">
+                    <HStack className="gap-3 items-center">
+                      <div className={`w-8 h-8 rounded-lg ${style.bg} flex items-center justify-center`}>
+                        <Icon name={status.icon} label={status.text} className={`w-4 h-4 ${style.text}`} />
+                      </div>
+                      <Tag variant={status.variant} label={status.text} />
+                      <span className={`${style.text} font-mono text-sm font-semibold`}>
+                        {improvement >= 0 ? "+" : ""}
+                        {improvement.toFixed(1)}%
+                      </span>
+                    </HStack>
+                    <Text level="body-small" className="text-content-layout-2">
+                      {rewrite.suggestion_metadata?.explanation || "Query rewrite optimization"}
+                    </Text>
+                  </VStack>
+                  <VStack className="gap-1 items-end shrink-0">
+                    <HStack className="gap-2 items-baseline">
+                      <Text level="mono-large" className="text-content-layout-1 font-semibold">
+                        {rewriteTime.toFixed(2)}
+                      </Text>
+                      <Text level="caption" className="text-content-layout-3">ms</Text>
+                    </HStack>
+                    {originalTime > 0 && (
+                      <Text level="caption" className="text-content-layout-3">
+                        vs {originalTime.toFixed(2)}ms original
+                      </Text>
+                    )}
+                  </VStack>
+                </HStack>
+              </div>
+              <div className="relative group">
+                <SQLDisplay sql={rewrite.sql} className="p-4 bg-surface-layout-2" showCopy />
+              </div>
+            </m.div>
+          );
+        })}
+      </div>
+    </m.div>
+  );
+}
+
+function IndexRecommendationsSection({
+  recommendations,
+}: {
+  recommendations: CompleteEvent["llm_analysis"]["index_recommendations"];
+}) {
+  if (!recommendations || recommendations.length === 0) return null;
+
+  return (
+    <m.div
+      className="space-y-4"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.3 }}
+    >
+      <SectionHeader
+        icon="search"
+        title="Index Recommendations"
+        subtitle={`${recommendations.length} suggested index${recommendations.length > 1 ? "es" : ""} for optimization`}
+      />
+      <div className="space-y-3">
+        {recommendations.map((index, i) => (
+          <m.div
+            key={i}
+            className="bg-surface-layout-1 rounded-xl overflow-hidden border border-border-layout-1 hover:border-border-layout-2 transition-all"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3, delay: 0.1 * i }}
+          >
+            <div className="p-5 border-b border-border-layout-1">
+              <HStack className="justify-between items-start gap-4 mb-3">
+                <HStack className="gap-3 items-center">
+                  <div className="w-8 h-8 rounded-lg bg-surface-info-soft flex items-center justify-center">
+                    <Icon name="database" label="Index" className="w-4 h-4 text-content-info-soft" />
+                  </div>
+                  <VStack className="gap-0.5 items-start">
+                    <Text as="span" level="label-medium" className="text-content-layout-1">
+                      Index on{" "}
+                      <Text as="span" level="mono-small" className="text-content-primary-soft">
+                        {index.table}
+                      </Text>
+                    </Text>
+                  </VStack>
+                </HStack>
+                <Tag
+                  variant={getPriorityVariant(index.estimated_impact)}
+                  modifier="ghost"
+                  size="small"
+                  label={`${index.estimated_impact.toUpperCase()} IMPACT`}
+                />
+              </HStack>
+              <Text level="body-small" className="text-content-layout-2 leading-relaxed">
+                {index.rationale}
+              </Text>
+            </div>
+            <div className="relative">
+              <SQLDisplay sql={index.sql} className="p-4 bg-surface-layout-2" showCopy />
+            </div>
+            {index.caveats && index.caveats.length > 0 && (
+              <div className="p-4 bg-surface-warning-soft/30 border-t border-border-warning-soft">
+                <HStack className="gap-2 items-center mb-2">
+                  <Icon name="alert" label="Caveats" className="w-3.5 h-3.5 text-content-warning-soft" />
+                  <Text level="overline" className="text-content-warning-soft uppercase tracking-wider">
+                    Caveats
+                  </Text>
+                </HStack>
+                <ul className="space-y-1.5 ml-5">
+                  {index.caveats.map((c, j) => (
+                    <li key={j} className="text-content-layout-2 list-disc">
+                      <Text as="span" level="body-small">{c}</Text>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </m.div>
+        ))}
+      </div>
+    </m.div>
+  );
+}
+
+function AdditionalRecommendationsSection({
+  opportunities,
+}: {
+  opportunities: CompleteEvent["llm_analysis"]["optimization_opportunities"];
+}) {
+  if (!opportunities || opportunities.length === 0) return null;
+
+  return (
+    <m.div
+      className="space-y-4"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.4 }}
+    >
+      <SectionHeader
+        icon="sparkles"
+        title="Additional Recommendations"
+        subtitle="Other optimization opportunities identified"
+      />
+      <div className="bg-surface-layout-1 rounded-xl border border-border-layout-1 overflow-hidden">
+        {opportunities.map((opp, i) => {
+          const priorityVariant: StyleVariant =
+            opp.priority?.toLowerCase() === "high"
+              ? "negative"
+              : opp.priority?.toLowerCase() === "medium"
+              ? "warning"
+              : "info";
+          const style = variantStyles[priorityVariant];
+
+          return (
+            <m.div
+              key={i}
+              className={`p-4 ${i > 0 ? "border-t border-border-layout-1" : ""} hover:bg-surface-layout-2/50 transition-colors`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.2, delay: 0.05 * i }}
+            >
+              <HStack className="gap-4 items-start">
+                <div className={`w-7 h-7 rounded-lg ${style.bg} flex items-center justify-center shrink-0 mt-0.5`}>
+                  <Text level="caption" className={`${style.text} font-bold`}>
+                    {opp.priority?.charAt(0).toUpperCase() || "M"}
+                  </Text>
+                </div>
+                <VStack className="gap-1.5 items-start flex-1">
+                  <HStack className="gap-2 items-center">
+                    <Tag
+                      variant={getPriorityVariant(opp.priority)}
+                      modifier="ghost"
+                      size="small"
+                      label={opp.priority?.toUpperCase() || "MEDIUM"}
+                    />
+                  </HStack>
+                  <Text as="span" level="body-small" className="text-content-layout-2 leading-relaxed">
+                    {opp.description}
+                  </Text>
+                </VStack>
+              </HStack>
+            </m.div>
+          );
+        })}
+      </div>
+    </m.div>
+  );
+}
+
+function ReadysetCacheabilitySection({ cacheability }: { cacheability: ReadysetCacheability }) {
+  if (!cacheability.checked) return null;
+
+  const isCacheable = cacheability.cacheable;
+  const variant: StyleVariant = isCacheable ? "positive" : "negative";
+  const style = variantStyles[variant];
+
+  return (
+    <m.div
+      className="space-y-4"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.5 }}
+    >
+      <SectionHeader
+        icon="layers"
+        title="Readyset Cacheability"
+        subtitle="Query compatibility with Readyset caching"
+      />
+      <div className={`rounded-xl overflow-hidden border ${style.border} ${style.glow}`}>
+        <div className={`${style.bg} p-6`}>
+          <HStack className="justify-between items-center mb-4">
+            <HStack className="gap-4 items-center">
+              <m.div
+                className={`w-14 h-14 rounded-2xl ${isCacheable ? "bg-surface-positive-soft" : "bg-surface-negative-soft"} flex items-center justify-center`}
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: "spring", stiffness: 400, damping: 15, delay: 0.2 }}
+              >
+                <Icon
+                  name={isCacheable ? "tick-double" : "close"}
+                  label={isCacheable ? "Cacheable" : "Not Cacheable"}
+                  className={`w-7 h-7 ${style.text}`}
+                />
+              </m.div>
+              <VStack className="gap-1 items-start">
+                <Text level="headline-4" className={style.text}>
+                  {isCacheable ? "Cacheable" : "Not Cacheable"}
+                </Text>
+                {cacheability.confidence && (
+                  <Text level="caption" className="text-content-layout-3">
+                    {cacheability.confidence.charAt(0).toUpperCase() + cacheability.confidence.slice(1)} confidence
+                  </Text>
+                )}
+              </VStack>
+            </HStack>
+            <Tag
+              variant={isCacheable ? "positive" : "negative"}
+              label={isCacheable ? "READY" : "BLOCKED"}
+            />
+          </HStack>
+          {cacheability.explanation && (
+            <Text level="body-small" className="text-content-layout-2 leading-relaxed">
+              {cacheability.explanation}
+            </Text>
+          )}
+        </div>
+        {cacheability.issues && cacheability.issues.length > 0 && (
+          <div className="p-5 bg-surface-layout-1 border-t border-border-layout-1">
+            <HStack className="gap-2 items-center mb-3">
+              <Icon name="alert" label="Issues" className="w-4 h-4 text-content-negative-soft" />
+              <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                Blocking Issues
+              </Text>
+            </HStack>
+            <ul className="space-y-2">
+              {cacheability.issues.map((issue, i) => (
+                <m.li
+                  key={i}
+                  className="flex items-start gap-2"
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.1 * i }}
+                >
+                  <span className="text-content-negative-soft mt-1.5">•</span>
+                  <Text level="body-small" className="text-content-layout-2">{issue}</Text>
+                </m.li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </m.div>
+  );
+}
+
+export function AnalysisResults({
+  state,
+  progress,
+  results,
+  rewriteTesting,
+  readysetCacheability,
+  error,
+  target,
+}: AnalysisResultsProps) {
+  if (state === "idle") {
+    return (
+      <m.div
+        className="py-20 flex flex-col items-center justify-center"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4 }}
+      >
+        <div className="w-16 h-16 rounded-2xl bg-surface-layout-1 border border-border-layout-1 flex items-center justify-center mb-6">
+          <Icon name="querypilot" label="Ready to Analyze" className="w-8 h-8 text-content-layout-3" />
+        </div>
+        <Text level="headline-4" className="text-content-layout-2 mb-2">
+          Ready to Analyze
+        </Text>
+        <Text level="body-small" className="text-content-layout-3 text-center max-w-md">
+          Enter a SQL query above and click Analyze to get performance insights and optimization recommendations
+        </Text>
+      </m.div>
+    );
+  }
+
+  if (state === "analyzing") {
+    const stages: { id: string; label: string; description: string; icon: ValidIconName }[] = [
+      {
+        id: "normalizing",
+        label: "Preparing",
+        description: "Parsing and normalizing SQL",
+        icon: "querypilot",
+      },
+      {
+        id: "executing_explain",
+        label: "Executing",
+        description: "Running EXPLAIN ANALYZE",
+        icon: "play",
+      },
+      {
+        id: "analyzing_llm",
+        label: "Analyzing",
+        description: "AI-powered optimization",
+        icon: "sparkles",
+      },
+    ];
+
+    // Map all backend stage IDs to frontend stage indices
+    const stageMapping: Record<string, number> = {
+      loading_config: 0,
+      validating: 0,
+      normalizing: 0,
+      executing_explain: 1,
+      collecting_metrics: 1,
+      collecting_schema: 1,
+      analyzing_llm: 2,
+      testing_rewrites: 2,
+      checking_readyset: 2,
+      storing_results: 2,
+      complete: 2,
+    };
+
+    const currentStageId = progress?.stage || "normalizing";
+    const currentStageIndex = stageMapping[currentStageId] ?? 0;
+    const currentStage = stages[currentStageIndex];
+    const percent = progress?.percent || 5;
+
+    return (
+      <m.div
+        className="py-16"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.3 }}
+      >
+        <div className="max-w-lg mx-auto">
+          {/* Stage indicators */}
+          <div className="flex items-center justify-center mb-10">
+            {stages.map((stage, index) => {
+              const isComplete = index < currentStageIndex;
+              const isCurrent = index === currentStageIndex;
+              const isPending = index > currentStageIndex;
+
+              return (
+                <div key={stage.id} className="flex items-center">
+                  <m.div
+                    className={`
+                      relative w-12 h-12 rounded-xl flex items-center justify-center transition-all
+                      ${isComplete ? "bg-surface-positive-soft" : ""}
+                      ${isCurrent ? "bg-surface-primary-soft ring-2 ring-border-primary-soft" : ""}
+                      ${isPending ? "bg-surface-layout-1 border border-border-layout-1" : ""}
+                    `}
+                    initial={false}
+                    animate={isCurrent ? { scale: [1, 1.05, 1] } : { scale: 1 }}
+                    transition={{ duration: 1.5, repeat: isCurrent ? Number.POSITIVE_INFINITY : 0, ease: "easeInOut" }}
+                  >
+                    {isComplete ? (
+                      <Icon name="tick-double" label="Complete" className="w-5 h-5 text-content-positive-soft" />
+                    ) : isCurrent ? (
+                      <Spinner size="base" />
+                    ) : (
+                      <Icon name={stage.icon} label={stage.label} className="w-5 h-5 text-content-layout-3" />
+                    )}
+                  </m.div>
+                  {index < stages.length - 1 && (
+                    <div className="w-12 mx-1.5 h-0.5 rounded-full overflow-hidden bg-surface-layout-1">
+                      <m.div
+                        className="h-full bg-content-positive-soft"
+                        initial={{ width: "0%" }}
+                        animate={{ width: index < currentStageIndex ? "100%" : "0%" }}
+                        transition={{ duration: 0.5 }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Current stage info */}
+          <div className="text-center mb-8">
+            <m.div
+              key={currentStage.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <Text level="headline-3" className="text-content-layout-1 mb-2">
+                {currentStage.label}
+              </Text>
+              <Text level="body-small" className="text-content-layout-3">
+                {currentStage.description}
+              </Text>
+            </m.div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="bg-surface-layout-1 rounded-xl p-5 border border-border-layout-1">
+            <HStack className="justify-between items-center mb-3">
+              <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                Progress
+              </Text>
+              <Text level="mono-small" className="text-content-primary-soft font-semibold">
+                {percent}%
+              </Text>
+            </HStack>
+            <div className="w-full h-2 bg-surface-layout-2 rounded-full overflow-hidden">
+              <m.div
+                className="h-full bg-gradient-to-r from-content-primary-soft to-content-rising-plain rounded-full"
+                initial={{ width: "0%" }}
+                animate={{ width: `${percent}%` }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+              />
+            </div>
+          </div>
+        </div>
+      </m.div>
+    );
+  }
+
+  if (state === "error") {
+    return (
+      <m.div
+        className="bg-surface-negative-soft/50 border border-border-negative-soft rounded-xl p-6"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3 }}
+      >
+        <HStack className="gap-4 items-start">
+          <div className="w-12 h-12 rounded-xl bg-surface-negative-soft flex items-center justify-center shrink-0">
+            <Icon name="alert" label="Error" className="w-6 h-6 text-content-negative-soft" />
+          </div>
+          <VStack className="gap-2 items-start flex-1">
+            <Text level="headline-4" className="text-content-negative-soft">
+              Analysis Failed
+            </Text>
+            <Text level="body-small" className="text-content-layout-2 leading-relaxed">
+              {error || "An unknown error occurred while analyzing the query. Please try again."}
+            </Text>
+          </VStack>
+        </HStack>
+      </m.div>
+    );
+  }
+
+  if (state === "complete" && results) {
+    const { llm_analysis, explain_results, formatted } = results;
+    const perf = llm_analysis?.performance_assessment || formatted?.analysis_summary;
+    const testing = resolveRewriteTesting(
+      rewriteTesting,
+      results.rewrite_testing,
+      formatted?.rewrite_testing
+    );
+    const cacheability =
+      readysetCacheability || results.readyset_cacheability || formatted?.readyset_cacheability;
+    const hasLLMAnalysis =
+      llm_analysis?.success !== false &&
+      (perf ||
+        llm_analysis?.rewrite_suggestions?.length ||
+        llm_analysis?.index_recommendations?.length);
+
+    const ratingVariant = perf?.overall_rating
+      ? getRatingVariant(perf.overall_rating)
+      : "informative";
+    const ratingStyle =
+      ratingVariant === "informative"
+        ? variantStyles.info
+        : variantStyles[ratingVariant as StyleVariant];
+
+    return (
+      <m.div
+        className="space-y-8 w-full"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4 }}
+      >
+        <AnalysisHeader results={results} target={target} />
+
+        {/* Performance Summary - Hero Section */}
+        {perf && (
+          <m.div
+            className="bg-surface-layout-1 rounded-2xl border border-border-layout-1 overflow-hidden"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+          >
+            {/* Header with rating */}
+            <div className={`${ratingStyle.bg} p-6 border-b ${ratingStyle.border}`}>
+              <HStack className="justify-between items-center">
+                <HStack className="gap-5 items-center">
+                  {perf.efficiency_score !== undefined && (
+                    <ScoreGauge score={perf.efficiency_score} size={80} />
+                  )}
+                  <VStack className="gap-1 items-start">
+                    <Text level="headline-3" className="text-content-layout-1">
+                      Performance Summary
+                    </Text>
+                    {perf.overall_rating && (
+                      <HStack className="gap-2 items-center">
+                        <Icon
+                          name={getRatingIcon(perf.overall_rating) as ValidIconName}
+                          label={perf.overall_rating}
+                          className={`w-4 h-4 ${ratingStyle.text}`}
+                        />
+                        <Text level="label-medium" className={ratingStyle.text}>
+                          {perf.overall_rating.charAt(0).toUpperCase() + perf.overall_rating.slice(1)} Performance
+                        </Text>
+                      </HStack>
+                    )}
+                  </VStack>
+                </HStack>
+                {perf.overall_rating && (
+                  <Tag
+                    variant={ratingVariant}
+                    label={perf.overall_rating.toUpperCase()}
+                  />
+                )}
+              </HStack>
+            </div>
+
+            {/* Metrics grid */}
+            <div className="p-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <MetricCard
+                  label="Execution Time"
+                  value={`${explain_results.execution_time_ms?.toFixed(2) || "0"}ms`}
+                  icon="speedometer"
+                  delay={0.1}
+                />
+                <MetricCard
+                  label="Rows Examined"
+                  value={explain_results.rows_examined?.toLocaleString() || "0"}
+                  icon="layers"
+                  delay={0.15}
+                />
+                <MetricCard
+                  label="Rows Returned"
+                  value={explain_results.rows_returned?.toLocaleString() || "0"}
+                  icon="dashboard"
+                  delay={0.2}
+                />
+                <MetricCard
+                  label="Cost Estimate"
+                  value={explain_results.cost_estimate?.toFixed(2) || "0"}
+                  icon="observe"
+                  delay={0.25}
+                />
+              </div>
+
+              {/* Concerns section */}
+              {perf.primary_concerns && perf.primary_concerns.length > 0 && (
+                <m.div
+                  className="bg-surface-warning-soft/30 rounded-xl p-5 border border-border-warning-soft"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                >
+                  <HStack className="gap-3 items-center mb-4">
+                    <div className="w-8 h-8 rounded-lg bg-surface-warning-soft flex items-center justify-center">
+                      <Icon name="alert" label="Concerns" className="w-4 h-4 text-content-warning-soft" />
+                    </div>
+                    <Text level="label-medium" className="text-content-warning-soft">
+                      Performance Concerns
+                    </Text>
+                  </HStack>
+                  <ul className="space-y-2.5">
+                    {perf.primary_concerns.map((concern, i) => (
+                      <m.li
+                        key={i}
+                        className="flex items-start gap-3"
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.35 + 0.05 * i }}
+                      >
+                        <span className="text-content-warning-soft mt-1">•</span>
+                        <Text level="body-small" className="text-content-layout-2 leading-relaxed">
+                          {concern}
+                        </Text>
+                      </m.li>
+                    ))}
+                  </ul>
+                </m.div>
+              )}
+            </div>
+          </m.div>
+        )}
+
+        {testing && <TestedOptimizationsSection testing={testing} />}
+
+        {llm_analysis?.index_recommendations && llm_analysis.index_recommendations.length > 0 && (
+          <IndexRecommendationsSection recommendations={llm_analysis.index_recommendations} />
+        )}
+
+        {llm_analysis?.optimization_opportunities &&
+          llm_analysis.optimization_opportunities.length > 0 && (
+            <AdditionalRecommendationsSection
+              opportunities={llm_analysis.optimization_opportunities}
+            />
+          )}
+
+        {cacheability && <ReadysetCacheabilitySection cacheability={cacheability} />}
+
+        {!hasLLMAnalysis && (
+          <m.div
+            className="bg-surface-warning-soft/50 border border-border-warning-soft rounded-xl p-5"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+          >
+            <HStack className="gap-3 items-start">
+              <div className="w-8 h-8 rounded-lg bg-surface-warning-soft flex items-center justify-center shrink-0">
+                <Icon name="info" label="Limited" className="w-4 h-4 text-content-warning-soft" />
+              </div>
+              <VStack className="gap-1 items-start">
+                <Text level="label-medium" className="text-content-warning-soft">
+                  Limited Analysis
+                </Text>
+                <Text level="body-small" className="text-content-layout-2">
+                  AI analysis was not available. Showing execution plan data only.
+                </Text>
+              </VStack>
+            </HStack>
+          </m.div>
+        )}
+      </m.div>
+    );
+  }
+
+  return null;
+}

@@ -114,7 +114,9 @@ python3 rdst.py --help
 ### Domain-Specific Guidelines
 
 - **UI Components**: See `lib/ui/AGENTS.md` for Rich component patterns (StyledPanel, DataTable, etc.)
+- **Ask3 Engine**: See `lib/engines/ask3/AGENTS.md` for NL-to-SQL phase architecture
 - **Devtools**: See `devtools/AGENTS.md` for storybook rendering
+- **Web Client**: See `web-apps/apps/rdst/AGENTS.md` for React frontend patterns
 
 ### Rich Component Imports (CRITICAL)
 

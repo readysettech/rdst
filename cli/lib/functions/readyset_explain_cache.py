@@ -10,7 +10,7 @@ def explain_create_cache_readyset(
     readyset_port: int | str = 5433,
     readyset_host: str = "localhost",
     test_db_config: Dict[str, Any] = None,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Execute EXPLAIN CREATE CACHE against Readyset instance.
@@ -32,7 +32,7 @@ def explain_create_cache_readyset(
         if not query:
             return {
                 "success": False,
-                "error": "No query provided for Readyset analysis"
+                "error": "No query provided for Readyset analysis",
             }
 
         # Parse test_db_config if it's a JSON string
@@ -42,24 +42,26 @@ def explain_create_cache_readyset(
         readyset_port = int(readyset_port)
 
         # Get connection details from test DB config
-        database = test_db_config.get('database', 'testdb')
-        user = test_db_config.get('user', 'postgres')
-        password = test_db_config.get('password', '')
-        engine = (test_db_config.get('engine') or 'postgresql').lower()
+        database = test_db_config.get("database", "testdb")
+        user = test_db_config.get("user", "postgres")
+        password = test_db_config.get("password", "")
+        engine = (test_db_config.get("engine") or "postgresql").lower()
 
         # Build EXPLAIN CREATE CACHE command
         explain_query = f"EXPLAIN CREATE CACHE FROM {query}"
 
-        print(f"Running EXPLAIN CREATE CACHE against Readyset on port {readyset_port}...")
+        print(
+            f"Running EXPLAIN CREATE CACHE against Readyset on port {readyset_port}..."
+        )
 
-        if engine == 'mysql':
+        if engine == "mysql":
             result = _run_explain_mysql(
                 explain_query=explain_query,
                 host=readyset_host,
                 port=readyset_port,
                 user=user,
                 database=database,
-                password=password
+                password=password,
             )
         else:
             # Default to PostgreSQL client
@@ -69,7 +71,7 @@ def explain_create_cache_readyset(
                 port=readyset_port,
                 user=user,
                 database=database,
-                password=password
+                password=password,
             )
 
         if result.returncode != 0:
@@ -77,7 +79,7 @@ def explain_create_cache_readyset(
                 "success": False,
                 "cacheable": False,
                 "error": f"Readyset EXPLAIN CREATE CACHE failed: {result.stderr}",
-                "query": query
+                "query": query,
             }
 
         # Parse Readyset response
@@ -93,7 +95,7 @@ def explain_create_cache_readyset(
 
         # Parse tab-separated or pipe-separated output from EXPLAIN CREATE CACHE
         # Try pipe-separated first (newer format), then tab-separated (older format)
-        separator = '|' if '|' in output else '\t' if '\t' in output else None
+        separator = "|" if "|" in output else "\t" if "\t" in output else None
 
         if separator:
             # Split by separator - format: query_id, proxied_query, readyset_supported
@@ -103,15 +105,19 @@ def explain_create_cache_readyset(
                 readyset_supported = parts[2].lower().strip()
 
                 # Check if Readyset supports this query
-                if readyset_supported == 'yes':
+                if readyset_supported == "yes":
                     cacheable = True
                     confidence = "high"
-                    explanation = f"Readyset can cache this query (query_id: {query_id})"
-                elif readyset_supported == 'cached':
+                    explanation = (
+                        f"Readyset can cache this query (query_id: {query_id})"
+                    )
+                elif readyset_supported == "cached":
                     cacheable = True
                     confidence = "high"
-                    explanation = f"Query is already cached in Readyset (query_id: {query_id})"
-                elif readyset_supported == 'no':
+                    explanation = (
+                        f"Query is already cached in Readyset (query_id: {query_id})"
+                    )
+                elif readyset_supported == "no":
                     cacheable = False
                     confidence = "high"
                     explanation = "Readyset does not support caching this query"
@@ -120,7 +126,9 @@ def explain_create_cache_readyset(
                     # Unknown support status
                     cacheable = False
                     confidence = "low"
-                    explanation = f"Unknown Readyset support status: {readyset_supported}"
+                    explanation = (
+                        f"Unknown Readyset support status: {readyset_supported}"
+                    )
             else:
                 # Unexpected format
                 cacheable = False
@@ -146,10 +154,12 @@ def explain_create_cache_readyset(
             # Try to parse as JSON
             try:
                 json_output = json.loads(output)
-                cacheable = json_output.get('cacheable', False)
-                issues = json_output.get('issues', [])
+                cacheable = json_output.get("cacheable", False)
+                issues = json_output.get("issues", [])
                 details = json_output
-                explanation = json_output.get('explanation') or json_output.get('message', "")
+                explanation = json_output.get("explanation") or json_output.get(
+                    "message", ""
+                )
             except json.JSONDecodeError:
                 # Plain text response, check for key phrases
                 if "cannot cache" in output.lower():
@@ -173,9 +183,9 @@ def explain_create_cache_readyset(
             "method": "readyset_explain_cache",
             "query": query,
             "details": details,
-                "issues": issues,
+            "issues": issues,
             "explanation": explanation,
-            "readyset_port": readyset_port
+            "readyset_port": readyset_port,
         }
 
     except subprocess.TimeoutExpired:
@@ -183,74 +193,65 @@ def explain_create_cache_readyset(
             "success": False,
             "cacheable": False,
             "error": "Readyset EXPLAIN CREATE CACHE timed out",
-            "query": query
+            "query": query,
         }
     except Exception as e:
         return {
             "success": False,
             "cacheable": False,
             "error": f"Failed to execute EXPLAIN CREATE CACHE: {str(e)}",
-            "query": query
+            "query": query,
         }
 
 
 def _run_explain_postgres(
-    explain_query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    explain_query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute EXPLAIN CREATE CACHE using psql against a PostgreSQL Readyset endpoint."""
     # Try using psycopg2 library first
     try:
         import psycopg2
+
         return _run_explain_postgres_psycopg2(
             explain_query=explain_query,
             host=host,
             port=port,
             user=user,
             database=database,
-            password=password
+            password=password,
         )
     except ImportError:
         pass
 
     # Fallback to psql command-line tool
     psql_cmd = [
-        'psql',
-        '-h', host,
-        '-p', str(port),
-        '-U', user,
-        '-d', database,
-        '-c', explain_query,
-        '-t',  # Tuples only (no headers/footers)
-        '-A'   # Unaligned output
+        "psql",
+        "-h",
+        host,
+        "-p",
+        str(port),
+        "-U",
+        user,
+        "-d",
+        database,
+        "-c",
+        explain_query,
+        "-t",  # Tuples only (no headers/footers)
+        "-A",  # Unaligned output
     ]
 
     import os
+
     env = os.environ.copy()
     # Set PGPASSWORD even if empty to prevent interactive prompts
     # Readyset typically doesn't require authentication
-    env['PGPASSWORD'] = password if password else ''
+    env["PGPASSWORD"] = password if password else ""
 
-    return subprocess.run(
-        psql_cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30
-    )
+    return subprocess.run(psql_cmd, capture_output=True, text=True, env=env, timeout=30)
 
 
 def _run_explain_postgres_psycopg2(
-    explain_query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    explain_query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute EXPLAIN CREATE CACHE using psycopg2 library (fallback for environments without psql)."""
     import psycopg2
@@ -268,9 +269,9 @@ def _run_explain_postgres_psycopg2(
             host=host,
             port=port,
             user=user,
-            password=password or '',
+            password=password or "",
             database=database,
-            connect_timeout=30
+            connect_timeout=30,
         )
 
         try:
@@ -281,31 +282,22 @@ def _run_explain_postgres_psycopg2(
                 # Format output similar to psql -t -A (tab-separated, no headers)
                 output_lines = []
                 for row in result:
-                    output_lines.append('\t'.join(str(val) if val is not None else '' for val in row))
+                    output_lines.append(
+                        "\t".join(str(val) if val is not None else "" for val in row)
+                    )
 
                 return CompletedProcess(
-                    returncode=0,
-                    stdout='\n'.join(output_lines),
-                    stderr=''
+                    returncode=0, stdout="\n".join(output_lines), stderr=""
                 )
         finally:
             connection.close()
 
     except Exception as e:
-        return CompletedProcess(
-            returncode=1,
-            stdout='',
-            stderr=str(e)
-        )
+        return CompletedProcess(returncode=1, stdout="", stderr=str(e))
 
 
 def _run_explain_mysql(
-    explain_query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    explain_query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute EXPLAIN CREATE CACHE using mysql client against a MySQL Readyset endpoint."""
     # Ensure TCP is used even if host is "localhost"
@@ -317,51 +309,45 @@ def _run_explain_mysql(
     # that don't have mysql_native_password plugin
     try:
         import pymysql
+
         return _run_explain_mysql_pymysql(
             explain_query=explain_query,
             host=normalized_host,
             port=port,
             user=user,
             database=database,
-            password=password
+            password=password,
         )
     except ImportError:
         pass
 
     mysql_cmd = [
-        'mysql',
-        '--protocol=TCP',
-        f'--host={normalized_host}',
-        f'--port={port}',
-        f'--user={user}',
-        f'--database={database}',
-        '--batch',
-        '--skip-column-names',
-        '--raw',
-        '--execute', explain_query
+        "mysql",
+        "--protocol=TCP",
+        f"--host={normalized_host}",
+        f"--port={port}",
+        f"--user={user}",
+        f"--database={database}",
+        "--batch",
+        "--skip-column-names",
+        "--raw",
+        "--execute",
+        explain_query,
     ]
 
     import os
+
     env = os.environ.copy()
     if password:
-        env['MYSQL_PWD'] = password
+        env["MYSQL_PWD"] = password
 
     return subprocess.run(
-        mysql_cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30
+        mysql_cmd, capture_output=True, text=True, env=env, timeout=30
     )
 
 
 def _run_explain_mysql_pymysql(
-    explain_query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    explain_query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute EXPLAIN CREATE CACHE using PyMySQL library (fallback for newer MySQL clients)."""
     import pymysql
@@ -381,7 +367,7 @@ def _run_explain_mysql_pymysql(
             user=user,
             password=password,
             database=database,
-            connect_timeout=30
+            connect_timeout=30,
         )
 
         try:
@@ -392,22 +378,16 @@ def _run_explain_mysql_pymysql(
                 # Format output similar to mysql CLI
                 output_lines = []
                 for row in result:
-                    output_lines.append('\t'.join(str(val) for val in row))
+                    output_lines.append("\t".join(str(val) for val in row))
 
                 return CompletedProcess(
-                    returncode=0,
-                    stdout='\n'.join(output_lines),
-                    stderr=''
+                    returncode=0, stdout="\n".join(output_lines), stderr=""
                 )
         finally:
             connection.close()
 
     except Exception as e:
-        return CompletedProcess(
-            returncode=1,
-            stdout='',
-            stderr=str(e)
-        )
+        return CompletedProcess(returncode=1, stdout="", stderr=str(e))
 
 
 def create_cache_readyset(
@@ -415,7 +395,7 @@ def create_cache_readyset(
     readyset_port: int | str = 5433,
     readyset_host: str = "localhost",
     test_db_config: Dict[str, Any] = None,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Execute CREATE CACHE to actually cache a query in Readyset.
@@ -432,10 +412,7 @@ def create_cache_readyset(
     """
     try:
         if not query:
-            return {
-                "success": False,
-                "error": "No query provided for cache creation"
-            }
+            return {"success": False, "error": "No query provided for cache creation"}
 
         # Parse test_db_config if it's a JSON string
         if isinstance(test_db_config, str):
@@ -444,24 +421,24 @@ def create_cache_readyset(
         readyset_port = int(readyset_port)
 
         # Get connection details from test DB config
-        database = test_db_config.get('database', 'testdb')
-        user = test_db_config.get('user', 'postgres')
-        password = test_db_config.get('password', '')
-        engine = (test_db_config.get('engine') or 'postgresql').lower()
+        database = test_db_config.get("database", "testdb")
+        user = test_db_config.get("user", "postgres")
+        password = test_db_config.get("password", "")
+        engine = (test_db_config.get("engine") or "postgresql").lower()
 
         # Build CREATE CACHE command
         cache_query = f"CREATE CACHE FROM {query}"
 
         print(f"Creating cache in Readyset on port {readyset_port}...")
 
-        if engine == 'mysql':
+        if engine == "mysql":
             result = _run_cache_mysql(
                 cache_query=cache_query,
                 host=readyset_host,
                 port=readyset_port,
                 user=user,
                 database=database,
-                password=password
+                password=password,
             )
         else:
             # Default to PostgreSQL client
@@ -471,7 +448,7 @@ def create_cache_readyset(
                 port=readyset_port,
                 user=user,
                 database=database,
-                password=password
+                password=password,
             )
 
         if result.returncode != 0:
@@ -479,7 +456,7 @@ def create_cache_readyset(
                 "success": False,
                 "cached": False,
                 "error": f"CREATE CACHE failed: {result.stderr}",
-                "query": query
+                "query": query,
             }
 
         # Parse Readyset response
@@ -492,14 +469,14 @@ def create_cache_readyset(
                 "cached": True,
                 "message": "Cache created successfully",
                 "query": query,
-                "readyset_port": readyset_port
+                "readyset_port": readyset_port,
             }
         else:
             return {
                 "success": False,
                 "cached": False,
                 "error": f"Unexpected response: {output}",
-                "query": query
+                "query": query,
             }
 
     except subprocess.TimeoutExpired:
@@ -507,74 +484,65 @@ def create_cache_readyset(
             "success": False,
             "cached": False,
             "error": "CREATE CACHE timed out",
-            "query": query
+            "query": query,
         }
     except Exception as e:
         return {
             "success": False,
             "cached": False,
             "error": f"Failed to create cache: {str(e)}",
-            "query": query
+            "query": query,
         }
 
 
 def _run_cache_postgres(
-    cache_query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    cache_query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute CREATE CACHE using psql against a PostgreSQL Readyset endpoint."""
     # Try using psycopg2 library first
     try:
         import psycopg2
+
         return _run_cache_postgres_psycopg2(
             cache_query=cache_query,
             host=host,
             port=port,
             user=user,
             database=database,
-            password=password
+            password=password,
         )
     except ImportError:
         pass
 
     # Fallback to psql command-line tool
     psql_cmd = [
-        'psql',
-        '-h', host,
-        '-p', str(port),
-        '-U', user,
-        '-d', database,
-        '-c', cache_query,
-        '-t',  # Tuples only (no headers/footers)
-        '-A'   # Unaligned output
+        "psql",
+        "-h",
+        host,
+        "-p",
+        str(port),
+        "-U",
+        user,
+        "-d",
+        database,
+        "-c",
+        cache_query,
+        "-t",  # Tuples only (no headers/footers)
+        "-A",  # Unaligned output
     ]
 
     import os
+
     env = os.environ.copy()
     # Set PGPASSWORD even if empty to prevent interactive prompts
     # Readyset typically doesn't require authentication
-    env['PGPASSWORD'] = password if password else ''
+    env["PGPASSWORD"] = password if password else ""
 
-    return subprocess.run(
-        psql_cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30
-    )
+    return subprocess.run(psql_cmd, capture_output=True, text=True, env=env, timeout=30)
 
 
 def _run_cache_postgres_psycopg2(
-    cache_query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    cache_query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute CREATE CACHE using psycopg2 library."""
     import psycopg2
@@ -591,9 +559,9 @@ def _run_cache_postgres_psycopg2(
             host=host,
             port=port,
             user=user,
-            password=password or '',
+            password=password or "",
             database=database,
-            connect_timeout=30
+            connect_timeout=30,
         )
 
         try:
@@ -601,29 +569,16 @@ def _run_cache_postgres_psycopg2(
                 cursor.execute(cache_query)
                 connection.commit()
 
-                return CompletedProcess(
-                    returncode=0,
-                    stdout='CREATE CACHE',
-                    stderr=''
-                )
+                return CompletedProcess(returncode=0, stdout="CREATE CACHE", stderr="")
         finally:
             connection.close()
 
     except Exception as e:
-        return CompletedProcess(
-            returncode=1,
-            stdout='',
-            stderr=str(e)
-        )
+        return CompletedProcess(returncode=1, stdout="", stderr=str(e))
 
 
 def _run_cache_mysql(
-    cache_query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    cache_query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute CREATE CACHE using mysql client against a MySQL Readyset endpoint."""
     # Ensure TCP is used even if host is "localhost"
@@ -634,51 +589,45 @@ def _run_cache_mysql(
     # Use pymysql or mysql.connector as fallback for newer MySQL clients
     try:
         import pymysql
+
         return _run_cache_mysql_pymysql(
             cache_query=cache_query,
             host=normalized_host,
             port=port,
             user=user,
             database=database,
-            password=password
+            password=password,
         )
     except ImportError:
         pass
 
     mysql_cmd = [
-        'mysql',
-        '--protocol=TCP',
-        f'--host={normalized_host}',
-        f'--port={port}',
-        f'--user={user}',
-        f'--database={database}',
-        '--batch',
-        '--skip-column-names',
-        '--raw',
-        '--execute', cache_query
+        "mysql",
+        "--protocol=TCP",
+        f"--host={normalized_host}",
+        f"--port={port}",
+        f"--user={user}",
+        f"--database={database}",
+        "--batch",
+        "--skip-column-names",
+        "--raw",
+        "--execute",
+        cache_query,
     ]
 
     import os
+
     env = os.environ.copy()
     if password:
-        env['MYSQL_PWD'] = password
+        env["MYSQL_PWD"] = password
 
     return subprocess.run(
-        mysql_cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30
+        mysql_cmd, capture_output=True, text=True, env=env, timeout=30
     )
 
 
 def _run_cache_mysql_pymysql(
-    cache_query: str,
-    host: str,
-    port: int,
-    user: str,
-    database: str,
-    password: str
+    cache_query: str, host: str, port: int, user: str, database: str, password: str
 ):
     """Execute CREATE CACHE using PyMySQL library."""
     import pymysql
@@ -697,7 +646,7 @@ def _run_cache_mysql_pymysql(
             user=user,
             password=password,
             database=database,
-            connect_timeout=30
+            connect_timeout=30,
         )
 
         try:
@@ -705,17 +654,112 @@ def _run_cache_mysql_pymysql(
                 cursor.execute(cache_query)
                 connection.commit()
 
-                return CompletedProcess(
-                    returncode=0,
-                    stdout='CREATE CACHE',
-                    stderr=''
-                )
+                return CompletedProcess(returncode=0, stdout="CREATE CACHE", stderr="")
         finally:
             connection.close()
 
     except Exception as e:
-        return CompletedProcess(
-            returncode=1,
-            stdout='',
-            stderr=str(e)
+        return CompletedProcess(returncode=1, stdout="", stderr=str(e))
+
+
+def get_cache_id_for_query(
+    query: str,
+    readyset_port: int,
+    db_config: Dict[str, Any],
+) -> str | None:
+    """
+    Query SHOW CACHES to get the cache ID for a specific query.
+
+    Args:
+        query: SQL query to find cache for
+        readyset_port: Readyset port
+        db_config: Database configuration
+
+    Returns:
+        Cache ID (query_id) if found, None otherwise
+    """
+    import os
+
+    try:
+        database = db_config.get("database", "testdb")
+        user = db_config.get("user", "postgres")
+        password = db_config.get("password", "")
+        engine = (db_config.get("engine") or "postgresql").lower()
+
+        normalized_query = " ".join(query.strip().split())
+
+        if engine == "mysql":
+            cmd = [
+                "mysql",
+                "--protocol=TCP",
+                "--host=localhost",
+                f"--port={readyset_port}",
+                f"--user={user}",
+                f"--database={database}",
+                "-e",
+                "SHOW CACHES;",
+            ]
+            env = (
+                {**os.environ, "MYSQL_PWD": password} if password else dict(os.environ)
+            )
+        else:
+            cmd = [
+                "psql",
+                "-h",
+                "localhost",
+                "-p",
+                str(readyset_port),
+                "-U",
+                user,
+                "-d",
+                database,
+                "-c",
+                "SHOW CACHES;",
+                "-A",
+                "-t",
+                "-F",
+                "|||",
+            ]
+            env = (
+                {**os.environ, "PGPASSWORD": password} if password else dict(os.environ)
+            )
+
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=10, env=env
         )
+
+        if result.returncode != 0:
+            return None
+
+        lines = result.stdout.strip().split("\n")
+        current_cache_id = None
+        current_query_parts = []
+
+        for line in lines:
+            if not line.strip():
+                continue
+
+            parts = line.split("|||")
+
+            if len(parts) >= 3 and parts[0].strip().startswith("q_"):
+                if current_cache_id and current_query_parts:
+                    full_query = " ".join(current_query_parts)
+                    normalized_cache_query = " ".join(full_query.strip().split())
+                    if normalized_query.lower() in normalized_cache_query.lower():
+                        return current_cache_id
+
+                current_cache_id = parts[0].strip()
+                current_query_parts = [parts[2].strip()]
+            elif current_cache_id and len(parts) >= 3:
+                current_query_parts.append(parts[2].strip())
+
+        if current_cache_id and current_query_parts:
+            full_query = " ".join(current_query_parts)
+            normalized_cache_query = " ".join(full_query.strip().split())
+            if normalized_query.lower() in normalized_cache_query.lower():
+                return current_cache_id
+
+        return None
+
+    except Exception:
+        return None

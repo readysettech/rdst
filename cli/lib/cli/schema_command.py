@@ -1009,58 +1009,44 @@ class SchemaCommand:
 
         # Run bulk pre-population only if --use-llm flag is set
         if use_llm:
-            self.console.print("Generating AI-powered annotation suggestions...")
-            self.console.print(
-                f"[{StyleTokens.MUTED}](This may take a minute for large schemas)[/{StyleTokens.MUTED}]\n"
-            )
+            import asyncio
+            from ..services.annotate_service import AnnotateService
+            from ..services.types import AnnotateErrorEvent, AnnotateCompleteEvent
+            from .annotate_renderer import AnnotateRenderer
 
             # Check prerequisites
-            if not ai_annotator:
-                return {
-                    "ok": False,
-                    "message": "No LLM API key configured. Run 'rdst configure llm' to set up AI support.",
-                }
-
             if not target_config:
                 return {
                     "ok": False,
                     "message": f"Target '{target}' not configured. Run 'rdst configure' first.",
                 }
 
-            # Load existing semantic layer
-            if not self.manager.exists(target):
-                return {
-                    "ok": False,
-                    "message": f"No semantic layer found for '{target}'. Run 'rdst schema init' first.",
-                }
+            # Use streaming service for bulk annotation
+            service = AnnotateService()
+            renderer = AnnotateRenderer()
+            llm_success = False
 
-            layer = self.manager.load(target)
+            async def _run_annotation():
+                nonlocal llm_success
+                try:
+                    async for event in service.annotate(
+                        target, target_config, table_name, sample_rows
+                    ):
+                        renderer.render(event)
+                        if isinstance(event, AnnotateCompleteEvent):
+                            llm_success = event.success
+                        elif isinstance(event, AnnotateErrorEvent):
+                            llm_success = False
+                finally:
+                    renderer.cleanup()
 
-            # Determine which tables to annotate
-            tables_to_annotate = (
-                [table_name] if table_name else list(layer.tables.keys())
-            )
+            asyncio.run(_run_annotation())
 
-            # Generate annotations
-            try:
-                ai_annotator.annotate_layer_bulk(
-                    layer, tables_to_annotate, sample_data_fn
-                )
-
-                # Save pre-populated layer
-                self.manager.save(layer)
-
-                self.console.print(
-                    f"[{StyleTokens.SUCCESS}]Generated suggestions for {len(tables_to_annotate)} table(s)[/{StyleTokens.SUCCESS}]"
-                )
+            if llm_success:
                 self.console.print(
                     "  Review and edit suggestions in the wizard below.\n"
                 )
-
-            except Exception as e:
-                self.console.print(
-                    f"[{StyleTokens.WARNING}]LLM annotation failed: {e}[/{StyleTokens.WARNING}]"
-                )
+            else:
                 self.console.print("Continuing with manual annotation...\n")
 
         # Run interactive wizard with AI support (if enabled)

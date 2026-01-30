@@ -188,6 +188,9 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
             metadata.get("normalized_query")
             or metadata.get("parameterized_sql")
             or metadata.get("query", "")
+            or workflow_result.get("normalized_query")
+            or workflow_result.get("parameterized_sql")
+            or workflow_result.get("query", "")
         )
         if query:
             lines.extend(_format_query(query))
@@ -441,6 +444,14 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
                 _format_additional_recommendations({"optimization_opportunities": opps})
             )
             lines.append(_divider())
+
+    readyset_analysis = workflow_result.get("readyset_analysis") or {}
+    readyset_cacheability = workflow_result.get("readyset_cacheability") or {}
+    if readyset_analysis.get("success") or readyset_cacheability.get("checked"):
+        lines.extend(
+            _format_readyset_cacheability(readyset_analysis, readyset_cacheability)
+        )
+        lines.append(_divider())
 
     next_steps = NextStepsBuilder(title=f"{Icons.MEMO} NEXT STEPS")
 
@@ -1021,6 +1032,8 @@ def _format_readyset_cacheability(
     readyset_analysis: Dict[str, Any], readyset_cacheability: Dict[str, Any]
 ) -> List[str]:
     content_parts: List[Any] = []
+    content_parts.append(f"[{StyleTokens.SECONDARY}]PERFORMANCE COMPARISON[/{StyleTokens.SECONDARY}]")
+    content_parts.append(Text(""))
 
     if readyset_analysis.get("success"):
         final_verdict = readyset_analysis.get("final_verdict") or {}
@@ -1101,7 +1114,8 @@ def _format_readyset_cacheability(
     return [
         _capture(
             SectionBox(
-                f"{Icons.ROCKET} Readyset Cacheability", content=Group(*content_parts)
+                f"{Icons.ROCKET} Readyset Cache Performance Analysis",
+                content=Group(*content_parts),
             )
         )
     ]

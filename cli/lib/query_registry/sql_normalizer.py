@@ -83,7 +83,7 @@ def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str =
                 replacement = exp.Literal.number(param_info['value'])
             placeholder.replace(replacement)
 
-    return tree.sql()
+    return tree.sql(dialect=dialect)
 
 
 def get_placeholder_names(normalized_sql: str, dialect: str = None) -> Set[str]:

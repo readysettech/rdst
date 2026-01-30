@@ -6,16 +6,110 @@ A command-line interface for diagnostics, query analysis, performance tuning,
 and caching with Readyset.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sys
 import argparse
 import shutil
 import subprocess
+from pathlib import Path
 
 
 # UI system
 from lib.ui import StyleTokens, get_console, DataTable, SectionHeader
+
+
+def _resolve_web_app_dir() -> Path | None:
+    env_dir = os.environ.get("RDST_WEB_APP_DIR")
+    if env_dir:
+        candidate = Path(env_dir).expanduser().resolve()
+        if (candidate / "package.json").exists():
+            return candidate
+
+    cwd = Path.cwd()
+    candidates = [
+        cwd / "web-apps" / "apps" / "rdst",
+        cwd / ".." / "web-apps" / "apps" / "rdst",
+        cwd / ".." / ".." / "web-apps" / "apps" / "rdst",
+        Path(__file__).resolve().parent.parent / "web-apps" / "apps" / "rdst",
+    ]
+
+    for candidate in candidates:
+        path = candidate.resolve()
+        if (path / "package.json").exists():
+            return path
+
+    return None
+
+
+def _resolve_rdst_source_dir(repo_root: Path | None = None) -> Path:
+    env_dir = os.environ.get("RDST_SOURCE_DIR")
+    if env_dir:
+        candidate = Path(env_dir).expanduser().resolve()
+        if (candidate / "rdst.py").exists() and (candidate / "lib").is_dir():
+            return candidate
+
+    cwd = Path.cwd()
+    candidates = []
+    if repo_root:
+        candidates.append(repo_root / "rdst")
+    candidates.extend(
+        [
+            cwd / "rdst",
+            cwd,
+            cwd / ".." / "rdst",
+            Path(__file__).resolve().parent,
+        ]
+    )
+
+    for candidate in candidates:
+        path = candidate.resolve()
+        if (path / "rdst.py").exists() and (path / "lib").is_dir():
+            return path
+
+    return Path(__file__).resolve().parent
+
+
+def _restore_web_required_env_vars() -> tuple[list[str], list[str], list[str]]:
+    """Restore required env vars from secure store for `rdst web` startup."""
+    try:
+        from lib.services.env_requirements_service import EnvRequirementsService
+
+        requirements = EnvRequirementsService()
+        required_names = requirements.get_required_names_for_restore()
+        if not required_names:
+            return [], [], []
+
+        result = requirements.secret_store.restore_required(required_names)
+        restored = list(result.get("restored", []))
+        errors = list(result.get("errors", []))
+        missing = sorted(
+            [name for name in required_names if not os.environ.get(name)]
+        )
+        return restored, missing, errors
+    except Exception as e:
+        return [], [], [f"Preflight env restore failed: {e}"]
+
+
+def _clear_web_required_env_vars() -> tuple[list[str], list[str], list[str]]:
+    """Clear required env vars from secure store and current process env."""
+    try:
+        from lib.services.env_requirements_service import EnvRequirementsService
+
+        requirements = EnvRequirementsService()
+        required_names = requirements.get_allowed_secret_names()
+        if not required_names:
+            return [], [], []
+
+        result = requirements.secret_store.clear_required(required_names)
+        cleared = list(result.get("cleared", []))
+        missing = list(result.get("missing", []))
+        errors = list(result.get("errors", []))
+        return cleared, missing, errors
+    except Exception as e:
+        return [], [], [f"Keyring clear failed: {e}"]
 
 
 def print_rich_help():
@@ -442,6 +536,136 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             include_plan=getattr(args, "include_plan", False),
         )
         return RdstResult(success, "")
+    elif command == "web":
+        host = getattr(args, "host", "127.0.0.1")
+        port = getattr(args, "port", 8787)
+        reload = getattr(args, "reload", False)
+        ui_mode = getattr(args, "ui", "auto")
+        clear = getattr(args, "clear", False)
+
+        if clear:
+            cleared_envs, missing_envs, clear_errors = _clear_web_required_env_vars()
+            if cleared_envs:
+                print(f"Cleared secure env vars: {', '.join(cleared_envs)}")
+            if missing_envs:
+                print(f"No persisted entries found for: {', '.join(missing_envs)}")
+            if clear_errors:
+                print("Keyring clear warnings:")
+                for err in clear_errors:
+                    print(f"  - {err}")
+                return RdstResult(False, "Failed to clear one or more secure env vars.")
+            return RdstResult(True, "")
+
+        try:
+            import uvicorn
+        except ImportError:
+            return RdstResult(
+                False,
+                "Server dependencies not installed.\n"
+                "Install with: pip install rdst[server]",
+            )
+
+        web_app_dir = _resolve_web_app_dir()
+        if not web_app_dir:
+            return RdstResult(
+                False,
+                "RDST web app directory not found. Set RDST_WEB_APP_DIR or run from the readyset repo.",
+            )
+
+        repo_root = web_app_dir.parents[2]
+        rdst_dir = _resolve_rdst_source_dir(repo_root)
+        dist_dir = web_app_dir / "dist"
+        dist_index = dist_dir / "index.html"
+
+        serve_static = False
+
+        def ensure_dist_build() -> RdstResult | None:
+            if dist_index.exists():
+                return None
+
+            pnpm_path = shutil.which("pnpm")
+            if not pnpm_path:
+                return RdstResult(
+                    False,
+                    "'pnpm' is required to build the RDST web app for --ui dist.\n"
+                    "Install pnpm and retry, or run with --ui none.",
+                )
+
+            print("No prebuilt frontend found; running 'pnpm run build'...")
+            result = subprocess.run([pnpm_path, "run", "build"], cwd=str(web_app_dir))
+            if result.returncode != 0:
+                return RdstResult(
+                    False,
+                    "Failed to build RDST web app (pnpm build returned non-zero exit code).",
+                )
+
+            if not dist_index.exists():
+                return RdstResult(
+                    False,
+                    f"Build completed but dist index not found at {dist_index}",
+                )
+
+            return None
+
+        if ui_mode == "none":
+            serve_static = False
+        elif ui_mode == "auto":
+            serve_static = dist_index.exists()
+        elif ui_mode == "dist":
+            maybe_error = ensure_dist_build()
+            if maybe_error:
+                return maybe_error
+            serve_static = True
+        else:
+            return RdstResult(False, f"Invalid UI mode: {ui_mode}")
+
+        os.environ["RDST_WEB_SERVE_STATIC"] = "1" if serve_static else "0"
+        os.environ["RDST_WEB_DIST_DIR"] = str(dist_dir)
+
+        restored_envs, missing_envs, restore_errors = _restore_web_required_env_vars()
+
+        print(f"Starting RDST web server on http://{host}:{port}")
+        if serve_static:
+            print(f"Serving static frontend from: {dist_dir}")
+        elif ui_mode == "auto":
+            print("No dist bundle found; running API-only mode")
+            print("Tip: run 'pnpm build' in web-apps/apps/rdst for single-process UI")
+
+        if restored_envs:
+            print(f"Restored secure env vars: {', '.join(restored_envs)}")
+        if missing_envs:
+            print(f"Missing required env vars: {', '.join(missing_envs)}")
+        if restore_errors:
+            print("Env restore warnings:")
+            for err in restore_errors:
+                print(f"  - {err}")
+        if restored_envs or missing_envs:
+            print(
+                "Note: values set in Web apply immediately for this process. "
+                "Values exported in a different shell require restarting `rdst web`."
+            )
+
+        if reload:
+            print("Auto-reload enabled (watching for file changes)")
+        print("Press Ctrl+C to stop")
+        print()
+
+        if reload:
+            uvicorn.run(
+                "lib.api.app:create_app",
+                host=host,
+                port=port,
+                reload=True,
+                factory=True,
+                reload_dirs=[str(rdst_dir)],
+            )
+        else:
+            from lib.api.app import create_app
+
+            static_dir_arg = str(dist_dir) if serve_static else None
+            app = create_app(static_dist_dir=static_dir_arg)
+            uvicorn.run(app, host=host, port=port)
+        return RdstResult(True, "")
     elif command == "help" or command is None:
         # Check if a question was provided
         question = " ".join(getattr(args, "question", []) or [])
@@ -589,7 +813,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             query = input("SQL query: ").strip()
             if not query:
                 return RdstResult(False, "analyze requires a SQL query")
-            return cli.analyze(query)
+            return cli.analyze(query=query)
         elif cmd == "init":
             return cli.init()
         elif cmd == "query":

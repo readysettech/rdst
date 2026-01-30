@@ -6,7 +6,173 @@ context to LLM for better rewrite and index suggestions.
 """
 
 import re
-from typing import Dict, Any, Set
+from typing import Dict, Any, Set, List
+import os
+
+
+def collect_all_tables_schema(target_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Collect schema for ALL tables in the database.
+
+    Used by the web UI for SQL autocomplete - needs complete schema, not just
+    tables referenced in a specific query.
+
+    Args:
+        target_config: Database target configuration dict
+
+    Returns:
+        Dict containing:
+        - success: boolean indicating if collection succeeded
+        - tables: dict mapping table_name -> list of column names
+        - error: error message if failed
+    """
+    try:
+        if not target_config:
+            return {
+                "success": False,
+                "tables": {},
+                "error": "No target_config provided",
+            }
+
+        engine = target_config.get("engine", "unknown").lower()
+
+        if engine == "mysql":
+            return _collect_all_mysql_tables(target_config)
+        elif engine in ["postgresql", "postgres"]:
+            return _collect_all_postgres_tables(target_config)
+        else:
+            return {
+                "success": False,
+                "tables": {},
+                "error": f"Unsupported database engine: {engine}",
+            }
+    except Exception as e:
+        return {"success": False, "tables": {}, "error": str(e)}
+
+
+def _collect_all_postgres_tables(target_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Collect all tables and columns from PostgreSQL database."""
+    try:
+        import psycopg2
+
+        host = target_config.get("host")
+        port = target_config.get("port", 5432)
+        user = target_config.get("user")
+        database = target_config.get("database")
+        password_env = target_config.get("password_env")
+        password = (
+            os.environ.get(password_env)
+            if password_env
+            else target_config.get("password")
+        )
+
+        if not all([host, user, database, password]):
+            return {
+                "success": False,
+                "tables": {},
+                "error": "Missing connection details",
+            }
+
+        connection = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            connect_timeout=10,
+        )
+
+        tables: Dict[str, List[str]] = {}
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        t.table_name,
+                        c.column_name
+                    FROM information_schema.tables t
+                    JOIN information_schema.columns c 
+                        ON t.table_name = c.table_name 
+                        AND t.table_schema = c.table_schema
+                    WHERE t.table_schema = 'public'
+                        AND t.table_type = 'BASE TABLE'
+                    ORDER BY t.table_name, c.ordinal_position
+                """)
+
+                for table_name, column_name in cursor.fetchall():
+                    if table_name not in tables:
+                        tables[table_name] = []
+                    tables[table_name].append(column_name)
+
+        finally:
+            connection.close()
+
+        return {"success": True, "tables": tables, "error": None}
+
+    except Exception as e:
+        return {"success": False, "tables": {}, "error": f"PostgreSQL error: {str(e)}"}
+
+
+def _collect_all_mysql_tables(target_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Collect all tables and columns from MySQL database."""
+    try:
+        import pymysql
+
+        host = target_config.get("host")
+        port = target_config.get("port", 3306)
+        user = target_config.get("user")
+        database = target_config.get("database")
+        password_env = target_config.get("password_env")
+        password = (
+            os.environ.get(password_env)
+            if password_env
+            else target_config.get("password")
+        )
+
+        if not all([host, user, database, password]):
+            return {
+                "success": False,
+                "tables": {},
+                "error": "Missing connection details",
+            }
+
+        connection = pymysql.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            connect_timeout=10,
+        )
+
+        tables: Dict[str, List[str]] = {}
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT 
+                        TABLE_NAME,
+                        COLUMN_NAME
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = %s
+                    ORDER BY TABLE_NAME, ORDINAL_POSITION
+                """,
+                    (database,),
+                )
+
+                for table_name, column_name in cursor.fetchall():
+                    if table_name not in tables:
+                        tables[table_name] = []
+                    tables[table_name].append(column_name)
+
+        finally:
+            connection.close()
+
+        return {"success": True, "tables": tables, "error": None}
+
+    except Exception as e:
+        return {"success": False, "tables": {}, "error": f"MySQL error: {str(e)}"}
 
 
 def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, Any]:
@@ -28,11 +194,12 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
         - error: error message if failed
     """
     try:
-        target_config = kwargs.get('target_config')
+        target_config = kwargs.get("target_config")
 
         # Handle case where WorkflowManager passes target_config as string
         if isinstance(target_config, str):
             import json
+
             try:
                 target_config = json.loads(target_config)
             except (json.JSONDecodeError, TypeError):
@@ -42,7 +209,7 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
                     "tables_analyzed": [],
                     "engine_version": "unknown",
                     "engine_major_version": None,
-                    "error": "target_config is invalid (string parse failed)"
+                    "error": "target_config is invalid (string parse failed)",
                 }
 
         if not target_config:
@@ -52,7 +219,7 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
                 "tables_analyzed": [],
                 "engine_version": "unknown",
                 "engine_major_version": None,
-                "error": "No target_config provided"
+                "error": "No target_config provided",
             }
 
         # Collect engine version
@@ -71,7 +238,7 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
             "tables_analyzed": list(table_names),
             "engine_version": engine_version,
             "engine_major_version": engine_major_version,
-            "error": None
+            "error": None,
         }
 
     except Exception as e:
@@ -81,7 +248,7 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
             "tables_analyzed": [],
             "engine_version": "unknown",
             "engine_major_version": None,
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -105,27 +272,32 @@ def collect_engine_version(target_config: Dict[str, Any]) -> Dict[str, Any]:
     """
     import os
 
-    engine = target_config.get('engine', 'unknown').lower()
-    host = target_config.get('host')
-    port = target_config.get('port')
-    user = target_config.get('user')
-    database = target_config.get('database')
-    password_env = target_config.get('password_env')
+    engine = target_config.get("engine", "unknown").lower()
+    host = target_config.get("host")
+    port = target_config.get("port")
+    user = target_config.get("user")
+    database = target_config.get("database")
+    password_env = target_config.get("password_env")
     password = os.environ.get(password_env) if password_env else None
 
     if not all([host, user, database, password]):
-        return {"version": "unknown", "major_version": None, "error": "Missing connection details"}
+        return {
+            "version": "unknown",
+            "major_version": None,
+            "error": "Missing connection details",
+        }
 
     try:
-        if engine == 'mysql':
+        if engine == "mysql":
             import pymysql
+
             connection = pymysql.connect(
                 host=host,
                 port=port or 3306,
                 user=user,
                 password=password,
                 database=database,
-                connect_timeout=5
+                connect_timeout=5,
             )
             try:
                 with connection.cursor() as cursor:
@@ -138,20 +310,21 @@ def collect_engine_version(target_config: Dict[str, Any]) -> Dict[str, Any]:
                         return {
                             "version": f"MySQL {version_str}",
                             "major_version": major_version,
-                            "error": None
+                            "error": None,
                         }
             finally:
                 connection.close()
 
-        elif engine in ['postgresql', 'postgres']:
+        elif engine in ["postgresql", "postgres"]:
             import psycopg2
+
             connection = psycopg2.connect(
                 host=host,
                 port=port or 5432,
                 user=user,
                 password=password,
                 database=database,
-                connect_timeout=5
+                connect_timeout=5,
             )
             try:
                 with connection.cursor() as cursor:
@@ -162,27 +335,37 @@ def collect_engine_version(target_config: Dict[str, Any]) -> Dict[str, Any]:
                         # Parse version like "PostgreSQL 14.5 on x86_64..."
                         major_version = _parse_postgres_version(version_str)
                         return {
-                            "version": version_str.split(' on ')[0] if ' on ' in version_str else version_str,
+                            "version": version_str.split(" on ")[0]
+                            if " on " in version_str
+                            else version_str,
                             "major_version": major_version,
-                            "error": None
+                            "error": None,
                         }
             finally:
                 connection.close()
         else:
-            return {"version": f"Unsupported engine: {engine}", "major_version": None, "error": None}
+            return {
+                "version": f"Unsupported engine: {engine}",
+                "major_version": None,
+                "error": None,
+            }
 
     except Exception as e:
         return {"version": "unknown", "major_version": None, "error": str(e)}
 
-    return {"version": "unknown", "major_version": None, "error": "Failed to get version"}
+    return {
+        "version": "unknown",
+        "major_version": None,
+        "error": "Failed to get version",
+    }
 
 
 def _parse_major_version(version_str: str) -> int:
     """Parse major version from MySQL version string like '8.0.33' or '5.7.42-log'."""
     try:
         # Handle formats like "8.0.33", "5.7.42-log", "8.0.33-0ubuntu0.22.04.1"
-        version_part = version_str.split('-')[0]
-        parts = version_part.split('.')
+        version_part = version_str.split("-")[0]
+        parts = version_part.split(".")
         if len(parts) >= 1:
             return int(parts[0])
     except (ValueError, IndexError):
@@ -194,7 +377,7 @@ def _parse_postgres_version(version_str: str) -> int:
     """Parse major version from PostgreSQL version string like 'PostgreSQL 14.5 on x86_64...'."""
     try:
         # Handle formats like "PostgreSQL 14.5 on x86_64..."
-        match = re.search(r'PostgreSQL\s+(\d+)', version_str)
+        match = re.search(r"PostgreSQL\s+(\d+)", version_str)
         if match:
             return int(match.group(1))
     except (ValueError, AttributeError):
@@ -217,10 +400,13 @@ def collect_schema_for_query(sql: str, target_config: Dict[str, Any]) -> str:
         # Handle case where WorkflowManager passes target_config as string
         if isinstance(target_config, str):
             import json
+
             try:
                 target_config = json.loads(target_config)
             except (json.JSONDecodeError, TypeError):
-                return "Schema information: target_config is invalid (string parse failed)"
+                return (
+                    "Schema information: target_config is invalid (string parse failed)"
+                )
         # Extract table names from query
         table_names = _extract_table_names_from_sql(sql)
 
@@ -228,11 +414,11 @@ def collect_schema_for_query(sql: str, target_config: Dict[str, Any]) -> str:
             return "Schema information: No tables identified in query"
 
         # Get schema for each table
-        engine = target_config.get('engine', 'unknown').lower()
+        engine = target_config.get("engine", "unknown").lower()
 
-        if engine == 'mysql':
+        if engine == "mysql":
             return _collect_mysql_schema(table_names, target_config)
-        elif engine in ['postgresql', 'postgres']:
+        elif engine in ["postgresql", "postgres"]:
             return _collect_postgres_schema(table_names, target_config)
         else:
             return f"Schema information: Unsupported database engine '{engine}'"
@@ -248,12 +434,12 @@ def _extract_table_names_from_sql(sql: str) -> Set[str]:
 
     # Common patterns for table references
     patterns = [
-        r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # FROM table_name
-        r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # JOIN table_name
-        r'\bINTO\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # INTO table_name
-        r'\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # UPDATE table_name
-        r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(?:AS\s+)?[a-zA-Z_]',  # FROM table AS alias
-        r'\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(?:AS\s+)?[a-zA-Z_]',  # JOIN table AS alias
+        r"\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)",  # FROM table_name
+        r"\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)",  # JOIN table_name
+        r"\bINTO\s+([a-zA-Z_][a-zA-Z0-9_]*)",  # INTO table_name
+        r"\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*)",  # UPDATE table_name
+        r"\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(?:AS\s+)?[a-zA-Z_]",  # FROM table AS alias
+        r"\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+(?:AS\s+)?[a-zA-Z_]",  # JOIN table AS alias
     ]
 
     for pattern in patterns:
@@ -261,7 +447,15 @@ def _extract_table_names_from_sql(sql: str) -> Set[str]:
         for match in matches:
             table_name = match.group(1).lower()
             # Avoid SQL keywords and aliases
-            if table_name not in {'select', 'where', 'order', 'group', 'having', 'limit', 'offset'}:
+            if table_name not in {
+                "select",
+                "where",
+                "order",
+                "group",
+                "having",
+                "limit",
+                "offset",
+            }:
                 table_names.add(table_name)
 
     return table_names
@@ -273,14 +467,15 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
         import pymysql
 
         # Get connection details
-        host = target_config.get('host')
-        port = target_config.get('port', 3306)
-        user = target_config.get('user')
-        database = target_config.get('database')
+        host = target_config.get("host")
+        port = target_config.get("port", 3306)
+        user = target_config.get("user")
+        database = target_config.get("database")
 
         # Get password from environment
         import os
-        password_env = target_config.get('password_env')
+
+        password_env = target_config.get("password_env")
         password = os.environ.get(password_env) if password_env else None
 
         if not all([host, user, database, password]):
@@ -293,7 +488,7 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
             user=user,
             password=password,
             database=database,
-            connect_timeout=5
+            connect_timeout=5,
         )
 
         schema_parts = []
@@ -302,7 +497,7 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
             with connection.cursor() as cursor:
                 for table_name in table_names:
                     # Validate table name contains only safe characters
-                    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table_name):
+                    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table_name):
                         continue  # Skip potentially unsafe table names
 
                     # Get table structure - use backtick quoting for MySQL identifier safety
@@ -319,11 +514,14 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
                     indexes = cursor.fetchall()
 
                     # Get row count estimate (for LLM to understand scale)
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         SELECT TABLE_ROWS as row_estimate
                         FROM information_schema.TABLES
                         WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
-                    """, (database, table_name))
+                    """,
+                        (database, table_name),
+                    )
                     row_count_result = cursor.fetchone()
                     row_estimate = row_count_result[0] if row_count_result else 0
 
@@ -345,7 +543,9 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
                         for idx in indexes:
                             index_name = idx[2]  # Key_name
                             column_name = idx[4]  # Column_name
-                            index_type = idx[10]  # Index_type (BTREE, HASH, FULLTEXT, etc.)
+                            index_type = idx[
+                                10
+                            ]  # Index_type (BTREE, HASH, FULLTEXT, etc.)
 
                             if index_name not in index_dict:
                                 index_dict[index_name] = []
@@ -353,38 +553,44 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
                             index_dict[index_name].append(column_name)
 
                         for idx_name, cols in index_dict.items():
-                            cols_str = ', '.join(cols)
-                            idx_type = index_types.get(idx_name, 'BTREE')
+                            cols_str = ", ".join(cols)
+                            idx_type = index_types.get(idx_name, "BTREE")
                             # Show in format similar to PostgreSQL for consistency
-                            table_schema.append(f"  - {idx_name} USING {idx_type} ({cols_str})")
+                            table_schema.append(
+                                f"  - {idx_name} USING {idx_type} ({cols_str})"
+                            )
 
-                    schema_parts.append('\n'.join(table_schema))
+                    schema_parts.append("\n".join(table_schema))
 
         finally:
             connection.close()
 
         if schema_parts:
-            return "Schema information:\n" + '\n'.join(schema_parts)
+            return "Schema information:\n" + "\n".join(schema_parts)
         else:
             return "Schema information: No schema found for referenced tables"
 
     except Exception as e:
         return f"Schema information: Error collecting MySQL schema - {str(e)}"
 
-def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any]) -> str:
+
+def _collect_postgres_schema(
+    table_names: Set[str], target_config: Dict[str, Any]
+) -> str:
     """Collect schema information for PostgreSQL tables."""
     try:
         import psycopg2
 
         # Get connection details
-        host = target_config.get('host')
-        port = target_config.get('port', 5432)
-        user = target_config.get('user')
-        database = target_config.get('database')
+        host = target_config.get("host")
+        port = target_config.get("port", 5432)
+        user = target_config.get("user")
+        database = target_config.get("database")
 
         # Get password from environment
         import os
-        password_env = target_config.get('password_env')
+
+        password_env = target_config.get("password_env")
         password = os.environ.get(password_env) if password_env else None
 
         if not all([host, user, database, password]):
@@ -397,7 +603,7 @@ def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any
             user=user,
             password=password,
             database=database,
-            connect_timeout=5
+            connect_timeout=5,
         )
 
         schema_parts = []
@@ -406,31 +612,40 @@ def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any
             with connection.cursor() as cursor:
                 for table_name in table_names:
                     # Get table columns
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         SELECT column_name, data_type, is_nullable, column_default
                         FROM information_schema.columns
                         WHERE table_name = %s
                         ORDER BY ordinal_position
-                    """, (table_name,))
+                    """,
+                        (table_name,),
+                    )
                     columns = cursor.fetchall()
 
                     if not columns:
                         continue
 
                     # Get indexes
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         SELECT indexname, indexdef
                         FROM pg_indexes
                         WHERE tablename = %s
-                    """, (table_name,))
+                    """,
+                        (table_name,),
+                    )
                     indexes = cursor.fetchall()
 
                     # Get row count estimate (for LLM to understand scale)
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         SELECT reltuples::bigint as row_estimate
                         FROM pg_class
                         WHERE relname = %s
-                    """, (table_name,))
+                    """,
+                        (table_name,),
+                    )
                     row_count_result = cursor.fetchone()
                     row_estimate = row_count_result[0] if row_count_result else 0
 
@@ -441,7 +656,7 @@ def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any
 
                     for col in columns:
                         column_name, data_type, is_nullable, default = col
-                        null_info = " NULL" if is_nullable == 'YES' else " NOT NULL"
+                        null_info = " NULL" if is_nullable == "YES" else " NOT NULL"
                         table_schema.append(f"  - {column_name} {data_type}{null_info}")
 
                     # Format indexes (show full definition with USING clause to prevent hallucination)
@@ -452,7 +667,7 @@ def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any
                             # This is critical for LLM to understand index type (btree vs hash vs gin)
                             table_schema.append(f"  - {idx_def}")
 
-                    schema_parts.append('\n'.join(table_schema))
+                    schema_parts.append("\n".join(table_schema))
 
                 # Collect installed extensions and custom types (important for type compatibility)
                 extensions_info = _collect_postgres_extensions(cursor)
@@ -467,7 +682,7 @@ def _collect_postgres_schema(table_names: Set[str], target_config: Dict[str, Any
             connection.close()
 
         if schema_parts:
-            return "Schema information:\n" + '\n'.join(schema_parts)
+            return "Schema information:\n" + "\n".join(schema_parts)
         else:
             return "Schema information: No schema found for referenced tables"
 
@@ -497,7 +712,7 @@ def _collect_postgres_extensions(cursor) -> str:
                 lines.append(f"  - {ext_name} v{ext_version}: {description}")
             else:
                 lines.append(f"  - {ext_name} v{ext_version}")
-        return '\n'.join(lines)
+        return "\n".join(lines)
     except Exception:
         return ""
 
@@ -520,15 +735,17 @@ def _collect_postgres_custom_types(cursor) -> str:
             return ""
         lines = ["\nCustom Types:"]
         for type_name, type_code, type_category, base_type, enum_values in custom_types:
-            if type_code == 'e' and enum_values:
+            if type_code == "e" and enum_values:
                 lines.append(f"  - {type_name} (enum): [{enum_values}]")
-            elif type_code == 'd' and base_type:
+            elif type_code == "d" and base_type:
                 lines.append(f"  - {type_name} (domain over {base_type})")
-            elif type_code == 'b':
-                lines.append(f"  - {type_name} (extension type): compare with same type only")
+            elif type_code == "b":
+                lines.append(
+                    f"  - {type_name} (extension type): compare with same type only"
+                )
             else:
                 lines.append(f"  - {type_name} ({type_category})")
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
     except Exception:
         return ""

@@ -812,7 +812,7 @@ class ScanCommand:
                     "Get one at: https://console.anthropic.com/"
                 )
                 if output_json:
-                    results["analysis"] = {"error": error_msg, "ci_status": "error", "ci_exit_code": 1}
+                    results["analysis"] = {"error": error_msg, "ci_status": "fail", "ci_exit_code": 1}
                     return RdstResult(False, json.dumps(results, indent=2), data=results)
                 return RdstResult(False, error_msg)
 
@@ -837,7 +837,7 @@ class ScanCommand:
                             f"(Configured in ~/.rdst/config.toml for target '{target}')"
                         )
                         if output_json:
-                            results["analysis"] = {"error": error_msg, "ci_status": "error", "ci_exit_code": 1}
+                            results["analysis"] = {"error": error_msg, "ci_status": "fail", "ci_exit_code": 1}
                             return RdstResult(False, json.dumps(results, indent=2), data=results)
                         return RdstResult(False, error_msg)
 
@@ -1660,8 +1660,8 @@ Respond with ONLY this JSON (no markdown code blocks):
                         worst_score = min(worst_score, rating_scores[r])
 
         if worst_score is None:
-            # No scores at all (LLM failed) — treat as error, exit code 1
-            analysis_results["ci_status"] = "error"
+            # No scores at all (LLM failed) — treat as fail, exit code 1
+            analysis_results["ci_status"] = "fail"
             analysis_results["ci_exit_code"] = 1
             # Build a useful error message
             if analysis_results["failed"] > 0 and analysis_results["successful"] == 0:

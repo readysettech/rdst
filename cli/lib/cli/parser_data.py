@@ -22,6 +22,8 @@ class ArgDef:
     dest: Optional[str] = None
     metavar: Optional[str] = None
     required: Optional[bool] = None
+    # If true, suppress this flag from --help output (used for internal/dev plumbing).
+    hidden: bool = False
 
     def is_positional(self) -> bool:
         return not self.name.startswith("-")
@@ -799,6 +801,62 @@ provide optimization recommendations.""",
         args=[],
         examples=[("rdst version", "Show version")],
     ),
+    "web": CommandDef(
+        name="web",
+        short_help="Start the RDST web server for the web client",
+        description="""Start the RDST API server for the web client.
+
+This starts a local HTTP server that exposes the RDST API for the web interface.
+The server provides REST endpoints with Server-Sent Events (SSE) for real-time
+progress updates during analysis.
+
+The CLI continues to work directly without needing the server.
+The server is only required for the web client.""",
+        args=[
+            # Internal/dev-only UI mode selector.
+            # Kept hidden from CLI help to avoid exposing local development plumbing.
+            ArgDef(
+                "--ui",
+                choices=["auto", "dist", "none"],
+                default="auto",
+                help="UI mode (default: auto)",
+                hidden=True,
+            ),
+            ArgDef(
+                "--port",
+                short="-p",
+                type=int,
+                default=8787,
+                help="Port to listen on (default: 8787)",
+            ),
+            ArgDef(
+                "--host",
+                default="127.0.0.1",
+                help="Host to bind to (default: 127.0.0.1)",
+            ),
+            # Internal/dev-only FastAPI reload flag.
+            # Kept hidden from CLI help.
+            ArgDef(
+                "--reload",
+                short="-r",
+                action="store_true",
+                help="Auto-reload on file changes (development mode)",
+                hidden=True,
+            ),
+            # Internal/debug-only keyring clear flag.
+            # Kept hidden from CLI help to avoid exposing maintenance plumbing.
+            ArgDef(
+                "--clear",
+                action="store_true",
+                help="Clear RDST web secure env vars from keyring and exit",
+                hidden=True,
+            ),
+        ],
+        examples=[
+            ("rdst web", "Start server on localhost:8787"),
+            ("rdst web --port 9000", "Start server on custom port"),
+        ],
+    ),
     "slack": CommandDef(
         name="slack",
         short_help="Deploy a Slack bot for database queries",
@@ -983,6 +1041,7 @@ COMMAND_ORDER = [
     "report",
     "help",
     "claude",
+    "web",
     "version",
 ]
 
@@ -1037,6 +1096,10 @@ def get_argparse_description(command: str) -> str:
 
 def _add_arg_to_parser(parser_or_group, arg: ArgDef) -> None:
     kwargs: dict[str, Any] = {"help": arg.help}
+    if getattr(arg, "hidden", False):
+        import argparse
+
+        kwargs["help"] = argparse.SUPPRESS
     if arg.type is not None:
         kwargs["type"] = arg.type
     if arg.default is not None:

@@ -1571,9 +1571,12 @@ class QueryCommand:
         # Initialize statistics
         stats = RunStatistics(start_time=time.perf_counter())
 
-        # Set up signal handler for graceful shutdown
+        # Set up signal handler for graceful shutdown.
+        # Signal registration is only allowed from the main thread.
         stop_event = threading.Event()
-        original_handler = signal.getsignal(signal.SIGINT)
+        can_install_signal = threading.current_thread() is threading.main_thread()
+        original_handler = None
+        signal_installed = False
 
         def signal_handler(signum, frame):
             if not quiet:
@@ -1582,7 +1585,14 @@ class QueryCommand:
                 )
             stop_event.set()
 
-        signal.signal(signal.SIGINT, signal_handler)
+        if can_install_signal:
+            try:
+                original_handler = signal.getsignal(signal.SIGINT)
+                signal.signal(signal.SIGINT, signal_handler)
+                signal_installed = True
+            except (ValueError, RuntimeError):
+                # Happens in non-main interpreter contexts; continue without signal trap.
+                signal_installed = False
 
         try:
             if not quiet:
@@ -1650,8 +1660,12 @@ class QueryCommand:
                 ok=False, message=f"Error during execution: {e}", data={"error": str(e)}
             )
         finally:
-            # Restore original signal handler
-            signal.signal(signal.SIGINT, original_handler)
+            # Restore original signal handler if we installed one
+            if signal_installed and original_handler is not None:
+                try:
+                    signal.signal(signal.SIGINT, original_handler)
+                except Exception:
+                    pass
 
         # Print summary
         self._print_run_summary(stats)

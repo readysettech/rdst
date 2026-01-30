@@ -30,7 +30,10 @@ def estimate_tokens(text: str) -> int:
 
 # Claude pricing (as of 2025) - $ per million tokens
 CLAUDE_PRICING = {
-    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},  # Default - same price as 4
+    "claude-sonnet-4-5-20250929": {
+        "input": 3.0,
+        "output": 15.0,
+    },  # Default - same price as 4
     "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
     "claude-opus-4-20250514": {"input": 15.0, "output": 75.0},
     # Fallback for unknown models (assume Sonnet pricing)
@@ -62,12 +65,18 @@ from ..prompts.analyze_prompts import (
     HOTSPOT_IDENTIFICATION_PROMPT,
     REWRITE_SUGGESTION_PROMPT,
     INDEX_SUGGESTION_PROMPT,
-    READYSET_CACHING_PROMPT
+    READYSET_CACHING_PROMPT,
 )
 
 
-def analyze_with_llm(explain_results: Dict[str, Any], query_metrics: Dict[str, Any],
-                     parameterized_sql: str, original_sql: str = None, schema_info: str = None, **kwargs) -> Dict[str, Any]:
+def analyze_with_llm(
+    explain_results: Dict[str, Any],
+    query_metrics: Dict[str, Any],
+    parameterized_sql: str,
+    original_sql: str = None,
+    schema_info: str = None,
+    **kwargs,
+) -> Dict[str, Any]:
     """
     Perform comprehensive LLM analysis of query performance.
 
@@ -96,28 +105,29 @@ def analyze_with_llm(explain_results: Dict[str, Any], query_metrics: Dict[str, A
             # Try to parse as JSON if it's a string
             try:
                 import json
+
                 explain_results = json.loads(explain_results)
             except (json.JSONDecodeError, TypeError):
                 # If parsing fails, create a basic structure
                 explain_results = {
-                    'success': False,
-                    'database_engine': 'unknown',
-                    'execution_time_ms': 0,
-                    'rows_examined': 0,
-                    'rows_returned': 0,
-                    'cost_estimate': 0
+                    "success": False,
+                    "database_engine": "unknown",
+                    "execution_time_ms": 0,
+                    "rows_examined": 0,
+                    "rows_returned": 0,
+                    "cost_estimate": 0,
                 }
 
         # Check if EXPLAIN ANALYZE failed - don't proceed with LLM analysis
-        if not explain_results.get('success', False):
-            error_msg = explain_results.get('error', 'EXPLAIN ANALYZE failed')
+        if not explain_results.get("success", False):
+            error_msg = explain_results.get("error", "EXPLAIN ANALYZE failed")
             return {
                 "success": False,
                 "error": f"Cannot perform LLM analysis: {error_msg}",
                 "analysis_results": {},
                 "rewrite_suggestions": [],
                 "index_recommendations": [],
-                "optimization_opportunities": []
+                "optimization_opportunities": [],
             }
 
         # Use the direct approach that's been working in fallback
@@ -131,17 +141,18 @@ def analyze_with_llm(explain_results: Dict[str, Any], query_metrics: Dict[str, A
 
         # Enhanced analysis with rewrite suggestions
         # Calculate performance metrics for context
-        execution_time_ms = explain_results.get('execution_time_ms', 0)
-        rows_examined = explain_results.get('rows_examined', 0)
-        rows_returned = explain_results.get('rows_returned', 0)
+        execution_time_ms = explain_results.get("execution_time_ms", 0)
+        rows_examined = explain_results.get("rows_examined", 0)
+        rows_returned = explain_results.get("rows_returned", 0)
 
         # Extract table size from schema_info if available
         row_estimate = 0
-        if 'Row estimate:' in schema_info:
+        if "Row estimate:" in schema_info:
             import re
-            match = re.search(r'Row estimate:\s*([\d,]+)', schema_info)
+
+            match = re.search(r"Row estimate:\s*([\d,]+)", schema_info)
             if match:
-                row_estimate = int(match.group(1).replace(',', ''))
+                row_estimate = int(match.group(1).replace(",", ""))
 
         # Calculate scan efficiency percentage
         scan_pct = (rows_examined / row_estimate * 100) if row_estimate > 0 else 0
@@ -163,10 +174,10 @@ def analyze_with_llm(explain_results: Dict[str, Any], query_metrics: Dict[str, A
             scan_efficiency = "INEFFICIENT (consider better indexes)"
 
         # Check if EXPLAIN ANALYZE was skipped or timed out
-        explain_skipped = explain_results.get('explain_analyze_skipped', False)
-        explain_timeout = explain_results.get('explain_analyze_timeout', False)
-        skip_reason = explain_results.get('skip_reason', '')
-        actual_elapsed = explain_results.get('actual_elapsed_time_ms', 0)
+        explain_skipped = explain_results.get("explain_analyze_skipped", False)
+        explain_timeout = explain_results.get("explain_analyze_timeout", False)
+        skip_reason = explain_results.get("skip_reason", "")
+        actual_elapsed = explain_results.get("actual_elapsed_time_ms", 0)
 
         # Build execution status message for LLM
         if explain_skipped or explain_timeout:
@@ -177,7 +188,7 @@ def analyze_with_llm(explain_results: Dict[str, Any], query_metrics: Dict[str, A
 
             execution_status = f"""
 IMPORTANT - EXECUTION STATUS:
-  EXPLAIN ANALYZE was {'skipped by user' if explain_skipped else 'timed out'} after {elapsed_str}.
+  EXPLAIN ANALYZE was {"skipped by user" if explain_skipped else "timed out"} after {elapsed_str}.
   This indicates the query is VERY SLOW and likely needs indexes.
   The execution time shown above is from EXPLAIN (estimated), not actual execution.
   Reason: {skip_reason}
@@ -241,13 +252,13 @@ QUERY REWRITE RULES:
 Analyze this SQL query performance and distinguish between immediate query rewrites vs database optimization recommendations:
 
 Query for Analysis: {sql_for_analysis}
-Database: {explain_results.get('database_engine', 'unknown')}
+Database: {explain_results.get("database_engine", "unknown")}
 {execution_status}
 PERFORMANCE METRICS:
   Execution Time: {execution_time_ms}ms → {perf_class}
-  Rows Examined: {rows_examined:,} {f'({scan_pct:.2f}% of table)' if row_estimate > 0 else ''}
+  Rows Examined: {rows_examined:,} {f"({scan_pct:.2f}% of table)" if row_estimate > 0 else ""}
   Rows Returned: {rows_returned:,}
-  Cost Estimate: {explain_results.get('cost_estimate', 0)}
+  Cost Estimate: {explain_results.get("cost_estimate", 0)}
   Scan Efficiency: {scan_efficiency}
 
 {schema_info}
@@ -459,34 +470,50 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
                         "performance_assessment": {
                             "type": "object",
                             "properties": {
-                                "overall_rating": {"type": "string", "enum": ["excellent", "good", "fair", "poor"]},
+                                "overall_rating": {
+                                    "type": "string",
+                                    "enum": ["excellent", "good", "fair", "poor"],
+                                },
                                 "efficiency_score": {"type": "number"},
-                                "primary_concerns": {"type": "array", "items": {"type": "string"}}
+                                "primary_concerns": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
                             },
-                            "required": ["overall_rating", "efficiency_score", "primary_concerns"],
-                            "additionalProperties": False
+                            "required": [
+                                "overall_rating",
+                                "efficiency_score",
+                                "primary_concerns",
+                            ],
+                            "additionalProperties": False,
                         },
                         "execution_analysis": {
                             "type": "object",
                             "properties": {
-                                "bottlenecks": {"type": "array", "items": {"type": "string"}},
-                                "scan_efficiency": {"type": "string"}
+                                "bottlenecks": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "scan_efficiency": {"type": "string"},
                             },
                             "required": ["bottlenecks", "scan_efficiency"],
-                            "additionalProperties": False
+                            "additionalProperties": False,
                         },
                         "optimization_opportunities": {
                             "type": "array",
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "priority": {"type": "string", "enum": ["high", "medium", "low"]},
+                                    "priority": {
+                                        "type": "string",
+                                        "enum": ["high", "medium", "low"],
+                                    },
                                     "description": {"type": "string"},
-                                    "type": {"type": "string"}
+                                    "type": {"type": "string"},
                                 },
                                 "required": ["priority", "description", "type"],
-                                "additionalProperties": False
-                            }
+                                "additionalProperties": False,
+                            },
                         },
                         "rewrite_suggestions": {
                             "type": "array",
@@ -496,12 +523,21 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
                                     "rewritten_sql": {"type": "string"},
                                     "explanation": {"type": "string"},
                                     "expected_improvement": {"type": "string"},
-                                    "priority": {"type": "string", "enum": ["high", "medium", "low"]},
-                                    "optimization_type": {"type": "string"}
+                                    "priority": {
+                                        "type": "string",
+                                        "enum": ["high", "medium", "low"],
+                                    },
+                                    "optimization_type": {"type": "string"},
                                 },
-                                "required": ["rewritten_sql", "explanation", "expected_improvement", "priority", "optimization_type"],
-                                "additionalProperties": False
-                            }
+                                "required": [
+                                    "rewritten_sql",
+                                    "explanation",
+                                    "expected_improvement",
+                                    "priority",
+                                    "optimization_type",
+                                ],
+                                "additionalProperties": False,
+                            },
                         },
                         "index_recommendations": {
                             "type": "array",
@@ -510,29 +546,51 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
                                 "properties": {
                                     "sql": {"type": "string"},
                                     "table": {"type": "string"},
-                                    "columns": {"type": "array", "items": {"type": "string"}},
+                                    "columns": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
                                     "index_type": {"type": "string"},
                                     "rationale": {"type": "string"},
-                                    "estimated_impact": {"type": "string", "enum": ["high", "medium", "low"]}
+                                    "estimated_impact": {
+                                        "type": "string",
+                                        "enum": ["high", "medium", "low"],
+                                    },
                                 },
-                                "required": ["sql", "table", "columns", "index_type", "rationale", "estimated_impact"],
-                                "additionalProperties": False
-                            }
-                        }
+                                "required": [
+                                    "sql",
+                                    "table",
+                                    "columns",
+                                    "index_type",
+                                    "rationale",
+                                    "estimated_impact",
+                                ],
+                                "additionalProperties": False,
+                            },
+                        },
                     },
-                    "required": ["performance_assessment", "execution_analysis", "optimization_opportunities", "rewrite_suggestions", "index_recommendations"],
-                    "additionalProperties": False
-                }
-            }
+                    "required": [
+                        "performance_assessment",
+                        "execution_analysis",
+                        "optimization_opportunities",
+                        "rewrite_suggestions",
+                        "index_recommendations",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
         }
 
         # Call LLM with enhanced approach and JSON mode
         # Don't pass a default model for LM Studio - let it use whatever is loaded
-        model_param = kwargs.get('model')
+        model_param = kwargs.get("model")
 
         # Determine provider to check if JSON mode is supported
-        provider = kwargs.get('provider', 'claude').lower()
-        use_json_mode = provider in ['claude', 'openai'] and os.getenv("RDST_USE_JSON_MODE", "true").lower() == "true"
+        provider = kwargs.get("provider", "claude").lower()
+        use_json_mode = (
+            provider in ["claude", "openai"]
+            and os.getenv("RDST_USE_JSON_MODE", "true").lower() == "true"
+        )
 
         extra_params = {}
         if use_json_mode:
@@ -540,10 +598,12 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
 
         # Estimate input tokens before call (for progress display)
         system_msg = "You are a database performance expert. Respond with valid JSON only. Be proactive in suggesting query rewrites when you see opportunities like: old-style comma JOINs, missing LIMIT on ORDER BY, inefficient subqueries, or non-optimal WHERE clause ordering."
-        estimated_input_tokens = estimate_tokens(system_msg) + estimate_tokens(ANALYZE_PROMPT)
+        estimated_input_tokens = estimate_tokens(system_msg) + estimate_tokens(
+            ANALYZE_PROMPT
+        )
 
         # Store estimate in kwargs for progress display access
-        kwargs['_estimated_input_tokens'] = estimated_input_tokens
+        kwargs["_estimated_input_tokens"] = estimated_input_tokens
 
         llm_response = llm_manager.generate_response(
             prompt=ANALYZE_PROMPT,
@@ -551,45 +611,51 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             system_message=system_msg,
             max_tokens=2000,
             temperature=0.0,  # Deterministic output for consistent recommendations
-            extra=extra_params if extra_params else None
+            extra=extra_params if extra_params else None,
         )
 
-        if not llm_response or 'response' not in llm_response:
+        if not llm_response or "response" not in llm_response:
             return {
                 "success": False,
                 "error": "No response from LLM",
                 "analysis_results": {},
-                "hotspots": []
+                "hotspots": [],
             }
 
         # Parse LLM response
         try:
-            analysis_json = _extract_json_from_response(llm_response['response'])
+            analysis_json = _extract_json_from_response(llm_response["response"])
             if not analysis_json:
                 # If JSON parsing fails, return raw response with error flag
                 return {
                     "success": False,
                     "error": "Failed to parse LLM response as JSON",
-                    "raw_response": llm_response['response'],
+                    "raw_response": llm_response["response"],
                     "analysis_results": {},
-                    "hotspots": []
+                    "hotspots": [],
                 }
 
             # Validate analysis structure
             validated_analysis = _validate_analysis_structure(analysis_json)
 
             # Extract top-level recommendations
-            rewrite_suggestions = analysis_json.get('rewrite_suggestions', [])
-            index_recommendations = analysis_json.get('index_recommendations', [])
+            rewrite_suggestions = analysis_json.get("rewrite_suggestions", [])
+            index_recommendations = analysis_json.get("index_recommendations", [])
 
             # Get detailed token usage
-            tokens_used = llm_response.get('tokens_used') or 0
-            model_used = llm_response.get('model') or model_param or 'claude-sonnet-4-5-20250929'
+            tokens_used = llm_response.get("tokens_used") or 0
+            model_used = (
+                llm_response.get("model") or model_param or "claude-sonnet-4-5-20250929"
+            )
 
             # Try to get actual token breakdown if available
             # tokens_used is usually total, but we can estimate breakdown
             actual_input = estimated_input_tokens  # Use estimate for input
-            actual_output = tokens_used - actual_input if tokens_used > actual_input else tokens_used // 2
+            actual_output = (
+                tokens_used - actual_input
+                if tokens_used > actual_input
+                else tokens_used // 2
+            )
 
             # Calculate cost
             cost_usd = estimate_cost(actual_input, actual_output, model_used)
@@ -597,8 +663,18 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             return {
                 "success": True,
                 "analysis_results": validated_analysis,
-                "hotspots": validated_analysis.get('execution_analysis', {}),
-                "optimization_suggestions": validated_analysis.get('optimization_opportunities', []),
+                "hotspots": validated_analysis.get("execution_analysis", {}),
+                "optimization_suggestions": validated_analysis.get(
+                    "optimization_opportunities", []
+                ),
+                # Also include at top level for web API compatibility
+                "optimization_opportunities": validated_analysis.get(
+                    "optimization_opportunities", []
+                ),
+                "performance_assessment": validated_analysis.get(
+                    "performance_assessment", {}
+                ),
+                "execution_analysis": validated_analysis.get("execution_analysis", {}),
                 "rewrite_suggestions": rewrite_suggestions,
                 "index_recommendations": index_recommendations,
                 "llm_model": model_used,
@@ -606,7 +682,9 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
                 "token_usage": {
                     "input": actual_input,
                     "output": actual_output,
-                    "total": tokens_used if tokens_used else actual_input + actual_output,
+                    "total": tokens_used
+                    if tokens_used
+                    else actual_input + actual_output,
                     "estimated_cost_usd": cost_usd,
                 },
             }
@@ -615,11 +693,10 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             return {
                 "success": False,
                 "error": f"Failed to parse LLM analysis: {str(parse_error)}",
-                "raw_response": llm_response.get('response', ''),
+                "raw_response": llm_response.get("response", ""),
                 "analysis_results": {},
-                "hotspots": []
+                "hotspots": [],
             }
-
 
     except Exception as e:
         logger.debug(f"LLM analysis failed with error: {e}", exc_info=True)
@@ -627,12 +704,16 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             "success": False,
             "error": f"LLM analysis failed: {str(e)}",
             "analysis_results": {},
-            "hotspots": []
+            "hotspots": [],
         }
 
 
-def extract_rewrites(analysis_results: Dict[str, Any], parameterized_sql: str,
-                     database_engine: str, **kwargs) -> Dict[str, Any]:
+def extract_rewrites(
+    analysis_results: Dict[str, Any],
+    parameterized_sql: str,
+    database_engine: str,
+    **kwargs,
+) -> Dict[str, Any]:
     """
     Extract query rewrite suggestions from LLM analysis results.
 
@@ -658,28 +739,32 @@ def extract_rewrites(analysis_results: Dict[str, Any], parameterized_sql: str,
 
         # Extract rewrites and index recommendations that were already generated with schema context
         # They can be at top level or inside analysis_results
-        rewrite_suggestions = analysis_results.get('rewrite_suggestions', [])
-        if not rewrite_suggestions and 'analysis_results' in analysis_results:
-            rewrite_suggestions = analysis_results['analysis_results'].get('rewrite_suggestions', [])
+        rewrite_suggestions = analysis_results.get("rewrite_suggestions", [])
+        if not rewrite_suggestions and "analysis_results" in analysis_results:
+            rewrite_suggestions = analysis_results["analysis_results"].get(
+                "rewrite_suggestions", []
+            )
 
-        index_recommendations = analysis_results.get('index_recommendations', [])
-        if not index_recommendations and 'analysis_results' in analysis_results:
-            index_recommendations = analysis_results['analysis_results'].get('index_recommendations', [])
+        index_recommendations = analysis_results.get("index_recommendations", [])
+        if not index_recommendations and "analysis_results" in analysis_results:
+            index_recommendations = analysis_results["analysis_results"].get(
+                "index_recommendations", []
+            )
 
         results = {
             "success": True,
             "rewrite_suggestions": rewrite_suggestions,
             "index_suggestions": index_recommendations,
             "caching_recommendations": {},
-            "extraction_results": {}
+            "extraction_results": {},
         }
 
         # 3. Readyset Caching Analysis
         caching_results = _get_caching_recommendations(
             llm_manager, parameterized_sql, analysis_results, kwargs
         )
-        results['caching_recommendations'] = caching_results
-        results['extraction_results']['caching_analysis'] = caching_results
+        results["caching_recommendations"] = caching_results
+        results["extraction_results"]["caching_analysis"] = caching_results
 
         return results
 
@@ -689,42 +774,49 @@ def extract_rewrites(analysis_results: Dict[str, Any], parameterized_sql: str,
             "error": f"Rewrite extraction failed: {str(e)}",
             "rewrite_suggestions": [],
             "index_suggestions": [],
-            "caching_recommendations": {}
+            "caching_recommendations": {},
         }
 
 
-def _get_rewrite_suggestions(llm_manager: LLMManager, parameterized_sql: str,
-                            performance_analysis: str, identified_issues: List[Dict],
-                            database_engine: str, kwargs: Dict) -> Dict[str, Any]:
+def _get_rewrite_suggestions(
+    llm_manager: LLMManager,
+    parameterized_sql: str,
+    performance_analysis: str,
+    identified_issues: List[Dict],
+    database_engine: str,
+    kwargs: Dict,
+) -> Dict[str, Any]:
     """Get query rewrite suggestions from LLM."""
     try:
         # Format issues for prompt
-        issues_text = "\n".join([
-            f"- {issue.get('description', 'Unknown issue')}"
-            for issue in identified_issues[:5]  # Limit to top 5 issues
-        ])
+        issues_text = "\n".join(
+            [
+                f"- {issue.get('description', 'Unknown issue')}"
+                for issue in identified_issues[:5]  # Limit to top 5 issues
+            ]
+        )
 
         # Get schema info if available from workflow context
-        schema_info = kwargs.get('schema_info', 'Schema information not available')
+        schema_info = kwargs.get("schema_info", "Schema information not available")
 
         prompt = REWRITE_SUGGESTION_PROMPT.format(
             parameterized_sql=parameterized_sql,
             performance_analysis=performance_analysis,
             identified_issues=issues_text,
             database_engine=database_engine,
-            schema_info=schema_info
+            schema_info=schema_info,
         )
 
         llm_response = llm_manager.generate_response(
             prompt=prompt,
-            model=kwargs.get('model'),  # Use provider's default model
+            model=kwargs.get("model"),  # Use provider's default model
             system_message="You are an expert SQL optimization consultant.",
             max_tokens=1500,
-            temperature=0.0  # Deterministic output for consistent recommendations
+            temperature=0.0,  # Deterministic output for consistent recommendations
         )
 
-        if llm_response and 'response' in llm_response:
-            rewrite_json = _extract_json_from_response(llm_response['response'])
+        if llm_response and "response" in llm_response:
+            rewrite_json = _extract_json_from_response(llm_response["response"])
             return rewrite_json or {"rewrite_suggestions": []}
 
         return {"rewrite_suggestions": []}
@@ -733,18 +825,28 @@ def _get_rewrite_suggestions(llm_manager: LLMManager, parameterized_sql: str,
         return {"rewrite_suggestions": []}
 
 
-def _get_index_suggestions(llm_manager: LLMManager, parameterized_sql: str,
-                          analysis_results: Dict[str, Any], database_engine: str,
-                          kwargs: Dict) -> Dict[str, Any]:
+def _get_index_suggestions(
+    llm_manager: LLMManager,
+    parameterized_sql: str,
+    analysis_results: Dict[str, Any],
+    database_engine: str,
+    kwargs: Dict,
+) -> Dict[str, Any]:
     """Get index suggestions from LLM."""
     try:
         # Extract relevant data for index analysis
-        execution_analysis = json.dumps(analysis_results.get('execution_analysis', {}), indent=2)
-        performance_metrics = json.dumps(analysis_results.get('performance_assessment', {}), indent=2)
+        execution_analysis = json.dumps(
+            analysis_results.get("execution_analysis", {}), indent=2
+        )
+        performance_metrics = json.dumps(
+            analysis_results.get("performance_assessment", {}), indent=2
+        )
 
         # Extract table information (simplified)
         tables_involved = _extract_table_names_from_query(parameterized_sql)
-        existing_indexes = kwargs.get('existing_indexes', 'Index information not available')
+        existing_indexes = kwargs.get(
+            "existing_indexes", "Index information not available"
+        )
 
         prompt = INDEX_SUGGESTION_PROMPT.format(
             parameterized_sql=parameterized_sql,
@@ -752,19 +854,19 @@ def _get_index_suggestions(llm_manager: LLMManager, parameterized_sql: str,
             performance_metrics=performance_metrics,
             database_engine=database_engine,
             tables_involved=json.dumps(tables_involved),
-            existing_indexes=existing_indexes
+            existing_indexes=existing_indexes,
         )
 
         llm_response = llm_manager.generate_response(
             prompt=prompt,
-            model=kwargs.get('model'),  # Use provider's default model
+            model=kwargs.get("model"),  # Use provider's default model
             system_message="You are a database indexing expert.",
             max_tokens=1500,
-            temperature=0.0  # Deterministic output for consistent recommendations
+            temperature=0.0,  # Deterministic output for consistent recommendations
         )
 
-        if llm_response and 'response' in llm_response:
-            index_json = _extract_json_from_response(llm_response['response'])
+        if llm_response and "response" in llm_response:
+            index_json = _extract_json_from_response(llm_response["response"])
             return index_json or {"index_recommendations": []}
 
         return {"index_recommendations": []}
@@ -773,36 +875,42 @@ def _get_index_suggestions(llm_manager: LLMManager, parameterized_sql: str,
         return {"index_recommendations": []}
 
 
-def _get_caching_recommendations(llm_manager: LLMManager, parameterized_sql: str,
-                                analysis_results: Dict[str, Any], kwargs: Dict) -> Dict[str, Any]:
+def _get_caching_recommendations(
+    llm_manager: LLMManager,
+    parameterized_sql: str,
+    analysis_results: Dict[str, Any],
+    kwargs: Dict,
+) -> Dict[str, Any]:
     """Get Readyset caching recommendations from LLM."""
     try:
         # Analyze query characteristics for caching
         query_characteristics = _analyze_query_characteristics(parameterized_sql)
-        performance_metrics = json.dumps(analysis_results.get('performance_assessment', {}), indent=2)
+        performance_metrics = json.dumps(
+            analysis_results.get("performance_assessment", {}), indent=2
+        )
 
         # Default values for caching analysis
-        execution_frequency = kwargs.get('execution_frequency', 'unknown')
-        read_write_ratio = kwargs.get('read_write_ratio', 'unknown')
+        execution_frequency = kwargs.get("execution_frequency", "unknown")
+        read_write_ratio = kwargs.get("read_write_ratio", "unknown")
 
         prompt = READYSET_CACHING_PROMPT.format(
             parameterized_sql=parameterized_sql,
             query_characteristics=json.dumps(query_characteristics, indent=2),
             performance_metrics=performance_metrics,
             execution_frequency=execution_frequency,
-            read_write_ratio=read_write_ratio
+            read_write_ratio=read_write_ratio,
         )
 
         llm_response = llm_manager.generate_response(
             prompt=prompt,
-            model=kwargs.get('model'),  # Use provider's default model
+            model=kwargs.get("model"),  # Use provider's default model
             system_message="You are a Readyset caching optimization expert.",
             max_tokens=1500,
-            temperature=0.0  # Deterministic output for consistent recommendations
+            temperature=0.0,  # Deterministic output for consistent recommendations
         )
 
-        if llm_response and 'response' in llm_response:
-            caching_json = _extract_json_from_response(llm_response['response'])
+        if llm_response and "response" in llm_response:
+            caching_json = _extract_json_from_response(llm_response["response"])
             return caching_json or {}
 
         return {}
@@ -814,22 +922,28 @@ def _get_caching_recommendations(llm_manager: LLMManager, parameterized_sql: str
 # Utility functions
 def _format_additional_metrics(query_metrics: Dict[str, Any]) -> str:
     """Format additional metrics for LLM prompt."""
-    if not query_metrics or not query_metrics.get('success', False):
+    if not query_metrics or not query_metrics.get("success", False):
         return "Additional metrics not available"
 
-    metrics = query_metrics.get('metrics', {})
+    metrics = query_metrics.get("metrics", {})
     if not metrics:
         return "No additional metrics collected"
 
     # Format metrics by source
     formatted = []
-    available_sources = query_metrics.get('available_sources', [])
+    available_sources = query_metrics.get("available_sources", [])
 
     for source in available_sources:
-        source_metrics = {k: v for k, v in metrics.items() if k.startswith(source.replace('_', '_').split('_')[0])}
+        source_metrics = {
+            k: v
+            for k, v in metrics.items()
+            if k.startswith(source.replace("_", "_").split("_")[0])
+        }
         if source_metrics:
             formatted.append(f"{source.upper()}:")
-            for key, value in list(source_metrics.items())[:10]:  # Limit to prevent prompt overflow
+            for key, value in list(source_metrics.items())[
+                :10
+            ]:  # Limit to prevent prompt overflow
                 formatted.append(f"  - {key}: {value}")
 
     return "\n".join(formatted) if formatted else "Metrics collected but not formatted"
@@ -844,7 +958,7 @@ def _extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
         pass
 
     # Try to find JSON within markdown code blocks
-    json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
+    json_pattern = r"```(?:json)?\s*(\{.*?\})\s*```"
     match = re.search(json_pattern, response, re.DOTALL | re.IGNORECASE)
     if match:
         try:
@@ -854,12 +968,12 @@ def _extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
 
     # Try to find JSON within the response text
     # Look for content between first { and last }
-    first_brace = response.find('{')
-    last_brace = response.rfind('}')
+    first_brace = response.find("{")
+    last_brace = response.rfind("}")
 
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
         try:
-            json_str = response[first_brace:last_brace + 1]
+            json_str = response[first_brace : last_brace + 1]
             return json.loads(json_str)
         except json.JSONDecodeError:
             pass
@@ -875,7 +989,7 @@ def _validate_analysis_structure(analysis: Dict[str, Any]) -> Dict[str, Any]:
         "execution_analysis": analysis.get("execution_analysis", {}),
         "optimization_opportunities": analysis.get("optimization_opportunities", []),
         "rewrite_suggestions": analysis.get("rewrite_suggestions", []),
-        "explanation": analysis.get("explanation", "Analysis completed")
+        "explanation": analysis.get("explanation", "Analysis completed"),
     }
 
     # Validate performance assessment structure
@@ -928,22 +1042,30 @@ def _analyze_query_characteristics(sql: str) -> Dict[str, Any]:
 
     characteristics = {
         "is_select": "SELECT" in sql_upper,
-        "has_joins": any(join in sql_upper for join in ["JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN"]),
+        "has_joins": any(
+            join in sql_upper
+            for join in ["JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN"]
+        ),
         "has_subqueries": "(" in sql and "SELECT" in sql_upper,
-        "has_aggregations": any(agg in sql_upper for agg in ["COUNT", "SUM", "AVG", "MAX", "MIN", "GROUP BY"]),
+        "has_aggregations": any(
+            agg in sql_upper
+            for agg in ["COUNT", "SUM", "AVG", "MAX", "MIN", "GROUP BY"]
+        ),
         "has_order_by": "ORDER BY" in sql_upper,
         "has_limit": "LIMIT" in sql_upper,
-        "query_complexity": "simple"  # Default, could be enhanced with more analysis
+        "query_complexity": "simple",  # Default, could be enhanced with more analysis
     }
 
     # Determine complexity
-    complexity_score = sum([
-        characteristics["has_joins"] * 2,
-        characteristics["has_subqueries"] * 2,
-        characteristics["has_aggregations"] * 1,
-        len(re.findall(r'\bJOIN\b', sql_upper)),
-        len(re.findall(r'\bSELECT\b', sql_upper)) - 1  # Subqueries
-    ])
+    complexity_score = sum(
+        [
+            characteristics["has_joins"] * 2,
+            characteristics["has_subqueries"] * 2,
+            characteristics["has_aggregations"] * 1,
+            len(re.findall(r"\bJOIN\b", sql_upper)),
+            len(re.findall(r"\bSELECT\b", sql_upper)) - 1,  # Subqueries
+        ]
+    )
 
     if complexity_score <= 2:
         characteristics["query_complexity"] = "simple"

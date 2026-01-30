@@ -1,0 +1,179 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&display=swap");
+
+@import "@rs/ui-new/style.css";
+@source "../src";
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/LufgaRegular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Lufga";
+  src: url("/fonts/LufgaMedium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: "Lufga", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;
+}
+
+@layer custom {
+  :root {
+    --sidebar-transform: translateX(-320px);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: var(--color-content-layout-1);
+    font-feature-settings: "ss02" on;
+  }
+
+  ::selection {
+    background-color: var(--color-content-layout-1) !important;
+    color: var(--color-surface-layout-1) !important;
+  }
+
+  code[class*="language-"],
+  pre[class*="language-"] {
+    -moz-tab-size: 4;
+    -o-tab-size: 4;
+    tab-size: 4;
+    -webkit-hyphens: none;
+    -moz-hyphens: none;
+    -ms-hyphens: none;
+    hyphens: none;
+  }
+
+  .custom-scrollbar {
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      width: 0px;
+      height: 0px;
+    }
+  }
+
+  /* CodeMirror Autocomplete Dropdown Styling */
+  .cm-tooltip-autocomplete {
+    background: var(--color-surface-layout-2) !important;
+    border: 1px solid var(--color-border-layout-1) !important;
+    border-radius: 8px !important;
+    box-shadow: var(--shadow-small) !important;
+    overflow: hidden !important;
+    font-family: var(--font-mono) !important;
+  }
+
+  .cm-tooltip-autocomplete > ul {
+    font-family: var(--font-mono) !important;
+    max-height: 300px !important;
+    padding: 4px 0 !important;
+  }
+
+  .cm-tooltip-autocomplete > ul > li {
+    padding: 6px 12px !important;
+    color: var(--color-content-layout-1) !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    cursor: pointer !important;
+  }
+
+  .cm-tooltip-autocomplete > ul > li[aria-selected="true"],
+  .cm-tooltip-autocomplete > ul > li:hover {
+    background: var(--color-surface-primary-soft) !important;
+    color: var(--color-content-layout-1) !important;
+  }
+
+  .cm-completionLabel {
+    flex: 1 !important;
+    color: var(--color-content-layout-1) !important;
+  }
+
+  .cm-completionMatchedText {
+    color: var(--color-content-primary-soft) !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+  }
+
+  .cm-completionDetail {
+    color: var(--color-content-layout-3) !important;
+    font-size: 0.85em !important;
+    margin-left: auto !important;
+  }
+
+  .cm-completionIcon {
+    width: 16px !important;
+    height: 16px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 12px !important;
+    opacity: 0.7 !important;
+  }
+
+  /* Icon colors for different completion types */
+  .cm-completionIcon-table::after {
+    content: "T" !important;
+    color: var(--color-content-info-soft) !important;
+    font-weight: 600 !important;
+  }
+
+  .cm-completionIcon-column::after,
+  .cm-completionIcon-property::after {
+    content: "C" !important;
+    color: var(--color-content-positive-soft) !important;
+    font-weight: 600 !important;
+  }
+
+  .cm-completionIcon-keyword::after {
+    content: "K" !important;
+    color: var(--color-content-warning-soft) !important;
+    font-weight: 600 !important;
+  }
+
+  .cm-completionIcon-function::after {
+    content: "F" !important;
+    color: var(--color-content-info-soft) !important;
+    font-weight: 600 !important;
+  }
+
+  .cm-completionIcon-type::after {
+    content: "T" !important;
+    color: var(--color-content-layout-2) !important;
+    font-weight: 600 !important;
+  }
+
+  /* Lint tooltip styling */
+  .cm-tooltip-lint {
+    background: var(--color-surface-layout-2) !important;
+    border: 1px solid var(--color-border-layout-1) !important;
+    border-radius: 6px !important;
+    padding: 8px 12px !important;
+    font-family: var(--font-sans) !important;
+    font-size: 13px !important;
+    box-shadow: var(--shadow-small) !important;
+  }
+
+  .cm-diagnostic-error {
+    border-left: 3px solid var(--color-border-negative-soft) !important;
+    background: var(--color-surface-negative-soft) !important;
+    color: var(--color-content-negative-soft) !important;
+  }
+
+  .cm-diagnostic-warning {
+    border-left: 3px solid var(--color-border-warning-soft) !important;
+    background: var(--color-surface-warning-soft) !important;
+    color: var(--color-content-warning-soft) !important;
+  }
+}

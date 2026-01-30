@@ -19,7 +19,9 @@ from urllib.parse import urlsplit, parse_qs, unquote
 import toml
 
 # Import UI system
-from lib.ui import Group, KeyValueTable, MessagePanel, SimpleTree, get_console
+from rich.console import Group
+
+from lib.ui import KeyValueTable, MessagePanel, SimpleTree, get_console
 
 # Local cloud agent modules (will be used by future implementations)
 # We import lazily inside methods to avoid side-effects and heavy imports at module load time.
@@ -295,7 +297,9 @@ class TargetsConfig:
         self._data.setdefault("init", {})
         self._data["init"]["completed"] = True
         self._data["init"]["completed_at"] = (
-            datetime.datetime.utcnow().isoformat() + "Z"
+            datetime.datetime.now(datetime.timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
         )
         if version is not None:
             self._data["init"]["version"] = version
@@ -342,7 +346,12 @@ class RdstCLI:
 
     # rdst configure
     def configure(self, config_path: Optional[str] = None, **kwargs) -> RdstResult:
-        """Manages database targets and connection profiles using modern wizard."""
+        """Manages database targets and connection profiles using service + renderer pattern."""
+        import asyncio
+        from lib.services.configure_service import ConfigureService
+        from lib.services.types import ConfigureInput, ConfigureOptions
+        from lib.cli.configure_renderer import ConfigureRenderer
+
         try:
             # Load agent config if provided
             if config_path:
@@ -367,24 +376,174 @@ class RdstCLI:
             if subcmd not in valid_subcommands:
                 return RdstResult(False, f"Unknown subcommand: {subcmd}")
 
-            # Load configuration
+            # Load configuration for fallback operations
             cfg = TargetsConfig()
             cfg.load()
 
-            # Handle test subcommand directly (standalone connection test)
-            if subcmd == "test":
-                return self._test_connection(cfg, kwargs)
-
-            # Use the modern configuration wizard
-            from .configuration_wizard import ConfigurationWizard
-
-            wizard = ConfigurationWizard(console=self.client._console)
-
-            # Handle LLM configuration separately (independent of targets)
+            # Handle LLM configuration separately (uses wizard - independent of targets)
             if subcmd == "llm":
+                from .configuration_wizard import ConfigurationWizard
+
+                wizard = ConfigurationWizard(console=self.client._console)
                 return wizard.configure_llm(cfg, kwargs)
 
-            return wizard.configure_targets(subcmd, cfg, **kwargs)
+            # Handle menu (interactive wizard) - fallback to wizard
+            if subcmd == "menu":
+                from .configuration_wizard import ConfigurationWizard
+
+                wizard = ConfigurationWizard(console=self.client._console)
+                return wizard.configure_targets(subcmd, cfg, **kwargs)
+
+            # Use service + renderer pattern for other subcommands
+            service = ConfigureService()
+            renderer = ConfigureRenderer()
+
+            result = None
+            error = None
+
+            async def _run():
+                nonlocal result, error
+                try:
+                    if subcmd == "list":
+                        async for event in service.list_targets(
+                            ConfigureInput(), ConfigureOptions()
+                        ):
+                            renderer.render(event)
+                            if event.type == "target_list":
+                                result = event
+                            elif event.type == "error":
+                                error = event
+
+                    elif subcmd == "test":
+                        target_name = kwargs.get("target") or kwargs.get("name")
+                        if not target_name:
+                            target_name = cfg.get_default()
+                        if not target_name:
+                            error = type(
+                                "ErrorEvent",
+                                (),
+                                {
+                                    "message": "No target specified and no default target configured"
+                                },
+                            )()
+                            return
+                        async for event in service.test_connection(target_name):
+                            renderer.render(event)
+                            if (
+                                event.type == "connection_test"
+                                and event.status == "success"
+                            ):
+                                result = event
+                            elif event.type == "error":
+                                error = event
+                            elif (
+                                event.type == "connection_test"
+                                and event.status == "failed"
+                            ):
+                                error = event
+
+                    elif subcmd == "add":
+                        target_name = kwargs.get("name")
+                        if not target_name:
+                            # Fall back to wizard for interactive add
+                            return
+                        target_data = {
+                            "engine": kwargs.get("engine", "postgresql"),
+                            "host": kwargs.get("host", "localhost"),
+                            "port": kwargs.get("port", 5432),
+                            "database": kwargs.get("database", "postgres"),
+                            "user": kwargs.get("user", "postgres"),
+                            "password_env": kwargs.get("password_env", ""),
+                            "tls": kwargs.get("tls", False),
+                        }
+                        async for event in service.add_target(
+                            ConfigureInput(target_name=target_name),
+                            ConfigureOptions(target_data=target_data),
+                        ):
+                            renderer.render(event)
+                            if event.type == "success":
+                                result = event
+                            elif event.type == "error":
+                                error = event
+
+                    elif subcmd == "edit":
+                        target_name = kwargs.get("name")
+                        if not target_name:
+                            # Fall back to wizard for interactive edit
+                            return
+                        target_data = {}
+                        for key in [
+                            "engine",
+                            "host",
+                            "port",
+                            "database",
+                            "user",
+                            "password_env",
+                            "tls",
+                        ]:
+                            if kwargs.get(key) is not None:
+                                target_data[key] = kwargs.get(key)
+                        async for event in service.update_target(
+                            target_name,
+                            ConfigureInput(target_name=target_name),
+                            ConfigureOptions(target_data=target_data),
+                        ):
+                            renderer.render(event)
+                            if event.type == "success":
+                                result = event
+                            elif event.type == "error":
+                                error = event
+
+                    elif subcmd == "remove":
+                        target_name = kwargs.get("name")
+                        if not target_name:
+                            error = type(
+                                "ErrorEvent",
+                                (),
+                                {"message": "Target name is required for remove"},
+                            )()
+                            return
+                        async for event in service.remove_target(target_name):
+                            renderer.render(event)
+                            if event.type == "success":
+                                result = event
+                            elif event.type == "error":
+                                error = event
+
+                    elif subcmd == "default":
+                        target_name = kwargs.get("name")
+                        if not target_name:
+                            error = type(
+                                "ErrorEvent",
+                                (),
+                                {"message": "Target name is required for set-default"},
+                            )()
+                            return
+                        async for event in service.set_default(target_name):
+                            renderer.render(event)
+                            if event.type == "success":
+                                result = event
+                            elif event.type == "error":
+                                error = event
+
+                finally:
+                    renderer.cleanup()
+
+            asyncio.run(_run())
+
+            # Handle fallback to wizard for interactive operations
+            if result is None and error is None and subcmd in ("add", "edit"):
+                from .configuration_wizard import ConfigurationWizard
+
+                wizard = ConfigurationWizard(console=self.client._console)
+                return wizard.configure_targets(subcmd, cfg, **kwargs)
+
+            if result:
+                return RdstResult(True, "Operation completed successfully")
+            elif error:
+                return RdstResult(False, getattr(error, "message", str(error)))
+            else:
+                return RdstResult(True, "Operation completed")
 
         except Exception as e:
             return RdstResult(False, f"configure failed: {e}")
@@ -617,7 +776,6 @@ class RdstCLI:
         interactive: bool = False,
         review: bool = False,
         large_query_bypass: Optional[str] = None,
-        output_json: bool = False,
         **kwargs,
     ) -> RdstResult:
         """
@@ -702,7 +860,6 @@ class RdstCLI:
                 fast=fast,
                 interactive=interactive,
                 review=review,
-                output_json=output_json,
             )
 
             # Extract query hash from result for telemetry
@@ -812,11 +969,48 @@ class RdstCLI:
         Returns:
             RdstResult with operation outcome
         """
-        try:
-            from .query_command import QueryCommand
+        import asyncio
 
-            query_cmd = QueryCommand()
-            return query_cmd.execute(subcommand, **kwargs)
+        try:
+            from lib.services.query_service import QueryService
+            from lib.services.types import (
+                QueryCommandInput,
+                QueryCompleteEvent,
+                QueryErrorEvent,
+            )
+            from .query_renderer import QueryRenderer
+
+            service = QueryService()
+            renderer = QueryRenderer()
+            complete_event = None
+            error_event = None
+
+            async def _run() -> None:
+                nonlocal complete_event, error_event
+                try:
+                    async for event in service.execute(
+                        QueryCommandInput(subcommand=subcommand, kwargs=kwargs)
+                    ):
+                        renderer.render(event)
+                        if isinstance(event, QueryCompleteEvent):
+                            complete_event = event
+                        elif isinstance(event, QueryErrorEvent):
+                            error_event = event
+                finally:
+                    renderer.cleanup()
+
+            asyncio.run(_run())
+
+            if complete_event:
+                payload = complete_event.result
+                return RdstResult(
+                    bool(payload.get("ok", complete_event.success)),
+                    payload.get("message", ""),
+                    payload.get("data") or {},
+                )
+            if error_event:
+                return RdstResult(False, error_event.message)
+            return RdstResult(False, "query command returned no result")
         except Exception as e:
             return RdstResult(False, f"query command failed: {e}")
 
@@ -887,9 +1081,10 @@ class RdstCLI:
         question: Optional[str] = None,
         target: Optional[str] = None,
         dry_run: bool = False,
-        timeout: int = 600,
+        timeout: int = 30,
         verbose: bool = False,
         agent_mode: bool = False,
+        no_interactive: bool = False,
         **kwargs,
     ) -> RdstResult:
         """
@@ -908,9 +1103,10 @@ class RdstCLI:
             question: Natural language question (if None, prompt user interactively)
             target: Target database name (if None, use default)
             dry_run: Generate SQL but don't execute (default: False)
-            timeout: Query timeout in seconds (default: 600)
+            timeout: Query timeout in seconds (default: 30)
             verbose: Show detailed information
             agent_mode: Skip linear flow and go directly to agent exploration
+            no_interactive: Skip clarification prompts, use first interpretation
             **kwargs: Additional parameters
 
         Returns:
@@ -929,7 +1125,20 @@ class RdstCLI:
             # Verbose output
             rdst ask "Show slow queries" --verbose
         """
-        from ..engines.ask3 import Ask3Engine, Ask3Presenter, Status
+        import asyncio
+        from ..engines.ask3.renderer import AskRenderer
+        from ..engines.ask3.input_handler import (
+            AskInputHandler,
+            NonInteractiveInputHandler,
+        )
+        from ..services.ask_service import AskService
+        from ..services.types import (
+            AskInput,
+            AskOptions,
+            AskClarificationNeededEvent,
+            AskResultEvent,
+            AskErrorEvent,
+        )
 
         # Interactive prompt if no question provided
         if not question:
@@ -955,95 +1164,104 @@ class RdstCLI:
                     'Question required. Usage: rdst ask "your question here" --target <target>',
                 )
 
-            # Load target configuration
-            if not target:
-                cfg = TargetsConfig()
-                cfg.load()
-                target = cfg.get_default()
-
-            if not target:
-                return RdstResult(
-                    False,
-                    "No target specified and no default configured. Run 'rdst configure' first.",
-                )
-
-            cfg = TargetsConfig()
-            cfg.load()
-            target_config = cfg._data.get("targets", {}).get(target)
-
-            if not target_config:
-                return RdstResult(
-                    False, f"Target '{target}' not found in configuration"
-                )
-
-            # Determine database type
-            engine_type = target_config.get("engine", "postgresql").lower()
-            if "mysql" in engine_type:
-                db_type = "mysql"
-            else:
-                db_type = "postgresql"
-
-            # Create presenter and engine
-            presenter = Ask3Presenter(verbose=verbose)
-            engine = Ask3Engine(presenter=presenter)
-
-            # Run the engine
-            ctx = engine.run(
-                question=question,
-                target=target,
-                target_config=target_config,
-                db_type=db_type,
-                timeout_seconds=timeout,
-                verbose=verbose,
-                no_interactive=kwargs.get("no_interactive", False),
-                agent_mode=agent_mode,
+            # Create renderer and input handler
+            renderer = AskRenderer(verbose=verbose)
+            input_handler = (
+                NonInteractiveInputHandler() if no_interactive else AskInputHandler()
             )
 
-            # Build result
-            if ctx.status == Status.SUCCESS:
-                row_count = (
-                    ctx.execution_result.row_count if ctx.execution_result else 0
-                )
-                exec_time = (
-                    ctx.execution_result.execution_time_ms
-                    if ctx.execution_result
-                    else 0
-                )
+            # Create service (no callbacks - fully event-driven)
+            service = AskService()
 
-                message = f"\nSQL: {ctx.sql}\n"
-                message += f"Rows: {row_count}\n"
-                message += f"Execution time: {exec_time:.1f}ms\n"
-                message += f"LLM calls: {len(ctx.llm_calls)}\n"
-                message += f"Total tokens: {ctx.total_tokens}\n"
+            # Build input
+            input_data = AskInput(
+                question=question,
+                target=target,
+                source="cli",
+            )
+            options_data = AskOptions(
+                dry_run=dry_run,
+                timeout_seconds=timeout,
+                verbose=verbose,
+                agent_mode=agent_mode,
+                no_interactive=no_interactive,
+            )
+
+            # Run async service with sync bridge, handling events
+            result_event = None
+            error_event = None
+
+            async def _run_ask():
+                nonlocal result_event, error_event
+
+                async for event in service.ask(input_data, options_data):
+                    # Render the event
+                    renderer.render(event)
+
+                    # Handle clarification - collect input and resume
+                    if isinstance(event, AskClarificationNeededEvent):
+                        try:
+                            answers = input_handler.collect_clarifications(event)
+                            # Resume with answers
+                            async for resume_event in service.resume(
+                                event.session_id, answers
+                            ):
+                                renderer.render(resume_event)
+                                if isinstance(resume_event, AskResultEvent):
+                                    result_event = resume_event
+                                elif isinstance(resume_event, AskErrorEvent):
+                                    error_event = resume_event
+                        except (EOFError, KeyboardInterrupt):
+                            error_event = AskErrorEvent(
+                                type="error",
+                                message="Cancelled by user",
+                                phase="clarify",
+                            )
+                            renderer.render(error_event)
+                            return
+
+                    elif isinstance(event, AskResultEvent):
+                        result_event = event
+
+                    elif isinstance(event, AskErrorEvent):
+                        error_event = event
+
+            asyncio.run(_run_ask())
+
+            # Build result from final events
+            if result_event:
+                message = f"\nSQL: {result_event.sql}\n"
+                message += f"Rows: {result_event.row_count}\n"
+                message += f"Execution time: {result_event.execution_time_ms:.1f}ms\n"
+                message += f"LLM calls: {result_event.llm_calls}\n"
+                message += f"Total tokens: {result_event.total_tokens}\n"
 
                 return RdstResult(
                     ok=True,
                     message=message,
                     data={
-                        "sql": ctx.sql,
-                        "rows": ctx.execution_result.rows
-                        if ctx.execution_result
-                        else [],
-                        "columns": ctx.execution_result.columns
-                        if ctx.execution_result
-                        else [],
-                        "row_count": row_count,
-                        "execution_time_ms": exec_time,
-                        "llm_calls": len(ctx.llm_calls),
-                        "total_tokens": ctx.total_tokens,
-                        "status": ctx.status,
+                        "sql": result_event.sql,
+                        "rows": result_event.rows,
+                        "columns": result_event.columns,
+                        "row_count": result_event.row_count,
+                        "execution_time_ms": result_event.execution_time_ms,
+                        "llm_calls": result_event.llm_calls,
+                        "total_tokens": result_event.total_tokens,
+                        "status": "success",
                     },
                 )
 
-            elif ctx.status == Status.CANCELLED:
-                return RdstResult(ok=False, message="Operation cancelled by user")
-
-            else:
+            elif error_event:
+                if "cancelled" in error_event.message.lower():
+                    return RdstResult(ok=False, message="Operation cancelled by user")
                 return RdstResult(
                     ok=False,
-                    message=f"Error: {ctx.error_message}",
-                    data={"status": ctx.status, "phase": ctx.phase},
+                    message=f"Error: {error_event.message}",
+                    data={"phase": error_event.phase} if error_event.phase else {},
                 )
+
+            else:
+                return RdstResult(False, "Ask command failed unexpectedly")
 
         except Exception as e:
             import traceback
@@ -1069,10 +1287,21 @@ class RdstCLI:
         Returns:
             RdstResult with operation outcome
         """
+        import asyncio
+
         try:
             from .schema_command import SchemaCommand
+            from .schema_renderer import SchemaRenderer
+            from lib.services.schema_service import SchemaService
+            from lib.services.types import (
+                SchemaCompleteEvent,
+                SchemaErrorEvent,
+                SchemaInitOptions,
+            )
 
             schema_cmd = SchemaCommand()
+            service = SchemaService()
+            renderer = SchemaRenderer()
 
             # Interactive menu if no subcommand provided
             if not subcommand:
@@ -1101,107 +1330,94 @@ class RdstCLI:
                     return RdstResult(False, "Cancelled")
                 subcommand = ["show", "init", "annotate", "edit"][choice - 1]
 
+            # Keep interactive/editor-only flows on legacy command implementation.
+            if subcommand in ("edit", "annotate"):
+                if not target:
+                    target = self._get_default_target()
+                    if not target:
+                        return RdstResult(
+                            False,
+                            "No target specified and no default target configured.",
+                        )
+
+                if subcommand == "edit":
+                    result = schema_cmd.edit(target, kwargs.get("table"))
+                else:
+                    table = kwargs.get("table")
+                    use_llm = kwargs.get("use_llm", False)
+                    sample_rows = kwargs.get("sample_rows", 5)
+                    target_config = self._get_target_config(target)
+                    if use_llm and not target_config:
+                        return RdstResult(
+                            False,
+                            f"Target '{target}' not found. Run 'rdst configure' first.",
+                        )
+                    result = schema_cmd.annotate(
+                        target, table, use_llm, sample_rows, target_config
+                    )
+                return RdstResult(bool(result.get("ok")), result.get("message", ""))
+
+            if subcommand != "list" and not target:
+                target = self._get_default_target()
+                if not target:
+                    return RdstResult(
+                        False,
+                        "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                    )
+
+            complete_event = None
+            error_event = None
+
+            async def _consume(generator):
+                nonlocal complete_event, error_event
+                async for event in generator:
+                    renderer.render(event)
+                    if isinstance(event, SchemaCompleteEvent):
+                        complete_event = event
+                    elif isinstance(event, SchemaErrorEvent):
+                        error_event = event
+
             if subcommand == "show":
-                table = kwargs.get("table")
-                if not target:
-                    default_target = self._get_default_target()
-                    if not default_target:
-                        return RdstResult(
-                            False,
-                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
-                        )
-                    target = default_target
-                result = schema_cmd.show(target, table)
-
+                asyncio.run(
+                    _consume(service.get_schema_events(target, kwargs.get("table")))
+                )
             elif subcommand == "init":
-                if not target:
-                    default_target = self._get_default_target()
-                    if not default_target:
-                        return RdstResult(
-                            False,
-                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
-                        )
-                    target = default_target
-
-                # Get target config
                 target_config = self._get_target_config(target)
                 if not target_config:
                     return RdstResult(
                         False,
                         f"Target '{target}' not found. Run 'rdst configure' first.",
                     )
-
-                enum_threshold = kwargs.get("enum_threshold", 20)
-                force = kwargs.get("force", False)
-                interactive = kwargs.get("interactive", False)
-                result = schema_cmd.init(
-                    target, target_config, enum_threshold, force, interactive
-                )
-
-            elif subcommand == "edit":
-                table = kwargs.get("table")
-                if not target:
-                    default_target = self._get_default_target()
-                    if not default_target:
-                        return RdstResult(
-                            False,
-                            "No target specified and no default target configured.",
-                        )
-                    target = default_target
-                result = schema_cmd.edit(target, table)
-
-            elif subcommand == "annotate":
-                table = kwargs.get("table")
-                if not target:
-                    default_target = self._get_default_target()
-                    if not default_target:
-                        return RdstResult(
-                            False,
-                            "No target specified and no default target configured.",
-                        )
-                    target = default_target
-                use_llm = kwargs.get("use_llm", False)
-                sample_rows = kwargs.get("sample_rows", 5)
-
-                # Always try to get target config (needed for AI suggestions in wizard)
-                target_config = self._get_target_config(target)
-
-                # Only error if --use-llm specified but config missing
-                if use_llm and not target_config:
-                    return RdstResult(
-                        False,
-                        f"Target '{target}' not found. Run 'rdst configure' first.",
+                if kwargs.get("interactive", False):
+                    # keep interactive enum flow on legacy command
+                    result = schema_cmd.init(
+                        target,
+                        target_config,
+                        kwargs.get("enum_threshold", 20),
+                        kwargs.get("force", False),
+                        True,
                     )
+                    return RdstResult(bool(result.get("ok")), result.get("message", ""))
 
-                result = schema_cmd.annotate(
-                    target, table, use_llm, sample_rows, target_config
+                options = SchemaInitOptions(
+                    enum_threshold=kwargs.get("enum_threshold", 20),
+                    force=kwargs.get("force", False),
+                    sample_enums=True,
                 )
-
+                asyncio.run(
+                    _consume(service.init_events(target, target_config, options))
+                )
             elif subcommand == "export":
-                if not target:
-                    default_target = self._get_default_target()
-                    if not default_target:
-                        return RdstResult(
-                            False,
-                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                asyncio.run(
+                    _consume(
+                        service.export_events(
+                            target, kwargs.get("output_format", "yaml")
                         )
-                    target = default_target
-                output_format = kwargs.get("output_format", "yaml")
-                result = schema_cmd.export(target, output_format)
-
+                    )
+                )
             elif subcommand == "delete":
-                if not target:
-                    default_target = self._get_default_target()
-                    if not default_target:
-                        return RdstResult(
-                            False,
-                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
-                        )
-                    target = default_target
-
                 force = kwargs.get("force", False)
                 if not force:
-                    # Prompt for confirmation
                     try:
                         confirm = input(f"Delete semantic layer for '{target}'? [y/N] ")
                         if confirm.lower() != "y":
@@ -1211,22 +1427,11 @@ class RdstCLI:
                             False,
                             "Cannot prompt for confirmation in non-interactive mode. Use --force",
                         )
-
-                result = schema_cmd.delete(target)
-
+                asyncio.run(_consume(service.delete_events(target)))
             elif subcommand == "list":
-                result = schema_cmd.list_targets()
-
+                asyncio.run(_consume(service.list_targets_events()))
             elif subcommand == "refresh":
-                if not target:
-                    default_target = self._get_default_target()
-                    if not default_target:
-                        return RdstResult(
-                            False,
-                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
-                        )
-                    target = default_target
-
+                # Keep refresh on the legacy command for now (not implemented as a service event stream).
                 target_config = self._get_target_config(target)
                 if not target_config:
                     return RdstResult(
@@ -1235,97 +1440,54 @@ class RdstCLI:
                     )
 
                 result = schema_cmd.refresh(target, target_config)
-
+                return RdstResult(bool(result.get("ok")), result.get("message", ""))
             elif subcommand == "add-table":
-                if not target:
-                    default_target = self._get_default_target()
-                    if not default_target:
-                        return RdstResult(
-                            False,
-                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
-                        )
-                    target = default_target
-                table = kwargs.get("table")
-                description = kwargs.get("description", "")
-                context = kwargs.get("context", "")
-                result = schema_cmd.add_table(target, table, description, context)
-
-            elif subcommand == "add-term":
-                if not target:
-                    default_target = self._get_default_target()
-                    if not default_target:
-                        return RdstResult(
-                            False,
-                            "No target specified and no default target configured. Use --target or run 'rdst configure'",
-                        )
-                    target = default_target
-                term = kwargs.get("term")
-                definition = kwargs.get("definition", "")
-                sql_pattern = kwargs.get("sql_pattern", "")
-                result = schema_cmd.add_terminology(
-                    target, term, definition, sql_pattern
+                result = service.add_table(
+                    target,
+                    kwargs.get("table"),
+                    kwargs.get("description", ""),
+                    kwargs.get("context", ""),
                 )
-
+                return RdstResult(
+                    bool(result.success), result.message or result.error or ""
+                )
+            elif subcommand == "add-term":
+                result = service.add_terminology(
+                    target,
+                    kwargs.get("term"),
+                    kwargs.get("definition", ""),
+                    kwargs.get("sql_pattern", ""),
+                )
+                return RdstResult(
+                    bool(result.success), result.message or result.error or ""
+                )
             else:
                 return RdstResult(False, f"Unknown schema subcommand: {subcommand}")
 
-            # Format result for display
-            if result["ok"]:
-                message = result["message"]
-                if result.get("data"):
-                    # Format data for display
-                    data = result["data"]
-                    if subcommand == "show" and "tables" in data:
-                        message += self._format_schema_show(data)
-                    elif subcommand == "init":
-                        summary = {
-                            "Tables": data.get("tables", 0),
-                            "Columns": data.get("columns", 0),
-                            "Relationships": data.get("relationships", 0),
-                        }
-                        if data.get("enum_columns"):
-                            summary["Potential enums"] = len(data["enum_columns"])
+            if error_event:
+                return RdstResult(False, error_event.message)
+            if not complete_event:
+                return RdstResult(False, "schema command returned no result")
 
-                        self.client._console.print(
-                            MessagePanel(
-                                "Semantic layer initialized", variant="success"
-                            )
-                        )
-                        self.client._console.print(KeyValueTable(summary))
-                        message = ""
-
-                        if data.get("next_steps"):
-                            from lib.ui import NextSteps
-
-                            target_name = data.get("target", target)
-                            steps = [
-                                (
-                                    f"rdst schema annotate --target {target_name} --use-llm",
-                                    "AI-generate descriptions",
-                                ),
-                                (
-                                    f"rdst schema edit --target {target_name}",
-                                    "Manual editing in $EDITOR",
-                                ),
-                                (
-                                    f'rdst ask "How many rows in each table?" --target {target_name}',
-                                    "Try natural language queries",
-                                ),
-                            ]
-                            self.client._console.print(NextSteps(steps))
-                    elif subcommand == "list":
-                        targets = data.get("targets", [])
-                        if targets:
-                            message += "\n"
-                            for t in targets:
-                                message += f"\n  {t['name']}: {t['tables']} tables, {t['terminology']} terms"
-                    elif subcommand == "export":
-                        message = result["data"].get("content", "")
-
-                return RdstResult(True, message)
-            else:
-                return RdstResult(False, result["message"])
-
+            if subcommand == "export" and complete_event.export_result:
+                return RdstResult(True, complete_event.export_result.content)
+            if subcommand == "list" and complete_event.target_list:
+                msg = (
+                    f"Found {len(complete_event.target_list.targets)} semantic layer(s)"
+                )
+                return RdstResult(True, msg)
+            if subcommand == "show":
+                return RdstResult(True, "")
+            if subcommand == "init" and complete_event.init_result:
+                return RdstResult(
+                    bool(complete_event.init_result.success),
+                    ""
+                    if complete_event.init_result.success
+                    else (complete_event.init_result.error or ""),
+                )
+            if subcommand == "delete" and complete_event.delete_result:
+                return RdstResult(bool(complete_event.delete_result.success), "")
+            return RdstResult(True, "")
         except Exception as e:
             return RdstResult(False, f"schema command failed: {e}")
 
