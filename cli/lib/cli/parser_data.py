@@ -1335,6 +1335,13 @@ COMMAND_ORDER = [
     "version",
 ]
 
+COMMAND_GROUPS: list[tuple[str, list[str]]] = [
+    ("Analysis", ["top", "analyze", "ask", "agent"]),
+    ("Configuration", ["init", "configure", "schema", "query", "guard"]),
+    ("Integrations", ["claude", "slack", "web"]),
+    ("Other", ["scan", "report", "help", "version"]),
+]
+
 
 # =============================================================================
 # Display Helpers
@@ -1343,6 +1350,14 @@ COMMAND_ORDER = [
 
 def get_commands_for_table() -> List[Tuple[str, str]]:
     return [(COMMANDS[name].name, COMMANDS[name].short_help) for name in COMMAND_ORDER]
+
+
+def get_grouped_commands() -> list[tuple[str, list[tuple[str, str]]]]:
+    """Return commands organized by group for display."""
+    return [
+        (group, [(COMMANDS[name].name, COMMANDS[name].short_help) for name in cmds])
+        for group, cmds in COMMAND_GROUPS
+    ]
 
 
 def get_main_examples() -> List[Tuple[str, str]]:

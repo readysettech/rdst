@@ -349,7 +349,11 @@ Examples:
 
                 # Chat with the agent
                 print("\nThinking...")
-                response = chat_agent.chat(question)
+                try:
+                    response = chat_agent.chat(question)
+                except KeyboardInterrupt:
+                    print("\n\nInterrupted. Type 'exit' to quit or ask another question.\n")
+                    continue
 
                 # Display tool results if any
                 for result in response.tool_results:

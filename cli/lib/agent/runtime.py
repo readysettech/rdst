@@ -74,13 +74,16 @@ def validate_read_only(sql: str) -> tuple[bool, str]:
     Returns:
         Tuple of (is_valid, error_message).
     """
+    # Read-only statement types (compound SELECTs like UNION are allowed)
+    READ_ONLY_KEYS = {"select", "with", "union", "intersect", "except"}
+
     try:
         parsed = sqlglot.parse(sql)
         for statement in parsed:
             if statement is None:
                 continue
             key = statement.key.lower() if hasattr(statement, "key") else ""
-            if key not in ("select", "with"):
+            if key not in READ_ONLY_KEYS:
                 return False, f"Write operation not allowed: {key.upper()}"
         return True, ""
     except Exception as e:

@@ -1068,8 +1068,8 @@ def _format_additional_metrics(query_metrics: Dict[str, Any]) -> str:
 def _extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
     """Extract JSON from LLM response, handling various formats."""
     try:
-        # Try direct JSON parsing first
-        return json.loads(response)
+        # Try direct JSON parsing first (strict=False allows control chars)
+        return json.loads(response, strict=False)
     except json.JSONDecodeError:
         pass
 
@@ -1078,7 +1078,7 @@ def _extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
     match = re.search(json_pattern, response, re.DOTALL | re.IGNORECASE)
     if match:
         try:
-            return json.loads(match.group(1))
+            return json.loads(match.group(1), strict=False)
         except json.JSONDecodeError:
             pass
 
@@ -1090,7 +1090,7 @@ def _extract_json_from_response(response: str) -> Optional[Dict[str, Any]]:
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
         try:
             json_str = response[first_brace : last_brace + 1]
-            return json.loads(json_str)
+            return json.loads(json_str, strict=False)
         except json.JSONDecodeError:
             pass
 

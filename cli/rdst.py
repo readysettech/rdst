@@ -104,7 +104,7 @@ def _clear_web_required_env_vars() -> tuple[list[str], list[str], list[str]]:
 
 def print_rich_help():
     """Print colorized help using Rich."""
-    from lib.cli.parser_data import get_commands_for_table, get_main_examples
+    from lib.cli.parser_data import get_grouped_commands, get_main_examples
 
     console = get_console()
 
@@ -116,13 +116,14 @@ def print_rich_help():
     )
     console.print()
 
-    table = DataTable(
-        columns=["Command", "Description"],
-        rows=get_commands_for_table(),
-        title="Commands",
-    )
-    console.print(table)
-    console.print()
+    for group_name, commands in get_grouped_commands():
+        table = DataTable(
+            columns=["Command", "Description"],
+            rows=commands,
+            title=group_name,
+        )
+        console.print(table)
+        console.print()
 
     console.print(f"[{StyleTokens.EMPHASIS}]Examples:[/{StyleTokens.EMPHASIS}]")
     for cmd, desc in get_main_examples():

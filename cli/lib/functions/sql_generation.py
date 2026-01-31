@@ -147,7 +147,7 @@ def generate_sql_from_nl(
                 response_text = response_text[:-3]
             response_text = response_text.strip()
 
-        result_data = json.loads(response_text)
+        result_data = json.loads(response_text, strict=False)
 
         # Extract key fields with safe defaults
         analysis = result_data.get('analysis', {})
@@ -295,7 +295,7 @@ def refine_sql_with_feedback(
                 response_text = response_text[:-3]
             response_text = response_text.strip()
 
-        result_data = json.loads(response_text)
+        result_data = json.loads(response_text, strict=False)
 
         return {
             'success': True,
@@ -420,7 +420,7 @@ def recover_from_error(
                 response_text = response_text[:-3]
             response_text = response_text.strip()
 
-        result_data = json.loads(response_text)
+        result_data = json.loads(response_text, strict=False)
 
         return {
             'success': True,
@@ -494,7 +494,7 @@ def filter_relevant_schema(
                 json_mode=True
             )
 
-            result_data = json.loads(response)
+            result_data = json.loads(response, strict=False)
             relevant_tables = result_data.get('relevant_tables', [])
 
             if relevant_tables:
