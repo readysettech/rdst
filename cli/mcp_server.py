@@ -501,7 +501,7 @@ This process:
 3. Attempts to cache the query in Readyset
 4. Runs a performance comparison (original DB vs Readyset cached)
 
-REQUIRES: Docker installed and running. If Docker error, tell user to install Docker Desktop.
+REQUIRES: Docker must be installed and running.
 WARNING: This may take a while, especially on first run. Warn the user before running.
 
 OUTPUT INCLUDES:
@@ -527,6 +527,14 @@ DATA SOURCES:
 - **Live monitoring mode** (with duration): Polls pg_stat_activity (PostgreSQL) or
   INFORMATION_SCHEMA.PROCESSLIST (MySQL) repeatedly. Only captures queries actively
   running during the monitoring window - fast queries may be missed.
+
+MYSQL SLOW LOG (optional source='slowlog'):
+For MySQL, you can also query individual slow queries from mysql.slow_log table.
+This requires enabling the MySQL slow query log with TABLE output:
+  - For self-hosted: SET GLOBAL slow_query_log = 'ON'; SET GLOBAL long_query_time = 1; SET GLOBAL log_output = 'TABLE';
+  - For RDS/Aurora: Modify parameter group (slow_query_log=1, long_query_time=1, log_output=TABLE)
+No restart required - changes take effect immediately.
+Use source='slowlog' parameter to enable. If not enabled, RDST will show setup instructions.
 
 OUTPUT INCLUDES (JSON):
 - query_hash: Unique identifier for the query pattern
@@ -560,6 +568,11 @@ Captured queries auto-save to registry for later analysis with rdst_analyze.
                     "filter": {
                         "type": "string",
                         "description": "Regex to filter query text"
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["auto", "pg_stat", "activity", "digest", "slowlog"],
+                        "description": "Data source (database-specific): auto (default - picks correct source), pg_stat (PostgreSQL only), activity (both), digest (MySQL only), slowlog (MySQL only, requires setup)"
                     },
                     "historical": {
                         "type": "boolean",
@@ -1069,6 +1082,8 @@ Required environment variable: {api_key_info.get(provider, 'Check provider docs'
 
         if "target" in arguments:
             args.extend(["--target", arguments["target"]])
+        if "source" in arguments:
+            args.extend(["--source", arguments["source"]])
         if "limit" in arguments:
             args.extend(["--limit", str(arguments["limit"])])
         if "sort" in arguments:

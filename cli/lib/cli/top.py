@@ -103,7 +103,12 @@ class TopCommand:
                     f"Invalid database engine for target '{target_name}': {target_config.get('engine')}",
                 )
 
-            # 3. Route based on historical flag
+            # 3. Auto-enable historical mode if source is explicitly set
+            # --source only applies to historical mode; without this, it would be silently ignored
+            if source != "auto" and not historical:
+                historical = True
+
+            # 4. Route based on historical flag
             if not historical:
                 # DEFAULT: Use new real-time monitoring (polls every 200ms)
                 return self._run_realtime_monitor(
@@ -111,7 +116,7 @@ class TopCommand:
                 )
 
             # HISTORICAL MODE: Use existing DataManager approach
-            # 4. Auto-select source if needed and validate
+            # 5. Auto-select source if needed and validate
             if source == "auto":
                 source = self._auto_select_source(db_engine, target_config)
 
@@ -122,7 +127,7 @@ class TopCommand:
                     f"Source '{source}' not supported for {db_engine}. Valid sources: {', '.join(valid_sources)}",
                 )
 
-            # 5. Execute based on mode (historical)
+            # 6. Execute based on mode (historical)
             if watch:
                 return self._run_watch_mode(
                     target_config, db_engine, source, limit, sort, filter, no_color
@@ -171,9 +176,9 @@ class TopCommand:
     def _get_valid_sources_for_engine(self, db_engine: str) -> List[str]:
         """Get valid sources for a database engine."""
         if db_engine == "postgresql":
-            return ["auto", "pg_stat", "activity"]  # slowlog, rds, pmm for v1.x
+            return ["auto", "pg_stat", "activity"]  # rds, pmm for v1.x
         elif db_engine == "mysql":
-            return ["auto", "digest", "activity"]  # slowlog, rds, pmm for v1.x
+            return ["auto", "digest", "activity", "slowlog"]  # rds, pmm for v1.x
         else:
             return ["auto", "activity"]
 
@@ -189,10 +194,158 @@ class TopCommand:
                 return "rdst_top_mysql_digest"
             elif source == "activity":
                 return "rdst_top_mysql_activity"
+            elif source == "slowlog":
+                return "rdst_top_mysql_slowlog"
 
         raise ValueError(
             f"No command set available for engine='{db_engine}' source='{source}'"
         )
+
+    def _detect_mysql_environment(self, connection) -> tuple:
+        """
+        Detect if MySQL is running on RDS/Aurora or self-hosted.
+
+        Returns:
+            tuple: (is_rds: bool, detection_method: str)
+        """
+        try:
+            cursor = connection.cursor()
+
+            # Check for rdsadmin database (RDS-specific)
+            cursor.execute("""
+                SELECT 1 FROM information_schema.schemata
+                WHERE SCHEMA_NAME = 'rdsadmin' LIMIT 1
+            """)
+            if cursor.fetchone():
+                # Check if it's Aurora specifically
+                try:
+                    cursor.execute("SELECT @@aurora_version")
+                    cursor.fetchone()
+                    return True, "aurora"
+                except Exception:
+                    return True, "rds"
+
+            return False, "self-hosted"
+        except Exception:
+            return False, "unknown"
+        finally:
+            cursor.close()
+
+    def _check_mysql_slowlog_status(self, connection, hostname: str) -> dict:
+        """
+        Check if MySQL slow query log is enabled and accessible.
+
+        Returns:
+            dict with keys:
+                - enabled: bool - whether slow_query_log is ON
+                - log_output: str - 'TABLE', 'FILE', or 'TABLE,FILE'
+                - is_rds: bool - whether this is an RDS instance
+                - rds_detection: str - how RDS was detected
+                - can_query: bool - whether we can query mysql.slow_log
+                - message: str - human-readable status message
+        """
+        result = {
+            "enabled": False,
+            "log_output": None,
+            "is_rds": False,
+            "rds_detection": "none",
+            "can_query": False,
+            "message": "",
+        }
+
+        try:
+            cursor = connection.cursor()
+
+            # Check hostname for RDS pattern
+            hostname_lower = hostname.lower() if hostname else ""
+            if '.rds.amazonaws.com' in hostname_lower or '.cluster-' in hostname_lower:
+                result["is_rds"] = True
+                result["rds_detection"] = "hostname"
+
+            # Check for rdsadmin database
+            if not result["is_rds"]:
+                is_rds, detection = self._detect_mysql_environment(connection)
+                result["is_rds"] = is_rds
+                result["rds_detection"] = detection
+
+            # Check slow_query_log status
+            cursor.execute("SELECT @@slow_query_log, @@log_output")
+            row = cursor.fetchone()
+            if row:
+                result["enabled"] = bool(row[0])
+                result["log_output"] = row[1]
+
+            # Check if we can query mysql.slow_log table
+            if result["enabled"] and result["log_output"] and 'TABLE' in result["log_output"].upper():
+                try:
+                    cursor.execute("SELECT 1 FROM mysql.slow_log LIMIT 1")
+                    result["can_query"] = True
+                except Exception:
+                    result["can_query"] = False
+
+            cursor.close()
+
+            # Build status message
+            if not result["enabled"]:
+                result["message"] = "MySQL slow query log is not enabled"
+            elif 'TABLE' not in (result["log_output"] or "").upper():
+                result["message"] = f"Slow query log is enabled but log_output is '{result['log_output']}' (needs TABLE)"
+            elif not result["can_query"]:
+                result["message"] = "Cannot access mysql.slow_log table"
+            else:
+                result["message"] = "Slow query log is enabled and accessible"
+
+            return result
+
+        except Exception as e:
+            result["message"] = f"Error checking slow log status: {e}"
+            return result
+
+    def _show_slowlog_not_enabled_message(self, status: dict):
+        """Display helpful message when slow log is not properly configured."""
+
+        if status["is_rds"]:
+            # RDS-specific instructions
+            self._console.print(
+                NoticePanel(
+                    title="MySQL Slow Query Log Not Enabled",
+                    description=f"Detected: AWS RDS/Aurora instance (via {status['rds_detection']})",
+                    variant="warning",
+                    bullets=[
+                        "To enable, modify your RDS parameter group:",
+                        "  • slow_query_log = 1",
+                        "  • long_query_time = 1  (log queries > 1 second)",
+                        "  • log_output = TABLE  (required for remote access)",
+                        "",
+                        "Apply changes in RDS Console or via AWS CLI.",
+                        "These parameters are dynamic - no reboot required.",
+                        "",
+                        "Alternative: Use --source digest for aggregated stats (works now)",
+                    ],
+                )
+            )
+        else:
+            # Self-hosted MySQL instructions
+            self._console.print(
+                NoticePanel(
+                    title="MySQL Slow Query Log Not Enabled",
+                    description="Detected: Self-hosted MySQL",
+                    variant="warning",
+                    bullets=[
+                        "To enable, run these commands on your MySQL server:",
+                        "",
+                        "  SET GLOBAL slow_query_log = 'ON';",
+                        "  SET GLOBAL long_query_time = 1;",
+                        "  SET GLOBAL log_output = 'TABLE';",
+                        "",
+                        "No restart required - changes take effect immediately.",
+                        "",
+                        "Note: If this is actually an RDS instance, modify the parameter group instead.",
+                        "",
+                        "Alternative: Use --source digest for aggregated stats (works now)",
+                    ],
+                )
+            )
 
     def _run_realtime_monitor(
         self,
@@ -735,6 +888,36 @@ class TopCommand:
                 source = "activity"  # Update source for display
             else:
                 raise e
+
+        # For MySQL slowlog source, check if slow query log is enabled
+        if db_engine == "mysql" and source == "slowlog":
+            import pymysql
+
+            try:
+                # Create temporary connection to check slow log status
+                check_conn = pymysql.connect(
+                    host=target_config["host"],
+                    port=target_config["port"],
+                    user=target_config["user"],
+                    password=password,
+                    database=target_config["database"],
+                    connect_timeout=10,
+                )
+
+                status = self._check_mysql_slowlog_status(
+                    check_conn, target_config["host"]
+                )
+                check_conn.close()
+
+                if not status["can_query"]:
+                    self._show_slowlog_not_enabled_message(status)
+                    raise ValueError(
+                        f"MySQL slow query log is not accessible: {status['message']}. "
+                        "Use --source digest for aggregated stats instead."
+                    )
+
+            except pymysql.Error as e:
+                raise ValueError(f"Failed to check slow log status: {e}")
 
         # Create temporary output directory
         output_dir = tempfile.mkdtemp(prefix="rdst_")

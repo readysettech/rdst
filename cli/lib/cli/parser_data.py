@@ -144,7 +144,21 @@ Each target has a name, connection details, and an environment variable for the 
         description="""Monitor database queries in real-time and identify slow queries.
 
 Queries are automatically saved to the registry as they're detected.
-Use the displayed hash values with 'rdst analyze' to investigate further.""",
+Use the displayed hash values with 'rdst analyze' to investigate further.
+
+MySQL Sources (use with --historical):
+  - digest: Query stats from performance_schema (default, always available)
+  - slowlog: Individual slow queries from mysql.slow_log table
+  - activity: Currently running queries from PROCESSLIST
+
+MySQL Slow Log Setup:
+  The 'slowlog' source requires enabling MySQL's slow query log with TABLE output.
+  For self-hosted MySQL:
+    SET GLOBAL slow_query_log = 'ON';
+    SET GLOBAL long_query_time = 1;
+    SET GLOBAL log_output = 'TABLE';
+  For RDS/Aurora: Modify parameter group (slow_query_log=1, log_output=TABLE)
+  No restart required - changes take effect immediately.""",
         args=[
             ArgDef("--target", help="Specific configured DB target"),
             ArgDef(
@@ -159,7 +173,7 @@ Use the displayed hash values with 'rdst analyze' to investigate further.""",
                     "pmm",
                 ],
                 default="auto",
-                help="Telemetry source to use",
+                help="Data source (implies --historical): auto (default), pg_stat (PostgreSQL), activity (both), digest (MySQL), slowlog (MySQL, requires setup)",
             ),
             ArgDef("--limit", type=int, default=10, help="Number of queries to show"),
             ArgDef(
@@ -184,7 +198,7 @@ Use the displayed hash values with 'rdst analyze' to investigate further.""",
             ArgDef(
                 "--historical",
                 action="store_true",
-                help="Use historical statistics (pg_stat_statements/performance_schema) instead of real-time monitoring",
+                help="Use historical statistics (pg_stat_statements/performance_schema/slowlog) instead of real-time monitoring",
             ),
             ArgDef(
                 "--duration",
@@ -198,7 +212,15 @@ Use the displayed hash values with 'rdst analyze' to investigate further.""",
             ("rdst top --json --duration 10", "JSON output for scripting"),
             (
                 "rdst top --historical",
-                "Use pg_stat_statements instead of live monitoring",
+                "View aggregated stats (pg_stat_statements / performance_schema)",
+            ),
+            (
+                "rdst top --source slowlog --target mysql-db",
+                "MySQL: Query mysql.slow_log table (requires setup)",
+            ),
+            (
+                "rdst top --source digest --target mysql-db",
+                "MySQL: Query performance_schema aggregated stats",
             ),
         ],
     ),
@@ -242,7 +264,7 @@ and Readyset caching opportunities.""",
                 "--readyset-cache",
                 action="store_true",
                 dest="readyset_cache",
-                help="Test Readyset caching: spins up a Docker container with your schema, caches the query, and shows performance comparison and whether the query is supported",
+                help="Test Readyset caching (requires Docker). Starts containers with your schema, caches the query, and shows performance comparison and cacheability status",
             ),
             ArgDef(
                 "--fast",
@@ -282,7 +304,7 @@ and Readyset caching opportunities.""",
             ("rdst analyze -f query.sql --target mydb", "Analyze query from file"),
             (
                 'rdst analyze -q "SELECT ..." --readyset-cache',
-                "Test Readyset caching performance",
+                "Test Readyset caching (requires Docker)",
             ),
         ],
     ),
@@ -794,7 +816,7 @@ def get_main_examples() -> List[Tuple[str, str]]:
         ("rdst init", "First-time setup wizard"),
         ("rdst top --target mydb", "Monitor slow queries"),
         ('rdst analyze -q "SELECT * FROM users" --target mydb', "Analyze a query"),
-        ('rdst analyze -q "SELECT ..." --readyset-cache', "Test Readyset caching"),
+        ('rdst analyze -q "SELECT ..." --readyset-cache', "Test Readyset caching (requires Docker)"),
         ('rdst help "how do I find slow queries?"', "Quick docs lookup"),
     ]
 

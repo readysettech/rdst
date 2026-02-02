@@ -1105,7 +1105,7 @@ class TargetsTableBase(DataTableBase):
         self._setup_columns()
 
     def _setup_columns(self):
-        self.add_column("Name", style=StyleTokens.TABLE_ROW_KEY, no_wrap=True)
+        self.add_column("Target", style=StyleTokens.TABLE_ROW_KEY, no_wrap=True)
         self.add_column("Engine", style=StyleTokens.ACCENT)
         self.add_column("Connection", style=StyleTokens.TABLE_ROW_VALUE)
         self.add_column("Proxy", style=StyleTokens.INFO)

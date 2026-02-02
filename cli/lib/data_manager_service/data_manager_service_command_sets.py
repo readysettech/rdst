@@ -704,4 +704,47 @@ COMMAND_SETS = {
             }
         },
     },
+    # MySQL Slow Query Log - requires slow_query_log=ON and log_output=TABLE
+    "rdst_top_mysql_slowlog": {
+        "schema": [
+            "query_hash",
+            "query_text",
+            "exec_count",
+            "total_time",
+            "avg_time",
+            "max_time",
+            "total_rows_examined",
+        ],
+        "query_type": DataManagerQueryType.UPSTREAM,
+        "sync_interval": 5000,
+        "dedup_key": "query_hash",
+        "override": True,
+        "filename": "rdst_top_mysql_slowlog.csv",
+        "commands": {
+            "mysql_slowlog_queries": {
+                "description": "Get top queries from mysql.slow_log table",
+                "query": f"""
+                    SELECT
+                        MD5(sql_text) as query_hash,
+                        LEFT(REPLACE(REPLACE(REPLACE(sql_text, '\\n', ' '), '\\r', ' '), '\\t', ' '), {MAX_QUERY_LENGTH}) as query_text,
+                        COUNT(*) as exec_count,
+                        ROUND(SUM(TIME_TO_SEC(query_time)), 6) as total_time,
+                        ROUND(AVG(TIME_TO_SEC(query_time)), 6) as avg_time,
+                        ROUND(MAX(TIME_TO_SEC(query_time)), 6) as max_time,
+                        SUM(rows_examined) as total_rows_examined
+                    FROM mysql.slow_log
+                    WHERE sql_text IS NOT NULL
+                      AND sql_text NOT LIKE '%slow_log%'
+                      AND sql_text NOT LIKE '%information_schema%'
+                      AND sql_text NOT LIKE '%performance_schema%'
+                    GROUP BY sql_text
+                    ORDER BY total_time DESC
+                    LIMIT 50
+                """,
+                "default_interval_ms": 5000,
+                "default_query": True,
+                "supports_latency_timing": True,
+            }
+        },
+    },
 }

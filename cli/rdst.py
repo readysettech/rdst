@@ -84,6 +84,7 @@ Examples:
   rdst analyze "SELECT * FROM users WHERE active = true"
   rdst analyze "SELECT COUNT(*) FROM orders WHERE status = 'pending'" --readyset-cache
   rdst top --limit 10
+  rdst top --source slowlog --target mysql-db
         """,
     )
 

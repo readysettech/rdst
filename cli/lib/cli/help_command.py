@@ -30,8 +30,25 @@ RDST is a CLI tool for database performance analysis and SQL query optimization.
 It connects to PostgreSQL or MySQL databases and provides AI-powered recommendations.
 
 ## Installation
+
+**Requirements:** Python 3.9+
+
+### macOS
 ```bash
 pip install rdst
+```
+
+### Linux
+```bash
+pip install rdst
+```
+
+### Windows
+Coming soon.
+
+### Verify Installation
+```bash
+rdst version
 ```
 
 ## Quick Start
@@ -50,6 +67,62 @@ rdst analyze -q "SELECT * FROM users WHERE email = 'test@example.com'" --target 
 
 # Monitor slow queries in real-time
 rdst top --target mydb
+```
+
+## Recommended Workflow
+
+**Step 1: Initial Setup**
+```bash
+rdst init                    # First-time setup wizard
+# OR manually:
+rdst configure add ...       # Add database target
+export MY_DB_PASSWORD="..."  # Set password env var
+rdst configure test mydb     # Verify connection works
+```
+
+**Step 2: Find Slow Queries**
+```bash
+# Historical stats (instant results - works for both PostgreSQL and MySQL)
+rdst top --target mydb --historical
+
+# Real-time monitoring (captures queries as they run)
+rdst top --target mydb --duration 30
+
+# MySQL: Additional slow log source (requires setup)
+rdst top --source slowlog --target mysql-db
+
+# Save interesting queries to analyze later
+rdst query save abc123 --name "slow-order-query"
+```
+
+**Step 3: Analyze Queries**
+```bash
+# Analyze a captured query
+rdst analyze --hash abc123 --target mydb
+
+# Or analyze a query directly
+rdst analyze -q "SELECT ..." --target mydb
+
+# Get AI optimization suggestions
+rdst analyze -q "SELECT ..." --target mydb --interactive
+```
+
+**Step 4: Test Readyset Caching (Optional)**
+```bash
+# Requires Docker installed and running
+rdst analyze -q "SELECT ..." --target mydb --readyset-cache
+```
+
+**Step 5: Iterate**
+```bash
+# List saved queries
+rdst query list
+
+# Re-analyze with changes
+rdst analyze --hash abc123 --interactive
+
+# Benchmark query after implementing changes
+rdst query run slow-order-query --target mydb
 ```
 
 ## Commands
@@ -300,11 +373,191 @@ rdst configure default --target prod
 ```
 
 ## Supported Databases
-- PostgreSQL (recommended)
+- PostgreSQL
 - MySQL
 
+### rdst top --source Options (Database-Specific)
+| Source | PostgreSQL | MySQL | Description |
+|--------|------------|-------|-------------|
+| auto | ✓ | ✓ | Automatically selects correct source (default) |
+| pg_stat | ✓ | ✗ | pg_stat_statements aggregated stats |
+| activity | ✓ | ✓ | Currently running queries |
+| digest | ✗ | ✓ | performance_schema aggregated stats |
+| slowlog | ✗ | ✓ | mysql.slow_log table (requires setup) |
+
+**Important:**
+- Using a source incompatible with your database will fail
+- Specifying `--source` automatically enables historical mode (no need for `--historical` flag)
+- Use `--source auto` (default) to let RDST pick the correct source
+
+## PostgreSQL-Specific Features
+
+### rdst top Sources for PostgreSQL
+RDST supports multiple data sources for PostgreSQL query monitoring:
+
+```bash
+# Default: Use pg_stat_statements (aggregated stats)
+rdst top --target pg-db --historical
+
+# Explicit sources:
+rdst top --target pg-db --source pg_stat    # pg_stat_statements
+rdst top --target pg-db --source activity   # pg_stat_activity (running queries)
+```
+
+**Source comparison:**
+| Source | What it shows | Requirements |
+|--------|--------------|--------------|
+| pg_stat | Aggregated query stats | pg_stat_statements extension |
+| activity | Currently running queries | None |
+
+### Enabling pg_stat_statements
+The pg_stat_statements extension provides the best query statistics:
+
+**For self-hosted PostgreSQL:**
+```sql
+-- Add to postgresql.conf:
+shared_preload_libraries = 'pg_stat_statements'
+
+-- Then restart PostgreSQL and run:
+CREATE EXTENSION pg_stat_statements;
+```
+
+**For AWS RDS/Aurora PostgreSQL:**
+pg_stat_statements is available by default. Enable it with:
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+```
+
+**For Google Cloud SQL:**
+Enable the `cloudsql.enable_pg_stat_statements` flag in your instance settings.
+
+### PostgreSQL EXPLAIN Output
+PostgreSQL EXPLAIN ANALYZE provides detailed execution statistics:
+- Actual vs estimated rows at each plan node
+- Time spent in each operation (actual time)
+- Buffer usage (shared hit, read, written)
+- Sort and hash memory usage
+
+### PostgreSQL Example Workflow
+```bash
+# 1. Add PostgreSQL target
+rdst configure add --target pg-prod --engine postgresql --host db.example.com --port 5432 --user admin --database myapp --password-env PG_PASSWORD
+
+# 2. Check historical query stats
+rdst top --target pg-prod --historical
+
+# 3. Monitor for slow queries in real-time
+rdst top --target pg-prod --duration 30
+
+# 4. Analyze a slow query
+rdst analyze -q "SELECT * FROM orders WHERE status = 'pending'" --target pg-prod
+```
+
+## MySQL-Specific Features
+
+### rdst top Sources for MySQL
+RDST supports multiple data sources for MySQL query monitoring:
+
+```bash
+# Default: Use performance_schema digest (aggregated stats)
+rdst top --target mysql-db --historical
+
+# Explicit sources:
+rdst top --target mysql-db --source digest     # performance_schema
+rdst top --target mysql-db --source activity   # SHOW PROCESSLIST (running queries)
+rdst top --target mysql-db --source slowlog    # mysql.slow_log table
+```
+
+**Source comparison:**
+| Source | What it shows | Requirements |
+|--------|--------------|--------------|
+| digest | Aggregated query stats | performance_schema enabled (default) |
+| activity | Currently running queries | None |
+| slowlog | Individual slow query executions | slow_query_log enabled, log_output=TABLE |
+
+### Enabling MySQL Slow Query Log
+The `slowlog` source requires enabling MySQL's slow query log with TABLE output:
+
+**For self-hosted MySQL:**
+```sql
+SET GLOBAL slow_query_log = 'ON';
+SET GLOBAL long_query_time = 1;      -- Log queries > 1 second
+SET GLOBAL log_output = 'TABLE';     -- Required for RDST access
+```
+No restart required - changes take effect immediately.
+
+**For AWS RDS/Aurora:**
+Modify your RDS parameter group:
+- slow_query_log = 1
+- long_query_time = 1
+- log_output = TABLE
+
+Apply in RDS Console or via AWS CLI. These are dynamic parameters (no reboot needed).
+
+### MySQL EXPLAIN Output
+MySQL EXPLAIN ANALYZE output differs from PostgreSQL:
+- Times are shown per operation
+- Index usage is shown in `key` column
+- `rows` shows estimated rows examined
+- `filtered` shows percentage of rows that pass conditions
+
+### MySQL Example Workflow
+```bash
+# 1. Add MySQL target
+rdst configure add --target mysql-prod --engine mysql --host db.example.com --port 3306 --user admin --database myapp --password-env MYSQL_PASSWORD
+
+# 2. Monitor for slow queries
+rdst top --target mysql-prod --duration 30
+
+# 3. Analyze a slow query
+rdst analyze -q "SELECT * FROM orders WHERE status = 'pending'" --target mysql-prod
+
+# 4. View historical stats from performance_schema
+rdst top --target mysql-prod --source digest
+```
+
 ## LLM Provider
-- Anthropic - requires ANTHROPIC_API_KEY
+- Anthropic Claude - requires ANTHROPIC_API_KEY
+
+## Semantic Layer (Annotations)
+
+The semantic layer lets you document business logic that isn't obvious from the schema alone.
+This helps RDST's AI provide better recommendations.
+
+**Why annotate?** Database schemas don't capture business meaning. For example, if you have:
+```sql
+CREATE TABLE posts (
+    id INT,
+    post_type_id INT,  -- What do these values mean?
+    ...
+);
+```
+
+The AI doesn't know that `post_type_id = 1` means "question", `2` means "answer", `3` means "comment".
+With annotations, you tell RDST what these values mean so it can give smarter recommendations.
+
+**Usage:**
+```bash
+# Initialize from your database schema
+rdst schema init --target mydb
+
+# Auto-generate descriptions using AI (good starting point)
+rdst schema annotate --target mydb --use-llm
+
+# Or manually add business context
+rdst schema annotate --target mydb
+
+# View current annotations
+rdst schema show --target mydb
+```
+
+**What to annotate:**
+- Enum values with business meanings (status codes, type IDs)
+- Columns with non-obvious purposes
+- Table relationships and business rules
+- Domain-specific terminology
+
+Annotations are **optional** but recommended for complex schemas with business logic encoded in numeric values.
 
 ## Troubleshooting
 
@@ -322,9 +575,57 @@ rdst configure default --target prod
 - Run `rdst configure llm --provider anthropic`
 - Export ANTHROPIC_API_KEY environment variable
 
+## Docker Requirements (--readyset-cache)
+
+The `--readyset-cache` flag for `rdst analyze` uses Docker to test Readyset cacheability.
+
+**Prerequisites:**
+- Docker must be installed and running
+- User must have permission to run Docker commands
+- First run downloads container images (~500MB)
+
+**What happens when you use --readyset-cache:**
+1. RDST automatically starts Docker containers:
+   - `rdst-test-mysql-<target>` or `rdst-test-postgres-<target>` - Database replica
+   - `rdst-readyset-<target>` - Readyset cache container
+2. Creates a test schema matching your database
+3. Attempts to cache the query in Readyset
+4. Runs performance comparison (original DB vs Readyset)
+5. Containers are kept running for subsequent tests
+
+**Resource usage:**
+- Memory: ~1-2GB for containers
+- Disk: ~500MB for images (first run)
+- CPU: Moderate during cacheability testing
+
+**Cleanup:**
+Containers remain running after tests. To stop them:
+```bash
+docker stop $(docker ps -q --filter "name=rdst-")
+docker rm $(docker ps -aq --filter "name=rdst-")
+```
+
+**Important:** The first `--readyset-cache` run may take 30-60 seconds while images download.
+Subsequent runs are faster (10-20 seconds).
+
+## Troubleshooting
+
 ### Readyset cache errors
-- Docker not found: Install Docker Desktop
+- Docker not found: Install Docker and ensure daemon is running
 - If a query can't be cached, Readyset will explain why in the output
+
+### MySQL slow log not accessible
+If `rdst top --source slowlog` fails:
+1. Check if slow_query_log is enabled: `SELECT @@slow_query_log;`
+2. Check log_output includes TABLE: `SELECT @@log_output;`
+3. For RDS, check your parameter group settings
+4. Alternative: Use `--source digest` for aggregated stats instead
+
+### MySQL performance_schema not available
+If digest source fails:
+- performance_schema is enabled by default in MySQL 5.6+
+- Check: `SHOW VARIABLES LIKE 'performance_schema';`
+- If disabled, add `performance_schema=ON` to my.cnf and restart
 
 ## Config File Location
 - Main config: ~/.rdst/config.toml
