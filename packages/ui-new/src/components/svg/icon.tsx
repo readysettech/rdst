@@ -1,6 +1,10 @@
 import * as AccessibleIcon from '@radix-ui/react-accessible-icon'
 import { tv, type VariantProps } from '@rs/tailwind-base'
-import type { IconName } from '@rs/ui-icons/icon-name'
+import type {
+  IconBulkName,
+  IconStrokeName,
+  IconVariant,
+} from '@rs/ui-icons/icon-name'
 import type { SVGProps } from 'react'
 
 export const iconRecipe = tv({
@@ -21,20 +25,32 @@ export const iconRecipe = tv({
 })
 type IconStyleProps = VariantProps<typeof iconRecipe>
 
-export type IconListType = IconName
+export type IconListType = IconStrokeName | IconBulkName
 
 export type IconProps = {
   name: IconListType
+  variant?: IconVariant
   label: string
   className?: string
 } & IconStyleProps &
   SVGProps<SVGSVGElement>
 
-export const Icon = ({ size, name, label, className, ...rest }: IconProps) => {
+export const Icon = ({
+  size,
+  name,
+  label,
+  variant = 'stroke',
+  className,
+  ...rest
+}: IconProps) => {
   return (
     <AccessibleIcon.Root label={label}>
-      <svg {...rest} className={iconRecipe({ size, class: className })}>
-        <use href={`/icons/sprite.svg#${name}`} />
+      <svg
+        {...rest}
+        className={iconRecipe({ size, class: className })}
+        style={variant === 'bulk' ? { strokeWidth: 0 } : undefined}
+      >
+        <use href={`/icons/sprite-${variant}.svg#${name}`} />
       </svg>
     </AccessibleIcon.Root>
   )

@@ -2,11 +2,12 @@
   "name": "@rs/ui-icons",
   "type": "module",
   "scripts": {
-    "build:local": "npx tsx ./scripts/build.mts",
+    "build:local": "node --experimental-strip-types ./scripts/build.mts",
     "clean": "rm -rf node_modules"
   },
   "exports": {
-    "./icon-name": "./types/name.d.ts"
+    "./icon-name": "./types/name.d.ts",
+    "./icon-variant": "./types/name.d.ts"
   },
   "devDependencies": {
     "@rs/typescript-config": "workspace:*",

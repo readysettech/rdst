@@ -18,7 +18,7 @@ const labelStyles = tv({
 export type FieldRootProps = ComponentProps<'div'>
 
 const Root = ({ className, children, ...props }: FieldRootProps) => (
-  <div className="@container">
+  <div className="@container w-full">
     <div className={rootStyles({ class: className })} {...props}>
       {children}
     </div>

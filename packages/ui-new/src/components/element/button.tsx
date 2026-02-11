@@ -34,11 +34,14 @@ const buttonStyles = tv({
   },
   variants: {
     size: {
+      large: {
+        root: ['text-button-medium', 'py-3', 'px-4', 'rounded-3xl', 'h-12'],
+      },
       base: {
-        root: ['text-button-medium', 'py-3', 'px-4', 'rounded-lg', 'h-10'],
+        root: ['text-button-medium', 'py-3', 'px-4', 'rounded-2xl', 'h-10'],
       },
       small: {
-        root: ['text-button-small', 'py-3', 'px-3', 'rounded-md', 'h-8'],
+        root: ['text-button-small', 'py-3', 'px-3', 'rounded-xl', 'h-8'],
       },
     },
     variant: {

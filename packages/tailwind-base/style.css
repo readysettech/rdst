@@ -342,32 +342,32 @@
     --neutral-black: #000000;
 
     /* Sand */
-    --sand-light-1: #fdfdfc;
-    --sand-light-2: #f9f9f8;
-    --sand-light-3: #f3f3f2;
-    --sand-light-4: #eeeeec;
-    --sand-light-5: #e9e9e6;
-    --sand-light-6: #e3e3e0;
-    --sand-light-7: #dbdbd7;
-    --sand-light-8: #c8c7c1;
-    --sand-light-9: #90908c;
-    --sand-light-10: #868682;
-    --sand-light-11: #706f6c;
-    --sand-light-12: #1b1b18;
+    --sand-light-1: #FFFFFF;
+    --sand-light-2: #FAFAFA;
+    --sand-light-3: #F8F6F3;
+    --sand-light-4: #F4F2EF;
+    --sand-light-5: #E8E6E3;
+    --sand-light-6: #E3E2E0;
+    --sand-light-7: #DBD9D7;
+    --sand-light-8: #C8C5C1;
+    --sand-light-9: #908E8C;
+    --sand-light-10: #868482;
+    --sand-light-11: #706E6C;
+    --sand-light-12: #1A1A1A;
 
-    --sand-dark-1: #0a0a0a;
-    --sand-dark-1-a: #0d0d0d;
-    --sand-dark-2: #0f0f0f;
-    --sand-dark-3: #161615;
-    --sand-dark-4: #1c1c1a;
-    --sand-dark-5: #232320;
-    --sand-dark-6: #353431;
-    --sand-dark-7: #3e3e3a;
-    --sand-dark-8: #51504b;
-    --sand-dark-9: #717069;
-    --sand-dark-10: #7f7e77;
-    --sand-dark-11: #a1a09a;
-    --sand-dark-12: #ededec;
+    --sand-dark-1: #171616;
+    --sand-dark-1-a: #1A1918;
+    --sand-dark-2: #1C1B1A;
+    --sand-dark-3: #232220;
+    --sand-dark-4: #282726;
+    --sand-dark-5: #2E2D2B;
+    --sand-dark-6: #353331;
+    --sand-dark-7: #3E3C3A;
+    --sand-dark-8: #514F4B;
+    --sand-dark-9: #716E69;
+    --sand-dark-10: #7F7C77;
+    --sand-dark-11: #A19E9A;
+    --sand-dark-12: #EDEDEC;
 
     /* Sand Marketing */
     --sand-m-light-1: #fdfdfc;
@@ -559,6 +559,33 @@
     --orange-dark-11: #ff8b3e;
     --orange-dark-12: #feeadd;
 
+        /* Lime */
+    --lime-light-1: #FBFCF8;
+    --lime-light-2: #F8FDE9;
+    --lime-light-3: #EEFFB9;
+    --lime-light-4: #E4FB97;
+    --lime-light-5: #DAF377;
+    --lime-light-6: #CCE470;
+    --lime-light-7: #BED46E;
+    --lime-light-8: #A7BE45;
+    --lime-light-9: #D8F64E;
+    --lime-light-10: #CEEC41;
+    --lime-light-11: #6F8200;
+    --lime-light-12: #3A4021;
+    
+    --lime-dark-1: #1B1E12;
+    --lime-dark-2: #202313;
+    --lime-dark-3: #2B3211;
+    --lime-dark-4: #363E0C;
+    --lime-dark-5: #3F4B03;
+    --lime-dark-6: #4A5700;
+    --lime-dark-7: #566600;
+    --lime-dark-8: #647700;
+    --lime-dark-9: #E2F895;
+    --lime-dark-10: #D9EE8C;
+    --lime-dark-11: #C9E16C;
+    --lime-dark-12: #E4FA97;
+
     /* Project Palettes */
     --red-light-10: #dc3d43;
     --red-light-11: #cd2b31;
@@ -615,12 +642,12 @@
     --surface-primary-soft-hover: var(--sand-light-4);
     --surface-primary-soft-active: var(--sand-light-5);
 
-    --surface-rising-solid: var(--purple-light-9);
-    --surface-rising-solid-hover: var(--purple-light-10);
-    --surface-rising-solid-active: var(--purple-light-8);
-    --surface-rising-soft: var(--purple-light-3);
-    --surface-rising-soft-hover: var(--purple-light-4);
-    --surface-rising-soft-active: var(--purple-light-5);
+    --surface-rising-solid: var(--lime-light-9);
+    --surface-rising-solid-hover: var(--lime-light-10);
+    --surface-rising-solid-active: var(--lime-light-8);
+    --surface-rising-soft: var(--lime-light-3);
+    --surface-rising-soft-hover: var(--lime-light-4);
+    --surface-rising-soft-active: var(--lime-light-5);
 
     --surface-positive-solid: var(--grass-light-9);
     --surface-positive-solid-hover: var(--grass-light-10);
@@ -659,9 +686,9 @@
     --content-primary-soft: var(--sand-light-12);
     --content-primary-plain: var(--sand-light-12);
 
-    --content-rising-solid: var(--neutral-white);
-    --content-rising-soft: var(--purple-light-11);
-    --content-rising-plain: var(--purple-light-11);
+    --content-rising-solid: var(--neutral-black);
+    --content-rising-soft: var(--lime-light-11);
+    --content-rising-plain: var(--lime-light-11);
 
     --content-positive-solid: var(--grass-light-1);
     --content-positive-soft: var(--grass-light-11);
@@ -686,8 +713,8 @@
     --border-primary-solid: var(--sand-dark-7);
     --border-primary-soft: var(--sand-dark-6);
 
-    --border-rising-solid: var(--purple-light-7);
-    --border-rising-soft: var(--purple-light-6);
+    --border-rising-solid: var(--lime-light-7);
+    --border-rising-soft: var(--lime-light-6);
 
     --border-positive-solid: var(--grass-light-7);
     --border-positive-soft: var(--grass-light-6);
@@ -732,12 +759,12 @@
     --surface-primary-soft-hover: var(--sand-dark-4);
     --surface-primary-soft-active: var(--sand-dark-5);
 
-    --surface-rising-solid: var(--purple-dark-9);
-    --surface-rising-solid-hover: var(--purple-dark-10);
-    --surface-rising-solid-active: var(--purple-dark-8);
-    --surface-rising-soft: var(--purple-dark-3);
-    --surface-rising-soft-hover: var(--purple-dark-4);
-    --surface-rising-soft-active: var(--purple-dark-5);
+    --surface-rising-solid: var(--lime-dark-9);
+    --surface-rising-solid-hover: var(--lime-dark-10);
+    --surface-rising-solid-active: var(--lime-dark-8);
+    --surface-rising-soft: var(--lime-dark-3);
+    --surface-rising-soft-hover: var(--lime-dark-4);
+    --surface-rising-soft-active: var(--lime-dark-5);
 
     --surface-positive-solid: var(--grass-dark-9);
     --surface-positive-solid-hover: var(--grass-dark-10);
@@ -776,9 +803,9 @@
     --content-primary-soft: var(--sand-dark-12);
     --content-primary-plain: var(--sand-dark-12);
 
-    --content-rising-solid: var(--neutral-white);
-    --content-rising-soft: var(--purple-dark-11);
-    --content-rising-plain: var(--purple-dark-11);
+    --content-rising-solid: var(--neutral-black);
+    --content-rising-soft: var(--lime-dark-11);
+    --content-rising-plain: var(--lime-dark-11);
 
     --content-positive-solid: var(--grass-dark-1);
     --content-positive-soft: var(--grass-dark-11);
@@ -803,8 +830,8 @@
     --border-primary-solid: var(--sand-light-7);
     --border-primary-soft: var(--sand-light-6);
 
-    --border-rising-solid: var(--purple-dark-7);
-    --border-rising-soft: var(--purple-dark-6);
+    --border-rising-solid: var(--lime-dark-7);
+    --border-rising-soft: var(--lime-dark-6);
 
     --border-positive-solid: var(--grass-dark-7);
     --border-positive-soft: var(--grass-dark-6);

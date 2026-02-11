@@ -23,6 +23,7 @@ const dropdownContentStyles = tv({
   base: [
     'z-50',
     'min-w-32',
+    'max-w-5xl',
     'w-full',
     'overflow-hidden',
     'rounded-xl',
