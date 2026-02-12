@@ -345,21 +345,42 @@ class TelemetryManager:
             return True
         return False
 
+    @staticmethod
+    def _is_interactive() -> bool:
+        """Check if we're in an interactive terminal with a real human.
+
+        Returns False in CI, piped stdin, non-TTY, or when explicitly disabled.
+        """
+        if not sys.stdin.isatty():
+            return False
+        # Explicit opt-out (set by integration tests and CI scripts)
+        if os.environ.get("RDST_NON_INTERACTIVE"):
+            return False
+        # Common CI environments that provide pseudo-TTYs
+        for var in ("BUILDKITE", "CI", "GITHUB_ACTIONS", "JENKINS_URL", "GITLAB_CI"):
+            if os.environ.get(var):
+                return False
+        return True
+
     def show_nps_prompt(self) -> bool:
         """
         Show the NPS prompt and handle response.
         Returns True if user responded, False if skipped.
         """
-        import sys
-
-        if not sys.stdin.isatty():
+        if not self._is_interactive():
             return False
 
+        from lib.ui import get_console, StyledPanel, StyleTokens
+
+        console = get_console()
+
         try:
-            print("\n┌─────────────────────────────────────────────────┐")
-            print("│  Quick question: How's RDST working for you?   │")
-            print("│  [1] 👍 Great    [2] 👎 Not great    [Enter] Skip│")
-            print("└─────────────────────────────────────────────────┘")
+            console.print()
+            console.print(StyledPanel.create(
+                "How's RDST working for you?\n"
+                "[bold][1][/bold] Great    [bold][2][/bold] Not great    [bold][3][/bold] Skip",
+                title="Quick Feedback",
+            ))
 
             response = input("> ").strip()
 
@@ -374,36 +395,160 @@ class TelemetryManager:
             self._save_stats()
 
             if response == "1":
-                # Positive - just track it
                 self.track("nps_response", {"rating": "positive", "score": 1})
-                print("Thanks! 🙏")
+                console.print(f"[{StyleTokens.SUCCESS}]Thanks![/{StyleTokens.SUCCESS}]")
                 return True
 
             elif response == "2":
-                # Negative - ask for more details
-                print("\nWhat can we improve? (press Enter twice to submit)")
-                lines = []
-                while True:
-                    line = input("> ").strip()
-                    if not line and lines:
-                        break
-                    elif line:
-                        lines.append(line)
+                console.print("\nWhat can we improve?")
+                feedback = ""
+                try:
+                    feedback = input("> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    pass
 
-                feedback = "\n".join(lines) if lines else "No details provided"
+                email = ""
+                if feedback:
+                    console.print("Email so we can follow up? (Enter to skip)")
+                    try:
+                        email = input("> ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        pass
 
-                # Track to PostHog (NPS feedback goes to PostHog only, not Slack)
-                self.track("nps_response", {"rating": "negative", "score": 0, "feedback": feedback})
-                print("Thanks for the feedback! We'll work on it.")
+                feedback = feedback or "No details provided"
+
+                self.track("nps_response", {
+                    "rating": "negative",
+                    "score": 0,
+                    "feedback": feedback,
+                    "email": email or None,
+                })
+                self._slack_notify_first_analyze_feedback("negative", feedback, email or None)
+                console.print(f"[{StyleTokens.SUCCESS}]Thanks for the feedback! We'll work on it.[/{StyleTokens.SUCCESS}]")
                 return True
 
             else:
-                # Skipped
                 self.track("nps_response", {"rating": "skipped"})
                 return False
 
         except (EOFError, KeyboardInterrupt):
             return False
+
+    # =========================================================================
+    # First Analyze Feedback (one-time prompt after first successful analyze)
+    # =========================================================================
+
+    def is_first_successful_analyze(self) -> bool:
+        """Check if the most recent analyze was the user's first success.
+
+        Call this AFTER track_analyze() — it checks if successful_analyzes == 1
+        (i.e., track_analyze just incremented it from 0 to 1).
+        """
+        stats = self._get_stats()
+        return stats.get("successful_analyzes", 0) == 1 and not stats.get("first_analyze_feedback_shown", False)
+
+    def show_first_analyze_feedback(self) -> bool:
+        """Show micro-feedback prompt after the user's first successful analyze.
+
+        Returns True if user responded, False if skipped.
+        Sends results to both PostHog and Slack.
+        """
+        if not self._is_interactive():
+            return False
+
+        from lib.ui import get_console, StyledPanel, StyleTokens
+
+        console = get_console()
+
+        try:
+            console.print()
+            console.print(StyledPanel.create(
+                "Your first analysis is complete!\n"
+                "Was this helpful?  [bold][1][/bold] Yes  [bold][2][/bold] No  [bold][3][/bold] Skip",
+                title="Quick Feedback",
+                variant="success",
+            ))
+
+            response = input("> ").strip()
+
+            # Mark as shown so we never ask again
+            stats = self._get_stats()
+            stats["first_analyze_feedback_shown"] = True
+            self._save_stats()
+
+            if response == "1":
+                self.track("first_analyze_feedback", {"rating": "positive"})
+                self._slack_notify_first_analyze_feedback("positive", None, None)
+                console.print(f"[{StyleTokens.SUCCESS}]Glad to hear it![/{StyleTokens.SUCCESS}]")
+                return True
+
+            elif response == "2":
+                console.print("\nWhat could be better?")
+                feedback = ""
+                try:
+                    feedback = input("> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    pass
+
+                email = ""
+                if feedback:
+                    console.print("Email so we can follow up? (Enter to skip)")
+                    try:
+                        email = input("> ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        pass
+
+                feedback = feedback or "No details provided"
+                self.track("first_analyze_feedback", {
+                    "rating": "negative",
+                    "feedback": feedback,
+                    "email": email or None,
+                })
+                self._slack_notify_first_analyze_feedback("negative", feedback, email or None)
+                console.print(f"[{StyleTokens.SUCCESS}]Thanks for the feedback -- we'll work on it.[/{StyleTokens.SUCCESS}]")
+                return True
+
+            else:
+                self.track("first_analyze_feedback", {"rating": "skipped"})
+                return False
+
+        except (EOFError, KeyboardInterrupt):
+            # Mark as shown even if interrupted
+            stats = self._get_stats()
+            stats["first_analyze_feedback_shown"] = True
+            self._save_stats()
+            return False
+
+    def _slack_notify_first_analyze_feedback(
+        self, sentiment: str, feedback: Optional[str], email: Optional[str]
+    ):
+        """Send first-analyze feedback to Slack."""
+        if not self.SLACK_WEBHOOK_FEEDBACK:
+            return
+
+        emoji = ":+1:" if sentiment == "positive" else ":-1:"
+
+        text = (
+            f"*First Analyze Feedback* {emoji}\n"
+            f"Device: `{self.device_id}`\n"
+            f"Rating: {sentiment}"
+        )
+        if feedback:
+            text += f"\nFeedback: {feedback[:1500]}"
+        if email:
+            text += f"\nEmail: {email}"
+
+        payload = {
+            "text": f"First analyze feedback from {self.device_id}",
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": text},
+                }
+            ],
+        }
+
+        self._slack_notify(self.SLACK_WEBHOOK_FEEDBACK, payload)
 
     # =========================================================================
     # Specific Event Trackers

@@ -731,6 +731,13 @@ class RdstCLI:
                     success=result.ok,
                     target_engine=target_engine,
                 )
+
+                # First successful analyze — ask for micro-feedback
+                if result.ok and telemetry.is_first_successful_analyze():
+                    try:
+                        telemetry.show_first_analyze_feedback()
+                    except Exception:
+                        pass
             except Exception:
                 pass  # Don't fail analyze if telemetry fails
 

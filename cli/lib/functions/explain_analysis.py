@@ -9,8 +9,13 @@ import time
 import sys
 import signal
 import select
-import termios
-import tty
+try:
+    import termios
+    import tty
+except ImportError:
+    # Windows: termios/tty not available, interactive skip won't work
+    termios = None
+    tty = None
 from typing import Dict, Any, Optional, List
 from contextlib import contextmanager
 

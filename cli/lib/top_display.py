@@ -306,8 +306,13 @@ class TopDisplay:
             finally:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
-        listener = threading.Thread(target=keypress_thread, daemon=True)
-        listener.start()
+        # Start keyboard listener (Unix-only, requires termios)
+        try:
+            import termios as _termios_check  # noqa: F401
+            listener = threading.Thread(target=keypress_thread, daemon=True)
+            listener.start()
+        except ImportError:
+            pass  # Windows: no keyboard shortcuts, Ctrl+C still works
 
         try:
             with Live(console=self.console, refresh_per_second=2, screen=True) as live:

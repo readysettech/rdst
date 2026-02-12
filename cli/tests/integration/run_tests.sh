@@ -35,6 +35,9 @@ fi
 export TEST_POSTGRESQL
 export TEST_MYSQL
 
+# Suppress interactive prompts (telemetry feedback, NPS) during tests
+export RDST_NON_INTERACTIVE=1
+
 # Find script directory and source setup
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/setup.sh"
