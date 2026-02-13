@@ -24,21 +24,16 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-try:
-    from lib.ui import (
-        get_console,
-        RichPanel as Panel,
-        RichTable as Table,
-        Progress,
-        SpinnerColumn,
-        TextColumn,
-        StyleTokens,
-        Icons,
-    )
-    _RICH_AVAILABLE = True
-except ImportError:
-    _RICH_AVAILABLE = False
-    get_console = None
+from lib.ui import (
+    get_console,
+    StyledPanel,
+    StyledTable,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    StyleTokens,
+    Icons,
+)
 
 from contextlib import contextmanager
 
@@ -371,7 +366,7 @@ class ScanCommand:
     """Command handler for rdst scan."""
 
     def __init__(self, console: Optional[Any] = None):
-        self.console = console or (get_console() if _RICH_AVAILABLE else None)
+        self.console = console or get_console()
 
     def execute(
         self,
@@ -2343,15 +2338,14 @@ Rules for SQL generation:
             reason_parts = [f"{count} {reason.lower()}" for reason, count in reasons.items()]
             funnel_lines.append(f"[bold]Skipped:[/bold] {len(skipped)} ({', '.join(reason_parts)})")
 
-        self.console.print(Panel.fit(
+        self.console.print(StyledPanel.create(
             "\n".join(funnel_lines),
             title="RDST Scan Report",
-            border_style="cyan"
         ))
 
         # Files table
         if results["files"]:
-            table = Table(title="Files with ORM Code", show_header=True)
+            table = StyledTable.create(title="Files with ORM Code")
             table.add_column("File", style="cyan")
             table.add_column("ORMs", style="green")
             table.add_column("Lines", justify="right")
@@ -2367,7 +2361,7 @@ Rules for SQL generation:
         # Queries table
         if results["queries"]:
             self.console.print()
-            table = Table(title="Extracted Queries", show_header=True)
+            table = StyledTable.create(title="Extracted Queries")
             table.add_column("File", style="cyan", max_width=30)
             table.add_column("Line", style="dim")
             table.add_column("Function", style="green")
@@ -2448,7 +2442,7 @@ Rules for SQL generation:
 
             self.console.print()
             border_color = {"pass": "green", "warn": "yellow", "fail": "red", "error": "red"}.get(ci_status, "red")
-            self.console.print(Panel.fit(
+            self.console.print(StyledPanel.create(
                 "\n".join(summary_lines),
                 title="Analysis Summary",
                 border_style=border_color,
@@ -2580,14 +2574,13 @@ Rules for SQL generation:
 
         # Rich output
         self.console.print()
-        self.console.print(Panel.fit(
+        self.console.print(StyledPanel.create(
             f"[bold]Source:[/bold] scan\n"
             f"[bold]Total queries:[/bold] {len(queries)}",
             title="Query Registry (Scan)",
-            border_style="cyan"
         ))
 
-        table = Table(title="Queries", show_header=True)
+        table = StyledTable.create(title="Queries")
         table.add_column("Hash", style="dim", width=12)
         table.add_column("SQL", max_width=60)
         table.add_column("Last Target", style="green", max_width=15)
@@ -2692,13 +2685,13 @@ Rules for SQL generation:
 
         status_color = {"pass": "green", "warning": "yellow", "error": "red"}.get(results["status"], "white")
         self.console.print()
-        self.console.print(Panel.fit(
+        self.console.print(StyledPanel.create(
             f"[bold]Status:[/bold] [{status_color}]{results['status'].upper()}[/{status_color}]\n"
             f"[bold]Total queries:[/bold] {results['total_queries']}\n"
             f"[bold]New queries:[/bold] {results['new_queries']}\n"
             f"[bold]With issues:[/bold] {results['queries_with_issues']}",
             title="Scan Check",
-            border_style=status_color
+            border_style=status_color,
         ))
 
         if results["issues"]:

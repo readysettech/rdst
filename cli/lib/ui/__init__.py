@@ -125,9 +125,6 @@ from .components import (
     Progress,
     SpinnerColumn,
     TextColumn,
-    # Raw Rich components (for when styled versions don't fit)
-    RichPanel,
-    RichTable,
 )
 
 __all__ = [
@@ -214,7 +211,4 @@ __all__ = [
     "Progress",
     "SpinnerColumn",
     "TextColumn",
-    # Raw Rich components
-    "RichPanel",
-    "RichTable",
 ]

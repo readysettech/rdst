@@ -61,10 +61,6 @@ from rich.syntax import Syntax
 from rich.console import Group
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-# Re-export raw Rich components for direct use when styled versions don't fit
-RichPanel = Panel
-RichTable = Table
-
 
 # =============================================================================
 # Base Primitives - Building Blocks for All Components

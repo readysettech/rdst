@@ -392,19 +392,6 @@ def generate_query_name(text: str, existing_names: Optional[set] = None) -> str:
     return final_name
 
 
-def extract_parameters_from_sql(
-    original_sql: str, parameterized_sql: str
-) -> Dict[str, Any]:
-    """
-    Extract parameter values by comparing original SQL with parameterized version.
-
-    This is a placeholder - the actual implementation would diff the two SQL
-    strings to extract literal values that were replaced with placeholders.
-    """
-    # TODO: Implement actual parameter extraction
-    return {}
-
-
 def generate_dummy_parameters(sql: str) -> Dict[str, Any]:
     """
     Generate sensible dummy parameter values for a parameterized SQL query.
