@@ -79,7 +79,7 @@ def _extract_semantic_concepts(
     question: str,
     all_tables: List[str],
     llm_manager,
-    model: str = "claude-3-haiku-20240307"
+    model: str = "claude-haiku-4-5-20251001"
 ) -> Dict[str, Any]:
     """
     Use Haiku to identify semantic concepts and required tables.
@@ -548,7 +548,7 @@ def _llm_select_tables(
     question: str,
     all_tables: List[str],
     llm_manager,
-    model: str = "claude-3-haiku-20240307"
+    model: str = "claude-haiku-4-5-20251001"
 ) -> Set[str]:
     """
     Tier 3: Use LLM to select relevant tables.

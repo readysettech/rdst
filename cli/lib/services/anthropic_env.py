@@ -16,6 +16,17 @@ def get_anthropic_api_key() -> str | None:
     return None
 
 
+def _has_active_trial() -> bool:
+    """Check if an active RDST trial token exists in config."""
+    try:
+        from lib.cli.rdst_cli import TargetsConfig
+        cfg = TargetsConfig()
+        cfg.load()
+        return cfg.is_trial_active()
+    except Exception:
+        return False
+
+
 def has_anthropic_api_key() -> bool:
-    """Return True when an Anthropic API key is available."""
-    return get_anthropic_api_key() is not None
+    """Return True when an Anthropic API key or active trial is available."""
+    return get_anthropic_api_key() is not None or _has_active_trial()

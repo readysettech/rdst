@@ -6,6 +6,7 @@ It consumes TopEvent objects from TopService and renders them appropriately.
 
 import datetime
 import sys
+import time
 from typing import List, Optional
 
 from lib.ui import (
@@ -14,11 +15,9 @@ from lib.ui import (
     EmptyState,
     Group,
     KeyboardShortcuts,
-    Live,
     MessagePanel,
     MonitorHeader,
     NoticePanel,
-    RichLayout,
     StatusLine,
     StyleTokens,
     TopQueryTable,
@@ -77,7 +76,7 @@ class TopRenderer:
         self._verbose = verbose
         self._no_color = no_color
         self._realtime = realtime
-        self._live: Optional[Live] = None
+        self._live_started: bool = False
         self._current_queries: List[TopQueryData] = []
         self._target_name: str = ""
         self._db_engine: str = ""
@@ -85,6 +84,7 @@ class TopRenderer:
         self._runtime_seconds: float = 0.0
         self._total_tracked: int = 0
         self._auto_saved_count: int = 0
+        self._last_display_update: float = 0.0
 
     def render(self, event: TopEvent) -> None:
         """Render an event to the terminal.
@@ -108,36 +108,24 @@ class TopRenderer:
             self._render_error(event)
 
     def start_live(self) -> None:
-        """Start Rich Live display for realtime mode."""
-        if self._realtime and self._live is None:
-            # Create footer using KeyboardShortcuts component
-            footer = KeyboardShortcuts(
-                title="Quick Actions",
-                shortcuts=[
-                    ("0-9", "save", StyleTokens.SUCCESS),
-                    ("a", "save all", StyleTokens.SUCCESS),
-                    ("z+0-9", "analyze", StyleTokens.WARNING),
-                    ("q", "quit", StyleTokens.ERROR),
-                    ("Ctrl+C", "quit", StyleTokens.ERROR),
-                ],
-            )
-            self._footer = footer
-            self._live = Live(
-                self._build_display(),
-                refresh_per_second=2,
-                console=self._console,
-                screen=True,
-            )
-            self._live.start()
+        """Start realtime display mode (manual cursor control, no Rich Live)."""
+        if self._realtime and not self._live_started:
+            self._live_started = True
+            # Clear screen and home cursor
+            if sys.stdout.isatty():
+                sys.stdout.write("\033[2J\033[H")
+                sys.stdout.flush()
 
     def stop_live(self) -> None:
-        """Stop Rich Live display."""
-        if self._live:
-            self._live.stop()
-            self._live = None
+        """Stop realtime display."""
+        self._live_started = False
 
     def cleanup(self) -> None:
         """Stop any active display. Call when done."""
+        if self._live_started and sys.stdout.isatty():
+            # Clear the screen so no ghost content remains
+            sys.stdout.write("\033[2J\033[H")
+            sys.stdout.flush()
         self.stop_live()
         self._restore_terminal()
 
@@ -209,9 +197,18 @@ class TopRenderer:
         self._total_tracked = event.total_tracked or 0
 
         if self._realtime:
-            # Update Live display
-            if self._live:
-                self._live.update(self._build_display())
+            # Direct terminal update (throttle to once per second)
+            now = time.monotonic()
+            if self._live_started and (now - self._last_display_update) >= 1.0:
+                self._last_display_update = now
+                # Home cursor, print, clear remainder
+                if sys.stdout.isatty():
+                    sys.stdout.write("\033[H")
+                    sys.stdout.flush()
+                self._console.print(self._build_display())
+                if sys.stdout.isatty():
+                    sys.stdout.write("\033[J")
+                    sys.stdout.flush()
         else:
             # Snapshot mode: render the table directly
             self._render_queries_snapshot(event)
@@ -287,8 +284,6 @@ class TopRenderer:
 
     def _build_display(self):
         """Build current display for Live updates."""
-        layout = RichLayout()
-
         # Header using MonitorHeader component
         stats = {
             "Runtime": f"{int(self._runtime_seconds)}s",
@@ -318,11 +313,11 @@ class TopRenderer:
         )
 
         table.add_column("#", style=StyleTokens.SECONDARY, width=3)
-        table.add_column("Max Duration", style=StyleTokens.DURATION_SLOW, width=12)
-        table.add_column("Avg Duration", style=StyleTokens.WARNING, width=12)
-        table.add_column("Observations", style=StyleTokens.SUCCESS, width=12)
-        table.add_column("Instances Running", style=StyleTokens.ACCENT, width=18)
-        table.add_column("Query", style=StyleTokens.SQL, no_wrap=True)
+        table.add_column("Max", style=StyleTokens.DURATION_SLOW, width=11)
+        table.add_column("Avg", style=StyleTokens.WARNING, width=11)
+        table.add_column("Obs", style=StyleTokens.SUCCESS, width=5)
+        table.add_column("Run", style=StyleTokens.ACCENT, width=5)
+        table.add_column("Query", style=StyleTokens.SQL)
 
         # Add rows
         for idx, query in enumerate(self._current_queries[:10]):
@@ -346,8 +341,6 @@ class TopRenderer:
             # Use normalized query for display
             query_text = query.normalized_query or query.query_text
             query_text = " ".join(query_text.split())
-            if len(query_text) > 100:
-                query_text = query_text[:97] + "..."
 
             # Highlight if currently running
             instances = query.current_instances or 0
@@ -379,14 +372,7 @@ class TopRenderer:
             ],
         )
 
-        # Combine header, table, and footer
-        layout.split_column(
-            RichLayout(header, size=8),
-            RichLayout(table),
-            RichLayout(footer, size=5),
-        )
-
-        return layout
+        return Group(header, table, footer)
 
     def _restore_terminal(self) -> None:
         """Restore terminal to normal state after Live display exits.

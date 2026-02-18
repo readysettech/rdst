@@ -1016,7 +1016,7 @@ class ConfigurationWizard:
         """Configure LLM settings for RDST.
 
         RDST uses Anthropic's Claude for AI-powered query analysis.
-        Users must provide their own API key via ANTHROPIC_API_KEY environment variable.
+        Users can provide their own API key or sign up for a free trial.
         """
         import os
 
@@ -1025,47 +1025,303 @@ class ConfigurationWizard:
 
         self._show_step("", "Anthropic Configuration", "")
 
-        # Check if API key is already set
-        has_api_key = bool(os.getenv("ANTHROPIC_API_KEY"))
+        # Check if API key is already set (own key takes priority)
+        has_api_key = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("RDST_ANTHROPIC_API_KEY"))
 
         if has_api_key:
             self._show_success(
-                "API Key Detected", "ANTHROPIC_API_KEY is set in your environment"
+                "API Key Detected", "Anthropic API key is set in your environment"
             )
 
-            # Use Sonnet 4.5 as the default (and only) model
             cfg._data.setdefault("llm", {})
             cfg._data["llm"]["provider"] = "claude"
-            cfg._data["llm"]["model"] = "claude-sonnet-4-5-20250929"
-            cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.5"
+            cfg._data["llm"]["model"] = "claude-sonnet-4-6"
+            cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.6"
 
             cfg.save()
             self._show_success("Configured", cfg._data["llm"]["hint"])
             return RdstResult(True, "Anthropic configured")
 
         else:
-            # No API key set - show instructions
-            self._show_warning(
-                "API Key Required",
-                "RDST requires an Anthropic API key for AI-powered query analysis.\n\n"
-                "To get started:\n"
-                "  1. Visit https://console.anthropic.com/\n"
-                "  2. Create an account or sign in\n"
-                "  3. Generate an API key\n"
-                "  4. Set the environment variable:\n"
-                '     export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
-                "For persistence, add to ~/.bashrc or ~/.zshrc:\n"
-                "  echo 'export ANTHROPIC_API_KEY=\"your-key\"' >> ~/.bashrc\n"
-                "  source ~/.bashrc",
+            # No API key - offer trial or manual setup
+            self.console.print(
+                MessagePanel(
+                    "RDST requires an Anthropic API key for AI-powered query analysis.",
+                    variant="info",
+                    title="LLM Setup",
+                )
             )
 
-            # Still save config to mark LLM as configured (will work once key is set)
+            # Check for existing active trial
+            if cfg.is_trial_active():
+                trial = cfg.get_trial_config()
+                remaining = trial.get("remaining_cents")
+                limit = trial.get("limit_cents", 500)
+                if remaining is not None:
+                    remaining_dollars = remaining / 100
+                    limit_dollars = limit / 100
+                    used_dollars = limit_dollars - remaining_dollars
+                    balance_msg = (
+                        f"You have an active RDST trial\n\n"
+                        f"  Balance: ${remaining_dollars:.2f} remaining of ${limit_dollars:.2f}\n"
+                        f"  Used:    ${used_dollars:.2f}"
+                    )
+                else:
+                    balance_msg = "You have an active RDST trial (balance updates after next LLM call)"
+                self._show_success("Active Trial", balance_msg)
+                cfg._data.setdefault("llm", {})
+                cfg._data["llm"]["provider"] = "claude"
+                cfg._data["llm"]["model"] = "claude-sonnet-4-6"
+                cfg._data["llm"]["hint"] = "Using trial credits"
+                cfg.save()
+                return RdstResult(True, "Trial active")
+
+            choice = SelectPrompt.ask(
+                "How would you like to set up AI query analysis?",
+                options=[
+                    "Get free trial credits (no credit card needed)",
+                    "I have my own Anthropic API key",
+                    "Skip for now",
+                ],
+                default=1,
+                return_index=True,
+            )
+
+            trial_success = False
+            if choice == 1:  # Free trial
+                trial_success = self._run_trial_registration(cfg)
+            elif choice == 2:  # Own key
+                self.console.print(
+                    MessagePanel(
+                        "Set the environment variable:\n"
+                        '  export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
+                        "Get a key at: https://console.anthropic.com/\n\n"
+                        "For persistence, add to ~/.bashrc or ~/.zshrc:\n"
+                        '  echo \'export ANTHROPIC_API_KEY="your-key"\' >> ~/.bashrc\n'
+                        "  source ~/.bashrc",
+                        variant="info",
+                        title="API Key Setup",
+                    )
+                )
+            # choice == 3: Skip
+
+            # Save config regardless
             cfg._data.setdefault("llm", {})
             cfg._data["llm"]["provider"] = "claude"
-            cfg._data["llm"]["model"] = "claude-sonnet-4-5-20250929"
-            cfg._data["llm"]["hint"] = "Waiting for ANTHROPIC_API_KEY"
+            cfg._data["llm"]["model"] = "claude-sonnet-4-6"
+            cfg._data["llm"]["hint"] = "Using trial credits" if trial_success else "Waiting for API key"
             cfg.save()
 
-            return RdstResult(
-                False, "ANTHROPIC_API_KEY not set. See instructions above."
+            return RdstResult(trial_success, "LLM configured" if trial_success else "API key needed")
+
+    def _run_trial_registration(self, cfg: TargetsConfig) -> bool:
+        """Run the trial registration flow with email validation retry loop.
+
+        1. Prompt for email (with retry on validation errors)
+        2. POST /register to key service
+        3. Handle: disposable, invalid domain, bad email, send failure
+        4. Tell user to check email
+        5. Prompt for trial token (from verification page)
+        6. Save to config
+        """
+        import requests as req
+
+        REGISTER_URL = "https://rdst-keyservice.readysetio.workers.dev/register"
+
+        # Retry loop for email validation errors
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            email = Prompt.ask("Email address")
+            if not email or "@" not in email:
+                self.console.print(MessagePanel("Invalid email address", variant="error"))
+                if attempt < max_attempts - 1:
+                    continue
+                return False
+
+            # Call registration endpoint
+            try:
+                resp = req.post(REGISTER_URL, json={"email": email}, timeout=20)
+            except Exception:
+                self.console.print(
+                    MessagePanel(
+                        "Unable to reach RDST trial service.\n\n"
+                        "You can set your own key instead:\n"
+                        '  export ANTHROPIC_API_KEY="sk-ant-..."',
+                        variant="error",
+                        title="Connection Error",
+                    )
+                )
+                return False
+
+            # Parse response JSON once
+            try:
+                resp_data = resp.json()
+            except Exception:
+                resp_data = {}
+
+            code = resp_data.get("code", "")
+
+            # --- Non-retryable errors ---
+
+            if resp.status_code == 503:
+                detail = resp_data.get("detail", "")
+                self.console.print(
+                    MessagePanel(
+                        detail or "The RDST free trial program is currently full.\n\n"
+                        "Options:\n"
+                        "  1. Email hello@readyset.io to request access\n"
+                        '  2. Use your own key: export ANTHROPIC_API_KEY="sk-ant-..."\n'
+                        "     Get one at: https://console.anthropic.com/",
+                        variant="warning",
+                        title="Trial Program Full",
+                    )
+                )
+                return False
+
+            if resp.status_code == 429:
+                self.console.print(
+                    MessagePanel(
+                        "Too many registration attempts. Please try again later.",
+                        variant="warning",
+                        title="Rate Limited",
+                    )
+                )
+                return False
+
+            if resp.status_code == 409:
+                self.console.print(
+                    MessagePanel("This email is already registered.", variant="warning")
+                )
+                # Still let them enter a token if they lost it
+                break
+
+            # --- Retryable email validation errors ---
+
+            if resp.status_code == 400 and code == "DISPOSABLE_EMAIL":
+                self.console.print(
+                    MessagePanel(
+                        "Disposable or temporary email addresses are not allowed.\n\n"
+                        "Please use your real email address (work or personal).",
+                        variant="error",
+                        title="Invalid Email",
+                    )
+                )
+                if attempt < max_attempts - 1:
+                    self.console.print("  Try again with a different email.\n")
+                    continue
+                return False
+
+            if resp.status_code == 400 and code == "INVALID_DOMAIN":
+                self.console.print(
+                    MessagePanel(
+                        "This email domain doesn't appear to accept mail.\n\n"
+                        "Please check for typos and try again.",
+                        variant="error",
+                        title="Invalid Email Domain",
+                    )
+                )
+                if attempt < max_attempts - 1:
+                    continue
+                return False
+
+            if resp.status_code == 400 and code == "EMAIL_REJECTED":
+                did_you_mean = resp_data.get("did_you_mean")
+                detail = resp_data.get("detail", "This email could not be verified.")
+                if did_you_mean:
+                    self.console.print(
+                        MessagePanel(
+                            f"{detail}\n\n"
+                            f"Suggestion: {did_you_mean}",
+                            variant="warning",
+                            title="Email Validation Failed",
+                        )
+                    )
+                else:
+                    self.console.print(
+                        MessagePanel(detail, variant="error", title="Email Validation Failed")
+                    )
+                if attempt < max_attempts - 1:
+                    continue
+                return False
+
+            # --- Email send failure (422) ---
+
+            if resp.status_code == 422:
+                email_error = resp_data.get("email_error", "")
+                hint = resp_data.get("hint", "")
+                self.console.print(
+                    MessagePanel(
+                        f"Could not send verification email to {email}.\n\n"
+                        f"{email_error}\n\n"
+                        f"{hint}" if hint else
+                        f"Could not send verification email to {email}.\n\n"
+                        f"{email_error}\n\n"
+                        "This usually means the email address doesn't exist or can't receive mail.\n"
+                        "Please double-check and try again.",
+                        variant="error",
+                        title="Email Delivery Failed",
+                    )
+                )
+                if attempt < max_attempts - 1:
+                    continue
+                return False
+
+            # --- Other errors ---
+
+            if resp.status_code >= 400:
+                detail = resp_data.get("detail", f"Registration failed (HTTP {resp.status_code})")
+                self.console.print(MessagePanel(detail, variant="error"))
+                return False
+
+            # --- Success ---
+
+            limit_display = resp_data.get("limit_display", "$5.00")
+            email_tier = resp_data.get("email_tier", "business")
+
+            self.console.print(
+                MessagePanel(
+                    f"Verification email sent to {email}\n\n"
+                    f"Your trial credit: {limit_display}"
+                    f"{' (business email)' if email_tier == 'business' else ' (personal email)'}\n\n"
+                    "1. Check your email (including spam folder)\n"
+                    "2. Click the verification link\n"
+                    "3. Copy the trial token from the page",
+                    variant="success",
+                    title="Email Sent",
+                )
             )
+            break
+        else:
+            # Exhausted all retry attempts
+            self.console.print(
+                MessagePanel(
+                    "Too many failed attempts.\n\n"
+                    "You can set your own key instead:\n"
+                    '  export ANTHROPIC_API_KEY="sk-ant-..."',
+                    variant="error",
+                )
+            )
+            return False
+
+        # Prompt for trial token
+        token = Prompt.ask("Paste your trial token")
+        if not token or len(token.strip()) < 10:
+            self.console.print(MessagePanel("Invalid token", variant="error"))
+            return False
+
+        # Save trial config
+        cfg.set_trial_config({
+            "token": token.strip(),
+            "email": email,
+            "status": "active",
+        })
+        cfg.save()
+
+        self.console.print(
+            MessagePanel(
+                "Trial activated! Check your verification email for credit details.",
+                variant="success",
+                title="Trial Active",
+            )
+        )
+        return True

@@ -10,7 +10,12 @@ class Provider(Protocol):
     ) -> "ProviderResponse": ...
 
     def stream(
-        self, request: "ProviderRequest", *, api_key: str
+        self,
+        request: "ProviderRequest",
+        *,
+        api_key: str,
+        base_url: str | None = None,
+        extra_headers: dict | None = None,
     ) -> Generator[str, None, None]:
         """Sync generator that yields tokens. Optional - may raise NotImplementedError."""
         raise NotImplementedError("Streaming not supported by this provider")

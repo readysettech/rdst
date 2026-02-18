@@ -882,16 +882,30 @@ class AnalyzeCommand:
             Error message if no API key configured, None if OK
         """
         try:
-            # RDST uses Anthropic/Claude - check for that key
-            key = os.environ.get("ANTHROPIC_API_KEY")
-            if not key:
-                return (
-                    "No LLM API key configured.\n\n"
-                    "Please provide your Anthropic API key to enable query analysis.\n"
-                    "You can get one at: https://console.anthropic.com/"
-                )
+            # Check env vars first, then trial token from config
+            key = os.environ.get("RDST_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+            if key:
+                return None
 
-            return None  # Key is configured
+            # Check for active trial token (or detect exhausted trial)
+            try:
+                from ..llm_manager.key_resolution import resolve_api_key
+                resolve_api_key()
+                return None
+            except Exception as trial_err:
+                # Check if this is a trial exhaustion (not just missing key)
+                err_code = getattr(trial_err, "code", None)
+                if err_code == "TRIAL_EXHAUSTED":
+                    return str(trial_err)
+                pass
+
+            return (
+                "No LLM API key configured.\n\n"
+                "Options:\n"
+                "  1. Run 'rdst init' to sign up for a free trial ($5 credit)\n"
+                '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."\n'
+                "     Get one at: https://console.anthropic.com/"
+            )
 
         except Exception as e:
             return f"Configuration error: {e}"

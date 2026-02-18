@@ -25,7 +25,7 @@ from .types import (
 class InitService:
     """Stateless service for init workflow."""
 
-    _DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
+    _DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 
     def _load_config(self) -> TargetsConfig:
         """Load TargetsConfig from CLI module."""
@@ -60,7 +60,7 @@ class InitService:
             {
                 "provider": "claude",
                 "model": self._DEFAULT_CLAUDE_MODEL,
-                "hint": "Using Claude Sonnet 4.5",
+                "hint": "Using Claude Sonnet 4.6",
             }
         )
         cfg.save()

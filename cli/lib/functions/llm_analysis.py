@@ -30,14 +30,21 @@ def estimate_tokens(text: str) -> int:
 
 # Claude pricing (as of 2025) - $ per million tokens
 CLAUDE_PRICING = {
-    "claude-sonnet-4-5-20250929": {
-        "input": 3.0,
-        "output": 15.0,
-    },  # Default - same price as 4
-    "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
-    "claude-opus-4-20250514": {"input": 15.0, "output": 75.0},
+    # Sonnet family ($3/$15 per MTok)
+    "claude-sonnet-4-6":          {"input": 3.0, "output": 15.0},   # Sonnet 4.6 (latest)
+    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+    "claude-sonnet-4-20250514":   {"input": 3.0, "output": 15.0},
+    # Opus family ($5/$25 per MTok for 4.5+; $15/$75 for 4.0/4.1)
+    "claude-opus-4-6":            {"input": 5.0, "output": 25.0},   # Opus 4.6 (latest)
+    "claude-opus-4-5-20251101":   {"input": 5.0, "output": 25.0},   # Opus 4.5
+    "claude-opus-4-1-20250805":   {"input": 15.0, "output": 75.0},  # Opus 4.1
+    "claude-opus-4-20250514":     {"input": 15.0, "output": 75.0},  # Opus 4.0
+    # Haiku family
+    "claude-haiku-4-5-20251001":  {"input": 1.0, "output": 5.0},    # Haiku 4.5 (latest)
+    "claude-3-5-haiku-20241022":  {"input": 0.80, "output": 4.0},   # Haiku 3.5
+    "claude-3-haiku-20240307":    {"input": 0.25, "output": 1.25},  # Haiku 3 (deprecated Apr 2026)
     # Fallback for unknown models (assume Sonnet pricing)
-    "default": {"input": 3.0, "output": 15.0},
+    "default":                    {"input": 3.0, "output": 15.0},
 }
 
 
@@ -445,7 +452,7 @@ CRITICAL DISTINCTIONS:
 
 - OPTIMIZATION_OPPORTUNITIES: General recommendations like query caching, connection pooling, etc.
 
-CRITICAL ANTI-HALLUCINATION RULES (from Gautam's validation):
+CRITICAL ANTI-HALLUCINATION RULES:
 - Check existing indexes CAREFULLY before suggesting new ones - look at the USING clause
 - Pay attention to index types: HASH indexes CANNOT be used for JOINs or range scans in PostgreSQL
 - If you see "USING hash" on a join column, suggest REPLACING it with BTREE, not creating duplicate
@@ -645,7 +652,7 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             # Get detailed token usage
             tokens_used = llm_response.get("tokens_used") or 0
             model_used = (
-                llm_response.get("model") or model_param or "claude-sonnet-4-5-20250929"
+                llm_response.get("model") or model_param or "claude-sonnet-4-6"
             )
 
             # Try to get actual token breakdown if available

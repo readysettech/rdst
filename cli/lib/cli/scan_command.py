@@ -595,15 +595,25 @@ class ScanCommand:
         if schema_context and self.console and not output_json:
             self.console.print(f"[dim]Loaded schema context ({len(schema_context)} chars)[/dim]")
 
-        # Check for API key early - fail fast if not configured
+        # Check for API key or trial token early - fail fast if not configured
         if not dry_run:
-            if not os.environ.get("ANTHROPIC_API_KEY"):
+            _has_key = bool(os.environ.get("RDST_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
+            if not _has_key:
+                try:
+                    from ..llm_manager.key_resolution import resolve_api_key
+                    resolve_api_key()
+                    _has_key = True
+                except Exception:
+                    pass
+            if not _has_key:
                 return RdstResult(
                     False,
                     "No LLM API key configured.\n\n"
-                    "rdst scan requires an Anthropic API key to convert ORM code to SQL.\n"
-                    "Set it with: export ANTHROPIC_API_KEY=\"sk-ant-...\"\n\n"
-                    "Get a key at: https://console.anthropic.com/"
+                    "rdst scan requires an Anthropic API key to convert ORM code to SQL.\n\n"
+                    "Options:\n"
+                    "  1. Run 'rdst init' to sign up for a free trial ($5 credit)\n"
+                    "  2. Set your own key: export ANTHROPIC_API_KEY=\"sk-ant-...\"\n"
+                    "     Get one at: https://console.anthropic.com/"
                 )
 
         # Step 2: AST-based extraction (DETERMINISTIC)
@@ -803,13 +813,23 @@ class ScanCommand:
 
         # Run full analysis on each query if --analyze flag is set
         if analyze and target:
-            # Fail immediately if no API key — don't silently produce empty results
+            # Fail immediately if no API key or trial token — don't silently produce empty results
             import os as _os
-            if not _os.environ.get("ANTHROPIC_API_KEY"):
+            _has_key = bool(_os.environ.get("RDST_ANTHROPIC_API_KEY") or _os.environ.get("ANTHROPIC_API_KEY"))
+            if not _has_key:
+                try:
+                    from ..llm_manager.key_resolution import resolve_api_key
+                    resolve_api_key()
+                    _has_key = True
+                except Exception:
+                    pass
+            if not _has_key:
                 error_msg = (
-                    "ANTHROPIC_API_KEY not set. Cannot run analysis.\n"
-                    "Export your key: export ANTHROPIC_API_KEY=sk-ant-...\n"
-                    "Get one at: https://console.anthropic.com/"
+                    "No LLM API key configured. Cannot run analysis.\n\n"
+                    "Options:\n"
+                    "  1. Run 'rdst init' to sign up for a free trial ($5 credit)\n"
+                    "  2. Set your own key: export ANTHROPIC_API_KEY=\"sk-ant-...\"\n"
+                    "     Get one at: https://console.anthropic.com/"
                 )
                 if output_json:
                     results["analysis"] = {"error": error_msg, "ci_status": "fail", "ci_exit_code": 1}
@@ -969,7 +989,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                     user_query=user_query,
                     max_tokens=2000,
                     temperature=0.0,
-                    model="claude-3-haiku-20240307",
+                    model="claude-haiku-4-5-20251001",
                 )
 
                 result_text = response.get("text", "").strip()
@@ -1268,10 +1288,98 @@ Respond with ONLY this JSON (no markdown code blocks):
                 }
 
         except subprocess.TimeoutExpired:
+            # Retry with --fast (skips EXPLAIN ANALYZE, uses EXPLAIN only)
+            try:
+                fast_cmd = [
+                    "python3", "rdst.py", "analyze",
+                    "-q", sql,
+                    "--target", target,
+                    "--json",
+                    "--fast",
+                ]
+                _start = _t.time()
+                proc = subprocess.run(
+                    fast_cmd,
+                    capture_output=True,
+                    text=True,
+                    stdin=subprocess.DEVNULL,
+                    timeout=120,
+                    cwd=rdst_dir,
+                )
+                _elapsed = _t.time() - _start
+
+                if proc.returncode == 0 and proc.stdout.strip():
+                    raw_output = proc.stdout.strip()
+                    data = None
+                    try:
+                        data = json_module.loads(raw_output)
+                    except json_module.JSONDecodeError:
+                        start = raw_output.find('{')
+                        end = raw_output.rfind('}')
+                        if start >= 0 and end > start:
+                            try:
+                                data = json_module.loads(raw_output[start:end + 1])
+                            except json_module.JSONDecodeError:
+                                pass
+
+                    if data is not None:
+                        explain_results = data.get("explain_results") or {}
+                        llm_analysis = data.get("llm_analysis") or {}
+                        exec_time_ms = explain_results.get("execution_time_ms")
+
+                        rating = None
+                        risk_score = None
+                        issues = ["EXPLAIN ANALYZE timed out — analyzed with EXPLAIN only"]
+                        recommendations = []
+
+                        if llm_analysis and llm_analysis.get("success"):
+                            analysis_res = llm_analysis.get("analysis_results") or {}
+                            performance = analysis_res.get("performance_assessment") or {}
+                            rating = performance.get("overall_rating")
+                            risk_score = performance.get("efficiency_score")
+
+                            for concern in (performance.get("primary_concerns") or []):
+                                issues.append(concern if isinstance(concern, str) else str(concern))
+                            for opp in (analysis_res.get("optimization_opportunities") or []):
+                                issue = opp if isinstance(opp, str) else opp.get("description", str(opp))
+                                issues.append(issue)
+                            for rec in (analysis_res.get("index_recommendations") or []):
+                                if isinstance(rec, str):
+                                    recommendations.append(rec)
+                                else:
+                                    idx_stmt = rec.get("index_statement") or rec.get("sql") or str(rec)
+                                    rationale = rec.get("rationale") or rec.get("reason", "")
+                                    if rationale:
+                                        recommendations.append(f"Index: {idx_stmt} — {rationale}")
+                                    else:
+                                        recommendations.append(f"Index: {idx_stmt}")
+
+                        return {
+                            "success": True,
+                            "hash": query_hash,
+                            "file": q.get("file", ""),
+                            "function": q.get("function", ""),
+                            "line": q.get("start_line", 0),
+                            "sql": sql,
+                            "rating": rating,
+                            "risk_score": risk_score,
+                            "execution_time_ms": exec_time_ms,
+                            "issues": issues,
+                            "recommendations": recommendations,
+                            "rewrite_benchmarks": [],
+                            "fast_mode": True,
+                            "_subprocess_seconds": round(_elapsed, 1),
+                            "_llm_ran": bool(llm_analysis and llm_analysis.get("success")),
+                            "_llm_error": "",
+                        }
+
+            except Exception:
+                pass
+
             return {
                 "success": False,
                 "hash": query_hash,
-                "error": "Timeout (30s)",
+                "error": "Timeout (EXPLAIN ANALYZE and fast mode both failed)",
             }
         except Exception as e:
             return {
@@ -1473,6 +1581,8 @@ Respond with ONLY this JSON (no markdown code blocks):
                 if rating:
                     parts.append(rating)
                 if llm_ran and score is not None:
+                    if result.get("fast_mode"):
+                        return f"  [{StyleTokens.WARNING}]{Icons.WARNING}[/{StyleTokens.WARNING}] {func_name}() {Icons.ARROW} {', '.join(parts)} (EXPLAIN only, timed out)"
                     return f"  [{StyleTokens.SUCCESS}]{Icons.CHECK}[/{StyleTokens.SUCCESS}] {func_name}() {Icons.ARROW} {', '.join(parts)}"
                 else:
                     err_hint = llm_error if llm_error else "no LLM score"
@@ -2051,7 +2161,7 @@ Output only the SQL query."""
                 user_query=user_query,
                 max_tokens=500,
                 temperature=0.0,
-                model="claude-3-haiku-20240307",  # Use Haiku for single queries - fast & cheap
+                model="claude-haiku-4-5-20251001",  # Use Haiku for single queries - fast & cheap
             )
 
             result_text = response.get("text", "").strip()

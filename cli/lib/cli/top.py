@@ -126,8 +126,10 @@ class TopCommand:
                 )
 
         except KeyboardInterrupt:
+            self._force_restore_terminal()
             return RdstResult(True, "\nTop view cancelled by user")
         except Exception as e:
+            self._force_restore_terminal()
             import traceback
 
             error_msg = f"top failed: {e}"
@@ -248,25 +250,36 @@ class TopCommand:
         except ImportError:
             pass
 
+        error_message = None
+
         async def run_async():
             nonlocal running, selected_query_index, save_all_requested
             nonlocal analyze_requested, quit_requested, target_name, newly_saved
+            nonlocal error_message
 
-            renderer.start_live()
+            live_started = False
             try:
                 async for event in service.stream_realtime(input_data, options, None):
-                    # Render the event
-                    renderer.render(event)
-
-                    # Track state
-                    if isinstance(event, TopConnectedEvent):
-                        target_name = event.target_name
-                    elif isinstance(event, TopQuerySavedEvent):
-                        if event.is_new:
-                            newly_saved += 1
-                    elif isinstance(event, TopErrorEvent):
+                    # Handle errors BEFORE starting Live display
+                    if isinstance(event, TopErrorEvent):
+                        error_message = event.message
                         running = False
                         break
+
+                    # Start Live display only after successful connection
+                    if isinstance(event, TopConnectedEvent) and not live_started:
+                        target_name = event.target_name
+                        renderer.start_live()
+                        live_started = True
+
+                    # Render the event
+                    if live_started:
+                        renderer.render(event)
+
+                    # Track state
+                    if isinstance(event, TopQuerySavedEvent):
+                        if event.is_new:
+                            newly_saved += 1
 
                     # Check for keyboard commands
                     try:
@@ -297,13 +310,22 @@ class TopCommand:
             except KeyboardInterrupt:
                 quit_requested = True
             finally:
-                renderer.cleanup()
+                if live_started:
+                    renderer.cleanup()
 
         try:
             asyncio.run(run_async())
         except KeyboardInterrupt:
             quit_requested = True
             renderer.cleanup()
+
+        # If we got an error before the Live display even started, show it clearly
+        if error_message:
+            self._force_restore_terminal()
+            self._console.print(
+                MessagePanel(error_message, title="Error", variant="error")
+            )
+            return RdstResult(False, error_message)
 
         # Handle post-exit actions
         current_queries = renderer.get_current_queries()
@@ -691,7 +713,7 @@ class TopCommand:
 
         try:
             with Live(
-                generate_table(), refresh_per_second=0.2, screen=True
+                generate_table(), refresh_per_second=0.2
             ) as live:
                 while True:
                     asyncio.run(fetch_once())
@@ -1114,26 +1136,36 @@ class TopCommand:
             )
             return []
 
-    def _restore_terminal(self):
-        """Restore terminal to normal state after Live display exits."""
+    def _force_restore_terminal(self):
+        """Force-restore terminal to sane state. Called on ANY exit path from execute().
+
+        This is the nuclear option — it always runs regardless of what state
+        the renderer or Live display is in. Ensures the user never gets a
+        broken terminal from rdst top crashing.
+        """
         try:
             if sys.stdout.isatty():
+                sys.stdout.write("\033[2J\033[H")  # Clear screen and home cursor
                 sys.stdout.write("\033[?25h")  # Show cursor
                 sys.stdout.write("\033[?1049l")  # Exit alternate screen buffer
                 sys.stdout.flush()
-
-            if os.name == "posix":
-                try:
-                    import subprocess
-
-                    subprocess.run(
-                        ["stty", "sane"],
-                        check=False,
-                        stdin=sys.stdin,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                except Exception:
-                    pass
         except Exception:
             pass
+
+        if os.name == "posix":
+            try:
+                import subprocess
+
+                subprocess.run(
+                    ["stty", "sane"],
+                    check=False,
+                    stdin=sys.stdin,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+
+    def _restore_terminal(self):
+        """Restore terminal to normal state after Live display exits."""
+        self._force_restore_terminal()

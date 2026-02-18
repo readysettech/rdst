@@ -43,6 +43,9 @@ htmlcov/
 # Local config (don't commit user-specific configs)
 .rdst/
 
+# Claude Code local files (may contain API keys in settings)
+.claude/
+
 # Internal (not for public GitHub)
 .buildkite/
 tests/integration/run_tests_local.sh

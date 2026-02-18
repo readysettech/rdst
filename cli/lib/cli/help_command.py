@@ -770,22 +770,25 @@ class HelpCommand:
         Returns:
             HelpResult with the answer
         """
-        # Check for API key first
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        # Check for API key or trial token
+        api_key = os.environ.get("RDST_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            try:
+                from ..llm_manager.key_resolution import resolve_api_key
+                resolve_api_key()
+                api_key = True  # Trial token available
+            except Exception:
+                pass
         if not api_key:
             return HelpResult(
                 success=False,
                 answer="",
-                error="""No Anthropic API key found.
+                error="""No LLM API key configured.
 
-To use 'rdst help "question"', you need to set up your API key:
-
-1. Get an API key from https://console.anthropic.com/
-2. Export it:
-   export ANTHROPIC_API_KEY="your-key-here"
-
-Or configure RDST with:
-   rdst configure llm --provider anthropic
+Options:
+  1. Run 'rdst init' to sign up for a free trial ($5 credit)
+  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."
+     Get one at: https://console.anthropic.com/
 """,
             )
 
@@ -793,7 +796,8 @@ Or configure RDST with:
             from lib.llm_manager.llm_manager import LLMManager
 
             # Use Haiku for fast, cheap responses
-            llm = LLMManager(defaults={"model": "claude-3-haiku-20240307"})
+            from lib.llm_manager.claude_provider import AnthropicModel
+            llm = LLMManager(defaults={"model": AnthropicModel.HAIKU_4_5.value})
 
             # Build prompt
             system_message = """You are a helpful assistant for RDST, a database performance analysis CLI tool.
@@ -814,6 +818,7 @@ Include command examples when relevant. If the question isn't covered in the doc
                     system_message=system_message,
                     user_query=user_query,
                     max_tokens=1000,
+                    model=AnthropicModel.HAIKU_4_5.value,
                 )
 
             # Response format: {"text": "...", "usage": {...}, "provider": "...", "model": "..."}

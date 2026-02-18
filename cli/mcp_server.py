@@ -130,6 +130,24 @@ If a command fails with authentication error, check:
 2. Is the password correct?
 3. Can the host/port be reached?
 
+### LLM Setup (CRITICAL)
+RDST requires an LLM provider for query analysis. Two options:
+
+**Option 1: RDST Free Trial (Recommended for new users)**
+- Run `rdst configure llm` in terminal (INTERACTIVE - cannot be done via MCP)
+- Select "Sign up for free RDST trial"
+- Enter email → receive verification code → enter code
+- Business emails get $5.00 in credits, personal emails get $1.50
+- No API key needed after setup - RDST uses a trial proxy
+- Check balance anytime: `rdst configure llm`
+
+**Option 2: Your Own Anthropic API Key**
+- Export: `export ANTHROPIC_API_KEY="sk-ant-..."`
+- No credit limits, direct API access
+
+If a user has no ANTHROPIC_API_KEY and hasn't set up a trial, tell them to run
+`rdst configure llm` in their terminal to set up free trial credits.
+
 ### Common CLI Workflows
 
 1. **First-time setup**: `rdst init` - Interactive wizard
@@ -365,28 +383,45 @@ SUPPORTED PROVIDERS:
 - claude: Anthropic's Claude (default, requires ANTHROPIC_API_KEY env var)
 - openai: OpenAI's GPT models (requires OPENAI_API_KEY env var)
 - lmstudio: Local LM Studio server (no API key needed)
+- trial: RDST free trial credits (no API key needed)
+
+TRIAL SIGNUP (INTERACTIVE - must be done in user's terminal):
+Users who don't have an ANTHROPIC_API_KEY can sign up for free RDST trial credits.
+The trial signup is INTERACTIVE and cannot be done via MCP. Tell the user:
+  "Run `rdst configure llm` in your terminal and select the free trial option"
+
+The trial flow:
+1. User runs `rdst configure llm` in their terminal
+2. Selects "Sign up for free RDST trial"
+3. Enters their email address
+4. Gets a verification code sent to their email
+5. Enters the code
+6. Gets free credits ($5.00 for business emails, $1.50 for personal emails)
+7. No ANTHROPIC_API_KEY needed after this - RDST uses a trial proxy
 
 EXAMPLES:
-  rdst configure llm --provider claude --model claude-sonnet-4-5-20250929
+  rdst configure llm --provider claude --model claude-sonnet-4-6
   rdst configure llm --provider openai --model gpt-4
   rdst configure llm --provider lmstudio --base-url http://localhost:1234
+  rdst configure llm  (interactive - includes trial signup option)
 
 REQUIRED ENV VARS:
 - For Claude: export ANTHROPIC_API_KEY="sk-ant-..."
 - For OpenAI: export OPENAI_API_KEY="sk-..."
 - For LM Studio: No API key needed, just base_url
+- For Trial: No env var needed - credits are managed by RDST
 """,
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "provider": {
                         "type": "string",
-                        "enum": ["claude", "openai", "lmstudio"],
-                        "description": "LLM provider to use"
+                        "enum": ["claude", "openai", "lmstudio", "trial"],
+                        "description": "LLM provider to use. Use 'trial' for free RDST trial credits (but trial signup is INTERACTIVE - tell user to run `rdst configure llm` in their terminal instead)"
                     },
                     "model": {
                         "type": "string",
-                        "description": "Model name (e.g., claude-sonnet-4-5-20250929, gpt-4)"
+                        "description": "Model name (e.g., claude-sonnet-4-6, gpt-4)"
                     },
                     "base_url": {
                         "type": "string",
@@ -866,9 +901,13 @@ Example: User says "The index recommendation was wrong"
             "description": """Run the RDST first-time setup wizard.
 
 This interactive wizard helps new users configure RDST by:
-1. Setting up the LLM provider (Claude, OpenAI, or LM Studio)
+1. Setting up the LLM provider (Claude, OpenAI, LM Studio, or free RDST trial)
 2. Adding their first database target
 3. Testing the connection
+
+The init wizard includes the trial signup option - users without an
+ANTHROPIC_API_KEY can sign up for free RDST trial credits during init.
+Trial credits: $5.00 for business emails, $1.50 for personal emails.
 
 Use this when:
 - User is setting up RDST for the first time
@@ -876,7 +915,8 @@ Use this when:
 - User says "help me set up RDST" or similar
 
 NOTE: This runs an interactive wizard - best used when the user
-explicitly asks to set up or reconfigure RDST.
+explicitly asks to set up or reconfigure RDST. Tell the user to run
+`rdst init` in their terminal for the full interactive experience.
 """,
             "inputSchema": {
                 "type": "object",
@@ -1208,7 +1248,8 @@ Then they can run:
             api_key_info = {
                 "claude": "ANTHROPIC_API_KEY",
                 "openai": "OPENAI_API_KEY",
-                "lmstudio": "(no API key needed)"
+                "lmstudio": "(no API key needed)",
+                "trial": "(no API key needed - using RDST trial credits)"
             }
             result["next_steps"] = f"""
 LLM provider configured to: {provider}

@@ -386,13 +386,21 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
         and not explain_failed
     ):
         error_msg = _clean_error_message(llm_analysis.get("error", "Unknown error"))
+        is_trial_exhausted = "Trial credits exhausted" in error_msg
+        if is_trial_exhausted:
+            hint_text = (
+                "Get your own key at https://console.anthropic.com/\n"
+                "Then: export ANTHROPIC_API_KEY=\"sk-ant-...\""
+            )
+        else:
+            hint_text = "Check your API key and provider settings with 'rdst configure llm'"
         lines.append(
             _capture(
                 MessagePanel(
                     error_msg,
                     variant="warning",
-                    title="AI ANALYSIS ERROR",
-                    hint="Check your API key and provider settings with 'rdst configure llm'",
+                    title="Trial Exhausted" if is_trial_exhausted else "AI ANALYSIS ERROR",
+                    hint=hint_text,
                 )
             )
         )

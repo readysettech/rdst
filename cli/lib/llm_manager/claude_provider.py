@@ -16,16 +16,21 @@ from .base import LLMError, Provider, ProviderRequest, ProviderResponse
 class AnthropicModel(str, Enum):
     """Supported Anthropic models for RDST.
 
-    RDST uses Claude Sonnet 4.5 as the default model for query analysis.
-    Same pricing as Sonnet 4, better performance.
+    RDST uses Claude Sonnet 4.6 as the default model for query analysis.
+    Same pricing as Sonnet 4.5, better performance.
 
     https://docs.anthropic.com/en/docs/about-claude/models/overview
     """
 
-    # Primary models for RDST
-    SONNET_4_5 = "claude-sonnet-4-5-20250929"  # Default - fast, cost-effective, latest
+    # Latest models (4.6) — RDST defaults
+    SONNET_4_6 = "claude-sonnet-4-6"  # Default - $3/$15 per MTok
+    OPUS_4_6 = "claude-opus-4-6"  # $5/$25 per MTok
+
+    # Previous generation
+    SONNET_4_5 = "claude-sonnet-4-5-20250929"  # Previous default
     SONNET_4 = "claude-sonnet-4-20250514"  # Previous version
-    OPUS_4 = "claude-opus-4-20250514"  # Optional - more sophisticated
+    OPUS_4 = "claude-opus-4-20250514"  # $15/$75 per MTok
+    HAIKU_4_5 = "claude-haiku-4-5-20251001"  # Fast & cheap - for scan, help, filters
 
     # Legacy aliases for backward compatibility
     CLAUDE_4_SONNET = "claude-sonnet-4-20250514"
@@ -36,28 +41,37 @@ class ClaudeProvider(Provider):
     """
     Anthropic Claude Messages API wrapper.
 
-    Default: Sonnet 4.5 (fast, cost-effective for query analysis)
+    Default: Sonnet 4.6 (fast, cost-effective for query analysis)
     Override via RDST_ANTHROPIC_MODEL env var to use Opus for more sophisticated analysis.
     """
 
     _DEFAULT_MODEL = AnthropicModel(
-        os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.SONNET_4_5.value)
+        os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.SONNET_4_6.value)
     )
 
-    _BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1/messages")
+    _BASE_URL = "https://api.anthropic.com/v1/messages"
     _API_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
 
     def default_model(self) -> str:
         return self._DEFAULT_MODEL
 
     def complete(
-        self, request: ProviderRequest, *, api_key: str, debug: bool = False
+        self,
+        request: ProviderRequest,
+        *,
+        api_key: str,
+        base_url: str | None = None,
+        extra_headers: dict | None = None,
+        debug: bool = False,
     ) -> ProviderResponse:
         headers = {
             "x-api-key": api_key,
             "anthropic-version": self._API_VERSION,
             "content-type": "application/json",
         }
+        # Merge attestation headers for trial proxy requests
+        if extra_headers:
+            headers.update(extra_headers)
 
         # Map provider-agnostic messages into Claude-style:
         # - Claude supports a "system" string and "messages" user/assistant turns.
@@ -118,12 +132,47 @@ class ClaudeProvider(Provider):
         elif request.extra:
             payload.update(request.extra)
 
+        target_url = base_url or self._BASE_URL
         try:
-            resp = requests.post(
-                self._BASE_URL, headers=headers, data=json.dumps(payload), timeout=60
-            )
+            resp = requests.post(target_url, headers=headers, data=json.dumps(payload), timeout=60)
+        except requests.exceptions.ConnectionError as e:
+            if base_url:
+                raise LLMError(
+                    "Unable to reach RDST trial service.\n\n"
+                    "Options:\n"
+                    "  1. Try again in a few minutes\n"
+                    '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."\n'
+                    "     Get one at: https://console.anthropic.com/",
+                    code="PROXY_UNREACHABLE",
+                    cause=e,
+                )
+            raise LLMError(f"Claude request error: {e}", code="HTTP_ERROR", cause=e)
         except Exception as e:
             raise LLMError(f"Claude request error: {e}", code="HTTP_ERROR", cause=e)
+
+        if resp.status_code == 403 and base_url:
+            # Check for trial-specific errors from our proxy
+            try:
+                err_json = resp.json()
+            except Exception:
+                err_json = {}
+            if err_json.get("code") == "TRIAL_EXHAUSTED":
+                detail = err_json.get("detail", "Trial credits exhausted.")
+                raise LLMError(
+                    f"{detail}\n\n"
+                    "To continue using RDST:\n"
+                    "  1. Get your own key: https://console.anthropic.com/\n"
+                    '  2. Set it: export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
+                    "Want more trial credits? Email hello@readyset.io",
+                    code="TRIAL_EXHAUSTED",
+                    status=403,
+                )
+            if err_json.get("code") == "INVALID_CLIENT":
+                raise LLMError(
+                    f"Trial authentication failed: {err_json.get('detail', 'unknown')}",
+                    code="INVALID_CLIENT",
+                    status=403,
+                )
 
         if resp.status_code >= 400:
             try:
@@ -175,10 +224,26 @@ class ClaudeProvider(Provider):
                 f"Claude response parse error: {e}", code="PARSE_ERROR", cause=e
             )
 
-        return ProviderResponse(text=text, usage=out_usage, raw=data if debug else {})
+        # Capture trial balance from proxy response header
+        raw = data if debug else {}
+        trial_remaining = resp.headers.get("X-RDST-Trial-Remaining-Cents")
+        if trial_remaining is not None:
+            if not raw:
+                raw = {}
+            try:
+                raw["_trial_remaining_cents"] = int(trial_remaining)
+            except (ValueError, TypeError):
+                pass
+
+        return ProviderResponse(text=text, usage=out_usage, raw=raw)
 
     def stream(
-        self, request: ProviderRequest, *, api_key: str
+        self,
+        request: ProviderRequest,
+        *,
+        api_key: str,
+        base_url: str | None = None,
+        extra_headers: dict | None = None,
     ) -> Generator[str, None, None]:
         """Stream response tokens from Claude (SYNC generator).
 
@@ -190,6 +255,8 @@ class ClaudeProvider(Provider):
             "anthropic-version": self._API_VERSION,
             "content-type": "application/json",
         }
+        if extra_headers:
+            headers.update(extra_headers)
 
         # Reuse message transformation from complete() (lines 62-74)
         # request.messages is List[Dict] with keys "role", "content"
@@ -218,9 +285,10 @@ class ClaudeProvider(Provider):
         if request.top_p is not None:
             payload["top_p"] = request.top_p
 
+        url = base_url or self._BASE_URL
         try:
             response = requests.post(
-                self._BASE_URL,
+                url,
                 headers=headers,
                 json=payload,
                 stream=True,

@@ -140,8 +140,12 @@ class LLMManager:
             len(resolved["stop_sequences"]),
         )
 
-        # prefer explicit api_key, else load from vault
-        key = api_key or self._safe_load_key_for_query(name)
+        # Resolve API key and routing (direct vs trial proxy)
+        from .key_resolution import KeyResolution
+        if api_key:
+            resolution = KeyResolution(api_key=api_key, is_trial=False)
+        else:
+            resolution = self._safe_load_key_for_query(name)
 
         # normalize into a ProviderRequest
         messages = _assemble_messages(system_message, user_query, context)
@@ -157,9 +161,21 @@ class LLMManager:
 
         try:
             resp: ProviderResponse = prov.complete(
-                req, api_key=key, debug=resolved["debug"]
+                req,
+                api_key=resolution.api_key,
+                base_url=resolution.proxy_url,
+                extra_headers=resolution.extra_headers,
+                debug=resolved["debug"],
             )
-        except LLMError:
+        except LLMError as e:
+            # On trial exhaustion, update config status
+            if e.code == "TRIAL_EXHAUSTED" and self._config:
+                try:
+                    trial = self._config._data.get("trial", {})
+                    trial["status"] = "exhausted"
+                    self._config.save()
+                except Exception:
+                    pass
             raise
         except Exception as e:
             raise LLMError(
@@ -179,6 +195,20 @@ class LLMManager:
         }
         if resolved["debug"]:
             out["raw"] = resp.raw
+
+        # Propagate trial balance from proxy response and persist locally
+        trial_remaining = (resp.raw or {}).get("_trial_remaining_cents")
+        if trial_remaining is not None:
+            out["trial_remaining_cents"] = trial_remaining
+            if self._config:
+                try:
+                    trial = self._config._data.get("trial", {})
+                    trial["remaining_cents"] = int(trial_remaining)
+                    trial["limit_cents"] = trial.get("limit_cents") or 500
+                    self._config._data["trial"] = trial
+                    self._config.save()
+                except Exception:
+                    pass
 
         # Track LLM usage for telemetry
         try:
@@ -221,7 +251,11 @@ class LLMManager:
         prov = self.provider(name)
 
         # Build request using existing _assemble_messages
-        key = api_key or self._safe_load_key_for_query(name)
+        from .key_resolution import KeyResolution
+        if api_key:
+            resolution = KeyResolution(api_key=api_key, is_trial=False)
+        else:
+            resolution = self._safe_load_key_for_query(name)
         messages = _assemble_messages(system_message, user_query, context)
 
         request = ProviderRequest(
@@ -241,7 +275,7 @@ class LLMManager:
 
         def _run_sync_stream():
             try:
-                for token in prov.stream(request, api_key=key):
+                for token in prov.stream(request, api_key=resolution.api_key, base_url=resolution.proxy_url, extra_headers=resolution.extra_headers):
                     loop.call_soon_threadsafe(queue.put_nowait, ("token", token))
             except Exception as e:
                 loop.call_soon_threadsafe(queue.put_nowait, ("error", e))
@@ -316,29 +350,13 @@ class LLMManager:
         except Exception as e:
             raise e
 
-    def _safe_load_key_for_query(self, provider: str) -> str:
-        """Load API key from environment variable.
+    def _safe_load_key_for_query(self, provider: str) -> "KeyResolution":
+        """Resolve API key and routing (direct vs trial proxy).
 
-        RDST uses Bring Your Own Key (BYOK) - users must set their own API key.
-        Checks RDST_ANTHROPIC_API_KEY first (to avoid conflicts with Claude Code),
-        then falls back to ANTHROPIC_API_KEY.
+        Returns KeyResolution with api_key, routing info, and attestation headers.
         """
-        # Check RDST-specific key first to avoid conflicts with Claude Code
-        api_key = os.getenv("RDST_ANTHROPIC_API_KEY")
-        if api_key:
-            return api_key
-
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if api_key:
-            return api_key
-
-        raise LLMError(
-            "No LLM API key configured.\n\n"
-            "Please provide your Anthropic API key to enable query analysis.\n"
-            "Set RDST_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY.\n"
-            "You can get one at: https://console.anthropic.com/",
-            code="NO_API_KEY",
-        )
+        from .key_resolution import resolve_api_key
+        return resolve_api_key()
 
 
 def _assemble_messages(

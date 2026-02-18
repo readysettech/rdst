@@ -32,7 +32,7 @@ class TestTopRendererInit:
         assert renderer._verbose is False
         assert renderer._no_color is False
         assert renderer._realtime is False
-        assert renderer._live is None
+        assert renderer._live_started is False
 
     def test_initialization_with_options(self):
         """Test renderer initializes with custom options."""
@@ -214,37 +214,42 @@ class TestTopRendererRealtimeMode:
         return renderer
 
     def test_start_live(self, realtime_renderer):
-        """Test starting Live display."""
-        with patch("lib.cli.top_renderer.Live") as mock_live_class:
-            mock_live = Mock()
-            mock_live_class.return_value = mock_live
+        """Test starting live display sets flag and clears screen."""
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.isatty.return_value = True
 
             realtime_renderer.start_live()
 
-            mock_live_class.assert_called_once()
-            mock_live.start.assert_called_once()
-            assert realtime_renderer._live is mock_live
+            assert realtime_renderer._live_started is True
+            # Should write ANSI clear screen + home cursor
+            mock_stdout.write.assert_called()
+
+    def test_start_live_not_tty(self, realtime_renderer):
+        """Test starting live display on non-tty just sets flag."""
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.isatty.return_value = False
+
+            realtime_renderer.start_live()
+
+            assert realtime_renderer._live_started is True
+            mock_stdout.write.assert_not_called()
 
     def test_stop_live(self, realtime_renderer):
-        """Test stopping Live display."""
-        mock_live = Mock()
-        realtime_renderer._live = mock_live
+        """Test stopping live display clears flag."""
+        realtime_renderer._live_started = True
 
         realtime_renderer.stop_live()
 
-        mock_live.stop.assert_called_once()
-        assert realtime_renderer._live is None
+        assert realtime_renderer._live_started is False
 
     def test_cleanup(self, realtime_renderer):
-        """Test cleanup stops Live and restores terminal."""
-        mock_live = Mock()
-        realtime_renderer._live = mock_live
+        """Test cleanup stops live and restores terminal."""
+        realtime_renderer._live_started = True
 
         with patch.object(realtime_renderer, "_restore_terminal"):
             realtime_renderer.cleanup()
 
-        mock_live.stop.assert_called_once()
-        assert realtime_renderer._live is None
+        assert realtime_renderer._live_started is False
 
     def test_get_current_queries(self, realtime_renderer):
         """Test getting current queries."""

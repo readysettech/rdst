@@ -1,7 +1,7 @@
 """
 Recommendation Validation - Prevent LLM Hallucination
 
-Based on Gautam's ValidationLayer from hacks/gautam/rdst/rdst_analyze.py
+Validates LLM recommendations against collected database context.
 Validates LLM recommendations against collected database context to detect:
 - Duplicate index suggestions (recommending indexes that already exist)
 - Invalid recommendations not grounded in schema

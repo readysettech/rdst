@@ -26,7 +26,9 @@ def estimate_tokens(text: str) -> int:
 # Pricing for cost estimation
 CLAUDE_PRICING = {
     "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
-    "claude-haiku-3-5-20241022": {"input": 0.25, "output": 1.25},
+    "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0},
+    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.0},
+    "claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
     "default": {"input": 3.0, "output": 15.0},
 }
 
@@ -231,7 +233,7 @@ def analyze_shallow_with_llm(
 
             # Get token usage
             tokens_used = llm_response.get('tokens_used') or 0
-            model_used = llm_response.get('model') or model or 'claude-sonnet-4-5-20250929'
+            model_used = llm_response.get('model') or model or 'claude-sonnet-4-6'
             actual_input = estimated_input_tokens
             actual_output = tokens_used - actual_input if tokens_used > actual_input else tokens_used // 2
             cost_usd = estimate_cost(actual_input, actual_output, model_used)

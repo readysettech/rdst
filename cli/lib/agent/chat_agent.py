@@ -213,10 +213,10 @@ class ChatAgent:
 
     def _get_api_key(self) -> str:
         """
-        Get Anthropic API key from environment.
+        Get API key, checking env vars then trial config.
 
-        Checks RDST_ANTHROPIC_API_KEY first (to avoid conflicts with Claude Code),
-        then falls back to ANTHROPIC_API_KEY.
+        Uses the shared key resolution module for consistent behavior
+        across LLMManager and ChatAgent.
 
         Returns:
             API key string.
@@ -224,21 +224,13 @@ class ChatAgent:
         Raises:
             ValueError: If no API key found.
         """
-        import os
-
-        # Check RDST-specific key first to avoid conflicts
-        api_key = os.getenv("RDST_ANTHROPIC_API_KEY")
-        if api_key:
-            return api_key
-
-        # Fall back to standard key
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if api_key:
-            return api_key
-
-        raise ValueError(
-            "No Anthropic API key found. Set RDST_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY"
-        )
+        try:
+            from ..llm_manager.key_resolution import resolve_api_key
+            resolution = resolve_api_key()
+            self._key_resolution = resolution
+            return resolution.api_key
+        except Exception as e:
+            raise ValueError(str(e))
 
     def _call_llm(self) -> dict[str, Any]:
         """
@@ -255,7 +247,15 @@ class ChatAgent:
 
         # Explicitly pass API key to avoid env conflicts
         api_key = self._get_api_key()
-        client = anthropic.Anthropic(api_key=api_key)
+
+        # Route based on key type (direct vs trial proxy)
+        kwargs = {"api_key": api_key}
+        if hasattr(self, "_key_resolution") and self._key_resolution.is_trial:
+            from ..llm_manager.key_resolution import TRIAL_PROXY_BASE
+            kwargs["base_url"] = TRIAL_PROXY_BASE
+            kwargs["default_headers"] = self._key_resolution.extra_headers
+
+        client = anthropic.Anthropic(**kwargs)
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",

@@ -276,15 +276,29 @@ class InitCommand:
         else:
             error = llm_result.get("error", "Unknown error")
             if error == "ANTHROPIC_API_KEY not set":
-                self.console.print(
-                    MessagePanel(
-                        "ANTHROPIC_API_KEY not set\n\n"
-                        'Set: export ANTHROPIC_API_KEY="sk-ant-..."',
-                        variant="warning",
-                        title="Anthropic Setup Required",
-                        hint="Get an API key at: https://console.anthropic.com/",
+                # Check if trial token is available (key service integration)
+                has_key = False
+                try:
+                    from lib.llm_manager.key_resolution import resolve_api_key
+                    resolve_api_key()
+                    has_key = True
+                except Exception:
+                    pass
+
+                if has_key:
+                    self._print("Anthropic", "Trial token configured")
+                else:
+                    self.console.print(
+                        MessagePanel(
+                            "No LLM API key configured.\n\n"
+                            "Options:\n"
+                            "  1. Run 'rdst configure llm' to sign up for a free trial ($5 credit)\n"
+                            '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."',
+                            variant="warning",
+                            title="LLM Setup Required",
+                            hint="Get an API key at: https://console.anthropic.com/",
+                        )
                     )
-                )
             elif error == "LLM not configured":
                 self._print("Anthropic", "Not configured (run 'rdst configure llm')")
             else:
@@ -338,7 +352,14 @@ class InitCommand:
                 self._print("Failed", msg)
 
         # Breadcrumb: show next steps using NextSteps component
-        has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        has_api_key = bool(os.environ.get("RDST_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
+        if not has_api_key:
+            try:
+                from lib.llm_manager.key_resolution import resolve_api_key
+                resolve_api_key()
+                has_api_key = True
+            except Exception:
+                pass
         steps = []
         if not has_api_key:
             steps.append(

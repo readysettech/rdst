@@ -337,6 +337,20 @@ class TargetsConfig:
         if model:
             self._data["llm"]["model"] = model
 
+    # Trial configuration methods
+    def get_trial_config(self) -> Dict[str, Any]:
+        """Get trial configuration."""
+        return self._data.get("trial", {})
+
+    def set_trial_config(self, trial: Dict[str, Any]) -> None:
+        """Set trial configuration."""
+        self._data["trial"] = trial
+
+    def is_trial_active(self) -> bool:
+        """Check if user has an active trial."""
+        trial = self._data.get("trial", {})
+        return bool(trial.get("token") and trial.get("status") == "active")
+
 
 class RdstCLI:
     """Stubs for rdst commands. Each returns RdstResult and shows intended integrations."""
@@ -776,6 +790,7 @@ class RdstCLI:
         interactive: bool = False,
         review: bool = False,
         large_query_bypass: Optional[str] = None,
+        output_json: bool = False,
         **kwargs,
     ) -> RdstResult:
         """
@@ -860,6 +875,7 @@ class RdstCLI:
                 fast=fast,
                 interactive=interactive,
                 review=review,
+                output_json=output_json,
             )
 
             # Extract query hash from result for telemetry

@@ -928,21 +928,19 @@ class TopQueryTableBase(DataTableBase):
         self._setup_columns()
 
     def _setup_columns(self):
-        self.add_column("QUERY HASH", style=StyleTokens.HASH, width=12)
-        self.add_column("QUERY", style=StyleTokens.SQL, width=15)
-        self.add_column("FREQ", style=StyleTokens.SUCCESS, width=7, justify="right")
-        self.add_column(
-            "TOTAL TIME", style=StyleTokens.WARNING, width=10, justify="right"
-        )
-        self.add_column("AVG TIME", style=StyleTokens.WARNING, width=8, justify="right")
-        self.add_column("% LOAD", style=StyleTokens.ERROR, width=6, justify="right")
-        self.add_column("SOURCE", style=StyleTokens.ACCENT, width=8)
-        self.add_column("READYSET", style=StyleTokens.INFO, width=8)
+        self.add_column("HASH", style=StyleTokens.HASH, width=12)
+        self.add_column("QUERY", style=StyleTokens.SQL)
+        self.add_column("FREQ", style=StyleTokens.SUCCESS, width=6, justify="right")
+        self.add_column("TOTAL", style=StyleTokens.WARNING, width=10, justify="right")
+        self.add_column("AVG", style=StyleTokens.WARNING, width=10, justify="right")
+        self.add_column("LOAD", style=StyleTokens.ERROR, width=6, justify="right")
+        self.add_column("SRC", style=StyleTokens.ACCENT, width=8)
+        self.add_column("RS", style=StyleTokens.INFO, width=5)
 
     def add_slow_query(self, query: dict) -> "TopQueryTableBase":
         self.add_row(
             query.get("query_hash", "")[:12],
-            _truncate(query.get("query_text", ""), 15),
+            _truncate(query.get("query_text", ""), 80),
             str(query.get("freq", 0)),
             query.get("total_time", "-"),
             query.get("avg_time", "-"),
