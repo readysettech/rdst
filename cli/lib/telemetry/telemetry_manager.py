@@ -72,14 +72,16 @@ class TelemetryManager:
     - Privacy controls (opt-out via env var or config)
     """
 
-    # Configuration
-    POSTHOG_API_KEY = os.environ.get("RDST_POSTHOG_KEY", "phc_WPINnbS1CUiADz01QFeDZCr4Wn7jXfNPxe1EK0V2ZzP")
+    # Configuration - set via environment variables
+    # RDST_POSTHOG_KEY: PostHog API key for usage analytics
+    # RDST_SENTRY_DSN: Sentry DSN for crash reporting
+    # RDST_SLACK_WEBHOOK_*: Slack webhooks for notifications
+    POSTHOG_API_KEY = os.environ.get("RDST_POSTHOG_KEY", "")
     POSTHOG_HOST = "https://us.i.posthog.com"
-    SENTRY_DSN = os.environ.get("RDST_SENTRY_DSN", "")  # Optional - not currently used
-    # Slack webhooks - only used for: installation, first successful analyze, user feedback
-    SLACK_WEBHOOK_INSTALLS = os.environ.get("RDST_SLACK_WEBHOOK_INSTALLS", "https://hooks.slack.com/services/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")
-    SLACK_WEBHOOK_FEEDBACK = os.environ.get("RDST_SLACK_WEBHOOK_FEEDBACK", "https://hooks.slack.com/services/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")
-    SLACK_WEBHOOK_ANALYZE = os.environ.get("RDST_SLACK_WEBHOOK_ANALYZE", "https://hooks.slack.com/services/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")
+    SENTRY_DSN = os.environ.get("RDST_SENTRY_DSN", "")
+    SLACK_WEBHOOK_INSTALLS = os.environ.get("RDST_SLACK_WEBHOOK_INSTALLS", "")
+    SLACK_WEBHOOK_FEEDBACK = os.environ.get("RDST_SLACK_WEBHOOK_FEEDBACK", "")
+    SLACK_WEBHOOK_ANALYZE = os.environ.get("RDST_SLACK_WEBHOOK_ANALYZE", "")
 
     def __init__(self):
         self._device_id: Optional[str] = None

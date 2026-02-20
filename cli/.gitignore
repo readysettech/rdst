@@ -32,3 +32,19 @@ uv.lock
 Thumbs.db
 _version_build.py
 storybook_output.html
+
+# Test artifacts
+.pytest_cache/
+test-results/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Local config (don't commit user-specific configs)
+.rdst/
+
+# Internal (not for public GitHub)
+.buildkite/
+tests/integration/run_tests_local.sh
+tests/integration/README.md
+docs/internal/

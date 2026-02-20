@@ -20,14 +20,16 @@ TPC-H is an industry-standard decision support benchmark with 22 complex analyti
 
 ## Quick Start (5 minutes)
 
-### Option 1: Download Pre-built Dump from S3 (Recommended)
+### Option 1: Use a Pre-built TPC-H Dump
+
+If you have a pre-built TPC-H SF10 PostgreSQL dump file:
 
 ```bash
 # 1. Create working directory
 mkdir -p ~/tpch-postgres && cd ~/tpch-postgres
 
-# 2. Download the pre-built dump (3.1GB)
-aws s3 cp s3://readysetdbbackups/tpch/sf10/postgres/testdb.dump ./testdb.dump
+# 2. Place your TPC-H SF10 dump file here (testdb.dump, ~3.1GB)
+# You can generate this using tpch-kit (see Option 2 below)
 
 # 3. Start PostgreSQL container
 docker run -d --name tpch-postgres \

@@ -102,15 +102,14 @@ This reduced total indexes from 40+ to ~25 while maintaining query performance.
 
 ### Prerequisites
 - Docker
-- AWS CLI (for S3 download)
 - Python 3.8+
 - Anthropic API key
 
 ### Steps
 
 ```bash
-# 1. Download dataset
-aws s3 cp s3://readysetdbbackups/tpch/sf10/postgres/testdb.dump ./testdb.dump
+# 1. Obtain TPC-H SF10 dataset
+# Generate using tpch-kit (see TPCH_BENCHMARK_GUIDE.md) or use your own dump file
 
 # 2. Start PostgreSQL
 docker run -d --name tpch-postgres \

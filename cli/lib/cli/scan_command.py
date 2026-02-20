@@ -969,7 +969,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                     user_query=user_query,
                     max_tokens=2000,
                     temperature=0.0,
-                    model="claude-3-5-haiku-20241022",
+                    model="claude-3-haiku-20240307",
                 )
 
                 result_text = response.get("text", "").strip()
