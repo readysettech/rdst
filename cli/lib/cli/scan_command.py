@@ -79,9 +79,9 @@ def _terminal_guard():
         except Exception:
             pass
 from .scan_context import ContextGatherer
-from .ast_extractor import ASTQueryExtractor, CrossFileResolver, extract_queries_from_file, ExtractedQuery
+from .ast_extractor import CrossFileResolver, extract_queries_from_file, ExtractedQuery
 from .js_extractor import extract_queries_from_js_file
-from .snippet_cache import SnippetCache, get_cache
+from .snippet_cache import get_cache
 from lib.query_registry.query_registry import QueryRegistry, hash_sql
 
 # File extensions for JS/TS files (use JS extractor)
@@ -1445,7 +1445,6 @@ Respond with ONLY this JSON (no markdown code blocks):
 
         total_queries = len(valid_queries)
 
-        import time as _time
 
         # Map hash → query info for display
         query_info = {}
@@ -2052,7 +2051,7 @@ Output only the SQL query."""
                 user_query=user_query,
                 max_tokens=500,
                 temperature=0.0,
-                model="claude-3-5-haiku-20241022",  # Use Haiku for single queries - fast & cheap
+                model="claude-3-haiku-20240307",  # Use Haiku for single queries - fast & cheap
             )
 
             result_text = response.get("text", "").strip()
@@ -2391,7 +2390,7 @@ Rules for SQL generation:
         if "registry" in results:
             self.console.print()
             if results["registry"].get("skipped"):
-                self.console.print(f"[bold]Registry:[/bold] [dim]skipped (--nosave)[/dim]")
+                self.console.print("[bold]Registry:[/bold] [dim]skipped (--nosave)[/dim]")
             else:
                 self.console.print(f"[bold]Registry saved:[/bold] {results['registry']['path']}")
                 self.console.print(f"  New queries: {results['registry']['new_queries']}")
@@ -2494,7 +2493,7 @@ Rules for SQL generation:
                             self.console.print(f"    [magenta]⏱[/magenta]  {line}")
 
                 if not q.get("issues") and not q.get("recommendations") and not q.get("rewrite_benchmarks"):
-                    self.console.print(f"    [green]No issues found[/green]")
+                    self.console.print("    [green]No issues found[/green]")
 
                 # Per-query deep-dive hint
                 if short_hash:
@@ -2565,7 +2564,7 @@ Rules for SQL generation:
 
         # Pretty print
         if not self.console:
-            print(f"\nScan Queries in Registry")
+            print("\nScan Queries in Registry")
             print(f"Total queries: {len(queries)}")
             for q in query_dicts:
                 print(f"\n  [{q['hash'][:10]}]")
