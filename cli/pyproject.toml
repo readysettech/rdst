@@ -83,6 +83,10 @@ exclude = [
 [tool.hatch.build.targets.wheel.force-include]
 "rdst.py" = "rdst.py"
 "mcp_server.py" = "mcp_server.py"
+"lib/web_dist" = "lib/web_dist"
+
+[tool.hatch.build.targets.sdist.force-include]
+"lib/web_dist" = "lib/web_dist"
 
 [dependency-groups]
 dev = [
