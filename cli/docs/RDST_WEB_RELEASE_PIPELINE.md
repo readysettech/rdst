@@ -78,8 +78,8 @@ Required metadata keys:
 3. Include `lib/web_dist` in both wheel and sdist using `rdst/pyproject.toml` force-include rules.
 
 Runtime behavior:
-- In repo/dev mode, local dist can be used.
-- In installed package mode, embedded `lib/web_dist` is served.
+- `rdst web` serves embedded `lib/web_dist` when packaged assets are present.
+- If embedded assets are missing, `rdst web --ui auto` falls back to API-only mode.
 
 ## Gating and Failure Semantics
 - `build-package` depends on `build-rdst-web`; if frontend build fails, package build does not start.
