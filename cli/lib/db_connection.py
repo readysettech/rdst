@@ -171,8 +171,10 @@ def _create_mysql_connection(host: str, port: int, user: str, password: str, dat
 
         if use_tls:
             import ssl
-            # Create SSL context that verifies server certificate
+            # Require encryption but don't verify certificate (matches psycopg2 sslmode='require')
             ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
             conn_params['ssl'] = ssl_context
 
         conn = pymysql.connect(**conn_params)

@@ -188,6 +188,7 @@ class TopCommand:
         quit_requested = False
         target_name = ""
         newly_saved = 0
+        error_event = None  # Capture errors to display after Live cleanup
 
         # Set up keyboard listener
         command_queue = queue.Queue()
@@ -250,19 +251,19 @@ class TopCommand:
         except ImportError:
             pass
 
-        error_message = None
+        error_event = None
 
         async def run_async():
             nonlocal running, selected_query_index, save_all_requested
             nonlocal analyze_requested, quit_requested, target_name, newly_saved
-            nonlocal error_message
+            nonlocal error_event
 
             live_started = False
             try:
                 async for event in service.stream_realtime(input_data, options, None):
                     # Handle errors BEFORE starting Live display
-                    if isinstance(event, TopErrorEvent):
-                        error_message = event.message
+                    if isinstance(event, TopErrorEvent) and not live_started:
+                        error_event = event
                         running = False
                         break
 
@@ -272,14 +273,21 @@ class TopCommand:
                         renderer.start_live()
                         live_started = True
 
-                    # Render the event
-                    if live_started:
-                        renderer.render(event)
-
                     # Track state
                     if isinstance(event, TopQuerySavedEvent):
                         if event.is_new:
                             newly_saved += 1
+                    elif isinstance(event, TopErrorEvent):
+                        # Don't render to Live display — it would be lost
+                        # when the alternate screen buffer exits. Capture
+                        # the event and display it after cleanup.
+                        error_event = event
+                        running = False
+                        break
+
+                    # Render non-error events to Live display
+                    if live_started:
+                        renderer.render(event)
 
                     # Check for keyboard commands
                     try:
@@ -319,13 +327,17 @@ class TopCommand:
             quit_requested = True
             renderer.cleanup()
 
-        # If we got an error before the Live display even started, show it clearly
-        if error_message:
-            self._force_restore_terminal()
-            self._console.print(
-                MessagePanel(error_message, title="Error", variant="error")
-            )
-            return RdstResult(False, error_message)
+        # Display error after Live cleanup so it's visible on the normal terminal
+        if error_event is not None:
+            if not live_started:
+                # Error before Live display started — restore terminal and show clearly
+                self._force_restore_terminal()
+                self._console.print(
+                    MessagePanel(error_event.message, title="Error", variant="error")
+                )
+            else:
+                renderer.render(error_event)
+            return RdstResult(False, error_event.message)
 
         # Handle post-exit actions
         current_queries = renderer.get_current_queries()
