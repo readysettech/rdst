@@ -7,6 +7,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import os
 
 from lib.cli.rdst_cli import TargetsConfig
+from lib.llm_manager.claude_provider import AnthropicModel
 
 from .password_resolver import resolve_password
 from .anthropic_env import has_anthropic_api_key
@@ -25,7 +26,7 @@ from .types import (
 class InitService:
     """Stateless service for init workflow."""
 
-    _DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
+    _DEFAULT_CLAUDE_MODEL = AnthropicModel.SONNET_4_5.value
 
     def _load_config(self) -> TargetsConfig:
         """Load TargetsConfig from CLI module."""

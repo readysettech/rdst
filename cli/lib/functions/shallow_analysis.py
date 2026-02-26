@@ -11,6 +11,7 @@ import os
 from typing import Dict, Any
 
 from ..llm_manager.llm_manager import LLMManager
+from ..llm_manager.claude_provider import AnthropicModel
 from ..prompts.analyze_prompts import SHALLOW_ANALYSIS_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -233,7 +234,7 @@ def analyze_shallow_with_llm(
 
             # Get token usage
             tokens_used = llm_response.get('tokens_used') or 0
-            model_used = llm_response.get('model') or model or 'claude-sonnet-4-6'
+            model_used = llm_response.get('model') or model or AnthropicModel.SONNET_4_5.value
             actual_input = estimated_input_tokens
             actual_output = tokens_used - actual_input if tokens_used > actual_input else tokens_used // 2
             cost_usd = estimate_cost(actual_input, actual_output, model_used)

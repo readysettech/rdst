@@ -4,6 +4,7 @@ Handles database target configuration with a beautiful, step-by-step interface.
 """
 
 from typing import List, Dict, Optional, Any
+from ..llm_manager.claude_provider import AnthropicModel
 from .rdst_cli import (
     RdstResult,
     TargetsConfig,
@@ -1035,8 +1036,8 @@ class ConfigurationWizard:
 
             cfg._data.setdefault("llm", {})
             cfg._data["llm"]["provider"] = "claude"
-            cfg._data["llm"]["model"] = "claude-sonnet-4-6"
-            cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.6"
+            cfg._data["llm"]["model"] = AnthropicModel.SONNET_4_5.value
+            cfg._data["llm"]["hint"] = "Using Claude Sonnet 4.5"
 
             cfg.save()
             self._show_success("Configured", cfg._data["llm"]["hint"])
@@ -1071,7 +1072,7 @@ class ConfigurationWizard:
                 self._show_success("Active Trial", balance_msg)
                 cfg._data.setdefault("llm", {})
                 cfg._data["llm"]["provider"] = "claude"
-                cfg._data["llm"]["model"] = "claude-sonnet-4-6"
+                cfg._data["llm"]["model"] = AnthropicModel.SONNET_4_5.value
                 cfg._data["llm"]["hint"] = "Using trial credits"
                 cfg.save()
                 return RdstResult(True, "Trial active")
@@ -1108,7 +1109,7 @@ class ConfigurationWizard:
             # Save config regardless
             cfg._data.setdefault("llm", {})
             cfg._data["llm"]["provider"] = "claude"
-            cfg._data["llm"]["model"] = "claude-sonnet-4-6"
+            cfg._data["llm"]["model"] = AnthropicModel.SONNET_4_5.value
             cfg._data["llm"]["hint"] = "Using trial credits" if trial_success else "Waiting for API key"
             cfg.save()
 

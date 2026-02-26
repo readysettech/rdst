@@ -553,6 +553,7 @@ COMMAND_SETS = {
                     WHERE query IS NOT NULL
                       AND query NOT LIKE '%pg_stat_statements%'
                       AND query NOT LIKE '%information_schema%'
+                      AND query NOT LIKE 'EXPLAIN%'
                     ORDER BY total_exec_time DESC
                     LIMIT 50
                 """,
@@ -602,6 +603,7 @@ COMMAND_SETS = {
                       AND query NOT LIKE '%pg_stat_activity%'
                       AND query NOT LIKE '%pg_stat_statements%'
                       AND query NOT LIKE '%information_schema%'
+                      AND query NOT LIKE 'EXPLAIN%'
                       AND query NOT LIKE 'LISTEN %'
                       AND query NOT LIKE 'UNLISTEN %'
                       AND LENGTH(TRIM(query)) > 10
@@ -662,6 +664,7 @@ COMMAND_SETS = {
                     WHERE DIGEST_TEXT IS NOT NULL
                       AND DIGEST_TEXT NOT LIKE '%performance_schema%'
                       AND DIGEST_TEXT NOT LIKE '%information_schema%'
+                      AND DIGEST_TEXT NOT LIKE 'EXPLAIN%'
                     ORDER BY SUM_TIMER_WAIT DESC
                     LIMIT 50
                 """,
@@ -695,6 +698,7 @@ COMMAND_SETS = {
                       AND COMMAND != 'Sleep'
                       AND INFO NOT LIKE '%PROCESSLIST%'
                       AND INFO NOT LIKE '%information_schema%'
+                      AND INFO NOT LIKE 'EXPLAIN%'
                       AND ID != CONNECTION_ID()
                     ORDER BY TIME DESC
                 """,

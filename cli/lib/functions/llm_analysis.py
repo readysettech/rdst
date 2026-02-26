@@ -67,6 +67,7 @@ def estimate_cost(tokens_in: int, tokens_out: int, model: str = "default") -> fl
 
 
 from ..llm_manager.llm_manager import LLMManager
+from ..llm_manager.claude_provider import AnthropicModel
 from ..prompts.analyze_prompts import (
     EXPLAIN_ANALYSIS_PROMPT,
     HOTSPOT_IDENTIFICATION_PROMPT,
@@ -652,7 +653,7 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             # Get detailed token usage
             tokens_used = llm_response.get("tokens_used") or 0
             model_used = (
-                llm_response.get("model") or model_param or "claude-sonnet-4-6"
+                llm_response.get("model") or model_param or AnthropicModel.SONNET_4_5.value
             )
 
             # Try to get actual token breakdown if available
