@@ -1089,7 +1089,7 @@ class TopCommand:
                     except ValueError:
                         skipped_queries.append(idx)
                         status = (
-                            f"[{StyleTokens.WARNING}]skipped (>1KB)[/{StyleTokens.WARNING}]"
+                            f"[{StyleTokens.WARNING}]skipped (>4KB)[/{StyleTokens.WARNING}]"
                         )
 
                 query_preview = query.get("normalized_query", query_text)[:70] + (
@@ -1101,7 +1101,7 @@ class TopCommand:
 
             if skipped_queries:
                 self._console.print(
-                    f"\n[{StyleTokens.WARNING}]Note: {len(skipped_queries)} queries exceeded the 1KB limit and were not saved.[/{StyleTokens.WARNING}]"
+                    f"\n[{StyleTokens.WARNING}]Note: {len(skipped_queries)} queries exceeded the 4KB limit and were not saved.[/{StyleTokens.WARNING}]"
                 )
                 self._console.print(
                     f"[{StyleTokens.WARNING}]Use 'rdst analyze --large-query-bypass' to analyze large queries.[/{StyleTokens.WARNING}]"
