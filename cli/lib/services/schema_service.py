@@ -614,8 +614,8 @@ class SchemaService:
             return SchemaUpdateResult(
                 success=False,
                 message="",
-                error="Anthropic API key not set (RDST_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY). "
-                "Export your API key and restart the server.",
+                error="Anthropic API key not set (ANTHROPIC_API_KEY or RDST_TRIAL_TOKEN). "
+                "Export your API key or run 'rdst init' to configure.",
             )
 
         if not self._manager.exists(target):

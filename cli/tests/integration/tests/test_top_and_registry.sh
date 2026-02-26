@@ -127,7 +127,7 @@ test_top_snapshot_mode_with_json() {
   # Run Top in snapshot mode with JSON output
   local json_output="${TMP_RUN}/top_snapshot.json"
   echo "Running rdst top --target \"$TARGET_NAME\" --duration 30 --json..."
-  "${RDST_CMD[@]}" top --target "$TARGET_NAME" --duration 30 --json > "$json_output" 2>&1
+  "${RDST_CMD[@]}" top --target "$TARGET_NAME" --duration 30 --json > "$json_output" 2>/dev/null
   local top_exit_code=$?
 
   # Kill workload immediately after getting data

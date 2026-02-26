@@ -27,7 +27,7 @@ async def test_get_env_requirements_returns_contract(app):
         },
         {
             "kind": "anthropic_api_key",
-            "accepted_names": ["RDST_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"],
+            "accepted_names": ["ANTHROPIC_API_KEY", "RDST_TRIAL_TOKEN"],
             "target": None,
             "satisfied": True,
             "source": "process_env",

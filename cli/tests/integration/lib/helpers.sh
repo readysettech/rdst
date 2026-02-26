@@ -31,14 +31,31 @@ run_cmd() {
   echo "TEST: $label"
   echo "  Command: $*"
 
-  if "$@" > "$LAST_OUTPUT_FILE" 2>&1; then
-    echo "PASS"
+  local start_time=$SECONDS
+
+  # Stream output live (tee to file + stdout) so CI sees every line in real time.
+  # Also run a heartbeat: if rdst goes silent (e.g. waiting on LLM), CI still
+  # sees proof of life every 5 seconds.
+  (
+    while true; do
+      sleep 5
+      local elapsed=$(( SECONDS - start_time ))
+      echo "  ... waiting on response ($label) ${elapsed}s"
+    done
+  ) &
+  local heartbeat_pid=$!
+
+  local exit_code=0
+  "$@" 2>&1 | tee "$LAST_OUTPUT_FILE" || exit_code=${PIPESTATUS[0]}
+
+  kill $heartbeat_pid 2>/dev/null
+  wait $heartbeat_pid 2>/dev/null || true
+
+  local elapsed=$(( SECONDS - start_time ))
+  if [[ $exit_code -eq 0 ]]; then
+    echo "PASS (${elapsed}s)"
   else
-    local exit_code=$?
-    echo "Command exited with code $exit_code (not necessarily a failure)"
-    echo "--- Output ---"
-    cat "$LAST_OUTPUT_FILE"
-    echo "--- End Output ---"
+    echo "Command exited with code $exit_code after ${elapsed}s (not necessarily a failure)"
   fi
 }
 
@@ -49,12 +66,28 @@ run_expect_fail() {
   echo "TEST: $label (expect failure)"
   echo "  Command: $*"
 
-  if "$@" > "$LAST_OUTPUT_FILE" 2>&1; then
-    echo "FAIL Expected command to fail but it succeeded"
-    cat "$LAST_OUTPUT_FILE"
+  local start_time=$SECONDS
+  (
+    while true; do
+      sleep 5
+      local elapsed=$(( SECONDS - start_time ))
+      echo "  ... waiting on response ($label) ${elapsed}s"
+    done
+  ) &
+  local heartbeat_pid=$!
+
+  local exit_code=0
+  "$@" 2>&1 | tee "$LAST_OUTPUT_FILE" || exit_code=${PIPESTATUS[0]}
+
+  kill $heartbeat_pid 2>/dev/null
+  wait $heartbeat_pid 2>/dev/null || true
+
+  local elapsed=$(( SECONDS - start_time ))
+  if [[ $exit_code -eq 0 ]]; then
+    echo "FAIL Expected command to fail but it succeeded (${elapsed}s)"
     exit 1
   else
-    echo "PASS Observed expected failure for $label"
+    echo "PASS Observed expected failure for $label (${elapsed}s)"
   fi
 }
 
@@ -65,8 +98,24 @@ run_cmd_pipe() {
   echo
   echo "TEST: $label"
   echo "  Command: $command_string"
-  bash -lc "$command_string" >"$LAST_OUTPUT_FILE" 2>&1 || true
-  echo "PASS"
+
+  local start_time=$SECONDS
+  (
+    while true; do
+      sleep 5
+      local elapsed=$(( SECONDS - start_time ))
+      echo "  ... waiting on response ($label) ${elapsed}s"
+    done
+  ) &
+  local heartbeat_pid=$!
+
+  bash -lc "$command_string" 2>&1 | tee "$LAST_OUTPUT_FILE" || true
+
+  kill $heartbeat_pid 2>/dev/null
+  wait $heartbeat_pid 2>/dev/null || true
+
+  local elapsed=$(( SECONDS - start_time ))
+  echo "PASS (${elapsed}s)"
 }
 
 # =============================================================================

@@ -771,7 +771,7 @@ class HelpCommand:
             HelpResult with the answer
         """
         # Check for API key or trial token
-        api_key = os.environ.get("RDST_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+        api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN")
         if not api_key:
             try:
                 from ..llm_manager.key_resolution import resolve_api_key

@@ -30,14 +30,14 @@ def _mock_config():
 def test_get_requirements_resolves_sources(monkeypatch):
     monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
     monkeypatch.delenv("STAGE_DB_PASSWORD", raising=False)
-    monkeypatch.delenv("RDST_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     service = EnvRequirementsService(
         secret_store=FakeSecretStore(
             {
                 "PROD_DB_PASSWORD": "persisted-prod",
-                "RDST_ANTHROPIC_API_KEY": "persisted-anthropic",
+                "ANTHROPIC_API_KEY": "persisted-anthropic",
             }
         )
     )
@@ -87,7 +87,7 @@ def test_get_allowed_names_includes_targets_and_anthropic():
 
     assert "PROD_DB_PASSWORD" in names
     assert "STAGE_DB_PASSWORD" in names
-    assert "RDST_ANTHROPIC_API_KEY" in names
+    assert "RDST_TRIAL_TOKEN" in names
     assert "ANTHROPIC_API_KEY" in names
 
 

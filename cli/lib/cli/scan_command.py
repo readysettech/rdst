@@ -597,7 +597,7 @@ class ScanCommand:
 
         # Check for API key or trial token early - fail fast if not configured
         if not dry_run:
-            _has_key = bool(os.environ.get("RDST_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
+            _has_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN"))
             if not _has_key:
                 try:
                     from ..llm_manager.key_resolution import resolve_api_key
@@ -815,7 +815,7 @@ class ScanCommand:
         if analyze and target:
             # Fail immediately if no API key or trial token — don't silently produce empty results
             import os as _os
-            _has_key = bool(_os.environ.get("RDST_ANTHROPIC_API_KEY") or _os.environ.get("ANTHROPIC_API_KEY"))
+            _has_key = bool(_os.environ.get("ANTHROPIC_API_KEY") or _os.environ.get("RDST_TRIAL_TOKEN"))
             if not _has_key:
                 try:
                     from ..llm_manager.key_resolution import resolve_api_key

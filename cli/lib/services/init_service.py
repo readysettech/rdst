@@ -147,7 +147,7 @@ class InitService:
         if not has_anthropic_api_key():
             return {
                 "success": False,
-                "error": "Anthropic API key not set (RDST_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY)",
+                "error": "Anthropic API key not set (ANTHROPIC_API_KEY or RDST_TRIAL_TOKEN). Run 'rdst init' to configure.",
             }
 
         try:

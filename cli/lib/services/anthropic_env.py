@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-ANTHROPIC_API_KEY_NAMES = ("RDST_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY")
+ANTHROPIC_API_KEY_NAMES = ("ANTHROPIC_API_KEY", "RDST_TRIAL_TOKEN")
 
 
 def get_anthropic_api_key() -> str | None:

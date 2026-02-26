@@ -1026,7 +1026,7 @@ class ConfigurationWizard:
         self._show_step("", "Anthropic Configuration", "")
 
         # Check if API key is already set (own key takes priority)
-        has_api_key = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("RDST_ANTHROPIC_API_KEY"))
+        has_api_key = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("RDST_TRIAL_TOKEN"))
 
         if has_api_key:
             self._show_success(

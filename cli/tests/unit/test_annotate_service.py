@@ -89,11 +89,11 @@ class TestAnnotateServiceAnnotate:
         assert "No semantic layer found" in events[0].message
 
     @pytest.mark.asyncio
-    async def test_accepts_rdst_anthropic_api_key(self, service, target_config):
-        """Test RDST_ANTHROPIC_API_KEY is accepted when ANTHROPIC_API_KEY is absent."""
+    async def test_accepts_rdst_trial_token(self, service, target_config):
+        """Test RDST_TRIAL_TOKEN is accepted when ANTHROPIC_API_KEY is absent."""
         events = []
 
-        with patch.dict(os.environ, {"RDST_ANTHROPIC_API_KEY": "test-key"}, clear=True):
+        with patch.dict(os.environ, {"RDST_TRIAL_TOKEN": "test-token"}, clear=True):
             with patch(
                 "lib.semantic_layer.manager.SemanticLayerManager"
             ) as MockManager:

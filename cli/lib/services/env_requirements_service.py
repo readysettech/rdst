@@ -12,7 +12,7 @@ from .secret_store_service import SecretStoreService
 class EnvRequirementsService:
     """Build readiness model for required env vars."""
 
-    ANTHROPIC_ACCEPTED_NAMES = ["RDST_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"]
+    ANTHROPIC_ACCEPTED_NAMES = ["ANTHROPIC_API_KEY", "RDST_TRIAL_TOKEN"]
 
     def __init__(self, secret_store: SecretStoreService | None = None):
         self.secret_store = secret_store or SecretStoreService()

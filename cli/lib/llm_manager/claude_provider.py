@@ -41,12 +41,12 @@ class ClaudeProvider(Provider):
     """
     Anthropic Claude Messages API wrapper.
 
-    Default: Sonnet 4.6 (fast, cost-effective for query analysis)
+    Default: Sonnet 4.5 (fast, cost-effective for query analysis)
     Override via RDST_ANTHROPIC_MODEL env var to use Opus for more sophisticated analysis.
     """
 
     _DEFAULT_MODEL = AnthropicModel(
-        os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.SONNET_4_6.value)
+        os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.SONNET_4_5.value)
     )
 
     _BASE_URL = "https://api.anthropic.com/v1/messages"

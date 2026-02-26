@@ -56,7 +56,7 @@ class AnnotateService:
         if not has_anthropic_api_key():
             yield AnnotateErrorEvent(
                 type="annotate_error",
-                message="Anthropic API key not set (RDST_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY).",
+                message="Anthropic API key not set (ANTHROPIC_API_KEY or RDST_TRIAL_TOKEN). Run 'rdst init' to configure.",
             )
             return
 

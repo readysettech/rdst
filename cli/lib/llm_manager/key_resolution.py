@@ -66,45 +66,46 @@ def resolve_api_key() -> KeyResolution:
     """
     from .base import LLMError
 
-    # 1. RDST-specific env var (highest priority, avoids Claude Code conflicts)
-    key = os.getenv("RDST_ANTHROPIC_API_KEY")
-    if key:
-        return KeyResolution(api_key=key, is_trial=False)
-
-    # 2. Standard Anthropic env var
+    # 1. User's own Anthropic API key
     key = os.getenv("ANTHROPIC_API_KEY")
     if key:
         return KeyResolution(api_key=key, is_trial=False)
 
-    # 3. Trial token from config
+    # 2. Trial token (env var or config) — check exhausted status first
+    trial_env = os.getenv("RDST_TRIAL_TOKEN")
+    trial_config_token = None
+    trial_status = None
+
     try:
         from ..cli.rdst_cli import TargetsConfig
 
         config = TargetsConfig()
         config.load()
         trial = config._data.get("trial", {})
-        if trial.get("token"):
-            if trial.get("status") == "active":
-                token = trial["token"]
-                return KeyResolution(
-                    api_key=token,
-                    is_trial=True,
-                    proxy_url=TRIAL_PROXY_URL,
-                    extra_headers=_make_attestation_headers(token),
-                )
-            if trial.get("status") == "exhausted":
-                raise LLMError(
-                    "Trial credits exhausted ($5.00 used).\n\n"
-                    "To continue using RDST:\n"
-                    "  1. Get your own key: https://console.anthropic.com/\n"
-                    '  2. Set it: export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
-                    "Want more trial credits? Email hello@readyset.io",
-                    code="TRIAL_EXHAUSTED",
-                )
-    except LLMError:
-        raise
+        trial_config_token = trial.get("token")
+        trial_status = trial.get("status")
     except Exception:
         pass
+
+    if trial_status == "exhausted":
+        raise LLMError(
+            "Trial credits exhausted.\n\n"
+            "To continue using RDST:\n"
+            "  1. Get your own key: https://console.anthropic.com/\n"
+            '  2. Set it: export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
+            "Want more trial credits? Email hello@readyset.io",
+            code="TRIAL_EXHAUSTED",
+        )
+
+    # Env var takes priority over config
+    token = trial_env or (trial_config_token if trial_status == "active" else None)
+    if token:
+        return KeyResolution(
+            api_key=token,
+            is_trial=True,
+            proxy_url=TRIAL_PROXY_URL,
+            extra_headers=_make_attestation_headers(token),
+        )
 
     raise LLMError(
         "No LLM API key configured.\n\n"

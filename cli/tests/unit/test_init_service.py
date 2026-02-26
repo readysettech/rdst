@@ -113,10 +113,10 @@ class TestInitServiceGetStatus:
 
         assert status.llm_configured is True
 
-    def test_checks_llm_configured_with_rdst_api_key(self, service, mock_config):
-        """Test get_status accepts RDST_ANTHROPIC_API_KEY."""
+    def test_checks_llm_configured_with_trial_token(self, service, mock_config):
+        """Test get_status accepts RDST_TRIAL_TOKEN."""
         with patch.object(service, "_load_config", return_value=mock_config):
-            with patch.dict(os.environ, {"RDST_ANTHROPIC_API_KEY": "test-key"}, clear=True):
+            with patch.dict(os.environ, {"RDST_TRIAL_TOKEN": "test-token"}, clear=True):
                 status = service.get_status()
 
         assert status.llm_configured is True
@@ -293,12 +293,12 @@ class TestInitServiceCheckLLM:
 
         assert result["success"] is True
 
-    def test_llm_api_success_with_rdst_key(self, service, mock_config):
-        """Test check_llm succeeds when only RDST_ANTHROPIC_API_KEY is set."""
+    def test_llm_api_success_with_trial_token(self, service, mock_config):
+        """Test check_llm succeeds when only RDST_TRIAL_TOKEN is set."""
         mock_llm = Mock()
         mock_llm.query.return_value = {"text": "pong"}
 
-        with patch.dict(os.environ, {"RDST_ANTHROPIC_API_KEY": "test-key"}, clear=True):
+        with patch.dict(os.environ, {"RDST_TRIAL_TOKEN": "test-token"}, clear=True):
             with patch("lib.llm_manager.llm_manager.LLMManager", return_value=mock_llm):
                 result = service.check_llm(mock_config)
 

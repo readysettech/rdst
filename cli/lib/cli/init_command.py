@@ -352,7 +352,7 @@ class InitCommand:
                 self._print("Failed", msg)
 
         # Breadcrumb: show next steps using NextSteps component
-        has_api_key = bool(os.environ.get("RDST_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
+        has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN"))
         if not has_api_key:
             try:
                 from lib.llm_manager.key_resolution import resolve_api_key

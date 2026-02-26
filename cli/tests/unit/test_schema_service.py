@@ -547,12 +547,12 @@ class TestSchemaServiceAnnotate:
         assert result.success is False
         assert "ANTHROPIC_API_KEY" in (result.error or "")
 
-    def test_annotate_accepts_rdst_anthropic_key(self, service):
-        """Test annotate accepts RDST_ANTHROPIC_API_KEY."""
+    def test_annotate_accepts_rdst_trial_token(self, service):
+        """Test annotate accepts RDST_TRIAL_TOKEN."""
         service._manager.exists.return_value = False
 
         with patch.dict(
-            "os.environ", {"RDST_ANTHROPIC_API_KEY": "test-key"}, clear=True
+            "os.environ", {"RDST_TRIAL_TOKEN": "test-token"}, clear=True
         ):
             result = service.annotate("test-target", {"engine": "postgresql"})
 

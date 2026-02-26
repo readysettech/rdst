@@ -883,7 +883,7 @@ class AnalyzeCommand:
         """
         try:
             # Check env vars first, then trial token from config
-            key = os.environ.get("RDST_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+            key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN")
             if key:
                 return None
 
