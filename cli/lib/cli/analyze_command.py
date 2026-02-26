@@ -59,6 +59,7 @@ class AnalyzeInput:
     hash: str
     tag: str = ""
     save_as: str = ""
+    registry_target: str = ""  # Target from registry (last_target)
 
 
 class AnalyzeInputError(Exception):
@@ -190,6 +191,7 @@ class AnalyzeCommand:
             hash=entry.hash,
             tag=entry.tag,
             save_as=save_as,
+            registry_target=entry.last_target,
         )
 
     def _resolve_by_name(self, name: str, save_as: str) -> AnalyzeInput:
@@ -216,6 +218,7 @@ class AnalyzeCommand:
             hash=entry.hash,
             tag=entry.tag,
             save_as=save_as,
+            registry_target=entry.last_target,
         )
 
     def _enforce_query_size_limit(self, query: str, bypass: bool = False) -> None:

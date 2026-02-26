@@ -784,7 +784,6 @@ class RdstCLI:
         positional_query: Optional[str] = None,
         target: Optional[str] = None,
         save_as: Optional[str] = None,
-        db: Optional[str] = None,
         readyset_cache: bool = False,
         fast: bool = False,
         interactive: bool = False,
@@ -815,7 +814,6 @@ class RdstCLI:
             positional_query: Positional query argument
             target: Target database
             save_as: Name to save query as after analysis
-            db: Legacy parameter for target database
             readyset_cache: Whether to test Readyset caching with Docker container
             fast: Whether to skip EXPLAIN ANALYZE and use EXPLAIN only
             interactive: Whether to enter interactive mode after analysis
@@ -850,12 +848,14 @@ class RdstCLI:
                 large_query_bypass=large_query_bypass,
             )
 
-            # Use target parameter, fallback to db for backward compatibility, then to default
-            target_db = target or db
+            # Use explicit --target, then registry target (from --hash/--name
+            # lookup), then config default
+            target_db = target
             cfg = TargetsConfig()
             cfg.load()
+            if not target_db and resolved_input.registry_target:
+                target_db = resolved_input.registry_target
             if not target_db:
-                # Get default target from configuration if none specified
                 target_db = cfg.get_default()
 
             # Get target engine for telemetry
