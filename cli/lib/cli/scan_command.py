@@ -1125,7 +1125,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                 capture_output=True,
                 text=True,
                 stdin=subprocess.DEVNULL,  # Isolate subprocess from terminal
-                timeout=120,  # 2 minute timeout for EXPLAIN ANALYZE + LLM
+                timeout=60,  # 60s timeout — if EXPLAIN ANALYZE is slow, fall back to --fast
                 cwd=rdst_dir,
             )
             _elapsed = _t.time() - _start
@@ -1303,7 +1303,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                     capture_output=True,
                     text=True,
                     stdin=subprocess.DEVNULL,
-                    timeout=120,
+                    timeout=60,  # --fast skips EXPLAIN ANALYZE, should be quick
                     cwd=rdst_dir,
                 )
                 _elapsed = _t.time() - _start
