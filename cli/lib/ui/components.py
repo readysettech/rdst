@@ -868,8 +868,8 @@ def StatusLine(label: str, value: str, style: Optional[str] = None) -> "Text":
 
     Args:
         label: Status label
-        value: Status value
-        style: Optional style for the value
+        value: Status value (supports Rich markup like [green]text[/green])
+        style: Optional style for the value (overrides markup if provided)
 
     Returns:
         Rich Text with formatted status line
@@ -879,7 +879,8 @@ def StatusLine(label: str, value: str, style: Optional[str] = None) -> "Text":
     if style:
         text.append(value, style=style)
     else:
-        text.append(value)
+        # Parse Rich markup in the value (e.g., [green]text[/green])
+        text.append_text(Text.from_markup(value))
     return text
 
 

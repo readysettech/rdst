@@ -1083,8 +1083,8 @@ def _format_readyset_cacheability(
                         f"  [{StyleTokens.MUTED}]•[/{StyleTokens.MUTED}] {issue}"
                     )
 
-    # Also include LLM explanation from cacheability analysis
-    if readyset_cacheability.get("success"):
+    elif readyset_cacheability.get("success"):
+        # Fallback to LLM-based analysis if container-based analysis not available
         status_style = (
             StyleTokens.SUCCESS
             if readyset_cacheability.get("cacheable", False)
