@@ -61,7 +61,7 @@ class SchemaRenderer:
             target_name = event.init_result.target
             steps = [
                 (
-                    f"rdst schema annotate --target {target_name} --use-llm",
+                    f"rdst schema annotate --target {target_name} --llm-guided",
                     "AI-generate descriptions",
                 ),
                 (

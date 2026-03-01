@@ -299,7 +299,7 @@ rdst schema init --target mydb
 rdst schema show --target mydb
 
 # AI-generate column/table descriptions
-rdst schema annotate --target mydb --use-llm
+rdst schema annotate --target mydb --llm-guided
 
 # Edit semantic layer manually
 rdst schema edit --target mydb
@@ -642,7 +642,7 @@ With annotations, you tell RDST what these values mean so it can give smarter re
 rdst schema init --target mydb
 
 # Auto-generate descriptions using AI (good starting point)
-rdst schema annotate --target mydb --use-llm
+rdst schema annotate --target mydb --llm-guided
 
 # Or manually add business context
 rdst schema annotate --target mydb

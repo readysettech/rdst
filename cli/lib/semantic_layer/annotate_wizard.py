@@ -576,7 +576,7 @@ class AnnotateWizard:
                     break
                 else:
                     self.console.print(
-                        f"[{StyleTokens.WARNING}]AI suggestions not available. Use --use-llm flag.[/{StyleTokens.WARNING}]"
+                        f"[{StyleTokens.WARNING}]AI suggestions not available. Set ANTHROPIC_API_KEY environment variable.[/{StyleTokens.WARNING}]"
                     )
             elif "=" in entry:
                 value, meaning = entry.split("=", 1)

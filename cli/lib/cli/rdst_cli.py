@@ -1362,16 +1362,24 @@ class RdstCLI:
                     result = schema_cmd.edit(target, kwargs.get("table"))
                 else:
                     table = kwargs.get("table")
-                    use_llm = kwargs.get("use_llm", False)
+                    llm_guided = kwargs.get("llm_guided", False)
+                    auto_accept = kwargs.get("auto_accept", False)
                     sample_rows = kwargs.get("sample_rows", 5)
                     target_config = self._get_target_config(target)
-                    if use_llm and not target_config:
+                    if llm_guided and not target_config:
                         return RdstResult(
                             False,
                             f"Target '{target}' not found. Run 'rdst configure' first.",
                         )
+                    if auto_accept and not llm_guided:
+                        return RdstResult(
+                            False,
+                            "--auto-accept requires --llm-guided.",
+                        )
                     result = schema_cmd.annotate(
-                        target, table, use_llm, sample_rows, target_config
+                        target, table, llm_guided=llm_guided,
+                        auto_accept=auto_accept,
+                        sample_rows=sample_rows, target_config=target_config,
                     )
                 return RdstResult(bool(result.get("ok")), result.get("message", ""))
 

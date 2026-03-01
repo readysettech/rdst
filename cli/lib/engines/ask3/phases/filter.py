@@ -133,7 +133,7 @@ Rules:
             extra={"response_format": {"type": "json_object"}}
         )
 
-        if not response or 'text' not in response:
+        if not response or 'text' not in response or not response['text'].strip():
             logger.warning("Semantic extraction returned no response")
             return {"suggested_tables": [], "reasoning": "LLM returned no response"}
 

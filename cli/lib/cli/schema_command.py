@@ -792,7 +792,7 @@ class SchemaCommand:
                     "enum_columns": enum_columns,
                     "path": str(self.manager.get_path(target)),
                     "next_steps": [
-                        f"  rdst schema annotate --target {target} --use-llm   AI-generate descriptions",
+                        f"  rdst schema annotate --target {target} --llm-guided   AI-generate descriptions",
                         f"  rdst schema edit --target {target}                 Manual editing in $EDITOR",
                         f'  rdst ask "How many rows in each table?" --target {target}   Try natural language queries',
                     ],
@@ -969,34 +969,57 @@ class SchemaCommand:
         self,
         target: str,
         table_name: Optional[str] = None,
-        use_llm: bool = False,
+        llm_guided: bool = False,
+        auto_accept: bool = False,
         sample_rows: int = 5,
         target_config: Optional[dict] = None,
     ) -> dict:
         """
-        Run interactive annotation wizard.
+        Run annotation — either LLM-guided or interactive wizard.
 
         Args:
             target: Target database name
             table_name: Optional specific table to annotate
-            use_llm: Use LLM to generate suggestions before wizard
+            llm_guided: LLM-guided mode — profiles data, drafts annotations, asks questions
+            auto_accept: Auto-accept all LLM annotations (requires llm_guided)
             sample_rows: Number of sample rows to use for context
-            target_config: Database config (required if use_llm=True)
+            target_config: Database config (required if llm_guided=True)
 
         Returns:
-            Dict with result from wizard
+            Dict with result
         """
-        # Always try to enable AI support in wizard (if API key available)
+        if llm_guided:
+            if not target_config:
+                return {
+                    "ok": False,
+                    "message": f"Target '{target}' not configured. Run 'rdst configure' first.",
+                }
+
+            layer = self.manager.load_or_create(target)
+            if not layer.tables:
+                return {
+                    "ok": False,
+                    "message": f"No schema found for '{target}'. Run 'rdst schema init --target {target}' first.",
+                }
+
+            try:
+                from ..semantic_layer.guided_annotator import GuidedAnnotator
+
+                annotator = GuidedAnnotator(console=self.console, manager=self.manager)
+                annotator.run(layer, target_config, table_name, auto_accept=auto_accept)
+                return {"ok": True, "message": "Guided annotation complete."}
+            except Exception as e:
+                return {"ok": False, "message": f"Guided annotation failed: {e}"}
+
+        # Interactive wizard (no --llm-guided flag)
         ai_annotator = None
         try:
             from ..semantic_layer.ai_annotator import AIAnnotator
 
             ai_annotator = AIAnnotator()  # Will raise if no API key
         except Exception:
-            # Silently skip - AI suggestions will be unavailable in wizard
             pass
 
-        # Always try to create sample data function (if target configured)
         sample_data_fn = None
         if target_config:
             try:
@@ -1004,55 +1027,10 @@ class SchemaCommand:
                     target_config, sample_rows
                 )
             except Exception:
-                # Database connection issues - sample data unavailable
                 pass
 
-        # Always set schema context
         schema_context = f"{target} database"
 
-        # Run bulk pre-population only if --use-llm flag is set
-        if use_llm:
-            import asyncio
-            from ..services.annotate_service import AnnotateService
-            from ..services.types import AnnotateErrorEvent, AnnotateCompleteEvent
-            from .annotate_renderer import AnnotateRenderer
-
-            # Check prerequisites
-            if not target_config:
-                return {
-                    "ok": False,
-                    "message": f"Target '{target}' not configured. Run 'rdst configure' first.",
-                }
-
-            # Use streaming service for bulk annotation
-            service = AnnotateService()
-            renderer = AnnotateRenderer()
-            llm_success = False
-
-            async def _run_annotation():
-                nonlocal llm_success
-                try:
-                    async for event in service.annotate(
-                        target, target_config, table_name, sample_rows
-                    ):
-                        renderer.render(event)
-                        if isinstance(event, AnnotateCompleteEvent):
-                            llm_success = event.success
-                        elif isinstance(event, AnnotateErrorEvent):
-                            llm_success = False
-                finally:
-                    renderer.cleanup()
-
-            asyncio.run(_run_annotation())
-
-            if llm_success:
-                self.console.print(
-                    "  Review and edit suggestions in the wizard below.\n"
-                )
-            else:
-                self.console.print("Continuing with manual annotation...\n")
-
-        # Run interactive wizard with AI support (if enabled)
         wizard = AnnotateWizard(
             manager=self.manager,
             ai_annotator=ai_annotator,
@@ -1075,22 +1053,22 @@ class SchemaCommand:
 
         def sample_data(table_name: str) -> List[Dict]:
             """Sample N rows from a table."""
-            engine = target_config.get("engine", "").lower()
+            from ..db_connection import resolve_connection_params
 
-            if engine in ["postgresql", "postgres"]:
+            params = resolve_connection_params(target_config=target_config)
+            engine = params["engine"]
+
+            if engine in ("postgresql", "postgres"):
                 import psycopg2
                 import psycopg2.extras
 
-                # Get connection params
-                password_env = target_config.get("password_env")
-                password = os.environ.get(password_env) if password_env else None
-
                 conn = psycopg2.connect(
-                    host=target_config.get("host"),
-                    port=target_config.get("port", 5432),
-                    user=target_config.get("user"),
-                    password=password,
-                    database=target_config.get("database"),
+                    host=params["host"],
+                    port=params["port"],
+                    user=params["user"],
+                    password=params["password"],
+                    database=params["database"],
+                    sslmode=params["sslmode"],
                     connect_timeout=5,
                 )
 
@@ -1098,7 +1076,6 @@ class SchemaCommand:
                     with conn.cursor(
                         cursor_factory=psycopg2.extras.RealDictCursor
                     ) as cursor:
-                        # Use TABLESAMPLE for large tables
                         cursor.execute(f"""
                             SELECT * FROM "{table_name}"
                             TABLESAMPLE SYSTEM(1)
@@ -1112,15 +1089,12 @@ class SchemaCommand:
                 import pymysql
                 import pymysql.cursors
 
-                password_env = target_config.get("password_env")
-                password = os.environ.get(password_env) if password_env else None
-
                 conn = pymysql.connect(
-                    host=target_config.get("host"),
-                    port=target_config.get("port", 3306),
-                    user=target_config.get("user"),
-                    password=password,
-                    database=target_config.get("database"),
+                    host=params["host"],
+                    port=params["port"],
+                    user=params["user"],
+                    password=params["password"],
+                    database=params["database"],
                     cursorclass=pymysql.cursors.DictCursor,
                     connect_timeout=5,
                 )
