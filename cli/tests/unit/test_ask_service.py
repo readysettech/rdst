@@ -392,6 +392,107 @@ class TestAskServiceBuildRefinedQuestion:
         assert "aggregation: unique count" in result
 
 
+class TestAskServiceNullSchema:
+    """Tests for null/empty schema handling (rdst-9cq.7)."""
+
+    @pytest.fixture
+    def service(self):
+        return AskService()
+
+    @pytest.fixture
+    def input_data(self):
+        return AskInput(question="How many users?", target="test-target", source="cli")
+
+    @pytest.fixture
+    def options(self):
+        return AskOptions(dry_run=False, timeout_seconds=30, verbose=False)
+
+    @pytest.mark.asyncio
+    async def test_error_when_schema_info_is_none(self, service, input_data, options):
+        """Schema load returns None schema_info without marking error — should yield error event."""
+        events = []
+
+        async def mock_load_config(target):
+            return ("test-target", {"engine": "postgresql", "host": "localhost"})
+
+        with patch.object(service, "_load_config", side_effect=mock_load_config):
+            with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+                def fake_load_schema(ctx, presenter, sem_mgr):
+                    # Simulate _collect_from_database returning (None, error_string)
+                    # without calling mark_error — the bug scenario.
+                    ctx.schema_info = None
+                    ctx.schema_formatted = "Schema information: Not available (no target config)"
+                    return ctx
+
+                mock_load.side_effect = fake_load_schema
+
+                async for event in service.ask(input_data, options):
+                    events.append(event)
+
+        error_events = [e for e in events if isinstance(e, AskErrorEvent)]
+        assert len(error_events) == 1, (
+            f"Expected error event for null schema, got events: "
+            f"{[e.type for e in events]}"
+        )
+        assert "schema" in error_events[0].message.lower() or "schema" in (error_events[0].phase or "")
+
+    @pytest.mark.asyncio
+    async def test_error_when_schema_has_no_tables(self, service, input_data, options):
+        """Schema loads but has zero tables — should yield error, not continue."""
+        events = []
+
+        async def mock_load_config(target):
+            return ("test-target", {"engine": "postgresql", "host": "localhost"})
+
+        with patch.object(service, "_load_config", side_effect=mock_load_config):
+            with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+                def fake_load_schema(ctx, presenter, sem_mgr):
+                    from lib.engines.ask3.types import SchemaInfo, SchemaSource
+                    ctx.schema_info = SchemaInfo(
+                        target="test-target",
+                        db_type="postgresql",
+                        source=SchemaSource.DATABASE,
+                    )
+                    # schema_info exists but has no tables
+                    ctx.schema_formatted = ""
+                    return ctx
+
+                mock_load.side_effect = fake_load_schema
+
+                async for event in service.ask(input_data, options):
+                    events.append(event)
+
+        error_events = [e for e in events if isinstance(e, AskErrorEvent)]
+        assert len(error_events) == 1, (
+            f"Expected error event for empty schema, got events: "
+            f"{[e.type for e in events]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_filter_phase_when_schema_none(self, service, input_data, options):
+        """Null schema should stop before filter phase — never send to LLM."""
+        events = []
+
+        async def mock_load_config(target):
+            return ("test-target", {"engine": "postgresql", "host": "localhost"})
+
+        with patch.object(service, "_load_config", side_effect=mock_load_config):
+            with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+                def fake_load_schema(ctx, presenter, sem_mgr):
+                    ctx.schema_info = None
+                    ctx.schema_formatted = "Schema information: Collection failed (connection refused)"
+                    return ctx
+
+                mock_load.side_effect = fake_load_schema
+
+                with patch("lib.engines.ask3.phases.filter_schema") as mock_filter:
+                    async for event in service.ask(input_data, options):
+                        events.append(event)
+
+                    # filter_schema should never be called
+                    mock_filter.assert_not_called()
+
+
 class TestAskServiceErrorHandling:
     """Tests for error handling edge cases."""
 

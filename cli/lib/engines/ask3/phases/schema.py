@@ -76,9 +76,15 @@ def load_schema(
         ctx.schema_info, ctx.schema_formatted = _collect_from_database(ctx)
         ctx.schema_source = SchemaSource.DATABASE
 
+        if ctx.schema_info is None or not ctx.schema_info.tables:
+            error_msg = ctx.schema_formatted or "Failed to load schema"
+            logger.error(f"Schema collection produced no tables: {error_msg}")
+            ctx.mark_error(error_msg)
+            return ctx
+
         presenter.schema_loaded(
             source='database',
-            table_count=len(ctx.schema_info.tables) if ctx.schema_info else 0
+            table_count=len(ctx.schema_info.tables)
         )
 
     except Exception as e:

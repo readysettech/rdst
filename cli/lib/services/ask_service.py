@@ -142,8 +142,17 @@ class AskService:
                 )
                 return
 
+            # Guard: stop if schema is null or empty (rdst-9cq.7)
+            if not ctx.schema_info or not ctx.schema_info.tables:
+                yield AskErrorEvent(
+                    type="error",
+                    message=ctx.error_message or "No schema loaded — check target connection and credentials",
+                    phase="schema",
+                )
+                return
+
             # Yield schema info
-            tables = list(ctx.schema_info.tables.keys()) if ctx.schema_info else []
+            tables = list(ctx.schema_info.tables.keys())
             ctx.all_available_tables = tables
             yield AskSchemaLoadedEvent(
                 type="schema_loaded",
