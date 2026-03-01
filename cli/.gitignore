@@ -41,6 +41,9 @@ test-results/
 .coverage
 htmlcov/
 
+# E2E test credentials (developer-specific)
+tests/e2e/.env
+
 # Local config (don't commit user-specific configs)
 .rdst/
 

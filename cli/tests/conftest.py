@@ -11,6 +11,9 @@ def pytest_configure(config):
         "markers", "ask_experimental: tests for Ask/Schema features (not run by default, require database)"
     )
     config.addinivalue_line(
+        "markers", "e2e: end-to-end tests via tmux (not run by default, require database + API key)"
+    )
+    config.addinivalue_line(
         "markers", "asyncio: mark test to run in asyncio event loop"
     )
 
@@ -32,10 +35,28 @@ def pytest_collection_modifyitems(config, items):
         # User explicitly ran: pytest tests/ask_experimental/
         return
 
+    # Check if user is explicitly running e2e tests
+    running_e2e_explicit = any(
+        "tests/e2e" in str(item.fspath) or "tests\\e2e" in str(item.fspath)
+        for item in items
+    ) and all(
+        "tests/e2e" in str(item.fspath) or "tests\\e2e" in str(item.fspath) or "conftest" in str(item.fspath)
+        for item in items
+    )
+
+    if running_e2e_explicit:
+        # User explicitly ran: pytest tests/e2e/
+        return
+
     skip_ask = pytest.mark.skip(reason="ask_experimental tests excluded by default. Run with: pytest tests/ask_experimental/ -v")
     for item in items:
         if "ask_experimental" in str(item.fspath):
             item.add_marker(skip_ask)
+
+    skip_e2e = pytest.mark.skip(reason="e2e tests excluded by default. Run with: pytest tests/e2e/ -v")
+    for item in items:
+        if "tests/e2e" in str(item.fspath) or "tests\\e2e" in str(item.fspath):
+            item.add_marker(skip_e2e)
 import tempfile
 import os
 import sys
