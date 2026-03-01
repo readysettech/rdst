@@ -123,6 +123,17 @@ class ClaudeProvider(Provider):
                 # Force the model to use this tool
                 payload["tool_choice"] = {"type": "tool", "name": tool_name}
 
+            elif response_format.get("type") == "json_object":
+                # json_object mode: no schema provided, just enforce JSON output.
+                # Claude doesn't have a native json_object mode like OpenAI,
+                # so we add an explicit instruction to the system prompt.
+                json_instruction = (
+                    "\n\nYou MUST respond with valid JSON only. "
+                    "No markdown, no explanation, no code fences — just the JSON object."
+                )
+                existing_system = payload.get("system", "")
+                payload["system"] = existing_system + json_instruction
+
             # Add other extra parameters (excluding response_format)
             extra_without_response_format = {
                 k: v for k, v in request.extra.items() if k != "response_format"

@@ -94,8 +94,8 @@ CONFIDENCE SCORING GUIDE:
 
 IMPORTANT RULES:
 1. If needs_clarification=true, you MUST provide at least one clarification question
-2. ALWAYS generate SQL in the sql_generation section, even if needs_clarification=true
-3. When clarification is needed, generate your best-guess SQL based on reasonable assumptions
+2. If the schema clearly CANNOT answer the question (missing tables/columns for the requested data), set confidence to 0.0, set sql to empty string "", and explain in assumptions what data is missing and what IS available
+3. Only generate best-guess SQL when the schema plausibly contains the needed data but has minor ambiguities
 4. Document your assumptions in the "assumptions" field
 5. If confidence < 0.7, you SHOULD consider requesting clarification"""
 

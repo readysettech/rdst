@@ -74,6 +74,18 @@ def generate_sql(
         presenter.error(error)
         return ctx
 
+    # Gate on very low confidence — schema can't answer the question
+    confidence = result.get('confidence', 1.0)
+    if confidence < 0.3:
+        assumptions = result.get('assumptions', [])
+        explanation = '; '.join(assumptions) if assumptions else 'Schema lacks the data needed to answer this question'
+        ctx.mark_error(
+            f"Cannot answer this question from the available schema "
+            f"(confidence: {confidence}). {explanation}"
+        )
+        presenter.error(ctx.error_message)
+        return ctx
+
     # Store results
     ctx.sql = result.get('sql', '')
     ctx.sql_explanation = result.get('explanation', '')

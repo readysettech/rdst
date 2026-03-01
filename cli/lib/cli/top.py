@@ -241,6 +241,9 @@ class TopCommand:
             except ImportError:
                 # Windows doesn't have these modules
                 pass
+            except OSError:
+                # Non-TTY stdin (e.g., pytest redirected pseudofile)
+                pass
 
         # Start keyboard listener
         try:
