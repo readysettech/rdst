@@ -2,7 +2,44 @@
 Common pytest fixtures and configuration for RDST tests.
 """
 
+import os
+import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 import pytest
+
+# Add the rdst directory to the path for proper imports
+rdst_root = Path(__file__).parent.parent
+if str(rdst_root) not in sys.path:
+    sys.path.insert(0, str(rdst_root))
+if str(rdst_root / "lib") not in sys.path:
+    sys.path.insert(0, str(rdst_root / "lib"))
+
+
+# Test suites excluded from default runs.  Each entry maps a path
+# fragment to the skip reason shown when the suite is auto-skipped.
+_EXCLUDED_SUITES = {
+    "ask_experimental": "ask_experimental tests excluded by default. Run with: pytest tests/ask_experimental/ -v",
+    "tests/e2e": "e2e tests excluded by default. Run with: pytest tests/e2e/ -v",
+}
+
+
+def _matches_suite(path_str: str, fragment: str) -> bool:
+    """True if *path_str* belongs to the test suite identified by *fragment*."""
+    return fragment in path_str or fragment.replace("/", "\\") in path_str
+
+
+def _is_explicit_run(items, fragment: str) -> bool:
+    """True if the user explicitly targeted *fragment* (and nothing else)."""
+    return (
+        any(_matches_suite(str(it.fspath), fragment) for it in items)
+        and all(
+            _matches_suite(str(it.fspath), fragment) or "conftest" in str(it.fspath)
+            for it in items
+        )
+    )
 
 
 # Register custom markers
@@ -18,57 +55,15 @@ def pytest_configure(config):
     )
 
 
-# Exclude ask_experimental tests from default runs
 def pytest_collection_modifyitems(config, items):
-    """Skip ask_experimental tests unless explicitly targeted."""
-    # Check if user is explicitly running ask_experimental tests
-    # by looking at the test paths being collected
-    running_ask_explicit = any(
-        "ask_experimental" in str(item.fspath)
-        for item in items
-    ) and all(
-        "ask_experimental" in str(item.fspath) or "conftest" in str(item.fspath)
-        for item in items
-    )
-
-    if running_ask_explicit:
-        # User explicitly ran: pytest tests/ask_experimental/
-        return
-
-    # Check if user is explicitly running e2e tests
-    running_e2e_explicit = any(
-        "tests/e2e" in str(item.fspath) or "tests\\e2e" in str(item.fspath)
-        for item in items
-    ) and all(
-        "tests/e2e" in str(item.fspath) or "tests\\e2e" in str(item.fspath) or "conftest" in str(item.fspath)
-        for item in items
-    )
-
-    if running_e2e_explicit:
-        # User explicitly ran: pytest tests/e2e/
-        return
-
-    skip_ask = pytest.mark.skip(reason="ask_experimental tests excluded by default. Run with: pytest tests/ask_experimental/ -v")
-    for item in items:
-        if "ask_experimental" in str(item.fspath):
-            item.add_marker(skip_ask)
-
-    skip_e2e = pytest.mark.skip(reason="e2e tests excluded by default. Run with: pytest tests/e2e/ -v")
-    for item in items:
-        if "tests/e2e" in str(item.fspath) or "tests\\e2e" in str(item.fspath):
-            item.add_marker(skip_e2e)
-import tempfile
-import os
-import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-# Add the rdst directory to the path for proper imports
-rdst_root = Path(__file__).parent.parent
-if str(rdst_root) not in sys.path:
-    sys.path.insert(0, str(rdst_root))
-if str(rdst_root / "lib") not in sys.path:
-    sys.path.insert(0, str(rdst_root / "lib"))
+    """Skip excluded test suites unless the user explicitly targeted them."""
+    for fragment, reason in _EXCLUDED_SUITES.items():
+        if _is_explicit_run(items, fragment):
+            return
+        skip = pytest.mark.skip(reason=reason)
+        for item in items:
+            if _matches_suite(str(item.fspath), fragment):
+                item.add_marker(skip)
 
 
 @pytest.fixture

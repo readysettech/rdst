@@ -1,6 +1,8 @@
 """E2E test fixtures: env loading, DB checks, target provisioning, tmux sessions."""
 
 import os
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -17,6 +19,8 @@ _REQUIRED_VARS = [
 ]
 
 _TARGET_NAME = "e2e-imdb"
+
+_RDST_PY = Path(__file__).resolve().parent.parent.parent / "rdst.py"
 
 
 def _load_dotenv() -> None:
@@ -38,6 +42,18 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+def _run_rdst(*args: str, timeout: int = 30) -> subprocess.CompletedProcess:
+    """Run rdst as a subprocess (for non-interactive setup/teardown)."""
+    cmd = [sys.executable, str(_RDST_PY)] + list(args)
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=str(_RDST_PY.parent),
+    )
+
+
 @pytest.fixture(scope="session")
 def e2e_config():
     """Load and validate e2e configuration from env vars.
@@ -52,8 +68,8 @@ def e2e_config():
         )
 
     return {
-        "host": os.environ.get("RDST_E2E_DB_HOST", "localhost"),
-        "port": os.environ.get("RDST_E2E_DB_PORT", "5432"),
+        "host": os.environ["RDST_E2E_DB_HOST"],
+        "port": int(os.environ.get("RDST_E2E_DB_PORT", "5432")),
         "user": os.environ.get("RDST_E2E_DB_USER", "rdst"),
         "database": os.environ["RDST_E2E_DB_DATABASE"],
         "engine": os.environ.get("RDST_E2E_DB_ENGINE", "postgresql"),
@@ -69,10 +85,10 @@ def db_check(e2e_config):
     """
     engine = e2e_config["engine"]
     host = e2e_config["host"]
-    port = int(e2e_config["port"])
+    port = e2e_config["port"]
     user = e2e_config["user"]
     database = e2e_config["database"]
-    password = os.environ["RDST_E2E_DB_PASSWORD"]
+    password = os.environ[e2e_config["password_env"]]
 
     if engine == "postgresql":
         try:
@@ -122,54 +138,36 @@ def db_check(e2e_config):
 
 @pytest.fixture(scope="session")
 def e2e_target(e2e_config, db_check):
-    """Provision an rdst target for e2e tests via tmux.
+    """Provision an rdst target for e2e tests.
 
     Creates ``e2e-imdb`` target using ``rdst configure add``.
     Tears it down after the session.
     """
-    client = TmuxClient(f"e2e-setup-{uuid.uuid4().hex[:8]}")
+    # Remove stale target if it exists (ignore errors).
+    _run_rdst("configure", "remove", _TARGET_NAME, "--confirm")
 
-    try:
-        client.start()
+    # Add the target.
+    _run_rdst(
+        "configure", "add",
+        "--target", _TARGET_NAME,
+        "--engine", e2e_config["engine"],
+        "--host", e2e_config["host"],
+        "--port", str(e2e_config["port"]),
+        "--user", e2e_config["user"],
+        "--database", e2e_config["database"],
+        "--password-env", e2e_config["password_env"],
+        "--skip-verify",
+    )
 
-        # Remove stale target if it exists (ignore errors).
-        try:
-            client.run_rdst(f"configure remove {_TARGET_NAME} --confirm", timeout=15)
-        except TmuxError:
-            pass
+    yield _TARGET_NAME
 
-        # Add the target.
-        add_cmd = (
-            f"configure add "
-            f"--target {_TARGET_NAME} "
-            f"--engine {e2e_config['engine']} "
-            f"--host {e2e_config['host']} "
-            f"--port {e2e_config['port']} "
-            f"--user {e2e_config['user']} "
-            f"--database {e2e_config['database']} "
-            f"--password-env {e2e_config['password_env']} "
-            f"--skip-verify"
-        )
-        client.run_rdst(add_cmd, timeout=30)
-
-        yield _TARGET_NAME
-
-        # Teardown: remove the target.
-        try:
-            client.run_rdst(f"configure remove {_TARGET_NAME} --confirm", timeout=15)
-        except TmuxError:
-            pass
-    finally:
-        try:
-            client.kill()
-        except TmuxError:
-            pass
+    # Teardown: remove the target.
+    _run_rdst("configure", "remove", _TARGET_NAME, "--confirm")
 
 
 @pytest.fixture
 def tmux(request):
     """Fresh tmux session per test. Killed on teardown."""
-    # Use test node id (shortened) for unique session names.
     short_id = uuid.uuid4().hex[:8]
     client = TmuxClient(f"e2e-{short_id}")
     client.start()

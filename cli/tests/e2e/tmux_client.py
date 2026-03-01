@@ -117,13 +117,13 @@ class TmuxClient:
         return _run(*args)
 
     def run_rdst(self, args: str, timeout: float = 90) -> str:
-        """Run an rdst command and return the full output after it completes.
+        """Run an rdst command and return recent output after it completes.
 
         Sends ``uv run rdst.py {args}``, waits for the shell prompt to
-        reappear (indicating the command finished), then reads and returns
-        the pane content.
+        reappear (indicating the command finished), then reads the last
+        200 lines of pane content to avoid unbounded scrollback.
         """
         cmd = f"uv run rdst.py {args}"
         self.send_and_wait(cmd, r"\$ ", timeout=timeout)
-        data = self.read()
+        data = self.read(last=200)
         return data.get("content", "")
