@@ -759,6 +759,7 @@ class SchemaTableColumn:
     unit: Optional[str]
     is_pii: bool
     enum_values: Optional[Dict[str, str]]
+    value_pattern: Optional[str] = None
 
 
 @dataclass

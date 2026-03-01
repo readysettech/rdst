@@ -901,6 +901,9 @@ class SchemaCommand:
                         )
                         old_col.data_type = new_col.data_type
 
+                    # Always update auto-detected enrichment (structural, not user-authored)
+                    old_col.value_pattern = new_col.value_pattern
+
                 # Replace indexes entirely (structural data, no annotations)
                 old_idx_names = set(old_table.indexes.keys()) if old_table.indexes else set()
                 new_idx_names = set(new_table.indexes.keys()) if new_table.indexes else set()

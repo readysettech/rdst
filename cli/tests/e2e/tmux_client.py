@@ -18,9 +18,8 @@ class TmuxError(Exception):
         self.data = data or {}
 
 
-# Resolve harness script relative to this file:
-# tests/e2e/tmux_client.py -> ../../scripts/tmux_harness.py
-_HARNESS = Path(__file__).resolve().parent.parent.parent / "scripts" / "tmux_harness.py"
+# Resolve harness script — same directory as this file.
+_HARNESS = Path(__file__).resolve().parent / "tmux_harness.py"
 
 
 def _run(*args: str) -> dict:
@@ -122,8 +121,12 @@ class TmuxClient:
         Sends ``uv run rdst.py {args}``, waits for the shell prompt to
         reappear (indicating the command finished), then reads the last
         200 lines of pane content to avoid unbounded scrollback.
+
+        Note: the prompt pattern uses ``\\n\\$`` (newline then dollar) rather
+        than ``\\$ `` because tmux capture-pane strips trailing whitespace
+        from each line, turning ``$ `` into ``$``.
         """
         cmd = f"uv run rdst.py {args}"
-        self.send_and_wait(cmd, r"\$ ", timeout=timeout)
+        self.send_and_wait(cmd, r"\n\$", timeout=timeout)
         data = self.read(last=200)
         return data.get("content", "")

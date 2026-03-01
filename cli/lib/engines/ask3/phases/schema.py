@@ -168,6 +168,8 @@ def _format_semantic_schema(layer) -> str:
             if col.enum_values:
                 enum_preview = ", ".join(f"{k}={v}" for k, v in list(col.enum_values.items())[:3])
                 col_str += f" [enum: {enum_preview}]"
+            if col.value_pattern:
+                col_str += f" [pattern: {col.value_pattern}]"
             col_strs.append(col_str)
 
         parts.append("\n".join(col_strs))

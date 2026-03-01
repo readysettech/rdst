@@ -108,6 +108,7 @@ class SchemaService:
                     unit=col.unit,
                     is_pii=col.is_pii or False,
                     enum_values=col.enum_values,
+                    value_pattern=col.value_pattern or None,
                 )
                 for col_name, col in table.columns.items()
             ]

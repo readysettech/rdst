@@ -129,6 +129,10 @@ class SchemaRenderer:
                             )
                             for val, meaning in col.enum_values.items():
                                 enum_node.add(f"{val} = {meaning}")
+                        if col.value_pattern:
+                            col_node.add(
+                                f"[{StyleTokens.ACCENT}]Pattern: {col.value_pattern}[/{StyleTokens.ACCENT}]"
+                            )
 
             self._console.print(tree)
 

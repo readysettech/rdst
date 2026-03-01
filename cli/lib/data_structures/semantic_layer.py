@@ -49,6 +49,9 @@ class ColumnAnnotation:
     # Data quality notes
     quality_notes: str = ""
 
+    # Auto-detected enrichment (populated by introspector)
+    value_pattern: str = ""  # comma_separated_list (columns requiring split/unnest)
+
     def to_dict(self) -> dict:
         """Convert to dictionary for YAML serialization."""
         result = {}
@@ -70,6 +73,8 @@ class ColumnAnnotation:
             result['is_pii'] = self.is_pii
         if self.quality_notes:
             result['quality_notes'] = self.quality_notes
+        if self.value_pattern:
+            result['value_pattern'] = self.value_pattern
         return result
 
     @classmethod
@@ -85,7 +90,8 @@ class ColumnAnnotation:
             enum_values=data.get('enum_values', {}),
             default_filter=data.get('default_filter', ''),
             is_pii=data.get('is_pii', False),
-            quality_notes=data.get('quality_notes', '')
+            quality_notes=data.get('quality_notes', ''),
+            value_pattern=data.get('value_pattern', ''),
         )
 
 

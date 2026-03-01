@@ -20,6 +20,11 @@ from ..data_structures.semantic_layer import (
     Extension,
     CustomType,
 )
+from .pattern_detector import (
+    detect_delimiter_columns_sql_postgres,
+    detect_delimiter_columns_sql_mysql,
+    DELIMITER_FRACTION_THRESHOLD,
+)
 
 
 class SchemaIntrospector:
@@ -274,6 +279,24 @@ class SchemaIntrospector:
                         }
 
             table.columns[col_name] = column
+
+        # Detect delimiter-separated list columns (single query per table)
+        text_cols = [
+            name for name, col in table.columns.items()
+            if not col.enum_values and col.data_type in ('text', 'varchar', 'character varying')
+        ]
+        if text_cols:
+            try:
+                sql = detect_delimiter_columns_sql_postgres(text_cols, table_name, row_estimate)
+                cursor.execute(sql)
+                row = cursor.fetchone()
+                if row:
+                    for i, col_name in enumerate(text_cols):
+                        fraction = row[i]
+                        if fraction is not None and fraction > DELIMITER_FRACTION_THRESHOLD:
+                            table.columns[col_name].value_pattern = "comma_separated_list"
+            except Exception:
+                pass  # Don't abort table introspection for enrichment
 
         # Get indexes
         cursor.execute("""
@@ -660,6 +683,24 @@ class SchemaIntrospector:
                         }
 
             table.columns[field] = column
+
+        # Detect delimiter-separated list columns (single query per table)
+        text_cols = [
+            name for name, col in table.columns.items()
+            if not col.enum_values and col.data_type in ('text', 'varchar', 'char')
+        ]
+        if text_cols:
+            try:
+                sql = detect_delimiter_columns_sql_mysql(text_cols, table_name, row_estimate)
+                cursor.execute(sql)
+                row = cursor.fetchone()
+                if row:
+                    for i, col_name in enumerate(text_cols):
+                        fraction = row[i]
+                        if fraction is not None and fraction > DELIMITER_FRACTION_THRESHOLD:
+                            table.columns[col_name].value_pattern = "comma_separated_list"
+            except Exception:
+                pass
 
         # Get indexes
         cursor.execute(f"SHOW INDEX FROM `{table_name}`")
