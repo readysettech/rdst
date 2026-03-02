@@ -311,7 +311,7 @@ test_query_integration_with_analyze() {
 
   # Analyze using the name
   run_cmd "Analyze query by name" \
-    "${RDST_CMD[@]}" analyze --name integration-test
+    "${RDST_CMD[@]}" analyze --name integration-test --skip-warning
   assert_contains "RDST Query Analysis" "analyze should work with query name"
   assert_contains "title_basics" "analyze should show query content"
 

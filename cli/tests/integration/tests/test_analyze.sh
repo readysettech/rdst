@@ -15,7 +15,8 @@ LIMIT 25"
     "${RDST_CMD[@]}" analyze \
     --target "$TARGET_NAME" \
     --query "$inline_query" \
-    --save-as "$PRIMARY_TAG"
+    --save-as "$PRIMARY_TAG" \
+    --skip-warning
   assert_contains "RDST Query Analysis" "analysis header"
   assert_contains "─ Query ─" "analysis query section"
   assert_contains "NEXT STEPS" "analysis footer"
@@ -25,11 +26,11 @@ LIMIT 25"
   [[ -n "$PRIMARY_HASH" ]] || fail "Failed to capture primary query hash from list output"
 
   run_cmd "Analyze by registry hash (${PRIMARY_HASH})" \
-    "${RDST_CMD[@]}" analyze "$PRIMARY_HASH"
+    "${RDST_CMD[@]}" analyze "$PRIMARY_HASH" --skip-warning
   assert_not_contains "ERROR:" "analysis by hash should succeed"
 
   run_cmd "Analyze by name (${PRIMARY_TAG})" \
-    "${RDST_CMD[@]}" analyze --name "$PRIMARY_TAG"
+    "${RDST_CMD[@]}" analyze --name "$PRIMARY_TAG" --skip-warning
   assert_contains "RDST Query Analysis" "analysis by name header"
 
   local query_file="$TMP_RUN/from_file.sql"
@@ -64,7 +65,7 @@ SQL
   done
 
   run_cmd "Analyze using normalized structure hash (${STRUCTURE_HASH})" \
-    "${RDST_CMD[@]}" analyze "$STRUCTURE_HASH"
+    "${RDST_CMD[@]}" analyze "$STRUCTURE_HASH" --skip-warning
   assert_not_contains "ERROR:" "analysis using structure hash should succeed"
 
   # Verify token usage tracking in stats.json
@@ -109,6 +110,7 @@ test_readyset_flag() {
     "${RDST_CMD[@]}" analyze \
     --target "$TARGET_NAME" \
     --readyset \
+    --skip-warning \
     --query "$simple_query"
   assert_contains "RDST Query Analysis" "analyze --readyset should show analysis"
   # Check that Readyset analysis was attempted (may succeed or fail gracefully)
@@ -120,7 +122,7 @@ test_readyset_flag() {
   [[ -n "$READYSET_HASH" ]] || fail "Failed to capture readyset query hash"
 
   run_cmd "Analyze with --readyset using hash (${READYSET_HASH})" \
-    "${RDST_CMD[@]}" analyze --readyset "$READYSET_HASH"
+    "${RDST_CMD[@]}" analyze --readyset "$READYSET_HASH" --skip-warning
   assert_contains "RDST Query Analysis" "analyze --readyset by hash should run analysis"
   assert_regex "READYSET|Readyset|readyset" "analyze --readyset by hash should mention Readyset"
 
@@ -128,13 +130,14 @@ test_readyset_flag() {
     "${RDST_CMD[@]}" analyze \
     --target "$TARGET_NAME" \
     --readyset \
+    --skip-warning \
     --save-as "readyset-test" \
     --query "SELECT * FROM title_basics WHERE tconst = 'tt0000006'"
   assert_contains "RDST Query Analysis" "analyze --readyset with tag should run analysis"
   assert_regex "READYSET|Readyset|readyset" "analyze --readyset with tag should mention Readyset"
 
   run_cmd "Analyze with --readyset using name" \
-    "${RDST_CMD[@]}" analyze --readyset --name "readyset-test"
+    "${RDST_CMD[@]}" analyze --readyset --name "readyset-test" --skip-warning
   assert_contains "RDST Query Analysis" "analyze --readyset by name should run analysis"
   assert_regex "READYSET|Readyset|readyset" "analyze --readyset by name should mention Readyset"
 
@@ -143,6 +146,7 @@ test_readyset_flag() {
     "${RDST_CMD[@]}" analyze \
     --target "$TARGET_NAME" \
     --readyset \
+    --skip-warning \
     --query "SELECT * FROM title_basics WHERE tconst = 'tt0000007' LIMIT 1"
   assert_contains "RDST Query Analysis" "basic query should run analysis"
   # Just verify the command ran - Readyset analysis may or may not succeed

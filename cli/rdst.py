@@ -222,6 +222,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             "review",
             "large_query_bypass",
             "json",
+            "skip_warning",
         ]
         filtered_kwargs = {
             k: v for k, v in kwargs.items() if k not in analyze_exclude_keys
@@ -242,6 +243,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             review=getattr(args, "review", False),
             large_query_bypass=getattr(args, "large_query_bypass", None),
             output_json=getattr(args, "json", False),
+            skip_warning=getattr(args, "skip_warning", False),
             **filtered_kwargs,
         )
     elif command == "init":

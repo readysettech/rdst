@@ -786,7 +786,7 @@ class HelpCommand:
                 error="""No LLM API key configured.
 
 Options:
-  1. Run 'rdst init' to sign up for a free trial ($5 credit)
+  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)
   2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."
      Get one at: https://console.anthropic.com/
 """,

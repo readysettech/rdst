@@ -791,6 +791,7 @@ class RdstCLI:
         review: bool = False,
         large_query_bypass: Optional[str] = None,
         output_json: bool = False,
+        skip_warning: bool = False,
         **kwargs,
     ) -> RdstResult:
         """
@@ -876,6 +877,7 @@ class RdstCLI:
                 interactive=interactive,
                 review=review,
                 output_json=output_json,
+                skip_warning=skip_warning,
             )
 
             # Extract query hash from result for telemetry

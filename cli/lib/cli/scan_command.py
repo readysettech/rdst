@@ -611,7 +611,7 @@ class ScanCommand:
                     "No LLM API key configured.\n\n"
                     "rdst scan requires an Anthropic API key to convert ORM code to SQL.\n\n"
                     "Options:\n"
-                    "  1. Run 'rdst init' to sign up for a free trial ($5 credit)\n"
+                    "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
                     "  2. Set your own key: export ANTHROPIC_API_KEY=\"sk-ant-...\"\n"
                     "     Get one at: https://console.anthropic.com/"
                 )
@@ -827,7 +827,7 @@ class ScanCommand:
                 error_msg = (
                     "No LLM API key configured. Cannot run analysis.\n\n"
                     "Options:\n"
-                    "  1. Run 'rdst init' to sign up for a free trial ($5 credit)\n"
+                    "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
                     "  2. Set your own key: export ANTHROPIC_API_KEY=\"sk-ant-...\"\n"
                     "     Get one at: https://console.anthropic.com/"
                 )
@@ -836,7 +836,7 @@ class ScanCommand:
                     return RdstResult(False, json.dumps(results, indent=2), data=results)
                 return RdstResult(False, error_msg)
 
-            batch_size = 1 if sequential else 5
+            batch_size = 1 if sequential else 3
 
             if shallow:
                 results["analysis"] = self._analyze_shallow_all_queries(
@@ -1115,6 +1115,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                 "-q", sql,
                 "--target", target,
                 "--json",
+                "--skip-warning",
             ]
 
             _start = _t.time()
@@ -1296,6 +1297,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                     "--target", target,
                     "--json",
                     "--fast",
+                    "--skip-warning",
                 ]
                 _start = _t.time()
                 proc = subprocess.run(

@@ -252,13 +252,12 @@ class TopCommand:
             pass
 
         error_event = None
+        live_started = False
 
         async def run_async():
             nonlocal running, selected_query_index, save_all_requested
             nonlocal analyze_requested, quit_requested, target_name, newly_saved
-            nonlocal error_event
-
-            live_started = False
+            nonlocal error_event, live_started
             try:
                 async for event in service.stream_realtime(input_data, options, None):
                     # Handle errors BEFORE starting Live display

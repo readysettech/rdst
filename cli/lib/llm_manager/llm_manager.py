@@ -198,13 +198,20 @@ class LLMManager:
 
         # Propagate trial balance from proxy response and persist locally
         trial_remaining = (resp.raw or {}).get("_trial_remaining_cents")
+        trial_limit = (resp.raw or {}).get("_trial_limit_cents")
         if trial_remaining is not None:
             out["trial_remaining_cents"] = trial_remaining
+            if trial_limit is not None:
+                out["trial_limit_cents"] = trial_limit
             if self._config:
                 try:
                     trial = self._config._data.get("trial", {})
                     trial["remaining_cents"] = int(trial_remaining)
-                    trial["limit_cents"] = trial.get("limit_cents") or 500
+                    if trial_limit is not None:
+                        trial["limit_cents"] = int(trial_limit)
+                    elif not trial.get("limit_cents"):
+                        trial["limit_cents"] = 500
+                    out.setdefault("trial_limit_cents", trial["limit_cents"])
                     self._config._data["trial"] = trial
                     self._config.save()
                 except Exception:

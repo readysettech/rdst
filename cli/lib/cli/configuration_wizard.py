@@ -1059,13 +1059,15 @@ class ConfigurationWizard:
                 remaining = trial.get("remaining_cents")
                 limit = trial.get("limit_cents", 500)
                 if remaining is not None:
-                    remaining_dollars = remaining / 100
-                    limit_dollars = limit / 100
-                    used_dollars = limit_dollars - remaining_dollars
+                    from ..llm_manager.trial_display import cents_to_tokens, format_tokens
+                    remaining_tok = cents_to_tokens(remaining)
+                    limit_tok = cents_to_tokens(limit)
+                    used_tok = limit_tok - remaining_tok
+                    pct = int((remaining / limit) * 100) if limit > 0 else 0
                     balance_msg = (
                         f"You have an active RDST trial\n\n"
-                        f"  Balance: ${remaining_dollars:.2f} remaining of ${limit_dollars:.2f}\n"
-                        f"  Used:    ${used_dollars:.2f}"
+                        f"  Balance: {format_tokens(remaining_tok)} of {format_tokens(limit_tok)} tokens remaining ({pct}%)\n"
+                        f"  Used:    {format_tokens(used_tok)} tokens"
                     )
                 else:
                     balance_msg = "You have an active RDST trial (balance updates after next LLM call)"

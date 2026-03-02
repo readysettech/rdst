@@ -513,6 +513,7 @@ class AnalyzeCommand:
         interactive: bool = False,
         review: bool = False,
         output_json: bool = False,
+        skip_warning: bool = False,
     ) -> RdstResult:
         """
         Execute the analyze command with resolved input using the workflow engine.
@@ -689,6 +690,28 @@ class AnalyzeCommand:
             if readyset and not readyset_cache:
                 readyset_cache = True
 
+            # EXPLAIN ANALYZE safety warning (unless --skip-warning or --fast)
+            showed_warning = False
+            if not skip_warning and not fast and not output_json and sys.stdout.isatty():
+                from lib.ui import Confirm
+
+                self._console.print(
+                    MessagePanel(
+                        "This will run EXPLAIN ANALYZE against your database.\n"
+                        "While this is a read-only operation (SELECT), it executes the full\n"
+                        "query plan which could impact database performance for slow or\n"
+                        "resource-intensive queries.\n\n"
+                        "To suppress this prompt in the future:\n"
+                        "  --skip-warning   Run without this confirmation\n"
+                        "  --fast           Skip EXPLAIN ANALYZE entirely (schema-only analysis)",
+                        variant="warning",
+                        title="EXPLAIN ANALYZE Warning",
+                    )
+                )
+                if not Confirm.ask("Continue with EXPLAIN ANALYZE?", default=True):
+                    return RdstResult(False, "Analysis cancelled by user")
+                showed_warning = True
+
             success, workflow_result, error_msg = asyncio.run(
                 self._execute_analyze_async(
                     resolved_input=resolved_input,
@@ -756,6 +779,13 @@ class AnalyzeCommand:
                 return RdstResult(True, "")
 
             print(formatted_results)
+
+            # Breadcrumb: remind users about --skip-warning if they saw the prompt
+            if showed_warning:
+                self._console.print(
+                    f"\n[dim]Tip: Use --skip-warning to skip the EXPLAIN ANALYZE confirmation next time.[/dim]"
+                )
+
             return RdstResult(True, "")
 
         except Exception as e:
@@ -902,7 +932,7 @@ class AnalyzeCommand:
             return (
                 "No LLM API key configured.\n\n"
                 "Options:\n"
-                "  1. Run 'rdst init' to sign up for a free trial ($5 credit)\n"
+                "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
                 '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."\n'
                 "     Get one at: https://console.anthropic.com/"
             )

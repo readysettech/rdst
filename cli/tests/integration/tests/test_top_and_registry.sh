@@ -16,12 +16,14 @@ test_registry_and_files() {
       "${RDST_CMD[@]}" analyze \
       --target "$TARGET_NAME" \
       --save-as "registry-test-1" \
+      --skip-warning \
       --query "SELECT * FROM title_basics LIMIT 1"
 
     run_cmd "Create test query 2 for registry verification" \
       "${RDST_CMD[@]}" analyze \
       --target "$TARGET_NAME" \
       --save-as "registry-test-2" \
+      --skip-warning \
       --query "SELECT * FROM title_ratings LIMIT 1"
 
     # Get the hash from latest query
@@ -73,7 +75,7 @@ test_list_command() {
   [[ -n "$LIST_HASH" ]] || fail "Failed to extract hash from list --limit output"
 
   run_cmd "Analyze using hash from list (${LIST_HASH})" \
-    "${RDST_CMD[@]}" analyze "$LIST_HASH"
+    "${RDST_CMD[@]}" analyze "$LIST_HASH" --skip-warning
   assert_not_contains "ERROR:" "analyze using list hash should succeed"
 
   # Note: Cache by hash is tested in test_cache_commands

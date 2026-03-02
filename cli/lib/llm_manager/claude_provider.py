@@ -224,9 +224,10 @@ class ClaudeProvider(Provider):
                 f"Claude response parse error: {e}", code="PARSE_ERROR", cause=e
             )
 
-        # Capture trial balance from proxy response header
+        # Capture trial balance from proxy response headers
         raw = data if debug else {}
         trial_remaining = resp.headers.get("X-RDST-Trial-Remaining-Cents")
+        trial_limit = resp.headers.get("X-RDST-Trial-Limit-Cents")
         if trial_remaining is not None:
             if not raw:
                 raw = {}
@@ -234,6 +235,11 @@ class ClaudeProvider(Provider):
                 raw["_trial_remaining_cents"] = int(trial_remaining)
             except (ValueError, TypeError):
                 pass
+            if trial_limit is not None:
+                try:
+                    raw["_trial_limit_cents"] = int(trial_limit)
+                except (ValueError, TypeError):
+                    pass
 
         return ProviderResponse(text=text, usage=out_usage, raw=raw)
 

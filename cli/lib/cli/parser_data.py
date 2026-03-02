@@ -298,6 +298,11 @@ and Readyset caching opportunities.""",
                 action="store_true",
                 help="Output results as JSON (for programmatic use)",
             ),
+            ArgDef(
+                "--skip-warning",
+                action="store_true",
+                help="Skip the EXPLAIN ANALYZE safety confirmation prompt",
+            ),
         ],
         examples=[
             (

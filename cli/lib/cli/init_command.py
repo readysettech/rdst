@@ -292,7 +292,7 @@ class InitCommand:
                         MessagePanel(
                             "No LLM API key configured.\n\n"
                             "Options:\n"
-                            "  1. Run 'rdst configure llm' to sign up for a free trial ($5 credit)\n"
+                            "  1. Run 'rdst configure llm' to sign up for a free trial (up to 925K tokens)\n"
                             '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."',
                             variant="warning",
                             title="LLM Setup Required",

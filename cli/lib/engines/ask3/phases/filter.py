@@ -151,7 +151,7 @@ Rules:
         }
 
     except Exception as e:
-        logger.error(f"Semantic extraction failed: {e}")
+        logger.debug(f"Semantic extraction skipped, falling back to heuristics: {e}")
         return {"suggested_tables": [], "reasoning": f"Error: {e}"}
 
 

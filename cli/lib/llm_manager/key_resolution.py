@@ -56,7 +56,18 @@ def _make_attestation_headers(trial_token: str) -> dict[str, str]:
 
 
 def resolve_api_key() -> KeyResolution:
-    """Resolve API key with priority: env vars > trial token.
+    """Resolve API key with priority: env > trial > keyring.
+
+    Resolution order:
+      1. ANTHROPIC_API_KEY env var  → direct to Anthropic
+      2. RDST_TRIAL_TOKEN env var   → trial proxy
+      3. Trial token in config.toml → trial proxy
+      4. ANTHROPIC_API_KEY in OS keyring (set via rdst web) → direct
+      5. RDST_TRIAL_TOKEN in OS keyring → trial proxy
+
+    Keyring is checked last because it may be slow on systems
+    without a keyring daemon. The backend type is checked first
+    (instant) so dead backends never cause a delay.
 
     Returns:
         KeyResolution with routing info and attestation headers.
@@ -66,13 +77,22 @@ def resolve_api_key() -> KeyResolution:
     """
     from .base import LLMError
 
-    # 1. User's own Anthropic API key
+    # 1. User's own Anthropic API key (env var) — fastest path
     key = os.getenv("ANTHROPIC_API_KEY")
     if key:
         return KeyResolution(api_key=key, is_trial=False)
 
-    # 2. Trial token (env var or config) — check exhausted status first
+    # 2. Trial token (env var) — no config read needed
     trial_env = os.getenv("RDST_TRIAL_TOKEN")
+    if trial_env:
+        return KeyResolution(
+            api_key=trial_env,
+            is_trial=True,
+            proxy_url=TRIAL_PROXY_URL,
+            extra_headers=_make_attestation_headers(trial_env),
+        )
+
+    # 3. Trial token (config.toml)
     trial_config_token = None
     trial_status = None
 
@@ -97,20 +117,40 @@ def resolve_api_key() -> KeyResolution:
             code="TRIAL_EXHAUSTED",
         )
 
-    # Env var takes priority over config
-    token = trial_env or (trial_config_token if trial_status == "active" else None)
-    if token:
+    if trial_config_token and trial_status == "active":
         return KeyResolution(
-            api_key=token,
+            api_key=trial_config_token,
             is_trial=True,
             proxy_url=TRIAL_PROXY_URL,
-            extra_headers=_make_attestation_headers(token),
+            extra_headers=_make_attestation_headers(trial_config_token),
         )
+
+    # 4. OS keyring (checked last — may be slow on first probe)
+    try:
+        from ..services.secret_store_service import SecretStoreService
+
+        store = SecretStoreService()
+        keyring_key = store.get_secret("ANTHROPIC_API_KEY")
+        if keyring_key:
+            os.environ["ANTHROPIC_API_KEY"] = keyring_key
+            return KeyResolution(api_key=keyring_key, is_trial=False)
+
+        # 5. Trial token in keyring (for future web UI support)
+        keyring_trial = store.get_secret("RDST_TRIAL_TOKEN")
+        if keyring_trial:
+            return KeyResolution(
+                api_key=keyring_trial,
+                is_trial=True,
+                proxy_url=TRIAL_PROXY_URL,
+                extra_headers=_make_attestation_headers(keyring_trial),
+            )
+    except Exception:
+        pass
 
     raise LLMError(
         "No LLM API key configured.\n\n"
         "Options:\n"
-        '  1. Run \'rdst init\' to sign up for a free trial ($5 credit)\n'
+        "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
         '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."\n'
         "     Get one at: https://console.anthropic.com/",
         code="NO_API_KEY",

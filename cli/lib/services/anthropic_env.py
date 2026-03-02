@@ -8,11 +8,29 @@ ANTHROPIC_API_KEY_NAMES = ("ANTHROPIC_API_KEY", "RDST_TRIAL_TOKEN")
 
 
 def get_anthropic_api_key() -> str | None:
-    """Return the first configured Anthropic API key, preferring RDST-specific env."""
+    """Return the first configured Anthropic API key.
+
+    Resolution order: env vars → OS keyring (with timeout) → None.
+    """
+    # 1. Check environment variables
     for name in ANTHROPIC_API_KEY_NAMES:
         value = os.environ.get(name)
         if value:
             return value
+
+    # 2. Check OS keyring (set via rdst web)
+    try:
+        from .secret_store_service import SecretStoreService
+
+        store = SecretStoreService()
+        for name in ANTHROPIC_API_KEY_NAMES:
+            value = store.get_secret(name)
+            if value:
+                os.environ[name] = value  # cache in env for downstream use
+                return value
+    except Exception:
+        pass
+
     return None
 
 
