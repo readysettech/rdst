@@ -48,16 +48,24 @@ Component Hierarchy:
         MonitorHeader - live monitoring displays
 """
 
+import re
 from typing import List, Tuple, Any, Optional, Union, Literal
+
+import sqlglot
+from pygments.lexers.sql import SqlLexer
+from pygments.styles.monokai import MonokaiStyle
+from pygments.token import Name
+from sqlglot.errors import ParseError
 
 JustifyMethod = Literal["default", "left", "center", "right", "full"]
 
 from .theme import StyleTokens, Icons, Layout, duration_style
 
 from rich.panel import Panel
+from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
-from rich.syntax import Syntax
+from rich.syntax import Syntax, PygmentsSyntaxTheme
 from rich.console import Group
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.status import Status
@@ -501,9 +509,110 @@ def MetricPanel(
 # =============================================================================
 
 
+def format_sql_for_display(sql: str) -> str:
+    """Format SQL consistently for user-facing terminal output."""
+    if not sql:
+        return sql
+
+    stripped_sql = sql.strip()
+
+    try:
+        return sqlglot.parse_one(stripped_sql).sql(pretty=True)
+    except ParseError:
+        pass
+
+    formatted = " ".join(stripped_sql.split())
+    keywords = [
+        "LEFT JOIN",
+        "RIGHT JOIN",
+        "INNER JOIN",
+        "OUTER JOIN",
+        "GROUP BY",
+        "ORDER BY",
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "JOIN",
+        "ON",
+        "HAVING",
+        "LIMIT",
+        "OFFSET",
+        "UNION",
+        "WITH",
+    ]
+
+    for keyword in keywords:
+        formatted = re.sub(
+            rf"\b{re.escape(keyword)}\b",
+            keyword,
+            formatted,
+            flags=re.IGNORECASE,
+        )
+
+    for keyword in keywords:
+        pattern = rf"\s+{re.escape(keyword)}\b"
+        formatted = re.sub(pattern, f"\n{keyword}", formatted, flags=re.IGNORECASE)
+
+    return formatted.strip()
+
+
+class RdstSqlLexer(SqlLexer):
+    """SQL lexer that tokenizes common parameter placeholders as variables."""
+
+    name = "RDST SQL"
+    aliases = ["rdst-sql"]
+
+    tokens = {
+        "root": [
+            (r":p\d+\b", Name.Variable),
+            (r"\$\d+\b", Name.Variable),
+            (r"\?", Name.Variable),
+            *SqlLexer.tokens["root"],
+        ],
+        "multiline-comments": SqlLexer.tokens["multiline-comments"],
+    }
+
+
+_RDST_SQL_LEXER = RdstSqlLexer()
+
+
+class RdstSqlStyle(MonokaiStyle):
+    """Monokai-derived theme with explicit styling for SQL parameter placeholders."""
+
+    styles = dict(MonokaiStyle.styles)
+    styles[Name.Variable] = "bold #ae81ff"
+
+
+_RDST_SQL_THEME = PygmentsSyntaxTheme(RdstSqlStyle)
+
+
+def _sql_syntax(formatted_sql: str) -> Syntax:
+    """Build the shared Syntax renderable for SQL blocks."""
+    return Syntax(
+        formatted_sql,
+        _RDST_SQL_LEXER,
+        theme=_RDST_SQL_THEME,
+        word_wrap=True,
+        background_color="default",
+    )
+
+
+def render_sql_block(
+    sql: str,
+    title: str = "Query",
+    rule_style: Optional[str] = None,
+) -> Group:
+    """Render a copy-friendly SQL block with a titled rule and no surrounding box."""
+    formatted_sql = format_sql_for_display(sql).strip()
+    block_title = title or "Query"
+    header = Rule(Text(block_title, style=StyleTokens.HEADER), style=rule_style or StyleTokens.MUTED)
+    body = Padding(_sql_syntax(formatted_sql), (0, 0, 0, 2))
+    return Group(header, body)
+
+
 def QueryPanel(
     sql: str, title: str = "Query", border_style: Optional[str] = None
-) -> "StyledPanel":
+) -> Group:
     """
     SQL query display with syntax highlighting.
 
@@ -513,17 +622,13 @@ def QueryPanel(
         border_style: Override border style
 
     Returns:
-        Rich Panel with syntax-highlighted SQL
+        Rich Group with titled rule and syntax-highlighted SQL
     """
-    syntax = Syntax(
-        sql.strip(),
-        "sql",
-        theme=StyleTokens.SQL_THEME,
-        word_wrap=True,
-        background_color="default",
+    return render_sql_block(
+        sql,
+        title=title,
+        rule_style=border_style,
     )
-
-    return StyledPanel(syntax, title=title, border_style=border_style)
 
 
 def SQLPreview(
@@ -1594,11 +1699,12 @@ class Rule:
     def __str__(self):
         """Render as plain text."""
         if self.title:
+            title_text = self.title.plain if isinstance(self.title, Text) else str(self.title)
             # Center title in a line of dashes
             total_width = 60
-            title_len = len(self.title) + 2  # Add spaces around title
+            title_len = len(title_text) + 2  # Add spaces around title
             side_len = (total_width - title_len) // 2
-            return f"{'─' * side_len} {self.title} {'─' * side_len}"
+            return f"{'─' * side_len} {title_text} {'─' * side_len}"
         return "─" * 60
 
 

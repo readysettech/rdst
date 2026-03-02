@@ -92,21 +92,27 @@ class TestFormatQuery:
     def test_single_line_query(self):
         """Test formatting single line query."""
         result = _format_query("SELECT * FROM users")
-        # Now returns a QueryPanel box
+        # QueryPanel now renders a borderless SQL block
         output = result[0] if isinstance(result, list) else result
         assert "Query" in output
-        assert "SELECT * FROM users" in output
+        assert "SELECT" in output
+        assert "FROM users" in output
+        assert "│" not in output
+        assert "╭" not in output
+        assert "╰" not in output
 
     def test_multiline_query(self):
         """Test formatting multiline query."""
         query = "SELECT *\nFROM users\nWHERE id = 1"
         result = _format_query(query)
-        # Now returns a QueryPanel box with content
+        # QueryPanel now renders a borderless SQL block with content
         output = result[0] if isinstance(result, list) else result
         assert "Query" in output
         assert "SELECT" in output
         assert "FROM users" in output
-        assert "WHERE id = 1" in output
+        assert "WHERE" in output
+        assert "id = 1" in output
+        assert "│" not in output
 
 
 class TestFormatHeader:
@@ -212,7 +218,8 @@ class TestFormatAnalyzeOutput:
 
         result = format_analyze_output(workflow_result)
         assert "RDST Query Analysis" in result
-        assert "SELECT * FROM users" in result
+        assert "SELECT" in result
+        assert "FROM users" in result
 
     def test_fallback_on_format_failure(self):
         """Test fallback formatting when FormatFinalResults fails."""
@@ -252,7 +259,9 @@ class TestFormatAnalyzeOutput:
         }
 
         result = format_analyze_output(workflow_result)
-        assert "SELECT * FROM title_basics LIMIT ?" in result
+        assert "SELECT" in result
+        assert "FROM title_basics" in result
+        assert "LIMIT ?" in result
 
     def test_readyset_cache_section_labels_present(self):
         """Readyset section should include compatibility labels expected by integration tests."""

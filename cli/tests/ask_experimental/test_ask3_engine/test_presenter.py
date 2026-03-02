@@ -142,6 +142,21 @@ class TestPresenterOutput:
         assert "Jane" in captured.out
         assert "2 rows" in captured.out
 
+    def test_sql_generated_formats_query(self, capsys):
+        """Test generated SQL output uses the shared formatter."""
+        presenter = Ask3Presenter()
+
+        presenter.sql_generated(
+            "select id, name from users where status = 'active' order by created_at desc limit 10",
+            explanation="Fetch active users",
+        )
+
+        captured = capsys.readouterr()
+        assert "Generated SQL" in captured.out
+        assert "SELECT" in captured.out
+        assert "FROM users" in captured.out
+        assert "Explanation: Fetch active users" in captured.out
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

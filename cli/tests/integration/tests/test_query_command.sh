@@ -54,6 +54,14 @@ SQL
     --target "$TARGET_NAME"
   assert_contains "Query added" "query add from file should succeed"
   assert_regex "test-from" "query add should show file-based query name"
+
+  LONG_FORMAT_QUERY="SELECT tconst, primaryTitle, startYear, titleType FROM title_basics WHERE titleType = :p1 AND startYear >= :p2 ORDER BY startYear DESC LIMIT :p3"
+  run_cmd "Add long SQL query for formatting checks" \
+    "${RDST_CMD[@]}" query add test-longfmt \
+    --query "$LONG_FORMAT_QUERY" \
+    --target "$TARGET_NAME"
+  assert_contains "Query added" "long SQL query should be added"
+  LONG_FORMAT_HASH=$(latest_hash_from_list)
 }
 
 test_query_list() {
@@ -64,6 +72,7 @@ test_query_list() {
     "${RDST_CMD[@]}" query list
   assert_regex "test-movie" "list should show first query"
   assert_regex "test-from" "list should show second query"
+  assert_regex "test-longfmt" "list should show formatting query"
 
   # List with limit
   run_cmd "List queries with limit" \
@@ -75,12 +84,27 @@ test_query_list() {
 test_query_show() {
   log_section "3. Query Command - Show (${DB_ENGINE})"
 
+  local long_format_query="${LONG_FORMAT_QUERY:-SELECT tconst, primaryTitle, startYear, titleType FROM title_basics WHERE titleType = :p1 AND startYear >= :p2 ORDER BY startYear DESC LIMIT :p3}"
+
   run_cmd "Show query details" \
-    "${RDST_CMD[@]}" query show test-movie-query
-  assert_regex "test-movie" "show should display query name"
+    "${RDST_CMD[@]}" query show test-longfmt
+  assert_regex "test-longfmt" "show should display query name"
   assert_contains "Hash:" "show should display query hash"
+  assert_contains "SQL Pattern" "show should display SQL pattern panel"
+  assert_contains ":p1" "show should preserve placeholders"
   assert_contains "SELECT" "show should display SQL"
   assert_contains "title_basics" "show should display full query"
+  assert_not_contains "$long_format_query" "show should format long SQL across lines"
+  assert_not_contains "│ SELECT" "show should render SQL without panel side borders"
+
+  if [[ -n "$LONG_FORMAT_HASH" ]]; then
+    run_cmd "Show query details with hash" \
+      "${RDST_CMD[@]}" query show --hash "$LONG_FORMAT_HASH"
+    assert_contains "SQL Pattern" "show --hash should display SQL pattern panel"
+    assert_contains ":p2" "show --hash should preserve placeholders"
+    assert_not_contains "$long_format_query" "show --hash should format long SQL across lines"
+    assert_not_contains "│ SELECT" "show --hash should render SQL without panel side borders"
+  fi
 }
 
 test_query_edit() {

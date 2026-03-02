@@ -21,6 +21,7 @@ from lib.ui import (
     Group,
     MessagePanel,
     Layout,
+    format_sql_for_display,
 )
 
 
@@ -368,7 +369,8 @@ def _prompt_for_parameters_plain(
     console = get_console()
 
     # Show query info in a section box
-    sql_preview = sql[:200] + ("..." if len(sql) > 200 else "")
+    formatted_sql = format_sql_for_display(sql)
+    sql_preview = formatted_sql[:200] + ("..." if len(formatted_sql) > 200 else "")
     console.print(
         SectionBox(
             title="Parameterized Query - Values Needed",
@@ -419,7 +421,8 @@ def _prompt_for_parameters_plain(
     substituted_sql = substitute_placeholders(sql, values)
 
     # Show the substituted query
-    sql_preview = substituted_sql[:300] + ("..." if len(substituted_sql) > 300 else "")
+    formatted_sql = format_sql_for_display(substituted_sql)
+    sql_preview = formatted_sql[:300] + ("..." if len(formatted_sql) > 300 else "")
     console.print(
         SectionBox(
             title="Query Ready", content=sql_preview, border_style=StyleTokens.SUCCESS

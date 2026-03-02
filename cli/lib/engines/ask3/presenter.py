@@ -7,7 +7,6 @@ easier to test and the output easier to customize.
 
 from __future__ import annotations
 
-import sqlparse
 from typing import Any, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -24,6 +23,7 @@ from lib.ui import (
     MessagePanel,
     SectionBox,
     SelectionTable,
+    format_sql_for_display,
 )
 
 
@@ -144,9 +144,7 @@ class Ask3Presenter:
     def sql_generated(self, sql: str, explanation: Optional[str] = None) -> None:
         """Display generated SQL."""
         # Format SQL for readability
-        formatted_sql = sqlparse.format(
-            sql, reindent=True, keyword_case="upper", indent_width=2, wrap_after=80
-        )
+        formatted_sql = format_sql_for_display(sql)
 
         self._console.print(
             SectionBox(

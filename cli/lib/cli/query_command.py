@@ -42,14 +42,9 @@ from lib.ui import (
     DurationDisplay,
     DataTable,
     QueryTable,
+    format_sql_for_display,
+    render_sql_block,
 )
-
-try:
-    import sqlparse
-
-    SQLPARSE_AVAILABLE = True
-except ImportError:
-    SQLPARSE_AVAILABLE = False
 
 from lib.query_registry.query_registry import QueryRegistry
 
@@ -1064,13 +1059,14 @@ class QueryCommand:
         )
         self.console.print(panel)
 
-        # SQL pattern with highlighted placeholders
-        self.console.print(f"\n[{StyleTokens.TITLE}]SQL Pattern:[/{StyleTokens.TITLE}]")
-        # Highlight :pN placeholders in bright_magenta for visibility
-        sql_with_highlights = re.sub(
-            r"(:p\d+)", f"[{StyleTokens.PARAM}]\\1[/{StyleTokens.PARAM}]", entry.sql
+        # SQL pattern with syntax highlighting and emphasized placeholders
+        self.console.print(
+            render_sql_block(
+                entry.sql,
+                title="SQL Pattern",
+                rule_style=StyleTokens.MUTED,
+            )
         )
-        self.console.print(sql_with_highlights)
 
         # Show parameters and reconstructed query if parameters exist
         if entry.parameters:
@@ -1098,8 +1094,9 @@ class QueryCommand:
             # Show reconstructed executable SQL
             try:
                 executable_sql = reconstruct_sql(entry.sql, entry.parameters)
+                self.console.print()
                 self.console.print(
-                    f"\n[{StyleTokens.TITLE}]Executable SQL:[/{StyleTokens.TITLE}] (with current parameters)"
+                    f"[{StyleTokens.MUTED}]Using current stored parameter values.[/{StyleTokens.MUTED}]"
                 )
                 self.console.print(
                     QueryPanel(
@@ -1257,40 +1254,7 @@ class QueryCommand:
         if not sql:
             return sql
 
-        if SQLPARSE_AVAILABLE:
-            # Use sqlparse for professional formatting
-            formatted = sqlparse.format(
-                sql, reindent=True, keyword_case="upper", indent_width=2, wrap_after=80
-            )
-            return formatted
-        else:
-            # Fallback: basic formatting without sqlparse
-            # Add newlines before major keywords
-            keywords = [
-                "SELECT",
-                "FROM",
-                "WHERE",
-                "JOIN",
-                "LEFT JOIN",
-                "RIGHT JOIN",
-                "INNER JOIN",
-                "OUTER JOIN",
-                "ON",
-                "GROUP BY",
-                "ORDER BY",
-                "HAVING",
-                "LIMIT",
-                "OFFSET",
-                "UNION",
-                "WITH",
-            ]
-
-            formatted = sql
-            for kw in keywords:
-                # Add newline before keyword if not already at start of line
-                formatted = formatted.replace(f" {kw} ", f"\n{kw} ")
-
-            return formatted
+        return format_sql_for_display(sql)
 
     def _create_editor_template(
         self,

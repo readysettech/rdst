@@ -7,7 +7,6 @@ displays appropriate output for each event type.
 
 from __future__ import annotations
 
-import sqlparse
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -30,6 +29,7 @@ from lib.ui import (
     SelectionTable,
     Status,
     Syntax,
+    format_sql_for_display,
 )
 
 
@@ -135,9 +135,7 @@ class AskRenderer:
         """Render generated SQL with syntax highlighting."""
         self.cleanup()  # Stop spinner
 
-        formatted_sql = sqlparse.format(
-            event.sql, reindent=True, keyword_case="upper", indent_width=2, wrap_after=80
-        )
+        formatted_sql = format_sql_for_display(event.sql)
 
         # Create syntax-highlighted SQL
         syntax = Syntax(
