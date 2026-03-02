@@ -22,6 +22,7 @@ interface EnvSecretsDialogProps {
   requirements: EnvRequirement[];
   keyringAvailable: boolean;
   onSuccess?: () => void;
+  onTrialRegister?: () => void;
 }
 
 interface MissingEntry {
@@ -57,6 +58,7 @@ export function EnvSecretsDialog({
   requirements,
   keyringAvailable,
   onSuccess,
+  onTrialRegister,
 }: EnvSecretsDialogProps) {
   const entries = useMemo(() => toMissingEntries(requirements), [requirements]);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -196,6 +198,21 @@ export function EnvSecretsDialog({
                     </Text>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {onTrialRegister && requirements.some((r) => r.kind === 'anthropic_api_key') && (
+              <div className="text-center">
+                <button
+                  type="button"
+                  className="text-sm text-content-primary-soft hover:underline cursor-pointer"
+                  onClick={() => {
+                    onClose();
+                    onTrialRegister();
+                  }}
+                >
+                  Don&apos;t have a key? Try for free
+                </button>
               </div>
             )}
 

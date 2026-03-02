@@ -45,6 +45,15 @@ class EnvRequirementsService:
             return "process_env"
         if any(self.secret_store.get_secret(name) for name in self.ANTHROPIC_ACCEPTED_NAMES):
             return "secure_store"
+        try:
+            cfg = self._load_config()
+            if cfg.is_trial_active():
+                return "trial"
+            trial = cfg.get_trial_config()
+            if trial.get("token") and trial.get("status") == "exhausted":
+                return "trial_exhausted"
+        except Exception:
+            pass
         return "missing"
 
     def get_requirements(self) -> List[Dict[str, Any]]:
@@ -71,7 +80,7 @@ class EnvRequirementsService:
                 "kind": "anthropic_api_key",
                 "accepted_names": list(self.ANTHROPIC_ACCEPTED_NAMES),
                 "target": None,
-                "satisfied": anthropic_source != "missing",
+                "satisfied": anthropic_source not in ("missing", "trial_exhausted"),
                 "source": anthropic_source,
             }
         )

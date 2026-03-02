@@ -14,7 +14,9 @@ import {
   fetchEnvRequirements,
   fetchInitStatus,
   fetchStatus,
+  fetchTrialStatus,
 } from '../lib/api';
+import { TrialRegistrationDialog } from './TrialRegistrationDialog';
 
 interface WarningConfig {
   title: string;
@@ -22,12 +24,47 @@ interface WarningConfig {
   command: string;
   severity: 'error' | 'warning';
   actionLabel?: string;
-  actionType?: 'open-env-dialog';
+  actionType?: 'open-env-dialog' | 'open-trial-dialog';
+  secondaryActionLabel?: string;
+  secondaryActionType?: 'open-trial-dialog' | 'open-env-dialog';
+}
+
+interface TrialState {
+  active: boolean;
+  percent_remaining?: number;
+  remaining_tokens_display?: string;
+  limit_tokens_display?: string;
 }
 
 function getWarningConfig(
-  missingAnthropicRequirements: EnvRequirement[]
+  missingAnthropicRequirements: EnvRequirement[],
+  trialState?: TrialState,
 ): WarningConfig | null {
+  // Trial exhausted — needs a real key
+  if (trialState?.active && trialState.percent_remaining != null && trialState.percent_remaining <= 0) {
+    return {
+      title: 'Trial Credits Exhausted',
+      description: 'Your free trial tokens have been used up. Set an Anthropic API key to continue using AI analysis.',
+      command: 'export ANTHROPIC_API_KEY=sk-ant-...',
+      severity: 'error',
+      actionLabel: 'Set API Key',
+      actionType: 'open-env-dialog',
+    };
+  }
+
+  // Trial low balance
+  if (trialState?.active && trialState.percent_remaining != null && trialState.percent_remaining < 25) {
+    return {
+      title: 'Low Trial Balance',
+      description: `${trialState.remaining_tokens_display} of ${trialState.limit_tokens_display} trial tokens remaining. Consider getting your own API key.`,
+      command: 'export ANTHROPIC_API_KEY=sk-ant-...',
+      severity: 'warning',
+      actionLabel: 'Set API Key',
+      actionType: 'open-env-dialog',
+    };
+  }
+
+  // Missing key — offer both trial and set key
   if (missingAnthropicRequirements.length > 0) {
     const names = missingAnthropicRequirements
       .map((item) => item.accepted_names[0])
@@ -35,11 +72,13 @@ function getWarningConfig(
       .join(', ');
     return {
       title: 'Missing Anthropic API Key',
-      description: `Required API key is missing: ${names}. Set it in Web to enable AI analysis without restarting.`,
+      description: `Required API key is missing: ${names}. Start a free trial or set your own key.`,
       command: 'export RDST_ANTHROPIC_API_KEY=<value>',
       severity: 'warning',
-      actionLabel: 'Set',
-      actionType: 'open-env-dialog',
+      actionLabel: 'Try Free Trial',
+      actionType: 'open-trial-dialog',
+      secondaryActionLabel: 'Set API Key',
+      secondaryActionType: 'open-env-dialog',
     };
   }
 
@@ -49,11 +88,13 @@ function getWarningConfig(
 function ConfigBanner({
   config,
   onDismiss,
-  onAction
+  onAction,
+  onSecondaryAction,
 }: {
   config: WarningConfig;
   onDismiss?: () => void;
   onAction?: () => void;
+  onSecondaryAction?: () => void;
 }) {
   const isError = config.severity === 'error';
 
@@ -136,15 +177,27 @@ function ConfigBanner({
                 <CopyButton text={config.command} />
               </HStack>
 
-              {config.actionLabel && onAction && (
-                <Button
-                  variant="primary"
-                  modifier="outline"
-                  label={config.actionLabel}
-                  icon="key"
-                  iconPosition="left"
-                  onClick={onAction}
-                />
+              {(config.actionLabel && onAction) && (
+                <HStack className="gap-2 items-center">
+                  <Button
+                    variant="primary"
+                    modifier="outline"
+                    label={config.actionLabel}
+                    icon={config.actionType === 'open-trial-dialog' ? 'sparkles' : 'key'}
+                    iconPosition="left"
+                    onClick={onAction}
+                  />
+                  {config.secondaryActionLabel && onSecondaryAction && (
+                    <Button
+                      variant="primary"
+                      modifier="ghost"
+                      label={config.secondaryActionLabel}
+                      icon="key"
+                      iconPosition="left"
+                      onClick={onSecondaryAction}
+                    />
+                  )}
+                </HStack>
               )}
             </VStack>
           </HStack>
@@ -173,6 +226,7 @@ export function ConfigWarning() {
   const location = useLocation();
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [showSecretsDialog, setShowSecretsDialog] = useState(false);
+  const [showTrialDialog, setShowTrialDialog] = useState(false);
 
   const { data: status, isLoading, error } = useQuery({
     queryKey: ['status'],
@@ -193,10 +247,32 @@ export function ConfigWarning() {
     retry: 1,
   });
 
+  const anthropicSource = envRequirements?.requirements.find(
+    (r) => r.kind === 'anthropic_api_key',
+  )?.source;
+
+  const { data: trialStatus } = useQuery({
+    queryKey: ['trial-status'],
+    queryFn: fetchTrialStatus,
+    staleTime: 30000,
+    retry: 1,
+    enabled: anthropicSource === 'trial' || anthropicSource === 'trial_exhausted',
+  });
+
   const missingAnthropicRequirements =
     envRequirements?.requirements.filter(
       (item) => !item.satisfied && item.kind === 'anthropic_api_key'
     ) || [];
+
+  const trialState: TrialState | undefined =
+    trialStatus?.active || trialStatus?.status === 'exhausted'
+      ? {
+          active: true,
+          percent_remaining: trialStatus.status === 'exhausted' ? 0 : (trialStatus.percent_remaining ?? undefined),
+          remaining_tokens_display: trialStatus.remaining_tokens_display ?? undefined,
+          limit_tokens_display: trialStatus.limit_tokens_display ?? undefined,
+        }
+      : undefined;
 
   useEffect(() => {
     if (isLoading || initLoading || !status || !initStatus) return;
@@ -208,11 +284,11 @@ export function ConfigWarning() {
 
   // Reset dismissed state when status changes
   useEffect(() => {
-    const config = getWarningConfig(missingAnthropicRequirements);
+    const config = getWarningConfig(missingAnthropicRequirements, trialState);
     if (config?.title !== dismissed) {
       setDismissed(null);
     }
-  }, [missingAnthropicRequirements, dismissed]);
+  }, [missingAnthropicRequirements, trialState, dismissed]);
 
   if (isLoading) {
     return null;
@@ -222,7 +298,7 @@ export function ConfigWarning() {
 
   if (!status) return null;
 
-  const warningConfig = getWarningConfig(missingAnthropicRequirements);
+  const warningConfig = getWarningConfig(missingAnthropicRequirements, trialState);
 
   if (!warningConfig || dismissed === warningConfig.title) {
     return null;
@@ -231,13 +307,24 @@ export function ConfigWarning() {
   const handleAction = () => {
     if (warningConfig.actionType === 'open-env-dialog') {
       setShowSecretsDialog(true);
+    } else if (warningConfig.actionType === 'open-trial-dialog') {
+      setShowTrialDialog(true);
     }
   };
 
-  const handleSecretSuccess = () => {
+  const handleSecondaryAction = () => {
+    if (warningConfig.secondaryActionType === 'open-env-dialog') {
+      setShowSecretsDialog(true);
+    } else if (warningConfig.secondaryActionType === 'open-trial-dialog') {
+      setShowTrialDialog(true);
+    }
+  };
+
+  const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['status'] });
     queryClient.invalidateQueries({ queryKey: ['init-status'] });
     queryClient.invalidateQueries({ queryKey: ['env-requirements'] });
+    queryClient.invalidateQueries({ queryKey: ['trial-status'] });
   };
 
   return (
@@ -247,6 +334,7 @@ export function ConfigWarning() {
           config={warningConfig}
           onDismiss={() => setDismissed(warningConfig.title)}
           onAction={warningConfig.actionType ? handleAction : undefined}
+          onSecondaryAction={warningConfig.secondaryActionType ? handleSecondaryAction : undefined}
         />
       </AnimatePresence>
       <EnvSecretsDialog
@@ -254,7 +342,15 @@ export function ConfigWarning() {
         onClose={() => setShowSecretsDialog(false)}
         requirements={missingAnthropicRequirements}
         keyringAvailable={envRequirements?.keyring_available ?? false}
-        onSuccess={handleSecretSuccess}
+        onSuccess={invalidateAll}
+      />
+      <TrialRegistrationDialog
+        isOpen={showTrialDialog}
+        onClose={() => setShowTrialDialog(false)}
+        onSuccess={() => {
+          invalidateAll();
+          setShowTrialDialog(false);
+        }}
       />
     </>
   );

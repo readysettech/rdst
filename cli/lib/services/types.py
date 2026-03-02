@@ -1003,3 +1003,43 @@ AnnotateEvent = Union[
     AnnotateCompleteEvent,
     AnnotateErrorEvent,
 ]
+
+
+# ============================================================================
+# Trial Types
+# ============================================================================
+
+
+@dataclass
+class TrialRegisterResult:
+    """Result from trial registration attempt."""
+
+    success: bool
+    limit_display: Optional[str] = None
+    email_tier: Optional[str] = None
+    error_code: Optional[str] = None
+    detail: Optional[str] = None
+    did_you_mean: Optional[str] = None
+    status_code: int = 200
+
+
+@dataclass
+class TrialActivateResult:
+    """Result from trial token activation."""
+
+    success: bool
+    message: Optional[str] = None
+
+
+@dataclass
+class TrialStatusResult:
+    """Current trial status and balance."""
+
+    active: bool
+    email: Optional[str] = None
+    status: Optional[str] = None
+    remaining_cents: Optional[int] = None
+    limit_cents: Optional[int] = None
+    remaining_tokens_display: Optional[str] = None
+    limit_tokens_display: Optional[str] = None
+    percent_remaining: Optional[int] = None

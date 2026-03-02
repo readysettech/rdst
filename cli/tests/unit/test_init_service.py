@@ -125,10 +125,11 @@ class TestInitServiceGetStatus:
         """Test get_status shows LLM not configured without API key."""
         with patch.object(service, "_load_config", return_value=mock_config):
             with patch.dict(os.environ, {}, clear=True):
-                # Remove ANTHROPIC_API_KEY
-                if "ANTHROPIC_API_KEY" in os.environ:
-                    del os.environ["ANTHROPIC_API_KEY"]
-                status = service.get_status()
+                with patch("lib.services.anthropic_env._has_active_trial", return_value=False):
+                    # Remove ANTHROPIC_API_KEY
+                    if "ANTHROPIC_API_KEY" in os.environ:
+                        del os.environ["ANTHROPIC_API_KEY"]
+                    status = service.get_status()
 
         assert status.llm_configured is False
 
@@ -274,10 +275,11 @@ class TestInitServiceCheckLLM:
     def test_anthropic_key_missing(self, service, mock_config):
         """Test check_llm when ANTHROPIC_API_KEY is not set."""
         with patch.dict(os.environ, {}, clear=True):
-            if "ANTHROPIC_API_KEY" in os.environ:
-                del os.environ["ANTHROPIC_API_KEY"]
+            with patch("lib.services.anthropic_env._has_active_trial", return_value=False):
+                if "ANTHROPIC_API_KEY" in os.environ:
+                    del os.environ["ANTHROPIC_API_KEY"]
 
-            result = service.check_llm(mock_config)
+                result = service.check_llm(mock_config)
 
         assert result["success"] is False
         assert "ANTHROPIC_API_KEY" in result["error"]

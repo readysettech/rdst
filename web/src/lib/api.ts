@@ -255,7 +255,7 @@ export async function fetchStatus(): Promise<StatusResponse> {
 }
 
 export type EnvRequirementKind = 'target_password' | 'anthropic_api_key';
-export type EnvRequirementSource = 'config' | 'process_env' | 'secure_store' | 'missing';
+export type EnvRequirementSource = 'config' | 'process_env' | 'secure_store' | 'trial' | 'trial_exhausted' | 'missing';
 
 export interface EnvRequirement {
   kind: EnvRequirementKind;
@@ -533,3 +533,63 @@ export interface BenchmarkProgress {
 }
 
 export type BenchmarkState = 'idle' | 'running' | 'complete' | 'error';
+
+// Trial Types
+
+export interface TrialRegisterResponse {
+  success: boolean;
+  limit_display?: string;
+  email_tier?: string;
+  error_code?: string;
+  detail?: string;
+  did_you_mean?: string;
+  status_code: number;
+}
+
+export interface TrialActivateResponse {
+  success: boolean;
+  message?: string;
+}
+
+export interface TrialStatusResponse {
+  active: boolean;
+  email?: string;
+  status?: string;
+  remaining_cents?: number;
+  limit_cents?: number;
+  remaining_tokens_display?: string;
+  limit_tokens_display?: string;
+  percent_remaining?: number;
+}
+
+export async function registerTrial(email: string): Promise<TrialRegisterResponse> {
+  const response = await fetch('/api/trial/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to register trial: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function activateTrial(token: string, email: string, emailTier?: string): Promise<TrialActivateResponse> {
+  const response = await fetch('/api/trial/activate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, email, email_tier: emailTier }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to activate trial: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function fetchTrialStatus(): Promise<TrialStatusResponse> {
+  const response = await fetch('/api/trial/status');
+  if (!response.ok) {
+    throw new Error(`Failed to fetch trial status: ${response.status}`);
+  }
+  return response.json();
+}

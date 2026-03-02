@@ -8,6 +8,7 @@ import { TargetDropdown } from "../components/TargetDropdown";
 import { ReportDialog } from "../components/ReportDialog";
 import { useTarget } from "../hooks/useTarget";
 import { fetchStatus } from "../lib/api";
+import { TrialBalanceBadge } from "../components/TrialBalanceBadge";
 
 const sidebarStyles = tv({
   base: [
@@ -119,7 +120,8 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="p-3 border-t border-border-layout-1 space-y-1">
+      <div className="p-3 border-t border-border-layout-1 space-y-2">
+        <TrialBalanceBadge />
         <button
           type="button"
           onClick={() => setReportOpen(true)}

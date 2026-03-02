@@ -50,6 +50,23 @@ vi.mock('./EnvSecretsDialog', () => ({
     ) : null,
 }));
 
+vi.mock('./TrialRegistrationDialog', () => ({
+  TrialRegistrationDialog: ({
+    isOpen,
+    onSuccess,
+  }: {
+    isOpen: boolean;
+    onSuccess?: () => void;
+  }) =>
+    isOpen ? (
+      <div data-testid="trial-dialog">
+        <button type="button" onClick={() => onSuccess?.()}>
+          Mock Trial Success
+        </button>
+      </div>
+    ) : null,
+}));
+
 function renderWarning(queryClient: QueryClient) {
   return render(
     <QueryClientProvider client={queryClient}>
@@ -92,14 +109,15 @@ describe('ConfigWarning env secret flow', () => {
     cleanup();
   });
 
-  it('shows Set action when Anthropic requirement is missing', async () => {
+  it('shows trial and key actions when Anthropic requirement is missing', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
 
     renderWarning(queryClient);
 
-    expect(await screen.findByRole('button', { name: /Set/i })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /Try Free Trial/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Set API Key/i })).toBeTruthy();
     expect(screen.getByText(/export RDST_ANTHROPIC_API_KEY=<value>/i)).toBeTruthy();
   });
 
@@ -124,7 +142,7 @@ describe('ConfigWarning env secret flow', () => {
     renderWarning(queryClient);
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Set/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Try Free Trial/i })).toBeNull();
     });
   });
 
@@ -154,7 +172,7 @@ describe('ConfigWarning env secret flow', () => {
     });
 
     renderWarning(queryClient);
-    fireEvent.click(await screen.findByRole('button', { name: /Set/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Set API Key/i }));
 
     const requirementsText = (await screen.findByTestId('dialog-requirements'))
       .textContent || '';
@@ -170,7 +188,7 @@ describe('ConfigWarning env secret flow', () => {
 
     renderWarning(queryClient);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Set/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Set API Key/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Mock Secret Save/i }));
 
     await waitFor(() => {

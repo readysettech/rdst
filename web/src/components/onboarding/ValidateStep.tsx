@@ -9,6 +9,7 @@ import { Spinner } from "@rs/ui-new/spinner";
 import { m, AnimatePresence } from "@rs/ui-new/motion";
 import type { ValidationResult } from "../../types/onboarding";
 import { EnvSecretsDialog } from "../EnvSecretsDialog";
+import { TrialRegistrationDialog } from "../TrialRegistrationDialog";
 import { fetchEnvRequirements, fetchStatus, type EnvRequirement } from "../../lib/api";
 
 interface ValidateStepProps {
@@ -30,6 +31,7 @@ export function ValidateStep({
 }: ValidateStepProps) {
   const queryClient = useQueryClient();
   const [showSecretsDialog, setShowSecretsDialog] = useState(false);
+  const [showTrialDialog, setShowTrialDialog] = useState(false);
   const [dialogRequirements, setDialogRequirements] = useState<EnvRequirement[]>([]);
 
   const { data: envRequirements } = useQuery({
@@ -67,11 +69,17 @@ export function ValidateStep({
 
   const allTargetsSuccessful = results?.target_results.every((r) => r.success) ?? false;
   const hasResults = results !== null;
-  const llmStatus: "connected" | "optional" | "pending" = !anthropicRequirementKnown
+  const isTrialSource = anthropicRequirement?.source === "trial";
+  const isExhaustedSource = anthropicRequirement?.source === "trial_exhausted";
+  const llmStatus: "connected" | "trial" | "exhausted" | "optional" | "pending" = !anthropicRequirementKnown
     ? "pending"
-    : anthropicMissing
-      ? "optional"
-      : "connected";
+    : isExhaustedSource
+      ? "exhausted"
+      : anthropicMissing
+        ? "optional"
+        : isTrialSource
+          ? "trial"
+          : "connected";
 
   const llmStatusStyles = {
     connected: {
@@ -83,13 +91,31 @@ export function ValidateStep({
       body: "Anthropic API key is set and ready for AI analysis.",
       badgeLabel: "Connected",
     },
+    trial: {
+      badge: "bg-surface-primary-soft text-content-primary-soft",
+      container: "bg-surface-primary-soft/10 border-border-primary-soft",
+      icon: "sparkles",
+      iconClass: "text-content-primary-soft",
+      title: "Free Trial Active",
+      body: "Using RDST trial credits for AI analysis.",
+      badgeLabel: "Trial",
+    },
+    exhausted: {
+      badge: "bg-surface-negative-soft text-content-negative-soft",
+      container: "bg-surface-negative-soft/10 border-border-negative-soft",
+      icon: "alert",
+      iconClass: "text-content-negative-soft",
+      title: "Trial Credits Exhausted",
+      body: "Your free trial tokens have been used up. Set an Anthropic API key to continue.",
+      badgeLabel: "Exhausted",
+    },
     optional: {
       badge: "bg-surface-warning-soft text-content-warning-soft",
       container: "bg-surface-warning-soft/10 border-border-warning-soft",
       icon: "info",
       iconClass: "text-content-warning-soft",
       title: "API Key Required for AI",
-      body: "Set RDST_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY) in this step using Set.",
+      body: "Set an API key or start a free trial to enable AI analysis.",
       badgeLabel: "Setup Needed",
     },
     pending: {
@@ -103,7 +129,7 @@ export function ValidateStep({
     },
   } as const;
   const llmState = llmStatusStyles[llmStatus];
-  const needsAnthropicSetup = anthropicMissing;
+  const needsAnthropicSetup = anthropicMissing || isExhaustedSource;
 
   const openSecretsDialog = (requirements: EnvRequirement[]) => {
     if (requirements.length === 0) return;
@@ -324,14 +350,40 @@ export function ValidateStep({
                 </VStack>
               </HStack>
               {needsAnthropicSetup && (
-                <Button
-                  variant="primary"
-                  modifier="outline"
-                  icon="key"
-                  iconPosition="left"
-                  label="Set"
-                  onClick={() => openSecretsDialog(missingAnthropicRequirements)}
-                />
+                <HStack className="gap-2 items-center shrink-0">
+                  {isExhaustedSource ? (
+                    <Button
+                      variant="primary"
+                      modifier="outline"
+                      icon="key"
+                      iconPosition="left"
+                      label="Set API Key"
+                      onClick={() => openSecretsDialog(
+                        envRequirements?.requirements.filter(
+                          (item) => item.kind === "anthropic_api_key",
+                        ) ?? []
+                      )}
+                    />
+                  ) : (
+                    <>
+                      <Button
+                        variant="rising"
+                        icon="sparkles"
+                        iconPosition="left"
+                        label="Try Free Trial"
+                        onClick={() => setShowTrialDialog(true)}
+                      />
+                      <Button
+                        variant="primary"
+                        modifier="outline"
+                        icon="key"
+                        iconPosition="left"
+                        label="I Have a Key"
+                        onClick={() => openSecretsDialog(missingAnthropicRequirements)}
+                      />
+                    </>
+                  )}
+                </HStack>
               )}
             </div>
           </div>
@@ -372,6 +424,18 @@ export function ValidateStep({
           queryClient.invalidateQueries({ queryKey: ["status"] });
           queryClient.invalidateQueries({ queryKey: ["init-status"] });
           queryClient.invalidateQueries({ queryKey: ["env-requirements"] });
+          onRun();
+        }}
+      />
+      <TrialRegistrationDialog
+        isOpen={showTrialDialog}
+        onClose={() => setShowTrialDialog(false)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["status"] });
+          queryClient.invalidateQueries({ queryKey: ["init-status"] });
+          queryClient.invalidateQueries({ queryKey: ["env-requirements"] });
+          queryClient.invalidateQueries({ queryKey: ["trial-status"] });
+          setShowTrialDialog(false);
           onRun();
         }}
       />

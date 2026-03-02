@@ -37,6 +37,23 @@ vi.mock("../EnvSecretsDialog", () => ({
     ) : null,
 }));
 
+vi.mock("../TrialRegistrationDialog", () => ({
+  TrialRegistrationDialog: ({
+    isOpen,
+    onSuccess,
+  }: {
+    isOpen: boolean;
+    onSuccess?: () => void;
+  }) =>
+    isOpen ? (
+      <div data-testid="trial-dialog">
+        <button type="button" onClick={() => onSuccess?.()}>
+          Mock Trial Success
+        </button>
+      </div>
+    ) : null,
+}));
+
 function renderValidateStep(
   onRun = vi.fn(),
   options?: { results?: ValidationResult | null; isLoading?: boolean }
@@ -86,7 +103,7 @@ describe("ValidateStep", () => {
     cleanup();
   });
 
-  it("shows Set action when env requirements are missing", async () => {
+  it("shows trial and key actions when env requirements are missing", async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
       requirements: [
@@ -102,7 +119,8 @@ describe("ValidateStep", () => {
 
     renderValidateStep();
 
-    expect(await screen.findByRole("button", { name: /Set/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Try Free Trial/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /I Have a Key/i })).toBeTruthy();
   });
 
   it("shows auto-run guidance before validation results exist", async () => {
@@ -182,7 +200,7 @@ describe("ValidateStep", () => {
     });
   });
 
-  it("hides Set when Anthropic is already connected", async () => {
+  it("hides trial/key buttons when Anthropic is already connected", async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
       requirements: [
@@ -204,7 +222,8 @@ describe("ValidateStep", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /Set/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Try Free Trial/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /I Have a Key/i })).toBeNull();
     });
   });
 
@@ -230,12 +249,12 @@ describe("ValidateStep", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /Set/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /I Have a Key/i })).toBeNull();
     });
     expect(screen.queryByText(/API Key Required for AI/i)).toBeNull();
   });
 
-  it("passes only Anthropic requirements to Set dialog", async () => {
+  it("passes only Anthropic requirements to key dialog", async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
       requirements: [
@@ -257,7 +276,7 @@ describe("ValidateStep", () => {
     });
 
     renderValidateStep();
-    fireEvent.click(await screen.findByRole("button", { name: /Set/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /I Have a Key/i }));
 
     const requirementsText = (await screen.findByTestId("dialog-requirements"))
       .textContent || "";
@@ -282,7 +301,7 @@ describe("ValidateStep", () => {
 
     renderValidateStep(onRun);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Set/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /I Have a Key/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Mock Save Secrets/i }));
 
     await waitFor(() => {
