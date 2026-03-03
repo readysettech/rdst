@@ -11,7 +11,9 @@ from typing import Any, Dict, List, Optional
 _KEYRING_TIMEOUT = 2
 
 # Backend classes that are known to never work (no daemon, no storage).
-_DEAD_BACKENDS = {"Keyring", "NullKeyring", "NoKeyring", "ChainerBackend"}
+# Do not include the generic "Keyring" class name here: the real macOS backend
+# is also named "Keyring" but lives under keyring.backends.macOS.
+_DEAD_BACKENDS = {"NullKeyring", "NoKeyring", "ChainerBackend"}
 
 # Sentinel to distinguish "keyring returned None" from "timed out / error".
 _TIMEOUT = object()

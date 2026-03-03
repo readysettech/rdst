@@ -6,6 +6,12 @@ from unittest.mock import Mock, patch
 from lib.services.secret_store_service import SecretStoreService
 
 
+def _build_backend(class_name: str, module_name: str):
+    backend_type = type(class_name, (), {})
+    backend_type.__module__ = module_name
+    return backend_type()
+
+
 def test_set_secret_persists_when_keyring_available(monkeypatch):
     service = SecretStoreService()
     service._keyring = Mock()
@@ -104,3 +110,72 @@ def test_clear_required_marks_missing_when_not_present(monkeypatch):
     assert result["cleared"] == []
     assert result["missing"] == ["RDST_UNKNOWN_SECRET"]
     assert result["errors"] == []
+
+
+def test_is_available_accepts_macos_keyring_backend():
+    SecretStoreService._probe_cache.clear()
+    service = SecretStoreService(service_name="rdst-test-macos")
+    service._keyring = Mock()
+    service._keyring.get_keyring.return_value = _build_backend(
+        "Keyring",
+        "keyring.backends.macOS",
+    )
+    service._keyring_call = Mock(return_value=None)
+
+    assert service._backend_looks_viable() is True
+    assert service.is_available() is True
+    service._keyring_call.assert_called_once_with(
+        service._keyring.get_password,
+        service.service_name,
+        "__rdst_probe__",
+    )
+
+
+def test_is_available_rejects_fail_keyring_backend_without_probe():
+    SecretStoreService._probe_cache.clear()
+    service = SecretStoreService(service_name="rdst-test-fail")
+    service._keyring = Mock()
+    service._keyring.get_keyring.return_value = _build_backend(
+        "Keyring",
+        "keyring.backends.fail",
+    )
+    service._keyring_call = Mock(return_value=None)
+
+    assert service._backend_looks_viable() is False
+    assert service.is_available() is False
+    service._keyring_call.assert_not_called()
+
+
+def test_is_available_rejects_null_backend():
+    SecretStoreService._probe_cache.clear()
+    service = SecretStoreService(service_name="rdst-test-null")
+    service._keyring = Mock()
+    service._keyring.get_keyring.return_value = _build_backend(
+        "NullKeyring",
+        "keyring.backends.null",
+    )
+    service._keyring_call = Mock(return_value=None)
+
+    assert service._backend_looks_viable() is False
+    assert service.is_available() is False
+    service._keyring_call.assert_not_called()
+
+
+def test_is_available_caches_probe_result():
+    SecretStoreService._probe_cache.clear()
+    service = SecretStoreService(service_name="rdst-test-cache")
+    service._keyring = Mock()
+    service._keyring.get_keyring.return_value = _build_backend(
+        "Keyring",
+        "keyring.backends.macOS",
+    )
+    service._keyring_call = Mock(return_value=None)
+
+    # A running server keeps the first probe result cached until restart.
+    assert service.is_available() is True
+    assert service.is_available() is True
+    service._keyring_call.assert_called_once_with(
+        service._keyring.get_password,
+        service.service_name,
+        "__rdst_probe__",
+    )
