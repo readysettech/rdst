@@ -136,12 +136,12 @@ Rules:
         )
 
         if not response or 'text' not in response or not response['text'].strip():
-            logger.warning("Semantic extraction returned no response")
+            logger.debug("Semantic extraction returned no response")
             return {"suggested_tables": [], "reasoning": "LLM returned no response"}
 
         result = _extract_json_from_response(response['text'])
         if result is None:
-            logger.warning("Semantic extraction returned unparseable JSON")
+            logger.debug("Semantic extraction returned unparseable JSON")
             return {"suggested_tables": [], "reasoning": "Could not parse LLM response as JSON"}
 
         # Validate suggested tables exist
@@ -190,7 +190,7 @@ def filter_schema(
 
     # Need schema_info for filtering
     if not ctx.schema_info or not ctx.schema_info.tables:
-        logger.warning("No schema_info available, skipping filter phase")
+        logger.debug("No schema_info available, skipping filter phase")
         return ctx
 
     all_tables = list(ctx.schema_info.tables.keys())
@@ -231,7 +231,7 @@ def filter_schema(
 
     # If still nothing, use full schema
     if not candidate_tables:
-        logger.warning("All methods failed, using full schema")
+        logger.debug("All methods failed, using full schema")
         candidate_tables = set(all_tables)
 
     final_tables = list(candidate_tables)

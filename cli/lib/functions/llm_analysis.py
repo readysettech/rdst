@@ -220,13 +220,16 @@ INDEX SELECTION PRINCIPLES (use your judgment, but be consistent):
   - Prefer indexes that help the most expensive operations (large table scans first)
   - Don't recommend redundant indexes (if idx(a,b) exists, don't also recommend idx(a))
 
-INDEX COLUMN ORDERING: When building composite indexes, use this priority:
-  1. Equality filter columns FIRST (WHERE col = value)
-  2. Range filter columns SECOND (WHERE col > value, BETWEEN, etc.)
+INDEX COLUMN ORDERING (EQR Rule - STRICT): When building composite indexes, use this priority:
+  1. Equality filter columns FIRST (WHERE col = value, col IN (...))
+  2. Range filter columns SECOND (WHERE col > value, col BETWEEN x AND y, col >= value)
   3. JOIN columns THIRD
   4. ORDER BY / GROUP BY columns FOURTH
   5. INCLUDE columns for covering indexes LAST
   Within same priority: order columns ALPHABETICALLY by column name
+  EXAMPLE: WHERE titletype = 'movie' AND startyear >= 2000
+    CORRECT: idx(titletype, startyear) — equality first, then range
+    WRONG:   idx(startyear, titletype) — range before equality breaks index efficiency
 
 INDEX NAMING: Always use format idx_tablename_col1_col2 (lowercase, underscores)
 

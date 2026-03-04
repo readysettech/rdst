@@ -1,14 +1,17 @@
 """
 Recommendation Validation - Prevent LLM Hallucination
 
-Validates LLM recommendations against collected database context.
 Validates LLM recommendations against collected database context to detect:
 - Duplicate index suggestions (recommending indexes that already exist)
 - Invalid recommendations not grounded in schema
+- Wrong composite index column ordering (EQR rule enforcement)
 """
 
+import logging
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Set, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def validate_recommendations(llm_analysis: Dict[str, Any], schema_info: str, **kwargs) -> Dict[str, Any]:
@@ -103,3 +106,124 @@ def _extract_index_name_from_create(create_sql: str) -> str:
         return match.group(1)
 
     return None
+
+
+def reorder_index_columns(
+    recommendations: List[Dict[str, Any]], sql: str
+) -> List[Dict[str, Any]]:
+    """
+    Enforce EQR column ordering in composite index recommendations.
+
+    Parses the SQL to classify WHERE conditions as equality (=, IN, IS) or
+    range (>, <, >=, <=, BETWEEN, LIKE), then reorders index columns so
+    equality columns come before range columns (remaining columns stay at end).
+
+    Args:
+        recommendations: List of index recommendation dicts with 'columns' and 'sql' keys
+        sql: The original SQL query being analyzed
+
+    Returns:
+        Recommendations with corrected column ordering
+    """
+    equality_cols, range_cols = _classify_where_columns(sql)
+    if not equality_cols and not range_cols:
+        return recommendations
+
+    for rec in recommendations:
+        columns = rec.get("columns", [])
+        if len(columns) < 2:
+            continue
+
+        cols_lower = [c.lower() for c in columns]
+        eq_in_idx = [c for c in cols_lower if c in equality_cols]
+        rng_in_idx = [c for c in cols_lower if c in range_cols]
+        other_in_idx = [
+            c for c in cols_lower if c not in equality_cols and c not in range_cols
+        ]
+
+        reordered_lower = eq_in_idx + rng_in_idx + other_in_idx
+        if reordered_lower == cols_lower:
+            continue
+
+        # Rebuild with original casing
+        case_map = {c.lower(): c for c in columns}
+        reordered = [case_map[c] for c in reordered_lower]
+        rec["columns"] = reordered
+
+        # Rebuild the CREATE INDEX SQL statement
+        old_sql = rec.get("sql", "")
+        if old_sql:
+            rec["sql"] = _rebuild_create_index_sql(old_sql, reordered)
+
+        logger.debug(
+            "EQR reorder: %s -> %s", cols_lower, reordered_lower
+        )
+
+    return recommendations
+
+
+def _classify_where_columns(sql: str) -> Tuple[Set[str], Set[str]]:
+    """
+    Parse SQL and classify WHERE clause columns as equality or range.
+
+    Returns:
+        (equality_columns, range_columns) as sets of lowercase column names
+    """
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except ImportError:
+        return set(), set()
+
+    try:
+        parsed = sqlglot.parse_one(sql)
+    except Exception:
+        return set(), set()
+
+    equality_cols: Set[str] = set()
+    range_cols: Set[str] = set()
+
+    where = parsed.find(exp.Where)
+    if not where:
+        return equality_cols, range_cols
+
+    # Walk all comparison expressions inside WHERE
+    for node in where.walk():
+        if isinstance(node, exp.EQ):
+            _collect_column_names(node, equality_cols)
+        elif isinstance(node, exp.In):
+            _collect_column_names(node, equality_cols)
+        elif isinstance(node, exp.Is):
+            _collect_column_names(node, equality_cols)
+        elif isinstance(node, (exp.GT, exp.GTE, exp.LT, exp.LTE)):
+            _collect_column_names(node, range_cols)
+        elif isinstance(node, exp.Between):
+            _collect_column_names(node, range_cols)
+        elif isinstance(node, exp.Like):
+            _collect_column_names(node, range_cols)
+
+    return equality_cols, range_cols
+
+
+def _collect_column_names(node, target_set: Set[str]) -> None:
+    """Extract column names from a comparison expression node."""
+    from sqlglot import exp
+
+    for col in node.find_all(exp.Column):
+        name = col.name.lower() if col.name else None
+        if name:
+            target_set.add(name)
+
+
+def _rebuild_create_index_sql(old_sql: str, new_columns: List[str]) -> str:
+    """Rebuild CREATE INDEX statement with reordered columns."""
+    # Match the column list in parentheses after ON table_name
+    pattern = r'(CREATE\s+(?:UNIQUE\s+)?INDEX\s+\S+\s+ON\s+\S+\s*)\(([^)]+)\)'
+    match = re.search(pattern, old_sql, re.IGNORECASE)
+    if not match:
+        return old_sql
+
+    prefix = match.group(1)
+    new_col_str = ", ".join(new_columns)
+    suffix = old_sql[match.end():]
+    return f"{prefix}({new_col_str}){suffix}"

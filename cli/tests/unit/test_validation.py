@@ -376,3 +376,107 @@ class TestIntegration:
         assert result["suggested_indexes_count"] == 2
         assert len(result["warnings"]) == 1
         assert "idx_products_category" in result["warnings"][0]
+
+
+class TestReorderIndexColumns:
+    """Tests for EQR (Equality-Range) column ordering in index recommendations (rdst-2vr.23)."""
+
+    def test_range_before_equality_gets_reordered(self):
+        """Index with range column before equality column must be reordered."""
+        from lib.functions.validation import reorder_index_columns
+
+        sql = "SELECT * FROM title_basics WHERE titletype = 'movie' AND startyear >= 2000"
+        recommendations = [
+            {
+                "sql": "CREATE INDEX idx_title_basics_startyear_titletype ON title_basics(startyear, titletype)",
+                "table": "title_basics",
+                "columns": ["startyear", "titletype"],
+                "rationale": "test",
+            }
+        ]
+        result = reorder_index_columns(recommendations, sql)
+        assert result[0]["columns"] == ["titletype", "startyear"]
+        # Column list in SQL should have titletype before startyear
+        assert "(titletype, startyear)" in result[0]["sql"]
+
+    def test_equality_columns_already_first_unchanged(self):
+        """Index that already has correct EQR ordering should not be changed."""
+        from lib.functions.validation import reorder_index_columns
+
+        sql = "SELECT * FROM title_basics WHERE titletype = 'movie' AND startyear >= 2000"
+        recommendations = [
+            {
+                "sql": "CREATE INDEX idx_tb ON title_basics(titletype, startyear)",
+                "table": "title_basics",
+                "columns": ["titletype", "startyear"],
+                "rationale": "test",
+            }
+        ]
+        result = reorder_index_columns(recommendations, sql)
+        assert result[0]["columns"] == ["titletype", "startyear"]
+
+    def test_in_clause_treated_as_equality(self):
+        """IN clause should be treated as equality for EQR ordering."""
+        from lib.functions.validation import reorder_index_columns
+
+        sql = "SELECT * FROM t WHERE x > 10 AND y IN (1, 2, 3)"
+        recommendations = [
+            {
+                "sql": "CREATE INDEX idx_t ON t(x, y)",
+                "table": "t",
+                "columns": ["x", "y"],
+                "rationale": "test",
+            }
+        ]
+        result = reorder_index_columns(recommendations, sql)
+        # y is equality (IN), x is range (>), so y should come first
+        assert result[0]["columns"] == ["y", "x"]
+
+    def test_between_treated_as_range(self):
+        """BETWEEN should be treated as range for EQR ordering."""
+        from lib.functions.validation import reorder_index_columns
+
+        sql = "SELECT * FROM t WHERE category = 'A' AND price BETWEEN 10 AND 100"
+        recommendations = [
+            {
+                "sql": "CREATE INDEX idx_t ON t(price, category)",
+                "table": "t",
+                "columns": ["price", "category"],
+                "rationale": "test",
+            }
+        ]
+        result = reorder_index_columns(recommendations, sql)
+        assert result[0]["columns"] == ["category", "price"]
+
+    def test_non_where_columns_preserved_after_eqr(self):
+        """Columns not in WHERE clause should remain at end of index."""
+        from lib.functions.validation import reorder_index_columns
+
+        sql = "SELECT * FROM t WHERE category = 'A' AND price > 10 ORDER BY name"
+        recommendations = [
+            {
+                "sql": "CREATE INDEX idx_t ON t(price, category, name)",
+                "table": "t",
+                "columns": ["price", "category", "name"],
+                "rationale": "test",
+            }
+        ]
+        result = reorder_index_columns(recommendations, sql)
+        # category (eq) first, price (range) second, name (other) last
+        assert result[0]["columns"] == ["category", "price", "name"]
+
+    def test_unparseable_sql_leaves_recommendations_unchanged(self):
+        """If SQL can't be parsed, don't modify recommendations."""
+        from lib.functions.validation import reorder_index_columns
+
+        sql = "THIS IS NOT VALID SQL AT ALL"
+        recommendations = [
+            {
+                "sql": "CREATE INDEX idx_t ON t(b, a)",
+                "table": "t",
+                "columns": ["b", "a"],
+                "rationale": "test",
+            }
+        ]
+        result = reorder_index_columns(recommendations, sql)
+        assert result[0]["columns"] == ["b", "a"]

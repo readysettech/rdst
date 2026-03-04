@@ -8,7 +8,7 @@ These functions bridge between the workflow execution and the query registry sys
 import time
 from typing import Dict, Any, Optional
 from ..query_registry.query_registry import QueryRegistry, hash_sql
-from .validation import validate_recommendations
+from .validation import validate_recommendations, reorder_index_columns
 
 
 def store_analysis_results(**kwargs) -> Dict[str, Any]:
@@ -109,6 +109,10 @@ def format_analysis_output(**kwargs) -> Dict[str, Any]:
         schema_collection = kwargs.get("schema_collection", {})
         schema_info = schema_collection.get("schema_info", "")
         validation_results = validate_recommendations(llm_analysis, schema_info)
+
+        # Enforce EQR column ordering in index recommendations
+        if query and llm_analysis.get("index_recommendations"):
+            reorder_index_columns(llm_analysis["index_recommendations"], query)
 
         # Build the formatted output
         output = {
