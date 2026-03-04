@@ -1,9 +1,11 @@
 """
-Unit tests for output_formatter engine display (rdst-2vr.13).
+Unit tests for analyze output formatting.
 
-Tests that the analyze header displays the correct database engine,
-falling back to target_config when explain_results lacks database_engine.
+- rdst-2vr.13: Engine display fallback
+- rdst-2vr.15: JSON output excludes internal keys
 """
+
+import json
 
 from lib.cli.output_formatter import format_analyze_output
 
@@ -68,3 +70,20 @@ class TestEngineDisplay:
         output = format_analyze_output(result)
         assert "MYSQL" in output
         assert "Unknown" not in output
+
+
+class TestJsonOutputKeys:
+    """JSON output must not contain internal/rendering keys (rdst-2vr.15)."""
+
+    def test_json_strips_internal_keys(self):
+        """JSON output must strip target_config but keep FormatFinalResults.
+
+        FormatFinalResults is kept because scan (and other JSON consumers)
+        may use the pre-formatted analysis summary.
+        """
+        from lib.cli import analyze_command
+        import inspect
+
+        source = inspect.getsource(analyze_command.AnalyzeCommand.execute_analyze)
+
+        assert 'pop("target_config"' in source

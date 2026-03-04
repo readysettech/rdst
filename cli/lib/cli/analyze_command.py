@@ -763,7 +763,7 @@ class AnalyzeCommand:
                 import json
 
                 result_data = dict(workflow_result)
-                # Remove config for security (may contain sensitive env var names).
+                # Remove internal/sensitive keys from JSON output
                 result_data.pop("target_config", None)
                 return RdstResult(
                     True,
