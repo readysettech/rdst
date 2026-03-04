@@ -426,8 +426,8 @@ def create_cache_readyset(
         password = test_db_config.get("password", "")
         engine = (test_db_config.get("engine") or "postgresql").lower()
 
-        # Build CREATE CACHE command
-        cache_query = f"CREATE CACHE FROM {query}"
+        # Build CREATE SHALLOW CACHE command (shallow mode - no replication)
+        cache_query = f"CREATE SHALLOW CACHE FROM {query}"
 
         print(f"Creating cache in Readyset on port {readyset_port}...")
 
@@ -455,7 +455,7 @@ def create_cache_readyset(
             return {
                 "success": False,
                 "cached": False,
-                "error": f"CREATE CACHE failed: {result.stderr}",
+                "error": f"CREATE SHALLOW CACHE failed: {result.stderr}",
                 "query": query,
             }
 
@@ -483,16 +483,83 @@ def create_cache_readyset(
         return {
             "success": False,
             "cached": False,
-            "error": "CREATE CACHE timed out",
+            "error": "CREATE SHALLOW CACHE timed out",
             "query": query,
         }
     except Exception as e:
         return {
             "success": False,
             "cached": False,
-            "error": f"Failed to create cache: {str(e)}",
+            "error": f"Failed to create shallow cache: {str(e)}",
             "query": query,
         }
+
+
+def drop_cache_readyset(
+    cache_name: str = None,
+    readyset_port: int | str = 5433,
+    readyset_host: str = "localhost",
+    test_db_config: Dict[str, Any] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    """
+    Drop a cache from Readyset.
+
+    Args:
+        cache_name: Name of the cache to drop
+        readyset_port: Port where Readyset is listening
+        readyset_host: Host where Readyset is running
+        test_db_config: Database configuration for connection
+        **kwargs: Additional parameters
+
+    Returns:
+        Dict with drop result
+    """
+    try:
+        if not cache_name:
+            return {"success": False, "error": "No cache name provided"}
+
+        if isinstance(test_db_config, str):
+            test_db_config = json.loads(test_db_config)
+
+        readyset_port = int(readyset_port)
+
+        database = test_db_config.get("database", "testdb")
+        user = test_db_config.get("user", "postgres")
+        password = test_db_config.get("password", "")
+        engine = (test_db_config.get("engine") or "postgresql").lower()
+
+        drop_query = f"DROP SHALLOW CACHE {cache_name}"
+
+        if engine == "mysql":
+            result = _run_cache_mysql(
+                cache_query=drop_query,
+                host=readyset_host,
+                port=readyset_port,
+                user=user,
+                database=database,
+                password=password,
+            )
+        else:
+            result = _run_cache_postgres(
+                cache_query=drop_query,
+                host=readyset_host,
+                port=readyset_port,
+                user=user,
+                database=database,
+                password=password,
+            )
+
+        if result.returncode != 0:
+            return {
+                "success": False,
+                "error": f"DROP SHALLOW CACHE failed: {result.stderr}",
+            }
+
+        return {"success": True, "message": f"Cache {cache_name} dropped"}
+
+    except Exception as e:
+        return {"success": False, "error": f"Failed to drop cache: {str(e)}"}
 
 
 def _run_cache_postgres(
@@ -763,3 +830,193 @@ def get_cache_id_for_query(
 
     except Exception:
         return None
+
+
+def warm_cache_and_measure(
+    query: str,
+    readyset_port: int | str = 5433,
+    readyset_host: str = "localhost",
+    test_db_config: Dict[str, Any] = None,
+    warmup_runs: int = 2,
+    measure_runs: int = 3,
+    **kwargs,
+) -> Dict[str, Any]:
+    """
+    Warm the cache by running the query and measure performance.
+
+    Shallow caches need to be "warmed" - the first query after CREATE SHALLOW CACHE
+    is a cache miss that populates the Moka cache. Subsequent queries are cache hits.
+
+    Uses a single persistent connection to avoid measuring connection overhead.
+
+    Args:
+        query: SQL query to run
+        readyset_port: Port where Readyset is listening
+        readyset_host: Host where Readyset is running
+        test_db_config: Test database configuration
+        warmup_runs: Number of warmup runs (first run populates cache)
+        measure_runs: Number of measurement runs after warmup
+        **kwargs: Additional parameters
+
+    Returns:
+        Dict containing timing measurements:
+            - cold_time_ms: First run time (cache miss)
+            - warm_times_ms: List of subsequent run times (cache hits)
+            - avg_warm_time_ms: Average of warm times
+            - speedup: Ratio of cold_time to avg_warm_time
+    """
+    try:
+        if not query:
+            return {"success": False, "error": "No query provided"}
+
+        if isinstance(test_db_config, str):
+            test_db_config = json.loads(test_db_config)
+
+        readyset_port = int(readyset_port)
+
+        database = test_db_config.get("database", "testdb")
+        user = test_db_config.get("user", "postgres")
+        password = test_db_config.get("password", "")
+        engine = (test_db_config.get("engine") or "postgresql").lower()
+
+        timings = []
+        total_runs = warmup_runs + measure_runs
+
+        print(f"Warming cache ({warmup_runs} warmup + {measure_runs} measured runs)...")
+
+        # Use a single persistent connection to avoid measuring connection overhead
+        if engine == "mysql":
+            result = _run_queries_mysql_persistent(
+                query=query,
+                host=readyset_host,
+                port=readyset_port,
+                user=user,
+                database=database,
+                password=password,
+                num_runs=total_runs,
+            )
+        else:
+            result = _run_queries_postgres_persistent(
+                query=query,
+                host=readyset_host,
+                port=readyset_port,
+                user=user,
+                database=database,
+                password=password,
+                num_runs=total_runs,
+            )
+
+        if not result.get("success"):
+            return result
+
+        timings = result.get("timings_ms", [])
+
+        if len(timings) < total_runs:
+            return {
+                "success": False,
+                "error": f"Expected {total_runs} timings, got {len(timings)}",
+            }
+
+        # First run is cold (cache miss), rest are warm (cache hits)
+        cold_time_ms = timings[0]
+        warm_times_ms = timings[warmup_runs:]  # Skip warmup runs for measurement
+
+        avg_warm_time_ms = sum(warm_times_ms) / len(warm_times_ms) if warm_times_ms else 0
+        speedup = cold_time_ms / avg_warm_time_ms if avg_warm_time_ms > 0 else 0
+
+        print(f"  Cold (1st run): {cold_time_ms:.2f}ms")
+        print(f"  Warm (avg of {measure_runs}): {avg_warm_time_ms:.2f}ms")
+        if speedup > 1:
+            print(f"  Speedup: {speedup:.1f}x")
+
+        return {
+            "success": True,
+            "cold_time_ms": round(cold_time_ms, 2),
+            "warm_times_ms": [round(t, 2) for t in warm_times_ms],
+            "avg_warm_time_ms": round(avg_warm_time_ms, 2),
+            "speedup": round(speedup, 1),
+            "all_timings_ms": [round(t, 2) for t in timings],
+        }
+
+    except Exception as e:
+        return {"success": False, "error": f"Cache warming failed: {str(e)}"}
+
+
+def _run_queries_postgres_persistent(
+    query: str, host: str, port: int, user: str, database: str, password: str, num_runs: int
+) -> Dict[str, Any]:
+    """Execute a query multiple times using a single persistent psycopg2 connection."""
+    import time
+
+    try:
+        import psycopg2
+
+        connection = psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password or "",
+            database=database,
+            connect_timeout=30,
+        )
+
+        timings = []
+        try:
+            for _ in range(num_runs):
+                start_time = time.perf_counter()
+                with connection.cursor() as cursor:
+                    cursor.execute(query)
+                    cursor.fetchall()
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                timings.append(elapsed_ms)
+
+            return {"success": True, "timings_ms": timings}
+        finally:
+            connection.close()
+
+    except ImportError:
+        return {"success": False, "error": "psycopg2 not installed"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _run_queries_mysql_persistent(
+    query: str, host: str, port: int, user: str, database: str, password: str, num_runs: int
+) -> Dict[str, Any]:
+    """Execute a query multiple times using a single persistent pymysql connection."""
+    import time
+
+    normalized_host = host or "127.0.0.1"
+    if normalized_host == "localhost":
+        normalized_host = "127.0.0.1"
+
+    try:
+        import pymysql
+
+        connection = pymysql.connect(
+            host=normalized_host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            connect_timeout=30,
+        )
+
+        timings = []
+        try:
+            for _ in range(num_runs):
+                start_time = time.perf_counter()
+                with connection.cursor() as cursor:
+                    cursor.execute(query)
+                    cursor.fetchall()
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                timings.append(elapsed_ms)
+
+            return {"success": True, "timings_ms": timings}
+        finally:
+            connection.close()
+
+    except ImportError:
+        return {"success": False, "error": "pymysql not installed"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

@@ -375,9 +375,10 @@ class AnalyzeService:
         target_name: str,
         target_config: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Synchronous readyset analysis (runs in thread).
+        """Synchronous readyset analysis using shallow mode (runs in thread).
 
-        This method runs the Readyset container setup and cacheability testing.
+        Uses shallow caching - single Readyset container connecting directly
+        to the upstream database without a test sub-container.
 
         Args:
             input: Analysis input with query
@@ -390,49 +391,71 @@ class AnalyzeService:
         import os
 
         try:
-            from ..cli.readyset_setup import setup_readyset_containers
+            from ..functions.readyset_container import (
+                start_readyset_container_direct,
+                wait_for_readyset_ready_shallow,
+                check_readyset_container_status,
+            )
             from ..functions.readyset_explain_cache import (
                 explain_create_cache_readyset,
                 create_cache_readyset,
+                drop_cache_readyset,
+                get_cache_id_for_query,
+                warm_cache_and_measure,
             )
 
-            # Set up Readyset containers
-            setup_result_wrapper = setup_readyset_containers(
-                target_name=target_name,
-                target_config=target_config,
-                test_data_rows=100,
-                llm_model=None,
-            )
-
-            if not setup_result_wrapper.get("success"):
-                return {
-                    "success": False,
-                    "error": setup_result_wrapper.get("error", "Setup failed"),
-                }
-
-            readyset_port = setup_result_wrapper.get("readyset_port")
-            if not readyset_port:
-                return {
-                    "success": False,
-                    "error": "Readyset port not found in setup result",
-                }
-
-            # Get test_db_config
-            if "setup_result" in setup_result_wrapper:
-                setup_result = setup_result_wrapper["setup_result"]
-            else:
-                setup_result = setup_result_wrapper
-
-            test_db_config = setup_result.get("target_config", {})
-
-            # Resolve password from environment if needed
+            # Resolve password from environment
             password = target_config.get("password", "")
             password_env = target_config.get("password_env")
             if password_env:
                 password = os.environ.get(password_env, "")
 
-            if not test_db_config.get("password"):
-                test_db_config["password"] = password
+            resolved_config = {**target_config, "password": password}
+
+            engine = target_config.get("engine", "postgresql")
+            readyset_port = 5433 if engine == "postgresql" else 3307
+            container_name = f"rdst-readyset-{target_name}"
+
+            # Check if container already running
+            status = check_readyset_container_status(
+                readyset_container_name=container_name
+            )
+
+            if not status.get("running"):
+                # Start container in shallow mode (direct upstream connection)
+                start_result = start_readyset_container_direct(
+                    target_config=resolved_config,
+                    readyset_port=readyset_port,
+                    readyset_container_name=container_name,
+                )
+
+                if not start_result.get("success"):
+                    return {
+                        "success": False,
+                        "error": start_result.get("error", "Failed to start Readyset"),
+                    }
+
+            # Wait for readyset to be ready
+            ready_result = wait_for_readyset_ready_shallow(
+                readyset_container_name=container_name,
+                timeout=120,
+            )
+
+            if not ready_result.get("success"):
+                return {
+                    "success": False,
+                    "error": ready_result.get("error", "Readyset not ready"),
+                }
+
+            # Build config for Readyset connection
+            test_db_config = {
+                "engine": engine,
+                "host": "localhost",
+                "port": readyset_port,
+                "database": target_config.get("database"),
+                "user": target_config.get("user"),
+                "password": password,
+            }
 
             # Run EXPLAIN CREATE CACHE
             explain_result = explain_create_cache_readyset(
@@ -443,6 +466,7 @@ class AnalyzeService:
 
             # Try to create cache if cacheable
             create_result = {}
+            cache_id = None
             if explain_result.get("cacheable", False):
                 already_cached = (
                     "already cached" in explain_result.get("explanation", "").lower()
@@ -454,9 +478,40 @@ class AnalyzeService:
                         "already_cached": True,
                         "message": "Query already cached",
                     }
+                    # Get the cache ID for cleanup
+                    cache_id = get_cache_id_for_query(
+                        query=input.sql,
+                        readyset_port=readyset_port,
+                        db_config=test_db_config,
+                    )
                 else:
                     create_result = create_cache_readyset(
                         query=input.sql,
+                        readyset_port=readyset_port,
+                        test_db_config=test_db_config,
+                    )
+                    if create_result.get("success"):
+                        cache_id = get_cache_id_for_query(
+                            query=input.sql,
+                            readyset_port=readyset_port,
+                            db_config=test_db_config,
+                        )
+
+                # Warm the cache and measure performance
+                warm_result = {}
+                if create_result.get("success") or create_result.get("already_cached"):
+                    warm_result = warm_cache_and_measure(
+                        query=input.sql,
+                        readyset_port=readyset_port,
+                        test_db_config=test_db_config,
+                        warmup_runs=2,
+                        measure_runs=3,
+                    )
+
+                # Drop the cache after testing (ephemeral container)
+                if cache_id:
+                    drop_cache_readyset(
+                        cache_name=cache_id,
                         readyset_port=readyset_port,
                         test_db_config=test_db_config,
                     )
@@ -465,16 +520,18 @@ class AnalyzeService:
                 "success": True,
                 "checked": True,
                 "readyset_port": readyset_port,
-                "setup_result": setup_result,
+                "shallow_mode": True,
                 "explain_cache_result": explain_result,
                 "create_cache_result": create_result,
+                "warm_cache_result": warm_result,
                 "final_verdict": {
                     "cacheable": explain_result.get("cacheable", False),
                     "confidence": explain_result.get("confidence", "unknown"),
-                    "method": "readyset_container"
-                    if explain_result.get("success")
-                    else "static_analysis",
+                    "method": "readyset_shallow",
                     "cached": create_result.get("cached", False),
+                    "cold_time_ms": warm_result.get("cold_time_ms"),
+                    "warm_time_ms": warm_result.get("avg_warm_time_ms"),
+                    "speedup": warm_result.get("speedup"),
                 },
             }
 

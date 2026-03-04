@@ -22,6 +22,8 @@ from .readyset_container import (
     start_readyset_container,
     wait_for_readyset_ready,
     check_readyset_container_status,
+    start_readyset_container_direct,
+    wait_for_readyset_ready_shallow,
 )
 from .readyset_explain_cache import (
     explain_create_cache_readyset,
@@ -85,4 +87,7 @@ READYSET_FUNCTIONS = {
     "wait_for_readyset_ready": wait_for_readyset_ready,
     "check_readyset_container_status": check_readyset_container_status,
     "explain_create_cache_readyset": explain_create_cache_readyset,
+    # Shallow cache (direct upstream connection) functions
+    "start_readyset_container_direct": start_readyset_container_direct,
+    "wait_for_readyset_ready_shallow": wait_for_readyset_ready_shallow,
 }

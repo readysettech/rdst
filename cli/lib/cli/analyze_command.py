@@ -693,6 +693,17 @@ class AnalyzeCommand:
             if readyset and not readyset_cache:
                 readyset_cache = True
 
+            # Check Docker availability upfront when --readyset-cache is enabled
+            if readyset_cache:
+                from ..functions.readyset_container import check_docker_available
+
+                docker_status = check_docker_available()
+                if not docker_status.get("available"):
+                    return RdstResult(
+                        False,
+                        f"--readyset-cache requires Docker: {docker_status.get('error', 'Docker not available')}"
+                    )
+
             # EXPLAIN ANALYZE safety warning (unless --skip-warning or --fast)
             showed_warning = False
             if not skip_warning and not fast and not output_json and sys.stdout.isatty():

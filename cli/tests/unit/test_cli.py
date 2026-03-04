@@ -500,3 +500,11 @@ class TestDefaultPortFor:
     def test_none_defaults_to_mysql(self):
         """Test None defaults to MySQL port."""
         assert default_port_for(None) == 3306
+
+
+parser_data = _import_module_directly("parser_data", _lib_path / "cli" / "parser_data.py")
+COMMANDS = parser_data.COMMANDS
+CommandDef = parser_data.CommandDef
+ArgDef = parser_data.ArgDef
+
+

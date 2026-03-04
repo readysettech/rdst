@@ -682,31 +682,29 @@ The `--readyset-cache` flag for `rdst analyze` uses Docker to test Readyset cach
 **Prerequisites:**
 - Docker must be installed and running
 - User must have permission to run Docker commands
-- First run downloads container images (~500MB)
+- First run downloads container image (~500MB)
 
 **What happens when you use --readyset-cache:**
-1. RDST automatically starts Docker containers:
-   - `rdst-test-mysql-<target>` or `rdst-test-postgres-<target>` - Database replica
-   - `rdst-readyset-<target>` - Readyset cache container
-2. Creates a test schema matching your database
+1. RDST starts a single Readyset container (`rdst-readyset`) that connects directly to your upstream database
+2. Uses shallow caching mode - no data replication or snapshotting required
 3. Attempts to cache the query in Readyset
-4. Runs performance comparison (original DB vs Readyset)
-5. Containers are kept running for subsequent tests
+4. Reports cacheability status and any issues
+5. Container is kept running for subsequent tests
 
 **Resource usage:**
-- Memory: ~1-2GB for containers
-- Disk: ~500MB for images (first run)
+- Memory: ~500MB-1GB for Readyset container
+- Disk: ~500MB for image (first run)
 - CPU: Moderate during cacheability testing
 
 **Cleanup:**
-Containers remain running after tests. To stop them:
+Container remains running after tests. To stop it:
 ```bash
-docker stop $(docker ps -q --filter "name=rdst-")
-docker rm $(docker ps -aq --filter "name=rdst-")
+docker stop rdst-readyset
+docker rm rdst-readyset
 ```
 
-**Important:** The first `--readyset-cache` run may take 30-60 seconds while images download.
-Subsequent runs are faster (10-20 seconds).
+**Important:** The first `--readyset-cache` run may take 30-60 seconds while the image downloads.
+Subsequent runs are faster (5-10 seconds).
 
 ## Troubleshooting
 

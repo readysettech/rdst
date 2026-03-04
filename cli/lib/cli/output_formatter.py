@@ -1062,6 +1062,20 @@ def _format_readyset_cacheability(
         )
         content_parts.append(StatusLine("Confidence", confidence))
         content_parts.append(StatusLine("Method", method))
+
+        # Display cache warming performance data if available
+        cold_time_ms = final_verdict.get("cold_time_ms")
+        warm_time_ms = final_verdict.get("warm_time_ms")
+        speedup = final_verdict.get("speedup")
+
+        if cold_time_ms is not None and warm_time_ms is not None:
+            content_parts.append(Text(""))
+            content_parts.append(f"[{StyleTokens.SECONDARY}]CACHE PERFORMANCE[/{StyleTokens.SECONDARY}]")
+            content_parts.append(StatusLine("Cold (1st query)", f"{cold_time_ms:.2f}ms"))
+            content_parts.append(StatusLine("Warm (cached)", f"[{StyleTokens.SUCCESS}]{warm_time_ms:.2f}ms[/{StyleTokens.SUCCESS}]"))
+            if speedup and speedup > 1:
+                content_parts.append(StatusLine("Speedup", f"[{StyleTokens.SUCCESS}]{speedup:.1f}x faster[/{StyleTokens.SUCCESS}]"))
+
         content_parts.append(Text(""))
 
         explain_result = readyset_analysis.get("explain_cache_result") or {}
