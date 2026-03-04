@@ -792,7 +792,6 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             ("init", "First-time setup wizard"),
             ("query", "Manage query registry"),
             ("schema", "Manage semantic layer"),
-            ("list", "Show saved queries"),
             ("version", "Show version information"),
             ("report", "Submit feedback or bug reports"),
             ("help", "Show help"),
@@ -890,8 +889,6 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             return cli.ask()
         elif cmd == "schema":
             return cli.schema()
-        elif cmd == "list":
-            return cli.query(subcommand="list")
         elif cmd == "version":
             return cli.version()
         elif cmd == "report":

@@ -175,6 +175,15 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
         ):
             return _format_from_raw_workflow(workflow_result)
 
+        # Ensure engine is set in metadata, falling back to target_config
+        metadata = formatted_output.get("metadata") or {}
+        target_config = workflow_result.get("target_config") or {}
+        if not metadata.get("database_engine"):
+            engine = _resolve_db_engine(metadata, target_config)
+            if engine:
+                metadata["database_engine"] = engine
+                formatted_output.setdefault("metadata", metadata)
+
         lines = []
 
         # Header box
@@ -182,7 +191,6 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
         lines.append("")
 
         # Query - use normalized/parameterized version for privacy (no PII)
-        metadata = formatted_output.get("metadata") or {}
         # Prefer normalized_query > parameterized_sql > query
         query = (
             metadata.get("normalized_query")
@@ -288,14 +296,19 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
         return f"Analysis completed but formatting failed: {str(e)}\n\nRaw result available in registry."
 
 
+def _resolve_db_engine(primary: Dict[str, Any], target_config: Dict[str, Any]) -> str:
+    """Get database engine from primary source, falling back to target_config."""
+    return primary.get("database_engine", "") or target_config.get("engine", "")
+
+
 def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
     """Format from raw workflow results when FormatFinalResults failed."""
     lines = []
 
     target = workflow_result.get("target", "unknown")
     explain_results = workflow_result.get("explain_results") or {}
-    db_engine = explain_results.get("database_engine", "")
     target_config = workflow_result.get("target_config") or {}
+    db_engine = _resolve_db_engine(explain_results, target_config)
     storage_result = workflow_result.get("storage_result") or {}
     analysis_id = (
         (storage_result.get("analysis_id") or "")[:12] if storage_result else ""

@@ -131,3 +131,24 @@ class TestSubcommandHelpDescriptions:
         assert missing == [], (
             f"Subcommands missing description in --help: {missing}"
         )
+
+
+class TestInteractiveMenu:
+    """Tests for _interactive_menu commands list (rdst-2vr.9)."""
+
+    def test_no_bare_list_in_menu(self):
+        """Interactive menu should not have a bare 'list' entry.
+
+        'list' is actually 'query list' — having it standalone in the menu
+        is confusing. The 'query' entry already has a submenu with list.
+        """
+        from rdst import _interactive_menu
+        import inspect
+
+        source = inspect.getsource(_interactive_menu)
+
+        # The commands list should not contain a bare ("list", ...) entry
+        assert '("list",' not in source, (
+            "Interactive menu has bare 'list' entry — should be removed; "
+            "'query' submenu already includes list"
+        )
