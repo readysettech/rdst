@@ -41,6 +41,7 @@ class Ask3Context:
     max_rows: int = 100
     verbose: bool = False
     no_interactive: bool = False
+    dry_run: bool = False
 
     # === Conversation Context (for agent chat mode) ===
     conversation_context: str = ""

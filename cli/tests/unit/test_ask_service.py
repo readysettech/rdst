@@ -623,6 +623,74 @@ class TestAskServiceErrorHandling:
         assert len(events) >= 1
 
 
+class TestAskServiceDryRun:
+    """Tests for --dry-run behavior (rdst-2vr.19)."""
+
+    @pytest.fixture
+    def service(self):
+        return AskService()
+
+    @pytest.fixture
+    def input_data(self):
+        return AskInput(question="How many users?", target="test-target", source="cli")
+
+    @pytest.fixture
+    def dry_run_options(self):
+        return AskOptions(dry_run=True, timeout_seconds=30, verbose=False)
+
+    @pytest.mark.asyncio
+    async def test_dry_run_skips_execution(self, service, input_data, dry_run_options):
+        """dry_run=True should generate SQL but never call execute_query."""
+        events = []
+
+        async def mock_load_config(target):
+            return ("test-target", {"engine": "postgresql", "host": "localhost"})
+
+        def fake_load(ctx, p, s):
+            from lib.engines.ask3.types import SchemaInfo, SchemaSource
+            ctx.schema_info = SchemaInfo(
+                target="test-target",
+                db_type="postgresql",
+                source=SchemaSource.DATABASE,
+            )
+            ctx.schema_info.tables = {"users": Mock()}
+            ctx.schema_formatted = "users table"
+            return ctx
+
+        def fake_filter(ctx, p, s):
+            return ctx
+
+        def fake_gen(ctx, p, s):
+            ctx.sql = "SELECT COUNT(*) FROM users"
+            ctx.sql_explanation = "Counts users"
+            return ctx
+
+        def fake_val(ctx, p):
+            ctx.validation_errors = []
+            return ctx
+
+        with patch.object(service, "_load_config", side_effect=mock_load_config), \
+             patch("lib.engines.ask3.phases.load_schema", side_effect=fake_load), \
+             patch("lib.engines.ask3.phases.filter_schema", side_effect=fake_filter), \
+             patch("lib.engines.ask3.phases.generate_sql", side_effect=fake_gen), \
+             patch("lib.engines.ask3.phases.validate_sql", side_effect=fake_val), \
+             patch("lib.engines.ask3.phases.execute_query") as mock_exec:
+
+            async for event in service.ask(input_data, dry_run_options):
+                events.append(event)
+
+            # execute_query must NOT be called
+            mock_exec.assert_not_called()
+
+        # Should have a result event with SQL but no rows
+        result_events = [e for e in events if isinstance(e, AskResultEvent)]
+        assert len(result_events) == 1
+        result = result_events[0]
+        assert result.sql == "SELECT COUNT(*) FROM users"
+        assert result.rows == []
+        assert result.row_count == 0
+
+
 class TestAskServiceTimeoutScenarios:
     """Tests for timeout handling scenarios."""
 

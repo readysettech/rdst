@@ -124,6 +124,7 @@ class AskService:
                 timeout_seconds=options.timeout_seconds,
                 verbose=options.verbose,
                 no_interactive=True,  # We handle interaction via events
+                dry_run=options.dry_run,
             )
 
             # Phase 1: Load schema
@@ -319,7 +320,21 @@ class AskService:
             )
             return
 
-        # Phase 5: Execute query
+        # Phase 5: Execute query (skip if dry_run)
+        if ctx.dry_run:
+            yield AskResultEvent(
+                type="result",
+                success=True,
+                sql=ctx.sql or "",
+                rows=[],
+                columns=[],
+                row_count=0,
+                execution_time_ms=0.0,
+                llm_calls=len(ctx.llm_calls),
+                total_tokens=ctx.total_tokens,
+            )
+            return
+
         yield AskStatusEvent(
             type="status",
             phase="execute",
