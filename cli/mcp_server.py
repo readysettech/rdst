@@ -945,7 +945,7 @@ SUBCOMMANDS (available via MCP):
 
 CLI-ONLY FEATURES (tell user to run these in their terminal):
 - `rdst schema annotate --target <target>` - Interactive wizard to add descriptions
-- `rdst schema annotate --target <target> --llm-guided` - AI-generated descriptions
+- `rdst schema annotate --target <target> --use-llm` - AI-generated descriptions
 - `rdst schema edit --target <target>` - Opens in $EDITOR
 - `rdst ask "question" --target <target>` - Natural language to SQL (interactive)
 

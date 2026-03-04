@@ -792,7 +792,7 @@ class SchemaCommand:
                     "enum_columns": enum_columns,
                     "path": str(self.manager.get_path(target)),
                     "next_steps": [
-                        f"  rdst schema annotate --target {target} --llm-guided   AI-generate descriptions",
+                        f"  rdst schema annotate --target {target} --use-llm   AI-generate descriptions",
                         f"  rdst schema edit --target {target}                 Manual editing in $EDITOR",
                         f'  rdst ask "How many rows in each table?" --target {target}   Try natural language queries',
                     ],
@@ -969,7 +969,7 @@ class SchemaCommand:
         self,
         target: str,
         table_name: Optional[str] = None,
-        llm_guided: bool = False,
+        use_llm: bool = False,
         auto_accept: bool = False,
         sample_rows: int = 5,
         target_config: Optional[dict] = None,
@@ -980,15 +980,15 @@ class SchemaCommand:
         Args:
             target: Target database name
             table_name: Optional specific table to annotate
-            llm_guided: LLM-guided mode — profiles data, drafts annotations, asks questions
-            auto_accept: Auto-accept all LLM annotations (requires llm_guided)
+            use_llm: LLM-guided mode — profiles data, drafts annotations, asks questions
+            auto_accept: Auto-accept all LLM annotations (requires use_llm)
             sample_rows: Number of sample rows to use for context
-            target_config: Database config (required if llm_guided=True)
+            target_config: Database config (required if use_llm=True)
 
         Returns:
             Dict with result
         """
-        if llm_guided:
+        if use_llm:
             if not target_config:
                 return {
                     "ok": False,
@@ -1011,7 +1011,7 @@ class SchemaCommand:
             except Exception as e:
                 return {"ok": False, "message": f"Guided annotation failed: {e}"}
 
-        # Interactive wizard (no --llm-guided flag)
+        # Interactive wizard (no --use-llm flag)
         ai_annotator = None
         try:
             from ..semantic_layer.ai_annotator import AIAnnotator

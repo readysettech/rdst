@@ -93,6 +93,98 @@ class TestSemanticExtraction:
         assert result["suggested_tables"] == []
 
 
+class TestSemanticExtractionJsonRobustness:
+    """Bug rdst-9cq.1: Semantic extraction must handle non-pure-JSON LLM responses.
+
+    When Haiku returns JSON wrapped in markdown code fences or with preamble text,
+    _extract_semantic_concepts fails with json.JSONDecodeError and returns empty
+    suggested_tables. This causes the ask pipeline to miss tables.
+    """
+
+    def test_handles_markdown_wrapped_json(self):
+        """LLM response wrapped in ```json ... ``` should still parse."""
+        mock_llm = Mock()
+        mock_llm.query.return_value = {
+            'text': '```json\n{"suggested_tables": ["title_ratings", "title_basics"], "reasoning": "ratings"}\n```'
+        }
+
+        result = _extract_semantic_concepts(
+            "What are the top 10 highest rated titles?",
+            ["title_basics", "title_ratings", "title_crew"],
+            mock_llm
+        )
+
+        assert "title_ratings" in result["suggested_tables"]
+        assert "title_basics" in result["suggested_tables"]
+
+    def test_handles_preamble_text_before_json(self):
+        """LLM response with text before JSON should still parse."""
+        mock_llm = Mock()
+        mock_llm.query.return_value = {
+            'text': 'Here are the tables:\n{"suggested_tables": ["title_ratings"], "reasoning": "needs ratings"}'
+        }
+
+        result = _extract_semantic_concepts(
+            "What is the average rating?",
+            ["title_basics", "title_ratings"],
+            mock_llm
+        )
+
+        assert "title_ratings" in result["suggested_tables"]
+
+    def test_handles_text_after_json(self):
+        """LLM response with text after JSON should still parse."""
+        mock_llm = Mock()
+        mock_llm.query.return_value = {
+            'text': '{"suggested_tables": ["title_ratings"], "reasoning": "ratings table"}\n\nI hope this helps!'
+        }
+
+        result = _extract_semantic_concepts(
+            "Show me ratings",
+            ["title_basics", "title_ratings"],
+            mock_llm
+        )
+
+        assert "title_ratings" in result["suggested_tables"]
+
+
+class TestHeuristicMatchingUnderscoreTables:
+    """Bug rdst-9cq.1: Heuristic matching must handle underscore-separated table names.
+
+    When semantic extraction fails, the heuristic fallback in _match_tables_and_columns
+    misses tables like 'title_ratings' because 'rating' doesn't match the full name.
+    """
+
+    def test_matches_underscore_table_via_component(self):
+        """'ratings' in question should match 'title_ratings' table."""
+        schema_info = MockSchemaInfo({
+            "title_basics": MockTableInfo(["tconst", "primarytitle"]),
+            "title_ratings": MockTableInfo(["tconst", "averagerating"]),
+            "name_basics": MockTableInfo(["nconst", "primaryname"]),
+        })
+
+        result = _match_tables_and_columns(
+            "What are the top 10 highest rated titles?",
+            schema_info
+        )
+
+        assert "title_ratings" in result
+
+    def test_matches_underscore_table_via_plural_component(self):
+        """'rating' (singular) should match 'title_ratings' table via component."""
+        schema_info = MockSchemaInfo({
+            "title_basics": MockTableInfo(["tconst", "primarytitle"]),
+            "title_ratings": MockTableInfo(["tconst", "averagerating"]),
+        })
+
+        result = _match_tables_and_columns(
+            "What is the average rating per genre?",
+            schema_info
+        )
+
+        assert "title_ratings" in result
+
+
 class TestHeuristicMatching:
     """Tests for heuristic table/column matching."""
 

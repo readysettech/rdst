@@ -645,14 +645,14 @@ The more comprehensive your semantic layer, the better 'rdst ask' can generate a
                     ArgDef("table", nargs="?", help="Table to annotate"),
                     ArgDef("--target", help="Target database name"),
                     ArgDef(
-                        "--llm-guided",
+                        "--use-llm",
                         action="store_true",
                         help="LLM-guided mode: profiles data, drafts annotations, asks targeted questions",
                     ),
                     ArgDef(
                         "--auto-accept",
                         action="store_true",
-                        help="Auto-accept all LLM annotations without interactive review (requires --llm-guided)",
+                        help="Auto-accept all LLM annotations without interactive review (requires --use-llm)",
                     ),
                     ArgDef(
                         "--sample-rows",
@@ -701,7 +701,7 @@ The more comprehensive your semantic layer, the better 'rdst ask' can generate a
             ("show", "Display semantic layer for a target or specific table"),
             (
                 "annotate",
-                "Add descriptions interactively or with AI assistance (--llm-guided)",
+                "Add descriptions interactively or with AI assistance (--use-llm)",
             ),
             ("edit", "Open semantic layer in $EDITOR for manual editing"),
             ("export", "Export as YAML or JSON"),
@@ -712,7 +712,7 @@ The more comprehensive your semantic layer, the better 'rdst ask' can generate a
         examples=[
             ("rdst schema init --target mydb", "Bootstrap from database"),
             (
-                "rdst schema annotate --target mydb --llm-guided",
+                "rdst schema annotate --target mydb --use-llm",
                 "AI-generate descriptions",
             ),
             ("rdst schema show --target mydb", "View current semantic layer"),

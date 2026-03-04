@@ -1,5 +1,5 @@
 """
-E2E test for `rdst schema annotate --llm-guided`.
+E2E test for `rdst schema annotate --use-llm`.
 
 Runs against the real e2e-imdb target provisioned by conftest.py.
 Uses a tmux session to interact with the guided annotator's prompts.
@@ -27,13 +27,13 @@ class TestGuidedAnnotate:
     """Guided annotation flow against real IMDB database."""
 
     def test_guided_annotate_single_table(self, schema_init, tmux):
-        """Run --llm-guided on a single table, accept all defaults."""
+        """Run --use-llm on a single table, accept all defaults."""
         target = schema_init
 
         # Start guided annotation for title_basics
         tmux.send(
             f"cd {_rdst_dir()} && uv run rdst.py schema annotate "
-            f"--target {target} --llm-guided title_basics"
+            f"--target {target} --use-llm title_basics"
         )
 
         # Wait for profiling phase
@@ -63,11 +63,11 @@ class TestGuidedAnnotate:
             )
 
     def test_help_shows_guided_flag(self):
-        """--llm-guided appears in help text."""
+        """--use-llm appears in help text."""
         from tests.e2e.conftest import _run_rdst
 
         result = _run_rdst("schema", "annotate", "--help")
-        assert "--llm-guided" in result.stdout
+        assert "--use-llm" in result.stdout
 
 
 def _rdst_dir():

@@ -325,7 +325,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         if schema_subcommand in ["show", "edit", "annotate"]:
             schema_kwargs["table"] = getattr(args, "table", None)
         if schema_subcommand == "annotate":
-            schema_kwargs["llm_guided"] = getattr(args, "llm_guided", False)
+            schema_kwargs["use_llm"] = getattr(args, "use_llm", False)
             schema_kwargs["auto_accept"] = getattr(args, "auto_accept", False)
             schema_kwargs["sample_rows"] = getattr(args, "sample_rows", 5)
         if schema_subcommand == "init":

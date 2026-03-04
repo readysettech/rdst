@@ -22,6 +22,8 @@ import logging
 import re
 from typing import TYPE_CHECKING, Dict, List, Set, Optional
 
+from lib.functions.shallow_analysis import _extract_json_from_response
+
 if TYPE_CHECKING:
     from ..context import Ask3Context
     from ..presenter import Ask3Presenter
@@ -137,7 +139,10 @@ Rules:
             logger.warning("Semantic extraction returned no response")
             return {"suggested_tables": [], "reasoning": "LLM returned no response"}
 
-        result = json.loads(response['text'])
+        result = _extract_json_from_response(response['text'])
+        if result is None:
+            logger.warning("Semantic extraction returned unparseable JSON")
+            return {"suggested_tables": [], "reasoning": "Could not parse LLM response as JSON"}
 
         # Validate suggested tables exist
         suggested = result.get('suggested_tables', [])
@@ -346,6 +351,15 @@ def _matches_with_variants(name: str, question: str, words: Set[str]) -> bool:
         y_singular = name[:-3] + 'y'
         if y_singular in question or y_singular in words:
             return True
+
+    # Handle underscore-separated names (e.g., title_ratings → check "ratings").
+    # Trade-off: may over-include tables (e.g., "post" matches post_history),
+    # but missing a needed table is worse than including an extra one.
+    if '_' in name:
+        parts = name.split('_')
+        for part in parts:
+            if len(part) >= 3 and _matches_with_variants(part, question, words):
+                return True
 
     return False
 
@@ -585,7 +599,10 @@ Rules:
             logger.warning("LLM table selection returned no response")
             return set()
 
-        result = json.loads(response['text'])
+        result = _extract_json_from_response(response['text'])
+        if result is None:
+            logger.warning("LLM table selection returned unparseable JSON")
+            return set()
         tables = result.get('relevant_tables', [])
 
         # Validate tables exist
