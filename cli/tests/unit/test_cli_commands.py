@@ -100,3 +100,34 @@ class TestTopCommand:
         mock_client = MagicMock()
         cmd = TopCommand(client=mock_client)
         assert cmd.client == mock_client
+
+
+class TestSubcommandHelpDescriptions:
+    """Tests that subcommand --help pages include description text (rdst-2vr.4)."""
+
+    def test_subcommands_have_description(self):
+        """Every subcommand's parser should have a description for --help."""
+        import argparse
+        from lib.cli.parser_data import COMMANDS, build_all_subparsers
+
+        root = argparse.ArgumentParser()
+        subparsers = root.add_subparsers()
+        parsers = build_all_subparsers(subparsers)
+
+        missing = []
+        for cmd_name, cmd_def in COMMANDS.items():
+            if not cmd_def.subcommand_defs:
+                continue
+            for subcmd in cmd_def.subcommand_defs:
+                # Get the subcommand's parser via argparse internals
+                parent_parser = parsers[cmd_name]
+                # Find the subparsers action
+                for action in parent_parser._subparsers._actions:
+                    if isinstance(action, argparse._SubParsersAction):
+                        sub_parser = action.choices.get(subcmd.name)
+                        if sub_parser and not sub_parser.description:
+                            missing.append(f"{cmd_name} {subcmd.name}")
+
+        assert missing == [], (
+            f"Subcommands missing description in --help: {missing}"
+        )

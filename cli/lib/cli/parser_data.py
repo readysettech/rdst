@@ -1267,7 +1267,9 @@ def build_subparser(subparsers, name: str, *, formatter_class=None) -> Any:
             dest=cmd.subcommand_dest, help=f"{name.capitalize()} subcommands"
         )
         for subcmd in cmd.subcommand_defs:
-            sub_parser = sub_subparsers.add_parser(subcmd.name, help=subcmd.help)
+            sub_parser = sub_subparsers.add_parser(
+                subcmd.name, help=subcmd.help, description=subcmd.help,
+            )
             _add_args_to_parser(sub_parser, subcmd.args)
 
     return parser
