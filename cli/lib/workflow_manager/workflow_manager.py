@@ -468,6 +468,8 @@ class WorkflowManager:
 def _stringify(val: Any) -> str:
     if val is None:
         return ""
+    if isinstance(val, Enum):
+        return str(val.value)
     if isinstance(val, (str, int, float, bool)):
         return str(val)
     try:

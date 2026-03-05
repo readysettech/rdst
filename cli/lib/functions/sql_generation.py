@@ -104,7 +104,7 @@ def generate_sql_from_nl(
         # Invoke callback for LLM call tracking
         if callback:
             response_text = llm_result.get('response', '')
-            tokens = llm_result.get('total_tokens', 0)
+            tokens = llm_result.get('tokens_used', 0)
             model = llm_result.get('model', 'unknown')
 
             try:

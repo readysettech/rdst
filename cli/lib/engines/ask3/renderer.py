@@ -171,7 +171,7 @@ class AskRenderer:
         table = DataTable(
             columns=event.columns,
             rows=str_rows,
-            title=f"Results ({event.row_count} rows, {event.execution_time_ms:.1f}ms)",
+            title=f"Results ({event.row_count} {'row' if event.row_count == 1 else 'rows'}, {event.execution_time_ms:.1f}ms)",
         )
         self._console.print(table)
 

@@ -211,7 +211,7 @@ class Ask3Presenter:
         table = DataTable(
             columns=columns,
             rows=str_rows,
-            title=f"Results ({row_count} rows, {time_ms:.1f}ms)",
+            title=f"Results ({row_count} {'row' if row_count == 1 else 'rows'}, {time_ms:.1f}ms)",
         )
         self._console.print(table)
 

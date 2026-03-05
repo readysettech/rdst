@@ -86,7 +86,7 @@ def _format_with_rich(
     table = DataTable(
         columns=columns,
         rows=rows,
-        title=f"Query Results ({total_rows} rows, {execution_time_ms:.2f}ms)",
+        title=f"Query Results ({total_rows} {'row' if total_rows == 1 else 'rows'}, {execution_time_ms:.2f}ms)",
     )
 
     # Capture table output
@@ -122,7 +122,7 @@ def _format_plain_text(
     separator = "-+-".join("-" * width for width in col_widths)
 
     output_lines.append(
-        f"\nQuery Results ({total_rows} rows, {execution_time_ms:.2f}ms)"
+        f"\nQuery Results ({total_rows} {'row' if total_rows == 1 else 'rows'}, {execution_time_ms:.2f}ms)"
     )
     output_lines.append(header)
     output_lines.append(separator)

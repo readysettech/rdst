@@ -1274,7 +1274,7 @@ class RdstCLI:
                     return RdstResult(ok=False, message="Operation cancelled by user")
                 return RdstResult(
                     ok=False,
-                    message=f"Error: {error_event.message}",
+                    message=error_event.message,
                     data={"phase": error_event.phase} if error_event.phase else {},
                 )
 

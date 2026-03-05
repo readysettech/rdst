@@ -53,7 +53,7 @@ class ClaudeProvider(Provider):
     _API_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
 
     def default_model(self) -> str:
-        return self._DEFAULT_MODEL
+        return self._DEFAULT_MODEL.value
 
     def complete(
         self,
