@@ -436,12 +436,13 @@ CRITICAL DISTINCTIONS:
     a correlated subquery to JOIN — see CORRELATED SUBQUERY REWRITE RULE below)
   ✗ Adding/removing ORDER BY (unless original has none)
   ✗ Changing LIMIT value
+  ✗ WHERE clause reorder is NOT a real optimization — the optimizer handles condition ordering
+    automatically. Do not suggest WHERE clause reorder as a rewrite.
 
   ALLOWED in rewrites:
   ✓ Index hints: SELECT /*+ INDEX(posts idx_score) */ ... WHERE score > 100
   ✓ FORCE INDEX: SELECT * FROM posts FORCE INDEX (idx_score) WHERE score > 100
   ✓ JOIN order hints: SELECT /*+ LEADING(t1 t2) */ ...
-  ✓ Reordering WHERE conditions: "WHERE a = 1 AND b = 2" → "WHERE b = 2 AND a = 1" (same filters)
   ✓ Subquery → JOIN conversion (ONLY if semantically equivalent)
   ✓ Correlated subquery → JOIN + GROUP BY (see rule below)
 
@@ -481,6 +482,27 @@ CRITICAL DISTINCTIONS:
   * Provide full CREATE INDEX statements with proper syntax
 
 - OPTIMIZATION_OPPORTUNITIES: General recommendations like query caching, connection pooling, etc.
+
+  ** NON-DETERMINISTIC FUNCTION DETECTION **
+
+  Scan the query for non-deterministic functions: CURRENT_DATE, CURRENT_TIMESTAMP, NOW(),
+  CURRENT_TIME, RANDOM(), RAND(), UUID(), SYSDATE, GETDATE(), NEWID().
+
+  If any are found, add to "optimization_opportunities" with type "non_deterministic":
+  {{
+    "type": "non_deterministic",
+    "priority": "medium",
+    "description": "Query uses <function> which returns different values on each execution",
+    "rationale": "Non-deterministic functions affect: (1) Cacheability — query results change over
+      time without data changes, making cache invalidation unpredictable. For Readyset, this query
+      may need a cache invalidation strategy or the non-deterministic value should be parameterized.
+      (2) Plan stability — filtered row counts change over time, potentially shifting query plans.
+      (3) Testing reproducibility — results differ between test runs.",
+    "example": "Consider parameterizing: WHERE startyear >= $1 instead of WHERE startyear >= EXTRACT(YEAR FROM CURRENT_DATE) - 5"
+  }}
+
+  This is a cacheability concern — even if the query performs well, the non-deterministic function
+  means cached results go stale without any data changes occurring.
 
 CRITICAL ANTI-HALLUCINATION RULES:
 - Check existing indexes CAREFULLY before suggesting new ones - look at the USING clause
