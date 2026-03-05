@@ -745,7 +745,7 @@ def _format_tested_optimizations(
             was_skipped = result.get("was_skipped", False) or perf.get(
                 "was_skipped", False
             )
-            if not was_skipped and not baseline_skipped:
+            if not was_skipped:
                 successful_rewrites.append(result)
 
     content_parts: List[Any] = []
@@ -758,13 +758,14 @@ def _format_tested_optimizations(
             )
         )
 
-    if not successful_rewrites and not baseline_skipped:
-        content_parts.append(
-            MessagePanel(
-                "No rewrite opportunities identified — query structure is already optimal",
-                variant="info",
+    if not successful_rewrites:
+        if not baseline_skipped:
+            content_parts.append(
+                MessagePanel(
+                    "No rewrite opportunities identified — query structure is already optimal",
+                    variant="info",
+                )
             )
-        )
     else:
         for i, rewrite in enumerate(successful_rewrites[:3], 1):
             metadata = rewrite.get("suggestion_metadata") or {}
@@ -777,7 +778,13 @@ def _format_tested_optimizations(
             rewrite_time = perf.get("execution_time_ms", 0)
 
             # Status with colors
-            if improvement_pct >= 10:
+            if baseline_skipped:
+                status_icon = (
+                    f"[{StyleTokens.MUTED}]{Icons.ARROW}[/{StyleTokens.MUTED}]"
+                )
+                status_text = f"[{StyleTokens.MUTED}]UNTESTED[/{StyleTokens.MUTED}]"
+                pct_display = f"[{StyleTokens.MUTED}]baseline too slow[/{StyleTokens.MUTED}]"
+            elif improvement_pct >= 10:
                 status_icon = (
                     f"[{StyleTokens.SUCCESS}]{Icons.CHECK}[/{StyleTokens.SUCCESS}]"
                 )
@@ -798,9 +805,14 @@ def _format_tested_optimizations(
                     f"[{StyleTokens.ERROR}]{improvement_pct:.1f}%[/{StyleTokens.ERROR}]"
                 )
 
-            content_parts.append(
-                f"{i}. {status_icon} {status_text} ({pct_display}) - {rewrite_time:.1f}ms"
-            )
+            if baseline_skipped:
+                content_parts.append(
+                    f"{i}. {status_icon} {status_text} ({pct_display})"
+                )
+            else:
+                content_parts.append(
+                    f"{i}. {status_icon} {status_text} ({pct_display}) - {rewrite_time:.1f}ms"
+                )
             content_parts.append(
                 f"   [{StyleTokens.MUTED}]{explanation}[/{StyleTokens.MUTED}]"
             )
