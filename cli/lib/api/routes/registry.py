@@ -22,6 +22,7 @@ class QueryRegistryEntry(BaseModel):
     target: str
     frequency: int
     source: str
+    most_recent_params: dict = {}
 
 
 class QueryRegistryResponse(BaseModel):
@@ -66,6 +67,7 @@ async def get_query_registry(limit: int = 50) -> QueryRegistryResponse:
                     target=q.last_target,
                     frequency=q.frequency,
                     source=q.source,
+                    most_recent_params=q.most_recent_params,
                 )
                 for q in queries
             ]

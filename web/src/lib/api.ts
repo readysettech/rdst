@@ -331,6 +331,7 @@ export interface QueryRegistryEntry {
   target: string;
   frequency: number;
   source: string;
+  most_recent_params?: Record<string, string | number>;
 }
 
 export interface QueryRegistryResponse {

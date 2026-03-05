@@ -19,6 +19,7 @@ interface QueryWithParams {
   identifier: string // tag or hash
   sql: string
   name: string
+  mostRecentParams?: Record<string, string | number>
 }
 
 interface BenchmarkParameterDialogProps {
@@ -165,6 +166,27 @@ function substituteParameters(
   return result
 }
 
+/**
+ * Resolve an initial value from backend's most_recent_params for a given parameter.
+ * Backend stores params as {p1: value, p2: value, ...} (SQLGlot-normalized keys).
+ */
+function resolveInitialValue(
+  param: Parameter,
+  storedParams: Record<string, string | number> | undefined
+): string {
+  if (!storedParams) return ''
+  let backendKey: string
+  if (param.type === 'named') {
+    backendKey = param.placeholder.replace(/^[:@]/, '')
+  } else if (param.placeholder.startsWith('$')) {
+    backendKey = param.placeholder.replace('$', 'p')
+  } else {
+    backendKey = `p${param.index}`
+  }
+  const value = storedParams[backendKey]
+  return value != null ? String(value) : ''
+}
+
 export function BenchmarkParameterDialog({
   isOpen,
   onClose,
@@ -179,7 +201,7 @@ export function BenchmarkParameterDialog({
         parameters.map((parameter) => parameter.placeholder)
       )
       return {
-        ...q,
+        ...q, // spreads identifier, sql, name, and mostRecentParams
         parameters,
         parameterHighlights,
         colorByPlaceholder: new Map<string, number>(
@@ -195,19 +217,19 @@ export function BenchmarkParameterDialog({
   // Values keyed by "identifier:placeholder"
   const [values, setValues] = useState<Record<string, string>>({})
 
-  // Initialize values when queries change
+  // Initialize values when queries change, using stored params if available
   useEffect(() => {
-    const initialValues: Record<string, string> = {}
+    const init: Record<string, string> = {}
     for (const q of queryParams) {
       for (const p of q.parameters) {
         const key =
           p.placeholder === '?'
             ? `${q.identifier}:?${p.index}`
             : `${q.identifier}:${p.placeholder}`
-        initialValues[key] = ''
+        init[key] = resolveInitialValue(p, q.mostRecentParams)
       }
     }
-    setValues(initialValues)
+    setValues(init)
   }, [queryParams])
 
   const handleValueChange = (

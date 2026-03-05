@@ -15,6 +15,7 @@ type ResultsSearch = {
   query: string;
   target?: string;
   fast?: boolean;
+  params?: string;
 };
 
 export const Route = createFileRoute('/results')({
@@ -26,6 +27,7 @@ export const Route = createFileRoute('/results')({
       query: search.query,
       target: typeof search.target === 'string' ? search.target : undefined,
       fast: search.fast === true || search.fast === 'true',
+      params: typeof search.params === 'string' ? search.params : undefined,
     };
   },
   component: ResultsRouteComponent,
@@ -37,7 +39,15 @@ interface ResultsPageProps {
 
 export function ResultsPage({ search }: ResultsPageProps) {
   const navigate = useNavigate();
-  const { query, target, fast } = search;
+  const { query, target, fast, params: paramsJson } = search;
+  const storedParams = useMemo(() => {
+    if (!paramsJson) return undefined;
+    try {
+      return JSON.parse(paramsJson) as Record<string, string | number>;
+    } catch {
+      return undefined;
+    }
+  }, [paramsJson]);
   const { analyze, state, progress, results, rewriteTesting, readysetCacheability, error } = useAnalyze();
   const passwordLock = useTargetPasswordLock(target);
   const [isInteractiveOpen, setIsInteractiveOpen] = useState(false);
@@ -262,6 +272,7 @@ export function ResultsPage({ search }: ResultsPageProps) {
         onClose={handleParamCancel}
         onSubmit={handleParamSubmit}
         query={query}
+        initialValues={storedParams}
       />
     </div>
   );

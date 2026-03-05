@@ -20,6 +20,7 @@ interface ParameterDialogProps {
   onClose: () => void
   onSubmit: (substitutedQuery: string) => void
   query: string
+  initialValues?: Record<string, string | number>
 }
 
 interface Parameter {
@@ -159,11 +160,36 @@ function formatValue(value: string): string {
   return `'${trimmed.replace(/'/g, "''")}'`
 }
 
+/**
+ * Resolve an initial value from backend's most_recent_params for a given parameter.
+ * Backend stores params as {p1: value, p2: value, ...} (SQLGlot-normalized keys).
+ */
+function resolveInitialValue(
+  param: Parameter,
+  storedParams: Record<string, string | number> | undefined
+): string {
+  if (!storedParams) return ''
+  let backendKey: string
+  if (param.type === 'named') {
+    // Named params like :p1 or @p1 — backend key is without the prefix
+    backendKey = param.placeholder.replace(/^[:@]/, '')
+  } else if (param.placeholder.startsWith('$')) {
+    // PostgreSQL $1 -> backend key p1
+    backendKey = param.placeholder.replace('$', 'p')
+  } else {
+    // MySQL ? -> backend key p{index}
+    backendKey = `p${param.index}`
+  }
+  const value = storedParams[backendKey]
+  return value != null ? String(value) : ''
+}
+
 export function ParameterDialog({
   isOpen,
   onClose,
   onSubmit,
   query,
+  initialValues,
 }: ParameterDialogProps) {
   const parameters = useMemo(() => detectParameters(query), [query])
   const parameterHighlights = useMemo(
@@ -186,13 +212,13 @@ export function ParameterDialog({
   const [values, setValues] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    const initialValues: Record<string, string> = {}
+    const init: Record<string, string> = {}
     parameters.forEach((p) => {
       const key = p.placeholder === '?' ? `?${p.index}` : p.placeholder
-      initialValues[key] = ''
+      init[key] = resolveInitialValue(p, initialValues)
     })
-    setValues(initialValues)
-  }, [query, parameters])
+    setValues(init)
+  }, [query, parameters, initialValues])
 
   const handleValueChange = (key: string, value: string) => {
     setValues((prev) => ({ ...prev, [key]: value }))

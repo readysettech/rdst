@@ -109,6 +109,27 @@ function substituteParameters(sql: string, params: Parameter[], values: Record<s
   return result;
 }
 
+/**
+ * Resolve an initial value from backend's most_recent_params for a given parameter.
+ * Backend stores params as {p1: value, p2: value, ...} (SQLGlot-normalized keys).
+ */
+function resolveInitialValue(
+  param: Parameter,
+  storedParams: Record<string, string | number> | undefined
+): string {
+  if (!storedParams) return "";
+  let backendKey: string;
+  if (param.type === "named") {
+    backendKey = param.placeholder.replace(/^[:@]/, "");
+  } else if (param.placeholder.startsWith("$")) {
+    backendKey = param.placeholder.replace("$", "p");
+  } else {
+    backendKey = `p${param.index}`;
+  }
+  const value = storedParams[backendKey];
+  return value != null ? String(value) : "";
+}
+
 // Step indicator component
 function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
   const steps = [
@@ -228,6 +249,24 @@ export function BenchmarkPage() {
     }
     return true;
   }, [selectedQueryObjects, paramValues]);
+
+  // Pre-populate param values from most_recent_params when queries are selected
+  useEffect(() => {
+    setParamValues((prev) => {
+      const next = { ...prev };
+      for (const q of selectedQueryObjects) {
+        if (!q.most_recent_params || q.parameters.length === 0) continue;
+        for (const p of q.parameters) {
+          const key = p.placeholder === "?" ? `${q.identifier}:?${p.index}` : `${q.identifier}:${p.placeholder}`;
+          // Only set if not already filled by the user
+          if (!next[key]) {
+            next[key] = resolveInitialValue(p, q.most_recent_params);
+          }
+        }
+      }
+      return next;
+    });
+  }, [selectedQueryObjects]);
 
   const canStart =
     !passwordLock.isLocked &&

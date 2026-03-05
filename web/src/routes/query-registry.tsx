@@ -106,12 +106,15 @@ function QueryRegistryPage() {
     }
   };
 
-  const handleAnalyze = (sql: string, target?: string) => {
+  const handleAnalyze = (sql: string, target?: string, mostRecentParams?: Record<string, string | number>) => {
     navigate({
       to: "/results",
       search: {
         query: sql.trim(),
         target: target || undefined,
+        params: mostRecentParams && Object.keys(mostRecentParams).length > 0
+          ? JSON.stringify(mostRecentParams)
+          : undefined,
       },
     });
   };
@@ -470,7 +473,7 @@ function QueryRegistryPage() {
                                             icon="speedometer"
                                             iconPosition="left"
                                             label="Analyze"
-                                            onClick={() => handleAnalyze(entry.sql, entry.target)}
+                                            onClick={() => handleAnalyze(entry.sql, entry.target, entry.most_recent_params)}
                                           />
                                         </div>
                                       </TooltipTrigger>
