@@ -504,6 +504,29 @@ CRITICAL DISTINCTIONS:
   This is a cacheability concern — even if the query performs well, the non-deterministic function
   means cached results go stale without any data changes occurring.
 
+  ** SELF-JOIN COMPLEXITY WARNING **
+
+  Detect self-joins: when the same table appears twice (or more) in FROM/JOIN clauses.
+  Pattern: `FROM table t1 JOIN table t2 ON t1.col = t2.col`
+
+  Self-joins have O(n^2) characteristics: for N rows per group, each group produces
+  N*(N-1)/2 pairs. On large tables, this is fundamentally expensive regardless of indexing.
+
+  If a self-join is detected, add to "optimization_opportunities" with type "complexity_warning":
+  {{
+    "type": "complexity_warning",
+    "priority": "high",
+    "description": "Self-join on <table> has quadratic (O(n^2)) characteristics per group",
+    "rationale": "For N rows per group, the self-join produces N*(N-1)/2 intermediate pairs.
+      Indexing helps filter but cannot eliminate the quadratic growth. For large tables,
+      consider pre-computing or materializing the aggregated result (e.g., a materialized view
+      of collaboration counts) rather than running this query in real time."
+  }}
+
+  ALWAYS include this warning for self-joins on tables with more than ~1M rows.
+  The warning is informational — still provide index recommendations for the best possible
+  runtime, but set expectations that the query will be inherently expensive.
+
 CRITICAL ANTI-HALLUCINATION RULES:
 - Check existing indexes CAREFULLY before suggesting new ones - look at the USING clause
 - Pay attention to index types: HASH indexes CANNOT be used for JOINs or range scans in PostgreSQL
