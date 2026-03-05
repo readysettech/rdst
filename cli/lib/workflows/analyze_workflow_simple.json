@@ -147,7 +147,8 @@
                 "parameterized_sql": "{{llm_parameterization.parameterized_sql}}",
                 "normalized_query": "{{registry_normalization.normalized_sql}}",
                 "target": "{{target}}",
-                "analysis_id": "{{storage_result.analysis_id}}"
+                "analysis_id": "{{storage_result.analysis_id}}",
+                "readyset_cacheability": "{{readyset_cacheability}}"
             },
             "End": true
         }

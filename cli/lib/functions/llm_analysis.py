@@ -432,7 +432,8 @@ CRITICAL DISTINCTIONS:
   ✗ Removing WHERE conditions: "WHERE a = 1 AND b = 2" → "WHERE a = 1" (WRONG!)
   ✗ Adding/removing columns from SELECT: "SELECT a" → "SELECT a, b" (WRONG!)
   ✗ Adding/removing DISTINCT
-  ✗ Adding/removing GROUP BY, HAVING
+  ✗ Adding/removing GROUP BY, HAVING (EXCEPTION: adding GROUP BY is REQUIRED when converting
+    a correlated subquery to JOIN — see CORRELATED SUBQUERY REWRITE RULE below)
   ✗ Adding/removing ORDER BY (unless original has none)
   ✗ Changing LIMIT value
 
@@ -442,6 +443,31 @@ CRITICAL DISTINCTIONS:
   ✓ JOIN order hints: SELECT /*+ LEADING(t1 t2) */ ...
   ✓ Reordering WHERE conditions: "WHERE a = 1 AND b = 2" → "WHERE b = 2 AND a = 1" (same filters)
   ✓ Subquery → JOIN conversion (ONLY if semantically equivalent)
+  ✓ Correlated subquery → JOIN + GROUP BY (see rule below)
+
+  ** CORRELATED SUBQUERY REWRITE RULE (N+1 ANTI-PATTERN) **
+
+  This is the HIGHEST PRIORITY rewrite (+30 points). Detect and rewrite correlated subqueries
+  that execute once per outer row (N+1 pattern).
+
+  DETECTION: A correlated subquery references the outer query's table in its WHERE clause:
+    SELECT o.*, (SELECT COUNT(*) FROM items i WHERE i.order_id = o.id) as item_count FROM orders o
+    The inner SELECT runs once per row of `orders` — this is O(N) subquery executions.
+
+  REWRITE TEMPLATE: Convert to LEFT JOIN + GROUP BY to execute as a single pass:
+    SELECT o.*, COUNT(i.id) as item_count
+    FROM orders o
+    LEFT JOIN items i ON i.order_id = o.id
+    GROUP BY o.id, o.col1, o.col2, ...   -- GROUP BY all non-aggregated columns
+    -- Preserve original ORDER BY and LIMIT
+
+  RULES:
+  - Use LEFT JOIN (not INNER JOIN) to preserve rows with zero matches (COUNT returns 0, not omitted)
+  - GROUP BY must include ALL non-aggregated columns from SELECT to maintain semantic equivalence
+  - Adding GROUP BY is REQUIRED here — it maintains equivalence, not changes it
+  - This rewrite eliminates N+1 execution: one scan instead of one-per-row
+  - Works for COUNT(*), SUM(), AVG(), MAX(), MIN() in correlated subqueries
+  - For EXISTS subqueries, prefer rewriting to JOIN with DISTINCT instead
 
   If you want to suggest a query with DIFFERENT filters (e.g., adding a WHERE condition):
   - Put it in "optimization_opportunities" with type "query_pattern"

@@ -324,13 +324,32 @@ def _format_readyset_cacheability(
     if not cacheability_results:
         return {"checked": False, "note": "Cacheability check not performed"}
 
-    # Extract final verdict from merged results
+    # Handle flat dict from simple workflow (check_readyset_cacheability returns
+    # a flat dict with cacheable/confidence/issues at the top level, not nested
+    # under final_verdict/static_analysis like the parallel merge workflow)
+    if "final_verdict" not in cacheability_results and "cacheable" in cacheability_results:
+        return {
+            "checked": True,
+            "success": True,
+            "cacheable": cacheability_results.get("cacheable", False),
+            "confidence": cacheability_results.get("confidence", "unknown"),
+            "method": "static_analysis",
+            "readyset_tested": False,
+            "explanation": cacheability_results.get("explanation", ""),
+            "issues": cacheability_results.get("issues", []),
+            "warnings": cacheability_results.get("warnings", []),
+            "create_cache_command": cacheability_results.get("create_cache_command"),
+            "recommended_options": cacheability_results.get("recommended_options", {}),
+        }
+
+    # Extract final verdict from merged results (parallel workflow)
     final_verdict = cacheability_results.get("final_verdict", {})
     readyset_container = cacheability_results.get("readyset_container", {})
 
     # Format the output
     result = {
         "checked": True,
+        "success": True,
         "cacheable": final_verdict.get("cacheable", False),
         "confidence": final_verdict.get("confidence", "unknown"),
         "method": final_verdict.get(
