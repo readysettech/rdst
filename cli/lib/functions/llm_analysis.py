@@ -527,6 +527,40 @@ CRITICAL DISTINCTIONS:
   The warning is informational — still provide index recommendations for the best possible
   runtime, but set expectations that the query will be inherently expensive.
 
+  ** ESTIMATE VS ACTUAL ROW ANALYSIS **
+
+  Compare Rows Examined vs Rows Returned in the PERFORMANCE METRICS above.
+  If Rows Examined is 10x+ more than Rows Returned, the planner's row estimate may be off,
+  indicating stale statistics. Add to "optimization_opportunities" with type "statistics":
+  {{
+    "type": "statistics",
+    "priority": "medium",
+    "description": "Large discrepancy between rows examined and rows returned suggests stale table statistics",
+    "rationale": "The planner estimated significantly more rows than were actually returned.
+      Run ANALYZE on the target tables to refresh statistics and help the planner choose
+      better execution plans. Stale statistics can cause the planner to choose sequential
+      scans over index scans or pick suboptimal join strategies."
+  }}
+
+  ** WORK_MEM TUNING ANALYSIS **
+
+  If the query involves sort operations, hash joins, hash aggregations, or large GROUP BY:
+  - These operations allocate work_mem per operation node
+  - When data exceeds work_mem, the operation spills to disk (orders of magnitude slower)
+  - Default work_mem (4MB) is often too low for analytical queries
+
+  If you detect sort/hash/aggregation on large intermediate result sets, add to
+  "optimization_opportunities" with type "configuration":
+  {{
+    "type": "configuration",
+    "priority": "medium",
+    "description": "Consider increasing work_mem for this session to avoid disk spills",
+    "rationale": "This query's sort/hash/aggregation operations process large intermediate
+      result sets. If work_mem is insufficient, these spill to disk. Try:
+      SET work_mem = '256MB'; before running the query (session-level, not global).",
+    "example": "SET work_mem = '256MB';"
+  }}
+
 CRITICAL ANTI-HALLUCINATION RULES:
 - Check existing indexes CAREFULLY before suggesting new ones - look at the USING clause
 - Pay attention to index types: HASH indexes CANNOT be used for JOINs or range scans in PostgreSQL
@@ -720,9 +754,9 @@ Return empty rewrite_suggestions array if no immediate query improvements are po
             # Validate analysis structure
             validated_analysis = _validate_analysis_structure(analysis_json)
 
-            # Extract top-level recommendations
-            rewrite_suggestions = analysis_json.get("rewrite_suggestions", [])
-            index_recommendations = analysis_json.get("index_recommendations", [])
+            # Extract top-level recommendations from validated analysis
+            rewrite_suggestions = validated_analysis.get("rewrite_suggestions", [])
+            index_recommendations = validated_analysis.get("index_recommendations", [])
 
             # Get detailed token usage
             tokens_used = llm_response.get("tokens_used") or 0
@@ -1071,6 +1105,7 @@ def _validate_analysis_structure(analysis: Dict[str, Any]) -> Dict[str, Any]:
         "execution_analysis": analysis.get("execution_analysis", {}),
         "optimization_opportunities": analysis.get("optimization_opportunities", []),
         "rewrite_suggestions": analysis.get("rewrite_suggestions", []),
+        "index_recommendations": analysis.get("index_recommendations", []),
         "explanation": analysis.get("explanation", "Analysis completed"),
     }
 
@@ -1081,13 +1116,10 @@ def _validate_analysis_structure(analysis: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(perf_assessment.get("efficiency_score"), (int, float)):
         perf_assessment["efficiency_score"] = 0
 
-    # Ensure optimization opportunities is a list
-    if not isinstance(validated["optimization_opportunities"], list):
-        validated["optimization_opportunities"] = []
-
-    # Ensure rewrite suggestions is a list
-    if not isinstance(validated["rewrite_suggestions"], list):
-        validated["rewrite_suggestions"] = []
+    # Ensure all list fields are actually lists
+    for key in ("optimization_opportunities", "rewrite_suggestions", "index_recommendations"):
+        if not isinstance(validated[key], list):
+            validated[key] = []
 
     return validated
 
