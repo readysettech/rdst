@@ -758,10 +758,10 @@ def _format_tested_optimizations(
             )
         )
 
-    if not successful_rewrites:
+    if not successful_rewrites and not baseline_skipped:
         content_parts.append(
             MessagePanel(
-                "No rewrites were tested successfully",
+                "No rewrite opportunities identified — query structure is already optimal",
                 variant="info",
             )
         )
