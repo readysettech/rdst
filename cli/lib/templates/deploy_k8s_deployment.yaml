@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: readyset-cache-{target_name}
+  namespace: {namespace}
+  labels:
+    app: readyset-cache-{target_name}
+    managed-by: rdst
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: readyset-cache-{target_name}
+  template:
+    metadata:
+      labels:
+        app: readyset-cache-{target_name}
+    spec:
+      containers:
+      - name: readyset
+        image: {readyset_image}
+        ports:
+        - containerPort: {readyset_port}
+          name: readyset
+          protocol: TCP
+        env:
+        - name: UPSTREAM_DB_URL
+          valueFrom:
+            secretKeyRef:
+              name: readyset-{target_name}
+              key: database-url
+        - name: DATABASE_TYPE
+          value: "{db_engine}"
+        - name: LISTEN_ADDRESS
+          value: "0.0.0.0:{readyset_port}"
+        - name: DEPLOYMENT_MODE
+          value: "standalone"
+        - name: QUERY_CACHING
+          value: "explicit"
+        - name: CACHE_MODE
+          value: "shallow"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        readinessProbe:
+          tcpSocket:
+            port: {readyset_port}
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket:
+            port: {readyset_port}
+          initialDelaySeconds: 30
+          periodSeconds: 10

@@ -1163,6 +1163,209 @@ Examples:
                 },
                 "required": ["schema"]
             }
+        },
+        {
+            "name": "rdst_cache_deploy",
+            "description": """Deploy ReadySet shallow cache permanently to local, remote, or Kubernetes environments.
+
+Modes:
+- docker: Docker container with restart policy
+- systemd: Native binary with systemd service
+- kubernetes: K8s Deployment + Service via kubectl
+
+For remote deployment, specify host to deploy via SSH.
+Use script_only to generate the deployment script without executing.
+
+After deployment, shows the connection endpoint to point your application to.
+Auto-registers a ReadySet target (e.g., mydb-cache) for use with cache add/show/delete.
+
+Examples:
+  rdst_cache_deploy(target="mydb", mode="docker")  # Local Docker deploy
+  rdst_cache_deploy(target="mydb", mode="systemd")  # Local systemd
+  rdst_cache_deploy(target="mydb", mode="docker", host="10.0.1.50")  # Remote Docker via SSH
+  rdst_cache_deploy(target="mydb", mode="kubernetes")  # Kubernetes
+  rdst_cache_deploy(target="mydb", mode="docker", script_only=True)  # Generate script only
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Database target name to deploy for (from rdst configure list)"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["docker", "systemd", "kubernetes"],
+                        "description": "Deployment mode (default: docker)"
+                    },
+                    "host": {
+                        "type": "string",
+                        "description": "Remote host for SSH deployment (omit for local)"
+                    },
+                    "ssh_key": {
+                        "type": "string",
+                        "description": "SSH private key path"
+                    },
+                    "ssh_user": {
+                        "type": "string",
+                        "description": "SSH username (default: root)"
+                    },
+                    "port": {
+                        "type": "integer",
+                        "description": "ReadySet listen port"
+                    },
+                    "namespace": {
+                        "type": "string",
+                        "description": "Kubernetes namespace (default: readyset)"
+                    },
+                    "kubeconfig": {
+                        "type": "string",
+                        "description": "Path to kubeconfig file for Kubernetes deployment"
+                    },
+                    "script_only": {
+                        "type": "boolean",
+                        "description": "Generate deployment script without executing"
+                    },
+                    "output_json": {
+                        "type": "boolean",
+                        "description": "Return JSON output"
+                    }
+                },
+                "required": ["target"]
+            }
+        },
+        {
+            "name": "rdst_cache_add",
+            "description": """Create a shallow cache for a query in a deployed ReadySet instance.
+
+Shallow caching stores query results in ReadySet's in-memory cache with a TTL
+(time-to-live). Queries are served from cache until the TTL expires, then
+refreshed from the upstream database. This provides dramatic latency improvements
+(often 10-100x) for read-heavy workloads without requiring full materialized views.
+
+IMPORTANT: The target must be a ReadySet target (target_type=readyset), not a
+database target. Deploy ReadySet first with rdst_cache_deploy(), which auto-registers
+a cache target named "{original_target}-cache".
+
+The query can be:
+- Direct SQL: A SELECT statement to cache
+- Registry hash: A 4-12 character hex hash from rdst query list
+
+After caching, use rdst query run to benchmark performance against both the
+ReadySet target and the upstream database target.
+
+Examples:
+  rdst_cache_add(query="SELECT * FROM orders WHERE id = 1", target="mydb-cache")
+  rdst_cache_add(query="abc123de", target="mydb-cache")  # By registry hash
+  rdst_cache_add(query="SELECT COUNT(*) FROM users", target="mydb-cache", tag="user-count")
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "SQL SELECT query or registry hash (4-12 hex chars)"
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "ReadySet target name (target_type=readyset, e.g., mydb-cache)"
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Tag for the query in the registry"
+                    },
+                    "output_json": {
+                        "type": "boolean",
+                        "description": "Return JSON output"
+                    }
+                },
+                "required": ["query", "target"]
+            }
+        },
+        {
+            "name": "rdst_cache_show",
+            "description": """List all cached queries in a deployed ReadySet instance.
+
+Shows a table of all shallow caches with columns: Cache Name, Query, Type, TTL.
+The cache name/ID is used with rdst_cache_delete to remove specific caches.
+
+IMPORTANT: The target must be a ReadySet target (target_type=readyset).
+
+Examples:
+  rdst_cache_show(target="mydb-cache")
+  rdst_cache_show(target="mydb-cache", output_json=True)
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "ReadySet target name (target_type=readyset)"
+                    },
+                    "output_json": {
+                        "type": "boolean",
+                        "description": "Return JSON output with cache details"
+                    }
+                },
+                "required": ["target"]
+            }
+        },
+        {
+            "name": "rdst_cache_delete",
+            "description": """Remove a specific cache from a deployed ReadySet instance.
+
+Use rdst_cache_show to get the cache ID/name, then pass it here to remove.
+
+IMPORTANT: The target must be a ReadySet target (target_type=readyset).
+
+Examples:
+  rdst_cache_delete(cache_id="q_54fc6da6d5703402", target="mydb-cache")
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cache_id": {
+                        "type": "string",
+                        "description": "Cache ID or name (from rdst_cache_show output)"
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "ReadySet target name (target_type=readyset)"
+                    },
+                    "output_json": {
+                        "type": "boolean",
+                        "description": "Return JSON output"
+                    }
+                },
+                "required": ["cache_id", "target"]
+            }
+        },
+        {
+            "name": "rdst_cache_drop_all",
+            "description": """Remove ALL caches from a deployed ReadySet instance.
+
+Runs DROP ALL CACHES against ReadySet. This removes every cached query.
+Use with caution — there is no undo.
+
+IMPORTANT: The target must be a ReadySet target (target_type=readyset).
+
+Examples:
+  rdst_cache_drop_all(target="mydb-cache")
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "ReadySet target name (target_type=readyset)"
+                    },
+                    "output_json": {
+                        "type": "boolean",
+                        "description": "Return JSON output"
+                    }
+                },
+                "required": ["target"]
+            }
         }
     ]
 
@@ -1590,6 +1793,81 @@ Just describe your database and we'll get connected!
         if arguments.get("nosave"):
             args.append("--nosave")
 
+        return run_rdst_command(args)
+
+    elif name == "rdst_cache_deploy":
+        # Deploy ReadySet shallow cache
+        args = ["cache", "deploy"]
+
+        args.extend(["--target", arguments["target"]])
+
+        # --mode is required by CLI; default to docker for MCP callers
+        mode = arguments.get("mode", "docker")
+        args.extend(["--mode", mode])
+
+        if "host" in arguments:
+            args.extend(["--host", arguments["host"]])
+
+        if "ssh_key" in arguments:
+            args.extend(["--ssh-key", arguments["ssh_key"]])
+
+        if "ssh_user" in arguments:
+            args.extend(["--ssh-user", arguments["ssh_user"]])
+
+        if "port" in arguments:
+            args.extend(["--port", str(arguments["port"])])
+
+        if "namespace" in arguments:
+            args.extend(["--namespace", arguments["namespace"]])
+
+        if "kubeconfig" in arguments:
+            args.extend(["--kubeconfig", arguments["kubeconfig"]])
+
+        if arguments.get("script_only"):
+            args.append("--script-only")
+
+        if arguments.get("output_json"):
+            args.append("--json")
+
+        return run_rdst_command(args)
+
+    elif name == "rdst_cache_add":
+        args = ["cache", "add", arguments["query"]]
+        args.extend(["--target", arguments["target"]])
+        if "tag" in arguments:
+            args.extend(["--tag", arguments["tag"]])
+        if arguments.get("output_json"):
+            args.append("--json")
+        result = run_rdst_command(args)
+        if result["success"]:
+            result["next_steps"] = f"""
+Cache created. Next steps:
+  Benchmark:  rdst query run <hash> --target {arguments["target"]}
+  Compare:    rdst query run <hash> --target <upstream-target>
+  View:       rdst_cache_show(target="{arguments["target"]}")
+"""
+        return result
+
+    elif name == "rdst_cache_show":
+        args = ["cache", "show"]
+        args.extend(["--target", arguments["target"]])
+        if arguments.get("output_json"):
+            args.append("--json")
+        return run_rdst_command(args)
+
+    elif name == "rdst_cache_delete":
+        args = ["cache", "delete", arguments["cache_id"]]
+        args.extend(["--target", arguments["target"]])
+        if arguments.get("output_json"):
+            args.append("--json")
+        return run_rdst_command(args)
+
+    elif name == "rdst_cache_drop_all":
+        args = ["cache", "drop-all"]
+        args.extend(["--target", arguments["target"]])
+        args.append("--yes")  # Skip confirmation for MCP (non-interactive)
+        if arguments.get("output_json"):
+            args.append("--json")
         return run_rdst_command(args)
 
     elif name == "rdst_agent_list":

@@ -22,6 +22,10 @@ DOCS_EXCLUDED_COMMANDS = {
     "version",   # Simple utility command
     "claude",    # MCP registration - specialized
     "run",       # Internal command for running arbitrary SQL
+    "guard",     # CLI-only - interactive guard management
+    "slack",     # CLI-only - requires running bot process
+    "web",       # CLI-only - starts local web server
+    "agent",     # Documented via MCP, not end-user help docs
     # Query subcommands (documented under "rdst query" section)
     "add",
     "edit",
@@ -41,42 +45,31 @@ DOCS_ALIASES = {}
 
 
 def get_cli_commands():
-    """Get CLI commands by importing rdst and checking subparsers."""
+    """Get CLI commands from parser_data.py COMMAND_ORDER."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    rdst_dir = os.path.join(script_dir, "..", "..", "..")
-
-    # Add rdst directory to path
-    sys.path.insert(0, rdst_dir)
+    parser_data_path = os.path.join(
+        script_dir, "..", "..", "..", "lib", "cli", "parser_data.py"
+    )
 
     try:
-        # Import and call parse_arguments to get the parser
-        # We need to temporarily modify sys.argv to avoid parsing actual args
-        old_argv = sys.argv
-        sys.argv = ['rdst']
-
-        # Import fresh to get the subparsers
-        import importlib
-        if 'rdst' in sys.modules:
-            importlib.reload(sys.modules['rdst'])
-
-        # Read the source file and extract commands from subparsers.add_parser calls
-        rdst_path = os.path.join(rdst_dir, "rdst.py")
-        with open(rdst_path, 'r') as f:
+        with open(parser_data_path, "r") as f:
             content = f.read()
 
-        # Find all subparsers.add_parser('command_name', ...) calls
+        # Find COMMAND_ORDER list which defines all top-level commands
+        match = re.search(r"COMMAND_ORDER\s*[=:]\s*\[([^\]]+)\]", content)
+        if not match:
+            print("Could not find COMMAND_ORDER in parser_data.py", file=sys.stderr)
+            return set()
+
+        # Extract command names from the list
         commands = set()
-        for match in re.finditer(r"subparsers\.add_parser\s*\(\s*['\"](\w+)['\"]", content):
-            commands.add(match.group(1))
+        for cmd_match in re.finditer(r'["\'](\w+)["\']', match.group(1)):
+            commands.add(cmd_match.group(1))
 
-        sys.argv = old_argv
         return commands
-
     except Exception as e:
         print(f"Error getting CLI commands: {e}", file=sys.stderr)
         return set()
-    finally:
-        sys.path.pop(0) if rdst_dir in sys.path else None
 
 
 def get_documented_commands():

@@ -149,15 +149,17 @@ cleanup() {
     delete_upstream_container "$CREATED_MYSQL_CONTAINER_ID" || true
   fi
 
-  # Clean up cache command's test containers (created by rdst cache)
+  # Clean up cache command's test containers (created by rdst cache deploy)
   if [[ "$TEST_POSTGRESQL" == "true" ]]; then
     docker rm -f "rdst-readyset-${PG_TARGET_NAME}" >/dev/null 2>&1 || true
     docker rm -f "rdst-test-psql-${PG_TARGET_NAME}" >/dev/null 2>&1 || true
+    docker rm -f "readyset-cache-${PG_TARGET_NAME}" >/dev/null 2>&1 || true
   fi
 
   if [[ "$TEST_MYSQL" == "true" ]]; then
     docker rm -f "rdst-readyset-${MYSQL_TARGET_NAME}" >/dev/null 2>&1 || true
     docker rm -f "rdst-test-mysql-${MYSQL_TARGET_NAME}" >/dev/null 2>&1 || true
+    docker rm -f "readyset-cache-${MYSQL_TARGET_NAME}" >/dev/null 2>&1 || true
   fi
 
   # Always attempt to remove integration test containers
@@ -178,7 +180,8 @@ if docker ps -a --filter "name=${READYSET_CONTAINER_NAME}" --format '{{.Names}}'
 fi
 
 for container in "rdst-readyset-${PG_TARGET_NAME}" "rdst-test-psql-${PG_TARGET_NAME}" \
-                 "rdst-readyset-${MYSQL_TARGET_NAME}" "rdst-test-mysql-${MYSQL_TARGET_NAME}"; do
+                 "rdst-readyset-${MYSQL_TARGET_NAME}" "rdst-test-mysql-${MYSQL_TARGET_NAME}" \
+                 "readyset-cache-${PG_TARGET_NAME}" "readyset-cache-${MYSQL_TARGET_NAME}"; do
   if docker ps -a --filter "name=${container}" --format '{{.Names}}' | grep -q "^${container}$"; then
     echo "Removing leftover cache container: ${container}"
     docker rm -f "$container" >/dev/null 2>&1 || true

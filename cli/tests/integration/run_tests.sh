@@ -47,6 +47,7 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 source "${SCRIPT_DIR}/tests/test_config.sh"
 source "${SCRIPT_DIR}/tests/test_analyze.sh"
 source "${SCRIPT_DIR}/tests/test_cache.sh"
+source "${SCRIPT_DIR}/tests/test_cache_commands.sh"
 source "${SCRIPT_DIR}/tests/test_top_and_registry.sh"
 source "${SCRIPT_DIR}/tests/test_query_command.sh"
 source "${SCRIPT_DIR}/tests/test_errors.sh"
@@ -82,8 +83,11 @@ run_test_suite() {
     # Interactive test (optional - may skip if TTY unavailable)
     test_top_interactive_flow
 
-    # Cache tests (create Readyset containers)
+    # Cache tests (create Readyset containers via analyze --readyset-cache)
     test_cache_commands
+
+    # Cache subcommand tests (deploy ReadySet + cache add/show/delete/drop-all)
+    test_cache_subcommands
 
     # Readyset analysis tests (use containers from cache tests)
     test_readyset_flag

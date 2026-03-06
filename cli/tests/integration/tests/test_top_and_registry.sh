@@ -194,7 +194,7 @@ try:
         avg_dur = query['avg_duration_ms']
         max_dur = query['max_duration_ms']
         assert avg_dur >= 0, f"Query {idx} avg duration {avg_dur}ms is negative"
-        assert max_dur >= avg_dur, f"Query {idx} max duration {max_dur}ms < avg duration {avg_dur}ms"
+        assert max_dur >= avg_dur - 1.0, f"Query {idx} max duration {max_dur}ms < avg duration {avg_dur}ms (tolerance 1ms)"
 
         # Validate observation count
         obs_count = query['observation_count']

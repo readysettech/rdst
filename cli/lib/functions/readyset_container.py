@@ -151,6 +151,8 @@ def check_docker_available() -> Dict[str, Any]:
             "remediation": "Restart Docker Desktop or the Docker daemon"
         }
 
+from lib.deploy import READYSET_IMAGE
+
 
 def start_readyset_container(
     test_db_container: str = None,
@@ -289,7 +291,7 @@ def start_readyset_container(
             '-e', f'LISTEN_ADDRESS={listen_address}',
             '-p', f'{readyset_port}:{readyset_port}',
             '--add-host=host.docker.internal:host-gateway',  # Allow container to reach host
-            'docker.io/readysettech/readyset:latest'
+            READYSET_IMAGE,
         ]
 
         print(f"Starting docker run (pulling latest image if needed)...")
@@ -616,7 +618,7 @@ def start_readyset_container_direct(
             '-e', f'LISTEN_ADDRESS={listen_address}',
             '-p', f'{readyset_port}:{readyset_port}',
             '--add-host=host.docker.internal:host-gateway',
-            'docker.io/readysettech/readyset:latest'
+            READYSET_IMAGE,
         ]
 
         console.print("[dim]Starting docker run...[/dim]")

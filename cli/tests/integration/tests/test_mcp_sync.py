@@ -46,6 +46,7 @@ SUBCOMMAND_MAPPING = {
     "configure": ["add", "list", "remove", "default", "llm"],
     "query": ["add", "list", "delete"],
     "agent": ["list", "ask", "create"],
+    "cache": ["deploy", "add", "show", "delete", "drop_all"],
 }
 
 

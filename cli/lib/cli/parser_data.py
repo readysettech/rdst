@@ -1034,6 +1034,106 @@ Modes:
             ("rdst scan . --analyze --schema mydb --sequential", "Deterministic analysis (one query at a time)"),
         ],
     ),
+    "cache": CommandDef(
+        name="cache",
+        short_help="Deploy and manage ReadySet shallow caches",
+        description="""Deploy ReadySet and manage shallow caches.
+
+Use 'cache deploy' to deploy a ReadySet instance, then 'cache add/show/delete'
+to manage cached queries. After deploying, a ReadySet target is automatically
+registered (e.g., mydb-cache). Use that target name with cache commands.""",
+        subcommand_dest="cache_subcommand",
+        subcommand_defs=[
+            SubcommandDef(
+                name="deploy",
+                help="Deploy ReadySet cache to local or remote environment",
+                args=[
+                    ArgDef("--target", required=True, help="Database target to deploy for"),
+                    ArgDef(
+                        "--mode",
+                        choices=["docker", "systemd", "kubernetes"],
+                        required=True,
+                        help="Deployment mode: docker, systemd, or kubernetes",
+                    ),
+                    ArgDef(
+                        "--config",
+                        choices=["readyset", "readyset-squeepy"],
+                        default="readyset",
+                        dest="deploy_config",
+                        help="Deployment config: readyset (default) or readyset-squeepy",
+                    ),
+                    ArgDef("--host", help="Remote host for SSH deployment (omit for local)"),
+                    ArgDef("--ssh-key", help="SSH private key path"),
+                    ArgDef("--ssh-user", default="root", help="SSH username (default: root)"),
+                    ArgDef("--port", type=int, help="ReadySet listen port"),
+                    ArgDef("--namespace", default="readyset", help="Kubernetes namespace"),
+                    ArgDef("--kubeconfig", help="Path to kubeconfig file for Kubernetes deployment"),
+                    ArgDef(
+                        "--script-only",
+                        action="store_true",
+                        help="Generate deployment script without executing",
+                    ),
+                    ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="add",
+                help="Create a shallow cache for a query",
+                args=[
+                    ArgDef("query", nargs="?", help="SQL query or registry hash_id (12 hex chars)"),
+                    ArgDef("--target", required=True, help="ReadySet target name"),
+                    ArgDef("--tag", help="Tag for query in registry"),
+                    ArgDef("--dry-run", action="store_true", help="Check if query is cacheable without creating it"),
+                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="show",
+                help="List cached queries in ReadySet",
+                args=[
+                    ArgDef("--target", required=True, help="ReadySet target name"),
+                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="delete",
+                help="Remove a cache from ReadySet by cache ID",
+                args=[
+                    ArgDef("cache_id", help="Cache ID (from 'rdst cache show')"),
+                    ArgDef("--target", required=True, help="ReadySet target name"),
+                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="drop-all",
+                help="Remove all caches from ReadySet",
+                args=[
+                    ArgDef("--target", required=True, help="ReadySet target name"),
+                    ArgDef("--yes", short="-y", action="store_true", help="Skip confirmation prompt"),
+                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
+                ],
+            ),
+        ],
+        subcommands=[
+            ("deploy", "Deploy ReadySet cache"),
+            ("add", "Create a shallow cache for a query"),
+            ("show", "List all cached queries"),
+            ("delete", "Remove a cache by ID"),
+            ("drop-all", "Remove all caches"),
+        ],
+        examples=[
+            ("rdst cache deploy --target mydb --mode docker", "Deploy locally (Docker)"),
+            ("rdst cache deploy --target mydb --mode systemd", "Deploy as systemd service"),
+            ("rdst cache deploy --target mydb --mode docker --host 10.0.1.50", "Deploy to remote server"),
+            ("rdst cache deploy --target mydb --mode kubernetes", "Deploy to Kubernetes"),
+            ("rdst cache deploy --target mydb --mode docker --script-only", "Generate script only"),
+            ("rdst cache add abc123def456 --target mydb-cache", "Cache query by registry hash"),
+            ('rdst cache add "SELECT * FROM orders WHERE id = ?" --target mydb-cache', "Cache direct SQL"),
+            ("rdst cache show --target mydb-cache", "List all caches"),
+            ("rdst cache delete q_abc123 --target mydb-cache", "Remove a cache"),
+            ("rdst cache drop-all --target mydb-cache --yes", "Remove all caches"),
+        ],
+    ),
 }
 
 COMMAND_ORDER = [
@@ -1048,6 +1148,7 @@ COMMAND_ORDER = [
     "slack",
     "guard",
     "scan",
+    "cache",
     "report",
     "help",
     "claude",

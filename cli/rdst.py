@@ -359,6 +359,80 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             sequential=getattr(args, 'sequential', False),
         )
 
+    elif command == 'cache':
+        cache_subcommand = getattr(args, 'cache_subcommand', None)
+        if not cache_subcommand:
+            return RdstResult(
+                False,
+                "Cache command requires a subcommand: deploy, add, show, delete, drop-all\nTry: rdst cache --help",
+            )
+
+        # Deploy has its own target loading (loads DB target, not cache target)
+        if cache_subcommand == 'deploy':
+            from lib.cli.cache_deploy import DeployCommand
+            deploy_cmd = DeployCommand()
+            return deploy_cmd.execute(
+                target=getattr(args, 'target', None),
+                mode=getattr(args, 'mode', None),
+                deploy_config=getattr(args, 'deploy_config', 'readyset'),
+                host=getattr(args, 'host', None),
+                ssh_key=getattr(args, 'ssh_key', None),
+                ssh_user=getattr(args, 'ssh_user', 'root'),
+                port=getattr(args, 'port', None),
+                namespace=getattr(args, 'namespace', 'readyset'),
+                kubeconfig=getattr(args, 'kubeconfig', None),
+                script_only=getattr(args, 'script_only', False),
+                output_json=getattr(args, 'output_json', False),
+            )
+
+        # Other cache subcommands need target config
+        from lib.cli.cache_commands import CacheCommands
+        from lib.cli.rdst_cli import TargetsConfig
+        cache_cmd = CacheCommands()
+
+        # Load target config for cache commands
+        cache_target = getattr(args, 'target', None)
+        cache_target_config = None
+        if cache_target:
+            targets_config = TargetsConfig()
+            targets_config.load()
+            cache_target_config = targets_config.get(cache_target)
+            if not cache_target_config:
+                available = ", ".join(targets_config.list_targets()) or "none"
+                return RdstResult(False, f"Target '{cache_target}' not found. Available: {available}")
+
+        if cache_subcommand == 'add':
+            return cache_cmd.add(
+                query=getattr(args, 'query', None),
+                target=cache_target,
+                target_config=cache_target_config,
+                tag=getattr(args, 'tag', None),
+                dry_run=getattr(args, 'dry_run', False),
+                json_output=getattr(args, 'json_output', False),
+            )
+        elif cache_subcommand == 'show':
+            return cache_cmd.show(
+                target=cache_target,
+                target_config=cache_target_config,
+                json_output=getattr(args, 'json_output', False),
+            )
+        elif cache_subcommand == 'delete':
+            return cache_cmd.delete(
+                cache_id=getattr(args, 'cache_id', None),
+                target=cache_target,
+                target_config=cache_target_config,
+                json_output=getattr(args, 'json_output', False),
+            )
+        elif cache_subcommand == 'drop-all':
+            return cache_cmd.drop_all(
+                target=cache_target,
+                target_config=cache_target_config,
+                json_output=getattr(args, 'json_output', False),
+                yes=getattr(args, 'yes', False),
+            )
+        else:
+            return RdstResult(False, f"Unknown cache subcommand: {cache_subcommand}")
+
     elif command == 'version':
         return cli.version()
     elif command == "claude":
@@ -867,7 +941,8 @@ def main():
             except Exception:
                 pass  # Don't fail if NPS prompt fails
         else:
-            print(f"Error: {result.message}", file=sys.stderr)
+            if result.message:
+                print(f"Error: {result.message}", file=sys.stderr)
             sys.exit(1)
 
     except KeyboardInterrupt:
