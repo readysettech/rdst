@@ -529,9 +529,7 @@ class AnalyzeService:
                     "confidence": explain_result.get("confidence", "unknown"),
                     "method": "readyset_shallow",
                     "cached": create_result.get("cached", False),
-                    "cold_time_ms": warm_result.get("cold_time_ms"),
                     "warm_time_ms": warm_result.get("avg_warm_time_ms"),
-                    "speedup": warm_result.get("speedup"),
                 },
             }
 

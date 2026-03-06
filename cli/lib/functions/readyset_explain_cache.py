@@ -918,23 +918,15 @@ def warm_cache_and_measure(
             }
 
         # First run is cold (cache miss), rest are warm (cache hits)
-        cold_time_ms = timings[0]
         warm_times_ms = timings[warmup_runs:]  # Skip warmup runs for measurement
-
         avg_warm_time_ms = sum(warm_times_ms) / len(warm_times_ms) if warm_times_ms else 0
-        speedup = cold_time_ms / avg_warm_time_ms if avg_warm_time_ms > 0 else 0
 
-        print(f"  Cold (1st run): {cold_time_ms:.2f}ms")
-        print(f"  Warm (avg of {measure_runs}): {avg_warm_time_ms:.2f}ms")
-        if speedup > 1:
-            print(f"  Speedup: {speedup:.1f}x")
+        print(f"  Cached query time: {avg_warm_time_ms:.2f}ms")
 
         return {
             "success": True,
-            "cold_time_ms": round(cold_time_ms, 2),
             "warm_times_ms": [round(t, 2) for t in warm_times_ms],
             "avg_warm_time_ms": round(avg_warm_time_ms, 2),
-            "speedup": round(speedup, 1),
             "all_timings_ms": [round(t, 2) for t in timings],
         }
 
@@ -945,7 +937,7 @@ def warm_cache_and_measure(
 def _run_queries_postgres_persistent(
     query: str, host: str, port: int, user: str, database: str, password: str, num_runs: int
 ) -> Dict[str, Any]:
-    """Execute a query multiple times using a single persistent psycopg2 connection."""
+    """Execute a query multiple times using a single persistent psycopg2 connection and cursor."""
     import time
 
     try:
@@ -959,19 +951,22 @@ def _run_queries_postgres_persistent(
             database=database,
             connect_timeout=30,
         )
+        # Use autocommit to avoid transaction overhead on each query
+        connection.autocommit = True
 
         timings = []
+        cursor = connection.cursor()
         try:
             for _ in range(num_runs):
                 start_time = time.perf_counter()
-                with connection.cursor() as cursor:
-                    cursor.execute(query)
-                    cursor.fetchall()
+                cursor.execute(query)
+                cursor.fetchall()
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
                 timings.append(elapsed_ms)
 
             return {"success": True, "timings_ms": timings}
         finally:
+            cursor.close()
             connection.close()
 
     except ImportError:
@@ -983,7 +978,7 @@ def _run_queries_postgres_persistent(
 def _run_queries_mysql_persistent(
     query: str, host: str, port: int, user: str, database: str, password: str, num_runs: int
 ) -> Dict[str, Any]:
-    """Execute a query multiple times using a single persistent pymysql connection."""
+    """Execute a query multiple times using a single persistent pymysql connection and cursor."""
     import time
 
     normalized_host = host or "127.0.0.1"
@@ -1000,20 +995,22 @@ def _run_queries_mysql_persistent(
             password=password,
             database=database,
             connect_timeout=30,
+            autocommit=True,  # Avoid transaction overhead
         )
 
         timings = []
+        cursor = connection.cursor()
         try:
             for _ in range(num_runs):
                 start_time = time.perf_counter()
-                with connection.cursor() as cursor:
-                    cursor.execute(query)
-                    cursor.fetchall()
+                cursor.execute(query)
+                cursor.fetchall()
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
                 timings.append(elapsed_ms)
 
             return {"success": True, "timings_ms": timings}
         finally:
+            cursor.close()
             connection.close()
 
     except ImportError:
