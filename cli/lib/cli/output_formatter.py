@@ -254,10 +254,10 @@ def format_analyze_output(workflow_result: Dict[str, Any]) -> str:
                 )
                 lines.append(_divider())
 
-        # Readyset cacheability
+        # Readyset cacheability (show on success, error, or checked)
         readyset_analysis = workflow_result.get("readyset_analysis") or {}
         readyset_cacheability = formatted_output.get("readyset_cacheability") or {}
-        if readyset_analysis.get("success") or readyset_cacheability.get("checked"):
+        if readyset_analysis.get("success") or readyset_analysis.get("error") or readyset_cacheability.get("checked"):
             lines.extend(
                 _format_readyset_cacheability(readyset_analysis, readyset_cacheability)
             )
@@ -455,7 +455,7 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
 
     readyset_analysis = workflow_result.get("readyset_analysis") or {}
     readyset_cacheability = workflow_result.get("readyset_cacheability") or {}
-    if readyset_analysis.get("success") or readyset_cacheability.get("checked"):
+    if readyset_analysis.get("success") or readyset_analysis.get("error") or readyset_cacheability.get("checked"):
         lines.extend(
             _format_readyset_cacheability(readyset_analysis, readyset_cacheability)
         )
@@ -1040,6 +1040,29 @@ def _format_readyset_cacheability(
     readyset_analysis: Dict[str, Any], readyset_cacheability: Dict[str, Any]
 ) -> List[str]:
     content_parts: List[Any] = []
+
+    # Check for errors first
+    if readyset_analysis and not readyset_analysis.get("success") and readyset_analysis.get("error"):
+        error_msg = readyset_analysis.get("error", "Unknown error")
+        remediation = readyset_analysis.get("remediation")
+
+        content_parts.append(f"[{StyleTokens.ERROR}]ERROR[/{StyleTokens.ERROR}]")
+        content_parts.append(Text(""))
+        content_parts.append(f"[{StyleTokens.ERROR}]{error_msg}[/{StyleTokens.ERROR}]")
+
+        if remediation:
+            content_parts.append(Text(""))
+            content_parts.append(f"[{StyleTokens.WARNING}]Hint: {remediation}[/{StyleTokens.WARNING}]")
+
+        return [
+            _capture(
+                SectionBox(
+                    f"{Icons.ROCKET} Readyset Cache Analysis",
+                    content=Group(*content_parts),
+                )
+            )
+        ]
+
     content_parts.append(f"[{StyleTokens.SECONDARY}]PERFORMANCE COMPARISON[/{StyleTokens.SECONDARY}]")
     content_parts.append(Text(""))
 

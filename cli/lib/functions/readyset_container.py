@@ -3,7 +3,153 @@ from __future__ import annotations
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404 - subprocess required for Docker/database operations
 import time
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
+
+
+class DockerError:
+    """Docker error types with user-friendly messages and remediation steps."""
+
+    DAEMON_NOT_RUNNING = "daemon_not_running"
+    IMAGE_NOT_FOUND = "image_not_found"
+    NETWORK_ERROR = "network_error"
+    PORT_IN_USE = "port_in_use"
+    PERMISSION_DENIED = "permission_denied"
+    TIMEOUT = "timeout"
+    UNKNOWN = "unknown"
+
+
+def classify_docker_error(error_text: str) -> Tuple[str, str, str]:
+    """
+    Classify a Docker error and return user-friendly message with remediation.
+
+    Args:
+        error_text: Raw error text from Docker command
+
+    Returns:
+        Tuple of (error_type, user_message, remediation)
+    """
+    error_lower = error_text.lower()
+
+    # Docker daemon not running
+    if "cannot connect to the docker daemon" in error_lower or \
+       "is the docker daemon running" in error_lower or \
+       "connection refused" in error_lower and "docker" in error_lower:
+        return (
+            DockerError.DAEMON_NOT_RUNNING,
+            "Docker is not running",
+            "Start Docker Desktop or run: sudo systemctl start docker"
+        )
+
+    # Image not found / pull access denied
+    if "pull access denied" in error_lower or \
+       "repository does not exist" in error_lower or \
+       "manifest unknown" in error_lower or \
+       "not found" in error_lower and "image" in error_lower:
+        return (
+            DockerError.IMAGE_NOT_FOUND,
+            "Docker image not found",
+            "Check your internet connection and verify the image name is correct"
+        )
+
+    # Network errors during pull
+    if "network" in error_lower and ("timeout" in error_lower or "unreachable" in error_lower) or \
+       "dial tcp" in error_lower or \
+       "no such host" in error_lower or \
+       "tls handshake timeout" in error_lower or \
+       "i/o timeout" in error_lower:
+        return (
+            DockerError.NETWORK_ERROR,
+            "Network error while pulling Docker image",
+            "Check your internet connection and try again"
+        )
+
+    # Port already in use
+    if "port is already allocated" in error_lower or \
+       "address already in use" in error_lower or \
+       "bind for" in error_lower and "failed" in error_lower:
+        return (
+            DockerError.PORT_IN_USE,
+            "Port is already in use",
+            "Stop the process using the port or use a different port with --readyset-port"
+        )
+
+    # Permission denied
+    if "permission denied" in error_lower and ("docker" in error_lower or "socket" in error_lower):
+        return (
+            DockerError.PERMISSION_DENIED,
+            "Permission denied accessing Docker",
+            "Add your user to the docker group: sudo usermod -aG docker $USER (then log out and back in)"
+        )
+
+    # Unknown error - return cleaned up message
+    return (
+        DockerError.UNKNOWN,
+        "Docker operation failed",
+        "Check Docker logs for more details: docker logs rdst-readyset"
+    )
+
+
+def format_docker_error(error_text: str, context: str = "") -> Dict[str, Any]:
+    """
+    Format a Docker error into a clean, user-friendly error response.
+
+    Args:
+        error_text: Raw error text from Docker
+        context: Additional context about what operation failed
+
+    Returns:
+        Dict with success=False and clean error info
+    """
+    error_type, message, remediation = classify_docker_error(error_text)
+
+    # Build clean error message
+    if context:
+        full_message = f"{context}: {message}"
+    else:
+        full_message = message
+
+    return {
+        "success": False,
+        "error": full_message,
+        "error_type": error_type,
+        "remediation": remediation,
+    }
+
+
+def check_docker_available() -> Dict[str, Any]:
+    """
+    Check if Docker is available and running.
+
+    Returns:
+        Dict with success status and error info if not available
+    """
+    try:
+        result = subprocess.run(
+            ['docker', 'info'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            return format_docker_error(
+                result.stderr,
+                context="Docker check failed"
+            )
+        return {"success": True}
+    except FileNotFoundError:
+        return {
+            "success": False,
+            "error": "Docker is not installed",
+            "error_type": DockerError.DAEMON_NOT_RUNNING,
+            "remediation": "Install Docker: https://docs.docker.com/get-docker/"
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "error": "Docker is not responding",
+            "error_type": DockerError.TIMEOUT,
+            "remediation": "Restart Docker Desktop or the Docker daemon"
+        }
 
 
 def start_readyset_container(
@@ -391,9 +537,15 @@ def start_readyset_container_direct(
     Returns:
         Dict containing Readyset container status
     """
-    try:
-        import os
+    from lib.ui import console
+    import os
 
+    # Check Docker availability first
+    docker_check = check_docker_available()
+    if not docker_check.get("success"):
+        return docker_check
+
+    try:
         # Parse target_config if it's a JSON string
         if isinstance(target_config, str):
             target_config = json.loads(target_config)
@@ -416,10 +568,8 @@ def start_readyset_container_direct(
         # Determine the readyset_url protocol based on engine
         if engine == 'mysql':
             readyset_url_protocol = 'mysql'
-            db_type = 'mysql'
         else:
             readyset_url_protocol = 'postgresql'
-            db_type = 'postgresql'
 
         # Check if Readyset container already exists and is running
         check_cmd = [
@@ -437,7 +587,6 @@ def start_readyset_container_direct(
 
         # Remove existing container to ensure we use latest image with shallow cache support
         if result.returncode == 0 and result.stdout.strip():
-            from lib.ui import console
             console.print(f"[dim]Removing existing container to ensure latest image...[/dim]")
             subprocess.run(['docker', 'rm', '-f', readyset_container_name], capture_output=True, timeout=10)
 
@@ -452,7 +601,6 @@ def start_readyset_container_direct(
         else:
             target_db_url = f"postgresql://{user}:{password}@{docker_host}:{port}/{database}"
 
-        from lib.ui import console
         console.print(f"[dim]Creating Readyset container (shallow mode): {readyset_container_name}[/dim]")
 
         # Create and start Readyset container
@@ -480,10 +628,8 @@ def start_readyset_container_direct(
         )
 
         if result.returncode != 0:
-            error_msg = result.stderr.strip()
-            error_message = f"Failed to create Readyset container: {error_msg}"
-            console.print(f"[red]Error: {error_message}[/red]")
-            raise Exception(error_message)
+            error_result = format_docker_error(result.stderr, "Failed to start Readyset container")
+            return error_result
 
         console.print("[green]Readyset container created (shallow mode)[/green]")
 
@@ -506,13 +652,20 @@ def start_readyset_container_direct(
             )
             crash_logs = (logs_result.stdout + logs_result.stderr) if logs_result.returncode == 0 else "Unable to retrieve logs"
 
-            console.print("[yellow]Readyset container crashed immediately after creation[/yellow]")
+            # Parse crash logs for common issues
+            error_summary = _parse_container_crash_logs(crash_logs)
+
+            console.print("[red]Readyset container crashed after creation[/red]")
+            if error_summary:
+                console.print(f"[yellow]Cause: {error_summary['message']}[/yellow]")
+                console.print(f"[yellow]Hint: {error_summary['remediation']}[/yellow]")
 
             return {
                 "success": False,
-                "error": f"Readyset container crashed immediately. Logs:\n{crash_logs[:1000]}",
+                "error": error_summary['message'] if error_summary else "Readyset container crashed",
+                "error_type": "container_crash",
+                "remediation": error_summary['remediation'] if error_summary else "Check container logs: docker logs " + readyset_container_name,
                 "container_name": readyset_container_name,
-                "crash_logs": crash_logs
             }
 
         return {
@@ -528,13 +681,70 @@ def start_readyset_container_direct(
     except subprocess.TimeoutExpired:
         return {
             "success": False,
-            "error": "Readyset container creation timed out"
+            "error": "Docker operation timed out",
+            "error_type": DockerError.TIMEOUT,
+            "remediation": "Docker may be overloaded. Try again or restart Docker."
         }
     except Exception as e:
+        # Check if it's a Docker-related error we can classify
+        error_str = str(e)
+        if "docker" in error_str.lower():
+            return format_docker_error(error_str, "Readyset container failed")
         return {
             "success": False,
-            "error": f"Failed to start Readyset container (direct mode): {str(e)}"
+            "error": f"Failed to start Readyset container: {error_str}",
+            "error_type": DockerError.UNKNOWN,
+            "remediation": "Check Docker logs for more details"
         }
+
+
+def _parse_container_crash_logs(logs: str) -> Dict[str, str] | None:
+    """
+    Parse container crash logs to identify common issues.
+
+    Args:
+        logs: Container logs text
+
+    Returns:
+        Dict with message and remediation, or None if no known issue found
+    """
+    logs_lower = logs.lower()
+
+    # Database connection issues
+    if "password authentication failed" in logs_lower:
+        return {
+            "message": "Database authentication failed",
+            "remediation": "Check the database password in your target configuration"
+        }
+    if "connection refused" in logs_lower:
+        return {
+            "message": "Cannot connect to upstream database",
+            "remediation": "Verify the database host and port are correct and the database is running"
+        }
+    if "no such host" in logs_lower or "name resolution" in logs_lower:
+        return {
+            "message": "Cannot resolve database hostname",
+            "remediation": "Check the database host in your target configuration"
+        }
+    if "ssl" in logs_lower and ("required" in logs_lower or "error" in logs_lower):
+        return {
+            "message": "SSL/TLS connection issue with database",
+            "remediation": "Check your database's SSL settings or set tls=false in target config"
+        }
+
+    # Readyset-specific issues
+    if "unsupported" in logs_lower and "version" in logs_lower:
+        return {
+            "message": "Unsupported database version",
+            "remediation": "Check ReadySet documentation for supported database versions"
+        }
+    if "replication" in logs_lower and ("failed" in logs_lower or "error" in logs_lower):
+        return {
+            "message": "Database replication configuration issue",
+            "remediation": "Ensure the database user has replication permissions"
+        }
+
+    return None
 
 
 def wait_for_readyset_ready_shallow(
@@ -728,48 +938,3 @@ def check_readyset_container_status(
         }
 
 
-def check_docker_available() -> Dict[str, Any]:
-    """
-    Check if Docker is available and running.
-
-    Returns:
-        Dict with 'available' bool and optional 'error' message
-    """
-    try:
-        result = subprocess.run(
-            ['docker', 'info'],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-
-        if result.returncode == 0:
-            return {"available": True}
-
-        # Docker command exists but daemon not running
-        if "Cannot connect to the Docker daemon" in result.stderr:
-            return {
-                "available": False,
-                "error": "Docker daemon is not running. Please start Docker Desktop or the Docker service."
-            }
-
-        return {
-            "available": False,
-            "error": f"Docker returned error: {result.stderr.strip()}"
-        }
-
-    except FileNotFoundError:
-        return {
-            "available": False,
-            "error": "Docker is not installed. Please install Docker to use --readyset-cache."
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "available": False,
-            "error": "Docker command timed out. Docker may be unresponsive."
-        }
-    except Exception as e:
-        return {
-            "available": False,
-            "error": f"Failed to check Docker availability: {str(e)}"
-        }

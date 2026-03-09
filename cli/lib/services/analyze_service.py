@@ -433,6 +433,8 @@ class AnalyzeService:
                     return {
                         "success": False,
                         "error": start_result.get("error", "Failed to start Readyset"),
+                        "error_type": start_result.get("error_type"),
+                        "remediation": start_result.get("remediation"),
                     }
 
             # Wait for readyset to be ready
@@ -445,6 +447,8 @@ class AnalyzeService:
                 return {
                     "success": False,
                     "error": ready_result.get("error", "Readyset not ready"),
+                    "error_type": ready_result.get("error_type"),
+                    "remediation": ready_result.get("remediation"),
                 }
 
             # Build config for Readyset connection
@@ -620,8 +624,8 @@ class AnalyzeService:
                 warnings=readyset_cacheability.get("warnings"),
             )
 
-        # Merge readyset result into context if available
-        if readyset_result and readyset_result.get("success"):
+        # Merge readyset result into context if available (success or error)
+        if readyset_result and (readyset_result.get("success") or readyset_result.get("error")):
             context["readyset_analysis"] = readyset_result
             formatted = context.get("FormatFinalResults", {})
             if isinstance(formatted, dict):

@@ -5,6 +5,8 @@ import json
 import time
 from typing import Dict, Any
 
+from .readyset_container import check_docker_available, format_docker_error
+
 
 def get_target_config(target_name: str = None, **kwargs) -> Dict[str, Any]:
     """
@@ -76,6 +78,16 @@ def detect_test_db_container(
         Dict containing container detection results
     """
     try:
+        # Check Docker availability first
+        docker_check = check_docker_available()
+        if not docker_check.get("success"):
+            return {
+                **docker_check,
+                "container_name": None,
+                "running": False,
+                "exists": False
+            }
+
         # Check running containers
         result = subprocess.run(
             ['docker', 'ps', '--filter', f'name={container_name_pattern}', '--format', '{{.Names}}\t{{.ID}}\t{{.Status}}'],
@@ -85,9 +97,9 @@ def detect_test_db_container(
         )
 
         if result.returncode != 0:
+            error_result = format_docker_error(result.stderr, "Failed to check Docker containers")
             return {
-                "success": False,
-                "error": "Failed to check Docker containers",
+                **error_result,
                 "container_name": None,
                 "running": False,
                 "exists": False
@@ -140,9 +152,9 @@ def detect_test_db_container(
         }
 
     except Exception as e:
+        error_result = format_docker_error(str(e), "Failed to detect container")
         return {
-            "success": False,
-            "error": f"Failed to detect container: {str(e)}",
+            **error_result,
             "container_name": None,
             "running": False,
             "exists": False
@@ -214,9 +226,9 @@ def start_test_db_container(
                     "started": True
                 }
             else:
+                error_result = format_docker_error(result.stderr, "Failed to start container")
                 return {
-                    "success": False,
-                    "error": f"Failed to start container: {result.stderr}",
+                    **error_result,
                     "container_name": container_name,
                     "created": False,
                     "started": False
@@ -361,9 +373,9 @@ def start_test_db_container(
                     "started": True
                 }
             else:
+                error_result = format_docker_error(result.stderr, "Failed to create container")
                 return {
-                    "success": False,
-                    "error": f"Failed to create container: {result.stderr}",
+                    **error_result,
                     "container_name": container_name,
                     "created": False,
                     "started": False
@@ -378,9 +390,9 @@ def start_test_db_container(
         }
 
     except Exception as e:
+        error_result = format_docker_error(str(e), "Failed to start/create container")
         return {
-            "success": False,
-            "error": f"Failed to start/create container: {str(e)}",
+            **error_result,
             "container_name": container_name,
             "created": False,
             "started": False

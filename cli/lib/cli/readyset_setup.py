@@ -110,8 +110,13 @@ def setup_readyset_containers(
     try:
         from ..workflow_manager.workflow_manager import WorkflowManager, DEFAULT_FUNCTIONS
         from ..functions import DATABASE_SETUP_FUNCTIONS, READYSET_FUNCTIONS
-        from ..functions.readyset_container import check_readyset_container_status
+        from ..functions.readyset_container import check_readyset_container_status, check_docker_available, format_docker_error
         import subprocess  # nosemgrep: gitlab.bandit.B404 - subprocess used for Readyset container status checks only
+
+        # Check Docker availability first
+        docker_check = check_docker_available()
+        if not docker_check.get("success"):
+            return docker_check
 
         # Get database engine from target config
         engine = target_config.get("engine", "postgresql").lower()
@@ -304,10 +309,8 @@ def setup_readyset_containers(
         }
 
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to setup Readyset containers: {str(e)}"
-        }
+        error_result = format_docker_error(str(e), "Failed to setup Readyset containers")
+        return error_result
 
 
 def get_container_ports(engine: str, find_available: bool = False) -> tuple[int, int]:

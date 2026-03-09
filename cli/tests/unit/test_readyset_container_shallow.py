@@ -221,7 +221,8 @@ class TestStartReadysetContainerDirect:
                 result = start_readyset_container_direct(target_config=base_config)
 
             assert result["success"] is False
-            assert "crashed" in result["error"].lower()
+            # Clean error handling returns user-friendly message about upstream connection
+            assert "upstream" in result["error"].lower() or "connect" in result["error"].lower()
 
     def test_timeout(self, base_config):
         with patch("subprocess.run") as mock_run:
@@ -230,7 +231,8 @@ class TestStartReadysetContainerDirect:
             result = start_readyset_container_direct(target_config=base_config)
 
             assert result["success"] is False
-            assert "timed out" in result["error"].lower()
+            # Clean error handling returns user-friendly timeout message
+            assert "timeout" in result["error"].lower() or "not responding" in result["error"].lower()
 
     def test_json_string_config(self):
         config = {

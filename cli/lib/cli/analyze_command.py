@@ -698,11 +698,13 @@ class AnalyzeCommand:
                 from ..functions.readyset_container import check_docker_available
 
                 docker_status = check_docker_available()
-                if not docker_status.get("available"):
-                    return RdstResult(
-                        False,
-                        f"--readyset-cache requires Docker: {docker_status.get('error', 'Docker not available')}"
-                    )
+                if not docker_status.get("success"):
+                    error_msg = docker_status.get('error', 'Docker not available')
+                    remediation = docker_status.get('remediation', '')
+                    full_msg = f"--readyset-cache requires Docker: {error_msg}"
+                    if remediation:
+                        full_msg += f"\nHint: {remediation}"
+                    return RdstResult(False, full_msg)
 
             # EXPLAIN ANALYZE safety warning (unless --skip-warning or --fast)
             showed_warning = False
@@ -1006,6 +1008,7 @@ class AnalyzeCommand:
             if isinstance(readyset_payload, dict) and (
                 "final_verdict" in readyset_payload
                 or "explain_cache_result" in readyset_payload
+                or "error" in readyset_payload  # Include error results
             ):
                 readyset_analysis = readyset_payload
 
