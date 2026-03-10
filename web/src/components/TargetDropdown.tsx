@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Dropdown } from '@rs/ui-new/dropdown';
 import { Icon } from '@rs/ui-new/icon';
@@ -33,31 +33,36 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
     : (targets.length > 0 ? targets[0].name : null);
   const currentTarget = isSelectedValid ? normalizedSelectedTarget : fallbackTarget;
 
-  useEffect(() => {
-    if (isLoading || !status) return;
+  // Track the last invalid→fallback correction we applied so status refetches
+  // do not loop, while still allowing new invalid parent selections to resync.
+  const lastCorrectionRef = useRef<string | null>(null);
+  const correctionKey = !isLoading && status && currentTarget !== normalizedSelectedTarget
+    ? `${normalizedSelectedTarget ?? '<none>'}=>${currentTarget ?? '<none>'}`
+    : null;
 
-    if (normalizedSelectedTarget && !isSelectedValid) {
-      onSelectTarget(currentTarget);
+  useEffect(() => {
+    if (!correctionKey) {
+      lastCorrectionRef.current = null;
       return;
     }
 
-    if (!normalizedSelectedTarget && currentTarget) {
-      onSelectTarget(currentTarget);
+    if (lastCorrectionRef.current === correctionKey) {
+      return;
     }
-  }, [
-    isLoading,
-    status,
-    normalizedSelectedTarget,
-    isSelectedValid,
-    currentTarget,
-    onSelectTarget,
-  ]);
+
+    lastCorrectionRef.current = correctionKey;
+    onSelectTarget(currentTarget);
+  }, [correctionKey, currentTarget, onSelectTarget]);
 
   useEffect(() => {
-    if (isLocked && open) {
+    if (isLocked) {
       setOpen(false);
     }
-  }, [isLocked, open]);
+  }, [isLocked]);
+
+  // Lock still forces the menu visually closed immediately while the effect above
+  // clears the internal open state so it stays closed after unlocking.
+  const effectiveOpen = open && !isLocked;
 
   if (isLoading) {
     return (
@@ -79,12 +84,9 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
     );
   }
 
-  const currentTargetInfo = targets.find(t => t.name === currentTarget);
+  const currentTargetInfo = targets.find((t) => t.name === currentTarget);
   const handleOpenChange = (nextOpen: boolean) => {
-    if (isLocked) {
-      setOpen(false);
-      return;
-    }
+    if (nextOpen && isLocked) return;
     setOpen(nextOpen);
   };
 
@@ -125,7 +127,7 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
   }
 
   return (
-    <Dropdown open={open} onOpenChange={handleOpenChange}>
+    <Dropdown open={effectiveOpen} onOpenChange={handleOpenChange}>
       {isLocked ? (
         <TooltipProvider delayDuration={0}>
           <Tooltip>
@@ -160,15 +162,15 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
               )}
             </div>
             {target.has_password ? (
-              <Icon 
-                name="tick-double" 
+              <Icon
+                name="tick-double"
                 label="Password configured"
                 className={target.name === currentTarget ? 'text-content-positive-soft' : 'text-content-layout-3'}
               />
             ) : (
-              <Icon 
-                name="alert" 
-                label="No password configured" 
+              <Icon
+                name="alert"
+                label="No password configured"
                 className="text-content-warning-soft"
               />
             )}

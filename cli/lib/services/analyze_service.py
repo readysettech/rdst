@@ -404,11 +404,8 @@ class AnalyzeService:
                 warm_cache_and_measure,
             )
 
-            # Resolve password from environment
-            password = target_config.get("password", "")
-            password_env = target_config.get("password_env")
-            if password_env:
-                password = os.environ.get(password_env, "")
+            from .password_resolver import resolve_password_value
+            password = resolve_password_value(target_config)
 
             resolved_config = {**target_config, "password": password}
 

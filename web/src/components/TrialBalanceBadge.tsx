@@ -6,10 +6,13 @@ import { useTrialSource } from '../lib/trialQueries';
 export function TrialBalanceBadge() {
   const { isTrialSource, trialStatus } = useTrialSource();
 
+  // Only show the sidebar badge for the current trial-backed credential source.
+  // Cached trial-status data must stay hidden once the active source changes away
+  // from the trial, but an exhausted trial should still render as trial-backed state.
   if (!isTrialSource) return null;
 
-  if (!trialStatus?.active && trialStatus?.status !== 'exhausted') return null;
-
+  const isExhaustedStatus = trialStatus?.status === 'exhausted';
+  if (!trialStatus || (!trialStatus.active && !isExhaustedStatus)) return null;
   const { remaining_tokens_display, limit_tokens_display, percent_remaining } = trialStatus;
 
   if (!remaining_tokens_display || !limit_tokens_display || percent_remaining == null) {

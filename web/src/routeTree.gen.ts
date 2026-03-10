@@ -11,10 +11,12 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TopRouteImport } from './routes/top'
 import { Route as SchemaRouteImport } from './routes/schema'
+import { Route as ScanRouteImport } from './routes/scan'
 import { Route as ResultsRouteImport } from './routes/results'
 import { Route as ReadysetRouteImport } from './routes/readyset'
 import { Route as QueryRegistryRouteImport } from './routes/query-registry'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as DevSettingsRouteImport } from './routes/dev-settings'
 import { Route as ConfigureRouteImport } from './routes/configure'
 import { Route as BenchmarkRouteImport } from './routes/benchmark'
 import { Route as AskRouteImport } from './routes/ask'
@@ -28,6 +30,11 @@ const TopRoute = TopRouteImport.update({
 const SchemaRoute = SchemaRouteImport.update({
   id: '/schema',
   path: '/schema',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScanRoute = ScanRouteImport.update({
+  id: '/scan',
+  path: '/scan',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResultsRoute = ResultsRouteImport.update({
@@ -48,6 +55,11 @@ const QueryRegistryRoute = QueryRegistryRouteImport.update({
 const OnboardingRoute = OnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DevSettingsRoute = DevSettingsRouteImport.update({
+  id: '/dev-settings',
+  path: '/dev-settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConfigureRoute = ConfigureRouteImport.update({
@@ -76,10 +88,12 @@ export interface FileRoutesByFullPath {
   '/ask': typeof AskRoute
   '/benchmark': typeof BenchmarkRoute
   '/configure': typeof ConfigureRoute
+  '/dev-settings': typeof DevSettingsRoute
   '/onboarding': typeof OnboardingRoute
   '/query-registry': typeof QueryRegistryRoute
   '/readyset': typeof ReadysetRoute
   '/results': typeof ResultsRoute
+  '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
   '/top': typeof TopRoute
 }
@@ -88,10 +102,12 @@ export interface FileRoutesByTo {
   '/ask': typeof AskRoute
   '/benchmark': typeof BenchmarkRoute
   '/configure': typeof ConfigureRoute
+  '/dev-settings': typeof DevSettingsRoute
   '/onboarding': typeof OnboardingRoute
   '/query-registry': typeof QueryRegistryRoute
   '/readyset': typeof ReadysetRoute
   '/results': typeof ResultsRoute
+  '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
   '/top': typeof TopRoute
 }
@@ -101,10 +117,12 @@ export interface FileRoutesById {
   '/ask': typeof AskRoute
   '/benchmark': typeof BenchmarkRoute
   '/configure': typeof ConfigureRoute
+  '/dev-settings': typeof DevSettingsRoute
   '/onboarding': typeof OnboardingRoute
   '/query-registry': typeof QueryRegistryRoute
   '/readyset': typeof ReadysetRoute
   '/results': typeof ResultsRoute
+  '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
   '/top': typeof TopRoute
 }
@@ -115,10 +133,12 @@ export interface FileRouteTypes {
     | '/ask'
     | '/benchmark'
     | '/configure'
+    | '/dev-settings'
     | '/onboarding'
     | '/query-registry'
     | '/readyset'
     | '/results'
+    | '/scan'
     | '/schema'
     | '/top'
   fileRoutesByTo: FileRoutesByTo
@@ -127,10 +147,12 @@ export interface FileRouteTypes {
     | '/ask'
     | '/benchmark'
     | '/configure'
+    | '/dev-settings'
     | '/onboarding'
     | '/query-registry'
     | '/readyset'
     | '/results'
+    | '/scan'
     | '/schema'
     | '/top'
   id:
@@ -139,10 +161,12 @@ export interface FileRouteTypes {
     | '/ask'
     | '/benchmark'
     | '/configure'
+    | '/dev-settings'
     | '/onboarding'
     | '/query-registry'
     | '/readyset'
     | '/results'
+    | '/scan'
     | '/schema'
     | '/top'
   fileRoutesById: FileRoutesById
@@ -152,10 +176,12 @@ export interface RootRouteChildren {
   AskRoute: typeof AskRoute
   BenchmarkRoute: typeof BenchmarkRoute
   ConfigureRoute: typeof ConfigureRoute
+  DevSettingsRoute: typeof DevSettingsRoute
   OnboardingRoute: typeof OnboardingRoute
   QueryRegistryRoute: typeof QueryRegistryRoute
   ReadysetRoute: typeof ReadysetRoute
   ResultsRoute: typeof ResultsRoute
+  ScanRoute: typeof ScanRoute
   SchemaRoute: typeof SchemaRoute
   TopRoute: typeof TopRoute
 }
@@ -174,6 +200,13 @@ declare module '@tanstack/react-router' {
       path: '/schema'
       fullPath: '/schema'
       preLoaderRoute: typeof SchemaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/scan': {
+      id: '/scan'
+      path: '/scan'
+      fullPath: '/scan'
+      preLoaderRoute: typeof ScanRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/results': {
@@ -202,6 +235,13 @@ declare module '@tanstack/react-router' {
       path: '/onboarding'
       fullPath: '/onboarding'
       preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dev-settings': {
+      id: '/dev-settings'
+      path: '/dev-settings'
+      fullPath: '/dev-settings'
+      preLoaderRoute: typeof DevSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/configure': {
@@ -240,10 +280,12 @@ const rootRouteChildren: RootRouteChildren = {
   AskRoute: AskRoute,
   BenchmarkRoute: BenchmarkRoute,
   ConfigureRoute: ConfigureRoute,
+  DevSettingsRoute: DevSettingsRoute,
   OnboardingRoute: OnboardingRoute,
   QueryRegistryRoute: QueryRegistryRoute,
   ReadysetRoute: ReadysetRoute,
   ResultsRoute: ResultsRoute,
+  ScanRoute: ScanRoute,
   SchemaRoute: SchemaRoute,
   TopRoute: TopRoute,
 }

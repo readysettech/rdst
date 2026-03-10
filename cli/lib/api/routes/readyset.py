@@ -168,7 +168,7 @@ async def _explain_generator(
 ) -> AsyncGenerator[dict, None]:
     from ...cli.readyset_setup import setup_readyset_containers
     from ...functions.readyset_explain_cache import explain_create_cache_readyset
-    import os
+    from ...services.password_resolver import resolve_password_value
 
     yield {
         "event": "progress",
@@ -200,10 +200,7 @@ async def _explain_generator(
     readyset_port = setup_result.get("readyset_port")
     test_db_config = setup_result.get("target_config", {})
 
-    password = target_config.get("password", "")
-    password_env = target_config.get("password_env")
-    if password_env:
-        password = os.environ.get(password_env, "")
+    password = resolve_password_value(target_config)
     if not test_db_config.get("password"):
         test_db_config["password"] = password
 
@@ -253,7 +250,7 @@ async def _create_cache_generator(
         create_cache_readyset,
         get_cache_id_for_query,
     )
-    import os
+    from ...services.password_resolver import resolve_password_value
 
     yield {
         "event": "progress",
@@ -285,10 +282,7 @@ async def _create_cache_generator(
     readyset_port = setup_result.get("readyset_port")
     test_db_config = setup_result.get("target_config", {})
 
-    password = target_config.get("password", "")
-    password_env = target_config.get("password_env")
-    if password_env:
-        password = os.environ.get(password_env, "")
+    password = resolve_password_value(target_config)
     if not test_db_config.get("password"):
         test_db_config["password"] = password
 

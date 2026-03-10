@@ -726,14 +726,13 @@ class ConfigurationWizard:
         port = config.get("port")
         user = config.get("user")
         database = config.get("database")
-        password_env = config.get("password_env")
         tls = config.get("tls", False)
 
-        # Get password from environment variable
-        password = ""
-        if password_env:
-            password = os.environ.get(password_env, "")
-            if not password:
+        from lib.services.password_resolver import resolve_password_value
+        password = resolve_password_value(config)
+        if not password:
+            password_env = config.get("password_env")
+            if password_env:
                 return RdstResult(
                     False,
                     f"Environment variable '{password_env}' is not set.\n"

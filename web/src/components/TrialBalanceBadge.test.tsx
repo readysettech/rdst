@@ -31,7 +31,38 @@ describe('TrialBalanceBadge', () => {
     cleanup();
   });
 
-  it('shows the badge when trial is active/exhausted', async () => {
+  it('shows the badge when the current source is an active trial', async () => {
+    vi.mocked(fetchEnvRequirements).mockResolvedValue({
+      keyring_available: true,
+      requirements: [
+        {
+          kind: 'anthropic_api_key',
+          accepted_names: ['RDST_ANTHROPIC_API_KEY'],
+          target: null,
+          satisfied: true,
+          source: 'trial',
+        },
+      ],
+    });
+    vi.mocked(fetchTrialStatus).mockResolvedValue({
+      active: true,
+      status: 'active',
+      percent_remaining: 60,
+      remaining_tokens_display: '60',
+      limit_tokens_display: '100',
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    renderBadge(queryClient);
+
+    expect(await screen.findByText(/free trial/i)).toBeTruthy();
+    expect(screen.getByText('60/100')).toBeTruthy();
+  });
+
+  it('shows the badge when the current source is an exhausted trial', async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
       requirements: [

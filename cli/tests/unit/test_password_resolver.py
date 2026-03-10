@@ -2,7 +2,7 @@
 
 from unittest.mock import Mock
 
-from lib.services.password_resolver import PasswordResolution, resolve_password
+from lib.services.password_resolver import PasswordResolution, resolve_password, resolve_password_value
 
 
 class FakeSecretStore:
@@ -88,3 +88,52 @@ def test_default_secret_store_instantiated(monkeypatch):
     # Should not raise — just returns missing since keychain likely empty in test
     result = resolve_password(cfg)
     assert result.source in ("secure_store", "missing")
+
+
+
+# -- resolve_password_value tests --
+
+
+def test_resolve_value_direct_password():
+    """Direct password in config is returned as-is."""
+    cfg = {"password": "s3cret", "password_env": "DB_PASS"}
+    result = resolve_password_value(cfg, secret_store=FakeSecretStore())
+    assert result == "s3cret"
+
+
+def test_resolve_value_from_env(monkeypatch):
+    """Env var value is returned when no direct password."""
+    monkeypatch.setenv("DB_PASS", "from-env")
+    cfg = {"password_env": "DB_PASS"}
+    store = FakeSecretStore({"DB_PASS": "from-keychain"})
+    result = resolve_password_value(cfg, secret_store=store)
+    assert result == "from-env"
+
+
+def test_resolve_value_from_keyring(monkeypatch):
+    """Keyring value is returned and injected into os.environ."""
+    monkeypatch.delenv("DB_PASS", raising=False)
+    cfg = {"password_env": "DB_PASS"}
+    store = FakeSecretStore({"DB_PASS": "from-keychain"})
+    result = resolve_password_value(cfg, secret_store=store)
+    assert result == "from-keychain"
+
+
+def test_resolve_value_missing(monkeypatch):
+    """Empty string when nothing found."""
+    monkeypatch.delenv("DB_PASS", raising=False)
+    cfg = {"password_env": "DB_PASS"}
+    result = resolve_password_value(cfg, secret_store=FakeSecretStore())
+    assert result == ""
+
+
+def test_resolve_value_env_injection(monkeypatch):
+    """Keyring resolution injects into os.environ for subprocess inheritance."""
+    import os
+    monkeypatch.delenv("DB_PASS", raising=False)
+    cfg = {"password_env": "DB_PASS"}
+    store = FakeSecretStore({"DB_PASS": "keychain-val"})
+    resolve_password_value(cfg, secret_store=store)
+    assert os.environ.get("DB_PASS") == "keychain-val"
+    # Clean up so this doesn't leak into other tests
+    monkeypatch.delenv("DB_PASS", raising=False)

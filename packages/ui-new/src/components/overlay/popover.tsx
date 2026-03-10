@@ -170,7 +170,6 @@ export const PopoverContent = forwardRef<
 
     return (
       <PopoverPrimitive.Portal>
-        <div className={styles.overlay()} />
         <PopoverPrimitive.Content
           ref={ref}
           align={align}

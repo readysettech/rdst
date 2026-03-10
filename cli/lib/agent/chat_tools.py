@@ -294,8 +294,8 @@ class ChatToolExecutor:
             user = target_config.get('user') or target_config.get('username')
             database = target_config.get('database') or target_config.get('dbname')
 
-            password_env = target_config.get('password_env')
-            password = os.environ.get(password_env) if password_env else target_config.get('password')
+            from lib.services.password_resolver import resolve_password_value
+            password = resolve_password_value(target_config)
 
             tls_enabled = target_config.get('tls', False)
             sslmode = 'prefer' if tls_enabled else 'disable'

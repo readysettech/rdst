@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import {
   Modal,
@@ -33,6 +33,8 @@ interface MissingEntry {
   label: string;
   hint: string;
 }
+
+const maskedSecretStyle = { WebkitTextSecurity: 'disc' } as CSSProperties;
 
 function toMissingEntries(requirements: EnvRequirement[]): MissingEntry[] {
   return requirements.map((item) => {
@@ -204,7 +206,7 @@ export function EnvSecretsDialog({
                       data-lpignore="true"
                       data-form-type="other"
                       inputMode="text"
-                      style={{ WebkitTextSecurity: "disc" }}
+                      style={maskedSecretStyle}
                       value={values[entry.envName] || ''}
                       onChange={(event) =>
                         setValues((previous) => ({

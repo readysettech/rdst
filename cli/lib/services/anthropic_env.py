@@ -1,50 +1,116 @@
-"""Helpers for resolving Anthropic API keys across web and CLI flows."""
+"""Helpers for resolving Anthropic credentials across web and CLI flows."""
 
 from __future__ import annotations
 
 import os
+from typing import Any
 
 ANTHROPIC_API_KEY_NAMES = ("ANTHROPIC_API_KEY", "RDST_TRIAL_TOKEN")
 
 
-def get_anthropic_api_key() -> str | None:
-    """Return the first configured Anthropic API key.
+def _load_trial_config(cfg: Any | None = None) -> dict[str, Any]:
+    if cfg is None:
+        try:
+            from lib.cli.rdst_cli import TargetsConfig
 
-    Resolution order: env vars → OS keyring (with timeout) → None.
-    """
-    # 1. Check environment variables
-    for name in ANTHROPIC_API_KEY_NAMES:
-        value = os.environ.get(name)
-        if value:
-            return value
+            cfg = TargetsConfig()
+            cfg.load()
+        except Exception:
+            return {}
 
-    # 2. Check OS keyring (set via rdst web)
     try:
-        from .secret_store_service import SecretStoreService
-
-        store = SecretStoreService()
-        for name in ANTHROPIC_API_KEY_NAMES:
-            value = store.get_secret(name)
-            if value:
-                os.environ[name] = value  # cache in env for downstream use
-                return value
+        trial_config = cfg.get_trial_config()
     except Exception:
-        pass
+        trial_config = None
+
+    return trial_config if isinstance(trial_config, dict) else {}
+
+
+def get_anthropic_source(
+    secret_store: Any | None = None,
+    cfg: Any | None = None,
+ ) -> str:
+    """Return how Anthropic credentials currently resolve.
+
+    Resolution order matches runtime key resolution: env vars → config-backed
+    trial state → OS keyring → missing.
+    """
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "process_env"
+    if os.environ.get("RDST_TRIAL_TOKEN"):
+        return "trial"
+
+    trial_config = _load_trial_config(cfg)
+    trial_token = trial_config.get("token")
+    trial_status = trial_config.get("status")
+    if trial_status == "exhausted" and trial_token:
+        return "trial_exhausted"
+    if trial_status == "active" and trial_token:
+        return "trial"
+
+    store = secret_store
+    if store is None:
+        try:
+            from .secret_store_service import SecretStoreService
+
+            store = SecretStoreService()
+        except Exception:
+            store = None
+
+    if store is not None:
+        direct_key = store.get_secret("ANTHROPIC_API_KEY")
+        if direct_key:
+            return "secure_store"
+
+        trial_key = store.get_secret("RDST_TRIAL_TOKEN")
+        if trial_key:
+            return "trial"
+
+    return "missing"
+
+
+def get_anthropic_api_key(
+    secret_store: Any | None = None,
+    cfg: Any | None = None,
+ ) -> str | None:
+    """Return the first configured Anthropic credential."""
+    direct_key = os.environ.get("ANTHROPIC_API_KEY")
+    if direct_key:
+        return direct_key
+
+    trial_env = os.environ.get("RDST_TRIAL_TOKEN")
+    if trial_env:
+        return trial_env
+
+    trial_config = _load_trial_config(cfg)
+    trial_token = trial_config.get("token")
+    if trial_token and trial_config.get("status") == "active":
+        return trial_token
+
+    store = secret_store
+    if store is None:
+        try:
+            from .secret_store_service import SecretStoreService
+
+            store = SecretStoreService()
+        except Exception:
+            store = None
+
+    if store is None:
+        return None
+
+    for name in ANTHROPIC_API_KEY_NAMES:
+        value = store.get_secret(name)
+        if value:
+            os.environ[name] = value  # Cache for downstream callers in this process.
+            return value
 
     return None
 
 
-def _has_active_trial() -> bool:
-    """Check if an active RDST trial token exists in config."""
-    try:
-        from lib.cli.rdst_cli import TargetsConfig
-        cfg = TargetsConfig()
-        cfg.load()
-        return cfg.is_trial_active()
-    except Exception:
-        return False
-
-
-def has_anthropic_api_key() -> bool:
-    """Return True when an Anthropic API key or active trial is available."""
-    return get_anthropic_api_key() is not None or _has_active_trial()
+def has_anthropic_api_key(
+    secret_store: Any | None = None,
+    cfg: Any | None = None,
+ ) -> bool:
+    """Return True when a usable Anthropic credential is available."""
+    return get_anthropic_api_key(secret_store=secret_store, cfg=cfg) is not None

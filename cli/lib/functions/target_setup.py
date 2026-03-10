@@ -249,10 +249,9 @@ def start_test_db_container(
             target_user = target_config.get("user", "postgres")
             target_db = target_config.get("database", "testdb")
 
-            # Get target password from environment
-            import os
-            target_password_env = target_config.get("password_env")
-            target_password = os.getenv(target_password_env, "testpassword")
+            # Get target password via resolver
+            from lib.services.password_resolver import resolve_password_value
+            target_password = resolve_password_value(target_config) or "testpassword"
 
             # Use provided container_name_pattern or fall back to passed container_name or default
             if container_name_pattern:
@@ -517,11 +516,9 @@ def recreate_schema_from_target(
         target_port = target_config.get("port")
         target_db = target_config.get("database")
         target_user = target_config.get("user")
-        target_password_env = target_config.get("password_env")
-
-        # Get target password from environment
-        import os
-        target_password = os.getenv(target_password_env, "")
+        # Get target password via resolver
+        from lib.services.password_resolver import resolve_password_value
+        target_password = resolve_password_value(target_config)
 
         print(f"Recreating schema from {target_host}:{target_port}/{target_db}...")
 
@@ -787,11 +784,10 @@ def create_test_db_target_config(
         target_config = json.loads(target_config)
 
     # Get password from target config
-    password = ""
+    password = "testpassword"
     if target_config:
-        password_env = target_config.get("password_env")
-        if password_env:
-            password = os.getenv(password_env, "testpassword")
+        from lib.services.password_resolver import resolve_password_value
+        password = resolve_password_value(target_config) or password
 
     return {
         "success": True,

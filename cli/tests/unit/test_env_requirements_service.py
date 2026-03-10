@@ -24,6 +24,7 @@ def _mock_config():
         "staging": {"password_env": "STAGE_DB_PASSWORD"},
         "shared": {"password_env": "PROD_DB_PASSWORD"},
     }.get(name, {})
+    cfg.get_trial_config.return_value = {}
     return cfg
 
 
@@ -80,6 +81,7 @@ def test_anthropic_requirement_satisfied_by_process_env(monkeypatch):
 
 
 def test_anthropic_requirement_satisfied_by_trial_token(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("RDST_TRIAL_TOKEN", "in-trial")
 
     service = EnvRequirementsService(secret_store=FakeSecretStore())
@@ -93,7 +95,10 @@ def test_anthropic_requirement_satisfied_by_trial_token(monkeypatch):
     monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
 
 
-def test_anthropic_requirement_satisfied_by_trial_token_in_keyring():
+def test_anthropic_requirement_satisfied_by_trial_token_in_keyring(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+
     service = EnvRequirementsService(
         secret_store=FakeSecretStore({"RDST_TRIAL_TOKEN": "stored-trial-token"})
     )
@@ -103,6 +108,70 @@ def test_anthropic_requirement_satisfied_by_trial_token_in_keyring():
     anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
     assert anthropic_req["source"] == "trial"
     assert anthropic_req["satisfied"] is True
+
+
+def test_anthropic_requirement_satisfied_by_api_key_in_keyring(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+
+    service = EnvRequirementsService(
+        secret_store=FakeSecretStore({"ANTHROPIC_API_KEY": "stored-anthropic-key"})
+    )
+    with patch.object(service, "_load_config", return_value=_mock_config()):
+        requirements = service.get_requirements()
+
+    anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
+    assert anthropic_req["source"] == "secure_store"
+    assert anthropic_req["satisfied"] is True
+
+
+def test_anthropic_requirement_uses_config_backed_active_trial(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+
+    cfg = _mock_config()
+    cfg.get_trial_config.return_value = {"status": "active", "token": "trial-token"}
+
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+    with patch.object(service, "_load_config", return_value=cfg):
+        requirements = service.get_requirements()
+
+    anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
+    assert anthropic_req["source"] == "trial"
+    assert anthropic_req["satisfied"] is True
+
+
+def test_anthropic_requirement_reports_config_backed_exhausted_trial(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+
+    cfg = _mock_config()
+    cfg.get_trial_config.return_value = {"status": "exhausted", "token": "trial-token"}
+
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+    with patch.object(service, "_load_config", return_value=cfg):
+        requirements = service.get_requirements()
+
+    anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
+    assert anthropic_req["source"] == "trial_exhausted"
+    assert anthropic_req["satisfied"] is False
+
+
+def test_anthropic_env_var_precedence_over_config_trial(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+
+    cfg = _mock_config()
+    cfg.get_trial_config.return_value = {"status": "active", "token": "trial-token"}
+
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+    with patch.object(service, "_load_config", return_value=cfg):
+        requirements = service.get_requirements()
+
+    anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
+    assert anthropic_req["source"] == "process_env"
+    assert anthropic_req["satisfied"] is True
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 
 def test_get_allowed_names_includes_targets_and_anthropic():

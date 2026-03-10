@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, List
 
+from .anthropic_env import get_anthropic_source
 from .password_resolver import resolve_password
 from .secret_store_service import SecretStoreService
 
@@ -42,23 +42,7 @@ class EnvRequirementsService:
         return mapping
 
     def _resolve_anthropic_source(self, cfg: Any) -> str:
-        if os.environ.get(self.ANTHROPIC_API_KEY_NAME):
-            return "process_env"
-        if self.secret_store.get_secret(self.ANTHROPIC_API_KEY_NAME):
-            return "secure_store"
-        if os.environ.get(self.TRIAL_TOKEN_NAME):
-            return "trial"
-        if self.secret_store.get_secret(self.TRIAL_TOKEN_NAME):
-            return "trial"
-        try:
-            if cfg.is_trial_active():
-                return "trial"
-            trial = cfg.get_trial_config()
-            if trial.get("token") and trial.get("status") == "exhausted":
-                return "trial_exhausted"
-        except Exception:
-            pass
-        return "missing"
+        return get_anthropic_source(secret_store=self.secret_store, cfg=cfg)
 
     def get_requirements(self) -> List[Dict[str, Any]]:
         cfg = self._load_config()

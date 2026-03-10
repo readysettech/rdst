@@ -4,7 +4,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useMemo } from "react";
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Text } from "@rs/ui-new/text";
 import { Button } from "@rs/ui-new/button";
 import { Icon } from "@rs/ui-new/icon";
@@ -14,7 +14,6 @@ import { Alert } from "@rs/ui-new/alert";
 import { m } from "@rs/ui-new/motion";
 import { useConfigure } from "../lib/useConfigure";
 import { EnvSecretsDialog } from "../components/EnvSecretsDialog";
-import { simulateTrialExhausted } from "../lib/api";
 import type { EnvRequirement } from "../lib/api";
 import {
   ConfigureForm,
@@ -115,34 +114,6 @@ function ConfigurePage() {
     testConnection(targetName);
   };
 
-  const simulateTrialMutation = useMutation({
-    mutationFn: async () => {
-      const result = await simulateTrialExhausted();
-      if (!result.success) {
-        throw new Error(result.message || "Failed to simulate trial exhaustion.");
-      }
-      return {
-        ...result,
-        message: result.message || "Trial has been marked as exhausted.",
-      };
-    },
-    onSuccess: () => {
-      void invalidateTrialRelatedQueries(queryClient);
-    },
-  });
-  const simulationMessage = simulateTrialMutation.data?.message ?? null;
-  const simulationError =
-    simulateTrialMutation.error instanceof Error
-      ? simulateTrialMutation.error.message
-      : null;
-
-  const handleSimulateExhausted = () => {
-    if (!trialSourceDetected) {
-      return;
-    }
-    simulateTrialMutation.reset();
-    simulateTrialMutation.mutate();
-  };
 
   return (
     <div className="space-y-6 w-full">
@@ -221,31 +192,9 @@ function ConfigurePage() {
                       Trial balance: {trialStatus.remaining_tokens_display} / {trialStatus.limit_tokens_display}
                     </Text>
                   ) : null}
-                  {simulationMessage ? (
-                    <Text level="caption" className="text-content-positive-soft">
-                      {simulationMessage}
-                    </Text>
-                  ) : null}
-                  {simulationError ? (
-                    <Text level="caption" className="text-content-negative-soft">
-                      {simulationError}
-                    </Text>
-                  ) : null}
                 </VStack>
               </HStack>
               <HStack className="gap-2 items-center">
-                <Show when={Boolean(import.meta.env.DEV && trialSourceDetected && !isTrialExhausted)}>
-                  <Button
-                    variant="negative"
-                    modifier="outline"
-                    label="Simulate Exhausted (dev)"
-                    icon="alert"
-                    iconPosition="left"
-                    onClick={handleSimulateExhausted}
-                    loading={simulateTrialMutation.isPending}
-                    disabled={simulateTrialMutation.isPending}
-                  />
-                </Show>
                 <Button
                   variant="primary"
                   modifier="outline"

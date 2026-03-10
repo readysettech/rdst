@@ -17,6 +17,7 @@ Key features:
 - Same code -> Same AST -> Same snippets -> Same hashes -> Same SQL
 """
 
+import asyncio
 import os
 import re
 import sys
@@ -79,287 +80,8 @@ def _terminal_guard():
         except Exception:
             pass
 from .scan_context import ContextGatherer
-from .ast_extractor import CrossFileResolver, extract_queries_from_file, ExtractedQuery
-from .js_extractor import extract_queries_from_js_file
-from .snippet_cache import get_cache
 from lib.query_registry.query_registry import QueryRegistry, hash_sql
 
-# File extensions for JS/TS files (use JS extractor)
-_JS_EXTENSIONS = {'.js', '.ts', '.tsx', '.jsx'}
-
-
-# ORM detection patterns - comprehensive coverage for SQLAlchemy and Django
-ORM_PATTERNS = {
-    "sqlalchemy": [
-        # Imports
-        r"from sqlalchemy",
-        r"import sqlalchemy",
-        # Session/Query patterns (1.x style)
-        r"\.query\(",
-        r"\.filter\(",
-        r"\.filter_by\(",
-        r"\.join\(",
-        r"\.outerjoin\(",
-        r"\.group_by\(",
-        r"\.order_by\(",
-        r"\.having\(",
-        r"\.distinct\(",
-        r"\.limit\(",
-        r"\.offset\(",
-        r"\.subquery\(",
-        r"\.with_entities\(",
-        r"\.options\(",
-        r"\.correlate\(",
-        r"\.union\(",
-        r"\.union_all\(",
-        r"\.intersect\(",
-        r"\.except_\(",
-        # Terminal methods
-        r"\.all\(\)",
-        r"\.first\(\)",
-        r"\.one\(\)",
-        r"\.one_or_none\(\)",
-        r"\.scalar\(",
-        r"\.scalars\(",
-        r"\.count\(\)",
-        r"\.exists\(\)",
-        r"\.fetchall\(",
-        r"\.fetchone\(",
-        r"\.fetchmany\(",
-        # SQLAlchemy 2.0 style
-        r"\bselect\(",
-        r"\binsert\(",
-        r"\bupdate\(",
-        r"\bdelete\(",
-        r"\.execute\(",
-        # Session operations
-        r"session\.(query|execute|add|delete|commit|flush|merge|refresh)",
-        r"db\.(query|execute|session|add|commit)",
-        # Relationship loading
-        r"joinedload\(",
-        r"subqueryload\(",
-        r"selectinload\(",
-        r"lazyload\(",
-        r"immediateload\(",
-        # Raw SQL
-        r"text\(['\"]",
-        # Functions
-        r"func\.\w+\(",
-        r"and_\(",
-        r"or_\(",
-        r"not_\(",
-        r"case\(",
-        r"cast\(",
-        r"coalesce\(",
-        r"nullif\(",
-        r"literal\(",
-        r"desc\(",
-        r"asc\(",
-        r"nullsfirst\(",
-        r"nullslast\(",
-    ],
-    "django": [
-        # QuerySet creation
-        r"\.objects\.",
-        # Filtering
-        r"\.filter\(",
-        r"\.exclude\(",
-        r"\.get\(",
-        # Terminal methods
-        r"\.all\(\)",
-        r"\.first\(\)",
-        r"\.last\(\)",
-        r"\.latest\(",
-        r"\.earliest\(",
-        r"\.count\(\)",
-        r"\.exists\(\)",
-        r"\.iterator\(",
-        # Aggregation
-        r"\.annotate\(",
-        r"\.aggregate\(",
-        # Related objects
-        r"\.select_related\(",
-        r"\.prefetch_related\(",
-        # Output transformation
-        r"\.values\(",
-        r"\.values_list\(",
-        r"\.only\(",
-        r"\.defer\(",
-        # Ordering/Distinct
-        r"\.order_by\(",
-        r"\.reverse\(\)",
-        r"\.distinct\(",
-        # Slicing is handled differently (Python slice syntax)
-        # Bulk operations
-        r"\.update\(",
-        r"\.delete\(",
-        r"\.create\(",
-        r"\.bulk_create\(",
-        r"\.bulk_update\(",
-        r"\.get_or_create\(",
-        r"\.update_or_create\(",
-        r"\.in_bulk\(",
-        # Raw SQL
-        r"\.raw\(",
-        r"\.extra\(",
-        r"RawSQL\(",
-        # Expressions
-        r"\bF\(['\"]",
-        r"\bQ\(",
-        r"\bValue\(",
-        r"\bCase\(",
-        r"\bWhen\(",
-        r"\bSubquery\(",
-        r"\bExists\(",
-        r"\bOuterRef\(",
-        # Aggregate functions
-        r"\bSum\(",
-        r"\bCount\(",
-        r"\bAvg\(",
-        r"\bMin\(",
-        r"\bMax\(",
-        r"\bStdDev\(",
-        r"\bVariance\(",
-        # Window functions
-        r"\.window\(",
-        r"\bWindow\(",
-        r"\bRowNumber\(",
-        r"\bRank\(",
-        r"\bDenseRank\(",
-        # Lookups (used in filter kwargs)
-        r"__exact=",
-        r"__iexact=",
-        r"__contains=",
-        r"__icontains=",
-        r"__in=",
-        r"__gt=",
-        r"__gte=",
-        r"__lt=",
-        r"__lte=",
-        r"__startswith=",
-        r"__istartswith=",
-        r"__endswith=",
-        r"__iendswith=",
-        r"__range=",
-        r"__isnull=",
-        r"__regex=",
-        r"__iregex=",
-    ],
-    "raw_sql": [
-        r"execute\(['\"]SELECT",
-        r"execute\(['\"]INSERT",
-        r"execute\(['\"]UPDATE",
-        r"execute\(['\"]DELETE",
-        r"cursor\.execute\(",
-        r"text\(['\"]SELECT",
-        r"\.executemany\(",
-        r"connection\.cursor\(",
-    ],
-    "prisma": [
-        # Imports / client
-        r"@prisma/client",
-        r"PrismaClient",
-        r"prisma\.\w+\.",
-        # Query methods
-        r"\.findMany\(",
-        r"\.findUnique\(",
-        r"\.findFirst\(",
-        r"\.findFirstOrThrow\(",
-        r"\.findUniqueOrThrow\(",
-        # Mutations
-        r"\.createMany\(",
-        r"\.createManyAndReturn\(",
-        r"\.updateMany\(",
-        r"\.updateManyAndReturn\(",
-        r"\.upsert\(",
-        r"\.deleteMany\(",
-        # Aggregation
-        r"\.aggregate\(",
-        r"\.groupBy\(",
-        # Raw SQL
-        r"\.\$queryRaw",
-        r"\.\$queryRawUnsafe\(",
-        r"\.\$executeRaw",
-        r"\.\$executeRawUnsafe\(",
-        # Transaction
-        r"\.\$transaction\(",
-        # Prisma-specific args
-        r"\binclude\s*:",
-        r"\bwhere\s*:",
-        r"\borderBy\s*:",
-        r"\btake\s*:",
-        r"\bskip\s*:",
-        r"\bdistinct\s*:",
-    ],
-    "drizzle": [
-        # Imports
-        r"drizzle-orm",
-        r"from ['\"]drizzle-",
-        # Builder starters
-        r"\bdb\.select\(",
-        r"\bdb\.selectDistinct\(",
-        r"\bdb\.selectDistinctOn\(",
-        r"\bdb\.insert\(",
-        r"\bdb\.update\(",
-        r"\bdb\.delete\(",
-        r"\bdb\.execute\(",
-        r"\bdb\.\$count\(",
-        # Relational API
-        r"\bdb\.query\.\w+\.",
-        # Chain methods
-        r"\.from\(",
-        r"\.innerJoin\(",
-        r"\.leftJoin\(",
-        r"\.rightJoin\(",
-        r"\.fullJoin\(",
-        r"\.groupBy\(",
-        r"\.having\(",
-        r"\.orderBy\(",
-        r"\.limit\(",
-        r"\.offset\(",
-        r"\.returning\(",
-        r"\.onConflictDoNothing\(",
-        r"\.onConflictDoUpdate\(",
-        r"\.onDuplicateKeyUpdate\(",
-        r"\.values\(",
-        r"\.set\(",
-        # Drizzle operators
-        r"\beq\(",
-        r"\bne\(",
-        r"\bgt\(",
-        r"\bgte\(",
-        r"\blt\(",
-        r"\blte\(",
-        r"\blike\(",
-        r"\bilike\(",
-        r"\binArray\(",
-        r"\bnotInArray\(",
-        r"\bisNull\(",
-        r"\bisNotNull\(",
-        r"\bbetween\(",
-        r"\band\(",
-        r"\bor\(",
-        r"\bnot\(",
-        # Drizzle aggregate/functions
-        r"\bcount\(",
-        r"\bsum\(",
-        r"\bavg\(",
-        r"\bmin\(",
-        r"\bmax\(",
-        r"\bcountDistinct\(",
-        # Raw SQL tag
-        r"\bsql`",
-        r"\bsql\.raw\(",
-        # Transaction / batch
-        r"\bdb\.transaction\(",
-        r"\bdb\.batch\(",
-        # Set operations
-        r"\bunion\(",
-        r"\bunionAll\(",
-        r"\bintersect\(",
-        r"\bexcept\(",
-    ],
-}
 
 
 class ScanCommand:
@@ -424,35 +146,24 @@ class ScanCommand:
         file_pattern: Optional[str] = None,
         sequential: bool = False,
     ) -> RdstResult:
+        """Scan a codebase for ORM queries and save to registry.
+
+        Delegates to ScanService for the actual scanning logic, consuming
+        the event stream to collect results and render progress.
         """
-        Scan a codebase for ORM queries and save to registry.
+        from lib.services.scan_service import ScanService
+        from lib.services.types import (
+            ScanInput,
+            ScanOptions,
+            ScanCompleteEvent,
+            ScanErrorEvent,
+            ScanFilesFoundEvent,
+            ScanQueryResultEvent,
+            ScanRegistryEvent,
+        )
+        from .scan_renderer import ScanRenderer, ScanQuietRenderer
 
-        Deterministic AST-based extraction:
-        1. AST finds all terminal methods (.all(), .first(), etc.)
-        2. AST extracts just the ORM snippet for each query
-        3. Snippets are hashed deterministically
-        4. LLM converts small snippets to SQL (cached by hash)
-        5. Queries saved to registry with source="scan"
-
-        Args:
-            directory: Path to scan
-            dry_run: Just show what would be scanned, don't convert or save
-            analyze: Whether to run rdst analyze on extracted queries
-            target: Database target for analysis
-            output_json: Output results as JSON
-            diff: Git ref to diff against (e.g., HEAD, main) - only scan changed files
-        """
-        directory = os.path.abspath(directory)
-
-        # Accept both files and directories
-        single_file = None
-        if os.path.isfile(directory):
-            single_file = directory
-            directory = os.path.dirname(directory)
-        elif not os.path.isdir(directory):
-            return RdstResult(False, f"Path not found: {directory}")
-
-        # Require target for scan
+        # Require target for scan — CLI-specific error message
         if not target:
             return RdstResult(
                 False,
@@ -464,117 +175,77 @@ class ScanCommand:
                 "  3. Run analysis (if --analyze is specified)"
             )
 
-        # Check that schema exists for target
-        schema_file = Path.home() / ".rdst" / "semantic-layer" / f"{target}.yaml"
-        if not schema_file.exists():
-            return RdstResult(
-                False,
-                f"No schema found for target '{target}'.\n\n"
-                f"Scan requires a schema to understand your database structure.\n"
-                f"Please run:\n\n"
-                f"  rdst schema init --target {target}\n\n"
-                f"This will introspect your database and create the schema."
-            )
+        input_data = ScanInput(
+            directory=directory,
+            target=target,
+            source="cli",
+        )
+        options = ScanOptions(
+            analyze=False,  # Analysis handled below with CLI-specific logic
+            shallow=shallow,
+            dry_run=dry_run,
+            diff=diff,
+            warn_threshold=warn_threshold,
+            fail_threshold=fail_threshold,
+            file_pattern=file_pattern,
+            nosave=nosave,
+            sequential=sequential,
+        )
 
-        # Step 1: Find files with ORM patterns
+        # Collected data from events
+        orm_files: List[Dict] = []
+        all_queries: List[Dict] = []
+        cache_hits = 0
+        cache_misses = 0
+        registry_info: Dict[str, Any] = {}
+        error_message: Optional[str] = None
+
         if self.console and not output_json:
             if diff:
-                self.console.print(f"\n[bold]Scanning[/bold] {directory} [dim](diff: {diff})[/dim]...")
+                self.console.print(f"\n[bold]Scanning[/bold] {os.path.abspath(directory)} [dim](diff: {diff})[/dim]...")
             else:
-                self.console.print(f"\n[bold]Scanning[/bold] {directory}...")
+                self.console.print(f"\n[bold]Scanning[/bold] {os.path.abspath(directory)}...")
 
-        if single_file:
-            orm_files = self._find_orm_files_single(single_file, directory)
-        else:
-            orm_files = self._find_orm_files(directory)
+        async def run_async():
+            nonlocal orm_files, all_queries, cache_hits, cache_misses
+            nonlocal registry_info, error_message
 
-        # If --file-pattern is provided, filter to matching files
-        if file_pattern and orm_files:
-            import fnmatch
-            orm_files = [
-                f for f in orm_files
-                if fnmatch.fnmatch(f["file"], file_pattern)
-                or fnmatch.fnmatch(os.path.basename(f["file"]), file_pattern)
-            ]
+            service = ScanService()
+            renderer = ScanQuietRenderer() if output_json else ScanRenderer()
 
-        # If --diff is provided, filter to only changed files
-        if diff and orm_files:
-            import subprocess
             try:
-                # First, find the git repo root
-                git_root_result = subprocess.run(
-                    ["git", "rev-parse", "--show-toplevel"],
-                    capture_output=True,
-                    text=True,
-                    cwd=directory,
-                )
-                if git_root_result.returncode != 0:
-                    error_msg = git_root_result.stderr.strip() or "not a git repository"
-                    return RdstResult(
-                        False,
-                        f"Not a git repository: {directory}\n\n"
-                        "The --diff flag requires a git repository.\n"
-                        "Either remove --diff to scan all files, or run from a git repo."
-                    )
+                with _terminal_guard():
+                    async for event in service.scan_directory(input_data, options):
+                        renderer.render(event)
 
-                git_root = git_root_result.stdout.strip()
+                        if isinstance(event, ScanFilesFoundEvent):
+                            orm_files = event.files
+                        elif isinstance(event, ScanQueryResultEvent):
+                            all_queries.append(event.query)
+                        elif isinstance(event, ScanRegistryEvent):
+                            registry_info = {
+                                "new_queries": event.new_queries,
+                                "updated_queries": event.updated_queries,
+                                "total_queries": event.total_queries,
+                                "path": event.registry_path,
+                                "skipped": event.skipped,
+                            }
+                        elif isinstance(event, ScanCompleteEvent):
+                            summary = event.summary
+                            cache_hits = summary.get("cache_hits", 0)
+                            cache_misses = summary.get("cache_misses", 0)
+                        elif isinstance(event, ScanErrorEvent):
+                            error_message = event.message
+            finally:
+                renderer.cleanup()
 
-                # Get changed files relative to git root
-                result = subprocess.run(
-                    ["git", "diff", "--name-only", diff],
-                    capture_output=True,
-                    text=True,
-                    cwd=git_root,
-                )
-                if result.returncode != 0:
-                    error_msg = result.stderr.strip() or "git diff failed"
-                    return RdstResult(False, f"Git error: {error_msg}")
+        asyncio.run(run_async())
 
-                changed_files_from_root = set(f.strip() for f in result.stdout.strip().split("\n") if f.strip())
+        if error_message:
+            return RdstResult(False, error_message)
 
-                if not changed_files_from_root:
-                    return RdstResult(
-                        True,
-                        "No files changed in diff.",
-                        data={"files": [], "queries": [], "diff": diff, "status": "pass"}
-                    )
-
-                # Convert changed file paths to be relative to the scan directory
-                # git_root: /path/to/repo
-                # directory: /path/to/repo/backend
-                # changed file from git: backend/app/services/file.py
-                # orm_file["file"]: app/services/file.py
-                scan_dir_rel_to_root = os.path.relpath(directory, git_root)
-                if scan_dir_rel_to_root == ".":
-                    # Scanning from git root - paths match directly
-                    changed_files = changed_files_from_root
-                else:
-                    # Scanning from subdirectory - need to strip the prefix
-                    prefix = scan_dir_rel_to_root + os.sep
-                    changed_files = set()
-                    for f in changed_files_from_root:
-                        if f.startswith(prefix):
-                            changed_files.add(f[len(prefix):])
-                        elif f.startswith(scan_dir_rel_to_root + "/"):
-                            # Handle both / and os.sep
-                            changed_files.add(f[len(scan_dir_rel_to_root) + 1:])
-
-                # Filter orm_files to only include changed files
-                original_count = len(orm_files)
-                orm_files = [f for f in orm_files if f["file"] in changed_files]
-
-                if self.console and not output_json:
-                    self.console.print(f"[dim]Git diff: {len(changed_files_from_root)} files changed, {len(orm_files)} with ORM patterns[/dim]")
-
-            except FileNotFoundError:
-                return RdstResult(
-                    False,
-                    "Git not found. The --diff flag requires git to be installed."
-                )
-            except Exception as e:
-                return RdstResult(False, f"Failed to get git diff: {e}")
-
-        if not orm_files:
+        # No files found
+        if not orm_files and not all_queries:
             if diff:
                 return RdstResult(
                     True,
@@ -583,206 +254,8 @@ class ScanCommand:
                 )
             return RdstResult(True, "No files with ORM patterns found.", data={"files": [], "queries": []})
 
-        if self.console and not output_json:
-            self.console.print(f"Found [cyan]{len(orm_files)}[/cyan] files with ORM patterns\n")
-
-        # Initialize cache (global) and cross-file resolver
-        snippet_cache = get_cache("scan")  # Global snippet cache for all scan operations
-        cross_file_resolver = CrossFileResolver(directory)
-
-        # Load schema context once (for LLM conversion) - use target if provided
-        schema_context = self._load_schema_context(target)
-        if schema_context and self.console and not output_json:
-            self.console.print(f"[dim]Loaded schema context ({len(schema_context)} chars)[/dim]")
-
-        # Check for API key or trial token early - fail fast if not configured
-        if not dry_run:
-            _has_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN"))
-            if not _has_key:
-                try:
-                    from ..llm_manager.key_resolution import resolve_api_key
-                    resolve_api_key()
-                    _has_key = True
-                except Exception:
-                    pass
-            if not _has_key:
-                return RdstResult(
-                    False,
-                    "No LLM API key configured.\n\n"
-                    "rdst scan requires an Anthropic API key to convert ORM code to SQL.\n\n"
-                    "Options:\n"
-                    "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
-                    "  2. Set your own key: export ANTHROPIC_API_KEY=\"sk-ant-...\"\n"
-                    "     Get one at: https://console.anthropic.com/"
-                )
-
-        # Step 2: AST-based extraction (DETERMINISTIC)
-        all_queries = []
-        cache_hits = 0
-        cache_misses = 0
-
-        if self.console and not output_json:
-            with _terminal_guard():
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    console=self.console
-                ) as progress:
-                    task = progress.add_task("Extracting queries (AST)...", total=len(orm_files))
-
-                    for file_info in orm_files:
-                        filepath = file_info["file"]
-                        full_path = os.path.join(directory, filepath)
-                        progress.update(task, description=f"Parsing {filepath}...")
-
-                        # Route to appropriate extractor based on file type
-                        _, ext = os.path.splitext(full_path)
-                        if ext in _JS_EXTENSIONS:
-                            extracted = extract_queries_from_js_file(full_path)
-                        else:
-                            extracted = extract_queries_from_file(full_path)
-
-                        for eq in extracted:
-                            # Handle cross-file query builders
-                            if eq.imports_query_builder and eq.imported_builder_name:
-                                builder_query = cross_file_resolver.resolve_query_builder(
-                                    full_path,
-                                    eq.imported_builder_name,
-                                    eq.imported_builder_module or ""
-                                )
-                                if builder_query:
-                                    # Merge the builder's ORM code
-                                    eq.orm_snippet = f"# From {eq.imported_builder_module}.{eq.imported_builder_name}:\n{builder_query.orm_snippet}\n# Called as:\n{eq.orm_snippet}"
-                                    eq.snippet_hash = self._hash_snippet(eq.orm_snippet)
-
-                            # Convert to dict format
-                            query_dict = self._ast_query_to_dict(eq, filepath)
-
-                            # Check cache first
-                            if not dry_run:
-                                cached_result = snippet_cache.get(eq.snippet_hash)
-                                if cached_result:
-                                    query_dict["sql"] = cached_result["sql"]
-                                    query_dict["issues"] = cached_result["issues"]
-                                    cache_hits += 1
-                                # Mark for batch processing if not cached
-                                elif not cached_result:
-                                    query_dict["_needs_llm"] = True
-                                    cache_misses += 1
-
-                            all_queries.append(query_dict)
-
-                        progress.advance(task)
-
-                    # Batch process uncached queries (5 at a time for Haiku efficiency)
-                    if not dry_run:
-                        uncached = [q for q in all_queries if q.get("_needs_llm")]
-                        if uncached:
-                            progress.update(task, description="Converting ORM to SQL (batch)...")
-                            self._batch_convert_snippets(uncached, snippet_cache, schema_context, batch_size=5, target=target)
-                            for q in uncached:
-                                q.pop("_needs_llm", None)
-        else:
-            # Non-progress-bar path (JSON output)
-            for file_info in orm_files:
-                filepath = file_info["file"]
-                full_path = os.path.join(directory, filepath)
-
-                # Route to appropriate extractor based on file type
-                _, ext = os.path.splitext(full_path)
-                if ext in _JS_EXTENSIONS:
-                    extracted = extract_queries_from_js_file(full_path)
-                else:
-                    extracted = extract_queries_from_file(full_path)
-
-                for eq in extracted:
-                    if eq.imports_query_builder and eq.imported_builder_name:
-                        builder_query = cross_file_resolver.resolve_query_builder(
-                            full_path,
-                            eq.imported_builder_name,
-                            eq.imported_builder_module or ""
-                        )
-                        if builder_query:
-                            eq.orm_snippet = f"# From {eq.imported_builder_module}.{eq.imported_builder_name}:\n{builder_query.orm_snippet}\n# Called as:\n{eq.orm_snippet}"
-                            eq.snippet_hash = self._hash_snippet(eq.orm_snippet)
-
-                    query_dict = self._ast_query_to_dict(eq, filepath)
-
-                    if not dry_run:
-                        cached_result = snippet_cache.get(eq.snippet_hash)
-                        if cached_result:
-                            query_dict["sql"] = cached_result["sql"]
-                            query_dict["issues"] = cached_result["issues"]
-                            cache_hits += 1
-                        else:
-                            query_dict["_needs_llm"] = True
-                            cache_misses += 1
-
-                    all_queries.append(query_dict)
-
-            # Batch process uncached queries
-            if not dry_run:
-                uncached = [q for q in all_queries if q.get("_needs_llm")]
-                if uncached:
-                    self._batch_convert_snippets(uncached, snippet_cache, schema_context, batch_size=5, target=target)
-                    for q in uncached:
-                        q.pop("_needs_llm", None)
-
-        # Tag every query with a status and skip_reason.
-        # Infer specific, human-readable reasons from the ORM snippet.
-        # Only tag after LLM conversion (not in dry-run mode).
-        if not dry_run:
-            for q in all_queries:
-                sql = q.get("sql", "").strip()
-                orm_code = q.get("orm_code", "")
-
-                if not sql or sql.startswith("--"):
-                    q["status"] = "skipped"
-                    q["skip_reason"] = self._infer_skip_reason(sql, orm_code, q)
-                else:
-                    q["status"] = "sql"
-        else:
-            for q in all_queries:
-                q["status"] = "pending"
-
-        # Save to query registry (unless --nosave)
-        new_query_count = 0
-        updated_query_count = 0
-        registry_path = ""
-
-        if not nosave:
-            registry = QueryRegistry()
-            registry.load()
-            for q in all_queries:
-                if q["status"] != "sql":
-                    continue
-
-                sql = q.get("sql", "")
-                try:
-                    query_hash, is_new = registry.add_query(
-                        sql=sql,
-                        source="scan",
-                        target=target or "",
-                        skip_param_extraction=True,
-                    )
-                    q["hash"] = query_hash
-
-                    if is_new:
-                        new_query_count += 1
-                    else:
-                        updated_query_count += 1
-                except ValueError as e:
-                    q["status"] = "skipped"
-                    q["skip_reason"] = str(e).split("\n")[0]
-
-            registry_path = str(registry.registry_path)
-        else:
-            for q in all_queries:
-                sql = q.get("sql", "")
-                if q["status"] == "sql":
-                    q["hash"] = hash_sql(sql)
-
-        results = {
+        # Build results dict matching _print_report expectations
+        results: Dict[str, Any] = {
             "files": orm_files,
             "queries": all_queries,
             "issues_found": [],
@@ -792,13 +265,13 @@ class ScanCommand:
                 "cache_misses": cache_misses,
                 "deterministic": True,
             },
-            "registry": {
-                "new_queries": new_query_count,
-                "updated_queries": updated_query_count,
-                "total_queries": 0 if nosave else len(registry.list_queries()),
-                "path": registry_path,
+            "registry": registry_info or {
+                "new_queries": 0,
+                "updated_queries": 0,
+                "total_queries": 0,
+                "path": "",
                 "skipped": nosave,
-            }
+            },
         }
 
         for q in all_queries:
@@ -811,11 +284,9 @@ class ScanCommand:
                         "sql": q.get("sql", "")
                     })
 
-        # Run full analysis on each query if --analyze flag is set
+        # Run analysis if --analyze flag is set (CLI-specific: progress bars, DB validation)
         if analyze and target:
-            # Fail immediately if no API key or trial token — don't silently produce empty results
-            import os as _os
-            _has_key = bool(_os.environ.get("ANTHROPIC_API_KEY") or _os.environ.get("RDST_TRIAL_TOKEN"))
+            _has_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("RDST_TRIAL_TOKEN"))
             if not _has_key:
                 try:
                     from ..llm_manager.key_resolution import resolve_api_key
@@ -850,7 +321,7 @@ class ScanCommand:
                 tgt = tc.get(target)
                 if tgt:
                     pw_env = tgt.get("password_env", "")
-                    if pw_env and not _os.environ.get(pw_env):
+                    if pw_env and not os.environ.get(pw_env):
                         error_msg = (
                             f"Database password not set. Deep analysis requires a database connection.\n"
                             f"Export the password: export {pw_env}=<password>\n"
@@ -875,30 +346,8 @@ class ScanCommand:
 
         return RdstResult(True, "")
 
-    def _ast_query_to_dict(self, eq: ExtractedQuery, filepath: str) -> Dict:
-        """Convert an ExtractedQuery dataclass to dict format."""
-        return {
-            "file": filepath,
-            "function": eq.function_name,
-            "class": eq.class_name,
-            "orm_code": eq.orm_snippet,
-            "snippet_hash": eq.snippet_hash,
-            "terminal_method": eq.terminal_method,
-            "start_line": eq.start_line,
-            "end_line": eq.end_line,
-            "imports_builder": eq.imports_query_builder,
-            "orm_type": eq.orm_type,
-            "sql": "",  # Filled by LLM conversion
-            "issues": [],  # Filled by LLM conversion
-        }
-
-    def _hash_snippet(self, snippet: str) -> str:
-        """Generate deterministic hash for ORM snippet."""
-        import hashlib
-        normalized = ' '.join(snippet.split())
-        return hashlib.md5(normalized.encode()).hexdigest()[:12]
-
-    def _detect_sql_dialect(self, target: Optional[str] = None) -> str:
+    @staticmethod
+    def _detect_sql_dialect(target: Optional[str] = None) -> str:
         """Detect SQL dialect from target's semantic layer YAML."""
         if not target:
             return "PostgreSQL"
@@ -906,195 +355,11 @@ class ScanCommand:
         if schema_file.exists():
             try:
                 content = schema_file.read_text()
-                if 'mysql' in content.lower():
+                if "mysql" in content.lower():
                     return "MySQL"
             except Exception:
                 pass
         return "PostgreSQL"
-
-    def _describe_orm_types(self, queries: List[Dict]) -> str:
-        """Build ORM type description string from query batch."""
-        orm_types = set()
-        for q in queries:
-            ot = q.get("orm_type")
-            if ot:
-                orm_types.add(ot)
-        if not orm_types:
-            return "SQLAlchemy/Django/Prisma/Drizzle"
-        name_map = {
-            'sqlalchemy': 'SQLAlchemy',
-            'django': 'Django',
-            'prisma': 'Prisma',
-            'drizzle': 'Drizzle',
-            'raw_sql': 'Raw SQL',
-        }
-        return '/'.join(name_map.get(t, t) for t in sorted(orm_types))
-
-    def _batch_convert_snippets(
-        self,
-        queries: List[Dict],
-        snippet_cache,
-        schema_context: str,
-        batch_size: int = 5,
-        target: Optional[str] = None,
-    ):
-        """
-        Convert multiple ORM snippets to SQL in batches.
-        Uses Haiku for efficiency, processes batch_size at a time.
-        Returns JSON for clean parsing.
-        """
-        from lib.llm_manager.llm_manager import LLMManager
-        llm = LLMManager()
-
-        schema_section = f"\n\nDatabase Schema:\n{schema_context}" if schema_context else ""
-        sql_dialect = self._detect_sql_dialect(target)
-
-        for i in range(0, len(queries), batch_size):
-            batch = queries[i:i + batch_size]
-
-            # Detect ORM types in this batch for prompt context
-            orm_desc = self._describe_orm_types(batch)
-
-            # Build batch prompt with numbered snippets
-            snippets_list = []
-            for j, q in enumerate(batch):
-                snippets_list.append(f'{j+1}. {q.get("orm_code", "")}')
-            snippets_text = "\n\n".join(snippets_list)
-
-            system_message = f"""Convert {orm_desc} ORM snippets to {sql_dialect} SQL.
-{schema_section}
-
-RULES:
-1. Use $1, $2, $3 for parameter placeholders
-2. Uppercase SQL keywords (SELECT, FROM, WHERE)
-3. Lowercase table/column names
-4. Output ONLY valid JSON, no markdown, no notes, no explanations
-5. If a snippet is not a database query, output "-- Not a query" as the SQL
-6. If a snippet uses dynamic kwargs (**data, ...item, spread operators) that prevent determining columns, output "-- Dynamic arguments" as the SQL
-7. If a snippet calls a method on an unknown variable (e.g. "query.first()" without seeing the query definition), output "-- Cross-file query" as the SQL
-8. NEVER use literal "..." or ellipsis in SQL output. Always list actual column names from the schema, or use the appropriate -- marker if columns cannot be determined
-9. For Prisma: translate include/select/where/orderBy/take/skip to SQL equivalents
-10. For Drizzle: translate builder chains (.from().where().limit()) to SQL"""
-
-            user_query = f"""Convert these {len(batch)} ORM snippets to SQL.
-
-{snippets_text}
-
-Respond with ONLY this JSON (no markdown code blocks):
-{{"queries": ["SQL for snippet 1", "SQL for snippet 2", ...]}}"""
-
-            try:
-                response = llm.query(
-                    system_message=system_message,
-                    user_query=user_query,
-                    max_tokens=2000,
-                    temperature=0.0,
-                    model="claude-haiku-4-5-20251001",
-                )
-
-                result_text = response.get("text", "").strip()
-
-                # Clean up markdown code blocks if present
-                if result_text.startswith("```"):
-                    lines = result_text.split("\n")
-                    # Remove first line (```json) and last line (```)
-                    result_text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
-                # Parse JSON response
-                parsed = json.loads(result_text)
-                sql_list = parsed.get("queries", [])
-
-                # Assign SQL to each query in batch
-                for j, q in enumerate(batch):
-                    if j < len(sql_list):
-                        sql = sql_list[j].strip()
-                        # Clean any remaining backticks
-                        sql = sql.strip("`").strip()
-                        if sql.lower().startswith("sql\n"):
-                            sql = sql[4:].strip()
-                        q["sql"] = sql
-                        q["issues"] = self._detect_issues(sql)
-                        # Cache it
-                        snippet_cache.set(
-                            q.get("snippet_hash", ""),
-                            sql,
-                            q["issues"],
-                            q.get("orm_code", "")
-                        )
-                    else:
-                        q["sql"] = "-- Conversion failed"
-                        q["issues"] = ["LLM did not return SQL for this query"]
-
-            except json.JSONDecodeError as e:
-                # JSON parsing failed - try line-by-line fallback
-                for q in batch:
-                    if not q.get("sql"):
-                        q["sql"] = f"-- JSON parse error: {e}"
-                        q["issues"] = ["LLM response was not valid JSON"]
-
-            except Exception as e:
-                # Fallback: mark batch as failed
-                for q in batch:
-                    if not q.get("sql"):
-                        q["sql"] = f"-- Batch conversion error: {e}"
-                        q["issues"] = ["LLM conversion failed"]
-
-    def _infer_skip_reason(self, sql: str, orm_code: str, q: Dict) -> str:
-        """Infer a specific, human-readable skip reason from the ORM snippet and LLM output."""
-        sql_lower = (sql or "").lower()
-        orm_lower = orm_code.lower()
-
-        # Cross-file: query built in another file, executed here
-        if q.get("imports_builder"):
-            return "Cross-file query — built in another module, can't trace statically"
-        if "-- cross-file" in sql_lower:
-            return "Cross-file query — built in another module, can't trace statically"
-
-        # Dynamic arguments: **kwargs, spread, variable dicts
-        if "-- dynamic" in sql_lower:
-            return "Dynamic arguments — variable contents only known at runtime"
-        if "**" in orm_code:
-            return "Dynamic arguments — **kwargs expanded at runtime"
-        if "...item" in orm_code or "...data" in orm_code or "...user" in orm_code:
-            return "Dynamic arguments — spread operator expanded at runtime"
-
-        # Result-only fetches: cursor.fetchall() / fetchone() without the execute()
-        if re.search(r'cursor\.(fetchall|fetchone|fetchmany)\b', orm_code):
-            return "Result fetch only — the SQL is in the preceding execute() call"
-        if re.search(r'\.(fetchall|fetchone|fetchmany)\(\)', orm_code) and 'execute' not in orm_lower:
-            return "Result fetch only — the SQL is in a separate execute() call"
-
-        # Bulk operations with variable lists
-        if 'bulk_create' in orm_lower or 'bulk_update' in orm_lower:
-            return "Bulk operation — list of objects built at runtime"
-        if 'createMany' in orm_code or 'updateMany' in orm_code:
-            if any(v in orm_code for v in ['...', 'data:', 'items']):
-                return "Bulk operation — data array built at runtime"
-
-        # Generic "not a query" from LLM — try to explain why
-        if "-- not a query" in sql_lower or not sql:
-            # Check for common non-query patterns
-            if re.search(r'\.(save|commit|flush|close|rollback)\(', orm_code):
-                return "Session operation, not a query"
-            if re.search(r'(get_or_create|update_or_create)\(', orm_code) and 'defaults=' in orm_code:
-                return "Upsert with dynamic defaults — default values only known at runtime"
-            return "Could not convert to SQL — ORM snippet is ambiguous or incomplete"
-
-        # Fallback: use whatever the LLM said
-        reason = sql.lstrip("- ").strip()
-        return reason if reason else "Could not convert to SQL"
-
-    def _detect_issues(self, sql: str) -> List[str]:
-        """Detect common SQL issues."""
-        issues = []
-        sql_upper = sql.upper()
-        if "SELECT *" in sql_upper:
-            issues.append("Uses SELECT * - consider selecting specific columns")
-        if "WHERE" in sql_upper and "LIMIT" not in sql_upper:
-            issues.append("No LIMIT clause - could return many rows")
-        if "LIKE" in sql_upper and "'%" in sql:
-            issues.append("Leading wildcard in LIKE - may prevent index usage")
-        return issues
 
     def _analyze_single_query(self, q: Dict, target: str) -> Dict:
         """
@@ -1246,6 +511,8 @@ Respond with ONLY this JSON (no markdown code blocks):
                     "issues": issues,
                     "recommendations": recommendations,
                     "rewrite_benchmarks": rewrite_benchmarks,
+                    # Full analysis JSON for rich modal display in web UI
+                    "raw_analysis": data,
                     "_subprocess_seconds": round(_elapsed, 1),
                     "_llm_ran": bool(llm_analysis and llm_analysis.get("success")),
                     "_llm_error": (
@@ -1369,6 +636,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                             "issues": issues,
                             "recommendations": recommendations,
                             "rewrite_benchmarks": [],
+                            "raw_analysis": data,
                             "fast_mode": True,
                             "_subprocess_seconds": round(_elapsed, 1),
                             "_llm_ran": bool(llm_analysis and llm_analysis.get("success")),
@@ -1656,6 +924,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                                         "issues": result["issues"],
                                         "recommendations": result["recommendations"],
                                         "rewrite_benchmarks": result.get("rewrite_benchmarks", []),
+                                        "raw_analysis": result.get("raw_analysis"),
                                     }
 
                                     for issue in result["issues"]:
@@ -1729,6 +998,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                                 "issues": result["issues"],
                                 "recommendations": result["recommendations"],
                                 "rewrite_benchmarks": result.get("rewrite_benchmarks", []),
+                                "raw_analysis": result.get("raw_analysis"),
                             }
 
                             for issue in result["issues"]:
@@ -1837,6 +1107,17 @@ Respond with ONLY this JSON (no markdown code blocks):
                     "rating": performance.get("overall_rating", "unknown"),
                     "issues": performance.get("primary_concerns") or [],
                     "recommendations": [],
+                    # Shallow analysis result — has llm_analysis but no explain_results/rewrite_test_results
+                    "raw_analysis": {
+                        "llm_analysis": {
+                            "success": True,
+                            "analysis_results": analysis_data,
+                            "performance_assessment": performance,
+                            "rewrite_suggestions": analysis_data.get("rewrite_suggestions") or [],
+                            "index_recommendations": result.get("index_recommendations") or [],
+                            "optimization_opportunities": analysis_data.get("optimization_opportunities") or [],
+                        },
+                    },
                     "_subprocess_seconds": round(_elapsed, 1),
                 }
 
@@ -1973,6 +1254,7 @@ Respond with ONLY this JSON (no markdown code blocks):
                     "rating": result.get("rating", "unknown"),
                     "issues": result.get("issues", []),
                     "recommendations": result.get("recommendations", []),
+                    "raw_analysis": result.get("raw_analysis"),
                 }
 
                 for issue in result.get("issues", []):
@@ -2081,334 +1363,6 @@ Respond with ONLY this JSON (no markdown code blocks):
         analysis_results["worst_score"] = worst_score
 
         return analysis_results
-
-    def _load_schema_context(self, target: Optional[str]) -> str:
-        """
-        Load schema from rdst semantic-layer if available.
-        Returns a compact schema summary for LLM context.
-        """
-        schema_dir = Path.home() / ".rdst" / "semantic-layer"
-        schema_file = None
-
-        if target:
-            # Try target-specific schema file
-            schema_file = schema_dir / f"{target}.yaml"
-
-        if not schema_file or not schema_file.exists():
-            # Try to find any schema file
-            if schema_dir.exists():
-                schemas = list(schema_dir.glob("*.yaml"))
-                if schemas:
-                    schema_file = schemas[0]
-
-        if not schema_file or not schema_file.exists():
-            return ""
-
-        try:
-            import yaml
-            data = yaml.safe_load(schema_file.read_text())
-            tables = data.get("tables", {})
-
-            # Build compact schema summary
-            lines = ["Database Schema:"]
-            for table_name, table_info in tables.items():
-                columns = table_info.get("columns", {})
-                col_list = ", ".join(columns.keys())
-                lines.append(f"  {table_name}: {col_list}")
-
-            return "\n".join(lines)
-        except Exception:
-            return ""
-
-    def _convert_snippet_to_sql(self, orm_snippet: str, schema_context: str = "", target: Optional[str] = None) -> tuple:
-        """
-        Use LLM to convert a small ORM snippet to parameterized SQL.
-
-        This is called only for snippets not in the cache.
-        The input is small (typically 50-200 chars), not whole files.
-        Uses Haiku for speed and cost efficiency on single queries.
-
-        Returns:
-            (sql: str, issues: list)
-        """
-        schema_section = f"\n\n{schema_context}" if schema_context else ""
-        sql_dialect = self._detect_sql_dialect(target)
-
-        system_message = f"""Convert this ORM code to parameterized {sql_dialect} SQL.
-{schema_section}
-
-RULES:
-1. Use $1, $2, $3 for ALL parameter values (never literal values)
-2. Use uppercase SQL keywords: SELECT, FROM, WHERE, JOIN, etc.
-3. Use lowercase for table/column names
-4. Output ONLY the SQL query, no explanations
-5. If you see func.count(), func.sum(), etc. - use the SQL equivalents
-6. For .desc() use DESC, for .asc() use ASC
-7. Match table names from the schema above when possible
-8. For Prisma: translate include/select/where/orderBy/take/skip to SQL
-9. For Drizzle: translate builder chains to SQL"""
-
-        user_query = f"""Convert this ORM code to SQL:
-
-{orm_snippet}
-
-Output only the SQL query."""
-
-        try:
-            from lib.llm_manager.llm_manager import LLMManager
-            llm = LLMManager()
-
-            response = llm.query(
-                system_message=system_message,
-                user_query=user_query,
-                max_tokens=500,
-                temperature=0.0,
-                model="claude-haiku-4-5-20251001",  # Use Haiku for single queries - fast & cheap
-            )
-
-            result_text = response.get("text", "").strip()
-
-            # Clean up markdown code blocks if present
-            if result_text.startswith("```"):
-                lines = result_text.split("\n")
-                result_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-
-            # Basic issue detection
-            issues = []
-            sql_upper = result_text.upper()
-            if "SELECT *" in sql_upper:
-                issues.append("Uses SELECT * - consider selecting specific columns")
-            if "WHERE" in sql_upper and "LIMIT" not in sql_upper:
-                issues.append("No LIMIT clause - could return many rows")
-            if "LIKE" in sql_upper and "%'" in result_text:
-                issues.append("Leading wildcard in LIKE - may prevent index usage")
-
-            return result_text, issues
-
-        except Exception as e:
-            return f"-- Error: {e}", ["LLM conversion failed"]
-
-    def _find_orm_files(self, directory: str) -> List[Dict]:
-        """Find all files that contain ORM patterns."""
-        results = []
-        directory_path = Path(directory)
-
-        # File extensions to check
-        extensions = {".py", ".js", ".ts", ".tsx", ".jsx"}
-
-        # Directories to skip
-        skip_dirs = {"node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build", ".tox", "eggs"}
-
-        for root, dirs, files in os.walk(directory_path):
-            # Skip certain directories
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
-
-            for file in files:
-                filepath = Path(root) / file
-                if filepath.suffix not in extensions:
-                    continue
-
-                try:
-                    content = filepath.read_text(encoding="utf-8", errors="ignore")
-                except Exception:
-                    continue
-
-                # Check for ORM patterns (filtered by file type)
-                detected_orms = []
-                is_python = filepath.suffix == ".py"
-                is_js_ts = filepath.suffix in {".js", ".ts", ".tsx", ".jsx"}
-                for orm_name, patterns in ORM_PATTERNS.items():
-                    # Only check relevant ORMs for the file type
-                    if is_python and orm_name in ("prisma", "drizzle"):
-                        continue
-                    if is_js_ts and orm_name in ("sqlalchemy", "django"):
-                        continue
-                    for pattern in patterns:
-                        if re.search(pattern, content, re.IGNORECASE):
-                            detected_orms.append(orm_name)
-                            break
-
-                if detected_orms:
-                    results.append({
-                        "file": str(filepath.relative_to(directory_path)),
-                        "orms": list(set(detected_orms)),
-                        "lines": len(content.splitlines()),
-                    })
-
-        return results
-
-    def _find_orm_files_single(self, file_path: str, base_dir: str) -> List[Dict]:
-        """Check a single file for ORM patterns."""
-        filepath = Path(file_path)
-        extensions = {".py", ".js", ".ts", ".tsx", ".jsx"}
-        if filepath.suffix not in extensions:
-            return []
-
-        try:
-            content = filepath.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            return []
-
-        detected_orms = []
-        is_python = filepath.suffix == ".py"
-        is_js_ts = filepath.suffix in {".js", ".ts", ".tsx", ".jsx"}
-        for orm_name, patterns in ORM_PATTERNS.items():
-            if is_python and orm_name in ("prisma", "drizzle"):
-                continue
-            if is_js_ts and orm_name in ("sqlalchemy", "django"):
-                continue
-            for pattern in patterns:
-                if re.search(pattern, content, re.IGNORECASE):
-                    detected_orms.append(orm_name)
-                    break
-
-        if not detected_orms:
-            return []
-
-        return [{
-            "file": os.path.basename(file_path),
-            "orms": list(set(detected_orms)),
-            "lines": len(content.splitlines()),
-        }]
-
-    def _extract_query_code(self, filepath: str, base_dir: str) -> str:
-        """Extract relevant code sections that contain queries."""
-        full_path = Path(base_dir) / filepath
-        content = full_path.read_text(encoding="utf-8", errors="ignore")
-
-        # For small files, return everything
-        lines = content.splitlines()
-        if len(lines) <= 200:
-            return content
-
-        # For larger files, extract functions containing query patterns
-        relevant_sections = []
-        in_function = False
-        current_function = []
-        has_query = False
-
-        for line in lines:
-            # Detect function start
-            if re.match(r"^\s*(def |async def |class )", line):
-                if in_function and has_query:
-                    relevant_sections.append("\n".join(current_function))
-                in_function = True
-                current_function = [line]
-                has_query = False
-            elif in_function:
-                current_function.append(line)
-                # Check if this line has query patterns
-                for patterns in ORM_PATTERNS.values():
-                    for pattern in patterns:
-                        if re.search(pattern, line):
-                            has_query = True
-                            break
-
-        # Don't forget the last function
-        if in_function and has_query:
-            relevant_sections.append("\n".join(current_function))
-
-        if relevant_sections:
-            return "\n\n# ---\n\n".join(relevant_sections)
-        return content[:5000]  # Fallback: first 5000 chars
-
-    def _extract_queries_with_llm(self, code: str, filepath: str) -> List[Dict]:
-        """
-        Use LLM to extract SQL queries from ORM code.
-
-        CRITICAL: The LLM is instructed to:
-        1. Generate PARAMETERIZED SQL (use $1, $2, etc. - never literal values)
-        2. Be deterministic (same input -> same output)
-        3. Extract only actual queries, not model definitions
-        """
-        # System message emphasizes determinism and parameterization
-        system_message = """You are a deterministic database query analyzer. Your task is to extract SQL queries from ORM code.
-
-CRITICAL RULES:
-1. ALWAYS generate PARAMETERIZED SQL using positional placeholders ($1, $2, $3, etc.)
-   - NEVER include literal values like strings, numbers, or dates
-   - Variables, function arguments, user inputs -> $1, $2, etc.
-   - Example: `.filter(User.name == name)` -> `WHERE name = $1`
-   - Example: `.filter(User.age > 18)` -> `WHERE age > $1` (18 is a literal but treat as param)
-
-2. Be DETERMINISTIC - given the same code, always produce the exact same output
-   - Process functions in order they appear in the file
-   - Use consistent SQL formatting (uppercase keywords, lowercase identifiers)
-   - Same ORM pattern -> Same SQL output
-
-3. Output ONLY valid JSON, no explanations or markdown
-
-4. Only extract actual database queries (SELECT, INSERT, UPDATE, DELETE)
-   - Skip model definitions, imports, configuration"""
-
-        user_query = f"""Extract all database queries from this code. For each query:
-- Convert ORM code to PARAMETERIZED SQL (use $1, $2, $3 for all values)
-- Identify the function containing the query
-- List potential performance issues
-
-Code from {filepath}:
-```
-{code}
-```
-
-Respond in this exact JSON format:
-{{
-  "queries": [
-    {{
-      "function": "function_name",
-      "orm_code": "exact ORM code snippet",
-      "sql": "SELECT ... WHERE col = $1",
-      "issues": ["issue1", "issue2"]
-    }}
-  ]
-}}
-
-Rules for SQL generation:
-- All variable values -> $1, $2, $3 (in order of appearance)
-- Use uppercase for SQL keywords: SELECT, FROM, WHERE, JOIN, etc.
-- Use lowercase for table/column names
-- Include ORDER BY, LIMIT, GROUP BY when present in ORM code
-- If query returns all columns, use "SELECT *" not individual columns
-- For LIKE patterns, use: WHERE col LIKE $1 (the % is part of the parameter)"""
-
-        try:
-            # Use the LLM manager from RDST
-            from lib.llm_manager.llm_manager import LLMManager
-            llm = LLMManager()
-
-            response = llm.query(
-                system_message=system_message,
-                user_query=user_query,
-                max_tokens=4000,
-                temperature=0.0,  # CRITICAL: temperature=0 for determinism
-            )
-
-            result_text = response.get("text", "")
-
-            # Extract JSON from response
-            json_match = re.search(r"\{[\s\S]*\}", result_text)
-            if json_match:
-                parsed = json.loads(json_match.group())
-                queries = parsed.get("queries", [])
-
-                # Post-process to ensure parameterization
-                for q in queries:
-                    sql = q.get("sql", "")
-                    # Validate it has parameters (contains $N pattern or no WHERE clause)
-                    if sql and "WHERE" in sql.upper() and not re.search(r'\$\d+', sql):
-                        # LLM didn't parameterize - flag it
-                        if "issues" not in q:
-                            q["issues"] = []
-                        q["issues"].append("WARNING: Query may not be properly parameterized")
-
-                return queries
-
-        except Exception as e:
-            if self.console:
-                self.console.print(f"  [dim]LLM error for {filepath}: {e}[/dim]")
-            return []
-
-        return []
 
     def _print_report(self, results: Dict, show_analysis: bool = False):
         """Print a formatted report."""

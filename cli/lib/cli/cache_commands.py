@@ -510,11 +510,9 @@ class CacheCommands:
         return query
 
     def _resolve_password(self, target_config: Dict[str, Any]) -> str:
-        """Resolve password from environment variable."""
-        password_env = target_config.get("password_env", "")
-        if password_env:
-            return os.environ.get(password_env, "")
-        return ""
+        """Resolve password from config, environment, or keyring."""
+        from lib.services.password_resolver import resolve_password_value
+        return resolve_password_value(target_config)
 
     def _save_to_registry(self, query: str, tag: Optional[str], target: str) -> Optional[str]:
         """Save query to registry if not already there. Returns hash or None."""
@@ -588,7 +586,7 @@ class CacheCommands:
                 if password_env:
                     hint += f":\n  export {password_env}=<password>"
                 else:
-                    hint += " in the target's password_env configuration."
+                    hint += " in the target configuration or keyring."
                 error += hint
             return {"success": False, "error": error}
         finally:

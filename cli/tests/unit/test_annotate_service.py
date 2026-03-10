@@ -60,8 +60,11 @@ class TestAnnotateServiceAnnotate:
         """Test error when ANTHROPIC_API_KEY is not set."""
         events = []
 
-        # Clear ANTHROPIC_API_KEY
-        with patch.dict(os.environ, {}, clear=True):
+        # Simulate no Anthropic credential available
+        with patch(
+            "lib.services.annotate_service.has_anthropic_api_key",
+            return_value=False,
+        ):
             async for event in service.annotate("test-target", target_config):
                 events.append(event)
 

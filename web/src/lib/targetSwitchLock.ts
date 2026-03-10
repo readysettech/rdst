@@ -5,6 +5,7 @@ export type TargetLockReason =
   | 'analyze'
   | 'schema'
   | 'top'
+  | 'scan'
   | 'benchmark'
   | 'readyset';
 
@@ -18,6 +19,7 @@ const reasonMessage: Record<TargetLockReason, string> = {
   analyze: 'Target switching is disabled while Analyze is in progress.',
   schema: 'Target switching is disabled while Schema operations are in progress.',
   top: 'Target switching is disabled while Top Queries is in progress.',
+  scan: 'Target switching is disabled while Scan is in progress.',
   benchmark: 'Target switching is disabled while Benchmark is in progress.',
   readyset: 'Target switching is disabled while Readyset operations are in progress.',
 };

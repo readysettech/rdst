@@ -37,7 +37,7 @@ function SchemaStatus({
         exit={{ opacity: 0, y: -5 }}
         className="flex items-center gap-2"
       >
-        <Spinner size="base" color="primary" />
+        <Spinner size="base" color="primary-soft" />
         <Text level="caption" className="text-content-layout-3">
           Connecting to database...
         </Text>

@@ -2,8 +2,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AskPanel } from "./AskPanel";
-import { useAsk } from "../lib/ask";
-import { createCsvFilename, downloadCsv, toCsv } from "../lib/csv";
+import { useAsk, type AskResultEvent } from '../lib/ask';
+import { createCsvFilename, downloadCsv, toCsv } from '../lib/csv';
 
 vi.mock("../lib/ask", () => ({
   useAsk: vi.fn(),
@@ -74,11 +74,15 @@ describe("AskPanel", () => {
       ...baseUseAskState,
       state: "complete",
       result: {
-        columns: ["name", "count"],
+        success: true,
+        sql: 'SELECT name, count FROM users',
+        columns: ['name', 'count'],
         rows,
         row_count: 60,
         execution_time_ms: 12.3,
-      },
+        llm_calls: 1,
+        total_tokens: 42,
+      } satisfies AskResultEvent,
     });
 
     render(<AskPanel />);

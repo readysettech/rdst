@@ -346,6 +346,10 @@ class TargetsConfig:
         """Set trial configuration."""
         self._data["trial"] = trial
 
+    def clear_trial_config(self) -> bool:
+        """Remove persisted trial configuration if present."""
+        return self._data.pop("trial", None) is not None
+
     def is_trial_active(self) -> bool:
         """Check if user has an active trial."""
         trial = self._data.get("trial", {})
@@ -593,10 +597,9 @@ class RdstCLI:
         port = target_config.get("port")
         user = target_config.get("user", "postgres")
         database = target_config.get("database", "postgres")
+        from lib.services.password_resolver import resolve_password_value
+        password = resolve_password_value(target_config)
         password_env = target_config.get("password_env", "")
-
-        # Get password from environment
-        password = os.environ.get(password_env, "") if password_env else ""
         if password_env and not password:
             result = {
                 "success": False,

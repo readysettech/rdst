@@ -52,6 +52,7 @@ class TestInitServiceGetStatus:
             "staging": {"engine": "mysql", "password": "secret"},
         }.get(name)
         cfg.get_llm_config.return_value = {"provider": "claude"}
+        cfg.get_trial_config.return_value = {}
         return cfg
 
     def test_returns_init_status(self, service, mock_config):
@@ -122,16 +123,27 @@ class TestInitServiceGetStatus:
         assert status.llm_configured is True
 
     def test_llm_not_configured_without_api_key(self, service, mock_config):
-        """Test get_status shows LLM not configured without API key."""
+        """Test get_status shows LLM not configured without usable credentials."""
         with patch.object(service, "_load_config", return_value=mock_config):
             with patch.dict(os.environ, {}, clear=True):
-                with patch("lib.services.anthropic_env._has_active_trial", return_value=False):
-                    # Remove ANTHROPIC_API_KEY
-                    if "ANTHROPIC_API_KEY" in os.environ:
-                        del os.environ["ANTHROPIC_API_KEY"]
+                with patch(
+                    "lib.services.init_service.has_anthropic_api_key",
+                    return_value=False,
+                ):
                     status = service.get_status()
 
         assert status.llm_configured is False
+
+    def test_llm_configured_with_config_backed_active_trial(self, service, mock_config):
+        """Active trial metadata in config should satisfy llm_configured."""
+        mock_config.get_trial_config.return_value = {"status": "active", "token": "trial-token"}
+
+        with patch.object(service, "_load_config", return_value=mock_config):
+            with patch.dict(os.environ, {}, clear=True):
+                status = service.get_status()
+
+        assert status.llm_configured is True
+
 
     def test_auto_configures_llm_when_provider_missing_and_api_key_set(self, service):
         """Test get_status auto-configures Claude for web-only onboarding flow."""
@@ -260,6 +272,7 @@ class TestInitServiceCheckLLM:
         """Create mock TargetsConfig."""
         cfg = Mock()
         cfg.get_llm_config.return_value = {"provider": "claude"}
+        cfg.get_trial_config.return_value = {}
         return cfg
 
     def test_llm_not_configured(self, service, mock_config):
@@ -273,16 +286,41 @@ class TestInitServiceCheckLLM:
         assert "not configured" in result["error"]
 
     def test_anthropic_key_missing(self, service, mock_config):
-        """Test check_llm when ANTHROPIC_API_KEY is not set."""
-        with patch.dict(os.environ, {}, clear=True):
-            with patch("lib.services.anthropic_env._has_active_trial", return_value=False):
-                if "ANTHROPIC_API_KEY" in os.environ:
-                    del os.environ["ANTHROPIC_API_KEY"]
-
-                result = service.check_llm(mock_config)
+        """Test check_llm when no usable Anthropic credential is set."""
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "lib.services.init_service.has_anthropic_api_key",
+            return_value=False,
+        ), patch(
+            "lib.services.init_service.get_anthropic_source",
+            return_value="missing",
+        ):
+            result = service.check_llm(mock_config)
 
         assert result["success"] is False
         assert "ANTHROPIC_API_KEY" in result["error"]
+
+    def test_check_llm_accepts_config_backed_active_trial(self, service, mock_config):
+        """Config-backed active trial should satisfy check_llm."""
+        mock_config.get_trial_config.return_value = {"status": "active", "token": "trial-token"}
+        mock_llm = Mock()
+        mock_llm.query.return_value = {"text": "pong"}
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("lib.llm_manager.llm_manager.LLMManager", return_value=mock_llm):
+                result = service.check_llm(mock_config)
+
+        assert result["success"] is True
+
+    def test_check_llm_reports_exhausted_config_trial(self, service, mock_config):
+        """Exhausted config-backed trial should surface the real failure."""
+        mock_config.get_trial_config.return_value = {"status": "exhausted", "token": "trial-token"}
+
+        with patch.dict(os.environ, {}, clear=True):
+            result = service.check_llm(mock_config)
+
+        assert result["success"] is False
+        assert "Trial credits exhausted" in result["error"]
+
 
     def test_llm_api_success(self, service, mock_config):
         """Test check_llm with successful API call."""
@@ -412,11 +450,43 @@ class TestInitServiceTestTarget:
             with patch(
                 "lib.data_manager.data_manager.DataManager", return_value=mock_dm
             ):
-                with patch("lib.data_manager.data_manager.ConnectionConfig"):
+                with patch("lib.data_manager.data_manager.ConnectionConfig") as mock_connection_config:
                     ok, msg, verification = service._test_target(target)
 
         assert ok is True
         assert "Connected" in msg
+        assert mock_connection_config.call_args.kwargs["ssl_mode"] == "prefer"
+
+    def test_postgresql_connection_honors_tls_flag(self, service):
+        """Test _test_target preserves TLS when building the connection config."""
+        target = {
+            "engine": "postgresql",
+            "host": "localhost",
+            "port": 5432,
+            "database": "testdb",
+            "user": "testuser",
+            "password_env": "DB_PASS",
+            "tls": True,
+        }
+
+        mock_dm = Mock()
+        mock_dm.connect.return_value = True
+        mock_dm.get_connection_state.return_value = {
+            "attempted": True,
+            "success": True,
+        }
+        mock_dm.disconnect = Mock()
+
+        with patch.dict(os.environ, {"DB_PASS": "secret"}):
+            with patch(
+                "lib.data_manager.data_manager.DataManager", return_value=mock_dm
+            ):
+                with patch("lib.data_manager.data_manager.ConnectionConfig") as mock_connection_config:
+                    ok, msg, verification = service._test_target(target)
+
+        assert ok is True
+        assert "Connected" in msg
+        assert mock_connection_config.call_args.kwargs["ssl_mode"] == "require"
 
     def test_mysql_connection_success(self, service):
         """Test _test_target with successful MySQL connection."""

@@ -542,7 +542,7 @@ class TestSchemaServiceAnnotate:
     def test_annotate_requires_anthropic_key(self, service):
         """Test annotate returns key error when neither env var is set."""
         with patch.dict("os.environ", {}, clear=True):
-            with patch("lib.services.anthropic_env._has_active_trial", return_value=False):
+            with patch("lib.services.schema_service.has_anthropic_api_key", return_value=False):
                 result = service.annotate("test-target", {"engine": "postgresql"})
 
         assert result.success is False

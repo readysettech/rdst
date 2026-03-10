@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { UIMessage } from 'ai';
 import { Text } from '@rs/ui-new/text';
 import { Spinner } from '@rs/ui-new/spinner';
 import { VStack } from '@rs/ui-new/stack';
@@ -6,11 +7,7 @@ import { Center } from '@rs/ui-new/stack';
 import { getMessageContent } from '../lib/chat';
 
 interface MessageListProps {
-  messages: Array<{
-    id: string;
-    role: 'user' | 'assistant';
-    parts?: Array<{ type: string; text?: string }>;
-  }>;
+  messages: Array<Pick<UIMessage, 'id' | 'role' | 'parts'>>;
   isStreaming?: boolean;
   className?: string;
 }
@@ -34,22 +31,28 @@ export function MessageList({ messages, isStreaming, className }: MessageListPro
 
   return (
     <VStack className={`gap-4 items-stretch ${className || ''}`}>
-      {messages.map((msg) => (
-        <div
-          key={msg.id}
-          className={msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
-        >
-          <div
-            className={
-              msg.role === 'user'
-                ? 'bg-surface-primary-solid text-content-primary-solid px-4 py-2 rounded-lg max-w-[80%]'
-                : 'bg-surface-layout-2 text-content-layout-1 px-4 py-2 rounded-lg max-w-[80%] border border-border-layout-1'
-            }
-          >
-            <Text level="body-medium">{getMessageContent(msg)}</Text>
+      {messages.map((msg) => {
+        const alignmentClass =
+          msg.role === 'user'
+            ? 'flex justify-end'
+            : msg.role === 'assistant'
+              ? 'flex justify-start'
+              : 'flex justify-center';
+        const bubbleClass =
+          msg.role === 'user'
+            ? 'bg-surface-primary-solid text-content-primary-solid px-4 py-2 rounded-lg max-w-[80%]'
+            : msg.role === 'assistant'
+              ? 'bg-surface-layout-2 text-content-layout-1 px-4 py-2 rounded-lg max-w-[80%] border border-border-layout-1'
+              : 'bg-surface-layout-2/60 text-content-layout-2 px-4 py-2 rounded-lg max-w-[80%] border border-dashed border-border-layout-1';
+
+        return (
+          <div key={msg.id} className={alignmentClass}>
+            <div className={bubbleClass}>
+              <Text level="body-medium">{getMessageContent(msg)}</Text>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       {isStreaming && (
         <div className="flex justify-start">
           <div className="bg-surface-layout-2 text-content-layout-3 px-4 py-2 rounded-lg border border-border-layout-1 flex items-center gap-2">

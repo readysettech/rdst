@@ -7,7 +7,7 @@ following the stateless async generator pattern used by other services.
 import os
 from typing import AsyncGenerator, Any, Dict, Optional
 
-from .password_resolver import resolve_password
+from .password_resolver import resolve_password, resolve_password_value
 from .types import (
     ConfigureInput,
     ConfigureOptions,
@@ -468,11 +468,10 @@ class ConfigureService:
         password_env = config.get("password_env")
         tls = config.get("tls", False)
 
-        # Get password from environment variable
-        password = ""
-        if password_env:
-            password = os.environ.get(password_env, "")
-            if not password:
+        password = resolve_password_value(config)
+        if not password:
+            password_env = config.get("password_env", "")
+            if password_env:
                 return {
                     "success": False,
                     "message": f"Environment variable '{password_env}' is not set. "

@@ -130,8 +130,8 @@ class DeployCommand:
                 available = ", ".join(config.list_targets()) if hasattr(config, "list_targets") else "none"
                 return None, f"Target '{target}' not found. Available targets: {available}"
 
-            password_env = target_config.get("password_env", "")
-            password = os.environ.get(password_env, "") if password_env else ""
+            from lib.services.password_resolver import resolve_password_value
+            password = resolve_password_value(target_config)
 
             return target_config, password
         except Exception as e:
@@ -196,6 +196,7 @@ class DeployCommand:
                 "port": int(variables["readyset_port"]),
                 "user": target_config.get("user", ""),
                 "database": target_config.get("database", ""),
+                "password": target_config.get("password", ""),
                 "password_env": target_config.get("password_env", ""),
                 "upstream_target": original_target,
                 "container_name": variables["container_name"],

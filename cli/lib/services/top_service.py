@@ -489,12 +489,9 @@ class TopService:
             DataManagerQueryType,
         )
 
-        # Get password from environment
-        password = None
-        if target_config.get("password_env"):
-            password = os.getenv(target_config["password_env"])
-        elif target_config.get("password"):
-            password = target_config["password"]
+        from .password_resolver import resolve_password_value
+
+        password = resolve_password_value(target_config)
 
         if not password:
             raise ValueError(

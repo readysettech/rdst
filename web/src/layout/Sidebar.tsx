@@ -59,6 +59,7 @@ const navItems = [
   { label: "Query Analyzer", icon: "speedometer" as const, to: "/" },
   { label: "Ask", icon: "sparkles" as const, to: "/ask" },
   { label: "Top Queries", icon: "observe" as const, to: "/top" },
+  { label: "Scan", icon: "search" as const, to: "/scan" },
   {
     label: "Query Registry",
     icon: "folder-file" as const,
@@ -117,6 +118,23 @@ export function Sidebar() {
             </Link>
           );
         })}
+        {import.meta.env.DEV && (
+          <Link
+            to="/dev-settings"
+            className={navItemStyles({ active: currentPath === '/dev-settings' })}
+          >
+            <Icon
+              name="test-tube"
+              label="Dev Settings"
+              className={`w-4 h-4 transition-transform group-hover:scale-110 ${
+                currentPath === '/dev-settings'
+                  ? "text-content-primary-soft"
+                  : "text-content-layout-3"
+              }`}
+            />
+            <span>Dev Settings</span>
+          </Link>
+        )}
       </nav>
 
       {/* Footer */}

@@ -8,6 +8,7 @@ context to LLM for better rewrite and index suggestions.
 import re
 from typing import Dict, Any, Set, List
 import os
+from lib.services.password_resolver import resolve_password_value
 
 
 def collect_all_tables_schema(target_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -59,12 +60,7 @@ def _collect_all_postgres_tables(target_config: Dict[str, Any]) -> Dict[str, Any
         port = target_config.get("port", 5432)
         user = target_config.get("user")
         database = target_config.get("database")
-        password_env = target_config.get("password_env")
-        password = (
-            os.environ.get(password_env)
-            if password_env
-            else target_config.get("password")
-        )
+        password = resolve_password_value(target_config)
 
         if not all([host, user, database, password]):
             return {
@@ -122,12 +118,7 @@ def _collect_all_mysql_tables(target_config: Dict[str, Any]) -> Dict[str, Any]:
         port = target_config.get("port", 3306)
         user = target_config.get("user")
         database = target_config.get("database")
-        password_env = target_config.get("password_env")
-        password = (
-            os.environ.get(password_env)
-            if password_env
-            else target_config.get("password")
-        )
+        password = resolve_password_value(target_config)
 
         if not all([host, user, database, password]):
             return {
@@ -277,8 +268,7 @@ def collect_engine_version(target_config: Dict[str, Any]) -> Dict[str, Any]:
     port = target_config.get("port")
     user = target_config.get("user")
     database = target_config.get("database")
-    password_env = target_config.get("password_env")
-    password = os.environ.get(password_env) if password_env else None
+    password = resolve_password_value(target_config)
 
     if not all([host, user, database, password]):
         return {
@@ -475,8 +465,7 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
         # Get password from environment
         import os
 
-        password_env = target_config.get("password_env")
-        password = os.environ.get(password_env) if password_env else None
+        password = resolve_password_value(target_config)
 
         if not all([host, user, database, password]):
             return "Schema information: Missing connection details"
@@ -590,8 +579,7 @@ def _collect_postgres_schema(
         # Get password from environment
         import os
 
-        password_env = target_config.get("password_env")
-        password = os.environ.get(password_env) if password_env else None
+        password = resolve_password_value(target_config)
 
         if not all([host, user, database, password]):
             return "Schema information: Missing connection details"

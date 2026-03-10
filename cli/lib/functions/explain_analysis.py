@@ -5,6 +5,7 @@ Executes EXPLAIN ANALYZE queries against target databases to gather
 actual execution plans and performance metrics for analysis.
 """
 
+import os
 import time
 import sys
 import signal
@@ -33,6 +34,26 @@ except ImportError:
 
 # Import shared cancellation utilities
 from lib.db_connection import cancel_postgres_by_pid, cancel_mysql_by_thread_id
+
+
+def _resolve_explain_password(target_config: Dict[str, Any]) -> str:
+    """Resolve passwords for EXPLAIN paths, keeping the legacy RDST_DB_PASSWORD fallback.
+"""
+    from lib.services.password_resolver import resolve_password_value
+
+    password = resolve_password_value(target_config)
+    if password:
+        return password
+
+    # An explicitly empty password means passwordless auth, not "try legacy env".
+    if target_config.get('password') == '':
+        return ''
+
+    password_env = (target_config.get('password_env') or '').strip()
+    if password_env:
+        return ''
+
+    return os.getenv('RDST_DB_PASSWORD', '')
 
 
 def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str, Any]:
@@ -159,12 +180,7 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
         }
 
     try:
-        import os
-
-        password = target_config.get('password')
-        if not password:
-            password_env = target_config.get('password_env', 'RDST_DB_PASSWORD')
-            password = os.getenv(password_env, '')
+        password = _resolve_explain_password(target_config)
 
         conn_params = {
             'host': target_config['host'],
@@ -514,13 +530,7 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
         }
 
     try:
-        import os
-
-        # Get password - either directly from config or from environment variable
-        password = target_config.get('password')
-        if not password:
-            password_env = target_config.get('password_env', 'RDST_DB_PASSWORD')
-            password = os.getenv(password_env, '')
+        password = _resolve_explain_password(target_config)
 
         conn_params = {
             'host': target_config['host'],

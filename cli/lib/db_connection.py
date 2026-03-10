@@ -53,9 +53,11 @@ def resolve_connection_params(target: Optional[str] = None, target_config: Optio
     tls = target_config.get('tls', False)
     read_only = target_config.get('read_only', False)
 
-    # Resolve password from environment variable or direct value
+    # Resolve password: config field -> env var -> keyring
+    from lib.services.password_resolver import resolve_password_value
+
     password_env = target_config.get('password_env')
-    password = os.environ.get(password_env) if password_env else target_config.get('password')
+    password = resolve_password_value(target_config)
 
     # Determine SSL mode for PostgreSQL
     sslmode = 'require' if tls else 'prefer'
@@ -107,10 +109,14 @@ def create_direct_connection(target_config: Dict[str, Any]):
     if not all([engine, host, port, user, database]):
         raise ValueError("Missing required connection parameters in target config")
 
-    # Get password from environment
-    password = os.environ.get(password_env) if password_env else None
-    if not password and password_env:
-        raise ValueError(f"Password environment variable '{password_env}' not set")
+    # Resolve password: config field -> env var -> keyring.
+    # Only reject when a password_env is configured but unresolved; some targets
+    # intentionally use passwordless auth and should pass an empty string through.
+    from lib.services.password_resolver import resolve_password_value
+
+    password = resolve_password_value(target_config)
+    if password == "" and password_env:
+        raise ValueError(f"Password not available for target (password_env='{password_env}')")
 
     if engine == 'postgresql':
         return _create_postgres_connection(host, port, user, password, database, use_tls)
@@ -214,11 +220,12 @@ def cancel_query(conn, engine: str, target_config: Optional[dict] = None) -> boo
             if not target_config:
                 return False
             thread_id = conn.thread_id()
+            from lib.services.password_resolver import resolve_password_value
             cancel_conn = _create_mysql_connection(
                 target_config['host'],
                 target_config['port'],
                 target_config['user'],
-                os.environ.get(target_config.get('password_env', '')),
+                resolve_password_value(target_config),
                 target_config['database']
             )
             try:
@@ -285,12 +292,13 @@ def cancel_mysql_by_thread_id(target_config: Dict[str, Any], thread_id: int, ver
     Returns:
         True if KILL QUERY was executed, False otherwise
     """
+    from lib.services.password_resolver import resolve_password_value
     try:
         cancel_conn = _create_mysql_connection(
             target_config['host'],
             target_config['port'],
             target_config['user'],
-            os.environ.get(target_config.get('password_env', '')),
+            resolve_password_value(target_config),
             target_config['database'],
             target_config.get('tls', False)
         )

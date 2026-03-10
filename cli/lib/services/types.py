@@ -1043,3 +1043,116 @@ class TrialStatusResult:
     remaining_tokens_display: Optional[str] = None
     limit_tokens_display: Optional[str] = None
     percent_remaining: Optional[int] = None
+
+
+# ============================================================================
+# Scan Types - Codebase ORM Query Scanning
+# ============================================================================
+
+
+@dataclass
+class ScanInput:
+    """Input for scan service."""
+
+    directory: str
+    target: str
+    source: str = "web"
+
+
+@dataclass
+class ScanOptions:
+    """Options for scan service execution."""
+
+    analyze: bool = False
+    shallow: bool = False
+    dry_run: bool = False
+    diff: Optional[str] = None
+    check: bool = False
+    warn_threshold: int = 60
+    fail_threshold: int = 40
+    file_pattern: Optional[str] = None
+    nosave: bool = False
+    sequential: bool = False
+
+
+# ============================================================================
+# Scan Event Types
+# ============================================================================
+
+
+@dataclass
+class ScanStatusEvent:
+    """Status update during scan."""
+
+    type: Literal["status"]
+    phase: str  # "config", "discovery", "extraction", "conversion", "registry", "analysis"
+    message: str
+
+
+@dataclass
+class ScanFilesFoundEvent:
+    """Files with ORM patterns discovered."""
+
+    type: Literal["files_found"]
+    files: List[Dict[str, Any]]
+    total: int
+
+
+@dataclass
+class ScanProgressEvent:
+    """Progress update within a scan phase."""
+
+    type: Literal["progress"]
+    phase: str
+    current: int
+    total: int
+    message: str
+
+
+@dataclass
+class ScanQueryResultEvent:
+    """Individual query result from scan."""
+
+    type: Literal["query_result"]
+    query: Dict[str, Any]
+
+
+@dataclass
+class ScanRegistryEvent:
+    """Registry save results."""
+
+    type: Literal["registry"]
+    new_queries: int
+    updated_queries: int
+    total_queries: int
+    skipped: bool
+    registry_path: str = ""
+
+
+@dataclass
+class ScanCompleteEvent:
+    """Scan completed."""
+
+    type: Literal["complete"]
+    success: bool
+    summary: Dict[str, Any]
+
+
+@dataclass
+class ScanErrorEvent:
+    """Scan error."""
+
+    type: Literal["error"]
+    message: str
+    phase: Optional[str] = None
+
+
+ScanEvent = Union[
+    ScanStatusEvent,
+    ScanFilesFoundEvent,
+    ScanProgressEvent,
+    ScanQueryResultEvent,
+    ScanRegistryEvent,
+    ScanCompleteEvent,
+    ScanErrorEvent,
+]

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import GuardConfig
+from lib.services.password_resolver import resolve_password_value
 
 logger = logging.getLogger(__name__)
 
@@ -500,8 +501,7 @@ def _get_postgres_cost(sql: str, config: dict[str, Any]) -> float | None:
         port = config.get("port", 5432)
         user = config.get("user") or config.get("username")
         database = config.get("database") or config.get("dbname")
-        password_env = config.get("password_env")
-        password = os.environ.get(password_env) if password_env else config.get("password")
+        password = resolve_password_value(config)
 
         conn = psycopg2.connect(
             host=host,
@@ -539,8 +539,7 @@ def _get_mysql_cost(sql: str, config: dict[str, Any]) -> float | None:
         port = config.get("port", 3306)
         user = config.get("user") or config.get("username")
         database = config.get("database") or config.get("dbname")
-        password_env = config.get("password_env")
-        password = os.environ.get(password_env) if password_env else config.get("password")
+        password = resolve_password_value(config)
 
         conn = pymysql.connect(
             host=host,
@@ -808,8 +807,7 @@ def _get_postgres_estimated_rows(sql: str, config: dict[str, Any]) -> float | No
         port = config.get("port", 5432)
         user = config.get("user") or config.get("username")
         database = config.get("database") or config.get("dbname")
-        password_env = config.get("password_env")
-        password = os.environ.get(password_env) if password_env else config.get("password")
+        password = resolve_password_value(config)
 
         conn = psycopg2.connect(
             host=host,
@@ -848,8 +846,7 @@ def _get_mysql_estimated_rows(sql: str, config: dict[str, Any]) -> float | None:
         port = config.get("port", 3306)
         user = config.get("user") or config.get("username")
         database = config.get("database") or config.get("dbname")
-        password_env = config.get("password_env")
-        password = os.environ.get(password_env) if password_env else config.get("password")
+        password = resolve_password_value(config)
 
         conn = pymysql.connect(
             host=host,

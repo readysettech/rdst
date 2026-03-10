@@ -64,7 +64,9 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     from .routes import (
         analyze,
         ask,
+        browse,
         configure,
+        dev,
         env,
         interactive,
         status,
@@ -76,9 +78,11 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         semantic_layer,
         report,
         trial,
+        scan,
     )
 
     app.include_router(analyze.router, prefix="/api")
+    app.include_router(browse.router, prefix="/api", tags=["browse"])
     app.include_router(ask.router, prefix="/api", tags=["ask"])
     app.include_router(configure.router, prefix="/api", tags=["configure"])
     app.include_router(interactive.router, prefix="/api", tags=["interactive"])
@@ -92,6 +96,8 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(semantic_layer.router, prefix="/api", tags=["semantic-layer"])
     app.include_router(report.router, prefix="/api", tags=["report"])
     app.include_router(trial.router, prefix="/api", tags=["trial"])
+    app.include_router(scan.router, prefix="/api", tags=["scan"])
+    app.include_router(dev.router, prefix="/api", tags=["dev"])
 
     @app.get("/health")
     async def health_check():

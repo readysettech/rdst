@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
 
 import { EnvSecretsDialog } from './EnvSecretsDialog';
 import { setEnvSecret } from '../lib/api';
@@ -14,7 +15,7 @@ vi.mock('../lib/api', async () => {
 });
 
 describe('EnvSecretsDialog', () => {
-  const renderWithClient = (ui: JSX.Element) => {
+  const renderWithClient = (ui: ReactElement) => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },

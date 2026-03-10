@@ -561,11 +561,9 @@ def start_readyset_container_direct(
         database = target_config.get('database', 'postgres')
         user = target_config.get('user', 'postgres')
 
-        # Get password - either directly or from environment variable
-        password = target_config.get('password', '')
-        password_env = target_config.get('password_env')
-        if password_env and not password:
-            password = os.getenv(password_env, '')
+        # Get password via resolver (config password → env var → keyring → empty)
+        from lib.services.password_resolver import resolve_password_value
+        password = resolve_password_value(target_config)
 
         # Determine the readyset_url protocol based on engine
         if engine == 'mysql':

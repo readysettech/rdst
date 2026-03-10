@@ -599,6 +599,28 @@ export async function fetchTrialStatus(): Promise<TrialStatusResponse> {
   return response.json();
 }
 
+// Browse (directory picker)
+
+export interface BrowseDirectoryEntry {
+  name: string;
+  path: string;
+}
+
+export interface BrowseResponse {
+  current: string;
+  parent: string | null;
+  directories: BrowseDirectoryEntry[];
+}
+
+export async function fetchBrowse(path?: string): Promise<BrowseResponse> {
+  const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : '/api/browse';
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to browse directory: ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function simulateTrialExhausted(): Promise<TrialSimulationResponse> {
   const response = await fetch('/api/trial/simulate/exhaust', {
     method: 'POST',
@@ -607,4 +629,82 @@ export async function simulateTrialExhausted(): Promise<TrialSimulationResponse>
     throw new Error(`Failed to simulate trial exhaustion: ${response.status}`);
   }
   return response.json();
+}
+
+export interface ClearKeyringResponse {
+  success: boolean;
+  cleared: string[];
+  missing: string[];
+  errors: string[];
+  message?: string;
+}
+
+type ClearKeyringErrorPayload = {
+  message?: string;
+  errors?: string[];
+  detail?: string | { msg?: string }[];
+};
+
+function formatClearKeyringErrorMessage(
+  payload: ClearKeyringErrorPayload | null | undefined,
+  fallback: string,
+ ): string {
+  if (!payload) return fallback;
+
+  const parts: string[] = [];
+
+  if (typeof payload.message === 'string' && payload.message.trim()) {
+    parts.push(payload.message.trim());
+  }
+
+  const errors = Array.isArray(payload.errors)
+    ? payload.errors.map((error) => error.trim()).filter(Boolean)
+    : [];
+  if (errors.length > 0) {
+    parts.push(errors.join(' '));
+  }
+
+  if (typeof payload.detail === 'string' && payload.detail.trim()) {
+    parts.push(payload.detail.trim());
+  }
+
+  if (Array.isArray(payload.detail)) {
+    const detailMessages = payload.detail
+      .map((detail) => (typeof detail?.msg === 'string' ? detail.msg.trim() : ''))
+      .filter(Boolean);
+    if (detailMessages.length > 0) {
+      parts.push(detailMessages.join(' '));
+    }
+  }
+
+  return parts.join(' ').trim() || fallback;
+}
+
+export async function clearKeyring(): Promise<ClearKeyringResponse> {
+  const response = await fetch('/api/dev/clear-keyring', { method: 'POST' });
+
+  let payload: ClearKeyringErrorPayload | ClearKeyringResponse | null = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      formatClearKeyringErrorMessage(
+        payload,
+        `Failed to clear keyring: ${response.status}`
+      )
+    );
+  }
+
+  const result = payload as ClearKeyringResponse | null;
+  if (!result?.success) {
+    throw new Error(
+      formatClearKeyringErrorMessage(result, 'Failed to clear keyring.')
+    );
+  }
+
+  return result;
 }

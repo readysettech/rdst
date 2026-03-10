@@ -102,11 +102,9 @@ class SchemaIntrospector:
 
     def _get_connection_params(self) -> dict:
         """Get connection parameters from config."""
-        # Password can be directly in config or from env var
-        password = self.config.get("password")
-        if not password:
-            password_env = self.config.get("password_env")
-            password = os.environ.get(password_env) if password_env else None
+        # Password resolved via shared resolver
+        from lib.services.password_resolver import resolve_password_value
+        password = resolve_password_value(self.config) or None
 
         return {
             "host": self.config.get("host"),

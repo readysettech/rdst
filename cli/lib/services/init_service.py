@@ -9,8 +9,8 @@ import os
 from lib.cli.rdst_cli import TargetsConfig
 from lib.llm_manager.claude_provider import AnthropicModel
 
-from .password_resolver import resolve_password
-from .anthropic_env import has_anthropic_api_key
+from .password_resolver import resolve_password, resolve_password_value
+from .anthropic_env import get_anthropic_source, has_anthropic_api_key
 from .types import (
     InitStatus,
     InitValidationResult,
@@ -41,7 +41,7 @@ class InitService:
         llm = cfg.get_llm_config() or {}
         provider = llm.get("provider")
         if provider == "claude":
-            return has_anthropic_api_key()
+            return has_anthropic_api_key(cfg=cfg)
         return False
 
     def _ensure_llm_provider_for_anthropic(self, cfg: Any) -> None:
@@ -54,7 +54,7 @@ class InitService:
         llm = cfg.get_llm_config() or {}
         if llm.get("provider"):
             return
-        if not has_anthropic_api_key():
+        if not has_anthropic_api_key(cfg=cfg):
             return
 
         cfg.set_llm_config(
@@ -141,11 +141,24 @@ class InitService:
         self._ensure_llm_provider_for_anthropic(cfg)
         llm = cfg.get_llm_config() or {}
         provider = llm.get("provider")
+        source = get_anthropic_source(cfg=cfg)
 
         if provider != "claude":
             return {"success": False, "error": "LLM not configured"}
 
-        if not has_anthropic_api_key():
+        if source == "trial_exhausted":
+            return {
+                "success": False,
+                "error": (
+                    "Trial credits exhausted.\n\n"
+                    "To continue using RDST:\n"
+                    "  1. Get your own key: https://console.anthropic.com/\n"
+                    '  2. Set it: export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
+                    "Want more trial credits? Email hello@readyset.io"
+                ),
+            }
+
+        if source == "missing":
             return {
                 "success": False,
                 "error": "Anthropic API key not set (ANTHROPIC_API_KEY or RDST_TRIAL_TOKEN). Run 'rdst init' to configure.",
@@ -185,10 +198,8 @@ class InitService:
         port = int(target.get("port") or 0)
         database = target.get("database")
         user = target.get("user")
-        password_env = target.get("password_env")
+        password = resolve_password_value(target) or None
         tls = bool(target.get("tls", False))
-
-        password = os.environ.get(password_env) if password_env else None
 
         if engine == "postgres" or engine == "psql":
             engine = "postgresql"
