@@ -109,7 +109,8 @@ run_cmd_pipe() {
   ) &
   local heartbeat_pid=$!
 
-  bash -lc "$command_string" 2>&1 | tee "$LAST_OUTPUT_FILE" || true
+  # Preserve PYTHONPATH so piped commands use the correct Python packages
+  env PYTHONPATH="$PYTHONPATH" bash -c "$command_string" 2>&1 | tee "$LAST_OUTPUT_FILE" || true
 
   kill $heartbeat_pid 2>/dev/null
   wait $heartbeat_pid 2>/dev/null || true

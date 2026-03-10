@@ -1,0 +1,60 @@
+# RDST Integration Test Databases
+#
+# PostgreSQL: localhost:15432
+# MySQL: localhost:13306
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: rdst-test-postgres
+    environment:
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: testdb
+    ports:
+      - "15432:5432"
+    volumes:
+      - ./init-scripts/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    command: >
+      postgres
+      -c fsync=off
+      -c synchronous_commit=off
+      -c full_page_writes=off
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+
+  mysql:
+    image: mysql:8.0
+    container_name: rdst-test-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpassword
+      MYSQL_DATABASE: testdb
+    ports:
+      - "13306:3306"
+    volumes:
+      - ./init-scripts/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "testuser", "-ptestpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --innodb-flush-log-at-trx-commit=0
+      --innodb-flush-method=nosync
+      --sync-binlog=0
+      --innodb-doublewrite=0
+      --performance-schema=ON
+      --slow-query-log=ON
+      --slow-query-log-file=/var/log/mysql/slow.log
+      --long-query-time=0
+      --log-output=TABLE

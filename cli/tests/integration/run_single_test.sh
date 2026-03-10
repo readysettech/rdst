@@ -53,9 +53,6 @@ if [[ "$DB_TYPE" == "mysql" && -z "${MYSQL_CONNECTION_STRING:-}" ]]; then
   exit 1
 fi
 
-# Dummy API_BASE_URL (not used when connection string is provided)
-export API_BASE_URL="${API_BASE_URL:-http://dummy-not-used}"
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source setup and helpers

@@ -83,14 +83,22 @@ run_test_suite() {
     # Interactive test (optional - may skip if TTY unavailable)
     test_top_interactive_flow
 
-    # Cache tests (create Readyset containers via analyze --readyset-cache)
-    test_cache_commands
+    # Cache tests (require ReadySet containers)
+    if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" ]]; then
+      test_cache_commands
 
-    # Cache subcommand tests (deploy ReadySet + cache add/show/delete/drop-all)
-    test_cache_subcommands
+      # Cache subcommand tests (deploy ReadySet + cache add/show/delete/drop-all)
+      test_cache_subcommands
 
-    # Readyset analysis tests (use containers from cache tests)
-    test_readyset_flag
+      # Readyset analysis tests (use containers from cache tests)
+      test_readyset_flag
+    else
+      echo ""
+      echo "=== SKIPPING: Cache tests (SKIP_READYSET_CACHE_TESTS=true) ==="
+      echo "  ReadySet containers cannot connect to databases inside Docker Compose."
+      echo "  To run cache tests, use a database accessible from the host network."
+      echo ""
+    fi
 
     # Query command tests
     test_query_commands

@@ -4,94 +4,98 @@ End-to-end integration tests for the RDST CLI tool, testing configuration, analy
 
 ## Quick Start
 
-### Run All Tests (Both PostgreSQL and MySQL)
+### Run Tests with Docker Compose
+
+Tests run against PostgreSQL and MySQL containers with pre-seeded test data:
+
 ```bash
-./run_tests.sh
+# Run all tests (PostgreSQL + MySQL)
+./run_tests_containerized.sh
+
+# Run single database
+./run_tests_containerized.sh postgresql
+./run_tests_containerized.sh mysql
 ```
 
-### Run Tests for Single Database
+This:
+1. Starts PostgreSQL and MySQL containers with IMDb test data
+2. Waits for health checks
+3. Runs the test suite
+4. Cleans up containers automatically
+
+**Requirements:**
+- Docker and Docker Compose
+- `ANTHROPIC_API_KEY` (optional, for LLM-dependent tests)
+
+### Manual Container Management
+
 ```bash
+# Start containers
+docker compose up -d
+
+# Wait for health checks (both should show "healthy")
+docker compose ps
+
+# Run tests with connection strings
+export PSQL_CONNECTION_STRING="postgresql://testuser:testpassword@localhost:15432/testdb"
+export MYSQL_CONNECTION_STRING="mysql://testuser:testpassword@localhost:13306/testdb"
 ./run_tests.sh postgresql
-./run_tests.sh mysql
+
+# Clean up
+docker compose down -v
 ```
 
-### Use Existing Database (Skip Container Creation)
-```bash
-PSQL_CONNECTION_STRING="postgresql://user:pass@host:port/db" ./run_tests.sh postgresql
-MYSQL_CONNECTION_STRING="mysql://user:pass@host:port/db" ./run_tests.sh mysql
-```
-
-### Test Against AL23 Binary Locally
+### Test Against AL23 Binary
 
 AL23 binaries are Linux binaries. On macOS, they run in a Docker container; on Linux, they run natively.
 
-#### Quick Start (macOS or Linux)
 ```bash
-# Set required environment variables
-export API_BASE_URL="https://api-dev01.apps.readyset.cloud"
-export ADMIN_API_TOKEN="your-admin-token"
-
-# Test both PostgreSQL and MySQL
-./rdst/tests/integration/test_al23_locally.sh
-
-# Or test single database
-./rdst/tests/integration/test_al23_locally.sh postgresql
-./rdst/tests/integration/test_al23_locally.sh mysql
-```
-
-#### Development Workflow (Build Once, Test Multiple Times)
-```bash
-# 1. Build AL23 binary once
+# Build AL23 binary
 ./rdst/orchestrate_rdst.sh al23
 
-# 2. Test repeatedly without rebuilding
-SKIP_BUILD=1 ./rdst/tests/integration/test_al23_locally.sh postgresql
+# Set up test database containers
+docker compose up -d
 
-# 3. Make code changes, rebuild, test again
-./rdst/orchestrate_rdst.sh al23
-SKIP_BUILD=1 ./rdst/tests/integration/test_al23_locally.sh postgresql
-```
-
-#### What `test_al23_locally.sh` Does
-1. **Builds AL23 binary** (unless `SKIP_BUILD=1`) via `orchestrate_rdst.sh`
-2. **Extracts binary** from RPM package (automatically skips if already extracted)
-3. **Runs tests** inside `amazonlinux:2023` container (on macOS) or natively (on Linux)
-4. **Uses host networking** so Readyset containers are accessible
-5. **Cleans up** test containers on completion
-
-#### Testing on Native Linux (Alternative)
-
-If you're already on Linux and want to test the binary directly without Docker:
-
-```bash
-# 1. Build the AL23 binary
-./rdst/orchestrate_rdst.sh al23
-
-# 2. Find the built binary
+# Find and export binary path
 BUILD_DIR=$(ls -td /tmp/rdst_build_* | head -1)
 export RDST_BINARY="$BUILD_DIR/usr/bin/rdst"
+export PSQL_CONNECTION_STRING="postgresql://testuser:testpassword@localhost:15432/testdb"
 
-# 3. Run tests directly
-./rdst/tests/integration/run_tests.sh postgresql
+# Run tests
+./run_tests.sh postgresql
+
+# Clean up
+docker compose down -v
 ```
 
 ## Test Structure
 
-The test suite is modular for better maintainability:
-
 ```
 tests/integration/
-├── run_tests.sh              # Main test runner
+├── run_tests.sh                  # Main test runner
+├── run_tests_containerized.sh    # Docker Compose test runner
+├── docker-compose.yml            # Database containers for local dev
+├── docker-compose.ci.yml         # CI version with test runner container
+├── init-scripts/                 # Database initialization
+│   ├── postgres/
+│   │   ├── 01-schema.sql
+│   │   └── 02-data.sql
+│   └── mysql/
+│       ├── 01-schema.sql
+│       └── 02-data.sql
 ├── lib/
-│   ├── setup.sh              # Environment setup and container management
-│   └── helpers.sh            # Assertions and utility functions
+│   ├── setup.sh                  # Environment setup
+│   └── helpers.sh                # Assertions and utility functions
 ├── tests/
-│   ├── test_config.sh        # Configuration command tests
-│   ├── test_analyze.sh       # Analyze command tests (including --readyset flag)
-│   ├── test_cache.sh         # Cache command tests
-│   ├── test_top_and_registry.sh  # Top, list, and registry tests
-│   └── test_errors.sh        # Error handling tests
-└── rdst_integration_tests.sh  # DEPRECATED: Old monolithic test file
+│   ├── test_config.sh            # Configuration command tests
+│   ├── test_analyze.sh           # Analyze command tests
+│   ├── test_cache.sh             # Cache command tests
+│   ├── test_top_and_registry.sh  # Top queries and registry tests
+│   ├── test_query_command.sh     # Query management tests
+│   ├── test_scan.sh              # ORM scanning tests
+│   └── test_errors.sh            # Error handling tests
+└── fixtures/
+    └── scan/                     # ORM fixture files for scan tests
 ```
 
 ## Test Coverage
@@ -107,7 +111,7 @@ tests/integration/
 - Tag-based query lookup
 - File and stdin input
 - Hash consistency (normalized structure hashing)
-- --readyset flag for parallel cacheability analysis
+- `--readyset-cache` flag for parallel cacheability analysis
 
 ### 3. Cache Commands
 - SQL text caching
@@ -119,7 +123,7 @@ tests/integration/
 ### 4. Top & List Commands
 - Query listing with limits
 - Top slow queries snapshot
-- Interactive query selection (rdst top --interactive)
+- Interactive query selection
 
 ### 5. Registry & Files
 - Query registry persistence
@@ -134,9 +138,11 @@ tests/integration/
 
 ## Environment Variables
 
-### Database Configuration
-- `PSQL_CONNECTION_STRING` - PostgreSQL connection string (skips container creation if set)
-- `MYSQL_CONNECTION_STRING` - MySQL connection string (skips container creation if set)
+### Database Configuration (Required)
+- `PSQL_CONNECTION_STRING` - PostgreSQL connection string
+- `MYSQL_CONNECTION_STRING` - MySQL connection string
+
+### Test Selection
 - `TEST_POSTGRESQL` - Enable PostgreSQL tests (default: true)
 - `TEST_MYSQL` - Enable MySQL tests (default: true)
 
@@ -144,19 +150,18 @@ tests/integration/
 - `PG_TARGET_NAME` - RDST target name for PostgreSQL (default: test-db-pg)
 - `MYSQL_TARGET_NAME` - RDST target name for MySQL (default: test-db-mysql)
 
-### Container Management
-- `API_BASE_URL` - Admin API URL for container creation (required, no default)
-- `ADMIN_API_TOKEN` - Admin API token for container creation (optional, required for creating containers)
-
-### RDST Binary Selection
-- `RDST_BINARY` - Path to compiled RDST binary (optional). When set, tests run against the binary instead of Python source. Used for testing AL23/RPM/DEB builds.
+### Binary Selection
+- `RDST_BINARY` - Path to compiled RDST binary (optional). When set, tests run against the binary instead of Python source.
 
 ### Python
 - `PYTHON_BIN` - Python binary to use (default: python3)
 
+### Cache Test Control
+- `SKIP_READYSET_CACHE_TESTS` - Skip cache tests (default: false). Set `true` in containerized mode since ReadySet can't reach DBs inside Docker from the host.
+
 ## CI/CD Integration
 
-The tests run automatically in Buildkite as part of the build pipeline:
+Tests run automatically in Buildkite as part of the build pipeline using Docker Compose:
 
 ### Test Suites
 1. **PostgreSQL Tests** - Tests Python source (pre-merge)
@@ -164,36 +169,30 @@ The tests run automatically in Buildkite as part of the build pipeline:
 3. **AL23 Integration Tests** - Tests compiled AL23 binary (post-build)
 
 ### Pipeline Flow
-1. Build AL23 binary (`orchestrate_rdst.sh al23`)
-2. Run integration tests against the binary
-3. Upload binary to S3 (if AWS credentials available)
+1. Spin up PostgreSQL/MySQL containers via Docker Compose
+2. Run integration tests
+3. Clean up containers
 
 All test suites:
-- Create database containers via admin API
+- Use local Docker containers (no external dependencies)
 - Run full test suite
-- Clean up containers on completion or failure
-- Have 30-minute timeout
+- Clean up on completion or failure
+- 20-minute timeout
 - Auto-retry on failure (up to 2 times)
 
 See `rdst/.buildkite/pipeline.yml` for pipeline configuration.
 
 ## Local Development
 
-### Prerequisites
-
-**For Python Source Testing:**
-- Docker (for Readyset containers created by cache tests)
-- Network access to admin API (or provide connection strings)
-
-**For AL23 Binary Testing:**
-- Docker (required on macOS; optional on Linux)
-- Network access to admin API (or provide connection strings)
-
 ### Running Specific Test Modules
 
-The modular structure allows you to run individual test modules during development:
-
 ```bash
+# Start containers first
+docker compose up -d
+
+# Set connection strings
+export PSQL_CONNECTION_STRING="postgresql://testuser:testpassword@localhost:15432/testdb"
+
 # Source the setup and helpers
 source lib/setup.sh
 source lib/helpers.sh
@@ -203,92 +202,46 @@ source tests/test_config.sh
 setup_upstream_databases
 set_db_context postgresql
 test_config_commands
+
+# Clean up
+docker compose down -v
 ```
 
 ### Debugging
 
-#### Python Source Tests
-Enable verbose output for troubleshooting:
+Enable verbose output:
 ```bash
-bash -x ./run_tests.sh postgresql
+bash -x ./run_tests_containerized.sh postgresql
 ```
 
-#### AL23 Binary Tests
-Check binary and test environment:
+View container logs:
 ```bash
-# Verify binary exists and size
-BUILD_DIR=$(ls -td /tmp/rdst_build_* | head -1)
-ls -lh $BUILD_DIR/usr/bin/rdst
-
-# Test binary directly
-$BUILD_DIR/usr/bin/rdst version
-$BUILD_DIR/usr/bin/rdst --help
-
-# Check Docker containers
-docker ps -a | grep rdst
-
-# View test container logs (if tests are running)
-docker logs -f <container-id>
+docker compose logs postgres
+docker compose logs mysql
 ```
 
-#### Common Issues
-- **S3 upload failures**: Ignored for local builds (warning only)
-- **Network errors**: Ensure `--network host` for AL23 container tests
-- **Missing libraries**: Rebuild with updated `build_rdst.sh` if adding dependencies
+Check container status:
+```bash
+docker compose ps
+```
 
-## AL23 Binary Build Details
+## Test Database
 
-The AL23 binary is built using Nuitka to compile Python to a standalone executable:
+The test containers are initialized with a subset of IMDb data:
+- `title_basics` - Movie/show information (~40 records)
+- `title_ratings` - Ratings data
 
-### Included in Binary
-- **RDST CLI code** - All Python source from `rdst/`
-- **Workflow JSON files** - Configuration files from `lib/workflows/`
-- **Database clients** - `psycopg2` and `pymysql` libraries
-- **Dependencies** - All packages from `requirements.txt`
-
-### Build Process
-1. **Docker image**: `readyset-rdst-builder-rpm-al23` (Amazon Linux 2023 with Nuitka)
-2. **Compilation**: Nuitka converts Python → C → native binary
-3. **Optimization**: LTO (Link-Time Optimization) enabled
-4. **Packaging**: FPM creates `.rpm.al23` package
-5. **Output**: Single 250-300MB executable at `/tmp/rdst_build_*/usr/bin/rdst`
-
-### Testing Strategy
-- **Python source**: Fast iteration during development
-- **AL23 binary**: Validates production deployment artifact
-- Both use the same test suite via `RDST_BINARY` environment variable
+This provides enough data for testing queries without large data volumes.
 
 ## Architecture
 
-### Container Management
-1. **Admin API Integration** - Creates PostgreSQL/MySQL containers on demand
-2. **Connection String Parsing** - Extracts credentials from connection URLs
-3. **Automatic Cleanup** - Removes all created containers on exit (success or failure)
-
-### Test Containers
-- **Upstream Database** - Created by admin API or user-provided
-- **Test Database** - Created by cache command for testing
-- **Readyset Container** - Created by cache command for performance testing
-
 ### Test Isolation
-- Each test run uses temporary HOME directory
+- Each test run uses a temporary HOME directory
 - Registry files are isolated per test run
 - Containers are cleaned up after each suite
-- Tests can run in parallel (PostgreSQL and MySQL simultaneously)
 
-## Migration from Old Test File
-
-The original `rdst_integration_tests.sh` (1193 lines) has been split into modular components:
-
-**Before:**
-- Single 1193-line file
-- Difficult to navigate and maintain
-- All functionality in one place
-
-**After:**
-- 6 focused modules (< 200 lines each)
-- Clear separation of concerns
-- Easier to add new tests
-- Better code reuse
-
-The old file is kept for reference but should not be modified. All new test development should use the modular structure.
+### Container Lifecycle
+1. `docker compose up -d` starts PostgreSQL and MySQL
+2. Health checks wait for databases to be ready
+3. Tests run against the containers
+4. `docker compose down -v` removes containers and volumes
