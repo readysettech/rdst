@@ -51,6 +51,11 @@ class TrialStatusResponse(BaseModel):
     percent_remaining: Optional[int] = None
 
 
+class TrialSimulationResponse(BaseModel):
+    success: bool
+    message: Optional[str] = None
+
+
 # --- Routes ---
 
 
@@ -112,3 +117,19 @@ async def get_trial_status(request: Request) -> TrialStatusResponse:
         limit_tokens_display=result.limit_tokens_display,
         percent_remaining=result.percent_remaining,
     )
+
+
+@router.post("/trial/simulate/exhaust")
+async def simulate_trial_exhaustion(request: Request) -> TrialSimulationResponse:
+    if not _is_loopback_request(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not _same_host_from_headers(request):
+        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+
+    from ...services.trial_service import TrialService
+
+    service = TrialService()
+    result = service.simulate_exhausted()
+    if not result.active and result.status == "exhausted":
+        return TrialSimulationResponse(success=True, message="Trial marked as exhausted for simulation.")
+    return TrialSimulationResponse(success=False, message="No active trial token found to simulate.")

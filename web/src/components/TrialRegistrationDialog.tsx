@@ -1,20 +1,28 @@
-import { useState } from 'react';
+import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import {
   Modal,
   ModalContent,
   ModalContentContainer,
   ModalDescription,
   ModalTitle,
-} from '@rs/ui-new/modal';
-import { Text } from '@rs/ui-new/text';
-import { Button } from '@rs/ui-new/button';
-import { BaseInputText } from '@rs/ui-new/base-input-text';
-import { Alert } from '@rs/ui-new/alert';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { Icon } from '@rs/ui-new/icon';
-import { registerTrial, activateTrial } from '../lib/api';
+} from "@rs/ui-new/modal";
+import { Text } from "@rs/ui-new/text";
+import { Button } from "@rs/ui-new/button";
+import { BaseInputText } from "@rs/ui-new/base-input-text";
+import { Alert } from "@rs/ui-new/alert";
+import { HStack, VStack } from "@rs/ui-new/stack";
+import { Icon } from "@rs/ui-new/icon";
+import { registerTrial, activateTrial } from "../lib/api";
 
-type Step = 'email' | 'verify' | 'success';
+type Step = "email" | "verify" | "success";
+type RegisterMutationData =
+  | { mode: "registered"; limitDisplay: string | null; emailTier: string | null }
+  | { mode: "already-registered" };
+
+type TrialMutationError = Error & {
+  didYouMean?: string;
+};
 
 interface TrialRegistrationDialogProps {
   isOpen: boolean;
@@ -27,27 +35,79 @@ export function TrialRegistrationDialog({
   onClose,
   onSuccess,
 }: TrialRegistrationDialogProps) {
-  const [step, setStep] = useState<Step>('email');
-  const [email, setEmail] = useState('');
-  const [token, setToken] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [didYouMean, setDidYouMean] = useState<string | null>(null);
-  const [limitDisplay, setLimitDisplay] = useState<string | null>(null);
-  const [emailTier, setEmailTier] = useState<string | null>(null);
-  // Track already-registered state to skip directly to token entry
-  const [alreadyRegistered, setAlreadyRegistered] = useState(false);
+  const [step, setStep] = useState<Step>("email");
+  const [email, setEmail] = useState("");
+  const [token, setToken] = useState("");
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const registerMutation = useMutation({
+    mutationFn: async (registerEmail: string): Promise<RegisterMutationData> => {
+      const result = await registerTrial(registerEmail);
+      if (result.success) {
+        return {
+          mode: "registered",
+          limitDisplay: result.limit_display ?? null,
+          emailTier: result.email_tier ?? null,
+        };
+      }
+      if (result.error_code === "ALREADY_REGISTERED") {
+        return { mode: "already-registered" };
+      }
+      const error = new Error(result.detail ?? "Registration failed.") as TrialMutationError;
+      error.didYouMean = result.did_you_mean ?? undefined;
+      throw error;
+    },
+    onSuccess: () => {
+      setStep("verify");
+    },
+  });
+  const activateMutation = useMutation({
+    mutationFn: ({
+      token,
+      email,
+      emailTier,
+    }: {
+      token: string;
+      email: string;
+      emailTier?: string | null;
+    }) =>
+      activateTrial(token, email, emailTier ?? undefined).then((result) => {
+        if (!result.success) {
+          throw new Error(result.message ?? "Activation failed.");
+        }
+        return result;
+      }),
+    onSuccess: () => {
+      setStep("success");
+      onSuccess?.();
+    },
+  });
+  const loading = registerMutation.isPending || activateMutation.isPending;
+  const registerError =
+    registerMutation.error instanceof Error ? registerMutation.error : null;
+  const activateError =
+    activateMutation.error instanceof Error ? activateMutation.error : null;
+  const errorMessage = validationError ?? activateError?.message ?? registerError?.message ?? null;
+  const didYouMean =
+    registerError && "didYouMean" in registerError
+      ? (registerError as TrialMutationError).didYouMean ?? null
+      : null;
+  const alreadyRegistered = registerMutation.data?.mode === "already-registered";
+  const limitDisplay =
+    registerMutation.data?.mode === "registered"
+      ? registerMutation.data.limitDisplay
+      : null;
+  const emailTier =
+    registerMutation.data?.mode === "registered"
+      ? registerMutation.data.emailTier
+      : null;
 
   const reset = () => {
-    setStep('email');
-    setEmail('');
-    setToken('');
-    setLoading(false);
-    setError(null);
-    setDidYouMean(null);
-    setLimitDisplay(null);
-    setEmailTier(null);
-    setAlreadyRegistered(false);
+    setStep("email");
+    setEmail("");
+    setToken("");
+    setValidationError(null);
+    registerMutation.reset();
+    activateMutation.reset();
   };
 
   const handleClose = () => {
@@ -55,70 +115,38 @@ export function TrialRegistrationDialog({
     onClose();
   };
 
-  const handleRegister = async () => {
-    if (!email || !email.includes('@')) {
-      setError('Please enter a valid email address.');
+  const handleRegister = () => {
+    if (!email || !email.includes("@")) {
+      setValidationError("Please enter a valid email address.");
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    setDidYouMean(null);
-
-    try {
-      const result = await registerTrial(email);
-
-      if (result.success) {
-        setLimitDisplay(result.limit_display ?? null);
-        setEmailTier(result.email_tier ?? null);
-        setStep('verify');
-      } else if (result.error_code === 'ALREADY_REGISTERED') {
-        // Let them enter a token
-        setAlreadyRegistered(true);
-        setStep('verify');
-      } else {
-        setError(result.detail ?? 'Registration failed.');
-        if (result.did_you_mean) {
-          setDidYouMean(result.did_you_mean);
-        }
-      }
-    } catch {
-      setError('Unable to reach the trial service. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    setValidationError(null);
+    registerMutation.reset();
+    activateMutation.reset();
+    registerMutation.mutate(email);
   };
 
-  const handleActivate = async () => {
+  const handleActivate = () => {
     if (!token || token.trim().length < 10) {
-      setError('Please paste a valid trial token (at least 10 characters).');
+      setValidationError("Please paste a valid trial token (at least 10 characters).");
       return;
     }
 
-    setLoading(true);
-    setError(null);
-
-    try {
-      const result = await activateTrial(token.trim(), email, emailTier ?? undefined);
-
-      if (result.success) {
-        setStep('success');
-        onSuccess?.();
-      } else {
-        setError(result.message ?? 'Activation failed.');
-      }
-    } catch {
-      setError('Failed to activate trial. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    setValidationError(null);
+    activateMutation.reset();
+    activateMutation.mutate({
+      token: token.trim(),
+      email,
+      emailTier,
+    });
   };
 
   const handleDidYouMean = () => {
     if (didYouMean) {
       setEmail(didYouMean);
-      setDidYouMean(null);
-      setError(null);
+      setValidationError(null);
+      registerMutation.reset();
     }
   };
 
@@ -139,14 +167,14 @@ export function TrialRegistrationDialog({
               </div>
               <VStack className="gap-0.5 items-start">
                 <Text level="headline-4" className="text-content-layout-1">
-                  {step === 'email' && 'Start Free Trial'}
-                  {step === 'verify' && 'Check Your Email'}
-                  {step === 'success' && 'Trial Activated'}
+                  {step === "email" && "Start Free Trial"}
+                  {step === "verify" && "Check Your Email"}
+                  {step === "success" && "Trial Activated"}
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
-                  {step === 'email' && 'Get free AI analysis credits — no credit card required.'}
-                  {step === 'verify' && 'Paste the trial token from the verification email.'}
-                  {step === 'success' && 'Your free trial is ready to use.'}
+                  {step === "email" && "Get free AI analysis credits — no credit card required."}
+                  {step === "verify" && "Paste the trial token from the verification email."}
+                  {step === "success" && "Your free trial is ready to use."}
                 </Text>
               </VStack>
             </HStack>
@@ -154,9 +182,9 @@ export function TrialRegistrationDialog({
 
           {/* Content */}
           <div className="p-6 space-y-4">
-            {error && <Alert variant="negative" modifier="outline" label={error} />}
+            {errorMessage && <Alert variant="negative" modifier="outline" label={errorMessage} />}
 
-            {step === 'email' && (
+            {step === "email" && (
               <>
                 <div className="space-y-1">
                   <Text as="label" level="label-small" className="text-content-layout-2 block">
@@ -173,7 +201,7 @@ export function TrialRegistrationDialog({
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@company.com"
                     disabled={loading}
-                    onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
+                    onKeyDown={(e) => e.key === "Enter" && handleRegister()}
                   />
                   <Text level="caption" className="text-content-layout-3">
                     Business emails get more credits. We only use this to send the trial token.
@@ -191,7 +219,7 @@ export function TrialRegistrationDialog({
               </>
             )}
 
-            {step === 'verify' && (
+            {step === "verify" && (
               <>
                 {!alreadyRegistered && (
                   <div className="rounded-lg bg-surface-positive-soft/20 border border-border-positive-soft px-4 py-3">
@@ -202,7 +230,7 @@ export function TrialRegistrationDialog({
                       {limitDisplay && (
                         <Text level="body-small" className="text-content-layout-2">
                           Your trial credit: {limitDisplay}
-                          {emailTier === 'business' ? ' (business email)' : ' (personal email)'}
+                          {emailTier === "business" ? " (business email)" : " (personal email)"}
                         </Text>
                       )}
                     </VStack>
@@ -248,21 +276,25 @@ export function TrialRegistrationDialog({
                     data-1p-ignore="true"
                     data-lpignore="true"
                     data-form-type="other"
-                    style={{ WebkitTextSecurity: 'disc' } as React.CSSProperties}
+                    style={{ WebkitTextSecurity: "disc" } as React.CSSProperties}
                     value={token}
                     onChange={(e) => setToken(e.target.value)}
                     placeholder="Paste your trial token here"
                     disabled={loading}
-                    onKeyDown={(e) => e.key === 'Enter' && handleActivate()}
+                    onKeyDown={(e) => e.key === "Enter" && handleActivate()}
                   />
                 </div>
               </>
             )}
 
-            {step === 'success' && (
+            {step === "success" && (
               <div className="py-4 flex flex-col items-center text-center gap-3">
                 <div className="w-14 h-14 rounded-2xl bg-surface-positive-soft flex items-center justify-center">
-                  <Icon name="tick" label="Success" className="w-7 h-7 text-content-positive-soft" />
+                  <Icon
+                    name="tick"
+                    label="Success"
+                    className="w-7 h-7 text-content-positive-soft"
+                  />
                 </div>
                 <VStack className="gap-1 items-center">
                   <Text level="subtitle-2" className="text-content-layout-1">
@@ -279,7 +311,7 @@ export function TrialRegistrationDialog({
           {/* Footer */}
           <div className="px-6 py-4 border-t border-border-layout-1 bg-surface-layout-2/40">
             <HStack className="justify-end gap-3 items-center w-full">
-              {step !== 'success' && (
+              {step !== "success" && (
                 <Button
                   variant="primary"
                   modifier="ghost"
@@ -289,7 +321,7 @@ export function TrialRegistrationDialog({
                 />
               )}
 
-              {step === 'email' && (
+              {step === "email" && (
                 <Button
                   variant="rising"
                   label="Start Free Trial"
@@ -301,7 +333,7 @@ export function TrialRegistrationDialog({
                 />
               )}
 
-              {step === 'verify' && (
+              {step === "verify" && (
                 <Button
                   variant="rising"
                   label="Activate"
@@ -313,12 +345,8 @@ export function TrialRegistrationDialog({
                 />
               )}
 
-              {step === 'success' && (
-                <Button
-                  variant="primary"
-                  label="Done"
-                  onClick={handleClose}
-                />
+              {step === "success" && (
+                <Button variant="primary" label="Done" onClick={handleClose} />
               )}
             </HStack>
           </div>

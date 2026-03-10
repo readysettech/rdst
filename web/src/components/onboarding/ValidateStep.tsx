@@ -10,7 +10,8 @@ import { m, AnimatePresence } from "@rs/ui-new/motion";
 import type { ValidationResult } from "../../types/onboarding";
 import { EnvSecretsDialog } from "../EnvSecretsDialog";
 import { TrialRegistrationDialog } from "../TrialRegistrationDialog";
-import { fetchEnvRequirements, fetchStatus, type EnvRequirement } from "../../lib/api";
+import { fetchEnvRequirements, type EnvRequirement } from "../../lib/api";
+import { invalidateTrialRelatedQueries } from "../../lib/trialQueries";
 
 interface ValidateStepProps {
   targetNames: string[];
@@ -37,12 +38,6 @@ export function ValidateStep({
   const { data: envRequirements } = useQuery({
     queryKey: ["env-requirements"],
     queryFn: fetchEnvRequirements,
-    staleTime: 30000,
-    retry: 1,
-  });
-  useQuery({
-    queryKey: ["status"],
-    queryFn: fetchStatus,
     staleTime: 30000,
     retry: 1,
   });
@@ -421,9 +416,7 @@ export function ValidateStep({
         requirements={dialogRequirements}
         keyringAvailable={envRequirements?.keyring_available ?? false}
         onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ["status"] });
-          queryClient.invalidateQueries({ queryKey: ["init-status"] });
-          queryClient.invalidateQueries({ queryKey: ["env-requirements"] });
+          void invalidateTrialRelatedQueries(queryClient);
           onRun();
         }}
       />
@@ -431,10 +424,7 @@ export function ValidateStep({
         isOpen={showTrialDialog}
         onClose={() => setShowTrialDialog(false)}
         onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ["status"] });
-          queryClient.invalidateQueries({ queryKey: ["init-status"] });
-          queryClient.invalidateQueries({ queryKey: ["env-requirements"] });
-          queryClient.invalidateQueries({ queryKey: ["trial-status"] });
+          void invalidateTrialRelatedQueries(queryClient);
           setShowTrialDialog(false);
           onRun();
         }}

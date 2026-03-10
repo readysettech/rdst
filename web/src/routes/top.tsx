@@ -4,14 +4,13 @@
 
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState, useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Text } from '@rs/ui-new/text';
 import { Show } from '@rs/ui-new/show';
 import { TargetLockNotice } from '../components';
 import { useTarget } from '../hooks/useTarget';
 import { useTop } from '../lib/useTop';
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
-import { addQueryToRegistry } from '../lib/api';
+import { useQueryRegistry } from '../lib/useQueryRegistry';
 import {
   TopFilters,
   TopHeader,
@@ -28,7 +27,7 @@ export const Route = createFileRoute('/top')({
 
 function TopPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
+  const { addMutation: addQueryMutation } = useQueryRegistry();
   const { target } = useTarget();
   const passwordLock = useTargetPasswordLock(target);
 
@@ -134,17 +133,17 @@ function TopPage() {
   const handleSaveAll = useCallback(async () => {
     if (!target || queries.length === 0) return;
 
-    for (const query of queries) {
-      if (!savedHashes.has(query.query_hash)) {
-        try {
-          await addQueryToRegistry(query.query_text, target);
-        } catch (err) {
-          console.error('Failed to save query:', err);
-        }
-      }
-    }
-    queryClient.invalidateQueries({ queryKey: ['queryRegistry'] });
-  }, [target, queries, savedHashes, queryClient]);
+    const unsavedQueries = queries.filter((query) => !savedHashes.has(query.query_hash));
+
+    const saves = unsavedQueries.map((query) =>
+      addQueryMutation.mutateAsync({
+        sql: query.query_text,
+        target,
+      }),
+    );
+
+    await Promise.allSettled(saves);
+  }, [target, queries, savedHashes, addQueryMutation]);
 
   // Reset when mode changes
   const handleModeChange = useCallback(

@@ -12,7 +12,9 @@ from .secret_store_service import SecretStoreService
 class EnvRequirementsService:
     """Build readiness model for required env vars."""
 
-    ANTHROPIC_ACCEPTED_NAMES = ["ANTHROPIC_API_KEY", "RDST_TRIAL_TOKEN"]
+    ANTHROPIC_API_KEY_NAME = "ANTHROPIC_API_KEY"
+    TRIAL_TOKEN_NAME = "RDST_TRIAL_TOKEN"
+    ANTHROPIC_ACCEPTED_NAMES = [ANTHROPIC_API_KEY_NAME, TRIAL_TOKEN_NAME]
 
     def __init__(self, secret_store: SecretStoreService | None = None):
         self.secret_store = secret_store or SecretStoreService()
@@ -24,9 +26,8 @@ class EnvRequirementsService:
         cfg.load()
         return cfg
 
-    def _target_env_mapping(self) -> Dict[str, Dict[str, Any]]:
+    def _target_env_mapping(self, cfg: Any) -> Dict[str, Dict[str, Any]]:
         """Return {password_env: {"targets": [...], "target_data": <first target's data>}}."""
-        cfg = self._load_config()
         mapping: Dict[str, Dict[str, Any]] = {}
 
         for target in cfg.list_targets():
@@ -40,13 +41,16 @@ class EnvRequirementsService:
 
         return mapping
 
-    def _resolve_anthropic_source(self) -> str:
-        if any(os.environ.get(name) for name in self.ANTHROPIC_ACCEPTED_NAMES):
+    def _resolve_anthropic_source(self, cfg: Any) -> str:
+        if os.environ.get(self.ANTHROPIC_API_KEY_NAME):
             return "process_env"
-        if any(self.secret_store.get_secret(name) for name in self.ANTHROPIC_ACCEPTED_NAMES):
+        if self.secret_store.get_secret(self.ANTHROPIC_API_KEY_NAME):
             return "secure_store"
+        if os.environ.get(self.TRIAL_TOKEN_NAME):
+            return "trial"
+        if self.secret_store.get_secret(self.TRIAL_TOKEN_NAME):
+            return "trial"
         try:
-            cfg = self._load_config()
             if cfg.is_trial_active():
                 return "trial"
             trial = cfg.get_trial_config()
@@ -57,8 +61,9 @@ class EnvRequirementsService:
         return "missing"
 
     def get_requirements(self) -> List[Dict[str, Any]]:
+        cfg = self._load_config()
         requirements: List[Dict[str, Any]] = []
-        mapping = self._target_env_mapping()
+        mapping = self._target_env_mapping(cfg)
 
         for env_name in sorted(mapping.keys()):
             entry = mapping[env_name]
@@ -74,7 +79,7 @@ class EnvRequirementsService:
                 }
             )
 
-        anthropic_source = self._resolve_anthropic_source()
+        anthropic_source = self._resolve_anthropic_source(cfg)
         requirements.append(
             {
                 "kind": "anthropic_api_key",
@@ -88,8 +93,9 @@ class EnvRequirementsService:
         return requirements
 
     def get_allowed_secret_names(self) -> List[str]:
+        cfg = self._load_config()
         names = set(self.ANTHROPIC_ACCEPTED_NAMES)
-        names.update(self._target_env_mapping().keys())
+        names.update(self._target_env_mapping(cfg).keys())
         return sorted(names)
 
     def get_required_names_for_restore(self) -> List[str]:

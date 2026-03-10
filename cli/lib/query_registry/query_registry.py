@@ -16,11 +16,29 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 import toml
 import sqlglot
+import sqlparse
 from sqlglot.errors import ParseError
 
 from lib.data_manager_service.data_manager_service_command_sets import MAX_QUERY_LENGTH
 
 logger = logging.getLogger(__name__)
+
+
+def canonicalize_sql(sql: str) -> str:
+    """
+    Strip comments and normalize whitespace while preserving statement structure.
+
+    This keeps meaningful newlines intact so comment-prefixed queries captured from
+    `rdst top` remain parseable after comment removal.
+    """
+    if not sql or not sql.strip():
+        return ""
+
+    stripped = sqlparse.format(sql, strip_comments=True)
+    stripped = stripped.replace("\r\n", "\n").replace("\r", "\n")
+    stripped = re.sub(r"[ \t\f\v]+", " ", stripped)
+    stripped = re.sub(r" *\n *", "\n", stripped)
+    return stripped.strip()
 
 
 def verify_query_completeness(
@@ -39,10 +57,11 @@ def verify_query_completeness(
     Returns:
         Tuple of (is_valid, error_message). If is_valid is True, error_message is None.
     """
-    if not sql or not sql.strip():
+    canonical_sql = canonicalize_sql(sql)
+    if not canonical_sql:
         return False, "Empty query"
 
-    stripped = sql.strip()
+    stripped = canonical_sql.strip()
     upper_sql = stripped.upper()
 
     truncation_suffixes = (
@@ -77,7 +96,7 @@ def verify_query_completeness(
             return False, f"Query appears truncated (ends with '{suffix.strip()}')"
 
     try:
-        sqlglot.parse_one(sql, dialect=dialect)
+        sqlglot.parse_one(canonical_sql, dialect=dialect)
         return True, None
     except ParseError as e:
         error_str = str(e).lower()
@@ -104,7 +123,11 @@ def normalize_sql(query: str, dialect: str = None) -> str:
     """
     from .sql_normalizer import normalize_and_extract
 
-    normalized, _ = normalize_and_extract(query, dialect)
+    canonical_query = canonicalize_sql(query)
+    if not canonical_query:
+        return ""
+
+    normalized, _ = normalize_and_extract(canonical_query, dialect)
     return normalized
 
 
@@ -723,8 +746,10 @@ class QueryRegistry:
         if not self._loaded:
             self.load()
 
+        canonical_sql = canonicalize_sql(sql)
+
         # Enforce 4KB size limit for registry storage
-        query_bytes = len(sql.encode("utf-8")) if sql else 0
+        query_bytes = len(canonical_sql.encode("utf-8")) if canonical_sql else 0
 
         if query_bytes > MAX_QUERY_LENGTH:
             raise ValueError(
@@ -733,7 +758,7 @@ class QueryRegistry:
                 "Use 'rdst analyze --large-query-bypass' for one-time analysis of large queries."
             )
 
-        is_valid, parse_error = verify_query_completeness(sql, dialect)
+        is_valid, parse_error = verify_query_completeness(canonical_sql, dialect)
         if not is_valid:
             raise ValueError(
                 f"Query appears truncated. {parse_error}\n"
@@ -744,11 +769,11 @@ class QueryRegistry:
         # Use SQLGlot for robust normalization and parameter extraction
         if skip_param_extraction:
             # For pre-parameterized queries (from scan), skip extraction
-            normalized_sql = sql
+            normalized_sql = canonical_sql
             params = {}
         else:
-            normalized_sql, params = normalize_and_extract(sql, dialect)
-        query_hash = hash_sql(sql)
+            normalized_sql, params = normalize_and_extract(canonical_sql, dialect)
+        query_hash = hash_sql(canonical_sql)
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         # Convert new params format to simple values for auto-substitution

@@ -7,10 +7,12 @@ source selection, fallback handling, and real-time streaming.
 
 import asyncio
 import pytest
+import pandas as pd
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from typing import Any, Dict, List, Optional
 
 # Import from lib package (conftest.py adds rdst root to path)
+from lib.data_manager_service.data_manager_service_command_sets import COMMAND_SETS
 from lib.services.types import (
     TopInput,
     TopOptions,
@@ -422,6 +424,45 @@ class TestTopServiceCommandSets:
         """Test command set for invalid combination raises ValueError."""
         with pytest.raises(ValueError):
             service._get_command_set_for_source("invalid", "invalid")
+
+    def test_raw_query_command_sets_preserve_newlines(self, service):
+        """Top command sets should not flatten whitespace for raw SQL sources."""
+        assert "LEFT(query, 4096) as query_text" in COMMAND_SETS["rdst_top_pg_stat"][
+            "commands"
+        ]["pg_stat_queries"]["query"]
+        assert "LEFT(query, 4096) as query_text" in COMMAND_SETS["rdst_top_pg_activity"][
+            "commands"
+        ]["pg_activity_queries"]["query"]
+        assert "LEFT(INFO, 4096) as query_text" in COMMAND_SETS[
+            "rdst_top_mysql_activity"
+        ]["commands"]["mysql_activity_queries"]["query"]
+        assert "LEFT(sql_text, 4096) as query_text" in COMMAND_SETS[
+            "rdst_top_mysql_slowlog"
+        ]["commands"]["mysql_slowlog_queries"]["query"]
+
+    def test_process_top_data_preserves_multiline_query_text(self, service):
+        """Top processing should keep raw multiline SQL intact."""
+        df = pd.DataFrame(
+            [
+                {
+                    "query_text": "-- note\nSELECT * FROM users WHERE id = 1",
+                    "calls": 3,
+                    "total_time": 1.5,
+                    "mean_time": 0.5,
+                    "pct_load": 75.0,
+                }
+            ]
+        )
+
+        result = service._process_top_data(
+            {"success": True, "data": df},
+            "pg_stat",
+            limit=10,
+            sort="total_time",
+            filter_pattern=None,
+        )
+
+        assert result[0]["query_text"] == "-- note\nSELECT * FROM users WHERE id = 1"
 
 
 class TestTopServiceEventTypes:

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import {
   Modal,
   ModalContent,
@@ -23,6 +24,7 @@ interface EnvSecretsDialogProps {
   keyringAvailable: boolean;
   onSuccess?: () => void;
   onTrialRegister?: () => void;
+  showManualAnthropicInput?: boolean;
 }
 
 interface MissingEntry {
@@ -59,72 +61,92 @@ export function EnvSecretsDialog({
   keyringAvailable,
   onSuccess,
   onTrialRegister,
+  showManualAnthropicInput = false,
 }: EnvSecretsDialogProps) {
-  const entries = useMemo(() => toMissingEntries(requirements), [requirements]);
+  const entries = useMemo(() => {
+    const missingEntries = toMissingEntries(requirements);
+    if (missingEntries.length > 0 || !showManualAnthropicInput) {
+      return missingEntries;
+    }
+    return [
+      {
+        key: "anthropic_api_key:ANTHROPIC_API_KEY:global",
+        envName: "ANTHROPIC_API_KEY",
+        label: "Anthropic API Key",
+        hint: "Set ANTHROPIC_API_KEY. Also accepted: RDST_TRIAL_TOKEN.",
+      },
+    ];
+  }, [requirements, showManualAnthropicInput]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [persist, setPersist] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [resultMessage, setResultMessage] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const wasOpenRef = useRef(false);
+  type EnvSecretPayload = { name: string; value: string; persist: boolean };
+  const setEnvSecretMutation = useMutation({
+    mutationFn: async (payloads: EnvSecretPayload[]) => {
+      let resolvedResultMessage: string | null = null;
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const nextValues: Record<string, string> = {};
-    for (const entry of entries) {
-      nextValues[entry.envName] = '';
-    }
-    setValues(nextValues);
-    setPersist(true);
-    setError(null);
-    setResultMessage(null);
-  }, [isOpen, entries]);
-
-  const handleSubmit = async () => {
-    const payloads = entries
-      .map((entry) => ({
-        name: entry.envName,
-        value: (values[entry.envName] || '').trim(),
-      }))
-      .filter((item) => item.value.length > 0);
-
-    if (payloads.length === 0) {
-      setError('Enter at least one secret value before saving.');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setResultMessage(null);
-
-    try {
       for (const payload of payloads) {
-        const response = await setEnvSecret({
-          name: payload.name,
-          value: payload.value,
-          persist,
-        });
+        const response = await setEnvSecret(payload);
         if (!response.success) {
           throw new Error(response.message || `Failed to set ${payload.name}`);
         }
         if (response.session_only) {
-          setResultMessage(response.message || 'Saved for this session only.');
+          resolvedResultMessage = response.message || 'Saved for this session only.';
         }
       }
 
-      if (!resultMessage) {
-        setResultMessage(
-          persist && keyringAvailable
+      return {
+        resultMessage:
+          resolvedResultMessage ??
+          (payloads.length > 0 && payloads[0].persist && keyringAvailable
             ? 'Secrets saved securely and applied.'
-            : 'Secrets applied to this RDST web session.'
-        );
-      }
+            : 'Secrets applied to this RDST web session.'),
+      };
+    },
+    onSuccess: () => {
       onSuccess?.();
       onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save secrets.');
-    } finally {
-      setLoading(false);
+    },
+  });
+  const mutationError =
+    setEnvSecretMutation.error instanceof Error
+      ? setEnvSecretMutation.error.message
+      : null;
+  const errorMessage = validationError ?? mutationError;
+  const resultMessage = setEnvSecretMutation.data?.resultMessage ?? null;
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      const nextValues: Record<string, string> = {};
+      for (const entry of entries) {
+        nextValues[entry.envName] = '';
+      }
+      setValues(nextValues);
+      setPersist(true);
+      setValidationError(null);
+      setEnvSecretMutation.reset();
     }
+    wasOpenRef.current = isOpen;
+  }, [isOpen, entries]);
+
+  const handleSubmit = () => {
+    const payloads = entries
+      .map((entry) => ({
+        name: entry.envName,
+        value: (values[entry.envName] || '').trim(),
+        persist,
+      }))
+      .filter((item) => item.value.length > 0);
+
+    if (payloads.length === 0) {
+      setValidationError('Enter at least one secret value before saving.');
+      return;
+    }
+
+    setValidationError(null);
+    setEnvSecretMutation.reset();
+    setEnvSecretMutation.mutate(payloads);
   };
 
   return (
@@ -160,7 +182,7 @@ export function EnvSecretsDialog({
               />
             )}
 
-            {error && <Alert variant="negative" modifier="outline" label={error} />}
+            {errorMessage && <Alert variant="negative" modifier="outline" label={errorMessage} />}
 
             {entries.length === 0 ? (
               <Alert variant="positive" modifier="outline" label="No missing secrets." />
@@ -171,7 +193,7 @@ export function EnvSecretsDialog({
                     <Text as="label" level="label-small" className="text-content-layout-2 block">
                       {entry.label}
                     </Text>
-                    <BaseInputText
+                  <BaseInputText
                       type="text"
                       name={`rdst-secret-${index}`}
                       autoComplete="off"
@@ -191,7 +213,7 @@ export function EnvSecretsDialog({
                         }))
                       }
                       placeholder={`Enter value for ${entry.envName}`}
-                      disabled={loading}
+                      disabled={setEnvSecretMutation.isPending}
                     />
                     <Text level="caption" className="text-content-layout-3">
                       {entry.hint}
@@ -229,7 +251,7 @@ export function EnvSecretsDialog({
                 name="persist"
                 checked={persist}
                 onCheckedChange={setPersist}
-                disabled={loading}
+                disabled={setEnvSecretMutation.isPending}
               />
             </div>
 
@@ -245,7 +267,7 @@ export function EnvSecretsDialog({
                 modifier="ghost"
                 label="Cancel"
                 onClick={onClose}
-                disabled={loading}
+                disabled={setEnvSecretMutation.isPending}
               />
               <Button
                 variant="rising"
@@ -253,8 +275,8 @@ export function EnvSecretsDialog({
                 icon="tick"
                 iconPosition="right"
                 onClick={handleSubmit}
-                loading={loading}
-                disabled={entries.length === 0 || loading}
+                loading={setEnvSecretMutation.isPending}
+                disabled={entries.length === 0 || setEnvSecretMutation.isPending}
               />
             </HStack>
           </div>

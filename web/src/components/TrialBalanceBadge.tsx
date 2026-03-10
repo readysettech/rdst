@@ -1,28 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
 import { Text } from '@rs/ui-new/text';
 import { Icon } from '@rs/ui-new/icon';
 import { HStack, VStack } from '@rs/ui-new/stack';
-import { fetchTrialStatus, fetchEnvRequirements } from '../lib/api';
+import { useTrialSource } from '../lib/trialQueries';
 
 export function TrialBalanceBadge() {
-  const { data: envRequirements } = useQuery({
-    queryKey: ['env-requirements'],
-    queryFn: fetchEnvRequirements,
-    staleTime: 30000,
-    retry: 1,
-  });
+  const { isTrialSource, trialStatus } = useTrialSource();
 
-  const anthropicSource = envRequirements?.requirements.find(
-    (r) => r.kind === 'anthropic_api_key',
-  )?.source;
-
-  const { data: trialStatus } = useQuery({
-    queryKey: ['trial-status'],
-    queryFn: fetchTrialStatus,
-    staleTime: 30000,
-    retry: 1,
-    enabled: anthropicSource === 'trial' || anthropicSource === 'trial_exhausted',
-  });
+  if (!isTrialSource) return null;
 
   if (!trialStatus?.active && trialStatus?.status !== 'exhausted') return null;
 

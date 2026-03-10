@@ -14,8 +14,10 @@ import { m, AnimatePresence } from "@rs/ui-new/motion";
 import {
   fetchQueryRegistry,
   submitReport,
-  type ReportSentiment,
   type QueryRegistryEntry,
+  type ReportRequest,
+  type ReportResponse,
+  type ReportSentiment,
 } from "../lib/api";
 
 interface ReportDialogProps {
@@ -84,36 +86,37 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
   }, [isOpen, initialQueryHash]);
 
   // Fetch recent queries for dropdown
-  const { data: registryData } = useQuery({
-    queryKey: ["query-registry"],
+  const { data: queries = [] } = useQuery<
+    { queries: QueryRegistryEntry[] },
+    Error,
+    QueryRegistryEntry[]
+  >({
+    queryKey: ["queryRegistry", 10],
     queryFn: () => fetchQueryRegistry(10),
+    select: (data) => data.queries,
     enabled: isOpen,
     staleTime: 30000,
   });
-
-  const queries = registryData?.queries || [];
 
   // Find selected query details
   const selectedQuery = queries.find((q) => q.hash === selectedQueryHash);
 
   // Submit mutation
-  const submitMutation = useMutation({
-    mutationFn: submitReport,
-    onSuccess: (data) => {
-      if (data.success) {
-        toast({
-          title: "Thank you for your feedback!",
-          description: "Your feedback helps us improve RDST.",
-          variant: "positive",
-        });
-        onClose();
-      } else {
-        toast({
-          title: "Failed to submit feedback",
-          description: data.error || "An error occurred",
-          variant: "negative",
-        });
-      }
+  const submitMutation = useMutation<ReportResponse, Error, ReportRequest>({
+    mutationFn: (request: ReportRequest) =>
+      submitReport(request).then((result) => {
+        if (!result.success) {
+          throw new Error(result.error || "An error occurred");
+        }
+        return result;
+      }),
+    onSuccess: () => {
+      toast({
+        title: "Thank you for your feedback!",
+        description: "Your feedback helps us improve RDST.",
+        variant: "positive",
+      });
+      onClose();
     },
     onError: (error) => {
       toast({

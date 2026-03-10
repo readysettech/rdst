@@ -17,7 +17,11 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
-    viteReact(),
+    viteReact({
+      babel: {
+        plugins: ["babel-plugin-react-compiler"],
+      },
+    }),
   ],
   resolve: {
     alias: {

@@ -79,6 +79,32 @@ def test_anthropic_requirement_satisfied_by_process_env(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 
+def test_anthropic_requirement_satisfied_by_trial_token(monkeypatch):
+    monkeypatch.setenv("RDST_TRIAL_TOKEN", "in-trial")
+
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+    with patch.object(service, "_load_config", return_value=_mock_config()):
+        requirements = service.get_requirements()
+
+    anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
+    assert anthropic_req["source"] == "trial"
+    assert anthropic_req["satisfied"] is True
+
+    monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+
+
+def test_anthropic_requirement_satisfied_by_trial_token_in_keyring():
+    service = EnvRequirementsService(
+        secret_store=FakeSecretStore({"RDST_TRIAL_TOKEN": "stored-trial-token"})
+    )
+    with patch.object(service, "_load_config", return_value=_mock_config()):
+        requirements = service.get_requirements()
+
+    anthropic_req = next(r for r in requirements if r["kind"] == "anthropic_api_key")
+    assert anthropic_req["source"] == "trial"
+    assert anthropic_req["satisfied"] is True
+
+
 def test_get_allowed_names_includes_targets_and_anthropic():
     service = EnvRequirementsService(secret_store=FakeSecretStore())
 

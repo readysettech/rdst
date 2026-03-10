@@ -45,8 +45,9 @@ function setup(lockActive: boolean) {
     ],
     isLoading: false,
     addQuery: vi.fn(),
+    addMutation: { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, isError: false, isIdle: true, isSuccess: false, data: undefined, error: null, reset: vi.fn(), status: 'idle', variables: undefined, failureCount: 0, failureReason: null, submittedAt: 0, context: undefined, isPaused: false } as any,
     removeQuery: vi.fn(),
-    refresh: vi.fn(),
+    updateTag: vi.fn(),
   });
 
   vi.mocked(useBenchmark).mockReturnValue({

@@ -42,10 +42,11 @@
     "@types/react": "catalog:react19",
     "@types/react-dom": "catalog:react19",
     "@vitejs/plugin-react": "^5.1.0",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "jsdom": "^26.1.0",
     "tailwindcss": "catalog:tailwind4",
     "typescript": "catalog:common",
     "vite": "^7.1.12",
-    "jsdom": "^26.1.0",
     "vitest": "^3.2.4"
   }
 }

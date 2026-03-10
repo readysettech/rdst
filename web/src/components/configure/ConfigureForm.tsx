@@ -89,6 +89,7 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
 }
 
 export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: ConfigureFormProps) {
+  const isAddMode = !initialData?.name;
   const [connectionUrl, setConnectionUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
   const [name, setName] = useState(initialData?.name || '');
@@ -132,7 +133,8 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
     setConnectionUrl('');
   };
 
-  const isValid = name && host && port && database && user;
+  const isAddModePasswordValid = !isAddMode || passwordEnv.trim().length > 0;
+  const isValid = name && host && port && database && user && isAddModePasswordValid;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -175,7 +177,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
             </Text>
           </HStack>
         </Card.Header>
-        <Card.Content>
+      <Card.Content>
           <div className="space-y-6">
             {/* Connection URL */}
             <div className="rounded-xl bg-surface-layout-2/50 p-4">
@@ -336,7 +338,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
               <div className="space-y-4">
                 <div>
                   <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
-                    Password Environment Variable
+                    Password Environment Variable {isAddMode ? '*' : ''}
                   </Text>
                   <BaseInputText
                     name="password_env"
@@ -344,6 +346,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
                     onChange={(e) => setPasswordEnv(e.target.value)}
                     placeholder="DB_PASSWORD"
                     disabled={isLoading}
+                    required={isAddMode}
                   />
                   <Text level="caption" className="text-content-layout-3 mt-1">
                     Name of environment variable containing the password

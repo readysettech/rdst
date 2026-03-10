@@ -33,6 +33,9 @@ describe('ConfigureForm connection URL parsing', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
+    fireEvent.change(screen.getByPlaceholderText('DB_PASSWORD'), {
+      target: { value: 'RDST_DB_PASSWORD' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Add Target' }))
 
     expect(onSubmit).toHaveBeenCalledWith(

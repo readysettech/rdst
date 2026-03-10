@@ -3,7 +3,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConfigWarning } from './ConfigWarning';
-import { fetchEnvRequirements, fetchInitStatus, fetchStatus } from '../lib/api';
+import {
+  fetchEnvRequirements,
+  fetchInitStatus,
+  fetchStatus,
+  fetchTrialStatus,
+} from '../lib/api';
 
 vi.mock('../lib/api', async () => {
   const actual = await vi.importActual('../lib/api');
@@ -12,6 +17,7 @@ vi.mock('../lib/api', async () => {
     fetchStatus: vi.fn(),
     fetchInitStatus: vi.fn(),
     fetchEnvRequirements: vi.fn(),
+    fetchTrialStatus: vi.fn(),
   };
 });
 
@@ -33,16 +39,30 @@ vi.mock('./EnvSecretsDialog', () => ({
     isOpen,
     onSuccess,
     requirements,
+    showManualAnthropicInput = false,
   }: {
     isOpen: boolean;
     onSuccess?: () => void;
     requirements: Array<{ accepted_names: string[] }>;
+    showManualAnthropicInput?: boolean;
   }) =>
     isOpen ? (
       <div>
         <div data-testid="dialog-requirements">
-          {requirements.map((item) => item.accepted_names[0]).join(',')}
+          {(requirements.length > 0 || !showManualAnthropicInput
+            ? requirements
+            : [{ accepted_names: ['ANTHROPIC_API_KEY'] }]
+          ).map((item) => item.accepted_names[0]).join(',')}
         </div>
+        {(requirements.length > 0 || !showManualAnthropicInput ? requirements : [{ accepted_names: ['ANTHROPIC_API_KEY'] }]).map((item) => (
+          <label key={item.accepted_names[0]}>
+            {`Secret ${item.accepted_names[0]}`}
+            <input
+              aria-label={`Secret ${item.accepted_names[0]}`}
+              onChange={() => undefined}
+            />
+          </label>
+        ))}
         <button type="button" onClick={() => onSuccess?.()}>
           Mock Secret Save
         </button>
@@ -192,9 +212,83 @@ describe('ConfigWarning env secret flow', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Mock Secret Save/i }));
 
     await waitFor(() => {
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['status'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['init-status'] });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['env-requirements'] });
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ['status'], refetchType: 'all' }),
+      );
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ['init-status'], refetchType: 'all' }),
+      );
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ['env-requirements'], refetchType: 'all' }),
+      );
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ['trial-status'], refetchType: 'all' }),
+      );
+    });
+  });
+
+  it('always shows Anthropic API key input for exhausted-trial banner even with no missing requirement entries', async () => {
+    vi.mocked(fetchTrialStatus).mockResolvedValue({
+      active: false,
+      status: 'exhausted',
+      percent_remaining: 0,
+      remaining_tokens_display: '0',
+      limit_tokens_display: '100',
+    });
+    vi.mocked(fetchEnvRequirements).mockResolvedValue({
+      keyring_available: true,
+      requirements: [
+        {
+          kind: 'anthropic_api_key',
+          accepted_names: ['RDST_ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
+          target: null,
+          satisfied: true,
+          source: 'trial_exhausted',
+        },
+      ],
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    renderWarning(queryClient);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Set API Key/i }));
+    const keyInput = await screen.findByLabelText(/secret anthropic_api_key/i);
+    fireEvent.change(keyInput, { target: { value: 'sk-ant-manual-token' } });
+    expect((keyInput as HTMLInputElement).value).toBe('sk-ant-manual-token');
+  });
+
+  it('does not show a trial warning when source is no longer trial even if trial status cache is exhausted', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(['trial-status'], {
+      active: false,
+      status: 'exhausted',
+      percent_remaining: 0,
+      remaining_tokens_display: '0',
+      limit_tokens_display: '100',
+    });
+
+    vi.mocked(fetchEnvRequirements).mockResolvedValue({
+      keyring_available: true,
+      requirements: [
+        {
+          kind: 'anthropic_api_key',
+          accepted_names: ['RDST_ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
+          target: null,
+          satisfied: true,
+          source: 'process_env',
+        },
+      ],
+    });
+
+    renderWarning(queryClient);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Trial Credits Exhausted/i)).toBeNull();
     });
   });
 });

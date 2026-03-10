@@ -562,6 +562,11 @@ export interface TrialStatusResponse {
   percent_remaining?: number;
 }
 
+export interface TrialSimulationResponse {
+  success: boolean;
+  message?: string;
+}
+
 export async function registerTrial(email: string): Promise<TrialRegisterResponse> {
   const response = await fetch('/api/trial/register', {
     method: 'POST',
@@ -590,6 +595,16 @@ export async function fetchTrialStatus(): Promise<TrialStatusResponse> {
   const response = await fetch('/api/trial/status');
   if (!response.ok) {
     throw new Error(`Failed to fetch trial status: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function simulateTrialExhausted(): Promise<TrialSimulationResponse> {
+  const response = await fetch('/api/trial/simulate/exhaust', {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to simulate trial exhaustion: ${response.status}`);
   }
   return response.json();
 }

@@ -168,6 +168,38 @@ class TrialService:
 
         return TrialActivateResult(success=True, message="Trial activated successfully.")
 
+    def _build_status_result(
+        self,
+        trial: dict,
+        *,
+        active: bool,
+        status: str | None,
+        remaining_cents: int | None,
+        limit_cents: int | None,
+    ) -> TrialStatusResult:
+        """Build a TrialStatusResult with formatted display fields."""
+        from lib.llm_manager.trial_display import cents_to_tokens, format_tokens
+
+        remaining_display = None
+        limit_display = None
+        pct = None
+
+        if remaining_cents is not None and limit_cents is not None:
+            remaining_display = format_tokens(cents_to_tokens(remaining_cents))
+            limit_display = format_tokens(cents_to_tokens(limit_cents))
+            pct = int((remaining_cents / limit_cents) * 100) if limit_cents > 0 else 0
+
+        return TrialStatusResult(
+            active=active,
+            email=trial.get("email"),
+            status=status,
+            remaining_cents=remaining_cents,
+            limit_cents=limit_cents,
+            remaining_tokens_display=remaining_display,
+            limit_tokens_display=limit_display,
+            percent_remaining=pct,
+        )
+
     def get_status(self) -> TrialStatusResult:
         """Read trial state from config.toml, format balance."""
         try:
@@ -179,32 +211,40 @@ class TrialService:
         if not trial.get("token"):
             return TrialStatusResult(active=False)
 
-        email = trial.get("email")
         status = trial.get("status")
-        is_active = status == "active"
-        remaining_cents = trial.get("remaining_cents")
-        limit_cents = trial.get("limit_cents")
-
-        from lib.llm_manager.trial_display import cents_to_tokens, format_tokens
-
-        remaining_display = None
-        limit_display = None
-        pct = None
-
-        if remaining_cents is not None and limit_cents is not None:
-            remaining_tok = cents_to_tokens(remaining_cents)
-            limit_tok = cents_to_tokens(limit_cents)
-            remaining_display = format_tokens(remaining_tok)
-            limit_display = format_tokens(limit_tok)
-            pct = int((remaining_cents / limit_cents) * 100) if limit_cents > 0 else 0
-
-        return TrialStatusResult(
-            active=is_active,
-            email=email,
+        return self._build_status_result(
+            trial,
+            active=status == "active",
             status=status,
-            remaining_cents=remaining_cents,
-            limit_cents=limit_cents,
-            remaining_tokens_display=remaining_display,
-            limit_tokens_display=limit_display,
-            percent_remaining=pct,
+            remaining_cents=trial.get("remaining_cents"),
+            limit_cents=trial.get("limit_cents"),
+        )
+
+    def simulate_exhausted(self) -> TrialStatusResult:
+        """Force trial status to exhausted for local/dev testing."""
+        try:
+            cfg = self._load_config()
+        except Exception:
+            return TrialStatusResult(active=False)
+
+        trial = cfg.get_trial_config()
+        if not trial.get("token"):
+            return TrialStatusResult(active=False)
+
+        try:
+            limit_cents = trial.get("limit_cents") or trial.get("limit") or 500
+            trial["status"] = "exhausted"
+            trial["remaining_cents"] = 0
+            trial["limit_cents"] = int(limit_cents)
+            cfg.set_trial_config(trial)
+            cfg.save()
+        except Exception:
+            return TrialStatusResult(active=False)
+
+        return self._build_status_result(
+            trial,
+            active=False,
+            status="exhausted",
+            remaining_cents=0,
+            limit_cents=int(limit_cents),
         )

@@ -84,6 +84,22 @@ class TestNormalizeSql:
 
         assert result1 == result2
 
+    def test_strips_leading_line_comment(self):
+        """Leading line comments are removed before normalization."""
+        sql = "-- find one user\nSELECT * FROM users WHERE id = 123"
+        result = normalize_sql(sql)
+
+        assert "find one user" not in result.lower()
+        assert result == "SELECT * FROM users WHERE id = :p1"
+
+    def test_strips_leading_block_comment(self):
+        """Leading block comments are removed before normalization."""
+        sql = "/* find one user */ SELECT * FROM users WHERE id = 123"
+        result = normalize_sql(sql)
+
+        assert "find one user" not in result.lower()
+        assert result == "SELECT * FROM users WHERE id = :p1"
+
 
 class TestHashSql:
     """Tests for the hash_sql function."""
@@ -123,6 +139,13 @@ class TestHashSql:
         sql2 = "SELECT * FROM orders WHERE id = 1"
 
         assert hash_sql(sql1) != hash_sql(sql2)
+
+    def test_comments_do_not_affect_hash(self):
+        """Equivalent queries hash the same after comment stripping."""
+        sql_with_comments = "-- lookup user\nSELECT * FROM users WHERE id = 123"
+        sql_without_comments = "SELECT * FROM users WHERE id = 123"
+
+        assert hash_sql(sql_with_comments) == hash_sql(sql_without_comments)
 
 
 class TestExtractParametersFromSql:
@@ -604,6 +627,22 @@ class TestVerifyQueryCompleteness:
         assert is_valid is False
         assert "Empty" in error
 
+    def test_valid_select_with_leading_line_comment(self):
+        """Leading line comments are ignored for completeness validation."""
+        is_valid, error = verify_query_completeness(
+            "-- returns active users\nSELECT * FROM users WHERE active = true"
+        )
+        assert is_valid is True
+        assert error is None
+
+    def test_valid_select_with_leading_block_comment(self):
+        """Leading block comments are ignored for completeness validation."""
+        is_valid, error = verify_query_completeness(
+            "/* returns active users */ SELECT * FROM users WHERE active = true"
+        )
+        assert is_valid is True
+        assert error is None
+
     def test_truncated_ends_with_where(self):
         """Query ending with WHERE is detected as truncated."""
         is_valid, error = verify_query_completeness("SELECT * FROM users WHERE")
@@ -657,3 +696,17 @@ class TestVerifyQueryCompleteness:
             registry.add_query("SELECT * FROM users WHERE id = 1 AND")
 
         assert "truncated" in str(exc_info.value).lower()
+
+    def test_registry_stores_comment_free_normalized_sql(self, temp_dir):
+        """Registry saves canonical SQL without comments."""
+        registry_path = temp_dir / "test_queries.toml"
+        registry = QueryRegistry(registry_path=str(registry_path))
+
+        sql = "-- look up one user\nSELECT * FROM users WHERE id = 42"
+        query_hash, is_new = registry.add_query(sql)
+
+        assert is_new is True
+        entry = registry.get_query(query_hash)
+        assert entry is not None
+        assert entry.sql == "SELECT * FROM users WHERE id = :p1"
+        assert "look up one user" not in entry.sql.lower()

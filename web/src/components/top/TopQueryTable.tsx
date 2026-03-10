@@ -21,6 +21,10 @@ interface TopQueryTableProps {
   onAnalyze: (query: TopQuery) => void;
 }
 
+function getCollapsedPreview(sql: string): string {
+  return sql.replace(/\s+/g, ' ').trim();
+}
+
 function EmptyState({ message, icon }: { message: string; icon: "observe" | "speedometer" | "folder-file" }) {
   return (
     <Card className="w-full">
@@ -162,6 +166,7 @@ export function TopQueryTable({
                   {queries.map((query, index) => {
                     const isExpanded = expandedHash === query.query_hash;
                     const hasRunning = (query.current_instances_running ?? 0) > 0;
+                    const collapsedPreview = getCollapsedPreview(query.query_text);
 
                     return (
                       <m.tr
@@ -195,9 +200,9 @@ export function TopQueryTable({
                               sql={
                                 isExpanded
                                   ? query.query_text
-                                  : query.query_text.length > 80
-                                    ? `${query.query_text.slice(0, 80)}...`
-                                    : query.query_text
+                                  : collapsedPreview.length > 80
+                                    ? `${collapsedPreview.slice(0, 80)}...`
+                                    : collapsedPreview
                               }
                               wrap={isExpanded}
                             />

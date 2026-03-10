@@ -10,13 +10,12 @@ import { Button } from '@rs/ui-new/button';
 import { CopyButton } from '@rs/ui-new/copy-button';
 import { EnvSecretsDialog } from './EnvSecretsDialog';
 import {
-  EnvRequirement,
-  fetchEnvRequirements,
+  type EnvRequirement,
   fetchInitStatus,
   fetchStatus,
-  fetchTrialStatus,
 } from '../lib/api';
 import { TrialRegistrationDialog } from './TrialRegistrationDialog';
+import { invalidateTrialRelatedQueries, useTrialSource } from '../lib/trialQueries';
 
 interface WarningConfig {
   title: string;
@@ -240,24 +239,7 @@ export function ConfigWarning() {
     staleTime: 30000,
     retry: 1,
   });
-  const { data: envRequirements } = useQuery({
-    queryKey: ['env-requirements'],
-    queryFn: fetchEnvRequirements,
-    staleTime: 30000,
-    retry: 1,
-  });
-
-  const anthropicSource = envRequirements?.requirements.find(
-    (r) => r.kind === 'anthropic_api_key',
-  )?.source;
-
-  const { data: trialStatus } = useQuery({
-    queryKey: ['trial-status'],
-    queryFn: fetchTrialStatus,
-    staleTime: 30000,
-    retry: 1,
-    enabled: anthropicSource === 'trial' || anthropicSource === 'trial_exhausted',
-  });
+  const { envRequirements, isTrialSource, trialStatus } = useTrialSource();
 
   const missingAnthropicRequirements =
     envRequirements?.requirements.filter(
@@ -265,7 +247,7 @@ export function ConfigWarning() {
     ) || [];
 
   const trialState: TrialState | undefined =
-    trialStatus?.active || trialStatus?.status === 'exhausted'
+    isTrialSource && (trialStatus?.active || trialStatus?.status === 'exhausted')
       ? {
           active: true,
           percent_remaining: trialStatus.status === 'exhausted' ? 0 : (trialStatus.percent_remaining ?? undefined),
@@ -304,6 +286,10 @@ export function ConfigWarning() {
     return null;
   }
 
+  const shouldShowManualAnthropicInput =
+    warningConfig.actionType === 'open-env-dialog' ||
+    warningConfig.secondaryActionType === 'open-env-dialog';
+
   const handleAction = () => {
     if (warningConfig.actionType === 'open-env-dialog') {
       setShowSecretsDialog(true);
@@ -321,10 +307,7 @@ export function ConfigWarning() {
   };
 
   const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['status'] });
-    queryClient.invalidateQueries({ queryKey: ['init-status'] });
-    queryClient.invalidateQueries({ queryKey: ['env-requirements'] });
-    queryClient.invalidateQueries({ queryKey: ['trial-status'] });
+    void invalidateTrialRelatedQueries(queryClient);
   };
 
   return (
@@ -341,6 +324,7 @@ export function ConfigWarning() {
         isOpen={showSecretsDialog}
         onClose={() => setShowSecretsDialog(false)}
         requirements={missingAnthropicRequirements}
+        showManualAnthropicInput={shouldShowManualAnthropicInput}
         keyringAvailable={envRequirements?.keyring_available ?? false}
         onSuccess={invalidateAll}
       />

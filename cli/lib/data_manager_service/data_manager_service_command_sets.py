@@ -543,7 +543,7 @@ COMMAND_SETS = {
                     )
                     SELECT
                         abs(queryid)::text as query_hash,
-                        LEFT(REGEXP_REPLACE(query, E'[\\n\\r\\t]+', ' ', 'g'), {MAX_QUERY_LENGTH}) as query_text,
+                        LEFT(query, {MAX_QUERY_LENGTH}) as query_text,
                         calls,
                         ROUND(total_exec_time::numeric, 3) as total_time,
                         ROUND(mean_exec_time::numeric, 3) as mean_time,
@@ -584,7 +584,7 @@ COMMAND_SETS = {
                 "query": f"""
                     SELECT
                         SUBSTRING(MD5(query), 1, 16) as query_hash,
-                        LEFT(REGEXP_REPLACE(query, E'[\\n\\r\\t]+', ' ', 'g'), {MAX_QUERY_LENGTH}) as query_text,
+                        LEFT(query, {MAX_QUERY_LENGTH}) as query_text,
                         state,
                         query_start,
                         CASE
@@ -687,7 +687,7 @@ COMMAND_SETS = {
                 "query": f"""
                     SELECT
                         SUBSTRING(MD5(INFO), 1, 16) as query_hash,
-                        LEFT(REPLACE(REPLACE(REPLACE(INFO, '\\n', ' '), '\\r', ' '), '\\t', ' '), {MAX_QUERY_LENGTH}) as query_text,
+                        LEFT(INFO, {MAX_QUERY_LENGTH}) as query_text,
                         TIME as time,
                         STATE as state,
                         USER as user,
@@ -730,7 +730,7 @@ COMMAND_SETS = {
                 "query": f"""
                     SELECT
                         MD5(sql_text) as query_hash,
-                        LEFT(REPLACE(REPLACE(REPLACE(sql_text, '\\n', ' '), '\\r', ' '), '\\t', ' '), {MAX_QUERY_LENGTH}) as query_text,
+                        LEFT(sql_text, {MAX_QUERY_LENGTH}) as query_text,
                         COUNT(*) as exec_count,
                         ROUND(SUM(TIME_TO_SEC(query_time)), 6) as total_time,
                         ROUND(AVG(TIME_TO_SEC(query_time)), 6) as avg_time,

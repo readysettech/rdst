@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { BaseInputText } from "@rs/ui-new/base-input-text";
 import { Button } from "@rs/ui-new/button";
 import { Card } from "@rs/ui-new/card";
@@ -12,7 +11,6 @@ import { HStack, VStack } from "@rs/ui-new/stack";
 import { m, AnimatePresence } from "@rs/ui-new/motion";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@rs/ui-new/tooltip";
 import { useQueryRegistry } from "../lib/useQueryRegistry";
-import { addQueryToRegistry } from "../lib/api";
 import { SQLInput } from "../components/SQLInput";
 import { SQLDisplay } from "../components/SQLDisplay";
 import { useTarget } from "../hooks/useTarget";
@@ -71,14 +69,12 @@ function getSourceVariant(source: string): "positive" | "warning" | "informative
 
 function QueryRegistryPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const { queries, isLoading, removeQuery, updateTag } = useQueryRegistry();
+  const { queries, isLoading, removeQuery, updateTag, addMutation: addQueryMutation } = useQueryRegistry();
   const [searchTerm, setSearchTerm] = useState("");
   const [editingHash, setEditingHash] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState("");
   const [confirmingHash, setConfirmingHash] = useState<string | null>(null);
   const [newSql, setNewSql] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
 
   const { target } = useTarget();
@@ -93,17 +89,17 @@ function QueryRegistryPage() {
     );
   }, [queries, searchTerm]);
 
-  const handleCreate = async () => {
+  const handleCreate = () => {
     if (!newSql.trim()) return;
-    setIsSubmitting(true);
-    try {
-      await addQueryToRegistry(newSql, target || undefined);
-      setNewSql("");
-      setShowAddForm(false);
-      queryClient.invalidateQueries({ queryKey: ["queryRegistry"] });
-    } finally {
-      setIsSubmitting(false);
-    }
+    addQueryMutation.mutate(
+      { sql: newSql, target: target || undefined },
+      {
+        onSuccess: () => {
+          setNewSql("");
+          setShowAddForm(false);
+        },
+      },
+    );
   };
 
   const handleAnalyze = (sql: string, target?: string, mostRecentParams?: Record<string, string | number>) => {
@@ -203,7 +199,7 @@ function QueryRegistryPage() {
                       icon="tick"
                       iconPosition="left"
                       onClick={handleCreate}
-                      loading={isSubmitting}
+                      loading={addQueryMutation.isPending}
                       disabled={!newSql.trim()}
                     />
                   </HStack>
