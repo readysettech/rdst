@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+
+from .docker_prepull import start_prepull
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    #Startup and shutdown events for the app
+    start_prepull()
+    yield
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -40,6 +50,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         title="RDST API",
         version="0.1.0",
         description="API server for RDST web client",
+        lifespan=lifespan,
     )
 
     app.add_middleware(
