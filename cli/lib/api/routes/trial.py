@@ -69,7 +69,7 @@ async def register_trial(request: Request, body: TrialRegisterRequest) -> TrialR
     from ...services.trial_service import TrialService
 
     service = TrialService()
-    result = await service.register(body.email)
+    result = await service.register(body.email, source="web")
     return TrialRegisterResponse(
         success=result.success,
         limit_display=result.limit_display,
@@ -91,7 +91,7 @@ async def activate_trial(request: Request, body: TrialActivateRequest) -> TrialA
     from ...services.trial_service import TrialService
 
     service = TrialService()
-    result = await service.activate(body.token, body.email, body.email_tier)
+    result = await service.activate(body.token, body.email, body.email_tier, source="web")
     return TrialActivateResponse(
         success=result.success,
         message=result.message,

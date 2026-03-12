@@ -136,6 +136,18 @@ async def _realtime_generator(
     auto_save: bool,
 ) -> AsyncGenerator[dict, None]:
     """Generate SSE events for realtime streaming."""
+    try:
+        from lib.telemetry import telemetry
+        telemetry.track("top_run", {
+            "source": "web",
+            "target": target,
+            "mode": "realtime",
+            "limit": limit,
+            "duration": duration,
+        })
+    except Exception:
+        pass
+
     service = TopService()
     input_data = TopInput(target=target, source="activity")
     options = TopOptions(
@@ -231,6 +243,18 @@ async def get_top_queries(
                 guard.target_name, source, limit, sort, filter_pattern, auto_save
             )
         )
+
+    try:
+        from lib.telemetry import telemetry
+        telemetry.track("top_run", {
+            "source": "web",
+            "target": guard.target_name,
+            "mode": "historical",
+            "limit": limit,
+            "data_source": source,
+        })
+    except Exception:
+        pass
 
     # Historical one-shot - collect all events and return JSON
     service = TopService()

@@ -616,6 +616,9 @@ def start_readyset_container_direct(
             '--name', readyset_container_name,
             '-e', f'UPSTREAM_DB_URL={target_db_url}',
             '-e', f'LISTEN_ADDRESS={listen_address}',
+            '-e', 'DEPLOYMENT_MODE=standalone',
+            '-e', 'QUERY_CACHING=explicit',
+            '-e', 'CACHE_MODE=shallow',
             '-p', f'{readyset_port}:{readyset_port}',
             '--add-host=host.docker.internal:host-gateway',
             READYSET_IMAGE,
@@ -831,6 +834,8 @@ def wait_for_readyset_ready_shallow(
                     "listening on",
                     "ready to accept connections",
                     "streaming replication started",
+                    "now have 1 of 1 required workers",
+                    "recreating 0 shallow caches",
                 ]):
                     elapsed = time.time() - start_time
                     console.print(f"[green]Readyset is ready ({elapsed:.1f}s)[/green]")

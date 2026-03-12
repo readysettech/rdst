@@ -133,6 +133,18 @@ async def _analyze_generator(
     input_data: AnalyzeInput, options: AnalyzeOptions
 ) -> AsyncGenerator[dict, None]:
     try:
+        from lib.telemetry import telemetry
+        telemetry.track("analyze_run", {
+            "source": "web",
+            "target": options.target,
+            "fast": options.fast,
+            "readyset_cache": options.readyset_cache,
+            "test_rewrites": options.test_rewrites,
+        })
+    except Exception:
+        pass
+
+    try:
         service = AnalyzeService()
         async for event in service.analyze(input_data, options):
             yield _event_to_sse(event)

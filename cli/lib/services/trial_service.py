@@ -24,7 +24,7 @@ class TrialService:
         cfg.load()
         return cfg
 
-    async def register(self, email: str) -> TrialRegisterResult:
+    async def register(self, email: str, source: str = "cli") -> TrialRegisterResult:
         """Proxy registration to keyservice, return structured result."""
         import httpx
 
@@ -124,7 +124,19 @@ class TrialService:
                 status_code=resp.status_code,
             )
 
-        # Success
+        # Success — track signup event
+        try:
+            from lib.telemetry import telemetry
+            telemetry.track("trial_registration", {
+                "email": email,
+                "email_domain": email.split("@")[1] if "@" in email else "unknown",
+                "email_tier": resp_data.get("email_tier", "business"),
+                "limit_display": resp_data.get("limit_display", "$5.00"),
+                "source": source,
+            })
+        except Exception:
+            pass
+
         return TrialRegisterResult(
             success=True,
             limit_display=resp_data.get("limit_display", "$5.00"),
@@ -132,7 +144,7 @@ class TrialService:
             status_code=resp.status_code,
         )
 
-    async def activate(self, token: str, email: str, email_tier: str | None = None) -> TrialActivateResult:
+    async def activate(self, token: str, email: str, email_tier: str | None = None, source: str = "cli") -> TrialActivateResult:
         """Save trial token to config.toml + keyring + env."""
         if not token or len(token.strip()) < 10:
             return TrialActivateResult(success=False, message="Invalid token.")
@@ -165,6 +177,18 @@ class TrialService:
             persist=True,
         )
         os.environ["RDST_TRIAL_TOKEN"] = token
+
+        # Track activation event
+        try:
+            from lib.telemetry import telemetry
+            telemetry.track("trial_activated", {
+                "email": email,
+                "email_domain": email.split("@")[1] if "@" in email else "unknown",
+                "email_tier": email_tier or "unknown",
+                "source": source,
+            })
+        except Exception:
+            pass
 
         return TrialActivateResult(success=True, message="Trial activated successfully.")
 

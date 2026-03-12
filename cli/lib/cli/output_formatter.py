@@ -513,7 +513,7 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
         if index_recs:
             next_steps.add_step(
                 "Create recommended indexes",
-                "Long-term improvement",
+                "Improved performance for commonly used columns",
             )
 
     if analysis_id:
@@ -1282,7 +1282,7 @@ def _format_next_steps(
         if index_suggestions:
             next_steps.add_step(
                 "Create recommended indexes",
-                "Long-term improvement",
+                "Improved performance for commonly used columns",
             )
 
     if not readyset_checked:

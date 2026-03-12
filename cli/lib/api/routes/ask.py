@@ -142,6 +142,18 @@ async def _ask_generator(
 ) -> AsyncGenerator[dict, None]:
     """Generate SSE events for ask request."""
     try:
+        from lib.telemetry import telemetry
+        telemetry.track("ask_run", {
+            "source": "web",
+            "target": input_data.target if input_data else None,
+            "is_resume": bool(session_id),
+            "agent_mode": options.agent_mode if options else False,
+            "dry_run": options.dry_run if options else False,
+        })
+    except Exception:
+        pass
+
+    try:
         service = AskService()
 
         if session_id:

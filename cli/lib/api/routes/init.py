@@ -146,6 +146,14 @@ async def complete_init() -> InitCompleteResponse:
             success = bool(event.success)
         elif isinstance(event, InitErrorEvent):
             success = False
+
+    if success:
+        try:
+            from lib.telemetry import telemetry
+            telemetry.track("init_complete", {"source": "web"})
+        except Exception:
+            pass
+
     return InitCompleteResponse(success=success)
 
 

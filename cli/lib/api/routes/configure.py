@@ -274,6 +274,15 @@ async def add_target(request: AddTargetRequest) -> Union[TargetResponse, ErrorRe
             error = event
 
     if result:
+        try:
+            from lib.telemetry import telemetry
+            telemetry.track("configure_target", {
+                "source": "web",
+                "operation": "add",
+                "engine": request.target.engine,
+            })
+        except Exception:
+            pass
         return TargetResponse(
             success=True,
             message=result.message,

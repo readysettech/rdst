@@ -659,6 +659,17 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
 
         restored_envs, missing_envs, restore_errors = _restore_web_required_env_vars()
 
+        try:
+            from lib.telemetry import telemetry
+            telemetry.track("web_started", {
+                "host": host,
+                "port": port,
+                "serve_static": serve_static,
+                "ui_mode": ui_mode,
+            })
+        except Exception:
+            pass
+
         print(f"Starting RDST web server on http://{host}:{port}")
         if serve_static:
             print(f"Serving embedded frontend from: {dist_dir}")

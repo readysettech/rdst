@@ -72,11 +72,12 @@ class TelemetryManager:
     - Privacy controls (opt-out via env var or config)
     """
 
-    # Configuration - set via environment variables
-    # RDST_POSTHOG_KEY: PostHog API key for usage analytics
+    # Configuration
+    # PostHog write-only ingest key — safe to embed (cannot read data, only write events)
+    # Override via RDST_POSTHOG_KEY env var if needed
     # RDST_SENTRY_DSN: Sentry DSN for crash reporting
     # RDST_SLACK_WEBHOOK_*: Slack webhooks for notifications
-    POSTHOG_API_KEY = os.environ.get("RDST_POSTHOG_KEY", "")
+    POSTHOG_API_KEY = os.environ.get("RDST_POSTHOG_KEY", "phc_WPINnbS1CUiADz01QFeDZCr4Wn7jXfNPxe1EK0V2ZzP")
     POSTHOG_HOST = "https://us.i.posthog.com"
     SENTRY_DSN = os.environ.get("RDST_SENTRY_DSN", "")
     SLACK_WEBHOOK_INSTALLS = os.environ.get("RDST_SLACK_WEBHOOK_INSTALLS", "")
@@ -221,6 +222,38 @@ class TelemetryManager:
         # Once published to PyPI, this should use importlib.metadata.version("rdst")
         return "0.1.0"
 
+    def _get_auth_type(self) -> str:
+        """Determine how the user is authenticating LLM requests.
+
+        Returns one of: 'own_key', 'trial', 'none'.
+        """
+        try:
+            if os.getenv("ANTHROPIC_API_KEY"):
+                return "own_key"
+            if os.getenv("RDST_TRIAL_TOKEN"):
+                return "trial"
+            config_file = self._rdst_dir / "config.toml"
+            if config_file.exists():
+                content = config_file.read_text()
+                if "[trial]" in content:
+                    if 'status = "active"' in content:
+                        return "trial"
+                    if 'status = "exhausted"' in content:
+                        return "trial_exhausted"
+            # Check keyring (fast path only — don't probe slow backends)
+            try:
+                from lib.services.secret_store_service import SecretStoreService
+                store = SecretStoreService()
+                if store.get_secret("ANTHROPIC_API_KEY"):
+                    return "own_key"
+                if store.get_secret("RDST_TRIAL_TOKEN"):
+                    return "trial"
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return "none"
+
     def _get_base_properties(self) -> Dict[str, Any]:
         """Get base properties included with every event."""
         return {
@@ -229,6 +262,7 @@ class TelemetryManager:
             "os": platform.system(),
             "os_version": platform.release(),
             "python_version": platform.python_version(),
+            "auth_type": self._get_auth_type(),
             "timestamp": datetime.utcnow().isoformat(),
         }
 
@@ -803,6 +837,7 @@ class TelemetryManager:
             "reason": reason,
             "sentiment": sentiment,
             "has_email": bool(email),
+            "email": email,
             "include_query": include_query,
             "include_plan": include_plan,
         }
