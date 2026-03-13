@@ -6,6 +6,13 @@ Tactical/ops-inspired dark theme with cyan accents.
 Inspired by command & control interfaces.
 """
 
+import os
+import re
+import select
+import sys
+import time
+from typing import Literal, Optional
+
 from rich import box
 
 BOX_HEAVY = box.HEAVY
@@ -14,11 +21,18 @@ BOX_SIMPLE = box.SIMPLE
 BOX_MINIMAL = box.MINIMAL
 BOX_ROUNDED = box.ROUNDED
 
+ThemeName = Literal["dark", "light"]
 
-class Colors:
-    """
-    Core color palette - tactical dark theme with cyan accents.
-    """
+_OSC_11_QUERY = b"\x1b]11;?\x07"
+_OSC_11_RESPONSE_RE = re.compile(
+    r"\x1b\]11;rgb:([0-9A-Fa-f]{1,4})/([0-9A-Fa-f]{1,4})/([0-9A-Fa-f]{1,4})(?:\x07|\x1b\\)"
+ )
+_OSC_11_TIMEOUT_SECONDS = 0.15
+_LIGHT_BACKGROUND_THRESHOLD = 0.5
+
+
+class _DarkColors:
+    """Core color palette for dark terminals."""
 
     # === Primary Colors ===
     PRIMARY = "cyan"  # Main accent - borders, key UI elements
@@ -63,10 +77,202 @@ class Colors:
     SQL_THEME = "monokai"
 
 
+class _LightColors:
+    """High-contrast palette for light terminals."""
+
+    # === Primary Colors ===
+    PRIMARY = "#00796B"
+    SECONDARY = "#00695C"
+
+    # === Semantic Colors ===
+    SUCCESS = "#2E7D32"
+    WARNING = "#BF360C"
+    ERROR = "#C62828"
+    INFO = "#1565C0"
+
+    # === Text Colors ===
+    TEXT = "#1A1A1A"
+    TEXT_DIM = "#616161"
+    MUTED = "#9E9E9E"
+    ACCENT = "#6A1B9A"
+
+    # === Data Colors ===
+    HIGHLIGHT = "#00838F"
+    PARAM = "#6A1B9A"
+    NUMBER = "#212121"
+    LABEL = "#757575"
+
+    # === Status Colors (traffic light) ===
+    STATUS_ACTIVE = "#2E7D32"
+    STATUS_PENDING = "#BF360C"
+    STATUS_CRITICAL = "#C62828"
+    STATUS_INACTIVE = "#9E9E9E"
+
+    # === Performance Colors ===
+    PERF_FAST = "#2E7D32"
+    PERF_MODERATE = "#BF360C"
+    PERF_SLOW = "#C62828"
+
+    # === Priority Colors ===
+    PRIORITY_CRITICAL = "#C62828"
+    PRIORITY_HIGH = "#AD1457"
+    PRIORITY_MEDIUM = "#BF360C"
+    PRIORITY_LOW = "#9E9E9E"
+
+    # === Syntax Highlighting ===
+    SQL_THEME = "tango"
+
+
+def _read_theme_override(env_name: str) -> Optional[ThemeName]:
+    """Return an explicit theme override, treating auto/invalid values as unset."""
+    configured_theme = os.getenv(env_name, "").strip().lower()
+    if configured_theme in {"light", "dark"}:
+        return configured_theme
+    return None
+
+
+def _detect_theme_from_colorfgbg() -> Optional[ThemeName]:
+    """Interpret COLORFGBG as a legacy background hint when present."""
+    colorfgbg = os.getenv("COLORFGBG", "").strip()
+    if not colorfgbg:
+        return None
+
+    parts = [part.strip() for part in colorfgbg.split(";") if part.strip()]
+    if not parts:
+        return None
+
+    try:
+        background = int(parts[-1])
+    except ValueError:
+        return None
+
+    return "light" if background >= 7 else "dark"
+
+
+def _normalize_rgb_channel(channel: str) -> Optional[float]:
+    try:
+        value = int(channel, 16)
+    except ValueError:
+        return None
+
+    max_value = (16 ** len(channel)) - 1
+    if max_value <= 0:
+        return None
+
+    return value / max_value
+
+
+def _classify_background_rgb(red: float, green: float, blue: float) -> ThemeName:
+    """Classify a terminal background using perceived luminance."""
+    brightness = (0.299 * red) + (0.587 * green) + (0.114 * blue)
+    return "light" if brightness >= _LIGHT_BACKGROUND_THRESHOLD else "dark"
+
+
+def _detect_theme_from_osc_11_response(response: str) -> Optional[ThemeName]:
+    match = _OSC_11_RESPONSE_RE.search(response)
+    if match is None:
+        return None
+
+    channels = [_normalize_rgb_channel(channel) for channel in match.groups()]
+    if any(channel is None for channel in channels):
+        return None
+
+    red, green, blue = channels
+    return _classify_background_rgb(red, green, blue)
+
+
+def _detect_theme_from_terminal() -> Optional[ThemeName]:
+    """Query the active terminal background color via OSC 11 when available."""
+    try:
+        if not sys.stdout.isatty() or os.name != "posix":
+            return None
+    except Exception:
+        return None
+
+    try:
+        import termios
+        import tty
+    except ImportError:
+        return None
+
+    tty_stream = None
+    saved_state = None
+    try:
+        tty_stream = open("/dev/tty", "r+b", buffering=0)
+        tty_fd = tty_stream.fileno()
+        saved_state = termios.tcgetattr(tty_fd)
+        tty.setcbreak(tty_fd)
+        os.write(tty_fd, _OSC_11_QUERY)
+
+        response_parts: list[str] = []
+        deadline = time.monotonic() + _OSC_11_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            ready, _, _ = select.select([tty_fd], [], [], max(remaining, 0))
+            if not ready:
+                break
+
+            chunk = os.read(tty_fd, 256)
+            if not chunk:
+                break
+
+            response_parts.append(chunk.decode("ascii", errors="ignore"))
+            decoded_buffer = "".join(response_parts)
+            detected_theme = _detect_theme_from_osc_11_response(decoded_buffer)
+            if detected_theme is not None:
+                return detected_theme
+
+            if decoded_buffer.endswith("\x07") or decoded_buffer.endswith("\x1b\\"):
+                break
+
+        return None
+    except Exception:
+        return None
+    finally:
+        if saved_state is not None and tty_stream is not None:
+            try:
+                termios.tcsetattr(tty_stream.fileno(), termios.TCSADRAIN, saved_state)
+            except Exception:
+                pass
+        if tty_stream is not None:
+            try:
+                tty_stream.close()
+            except Exception:
+                pass
+
+
+def _detect_theme() -> ThemeName:
+    """Resolve the active terminal theme from overrides, terminal probing, or hints."""
+    configured_theme = _read_theme_override("RDST_THEME")
+    if configured_theme is not None:
+        return configured_theme
+
+    cli_theme = _read_theme_override("CLITHEME")
+    if cli_theme is not None:
+        return cli_theme
+
+    terminal_theme = _detect_theme_from_terminal()
+    if terminal_theme is not None:
+        return terminal_theme
+
+    colorfgbg_theme = _detect_theme_from_colorfgbg()
+    if colorfgbg_theme is not None:
+        return colorfgbg_theme
+
+    return "dark"
+
+
+_active_theme: ThemeName = _detect_theme()
+Colors = _LightColors if _active_theme == "light" else _DarkColors
+
+
+def get_theme() -> ThemeName:
+    """Return the resolved RDST terminal theme name."""
+    return _active_theme
+
+
 class StyleTokens:
-    """
-    Compound styles for specific UI elements - tactical ops theme.
-    """
+    """Compound styles for specific UI elements derived from the active palette."""
 
     TEXT = Colors.TEXT
     TEXT_DIM = Colors.TEXT_DIM
@@ -106,7 +312,7 @@ class StyleTokens:
     # === Headers & Titles ===
     HEADER = f"bold {Colors.PRIMARY}"
     SUBHEADER = f"bold {Colors.TEXT_DIM}"
-    TITLE = "bold bright_white"
+    TITLE = f"bold {Colors.NUMBER}"
     SECTION_TITLE = f"bold {Colors.PRIMARY} reverse"
 
     # === Table Styles ===

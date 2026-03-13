@@ -54,12 +54,13 @@ from typing import List, Tuple, Any, Optional, Union, Literal
 import sqlglot
 from pygments.lexers.sql import SqlLexer
 from pygments.styles.monokai import MonokaiStyle
+from pygments.styles.tango import TangoStyle
 from pygments.token import Name
 from sqlglot.errors import ParseError
 
 JustifyMethod = Literal["default", "left", "center", "right", "full"]
 
-from .theme import StyleTokens, Icons, Layout, duration_style
+from .theme import StyleTokens, Icons, Layout, duration_style, get_theme
 
 from rich.panel import Panel
 from rich.padding import Padding
@@ -576,14 +577,28 @@ class RdstSqlLexer(SqlLexer):
 _RDST_SQL_LEXER = RdstSqlLexer()
 
 
-class RdstSqlStyle(MonokaiStyle):
+class RdstSqlDarkStyle(MonokaiStyle):
     """Monokai-derived theme with explicit styling for SQL parameter placeholders."""
 
     styles = dict(MonokaiStyle.styles)
     styles[Name.Variable] = "bold #ae81ff"
 
 
-_RDST_SQL_THEME = PygmentsSyntaxTheme(RdstSqlStyle)
+class RdstSqlLightStyle(TangoStyle):
+    """Tango-derived theme with readable SQL parameter placeholders on light terminals."""
+
+    styles = dict(TangoStyle.styles)
+    styles[Name.Variable] = "bold #6A1B9A"
+
+
+def _sql_style_class(theme_name: str):
+    """Map the active UI theme name to the matching Pygments style class."""
+    if theme_name == "light":
+        return RdstSqlLightStyle
+    return RdstSqlDarkStyle
+
+
+_RDST_SQL_THEME = PygmentsSyntaxTheme(_sql_style_class(get_theme()))
 
 
 def _sql_syntax(formatted_sql: str) -> Syntax:

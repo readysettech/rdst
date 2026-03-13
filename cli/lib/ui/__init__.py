@@ -34,6 +34,7 @@ from .theme import (
     StyleTokens,
     Icons,
     Layout,
+    get_theme,
 )
 
 # Prompt exports (Rich wrappers with fallback)
@@ -138,6 +139,7 @@ __all__ = [
     "StyleTokens",
     "Icons",
     "Layout",
+    "get_theme",
     # Prompts
     "Prompt",
     "Confirm",

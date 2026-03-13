@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 
 from lib.ui.console import create_console
 import lib.ui.components as ui_components
+import lib.ui.theme as ui_theme
 
 
 def _capture(renderable, width: int = 100) -> str:
@@ -19,6 +20,19 @@ def _capture(renderable, width: int = 100) -> str:
     with console.capture() as capture:
         console.print(renderable)
     return capture.get()
+
+
+def _clear_theme_env(monkeypatch):
+    for name in ("RDST_THEME", "CLITHEME", "COLORFGBG"):
+        monkeypatch.delenv(name, raising=False)
+
+
+class _FakeStdout:
+    def __init__(self, is_tty: bool):
+        self._is_tty = is_tty
+
+    def isatty(self) -> bool:
+        return self._is_tty
 
 
 class TestFormatSqlForDisplay:
@@ -105,3 +119,76 @@ class TestQueryPanel:
         assert "│" not in output
         assert "╭" not in output
         assert "╰" not in output
+
+
+class TestUiThemeSelection:
+    def test_detect_theme_rdtheme_beats_other_hints(self, monkeypatch):
+        _clear_theme_env(monkeypatch)
+        monkeypatch.setenv("RDST_THEME", "light")
+        monkeypatch.setenv("CLITHEME", "dark")
+        monkeypatch.setenv("COLORFGBG", "0;0")
+        monkeypatch.setattr(ui_theme, "_detect_theme_from_terminal", lambda: "dark")
+
+        assert ui_theme._detect_theme() == "light"
+
+    def test_detect_theme_uses_clitheme_when_rdst_theme_is_unset(self, monkeypatch):
+        _clear_theme_env(monkeypatch)
+        monkeypatch.setenv("CLITHEME", "light")
+        monkeypatch.setenv("COLORFGBG", "0;0")
+        monkeypatch.setattr(ui_theme, "_detect_theme_from_terminal", lambda: "dark")
+
+        assert ui_theme._detect_theme() == "light"
+
+    def test_detect_theme_invalid_rdst_theme_falls_through(self, monkeypatch):
+        _clear_theme_env(monkeypatch)
+        monkeypatch.setenv("RDST_THEME", "sepia")
+        monkeypatch.setenv("CLITHEME", "light")
+        monkeypatch.setattr(ui_theme, "_detect_theme_from_terminal", lambda: None)
+
+        assert ui_theme._detect_theme() == "light"
+
+    def test_detect_theme_uses_terminal_probe_before_colorfgbg(self, monkeypatch):
+        _clear_theme_env(monkeypatch)
+        monkeypatch.setenv("COLORFGBG", "0;0")
+        monkeypatch.setattr(ui_theme, "_detect_theme_from_terminal", lambda: "light")
+
+        assert ui_theme._detect_theme() == "light"
+
+    def test_detect_theme_falls_back_to_colorfgbg_when_probe_fails(self, monkeypatch):
+        _clear_theme_env(monkeypatch)
+        monkeypatch.setenv("RDST_THEME", "auto")
+        monkeypatch.setenv("COLORFGBG", "0;15")
+        monkeypatch.setattr(ui_theme, "_detect_theme_from_terminal", lambda: None)
+
+        assert ui_theme._detect_theme() == "light"
+
+    def test_detect_theme_defaults_to_dark_without_hints(self, monkeypatch):
+        _clear_theme_env(monkeypatch)
+        monkeypatch.setattr(ui_theme, "_detect_theme_from_terminal", lambda: None)
+
+        assert ui_theme._detect_theme() == "dark"
+
+    def test_detect_theme_from_osc_11_response_detects_dark_background(self):
+        response = "\x1b]11;rgb:0000/0000/0000\x1b\\"
+
+        assert ui_theme._detect_theme_from_osc_11_response(response) == "dark"
+
+    def test_detect_theme_from_osc_11_response_detects_light_background(self):
+        response = "\x1b]11;rgb:ffff/ffff/ffff\x07"
+
+        assert ui_theme._detect_theme_from_osc_11_response(response) == "light"
+
+    def test_detect_theme_from_terminal_skips_non_tty_stdout(self, monkeypatch):
+        monkeypatch.setattr(ui_theme.sys, "stdout", _FakeStdout(is_tty=False))
+        monkeypatch.setattr(
+            ui_theme,
+            "open",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not open /dev/tty")),
+            raising=False,
+        )
+
+        assert ui_theme._detect_theme_from_terminal() is None
+
+    def test_sql_style_class_matches_theme_name(self):
+        assert ui_components._sql_style_class("dark") is ui_components.RdstSqlDarkStyle
+        assert ui_components._sql_style_class("light") is ui_components.RdstSqlLightStyle
