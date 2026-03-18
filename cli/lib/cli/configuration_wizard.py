@@ -243,6 +243,24 @@ class ConfigurationWizard:
         # Get existing config for edit
         existing = cfg.get(name) if (is_edit and name) else {}
 
+        # Quick edit: if only changing group/tags with --skip-verify, skip wizard entirely
+        group_arg = kwargs.get("group")
+        tags_arg = kwargs.get("tags")
+        skip_verify = kwargs.get("skip_verify") or kwargs.get("skip-verify", False)
+        if is_edit and existing and skip_verify and (group_arg is not None or tags_arg is not None):
+            merged = dict(existing)
+            if group_arg is not None:
+                merged["group"] = group_arg if group_arg else None
+            if tags_arg is not None:
+                if isinstance(tags_arg, str):
+                    merged["tags"] = [t.strip() for t in tags_arg.split(",") if t.strip()]
+                elif isinstance(tags_arg, list):
+                    merged["tags"] = tags_arg
+            cfg.upsert(name, merged)
+            cfg.save()
+            self._show_success(f"Target '{name}'", "updated successfully")
+            return RdstResult(True, message=f"Target '{name}' updated", data={"target": name, "config": merged})
+
         # Check if we have enough info from CLI args
         has_connection_string = bool(
             kwargs.get("connection_string") or kwargs.get("connection-string")
@@ -304,9 +322,21 @@ class ConfigurationWizard:
         if existing:
             merged = dict(existing)
             merged.update(config_data)
-            cfg.upsert(target_name, merged)
         else:
-            cfg.upsert(target_name, config_data)
+            merged = config_data
+
+        # Apply group/tags from CLI args AFTER merge (so they override)
+        group = kwargs.get("group")
+        tags = kwargs.get("tags")
+        if group is not None:
+            merged["group"] = group if group else None
+        if tags is not None:
+            if isinstance(tags, str):
+                merged["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
+            elif isinstance(tags, list):
+                merged["tags"] = tags
+
+        cfg.upsert(target_name, merged)
 
         if config_data.get("make_default"):
             cfg.set_default(target_name)

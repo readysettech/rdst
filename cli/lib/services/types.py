@@ -1172,3 +1172,403 @@ ScanEvent = Union[
     ScanCompleteEvent,
     ScanErrorEvent,
 ]
+
+
+# ============================================================================
+# Fleet Types - Input/Options
+# ============================================================================
+
+
+@dataclass
+class FleetInput:
+    """Input for fleet service operations."""
+
+    subcommand: str  # "import", "discover", "list", "status", "audit", "diff", "snapshots"
+    csv_file: Optional[str] = None
+    password_env: str = "FLEET_PASS"
+    group: Optional[str] = None
+    tag: Optional[str] = None
+    regions: Optional[str] = None  # Comma-separated regions
+    engine_filter: Optional[str] = None
+    name_pattern: Optional[str] = None
+
+
+@dataclass
+class FleetOptions:
+    """Options for fleet service execution."""
+
+    dry_run: bool = False
+    output_json: bool = False
+    save_name: Optional[str] = None
+    diff_baseline: Optional[str] = None
+    insights: bool = False  # LLM fleet insights
+
+
+# ============================================================================
+# Fleet Event Types
+# ============================================================================
+
+
+@dataclass
+class FleetStatusEvent:
+    """Progress status update."""
+
+    type: Literal["status"]
+    phase: str  # "import", "discover", "validate", "audit", "complete"
+    message: str
+
+
+@dataclass
+class FleetImportProgressEvent:
+    """Progress during CSV or AWS import."""
+
+    type: Literal["import_progress"]
+    current: int
+    total: int
+    target_name: str
+    status: str  # "importing", "skipped", "error"
+    message: str
+
+
+@dataclass
+class FleetImportCompleteEvent:
+    """Import operation completed."""
+
+    type: Literal["import_complete"]
+    success: bool
+    imported: int
+    skipped: int
+    errors: int
+    target_names: List[str]
+
+
+@dataclass
+class FleetDiscoverEvent:
+    """AWS RDS discovery results."""
+
+    type: Literal["discover"]
+    instances_found: int
+    regions_searched: List[str]
+    message: str
+
+
+@dataclass
+class FleetListEvent:
+    """Fleet member listing."""
+
+    type: Literal["fleet_list"]
+    members: List[Dict[str, Any]]
+    groups: List[str]
+
+
+@dataclass
+class FleetConnectivityEvent:
+    """Connectivity check result for one target."""
+
+    type: Literal["connectivity"]
+    target_name: str
+    status: str  # "checking", "ok", "failed"
+    latency_ms: Optional[float] = None
+    error: Optional[str] = None
+    server_version: Optional[str] = None
+
+
+@dataclass
+class FleetErrorEvent:
+    """Fleet operation error."""
+
+    type: Literal["error"]
+    message: str
+    phase: Optional[str] = None
+
+
+FleetEvent = Union[
+    FleetStatusEvent,
+    FleetImportProgressEvent,
+    FleetImportCompleteEvent,
+    FleetDiscoverEvent,
+    FleetListEvent,
+    FleetConnectivityEvent,
+    FleetErrorEvent,
+]
+
+
+# ============================================================================
+# Audit Types - Input/Options
+# ============================================================================
+
+
+@dataclass
+class AuditInput:
+    """Input for audit service."""
+
+    target: Optional[str] = None  # Single target for rdst audit
+    targets: Optional[List[str]] = None  # Multiple targets for fleet audit
+
+
+@dataclass
+class AuditOptions:
+    """Options for audit service execution."""
+
+    save_name: Optional[str] = None
+    diff_baseline: Optional[str] = None
+    output_json: bool = False
+    insights: bool = False  # LLM insights
+
+
+# ============================================================================
+# Audit Event Types
+# ============================================================================
+
+
+@dataclass
+class AuditStatusEvent:
+    """Audit progress status update."""
+
+    type: Literal["status"]
+    phase: str
+    message: str
+
+
+@dataclass
+class AuditTargetStartEvent:
+    """Starting audit on one target."""
+
+    type: Literal["target_start"]
+    target_name: str
+    index: int
+    total: int
+
+
+@dataclass
+class AuditMetricsCollectedEvent:
+    """Metrics collected for one target."""
+
+    type: Literal["metrics_collected"]
+    target_name: str
+    metrics: Dict[str, Any]
+
+
+@dataclass
+class AuditTargetCompleteEvent:
+    """Audit completed for one target."""
+
+    type: Literal["target_complete"]
+    target_name: str
+    result: Dict[str, Any]
+    index: int
+    total: int
+
+
+@dataclass
+class AuditTargetErrorEvent:
+    """Audit failed for one target."""
+
+    type: Literal["target_error"]
+    target_name: str
+    error: str
+    index: int
+    total: int
+
+
+@dataclass
+class AuditLlmInsightsEvent:
+    """LLM-generated fleet-level insights."""
+
+    type: Literal["llm_insights"]
+    insights: str  # Markdown-formatted
+
+
+@dataclass
+class AuditSnapshotSavedEvent:
+    """Audit snapshot saved."""
+
+    type: Literal["snapshot_saved"]
+    snapshot_id: str
+    name: Optional[str] = None
+    path: Optional[str] = None
+
+
+@dataclass
+class AuditDiffEvent:
+    """Diff between two audit snapshots."""
+
+    type: Literal["diff"]
+    diff: Dict[str, Any]
+
+
+@dataclass
+class AuditCompleteEvent:
+    """Audit operation completed."""
+
+    type: Literal["complete"]
+    success: bool
+    snapshot_id: Optional[str] = None
+    summary: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class AuditErrorEvent:
+    """Audit operation error."""
+
+    type: Literal["error"]
+    message: str
+    phase: Optional[str] = None
+
+
+AuditEvent = Union[
+    AuditStatusEvent,
+    AuditTargetStartEvent,
+    AuditMetricsCollectedEvent,
+    AuditTargetCompleteEvent,
+    AuditTargetErrorEvent,
+    AuditLlmInsightsEvent,
+    AuditSnapshotSavedEvent,
+    AuditDiffEvent,
+    AuditCompleteEvent,
+    AuditErrorEvent,
+]
+
+
+# ============================================================================
+# Workload Types - Input/Options
+# ============================================================================
+
+
+@dataclass
+class WorkloadInput:
+    """Input for workload service."""
+
+    target: Optional[str] = None
+    source: str = "auto"  # "auto", "pg_stat_statements", "activity", "file"
+    file_path: Optional[str] = None  # For import mode
+    subcommand: str = "run"  # "run", "import", "list", "show", "diff"
+    run_id: Optional[str] = None  # For show
+    run_a: Optional[str] = None  # For diff
+    run_b: Optional[str] = None  # For diff
+
+
+@dataclass
+class WorkloadOptions:
+    """Options for workload service execution."""
+
+    duration_seconds: Optional[int] = None  # None = run until Ctrl+C
+    snapshot_only: bool = False  # True for pg_stat_statements one-shot
+    analyze: bool = True  # Run LLM analysis after capture
+    model: Optional[str] = None  # Override LLM model
+    limit: int = 50  # Top N queries to include in analysis
+    save_top_queries: Optional[int] = None  # Save top N to registry
+    output_json: bool = False
+    poll_interval_ms: int = 2000  # 2s sampling for activity
+
+
+# ============================================================================
+# Workload Event Types
+# ============================================================================
+
+
+@dataclass
+class WorkloadStatusEvent:
+    """Workload progress status update."""
+
+    type: Literal["status"]
+    phase: str  # "config", "snapshot_start", "capture", "snapshot_end", "analysis", "storage"
+    message: str
+
+
+@dataclass
+class WorkloadConnectedEvent:
+    """Database connection established for workload."""
+
+    type: Literal["connected"]
+    target_name: str
+    db_engine: str
+    source: str
+
+
+@dataclass
+class WorkloadSnapshotEvent:
+    """Database snapshot captured (start or end)."""
+
+    type: Literal["snapshot"]
+    when: str  # "start" or "end"
+    cache_hit_ratio: Optional[float] = None
+    active_connections: int = 0
+    stats_summary: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class WorkloadCaptureProgressEvent:
+    """Progress during live capture."""
+
+    type: Literal["capture_progress"]
+    elapsed_seconds: float
+    total_seconds: Optional[float] = None  # None if Ctrl+C mode
+    unique_queries: int = 0
+    total_executions: int = 0
+    # Latest intermediate snapshot data
+    cache_hit_ratio: Optional[float] = None
+    active_connections: int = 0
+    tps: float = 0.0
+
+
+@dataclass
+class WorkloadCaptureCompleteEvent:
+    """Capture phase finished."""
+
+    type: Literal["capture_complete"]
+    unique_queries: int
+    total_executions: int
+    total_query_time_ms: float
+    duration_seconds: float
+
+
+@dataclass
+class WorkloadAnalysisProgressEvent:
+    """LLM analysis in progress."""
+
+    type: Literal["analysis_progress"]
+    message: str
+    percent: int
+
+
+@dataclass
+class WorkloadQueriesSavedEvent:
+    """Top queries saved to registry."""
+
+    type: Literal["queries_saved"]
+    count: int
+    hashes: List[str]
+
+
+@dataclass
+class WorkloadCompleteEvent:
+    """Full workload run complete."""
+
+    type: Literal["complete"]
+    success: bool
+    run_id: str
+    summary: Optional[Dict[str, Any]] = None
+    analysis: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class WorkloadErrorEvent:
+    """Workload operation error."""
+
+    type: Literal["error"]
+    message: str
+    phase: Optional[str] = None
+
+
+WorkloadEvent = Union[
+    WorkloadStatusEvent,
+    WorkloadConnectedEvent,
+    WorkloadSnapshotEvent,
+    WorkloadCaptureProgressEvent,
+    WorkloadCaptureCompleteEvent,
+    WorkloadAnalysisProgressEvent,
+    WorkloadQueriesSavedEvent,
+    WorkloadCompleteEvent,
+    WorkloadErrorEvent,
+]

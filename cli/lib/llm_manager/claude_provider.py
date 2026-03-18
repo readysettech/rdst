@@ -144,8 +144,12 @@ class ClaudeProvider(Provider):
             payload.update(request.extra)
 
         target_url = base_url or self._BASE_URL
+        # Scale timeout with max_tokens — large analysis prompts need more time
+        timeout = 60
+        if request.max_tokens and request.max_tokens > 4096:
+            timeout = 120
         try:
-            resp = requests.post(target_url, headers=headers, data=json.dumps(payload), timeout=60)
+            resp = requests.post(target_url, headers=headers, data=json.dumps(payload), timeout=timeout)
         except requests.exceptions.ConnectionError as e:
             if base_url:
                 raise LLMError(

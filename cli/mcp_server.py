@@ -17,6 +17,8 @@ WHAT THIS PROVIDES:
     - Live slow query monitoring (top)
     - Query registry management
     - Performance tuning suggestions
+    - Database health auditing (metrics, sizing, cache opportunity, index recommendations)
+    - Fleet management (multi-target operations, fleet-wide audits, snapshot comparison)
 
 CONFIG LOCATION:
     ~/.rdst/config.toml - Contains database targets and settings
@@ -1366,6 +1368,265 @@ Examples:
                 },
                 "required": ["target"]
             }
+        },
+        {
+            "name": "rdst_audit",
+            "description": """Run a deep health audit on a database target.
+
+Collects database metrics, sizing assessment, cache opportunity score, and
+identifies top queries by resource consumption. Returns a comprehensive
+health report for the target.
+
+Without --duration: instant audit using historical statistics (pg_stat_statements
+or performance_schema). Provides metrics, sizing, cache opportunity, and top queries.
+
+With --duration: adds live query capture for the specified window (e.g., "30s", "2m",
+"5m"), then runs LLM analysis with index recommendations based on observed workload.
+
+OUTPUT INCLUDES:
+- Database metrics (connections, cache hit ratio, replication lag, etc.)
+- Sizing assessment (database size, table sizes, index sizes)
+- Cache opportunity score (how much the workload would benefit from caching)
+- Top queries by total time, frequency, and average duration
+- With --duration: captured live queries + LLM-powered index recommendations
+
+Examples:
+  rdst_audit(target="prod-db")
+  rdst_audit(target="prod-db", duration="2m")
+  rdst_audit(target="prod-db", no_insights=True)
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Database target name"
+                    },
+                    "duration": {
+                        "type": "string",
+                        "description": "Live capture duration (e.g., '30s', '2m', '5m'). Observe queries in real-time."
+                    },
+                    "no_insights": {
+                        "type": "boolean",
+                        "description": "Skip LLM analysis"
+                    },
+                    "no_save": {
+                        "type": "boolean",
+                        "description": "Don't save queries to registry"
+                    }
+                },
+                "required": ["target"]
+            }
+        },
+        {
+            "name": "rdst_audit_show",
+            "description": """View a saved audit run by its run ID.
+
+Shows the full audit report for a previously saved audit run, including
+all metrics, sizing, cache opportunity, and query details.
+
+Use rdst_audit_list to find available run IDs.
+
+Optionally export queries captured during the audit for further analysis.
+
+Examples:
+  rdst_audit_show(run_id="abc123")
+  rdst_audit_show(run_id="abc123", export_queries=True)
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "Audit run ID (from rdst_audit_list)"
+                    },
+                    "export_queries": {
+                        "type": "boolean",
+                        "description": "Export captured queries (or top queries if no capture)"
+                    },
+                    "export_top_queries": {
+                        "type": "boolean",
+                        "description": "Export cumulative top queries from stats"
+                    },
+                    "export_captured_queries": {
+                        "type": "boolean",
+                        "description": "Export queries captured during --duration window"
+                    }
+                },
+                "required": ["run_id"]
+            }
+        },
+        {
+            "name": "rdst_audit_list",
+            "description": """List saved audit runs.
+
+Shows all previously saved audit runs with their run IDs, targets, timestamps,
+and summary scores. Use the run ID with rdst_audit_show to view full details.
+
+Optionally filter by target name.
+
+Examples:
+  rdst_audit_list()
+  rdst_audit_list(target="prod-db")
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Filter audit runs by target name"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "rdst_fleet_list",
+            "description": """List all fleet targets.
+
+Shows all database targets that are part of the fleet, with their group
+assignments, tags, engine type, and connection details.
+
+Optionally filter by group or tag.
+
+Examples:
+  rdst_fleet_list()
+  rdst_fleet_list(group="production")
+  rdst_fleet_list(tag="aurora")
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group": {
+                        "type": "string",
+                        "description": "Filter by fleet group (e.g., 'production', 'us-east-1')"
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Filter by tag (e.g., 'aurora', 'reader')"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "rdst_fleet_status",
+            "description": """Check connectivity for fleet targets.
+
+Tests database connectivity for all fleet targets (or a filtered subset)
+and reports which are reachable, unreachable, or have authentication issues.
+
+Optionally filter by group or tag.
+
+Examples:
+  rdst_fleet_status()
+  rdst_fleet_status(group="production")
+  rdst_fleet_status(tag="reader")
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group": {
+                        "type": "string",
+                        "description": "Filter by fleet group"
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Filter by tag"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "rdst_fleet_audit",
+            "description": """Run a fleet-wide audit across multiple database targets concurrently.
+
+Audits all targets in the fleet (or a filtered subset by group/tag) in parallel.
+Each target gets a full health audit: metrics, sizing, cache opportunity, and top queries.
+
+Results are aggregated into a fleet-wide summary with cross-target comparisons.
+Optionally save the results as a named snapshot for later comparison with rdst_fleet_diff.
+
+With --duration: adds live query capture per target for the specified window,
+enabling workload-aware analysis across the fleet.
+
+Examples:
+  rdst_fleet_audit()
+  rdst_fleet_audit(group="production")
+  rdst_fleet_audit(group="production", duration="2m")
+  rdst_fleet_audit(save="march-baseline")
+  rdst_fleet_audit(group="production", save="prod-audit-q1")
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "group": {
+                        "type": "string",
+                        "description": "Filter by fleet group"
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Filter by tag"
+                    },
+                    "duration": {
+                        "type": "string",
+                        "description": "Live capture duration per target (e.g., '2m', '5m')"
+                    },
+                    "save": {
+                        "type": "string",
+                        "description": "Save snapshot with this name for later comparison"
+                    },
+                    "no_save": {
+                        "type": "boolean",
+                        "description": "Don't auto-save snapshot"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "rdst_fleet_snapshots",
+            "description": """List saved fleet audit snapshots.
+
+Shows all previously saved fleet audit snapshots with their names, timestamps,
+target counts, and summary information. Use snapshot names with rdst_fleet_diff
+to compare two snapshots.
+
+Examples:
+  rdst_fleet_snapshots()
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "rdst_fleet_diff",
+            "description": """Compare two fleet audit snapshots.
+
+Shows differences between two saved fleet audit snapshots, highlighting
+changes in metrics, sizing, query patterns, and cache opportunity scores
+across all targets. Useful for tracking fleet health over time.
+
+Examples:
+  rdst_fleet_diff(snapshot1="march-baseline", snapshot2="april-baseline")
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "snapshot1": {
+                        "type": "string",
+                        "description": "First snapshot name or ID"
+                    },
+                    "snapshot2": {
+                        "type": "string",
+                        "description": "Second snapshot name or ID"
+                    }
+                },
+                "required": ["snapshot1", "snapshot2"]
+            }
         }
     ]
 
@@ -1868,6 +2129,69 @@ Cache created. Next steps:
         args.append("--yes")  # Skip confirmation for MCP (non-interactive)
         if arguments.get("output_json"):
             args.append("--json")
+        return run_rdst_command(args)
+
+    elif name == "rdst_audit":
+        args = ["audit", "--target", arguments["target"], "--json"]
+        if "duration" in arguments:
+            args.extend(["--duration", arguments["duration"]])
+        if arguments.get("no_insights"):
+            args.append("--no-insights")
+        if arguments.get("no_save"):
+            args.append("--no-save")
+        return run_rdst_command(args)
+
+    elif name == "rdst_audit_show":
+        args = ["audit", "show", arguments["run_id"], "--json"]
+        if arguments.get("export_queries"):
+            args.append("--export-queries")
+        if arguments.get("export_top_queries"):
+            args.append("--export-top-queries")
+        if arguments.get("export_captured_queries"):
+            args.append("--export-captured-queries")
+        return run_rdst_command(args)
+
+    elif name == "rdst_audit_list":
+        args = ["audit", "list", "--json"]
+        if "target" in arguments:
+            args.extend(["--target", arguments["target"]])
+        return run_rdst_command(args)
+
+    elif name == "rdst_fleet_list":
+        args = ["fleet", "list", "--json"]
+        if "group" in arguments:
+            args.extend(["--group", arguments["group"]])
+        if "tag" in arguments:
+            args.extend(["--tag", arguments["tag"]])
+        return run_rdst_command(args)
+
+    elif name == "rdst_fleet_status":
+        args = ["fleet", "status", "--json"]
+        if "group" in arguments:
+            args.extend(["--group", arguments["group"]])
+        if "tag" in arguments:
+            args.extend(["--tag", arguments["tag"]])
+        return run_rdst_command(args)
+
+    elif name == "rdst_fleet_audit":
+        args = ["fleet", "audit", "--json"]
+        if "group" in arguments:
+            args.extend(["--group", arguments["group"]])
+        if "tag" in arguments:
+            args.extend(["--tag", arguments["tag"]])
+        if "duration" in arguments:
+            args.extend(["--duration", arguments["duration"]])
+        if "save" in arguments:
+            args.extend(["--save", arguments["save"]])
+        if arguments.get("no_save"):
+            args.append("--no-save")
+        return run_rdst_command(args)
+
+    elif name == "rdst_fleet_snapshots":
+        return run_rdst_command(["fleet", "snapshots", "--json"])
+
+    elif name == "rdst_fleet_diff":
+        args = ["fleet", "diff", arguments["snapshot1"], arguments["snapshot2"], "--json"]
         return run_rdst_command(args)
 
     elif name == "rdst_agent_list":

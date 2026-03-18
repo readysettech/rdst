@@ -44,6 +44,8 @@ from lib.ui import (
     QueryTable,
     format_sql_for_display,
     render_sql_block,
+    ElapsedMessage,
+    Status,
 )
 
 from lib.query_registry.query_registry import QueryRegistry
@@ -1458,6 +1460,8 @@ class QueryCommand:
         duration: int | None = None,
         count: int | None = None,
         quiet: bool = False,
+        file: str | None = None,
+        analyze: bool = False,
         **kwargs,
     ):
         """
@@ -1471,12 +1475,35 @@ class QueryCommand:
             duration: Stop after N seconds
             count: Stop after N total executions
             quiet: Suppress progress output
+            file: CSV file of queries to run
+            analyze: Run LLM analysis on results
 
         Returns:
             RdstResult with execution statistics
         """
         from .rdst_cli import RdstResult, TargetsConfig
         from lib.db_connection import create_direct_connection, close_connection
+
+        # Handle --file: load queries from CSV and register them temporarily
+        if file and not queries:
+            queries = queries or []
+            loaded_queries = self._load_queries_from_file(file)
+            if isinstance(loaded_queries, RdstResult):
+                return loaded_queries  # Error result
+            # Register loaded queries temporarily in the registry
+            registry = QueryRegistry()
+            registry.load()
+            temp_names = []
+            for i, sql in enumerate(loaded_queries):
+                import hashlib
+                qhash = hashlib.md5(sql.encode()).hexdigest()[:8]
+                temp_name = f"_file_{qhash}"
+                if not registry.get_query_by_tag(temp_name):
+                    registry.add_query(sql=sql, tag=temp_name, target=target, source="file")
+                temp_names.append(temp_name)
+            if temp_names:
+                registry.save()
+                queries = temp_names
 
         # Validate mode - cannot use both interval and concurrency
         if interval is not None and concurrency is not None:
@@ -1506,7 +1533,7 @@ class QueryCommand:
             return RdstResult(ok=False, message=str(e), data={})
 
         if not resolved_queries:
-            return RdstResult(ok=False, message="No queries to run", data={})
+            return RdstResult(ok=False, message="No queries to run. Provide query names/hashes or use --file.", data={})
 
         # Get target configuration
         cfg = TargetsConfig()
@@ -1634,29 +1661,169 @@ class QueryCommand:
         # Print summary
         self._print_run_summary(stats)
 
+        result_data = {
+            "total_executions": stats.total_executions,
+            "total_successes": stats.total_successes,
+            "total_failures": stats.total_failures,
+            "elapsed_seconds": stats.elapsed_seconds,
+            "queries": {
+                h: {
+                    "name": s.query_name,
+                    "executions": s.executions,
+                    "successes": s.successes,
+                    "failures": s.failures,
+                    "min_ms": s.min_ms,
+                    "avg_ms": s.avg_ms,
+                    "p95_ms": s.p95_ms,
+                    "max_ms": s.max_ms,
+                }
+                for h, s in stats.query_stats.items()
+            },
+        }
+
+        # LLM analysis of results if requested
+        if analyze:
+            console = get_console()
+            if not os.environ.get("ANTHROPIC_API_KEY"):
+                console.print("[yellow]--analyze requires ANTHROPIC_API_KEY to be set[/yellow]")
+            elif stats.total_executions == 0:
+                console.print("[dim]No executions to analyze.[/dim]")
+            else:
+                console.print("[dim]Generating analysis...[/dim]")
+                try:
+                    summary_lines = [
+                        f"Query run results: {stats.total_executions} executions, "
+                        f"{stats.total_successes} successes, {stats.total_failures} failures, "
+                        f"{stats.elapsed_seconds:.1f}s elapsed.",
+                    ]
+                    for h, s in stats.query_stats.items():
+                        summary_lines.append(
+                            f"  {s.query_name} ({h[:8]}): {s.executions} exec, "
+                            f"avg {s.avg_ms:.1f}ms, p95 {s.p95_ms:.1f}ms, "
+                            f"min {s.min_ms:.1f}ms, max {s.max_ms:.1f}ms"
+                        )
+                    prompt = (
+                        "Analyze these query benchmark results. Respond ONLY with valid JSON:\n\n"
+                        '{\n'
+                        '  "performance_summary": "2-3 sentence summary of benchmark results",\n'
+                        '  "per_query": [\n'
+                        '    {"query": "name", "assessment": "1 sentence", "readyset_cacheable": true, "reason": "why"}\n'
+                        '  ],\n'
+                        '  "readyset_recommendation": "1-2 sentence overall Readyset recommendation for these queries",\n'
+                        '  "concerns": ["any performance concerns"]\n'
+                        '}\n\n'
+                        "Readyset is a SQL caching proxy that serves cached query results in sub-10ms. "
+                        "It requires the upstream database to remain running. Most SELECT queries are cacheable. "
+                        "Do NOT suggest deployment modes, shadow mode, or any Readyset features that don't exist. "
+                        "Just say whether these queries would benefit from caching and why.\n\n"
+                        + "\n".join(summary_lines)
+                    )
+                    from lib.llm_manager.llm_manager import LLMManager
+                    from lib.ui import Status
+                    spinner = Status(
+                        ElapsedMessage("Generating analysis...", time.monotonic()),
+                        spinner="dots",
+                        console=console,
+                    )
+                    spinner.start()
+                    llm = LLMManager()
+                    llm_result = llm.generate_response(prompt, max_tokens=2048, temperature=0.0)
+                    spinner.stop()
+                    raw_text = llm_result.get("response", "")
+                    from lib.ui import StyledPanel
+                    from lib.util.json_parse import parse_llm_json
+
+                    try:
+                        analysis = parse_llm_json(raw_text)
+
+                        console.print()
+                        console.print(StyledPanel(
+                            analysis.get("performance_summary", ""),
+                            title="Benchmark Analysis",
+                        ))
+
+                        pq = analysis.get("per_query", [])
+                        if pq:
+                            from lib.ui import DataTable
+                            pq_rows = []
+                            for q in pq:
+                                cacheable = q.get("readyset_cacheable", False)
+                                tag = "[green]yes[/green]" if cacheable else "[red]no[/red]"
+                                pq_rows.append((
+                                    q.get("query", "?")[:30],
+                                    q.get("assessment", ""),
+                                    tag,
+                                ))
+                            console.print(DataTable(
+                                title="Per-Query Assessment",
+                                columns=["Query", "Assessment", "Cacheable"],
+                                rows=pq_rows,
+                            ))
+
+                        rec = analysis.get("readyset_recommendation", "")
+                        if rec:
+                            console.print(StyledPanel(rec, title="Readyset Recommendation"))
+
+                        result_data["analysis"] = analysis
+                    except Exception as e:
+                        console.print(f"\n[red]Failed to parse analysis: {e}[/red]")
+                        result_data["analysis"] = raw_text
+                except Exception as e:
+                    console.print(f"[red]Analysis failed: {e}[/red]")
+
         return RdstResult(
             ok=True,
             message=f"Completed {stats.total_executions} executions",
-            data={
-                "total_executions": stats.total_executions,
-                "total_successes": stats.total_successes,
-                "total_failures": stats.total_failures,
-                "elapsed_seconds": stats.elapsed_seconds,
-                "queries": {
-                    h: {
-                        "name": s.query_name,
-                        "executions": s.executions,
-                        "successes": s.successes,
-                        "failures": s.failures,
-                        "min_ms": s.min_ms,
-                        "avg_ms": s.avg_ms,
-                        "p95_ms": s.p95_ms,
-                        "max_ms": s.max_ms,
-                    }
-                    for h, s in stats.query_stats.items()
-                },
-            },
+            data=result_data,
         )
+
+    def _load_queries_from_file(self, file_path: str):
+        """Load queries from a CSV file. Returns list of SQL strings or RdstResult on error."""
+        import csv
+        from pathlib import Path
+        from .rdst_cli import RdstResult
+
+        path = Path(file_path)
+        if not path.exists():
+            return RdstResult(ok=False, message=f"File not found: {file_path}")
+        if not path.is_file():
+            return RdstResult(ok=False, message=f"Not a file: {file_path}")
+        if path.stat().st_size == 0:
+            return RdstResult(ok=False, message=f"File is empty: {file_path}")
+
+        queries = []
+        with open(path, "r", newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames and "query" in [h.lower().strip() for h in reader.fieldnames]:
+                for row in reader:
+                    sql = (row.get("query") or row.get("Query") or row.get("sql") or row.get("SQL") or "").strip()
+                    if sql:
+                        queries.append(sql)
+            else:
+                # Plain text, one query per line
+                f.seek(0)
+                for line in f:
+                    sql = line.strip()
+                    if sql and not sql.startswith("#"):
+                        queries.append(sql)
+
+        if not queries:
+            return RdstResult(
+                ok=False,
+                message=f"No valid queries found in {file_path}. "
+                f"Expected CSV with 'query' column header, or one SQL query per line.",
+            )
+
+        # Basic validation - only read-only queries
+        sql_keywords = {"select", "with", "explain"}
+        valid = [q for q in queries if q.split() and q.split()[0].lower() in sql_keywords]
+        if not valid:
+            return RdstResult(
+                ok=False,
+                message=f"No valid SQL queries in {file_path}. "
+                f"Queries must start with SELECT, WITH, or EXPLAIN.",
+            )
+        return valid
 
     def _resolve_queries(self, query_specs: list[str]) -> list[tuple[Any, str]]:
         """
@@ -1714,7 +1881,10 @@ class QueryCommand:
                 if stop_event.is_set():
                     break
 
-                query_name = entry.tag or entry.hash[:8]
+                query_name = entry.hash[:8]
+                sql_preview = (entry.sql or sql or "")[:40].replace("\n", " ")
+                if sql_preview:
+                    query_name = f"{entry.hash[:8]} {sql_preview}"
                 if not quiet:
                     self.console.print(StatusLine("Executing", query_name))
 
@@ -1785,7 +1955,10 @@ class QueryCommand:
 
                 entry, sql = queries[query_index]
                 query_index = (query_index + 1) % len(queries)
-                query_name = entry.tag or entry.hash[:8]
+                query_name = entry.hash[:8]
+                sql_preview = (entry.sql or sql or "")[:40].replace("\n", " ")
+                if sql_preview:
+                    query_name = f"{entry.hash[:8]} {sql_preview}"
 
                 start = time.perf_counter()
                 results, exc = self._execute_with_cancellation(
@@ -1892,7 +2065,10 @@ class QueryCommand:
 
             try:
                 entry, sql = get_next_query()
-                query_name = entry.tag or entry.hash[:8]
+                query_name = entry.hash[:8]
+                sql_preview = (entry.sql or sql or "")[:40].replace("\n", " ")
+                if sql_preview:
+                    query_name = f"{entry.hash[:8]} {sql_preview}"
 
                 # Track this connection as active
                 with active_lock:

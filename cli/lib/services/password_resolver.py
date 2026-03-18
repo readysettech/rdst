@@ -70,15 +70,15 @@ def resolve_password_value(
 ) -> str:
     """Return the actual password string for *target_config*.
 
-    Same resolution priority as :func:`resolve_password`:
+    Resolution priority:
       1. Direct ``password`` field in config
       2. ``password_env`` present in ``os.environ``
-      3. ``password_env`` found via *secret_store* (keychain)
-      4. Empty string (no password available)
+      3. AWS Secrets Manager (``password_secret_arn`` field)
+      4. ``password_env`` found via *secret_store* (keychain)
+      5. Empty string (no password available)
 
-    When the value comes from the secure store it is also injected into
-    ``os.environ`` so that child processes (e.g. ``rdst analyze`` subprocesses)
-    inherit it without needing their own keyring access.
+    When the value comes from the secure store or Secrets Manager it is
+    also injected into ``os.environ`` so that child processes inherit it.
     """
     password, password_env = _extract_password_fields(target_config)
 
@@ -90,6 +90,31 @@ def resolve_password_value(
         if env_val:
             return env_val
 
+    # Try AWS Secrets Manager if configured
+    secret_arn = (
+        target_config.get("password_secret_arn")
+        if isinstance(target_config, dict)
+        else getattr(target_config, "password_secret_arn", None)
+    )
+    if secret_arn:
+        try:
+            from lib.fleet.secrets_resolver import resolve_secret
+
+            secret_key = (
+                target_config.get("password_secret_key", "password")
+                if isinstance(target_config, dict)
+                else getattr(target_config, "password_secret_key", "password")
+            )
+            secret_val = resolve_secret(secret_arn, secret_key=secret_key)
+            if secret_val:
+                # Inject into env for child processes
+                if password_env:
+                    os.environ[password_env] = secret_val
+                return secret_val
+        except Exception:
+            pass  # Fall through to keyring
+
+    if password_env:
         store = secret_store or SecretStoreService()
         secret_val = store.get_secret(password_env)
         if secret_val:

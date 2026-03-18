@@ -128,6 +128,9 @@ from .components import (
     Progress,
     SpinnerColumn,
     TextColumn,
+    BarColumn,
+    MofNCompleteColumn,
+    ElapsedMessage,
     # Rich primitives
     Syntax,
     Status,
@@ -220,6 +223,9 @@ __all__ = [
     "Progress",
     "SpinnerColumn",
     "TextColumn",
+    "BarColumn",
+    "MofNCompleteColumn",
+    "ElapsedMessage",
     # Rich primitives
     "Syntax",
     "Status",

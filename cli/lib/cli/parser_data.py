@@ -121,6 +121,14 @@ Each target has a name, connection details, and an environment variable for the 
                 action="store_true",
                 help="Skip connection verification (for non-interactive use)",
             ),
+            ArgDef(
+                "--group",
+                help="Fleet group (e.g., production, us-east-1, my-aurora-cluster)",
+            ),
+            ArgDef(
+                "--tags",
+                help="Comma-separated tags (e.g., aurora,reader)",
+            ),
         ],
         subcommands=[
             ("add", "Add a new database target"),
@@ -520,8 +528,18 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                 args=[
                     ArgDef(
                         "queries",
-                        nargs="+",
+                        nargs="*",
                         help="Query names or hashes to run (round-robin if multiple)",
+                    ),
+                    ArgDef(
+                        "--file",
+                        short="-f",
+                        help="CSV file of queries to run",
+                    ),
+                    ArgDef(
+                        "--analyze",
+                        action="store_true",
+                        help="LLM analysis of results",
                     ),
                     ArgDef(
                         "--target",
@@ -1129,6 +1147,170 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
             ("rdst cache drop-all --target mydb-cache --yes", "Remove all caches"),
         ],
     ),
+    # =========================================================================
+    # Fleet — Multi-target management and fleet-wide audit
+    # =========================================================================
+    "fleet": CommandDef(
+        name="fleet",
+        short_help="Manage and audit database fleets",
+        description="Import, discover, and audit multiple database targets as a fleet.",
+        subcommand_dest="fleet_subcommand",
+        subcommand_defs=[
+            SubcommandDef(
+                name="configure",
+                help="Interactive fleet configuration",
+                args=[
+                    ArgDef("--from", dest="csv_file", help="Import from CSV file"),
+                    ArgDef("--password-env", default="FLEET_PASS", help="Default password env var"),
+                    ArgDef("--discover", action="store_true", help="Discover from AWS"),
+                    ArgDef("--group", help="Default group for new targets"),
+                ],
+            ),
+            SubcommandDef(
+                name="import",
+                help="Bulk import targets from CSV file",
+                args=[
+                    ArgDef("--from", dest="csv_file", help="Path to CSV file"),
+                    ArgDef(
+                        "--password-env",
+                        default="FLEET_PASS",
+                        help="Env var holding fleet password (default: FLEET_PASS)",
+                    ),
+                    ArgDef("--group", help="Assign all imported targets to this group"),
+                    ArgDef("--tag", action="append", dest="tags", help="Add tag (repeatable)"),
+                    ArgDef("--dry-run", action="store_true", help="Preview without saving"),
+                ],
+            ),
+            SubcommandDef(
+                name="discover",
+                help="Discover RDS instances from AWS",
+                args=[
+                    ArgDef("--regions", help="Comma-separated AWS regions"),
+                    ArgDef(
+                        "--engine-filter",
+                        choices=["postgresql", "mysql", "all"],
+                        default="all",
+                        help="Filter by engine type",
+                    ),
+                    ArgDef("--name-pattern", help="Glob pattern for instance names"),
+                    ArgDef(
+                        "--password-env",
+                        default="FLEET_PASS",
+                        help="Env var for fleet password",
+                    ),
+                    ArgDef("--user", help="DB username (default: postgres/admin)"),
+                    ArgDef("--group", help="Assign discovered targets to this group"),
+                    ArgDef("--dry-run", action="store_true", help="Preview without saving"),
+                ],
+            ),
+            SubcommandDef(
+                name="list",
+                help="List fleet members",
+                args=[
+                    ArgDef("--group", help="Filter by group"),
+                    ArgDef("--tag", help="Filter by tag"),
+                    ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="status",
+                help="Check fleet connectivity",
+                args=[
+                    ArgDef("--group", help="Filter by group"),
+                    ArgDef("--tag", help="Filter by tag"),
+                    ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="audit",
+                help="Run audit across fleet targets",
+                args=[
+                    ArgDef("--group", help="Filter by group"),
+                    ArgDef("--tag", help="Filter by tag"),
+                    ArgDef("--duration", help="Live capture duration per target (e.g., 2m, 5m)"),
+                    ArgDef("--save", dest="save_name", help="Save snapshot with name"),
+                    ArgDef("--no-save", action="store_true", dest="no_save", help="Don't auto-save snapshot"),
+                    ArgDef("--diff", dest="diff_baseline", help="Compare against saved snapshot"),
+                    ArgDef("--no-insights", action="store_true", help="Skip LLM fleet insights"),
+                    ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="diff",
+                help="Compare two fleet audit snapshots",
+                args=[
+                    ArgDef("snapshot1", help="First snapshot name or ID"),
+                    ArgDef("snapshot2", help="Second snapshot name or ID"),
+                    ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="snapshots",
+                help="List saved audit snapshots",
+                args=[
+                    ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
+                ],
+            ),
+        ],
+        subcommands=[
+            ("configure", "Configure fleet targets"),
+            ("import", "Bulk import targets from CSV"),
+            ("discover", "Discover RDS instances from AWS"),
+            ("list", "List fleet members"),
+            ("status", "Check fleet connectivity"),
+            ("audit", "Run fleet-wide audit"),
+            ("diff", "Compare two audit snapshots"),
+            ("snapshots", "List saved snapshots"),
+        ],
+        examples=[
+            ("rdst fleet import --from fleet.csv --password-env FLEET_PASS", "Import from CSV"),
+            ("rdst fleet discover --regions us-east-1,us-west-2", "Discover from AWS"),
+            ("rdst fleet list --group production", "List production fleet"),
+            ("rdst fleet status", "Check all fleet connectivity"),
+            ("rdst fleet audit --save march-baseline", "Audit fleet and save snapshot"),
+            ("rdst fleet diff march-baseline april-baseline", "Compare snapshots"),
+        ],
+    ),
+    # =========================================================================
+    # Audit — Single-target deep health audit
+    # =========================================================================
+    "audit": CommandDef(
+        name="audit",
+        short_help="Deep health audit of a database target",
+        description="Run a deep health audit on a single database target. Collects metrics, sizing assessment, and cache opportunity score.",
+        args=[
+            ArgDef("audit_subcommand", nargs="?", default=None,
+                   help="Subcommand: list, show"),
+            ArgDef("run_id", nargs="?", default=None,
+                   help="Run ID for 'audit show' (find IDs with 'audit list')"),
+            ArgDef("--target", short="-t", help="Target name"),
+            ArgDef("--no-insights", action="store_true", dest="no_insights", help="Skip LLM analysis"),
+            ArgDef("--duration", help="Live capture duration (e.g., 30s, 5m, 1h)"),
+            ArgDef("--source", choices=["auto", "pg_stat_statements", "activity"], default="auto", help="Query capture source"),
+            ArgDef("--limit", type=int, default=50, help="Top N queries for analysis (default: 50)"),
+            ArgDef("--no-save", action="store_true", dest="no_save", help="Don't save queries to registry"),
+            ArgDef("--save", dest="save_name", help="Save result with name"),
+            ArgDef("--diff", dest="diff_baseline", help="Compare against saved baseline"),
+            ArgDef("--export-queries", action="store_true", dest="export_queries", help="Export captured queries (or top queries if no capture)"),
+            ArgDef("--export-top-queries", action="store_true", dest="export_top_queries", help="Export cumulative top queries from stats"),
+            ArgDef("--export-captured-queries", action="store_true", dest="export_captured_queries", help="Export queries captured during --duration window"),
+            ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
+        ],
+        subcommands=[
+            ("list", "List past audit runs"),
+            ("show <run_id>", "View a past audit run"),
+        ],
+        examples=[
+            ("rdst audit --target mydb", "Audit a database"),
+            ("rdst audit --target mydb --duration 5m", "Audit with live capture"),
+            ("rdst audit --target mydb --no-insights", "Skip LLM analysis"),
+            ("rdst audit list", "List past audits (find run IDs here)"),
+            ("rdst audit list --target mydb", "List audits for a specific target"),
+            ("rdst audit show audit_mydb_20260325", "View a saved audit"),
+            ("rdst audit show audit_mydb_20260325 --export-captured-queries", "Export full query text"),
+            ("rdst audit --target mydb --json", "JSON output"),
+        ],
+    ),
 }
 
 COMMAND_ORDER = [
@@ -1144,6 +1326,8 @@ COMMAND_ORDER = [
     "guard",
     "scan",
     "cache",
+    "fleet",
+    "audit",
     "report",
     "help",
     "claude",

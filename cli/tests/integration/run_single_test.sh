@@ -26,6 +26,8 @@ if [[ $# -lt 1 ]]; then
   echo "  test_readyset_flag      - Analyze with --readyset flag"
   echo "  test_query_commands     - Query command tests (add/list/show/edit/delete)"
   echo "  test_error_handling     - Error handling scenarios"
+  echo "  test_fleet_commands     - Fleet import, list, status, audit, snapshots, diff"
+  echo "  test_audit_duration_commands - Audit with duration, list, show, query run --file"
   exit 1
 fi
 
@@ -66,6 +68,8 @@ source "${SCRIPT_DIR}/tests/test_cache.sh"
 source "${SCRIPT_DIR}/tests/test_top_and_registry.sh"
 source "${SCRIPT_DIR}/tests/test_query_command.sh"
 source "${SCRIPT_DIR}/tests/test_errors.sh"
+source "${SCRIPT_DIR}/tests/test_fleet.sh"
+source "${SCRIPT_DIR}/tests/test_audit_duration.sh"
 
 # Setup databases
 setup_upstream_databases

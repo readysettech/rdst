@@ -359,6 +359,74 @@ class TargetsConfig:
         trial = self._data.get("trial", {})
         return bool(trial.get("token") and trial.get("status") == "active")
 
+    # Fleet/group/tag query methods
+    def list_targets_by_group(self, group: str) -> List[str]:
+        """List target names that belong to a specific group."""
+        targets = self._data.get("targets", {})
+        return sorted(
+            name for name, cfg in targets.items() if cfg.get("group") == group
+        )
+
+    def list_targets_by_tag(self, tag: str) -> List[str]:
+        """List target names that have a specific tag."""
+        targets = self._data.get("targets", {})
+        return sorted(
+            name for name, cfg in targets.items() if tag in (cfg.get("tags") or [])
+        )
+
+    def list_fleet_targets(
+        self,
+        group: Optional[str] = None,
+        tag: Optional[str] = None,
+        exclude: Optional[List[str]] = None,
+    ) -> List[str]:
+        """List fleet targets — all database targets, excluding ReadySet caches.
+
+        Fleet = all targets that are actual databases (not ReadySet cache proxies).
+        Optionally filtered by group and/or tag. Specific targets can be excluded.
+        """
+        targets = self._data.get("targets", {})
+        exclude_set = set(exclude or [])
+        result = []
+        for name, cfg in targets.items():
+            # Skip ReadySet cache targets — they're not upstream databases
+            target_type = cfg.get("target_type", "database")
+            if target_type == "readyset":
+                continue
+            proxy = cfg.get("proxy", "none")
+            if proxy == "readyset":
+                continue
+            # Skip excluded targets
+            if name in exclude_set:
+                continue
+            # Apply group filter
+            if group and cfg.get("group") != group:
+                continue
+            # Apply tag filter
+            if tag and tag not in (cfg.get("tags") or []):
+                continue
+            result.append(name)
+        return sorted(result)
+
+    def list_groups(self) -> List[str]:
+        """List all unique groups across targets."""
+        targets = self._data.get("targets", {})
+        groups = set()
+        for cfg in targets.values():
+            g = cfg.get("group")
+            if g:
+                groups.add(g)
+        return sorted(groups)
+
+    def list_tags(self) -> List[str]:
+        """List all unique tags across targets."""
+        targets = self._data.get("targets", {})
+        tags = set()
+        for cfg in targets.values():
+            for t in cfg.get("tags") or []:
+                tags.add(t)
+        return sorted(tags)
+
 
 class RdstCLI:
     """Stubs for rdst commands. Each returns RdstResult and shows intended integrations."""

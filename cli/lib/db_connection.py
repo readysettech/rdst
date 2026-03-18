@@ -76,7 +76,7 @@ def resolve_connection_params(target: Optional[str] = None, target_config: Optio
     }
 
 
-def create_direct_connection(target_config: Dict[str, Any]):
+def create_direct_connection(target_config: Dict[str, Any], connect_timeout: int = 10):
     """
     Create a direct database connection from target configuration.
 
@@ -119,14 +119,14 @@ def create_direct_connection(target_config: Dict[str, Any]):
         raise ValueError(f"Password not available for target (password_env='{password_env}')")
 
     if engine == 'postgresql':
-        return _create_postgres_connection(host, port, user, password, database, use_tls)
+        return _create_postgres_connection(host, port, user, password, database, use_tls, connect_timeout=connect_timeout)
     elif engine == 'mysql':
-        return _create_mysql_connection(host, port, user, password, database, use_tls)
+        return _create_mysql_connection(host, port, user, password, database, use_tls, connect_timeout=connect_timeout)
     else:
         raise ValueError(f"Unsupported database engine: {engine}")
 
 
-def _create_postgres_connection(host: str, port: int, user: str, password: str, database: str, use_tls: bool = False):
+def _create_postgres_connection(host: str, port: int, user: str, password: str, database: str, use_tls: bool = False, connect_timeout: int = 10):
     """Create PostgreSQL connection using psycopg2."""
     try:
         import psycopg2
@@ -141,7 +141,7 @@ def _create_postgres_connection(host: str, port: int, user: str, password: str, 
             'user': user,
             'password': password,
             'database': database,
-            'connect_timeout': 10,
+            'connect_timeout': connect_timeout,
         }
 
         if use_tls:
@@ -155,7 +155,7 @@ def _create_postgres_connection(host: str, port: int, user: str, password: str, 
         raise RuntimeError(f"Failed to connect to PostgreSQL: {e}")
 
 
-def _create_mysql_connection(host: str, port: int, user: str, password: str, database: str, use_tls: bool = False):
+def _create_mysql_connection(host: str, port: int, user: str, password: str, database: str, use_tls: bool = False, connect_timeout: int = 10):
     """Create MySQL connection using pymysql."""
     try:
         import pymysql
@@ -170,7 +170,7 @@ def _create_mysql_connection(host: str, port: int, user: str, password: str, dat
             'user': user,
             'password': password,
             'database': database,
-            'connect_timeout': 10,
+            'connect_timeout': connect_timeout,
             'autocommit': True,
             'cursorclass': pymysql.cursors.DictCursor,  # Return results as dicts
         }

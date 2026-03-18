@@ -766,8 +766,9 @@ class QueryRegistry:
         if not is_valid:
             raise ValueError(
                 f"Query appears truncated. {parse_error}\n"
-                "Queries >1KB captured from 'rdst top' may be truncated by database settings.\n"
-                "Provide the full query with: rdst analyze -q '<full query>'"
+                "Queries >1KB may be truncated by database settings.\n"
+                "For MySQL: set performance_schema_max_digest_length = 16384 and max_digest_length = 16384\n"
+                "Or provide the full query with: rdst analyze -q '<full query>'"
             )
 
         # Use SQLGlot for robust normalization and parameter extraction

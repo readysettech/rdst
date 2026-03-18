@@ -8,3 +8,5 @@ pygments
 sqlparse
 pyyaml
 sqlglot
+anthropic
+botocore

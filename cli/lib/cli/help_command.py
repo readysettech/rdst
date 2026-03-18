@@ -225,7 +225,8 @@ rdst query delete my-slow-query
 ```
 
 ### rdst query run
-Run saved queries for benchmarking and load generation.
+Run saved queries or queries from a file for benchmarking
+and load generation.
 
 ```bash
 # Run a query once
@@ -233,6 +234,15 @@ rdst query run my-query
 
 # Run multiple queries round-robin
 rdst query run query1 query2 query3 --target mydb
+
+# Run queries from a CSV file
+rdst query run --file queries.csv --target mydb
+
+# Replay from file with LLM analysis of results
+rdst query run --file queries.csv --target mydb --analyze
+
+# Replay for a duration
+rdst query run --file queries.csv --target mydb --duration 5m
 
 # Fixed interval mode - run every 100ms
 rdst query run my-query --interval 100
@@ -250,6 +260,9 @@ rdst query run my-query --duration 30      # Run for 30s with no delay
 # Quiet mode (summary only)
 rdst query run my-query --duration 60 --quiet
 ```
+
+CSV format: a file with a `query` column header and one
+SQL query per row.
 
 Output includes:
 - Live progress table with QPS
@@ -567,15 +580,308 @@ rdst cache show --target mydb-cache
 rdst cache drop-all --target mydb-cache --yes
 ```
 
+### rdst audit
+Health audit of a single database target. Includes metrics,
+top queries, and Readyset cache opportunity scoring.
+
+```bash
+# Quick audit (metrics + top queries + insights)
+rdst audit --target mydb
+
+# Skip LLM insights (faster, metrics-only)
+rdst audit --target mydb --no-insights
+
+# Live capture: collect queries over a time window
+rdst audit --target mydb --duration 5m
+
+# Don't save captured queries to the registry
+rdst audit --target mydb --duration 5m --no-save
+
+# Save audit result with a name for later comparison
+rdst audit --target mydb --save baseline
+
+# JSON output for scripting
+rdst audit --target mydb --json
+```
+
+Collects: connection utilization, buffer cache hit rate,
+database size, read/write ratio, replication status,
+top queries from pg_stat_statements / performance_schema.
+Computes sizing verdict (under-provisioned/oversized/
+right-sized) and Readyset cache opportunity score (0-100).
+
+#### Duration mode (`--duration`)
+
+With `--duration`, rdst captures all queries over a time window
+with start/end database snapshots, intermediate 30s samples,
+and per-table statistics. LLM analysis produces health score,
+bottlenecks, index recommendations, caching candidates,
+and optimization priorities. Queries are auto-saved to the
+registry (use `--no-save` to skip).
+
+When using `--duration`, rdst also collects table schema
+information (existing indexes, column types) so that index
+recommendations are schema-aware. This means rdst will not
+suggest creating an index that already exists, and
+recommendations include the exact CREATE INDEX DDL ready
+to copy-paste.
+
+**Truncation warning:** If MySQL's digest length settings are too low
+(default 1024 bytes), captured query text will be truncated. The audit
+output warns when this is detected. To fix:
+
+1. Set `performance_schema_max_digest_length = 16384` in the DB parameter group
+2. Set `max_digest_length = 16384` in the DB parameter group
+3. Restart the instance
+4. Run `CALL sys.ps_truncate_all_tables(FALSE)` to clear old truncated entries
+5. Wait for new query traffic to accumulate, then re-run audit
+
+#### Browsing past audits
+
+```bash
+# List all saved audit runs
+rdst audit list
+rdst audit list --target mydb --json
+
+# View a saved audit with full analysis
+rdst audit show <run_id>
+rdst audit show <run_id> --json
+```
+
+#### Exporting queries from a saved audit
+
+Use `--export-queries`, `--export-top-queries`, or
+`--export-captured-queries` with `audit show` to export
+queries to stdout in a format suitable for piping or saving.
+
+```bash
+# Export all queries (captured if available, otherwise top)
+rdst audit show <run_id> --export-queries
+
+# Export only the cumulative top queries from stats
+# (pg_stat_statements / performance_schema)
+rdst audit show <run_id> --export-top-queries
+
+# Export only queries captured during the --duration window
+rdst audit show <run_id> --export-captured-queries
+```
+
+#### Options reference
+
+- `--target NAME`: Database target (required for new audit)
+- `--duration DURATION`: Live capture window (e.g., 2m, 5m, 1h)
+- `--no-insights`: Skip LLM analysis (faster, metrics-only)
+- `--no-save`: Don't save captured queries to the registry
+- `--save NAME`: Save the audit result with a name
+- `--source {auto,pg_stat_statements,activity}`: Query capture source
+- `--limit N`: Top N queries to include (default: 50)
+- `--diff BASELINE`: Compare against a saved baseline
+- `--export-queries`: Export queries from a saved audit
+- `--export-top-queries`: Export cumulative top queries only
+- `--export-captured-queries`: Export duration-captured queries only
+- `--json`: JSON output
+
+### rdst fleet
+Manage and audit multiple database targets as a fleet.
+
+#### fleet configure
+Interactive wizard for setting up fleet targets.
+
+```bash
+rdst fleet configure
+rdst fleet configure --discover   # Start with AWS discovery
+```
+
+#### fleet import
+Bulk import targets from a CSV file.
+
+```bash
+rdst fleet import --from fleet.csv --password-env FLEET_PASS
+rdst fleet import --from fleet.csv --group production --tag critical
+rdst fleet import --from fleet.csv --dry-run   # Preview without saving
+```
+
+CSV format columns: `name`, `host`, `port`, `database`, `user`,
+`engine`, `group`, `tags`, `password_env`.
+- `engine`: `postgresql` or `mysql`
+- `tags`: comma-separated (e.g., `critical,us-east-1`)
+- `password_env`: the **name** of the environment variable that
+  holds the password (not the password itself). For example, if
+  `password_env` is `PROD_DB_PASS`, you must `export PROD_DB_PASS="..."`
+  before running rdst commands. Passwords are never stored in config
+  files or CSV — only the env var name is stored.
+
+Example CSV:
+```
+name,host,port,database,user,engine,group,tags,password_env
+prod-primary,db1.example.com,5432,myapp,admin,postgresql,production,critical,PROD_DB_PASS
+prod-replica,db2.example.com,5432,myapp,admin,postgresql,production,replica,PROD_DB_PASS
+staging,staging.example.com,3306,myapp,admin,mysql,staging,,STAGING_PASS
+```
+
+Then before running commands:
+```bash
+export PROD_DB_PASS="my-prod-password"
+export STAGING_PASS="my-staging-password"
+```
+
+#### fleet discover
+Discover RDS/Aurora instances from AWS.
+
+```bash
+# Discover all RDS instances in specific regions
+rdst fleet discover --regions us-east-1,us-west-2
+
+# Filter by engine type
+rdst fleet discover --regions us-east-1 --engine-filter postgresql
+
+# Filter by instance name pattern
+rdst fleet discover --regions us-east-1 --name-pattern "prod-*"
+
+# Assign to a group and preview first
+rdst fleet discover --regions us-east-1 --group production --dry-run
+
+# Specify DB username
+rdst fleet discover --regions us-east-1 --user admin
+```
+
+**Aurora cluster discovery:** When rdst discovers Aurora clusters,
+it auto-creates separate targets for the cluster writer endpoint
+and each individual reader instance. All targets from the same
+cluster are automatically grouped by cluster ID and tagged as
+`aurora/writer` or `aurora/reader`. This lets you audit writers
+and readers independently or filter by role.
+
+**Auto-scaling support:** Re-run `fleet discover` anytime to pick
+up new auto-scaled reader instances. Existing targets are skipped
+(matched by hostname), and new readers are automatically added to
+the same cluster group with the correct tags. The credential wizard
+runs only for newly discovered instances.
+
+**Credential wizard:** After discovery completes, rdst prompts
+with three credential options:
+1. **Shared password** — one `password_env` for all discovered targets
+2. **Per-instance credentials** — set a different `password_env` for each target
+3. **Skip** — configure credentials later via `rdst configure`
+
+To remove a target: `rdst configure remove --target <name>`
+
+#### fleet list
+List all fleet targets (excludes Readyset cache targets).
+
+```bash
+rdst fleet list
+rdst fleet list --group production
+rdst fleet list --tag critical
+rdst fleet list --json
+```
+
+#### fleet status
+Check connectivity for all fleet targets. Runs a quick
+connection test against each target and reports success/failure.
+
+```bash
+rdst fleet status
+rdst fleet status --group production
+rdst fleet status --tag aurora/writer
+rdst fleet status --json
+```
+
+#### fleet audit
+Run a health audit across all fleet targets concurrently
+(max 10 targets in parallel).
+
+```bash
+# Basic fleet audit
+rdst fleet audit
+
+# Filter by group or tag
+rdst fleet audit --group production
+rdst fleet audit --tag critical
+
+# Save the snapshot for later comparison
+rdst fleet audit --save march-baseline
+
+# Live capture mode: collect queries for each target over a window
+rdst fleet audit --duration 2m
+
+# Skip auto-saving the snapshot
+rdst fleet audit --no-save
+
+# Skip LLM insights (faster, metrics-only)
+rdst fleet audit --no-insights
+
+# JSON output
+rdst fleet audit --json
+```
+
+With `--duration`, each target gets its own live capture
+window where queries are observed in real-time. The per-target
+results include the same depth of analysis as `rdst audit --duration`
+(health score, bottlenecks, index recommendations, caching
+candidates). Without `--duration`, uses cumulative stats from
+pg_stat_statements / performance_schema.
+
+#### fleet snapshots
+List all saved fleet audit snapshots.
+
+```bash
+rdst fleet snapshots
+rdst fleet snapshots --json
+```
+
+#### fleet diff
+Compare two saved fleet audit snapshots side by side.
+Shows changes in health scores, new/resolved issues,
+and query pattern drift between the two points in time.
+
+```bash
+rdst fleet diff march-baseline april-baseline
+rdst fleet diff march-baseline april-baseline --json
+```
+
+#### Typical fleet workflow
+```bash
+# 1. Discover your AWS fleet
+rdst fleet discover --regions us-east-1,us-west-2
+# → credentials wizard runs automatically
+
+# 2. Verify connectivity
+rdst fleet status
+
+# 3. Run baseline audit and save it
+rdst fleet audit --save baseline --duration 2m
+
+# 4. After changes, run another audit
+rdst fleet audit --save post-migration --duration 2m
+
+# 5. Compare before/after
+rdst fleet diff baseline post-migration
+```
+
 ## Password Handling
-RDST never stores passwords in config files. Each target has a `password_env` field
-specifying which environment variable holds the password.
+RDST never stores passwords in config files. Each target has a
+`password_env` field specifying a key name used to look up the
+password. RDST checks these sources in order:
+
+1. **Environment variable** — `export PROD_DB_PASS="..."`
+2. **OS keyring** — stored via `rdst fleet configure` or manually
+3. **AWS Secrets Manager** — if `password_secret_arn` is set
 
 ```bash
 # Config shows: password_env = "PROD_DB_PASSWORD"
-# You must export this before running commands:
+
+# Option 1: Environment variable (works everywhere)
 export PROD_DB_PASSWORD="your-actual-password"
+
+# Option 2: OS keyring (persists across sessions, no export needed)
+# Set during fleet configure, or manually:
+python3 -c "import keyring; keyring.set_password('rdst', 'PROD_DB_PASSWORD', 'your-password')"
 ```
+
+The keyring option works on macOS (Keychain), Linux (GNOME Keyring),
+and Windows (Credential Manager). On headless servers or containers
+without a keyring backend, use environment variables instead.
 
 ## Common Workflows
 

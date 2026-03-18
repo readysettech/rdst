@@ -68,8 +68,23 @@ from rich.table import Table
 from rich.text import Text
 from rich.syntax import Syntax, PygmentsSyntaxTheme
 from rich.console import Group
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
 from rich.status import Status
+
+
+class ElapsedMessage:
+    """Rich renderable that appends elapsed time to a message."""
+
+    def __init__(self, message: str, start_time: float):
+        self._message = message
+        self._start = start_time
+
+    def __rich__(self) -> str:
+        import time
+        elapsed = int(time.monotonic() - self._start)
+        if elapsed < 1:
+            return self._message
+        return f"{self._message} ({elapsed}s)"
 
 
 # =============================================================================

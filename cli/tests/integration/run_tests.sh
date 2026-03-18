@@ -52,6 +52,8 @@ source "${SCRIPT_DIR}/tests/test_top_and_registry.sh"
 source "${SCRIPT_DIR}/tests/test_query_command.sh"
 source "${SCRIPT_DIR}/tests/test_errors.sh"
 source "${SCRIPT_DIR}/tests/test_scan.sh"
+source "${SCRIPT_DIR}/tests/test_fleet.sh"
+source "${SCRIPT_DIR}/tests/test_audit_duration.sh"
 
 # Test suite execution
 run_test_suite() {
@@ -109,6 +111,12 @@ run_test_suite() {
 
     # Scan command tests (all 4 ORMs, shallow + deep analysis)
     test_scan_commands
+
+    # Fleet & Audit tests (import, list, status, audit, snapshots, diff)
+    test_fleet_commands
+
+    # Audit duration tests (duration, list, show, query run --file)
+    test_audit_duration_commands
   ) || suite_failed=1
 
   if [[ $suite_failed -eq 1 ]]; then

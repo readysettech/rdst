@@ -1,0 +1,1183 @@
+"""Fleet command — multi-target management and fleet-wide operations."""
+
+import argparse
+import asyncio
+import json
+import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List
+
+from lib.ui import Status, ElapsedMessage
+from lib.cli.rdst_cli import RdstResult
+from lib.ui import get_console
+
+
+class FleetCommand:
+    """Orchestrates fleet subcommands: import, discover, list, status, audit, diff, snapshots."""
+
+    def execute(self, subcommand: str, args: argparse.Namespace) -> RdstResult:
+        """Dispatch to the appropriate fleet subcommand."""
+        handler = getattr(self, f"_handle_{subcommand.replace('-', '_')}", None)
+        if handler is None:
+            return RdstResult(False, f"Unknown fleet subcommand: {subcommand}")
+        return handler(args)
+
+    # =========================================================================
+    # Configure (interactive wizard)
+    # =========================================================================
+
+    def _handle_configure(self, args: argparse.Namespace) -> RdstResult:
+        """Interactive fleet configuration wizard."""
+        csv_file = getattr(args, "csv_file", None)
+        discover = getattr(args, "discover", False)
+
+        # If --from provided, delegate to import
+        if csv_file:
+            return self._handle_import(args)
+
+        # If --discover provided, delegate to discover
+        if discover:
+            return self._handle_discover(args)
+
+        # Interactive menu
+        from lib.ui import Prompt
+        console = get_console()
+        console.print("\n[bold]Fleet Configuration[/bold]\n")
+        console.print("How would you like to add targets?")
+        console.print("  [bold][1][/bold] Import from CSV file")
+        console.print("  [bold][2][/bold] Discover from AWS (auto-find RDS/Aurora instances)\n")
+        console.print("[dim]To add a single target: rdst configure add --target <name> --host <host> ...[/dim]\n")
+
+        try:
+            choice = Prompt.ask("Choose", choices=["1", "2"], default="2")
+        except (EOFError, KeyboardInterrupt):
+            return RdstResult(False, "Cancelled")
+
+        if choice == "1":
+            from lib.ui import StyledPanel, DataTable
+            from lib.ui import Text
+
+            # CSV format panel
+            csv_example = (
+                "name,host,port,database,user,engine,password_env\n"
+                "prod-pg,db.example.com,5432,myapp,postgres,postgresql,PROD_DB_PASS\n"
+                "prod-mysql,mysql.example.com,3306,myapp,admin,mysql,MYSQL_PASS"
+            )
+            console.print()
+            console.print(StyledPanel(
+                f"[bold]Required columns:[/bold] name, host, engine\n"
+                f"[bold]Optional columns:[/bold] port, database, user, group, tags, password_env, password_secret_arn\n\n"
+                f"[bold]Example:[/bold]\n{csv_example}",
+                title="CSV Format",
+            ))
+
+            # Password options panel
+            console.print(StyledPanel(
+                "[bold]Option 1: Environment variable[/bold]\n"
+                "Put the env var NAME in the CSV (not the actual password).\n"
+                "Then export the password in your shell before running RDST.\n\n"
+                "  CSV column:  password_env = PROD_DB_PASS\n"
+                "  Your shell:  export PROD_DB_PASS=\"my-actual-password\"\n\n"
+                "[bold]Option 2: AWS Secrets Manager[/bold]\n"
+                "Put the full Secrets Manager ARN in the CSV.\n"
+                "RDST will fetch the password automatically at runtime.\n\n"
+                "  CSV column:  password_secret_arn = arn:aws:secretsmanager:us-east-1:123456:secret:my-db-pass",
+                title="Password Configuration",
+            ))
+
+            # Next step
+            console.print(StyledPanel(
+                "Create your CSV file, then run:\n\n"
+                "  [cyan]rdst fleet configure --from /path/to/fleet.csv[/cyan]",
+                title="Next Step",
+            ))
+            return RdstResult(True, "")
+
+        if choice == "2":
+            regions = Prompt.ask("AWS regions (comma-separated)", default="us-east-1")
+            if not regions:
+                return RdstResult(False, "At least one region required")
+            import copy
+            discover_args = copy.copy(args)
+            discover_args.regions = regions
+            return self._handle_discover(discover_args)
+
+        return RdstResult(False, f"Invalid choice: {choice}")
+
+    def _configure_manual(self, args: argparse.Namespace) -> RdstResult:
+        """Manually add a fleet target via interactive prompts."""
+        from lib.ui import Prompt
+        console = get_console()
+        default_group = getattr(args, "group", None)
+
+        try:
+            console.print("\n[bold]Add Database Target[/bold]\n")
+            engine = Prompt.ask("Engine", choices=["postgresql", "mysql"], default="postgresql")
+
+            host = Prompt.ask("Host (e.g. db.example.com)")
+            if not host:
+                return RdstResult(False, "Host is required")
+
+            default_port = "5432" if engine == "postgresql" else "3306"
+            port = int(Prompt.ask("Port", default=default_port))
+
+            default_user = "postgres" if engine == "postgresql" else "admin"
+            console.print("[dim]Tip: Use a read-only database user for safety. RDST only runs SELECT queries.[/dim]")
+            user = Prompt.ask("Username", default=default_user)
+            database = Prompt.ask("Database name")
+            if not database:
+                return RdstResult(False, "Database name is required")
+
+            group = Prompt.ask("Group (optional)", default=default_group or "", show_default=bool(default_group))
+            if not group:
+                group = None
+
+            # Generate target name from host
+            name = host.split(".")[0].replace("_", "-")
+            name = Prompt.ask("Target name", default=name)
+
+            # Password
+            console.print(f"\n  How should RDST get the password for [bold]{user}[/bold]?")
+            console.print("    [bold][1][/bold] Enter password now")
+            console.print("    [bold][2][/bold] AWS Secrets Manager ARN")
+            console.print("    [bold][3][/bold] Skip — configure later\n")
+
+            pw_method = Prompt.ask("    Choose", choices=["1", "2", "3"], default="1")
+
+        except (EOFError, KeyboardInterrupt):
+            return RdstResult(False, "Cancelled")
+
+        # Save the target
+        from lib.cli.rdst_cli import TargetsConfig
+
+        cfg = TargetsConfig()
+        cfg.load()
+
+        env_name = f"{name.upper().replace('-', '_')}_PASS"
+        target_config = {
+            "engine": engine,
+            "host": host,
+            "port": port,
+            "user": user,
+            "database": database,
+            "password_env": env_name,
+        }
+        if group:
+            target_config["group"] = group
+
+        if pw_method == "1":
+            password = Prompt.ask("    Password", password=True, default="", show_default=False)
+            if password:
+                stored_in_keyring = self._try_store_in_keyring(env_name, password)
+                os.environ[env_name] = password
+                if stored_in_keyring:
+                    console.print(f"    [green]Password saved to OS keyring (persists across sessions)[/green]")
+                else:
+                    console.print(f"    [green]Password set for this session via {env_name}[/green]")
+                    console.print(f"    [dim]For future sessions: export {env_name}=\"your-password\"[/dim]")
+        elif pw_method == "2":
+            arn = Prompt.ask("    Secrets Manager ARN", default="", show_default=False)
+            if arn:
+                target_config["password_secret_arn"] = arn
+                console.print(f"    [green]Set to Secrets Manager[/green]")
+
+        cfg.upsert(name, target_config)
+        cfg.save()
+
+        console.print(f"\n[green]Target '{name}' added.[/green]")
+
+        # Test connection
+        console.print("[dim]Testing connection...[/dim]")
+        try:
+            from lib.db_connection import create_direct_connection, close_connection
+
+            tc = cfg.get(name)
+            conn = create_direct_connection(tc)
+            close_connection(conn, tc.get("engine", "postgresql"))
+            console.print(f"[green]Connection successful.[/green]")
+        except Exception as e:
+            console.print(f"[yellow]Connection test failed: {e}[/yellow]")
+            console.print(f"[dim]Target saved. Check credentials and try: rdst fleet status[/dim]")
+
+        # Ask if they want to add another
+        try:
+            another = Prompt.ask("\nAdd another target?", choices=["y", "n"], default="n")
+            if another == "y":
+                return self._configure_manual(args)
+        except (EOFError, KeyboardInterrupt):
+            pass
+
+        return RdstResult(True, f"Target '{name}' configured")
+
+    # =========================================================================
+    # Import
+    # =========================================================================
+
+    def _handle_import(self, args: argparse.Namespace) -> RdstResult:
+        """Import fleet targets from CSV."""
+        csv_file = getattr(args, "csv_file", None)
+        if not csv_file:
+            return RdstResult(False, "CSV file required: rdst fleet import --from fleet.csv")
+
+        password_env = getattr(args, "password_env", "FLEET_PASS")
+        group = getattr(args, "group", None)
+        tags = getattr(args, "tags", None) or []
+        dry_run = getattr(args, "dry_run", False)
+
+        from lib.services.fleet_service import FleetService
+
+        service = FleetService()
+        console = get_console()
+
+        result_data = {"imported": 0, "skipped": 0, "errors": 0}
+
+        async def _run():
+            async for event in service.import_fleet(
+                csv_file=csv_file,
+                password_env=password_env,
+                default_group=group,
+                default_tags=tags,
+                dry_run=dry_run,
+            ):
+                if event.type == "status":
+                    console.print(f"[dim]{event.message}[/dim]")
+                elif event.type == "import_progress":
+                    icon = {"importing": "[green]+[/green]", "skipped": "[yellow]~[/yellow]", "error": "[red]x[/red]"}.get(event.status, " ")
+                    console.print(f"  {icon} [{event.current}/{event.total}] {event.message}")
+                elif event.type == "error":
+                    console.print(f"  [red]Error:[/red] {event.message}")
+                elif event.type == "import_complete":
+                    result_data["imported"] = event.imported
+                    result_data["skipped"] = event.skipped
+                    result_data["errors"] = event.errors
+
+        asyncio.run(_run())
+
+        imported = result_data["imported"]
+        skipped = result_data["skipped"]
+        errors = result_data["errors"]
+        prefix = "[dry-run] " if dry_run else ""
+        console.print(
+            f"\n{prefix}[bold]Import complete:[/bold] {imported} imported, {skipped} skipped, {errors} errors"
+        )
+        return RdstResult(True, f"{imported} targets imported", data=result_data)
+
+    # =========================================================================
+    # List
+    # =========================================================================
+
+    def _handle_list(self, args: argparse.Namespace) -> RdstResult:
+        """List fleet members."""
+        group = getattr(args, "group", None)
+        tag = getattr(args, "tag", None)
+        output_json = getattr(args, "output_json", False)
+
+        from lib.services.fleet_service import FleetService
+
+        service = FleetService()
+        console = get_console()
+        members_data: List[dict] = []
+
+        async def _run():
+            async for event in service.list_fleet(group=group, tag=tag):
+                if event.type == "fleet_list":
+                    members_data.extend(event.members)
+
+        asyncio.run(_run())
+
+        if output_json:
+            console.print(json.dumps(members_data, indent=2))
+            return RdstResult(True, data={"members": members_data})
+
+        if not members_data:
+            console.print("[dim]No fleet targets found.[/dim]")
+            console.print("[dim]Import targets: rdst fleet import --from fleet.csv[/dim]")
+            return RdstResult(True, "No targets")
+
+        from lib.ui import DataTable
+
+        rows = []
+        for m in members_data:
+            tags_str = ", ".join(m.get("tags") or [])
+            rows.append((
+                m["name"],
+                m["engine"],
+                m["host"],
+                str(m["port"]),
+                m.get("database", ""),
+                m.get("group") or "-",
+                tags_str or "-",
+                m.get("target_type", "database"),
+            ))
+        table = DataTable(
+            title=f"Fleet Targets ({len(members_data)})",
+            columns=["Name", "Engine", "Host", "Port", "Database", "Group", "Tags", "Type"],
+            rows=rows,
+        )
+        console.print(table)
+        return RdstResult(True, f"{len(members_data)} targets", data={"members": members_data})
+
+    # =========================================================================
+    # Status
+    # =========================================================================
+
+    def _handle_status(self, args: argparse.Namespace) -> RdstResult:
+        """Check fleet connectivity."""
+        group = getattr(args, "group", None)
+        tag = getattr(args, "tag", None)
+        output_json = getattr(args, "output_json", False)
+
+        from lib.services.fleet_service import FleetService
+
+        service = FleetService()
+        console = get_console()
+        results: List[dict] = []
+
+        async def _run():
+            async for event in service.check_status(group=group, tag=tag):
+                if event.type == "status":
+                    console.print(f"[dim]{event.message}[/dim]")
+                elif event.type == "connectivity":
+                    if event.status == "checking":
+                        continue
+                    results.append({
+                        "target": event.target_name,
+                        "status": event.status,
+                        "latency_ms": event.latency_ms,
+                        "server_version": event.server_version,
+                        "error": event.error,
+                    })
+                    if event.status == "ok":
+                        console.print(
+                            f"  [green]\u2713[/green] {event.target_name} "
+                            f"[dim]({event.latency_ms:.0f}ms)[/dim]"
+                        )
+                    else:
+                        console.print(
+                            f"  [red]\u2717[/red] {event.target_name} "
+                            f"[red]{event.error}[/red]"
+                        )
+                elif event.type == "error":
+                    console.print(f"[red]{event.message}[/red]")
+
+        asyncio.run(_run())
+
+        if output_json:
+            console.print(json.dumps(results, indent=2))
+
+        ok = sum(1 for r in results if r["status"] == "ok")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        console.print(f"\n[bold]{ok} ok[/bold], [bold]{failed} failed[/bold]")
+
+        return RdstResult(
+            ok=failed == 0,
+            message=f"{ok} ok, {failed} failed",
+            data={"results": results},
+        )
+
+    # =========================================================================
+    # Stubs for later phases
+    # =========================================================================
+
+    def _handle_discover(self, args: argparse.Namespace) -> RdstResult:
+        """Discover RDS instances from AWS."""
+        regions_str = getattr(args, "regions", None)
+        if not regions_str:
+            return RdstResult(False, "Regions required: rdst fleet discover --regions us-east-1,us-west-2")
+
+        regions = [r.strip() for r in regions_str.split(",")]
+        engine_filter = getattr(args, "engine_filter", "all")
+        if engine_filter == "all":
+            engine_filter = None
+        name_pattern = getattr(args, "name_pattern", None)
+        password_env = getattr(args, "password_env", "FLEET_PASS")
+        default_user = getattr(args, "user", None)
+        default_group = getattr(args, "group", None)
+        dry_run = getattr(args, "dry_run", False)
+
+        # Check AWS credentials first
+        from lib.fleet.aws_auth import detect_aws_credentials
+        has_creds, message = detect_aws_credentials()
+        console = get_console()
+
+        if not has_creds:
+            console.print(f"[yellow]{message}[/yellow]")
+            return RdstResult(False, "AWS credentials required for discovery")
+
+        try:
+            from lib.fleet.aws_discovery import discover_rds_instances
+        except ImportError as e:
+            return RdstResult(False, str(e))
+
+        console.print(f"[dim]Discovering RDS instances in {', '.join(regions)}...[/dim]")
+
+        from lib.cli.rdst_cli import TargetsConfig
+        cfg = TargetsConfig()
+        cfg.load()
+
+        # Build a set of existing hostnames for dedup
+        existing_hosts = set()
+        for tname in cfg.list_targets():
+            tc = cfg.get(tname)
+            if tc:
+                existing_hosts.add(tc.get("host", "").lower())
+
+        imported = 0
+        skipped = 0
+        discovered_names = []
+
+        try:
+            for member in discover_rds_instances(
+                regions=regions,
+                engine_filter=engine_filter,
+                name_pattern=name_pattern,
+                password_env=password_env,
+                default_user=default_user,
+                default_group=default_group,
+            ):
+                # Check by name OR by hostname
+                existing = cfg.get(member.name)
+                host_exists = member.host.lower() in existing_hosts
+                if existing or host_exists:
+                    console.print(f"  [yellow]~[/yellow] {member.name} (already exists)")
+                    skipped += 1
+                    continue
+
+                # Format Aurora targets with role tag
+                role_tag = ""
+                if "writer" in member.tags:
+                    role_tag = " [bold cyan][writer][/bold cyan]"
+                elif "reader" in member.tags:
+                    role_tag = " [dim][reader][/dim]"
+
+                if dry_run:
+                    console.print(
+                        f"  [green]+[/green] {member.name}{role_tag} "
+                        f"({member.engine}, {member.instance_class or 'unknown'}) [dry-run]"
+                    )
+                else:
+                    cfg.upsert(member.name, member.to_target_config())
+                    console.print(
+                        f"  [green]+[/green] {member.name}{role_tag} "
+                        f"({member.engine}, {member.instance_class or 'unknown'})"
+                    )
+                    discovered_names.append(member.name)
+                imported += 1
+
+            if not dry_run and imported > 0:
+                cfg.save()
+
+        except ImportError as e:
+            return RdstResult(False, str(e))
+        except Exception as e:
+            console.print(f"[red]Discovery error: {e}[/red]")
+
+        prefix = "[dry-run] " if dry_run else ""
+        console.print(f"\n{prefix}[bold]{imported} discovered, {skipped} already existed[/bold]")
+
+        # Interactive credential setup for newly discovered instances
+        if imported > 0 and not dry_run:
+            self._setup_credentials_after_discover(console, cfg, discovered_names)
+
+        return RdstResult(True, f"{imported} discovered")
+
+    def _setup_credentials_after_discover(self, console, cfg, discovered_names: list) -> None:
+        """Interactive credential setup for newly discovered instances."""
+        from lib.ui import Prompt
+
+        console.print(f"\n[bold]Credential Setup[/bold]")
+        console.print(f"Set up passwords for {len(discovered_names)} discovered instance(s).\n")
+
+        console.print("  [bold][1][/bold] All instances share the same password")
+        console.print("  [bold][2][/bold] Set credentials for each instance individually")
+        console.print("  [bold][3][/bold] Skip — I'll configure passwords later\n")
+
+        try:
+            choice = Prompt.ask("Choose", choices=["1", "2", "3"], default="1")
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]Skipped credential setup.[/dim]")
+            return
+
+        # Track env vars that need exporting (not stored in keyring)
+        env_vars_needed: dict[str, list[str]] = {}  # env_name -> [target_names]
+
+        if choice == "1":
+            # Shared credentials
+            try:
+                console.print("[dim]Tip: Use a read-only database user for safety. RDST only runs SELECT queries.[/dim]")
+                shared_user = Prompt.ask(
+                    "Username for all instances (enter to keep AWS defaults)",
+                    default="", show_default=False,
+                )
+                password = Prompt.ask(
+                    "Password",
+                    password=True,
+                )
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]Skipped credential setup.[/dim]")
+                return
+            env_name = "FLEET_DB_PASS"
+            stored_in_keyring = False
+            if password:
+                stored_in_keyring = self._try_store_in_keyring(env_name, password)
+                os.environ[env_name] = password
+            for name in discovered_names:
+                tc = cfg.get(name)
+                if tc:
+                    tc["password_env"] = env_name
+                    if shared_user:
+                        tc["user"] = shared_user
+                    cfg.upsert(name, tc)
+            cfg.save()
+            console.print(f"\n[green]All {len(discovered_names)} targets configured[/green]")
+            if stored_in_keyring:
+                console.print(f"[green]Password saved to OS keyring (persists across sessions)[/green]")
+            else:
+                env_vars_needed[env_name] = list(discovered_names)
+
+        elif choice == "2":
+            # Per-instance setup
+            console.print("[dim]Tip: Use a read-only database user for safety. RDST only runs SELECT queries.[/dim]")
+            changed = 0
+            for name in discovered_names:
+                tc = cfg.get(name)
+                if not tc:
+                    continue
+                engine = tc.get("engine", "?")
+                host = tc.get("host", "?")
+                user = tc.get("user", "?")
+                console.print(f"\n[bold]{name}[/bold] ({engine}, {host})")
+
+                # Username
+                try:
+                    new_user = Prompt.ask(
+                        f"  DB username",
+                        default=user,
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    if changed > 0:
+                        cfg.save()
+                        console.print(f"\n[dim]Stopped. {changed} target(s) saved.[/dim]")
+                    else:
+                        console.print("\n[dim]Stopped.[/dim]")
+                    break
+                if new_user != user:
+                    tc["user"] = new_user
+                    user = new_user
+
+                # Password method
+                console.print(f"  How should RDST get the password for [bold]{user}[/bold]?")
+                console.print("    [bold][1][/bold] Enter password")
+                console.print("    [bold][2][/bold] AWS Secrets Manager ARN")
+                console.print("    [bold][3][/bold] Skip — configure later")
+
+                try:
+                    method = Prompt.ask("    Choose", choices=["1", "2", "3"], default="1")
+                except (EOFError, KeyboardInterrupt):
+                    if changed > 0:
+                        cfg.save()
+                        console.print(f"\n[dim]Stopped. {changed} target(s) saved.[/dim]")
+                    else:
+                        console.print("\n[dim]Stopped.[/dim]")
+                    break
+
+                if method == "1":
+                    default_env = f"{name.upper().replace('-', '_')}_PASS"
+                    password = Prompt.ask("    Password", password=True, default="", show_default=False)
+                    env_name = default_env
+                    stored_in_keyring = False
+                    if password:
+                        stored_in_keyring = self._try_store_in_keyring(env_name, password)
+                        os.environ[env_name] = password
+                    tc["password_env"] = env_name
+                    cfg.upsert(name, tc)
+                    changed += 1
+                    if stored_in_keyring:
+                        console.print(f"    [green]Password saved to OS keyring[/green]")
+                    else:
+                        env_vars_needed.setdefault(env_name, []).append(name)
+                        console.print(f"    [green]Password set for this session[/green]")
+
+                elif method == "2":
+                    arn = Prompt.ask("    Secrets Manager ARN", default="", show_default=False)
+                    if arn:
+                        tc["password_secret_arn"] = arn
+                        cfg.upsert(name, tc)
+                        changed += 1
+                        arn_display = f"{arn[:50]}..." if len(arn) > 50 else arn
+                        console.print(f"    [green]Set to Secrets Manager: {arn_display}[/green]")
+                    else:
+                        console.print("    [yellow]Skipped (no ARN provided)[/yellow]")
+
+                else:
+                    cfg.upsert(name, tc)  # Still save username change if any
+                    if new_user != tc.get("user", user):
+                        changed += 1
+                    console.print("    [dim]Skipped password[/dim]")
+
+            if changed > 0:
+                cfg.save()
+                console.print(f"\n[green]{changed} target(s) updated[/green]")
+
+        else:
+            console.print("[dim]Skipped credential setup. Configure later with: rdst configure edit <target>[/dim]")
+
+        # Print env var summary for targets not using keyring
+        if env_vars_needed:
+            console.print(f"\n[bold]Environment Variables Required[/bold]")
+            console.print("[dim]Add these to your shell profile to persist across sessions:[/dim]\n")
+            for env_name, targets in env_vars_needed.items():
+                target_list = ", ".join(targets)
+                console.print(f'  export {env_name}="your-password"  [dim]# {target_list}[/dim]')
+            console.print()
+
+        # Verify connectivity
+        console.print(f"[dim]Verify with: rdst fleet status[/dim]")
+
+    @staticmethod
+    def _try_store_in_keyring(key_name: str, password: str) -> bool:
+        """Try to store password in OS keyring. Returns True if successful."""
+        try:
+            from lib.services.secret_store_service import SecretStoreService
+            store = SecretStoreService()
+            if not store.is_available():
+                return False
+            store.set_secret(key_name, password)
+            # Verify it stuck
+            stored = store.get_secret(key_name)
+            return stored == password
+        except Exception:
+            return False
+
+    def _render_fleet_insights(self, console, raw_text: str) -> None:
+        """Parse structured JSON insights and render with Rich."""
+        import json as _json
+        from lib.ui import StyledPanel, DataTable
+
+        try:
+            from lib.util.json_parse import parse_llm_json
+            data = parse_llm_json(raw_text)
+        except Exception as e:
+            console.print(f"\n[red]Failed to parse LLM response as JSON: {e}[/red]")
+            console.print(f"[dim]Raw response (first 200 chars): {raw_text[:200]}[/dim]")
+            return
+
+        # Fleet health summary
+        console.print()
+        console.print(StyledPanel(data.get("fleet_health_summary", ""), title="Fleet Health"))
+
+        # Per-target recommendations
+        per_target = data.get("per_target", [])
+        if per_target:
+            verdict_colors = {
+                "strong_candidate": "green",
+                "good_candidate": "green",
+                "marginal": "yellow",
+                "not_recommended": "red",
+            }
+            rows = []
+            for t in per_target:
+                verdict = t.get("readyset_verdict", "?")
+                vc = verdict_colors.get(verdict, "dim")
+                cacheable = t.get("estimated_cacheable_pct")
+                cacheable_str = f"{cacheable}%" if cacheable is not None else "?"
+                rows.append((
+                    t.get("target_name", "?"),
+                    f"[{vc}]{verdict.replace('_', ' ')}[/{vc}]",
+                    cacheable_str,
+                    t.get("readyset_summary", ""),
+                ))
+            table = DataTable(
+                title="Readyset Recommendations",
+                columns=["Target", "Verdict", "Cacheable", "Summary"],
+                rows=rows,
+            )
+            console.print(table)
+
+            # Key findings per target
+            for t in per_target:
+                findings = t.get("key_findings", [])
+                sizing = t.get("sizing_recommendation", "")
+                if findings or sizing:
+                    lines = []
+                    if sizing and sizing != "No change needed":
+                        lines.append(f"Sizing: {sizing}")
+                    for f in findings:
+                        lines.append(f"  {f}")
+                    if lines:
+                        console.print(f"\n  [bold]{t.get('target_name', '?')}[/bold]")
+                        for line in lines:
+                            console.print(f"  [dim]{line}[/dim]")
+
+        # Immediate actions
+        actions = data.get("immediate_actions", [])
+        if actions and actions != ["None"]:
+            console.print()
+            action_text = "\n".join(f"  {i+1}. {a}" for i, a in enumerate(actions))
+            console.print(StyledPanel(action_text, title="Immediate Actions"))
+
+        # Fleet summary
+        fleet_summary = data.get("fleet_readyset_summary", "")
+        if fleet_summary:
+            console.print()
+            console.print(StyledPanel(fleet_summary, title="Readyset Fleet Summary"))
+
+        savings = data.get("estimated_monthly_savings_usd")
+        if savings:
+            console.print(f"\n  [dim]Estimated monthly savings: ${savings}[/dim]")
+
+    # =========================================================================
+    # Fleet Audit
+    # =========================================================================
+
+    def _handle_audit(self, args: argparse.Namespace) -> RdstResult:
+        """Run audit across fleet targets concurrently."""
+        group = getattr(args, "group", None)
+        tag = getattr(args, "tag", None)
+        save_name = getattr(args, "save_name", None)
+        no_save = getattr(args, "no_save", False)
+        output_json = getattr(args, "output_json", False)
+        insights = not getattr(args, "no_insights", False)
+        duration_str = getattr(args, "duration", None)
+
+        # Auto-generate save name unless --no-save
+        if not save_name and not no_save:
+            import datetime as _dt
+            save_name = f"fleet_{_dt.datetime.now():%Y%m%d_%H%M%S}"
+        # Disable insights if no API key, warn the user
+        from lib.cli.rdst_cli import TargetsConfig
+        from lib.services.audit_service import AuditService
+
+        cfg = TargetsConfig()
+        cfg.load()
+
+        # Fleet = all database targets (excludes Readyset caches), filtered by group/tag
+        targets = cfg.list_fleet_targets(group=group, tag=tag)
+        if not targets:
+            return RdstResult(False, "No targets found")
+
+        service = AuditService(config=cfg)
+        console = get_console()
+
+        if insights:
+            from lib.services.anthropic_env import has_anthropic_api_key
+            if not has_anthropic_api_key():
+                insights = False
+                if not output_json:
+                    console.print(
+                        "[yellow]Warning: No LLM API key found. Skipping insights.\n"
+                        "Set with: export ANTHROPIC_API_KEY='your-key' or run: rdst init[/yellow]\n"
+                    )
+        all_results: List[dict] = []
+
+        # Parse duration if provided
+        duration_seconds = None
+        if duration_str:
+            from lib.services.capture_service import _parse_duration
+            duration_seconds = _parse_duration(duration_str)
+
+        # Pre-flight display
+        n = len(targets)
+        if not output_json:
+            estimate = "quick audit" if not duration_seconds else f"~{duration_seconds}s capture per target"
+            console.print(f"[bold]Auditing {n} targets...[/bold] ({estimate})")
+
+        # Run audits concurrently
+        max_workers = min(n, 10)
+        from lib.ui import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+
+        # Shared status dict for threads to report progress
+        import threading
+        target_status = {}
+        status_lock = threading.Lock()
+
+        def _update_status(name: str, msg: str):
+            with status_lock:
+                target_status[name] = msg
+
+        def _audit_one_with_status(target_name: str) -> dict:
+            _update_status(target_name, "collecting metrics...")
+            tc = cfg.get(target_name)
+            if not tc:
+                return {"target_name": target_name, "error": f"Target '{target_name}' not found"}
+            try:
+                result = service.audit_target(target_name, tc)
+            except Exception as e:
+                return {"target_name": target_name, "error": str(e)}
+
+            if isinstance(result, dict):
+                result_dict = result
+                result_dict.setdefault("target_name", target_name)
+            else:
+                from dataclasses import asdict
+                try:
+                    result_dict = asdict(result)
+                except TypeError:
+                    result_dict = result.__dict__ if hasattr(result, '__dict__') else {"target_name": target_name}
+
+            if duration_seconds:
+                _update_status(target_name, f"capturing queries ({duration_seconds}s)...")
+                try:
+                    from lib.services.capture_service import CaptureService
+                    ws = CaptureService()
+                    workload_result = {}
+                    cumulative_tq = result_dict.get("top_queries") or []
+
+                    async def _capture():
+                        nonlocal workload_result
+                        async for event in ws.run_capture(
+                            target_name=target_name,
+                            duration_seconds=duration_seconds,
+                            snapshot_only=False,
+                            source="auto",
+                            limit=50,
+                            run_analysis=insights,
+                            cumulative_top_queries=cumulative_tq,
+                            audit_result=result_dict,
+                            save_capture=False,
+                        ):
+                            if event.type == "capture_progress":
+                                elapsed = getattr(event, 'elapsed_seconds', 0)
+                                _update_status(target_name, f"capturing... {elapsed:.0f}s/{duration_seconds}s")
+                            elif event.type == "status" and getattr(event, 'phase', '') == "analysis":
+                                _update_status(target_name, "running LLM analysis...")
+                            elif event.type == "complete":
+                                workload_result = event.summary or {}
+                                if hasattr(event, 'analysis') and event.analysis:
+                                    workload_result["analysis"] = event.analysis
+
+                    asyncio.run(_capture())
+                    if workload_result:
+                        result_dict["workload"] = workload_result
+                except Exception as e:
+                    result_dict["workload_error"] = str(e)
+            else:
+                _update_status(target_name, "done")
+
+            return result_dict
+
+        if output_json:
+            # No progress display for JSON mode
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_audit_one_with_status, t): t for t in targets}
+                for future in as_completed(futures):
+                    result = future.result()
+                    all_results.append(result)
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TextColumn("[dim]{task.fields[status]}[/dim]"),
+                console=console,
+            ) as progress:
+                overall_task = progress.add_task(
+                    "Fleet audit", total=n, status="starting..."
+                )
+                target_tasks = {}
+                for t in targets:
+                    tid = progress.add_task(f"  {t}", total=1, status="waiting")
+                    target_tasks[t] = tid
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {}
+                    for t in targets:
+                        progress.update(target_tasks[t], status="starting...")
+                        futures[executor.submit(_audit_one_with_status, t)] = t
+
+                    # Poll for status updates while waiting for completions
+                    import time as _time
+                    completed_targets = set()
+                    while len(completed_targets) < n:
+                        # Update in-progress target statuses
+                        with status_lock:
+                            for t, msg in target_status.items():
+                                if t not in completed_targets:
+                                    progress.update(target_tasks[t], status=msg)
+
+                        # Check for completed futures (non-blocking)
+                        done = [f for f in futures if f.done() and futures[f] not in completed_targets]
+                        for future in done:
+                            target_name = futures[future]
+                            completed_targets.add(target_name)
+                            result = future.result()
+                            all_results.append(result)
+
+                            if result.get("error"):
+                                progress.update(target_tasks[target_name], completed=1, status=f"[red]ERROR[/red]")
+                            else:
+                                sizing = (result.get("sizing") or {}).get("verdict", "unknown")
+                                cache = (result.get("cache_opportunity") or {}).get("score", 0)
+                                verdict_colors = {
+                                    "under_provisioned": "red",
+                                    "oversized": "yellow",
+                                    "right_sized": "green",
+                                }
+                                vc = verdict_colors.get(sizing, "dim")
+                                progress.update(
+                                    target_tasks[target_name],
+                                    completed=1,
+                                    status=f"[{vc}]{sizing.replace('_', ' ')}[/{vc}] | cache {cache}/100",
+                                )
+                            progress.update(overall_task, advance=1, status=f"{len(all_results)}/{n} complete")
+
+                        if len(completed_targets) < n:
+                            _time.sleep(0.5)
+
+        # Save snapshots
+        individual_ids = {}
+        if save_name and all_results:
+            import datetime as _dt
+            from dataclasses import asdict
+            from lib.fleet.models import FleetAuditSnapshot
+            from lib.fleet.snapshot_store import SnapshotStore
+
+            store = SnapshotStore()
+
+            # Save individual per-target snapshots (skip failed ones)
+            individual_ids = {}
+            for r in all_results:
+                if r.get("error"):
+                    continue
+                target_name = r.get("target_name", "unknown")
+                ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                snap_id = f"audit_{target_name}_{ts}"
+                store.save_raw(snap_id, r)
+                individual_ids[target_name] = snap_id
+
+            # Save fleet-level combined snapshot
+            snapshot = FleetAuditSnapshot(
+                snapshot_id=save_name,
+                name=save_name,
+                created_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+                targets_audited=len(all_results),
+                targets_failed=sum(1 for r in all_results if r.get("error")),
+                results=all_results,
+            )
+            path = store.save_raw(save_name, asdict(snapshot))
+            if not output_json:
+                console.print(f"\n[dim]Snapshot saved. View later: rdst fleet snapshots[/dim]")
+
+        # Compute successful/failed once, reuse everywhere
+        successful = [r for r in all_results if not r.get("error")]
+        failed_results = [r for r in all_results if r.get("error")]
+
+        # LLM Fleet Insights (only if there are successful results)
+        fleet_insights_text = None
+        fleet_spinner = None
+        if insights and successful:
+            if not output_json:
+                fleet_spinner = Status(
+                    ElapsedMessage("Generating fleet insights...", time.monotonic()),
+                    spinner="dots",
+                    console=console,
+                )
+                fleet_spinner.start()
+            try:
+                from lib.fleet.fleet_llm import build_fleet_insights_prompt
+                from lib.llm_manager.llm_manager import LLMManager
+
+                prompt = build_fleet_insights_prompt(successful)
+                llm = LLMManager()
+                result = llm.generate_response(prompt, max_tokens=4096, temperature=0.0)
+                if fleet_spinner:
+                    fleet_spinner.stop()
+                fleet_insights_text = result.get("response", "")
+            except Exception as e:
+                if fleet_spinner:
+                    fleet_spinner.stop()
+                if not output_json:
+                    console.print(f"[red]LLM insights failed: {e}[/red]")
+
+        if output_json:
+            output_data = {"results": all_results}
+            if fleet_insights_text:
+                output_data["insights"] = fleet_insights_text
+            print(json.dumps(output_data, indent=2, default=str))
+            return RdstResult(True, message="")
+
+        ok = len(successful)
+        if failed_results:
+            console.print(f"\n[bold]{ok} audited[/bold], [red]{len(failed_results)} failed:[/red]")
+            for r in failed_results:
+                error_msg = r.get("error", "unknown error")
+                # Make common errors more actionable
+                if "Password not available" in error_msg:
+                    target_name = r.get("target_name", "?")
+                    target_cfg = cfg.get_target(target_name) or {}
+                    pw_env = target_cfg.get("password_env", "FLEET_DB_PASS")
+                    console.print(f"  [red]{target_name}[/red]: password not set — export {pw_env}=\"your-password\"")
+                elif "Authentication failed" in error_msg:
+                    console.print(f"  [red]{r.get('target_name', '?')}[/red]: wrong password or username")
+                elif "Unable to locate credentials" in error_msg:
+                    target_name = r.get("target_name", "?")
+                    target_cfg = cfg.get_target(target_name) or {}
+                    if target_cfg.get("password_secret_arn"):
+                        console.print(f"  [red]{target_name}[/red]: AWS credentials not found — run: aws sso login")
+                    else:
+                        pw_env = target_cfg.get("password_env", "FLEET_DB_PASS")
+                        console.print(f"  [red]{target_name}[/red]: password not set — export {pw_env}=\"your-password\"")
+                else:
+                    console.print(f"  [red]{r.get('target_name', '?')}[/red]: {error_msg[:80]}")
+        else:
+            console.print(f"\n[bold]{ok} audited[/bold]")
+
+        # Fleet metrics overview table
+        if successful:
+            from lib.ui import DataTable, StyledPanel
+
+            # Summary table
+            metric_rows = []
+            for r in successful:
+                m = r.get("metrics") or {}
+                sizing = (r.get("sizing") or {}).get("verdict", "?")
+                cache = (r.get("cache_opportunity") or {}).get("score", 0)
+                size_str = f"{m.get('database_size_mb', 0):.0f} MB"
+                if m.get("storage_allocated_gb"):
+                    size_str += f" / {m['storage_allocated_gb']:.0f} GB"
+                conn_str = f"{m.get('active_connections', 0)}/{m.get('max_connections', 0)} ({m.get('connection_utilization_pct', 0):.0f}%)"
+                rw = f"{m.get('read_pct', 0):.0f}R / {m.get('write_pct', 0):.0f}W"
+                metric_rows.append((
+                    r.get("target_name", "?"),
+                    r.get("engine", "?")[:5],
+                    m.get("server_version", "?")[:20],
+                    size_str,
+                    conn_str,
+                    f"{m.get('cache_hit_rate', 0):.0f}%",
+                    rw,
+                    str(m.get("tracked_query_count", 0)),
+                ))
+
+            console.print(DataTable(
+                title="Fleet Overview",
+                columns=["Target", "Engine", "Version", "Size", "Connections", "Cache Hit", "R/W", "Total Queries"],
+                rows=metric_rows,
+            ))
+
+            # Per-target breakdown
+            for r in successful:
+                m = r.get("metrics") or {}
+                sizing = r.get("sizing") or {}
+                cache = r.get("cache_opportunity") or {}
+                tq = r.get("top_queries") or []
+
+                verdict = sizing.get("verdict", "unknown").replace("_", " ")
+                cache_score = cache.get("score", 0)
+
+                lines = f"[bold]Sizing:[/bold] {verdict}"
+                if sizing.get("explanation"):
+                    lines += f" — {sizing['explanation']}"
+                lines += f"\n[bold]Cache Opportunity:[/bold] {cache_score}/100"
+                if cache.get("explanation"):
+                    lines += f" — {cache['explanation']}"
+
+                if tq:
+                    lines += f"\n[bold]Top Queries:[/bold] {len(tq)} tracked"
+                    for q in tq[:3]:
+                        sql = (q.get("normalized_query") or "")[:60]
+                        lines += f"\n  [{q.get('query_hash', '')[:8]}] calls={q.get('calls', 0)}, avg={q.get('avg_time_ms', 0):.1f}ms — {sql}"
+
+                console.print(StyledPanel(lines, title=f"{r.get('target_name', '?')} ({r.get('engine', '?')})"))
+
+        if fleet_insights_text:
+            self._render_fleet_insights(console, fleet_insights_text)
+
+        # Show individual target report links
+        if successful:
+            console.print(f"\n[bold]Individual Target Reports[/bold]")
+            for r in successful:
+                target = r.get("target_name", "?")
+                snap_id = individual_ids.get(target)
+                if snap_id:
+                    console.print(f"  {target}: [cyan]rdst audit show {snap_id}[/cyan]")
+
+        return RdstResult(True, message="")
+
+    # =========================================================================
+    # Diff
+    # =========================================================================
+
+    def _handle_diff(self, args: argparse.Namespace) -> RdstResult:
+        """Compare two fleet audit snapshots."""
+        snap1 = getattr(args, "snapshot1", None)
+        snap2 = getattr(args, "snapshot2", None)
+        output_json = getattr(args, "output_json", False)
+
+        if not snap1 or not snap2:
+            return RdstResult(False, "Two snapshot IDs required: rdst fleet diff <snap1> <snap2>")
+
+        from lib.fleet.snapshot_store import SnapshotStore
+        from dataclasses import asdict
+
+        store = SnapshotStore()
+        diff = store.diff(snap1, snap2)
+
+        if diff is None:
+            return RdstResult(False, f"Could not load snapshots '{snap1}' and/or '{snap2}'")
+
+        if output_json:
+            print(json.dumps(asdict(diff), indent=2, default=str))
+            return RdstResult(True, message="")
+
+        console = get_console()
+        console.print(f"\n[bold]Fleet Diff:[/bold] {snap1} -> {snap2}")
+
+        if diff.new_targets:
+            console.print(f"  [green]New targets:[/green] {', '.join(diff.new_targets)}")
+        if diff.removed_targets:
+            console.print(f"  [red]Removed targets:[/red] {', '.join(diff.removed_targets)}")
+
+        if diff.entries:
+            from lib.ui import DataTable
+
+            rows = []
+            for e in diff.entries:
+                change = f"{e.change_pct:+.1f}%" if e.change_pct is not None else ""
+                rows.append((e.target_name, e.field_name, str(e.old_value), str(e.new_value), change))
+
+            table = DataTable(
+                title="Changes",
+                columns=["Target", "Metric", "Before", "After", "Change"],
+                rows=rows,
+            )
+            console.print(table)
+        else:
+            console.print("  [dim]No metric changes detected.[/dim]")
+
+        return RdstResult(True, message="Diff complete")
+
+    # =========================================================================
+    # Snapshots
+    # =========================================================================
+
+    def _handle_snapshots(self, args: argparse.Namespace) -> RdstResult:
+        """List saved audit snapshots."""
+        output_json = getattr(args, "output_json", False)
+
+        from lib.fleet.snapshot_store import SnapshotStore
+
+        store = SnapshotStore()
+        snapshots = store.list_snapshots()
+
+        if output_json:
+            print(json.dumps(snapshots, indent=2))
+            return RdstResult(True, message="")
+
+        console = get_console()
+        if not snapshots:
+            console.print("[dim]No fleet audits saved yet.[/dim]")
+            return RdstResult(True, message="No snapshots")
+
+        from lib.ui import DataTable
+
+        rows = [(s["name"], s["created_at"][:19], str(s["targets_audited"])) for s in snapshots]
+        table = DataTable(
+            title=f"Fleet Audits ({len(snapshots)})",
+            columns=["Run ID", "Date", "Targets"],
+            rows=rows,
+        )
+        console.print(table)
+        console.print(f"\n[dim]Compare two runs: rdst fleet diff <run_id_1> <run_id_2>[/dim]")
+        return RdstResult(True, message="")

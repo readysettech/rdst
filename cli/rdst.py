@@ -275,6 +275,8 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             query_kwargs["duration"] = getattr(args, "duration", None)
             query_kwargs["count"] = getattr(args, "count", None)
             query_kwargs["quiet"] = getattr(args, "quiet", False)
+            query_kwargs["file"] = getattr(args, "file", None)
+            query_kwargs["analyze"] = getattr(args, "analyze", False)
 
         result = cli.query(subcommand=query_subcommand, **query_kwargs)
 
@@ -430,6 +432,35 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             )
         else:
             return RdstResult(False, f"Unknown cache subcommand: {cache_subcommand}")
+
+    # =========================================================================
+    # Fleet — Multi-target management
+    # =========================================================================
+    elif command == "fleet":
+        fleet_subcommand = getattr(args, "fleet_subcommand", None)
+        if not fleet_subcommand:
+            return RdstResult(
+                False,
+                "Fleet command requires a subcommand: configure, import, discover, list, status, audit, diff, snapshots\n"
+                "Try: rdst fleet --help",
+            )
+        from lib.cli.fleet_command import FleetCommand
+
+        fleet_cmd = FleetCommand()
+        return fleet_cmd.execute(subcommand=fleet_subcommand, args=args)
+
+    # =========================================================================
+    # Audit — Single-target deep health audit
+    # =========================================================================
+    elif command == "audit":
+        audit_subcommand = getattr(args, "audit_subcommand", None)
+        from lib.cli.audit_command import AuditCommand
+
+        audit_cmd = AuditCommand()
+        if audit_subcommand in ("list", "show"):
+            return audit_cmd.execute_subcommand(audit_subcommand, args)
+        else:
+            return audit_cmd.execute(args=args)
 
     elif command == 'version':
         return cli.version()

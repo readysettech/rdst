@@ -26,6 +26,7 @@ MCP_EXCLUDED_COMMANDS = {
     "slack",  # CLI-only - requires running bot process with Socket Mode
     "guard",  # CLI-only - interactive guard management
     "web",  # CLI-only - starts a long-running local server
+    # fleet and audit have MCP tools — see SUBCOMMAND_MAPPING
     # Schema subcommands (handled via rdst_schema tool, some are CLI-only)
     "annotate",  # Schema subcommand - interactive wizard, CLI-only
     "export",  # Schema subcommand - handled by rdst_schema tool
@@ -38,6 +39,7 @@ MCP_ONLY_TOOLS = {
     "set_env",  # Sets env vars in MCP session
     "help",  # Entry point tool, different from CLI help
     "test_connection",  # Maps to 'configure test' subcommand
+    "audit",  # Base audit tool (subcommands also exist: audit_show, audit_list)
 }
 
 # Mapping of MCP tool suffixes to CLI subcommands
@@ -47,6 +49,8 @@ SUBCOMMAND_MAPPING = {
     "query": ["add", "list", "delete"],
     "agent": ["list", "ask", "create"],
     "cache": ["deploy", "add", "show", "delete", "drop_all"],
+    "fleet": ["list", "status", "audit", "snapshots", "diff"],
+    "audit": ["show", "list"],
 }
 
 
