@@ -233,6 +233,17 @@ INDEX COLUMN ORDERING (EQR Rule - STRICT): When building composite indexes, use 
 
 INDEX NAMING: Always use format idx_tablename_col1_col2 (lowercase, underscores)
 
+SELECTIVITY AWARENESS (use [distinct: N] annotations on columns if available):
+  - When [distinct: N] is shown, estimate selectivity = distinct / row_estimate.
+  - Selectivity < 0.01 means an index on that column alone is unlikely to help.
+    Do NOT include it in index_recommendations — omit it entirely.
+  - If an existing index covers the WHERE columns AND selectivity is low,
+    do NOT recommend a new index — the current plan is expected behavior.
+  - High null fraction (> 50%): consider partial indexes (WHERE col IS NOT NULL)
+    instead of full indexes.
+  - ONLY include indexes in index_recommendations that you genuinely recommend.
+    If selectivity analysis shows an index would not help, leave it out.
+
 QUERY REWRITE RULES:
   CRITICAL: Rewrites MUST return IDENTICAL data to the original query.
   - Same rows, same columns, same values - no exceptions

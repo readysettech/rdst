@@ -19,7 +19,8 @@ async def test_query_registry_post_strips_comments_and_persists_canonical_sql(
     app, tmp_path, monkeypatch
 ):
     """POST /api/query-registry should save comment-prefixed SQL successfully."""
-    monkeypatch.setattr("lib.query_registry.query_registry.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("lib.constants.RDST_DATA_DIR", tmp_path / ".rdst")
+    monkeypatch.setattr("lib.query_registry.query_registry.RDST_DATA_DIR", tmp_path / ".rdst")
 
     sql = "-- look up one user\nSELECT * FROM users WHERE id = 42"
 

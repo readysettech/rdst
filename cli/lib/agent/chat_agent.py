@@ -175,7 +175,7 @@ class ChatAgent:
 
         # Get LLM response with tool use loop
         tool_results = []
-        max_iterations = 5  # Prevent infinite loops
+        max_iterations = 15
 
         for iteration in range(max_iterations):
             response = self._call_llm()

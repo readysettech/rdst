@@ -4,6 +4,7 @@ Schema Collection for LLM Analysis
 Collects schema information for tables referenced in queries to provide
 context to LLM for better rewrite and index suggestions.
 """
+from __future__ import annotations
 
 import re
 from typing import Dict, Any, Set, List
@@ -218,7 +219,20 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
         engine_version = version_info.get("version", "unknown")
         engine_major_version = version_info.get("major_version")
 
-        schema_info = collect_schema_for_query(sql, target_config)
+        # Load semantic layer stats if available
+        semantic_stats = {}
+        if target:
+            try:
+                from lib.semantic_layer.manager import SemanticLayerManager
+                mgr = SemanticLayerManager()
+                if mgr.exists(target):
+                    layer = mgr.load(target)
+                    for tname, tann in layer.tables.items():
+                        semantic_stats[tname] = tann.columns
+            except Exception:
+                pass  # Non-critical — proceed without stats
+
+        schema_info = collect_schema_for_query(sql, target_config, semantic_stats=semantic_stats)
 
         # Extract table names for reporting
         table_names = _extract_table_names_from_sql(sql)
@@ -375,13 +389,17 @@ def _parse_postgres_version(version_str: str) -> int:
     return None
 
 
-def collect_schema_for_query(sql: str, target_config: Dict[str, Any]) -> str:
+def collect_schema_for_query(
+    sql: str, target_config: Dict[str, Any], semantic_stats: dict | None = None,
+) -> str:
     """
     Collect schema information for tables referenced in the query.
 
     Args:
         sql: The SQL query to analyze
         target_config: Database target configuration (dict or JSON string)
+        semantic_stats: Optional dict[table_name, dict[col_name, ColumnAnnotation]]
+            from the semantic layer, used to enrich columns with selectivity data.
 
     Returns:
         Formatted schema string for LLM prompt
@@ -407,9 +425,9 @@ def collect_schema_for_query(sql: str, target_config: Dict[str, Any]) -> str:
         engine = target_config.get("engine", "unknown").lower()
 
         if engine == "mysql":
-            return _collect_mysql_schema(table_names, target_config)
+            return _collect_mysql_schema(table_names, target_config, semantic_stats)
         elif engine in ["postgresql", "postgres"]:
-            return _collect_postgres_schema(table_names, target_config)
+            return _collect_postgres_schema(table_names, target_config, semantic_stats)
         else:
             return f"Schema information: Unsupported database engine '{engine}'"
 
@@ -451,7 +469,10 @@ def _extract_table_names_from_sql(sql: str) -> Set[str]:
     return table_names
 
 
-def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) -> str:
+def _collect_mysql_schema(
+    table_names: Set[str], target_config: Dict[str, Any],
+    semantic_stats: dict | None = None,
+) -> str:
     """Collect schema information for MySQL tables."""
     try:
         import pymysql
@@ -522,7 +543,15 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
                     for col in columns:
                         field, type_, null, key, default, extra = col
                         key_info = f" [{key}]" if key else ""
-                        table_schema.append(f"  - {field} {type_}{key_info}")
+                        col_stats = ""
+                        if semantic_stats and table_name in semantic_stats:
+                            col_ann = semantic_stats[table_name].get(field)
+                            if col_ann:
+                                if col_ann.distinct_count is not None:
+                                    col_stats += f" [distinct: {col_ann.distinct_count:,}]"
+                                if col_ann.null_fraction is not None and col_ann.null_fraction > 0.01:
+                                    col_stats += f" [null: {col_ann.null_fraction:.0%}]"
+                        table_schema.append(f"  - {field} {type_}{key_info}{col_stats}")
 
                     # Format indexes (show type to prevent hallucination)
                     if indexes:
@@ -564,7 +593,8 @@ def _collect_mysql_schema(table_names: Set[str], target_config: Dict[str, Any]) 
 
 
 def _collect_postgres_schema(
-    table_names: Set[str], target_config: Dict[str, Any]
+    table_names: Set[str], target_config: Dict[str, Any],
+    semantic_stats: dict | None = None,
 ) -> str:
     """Collect schema information for PostgreSQL tables."""
     try:
@@ -645,7 +675,16 @@ def _collect_postgres_schema(
                     for col in columns:
                         column_name, data_type, is_nullable, default = col
                         null_info = " NULL" if is_nullable == "YES" else " NOT NULL"
-                        table_schema.append(f"  - {column_name} {data_type}{null_info}")
+                        # Append selectivity stats from semantic layer
+                        col_stats = ""
+                        if semantic_stats and table_name in semantic_stats:
+                            col_ann = semantic_stats[table_name].get(column_name)
+                            if col_ann:
+                                if col_ann.distinct_count is not None:
+                                    col_stats += f" [distinct: {col_ann.distinct_count:,}]"
+                                if col_ann.null_fraction is not None and col_ann.null_fraction > 0.01:
+                                    col_stats += f" [null: {col_ann.null_fraction:.0%}]"
+                        table_schema.append(f"  - {column_name} {data_type}{null_info}{col_stats}")
 
                     # Format indexes (show full definition with USING clause to prevent hallucination)
                     if indexes:
