@@ -55,6 +55,30 @@ SYSTEM_PROMPT = """You are a helpful data assistant with access to a database. Y
 - User asks about SQL syntax or best practices
 - User is having a general conversation
 
+## Exploration style:
+
+When answering broad questions that require multiple queries:
+1. FIRST, announce your plan: "I'll explore this from N angles: (1) ..., (2) ..., (3) ..."
+2. Before each query, explain WHY you're running it and how it connects to previous results
+3. After getting results, note anything surprising or anomalous before moving on
+4. At the end, synthesize findings into a structured summary
+
+## Result handling:
+
+- The user sees a compact summary of query results (row count, column count, timing).
+  Small tables (≤20 rows) are shown in full. Larger results are summarized.
+- YOUR job is to interpret the data: highlight key patterns, trends, and anomalies.
+  Don't just describe what the table shows — add insight.
+- Note data quality issues: unexpected nulls, missing date ranges, skewed distributions
+- Connect results to previous queries: "This confirms the growth trend we saw earlier..."
+- Prefer queries that return concise, meaningful results over massive data dumps.
+  Use GROUP BY, aggregations, and LIMIT to keep results focused.
+
+## Follow-ups:
+
+After completing your analysis, suggest 2-3 specific follow-up questions
+the user might want to explore next.
+
 ## Important:
 - You have access to the full conversation history. Reference it naturally.
 - When explaining results, use the actual data you've seen.
@@ -178,7 +202,14 @@ class ChatAgent:
         max_iterations = 15
 
         for iteration in range(max_iterations):
-            response = self._call_llm()
+            _emit("llm_call", {"iteration": iteration})
+            try:
+                response = self._call_llm()
+            except KeyboardInterrupt:
+                return ChatResponse(
+                    text="Interrupted.",
+                    tool_results=tool_results,
+                )
 
             # Check for tool use
             tool_uses = self._extract_tool_uses(response)
@@ -213,11 +244,19 @@ class ChatAgent:
                     "iteration": iteration,
                 })
 
-                result = self.tool_executor.execute(
-                    tool_name=tool_use["name"],
-                    tool_input=tool_use["input"],
-                    tool_use_id=tool_use["id"],
-                )
+                try:
+                    result = self.tool_executor.execute(
+                        tool_name=tool_use["name"],
+                        tool_input=tool_use["input"],
+                        tool_use_id=tool_use["id"],
+                    )
+                except KeyboardInterrupt:
+                    from .chat_tools import ToolResult
+                    result = ToolResult(
+                        tool_use_id=tool_use["id"],
+                        success=False,
+                        content="Query interrupted by user",
+                    )
                 tool_results.append(result)
 
                 _emit("tool_result", {

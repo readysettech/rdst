@@ -991,6 +991,7 @@ then expose them via HTTP API, MCP, or Slack.""",
             ArgDef("--deny-columns", nargs="*", help="Column patterns to deny access"),
             ArgDef("--allow-tables", nargs="*", help="Tables to allow (whitelist)"),
             ArgDef("--guard", short="-g", help="Guard to apply (created via rdst guard create)"),
+            ArgDef("--verbose", action="store_true", help="Show full SQL and results in chat (default: compact)"),
         ],
         subcommands=[
             ("create", "Create a new data agent"),

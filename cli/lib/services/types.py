@@ -465,6 +465,8 @@ class AskResultEvent:
     execution_time_ms: float
     llm_calls: int
     total_tokens: int
+    query_hash: str = ""
+    query_tag: str = ""
 
 
 @dataclass

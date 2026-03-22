@@ -25,11 +25,9 @@ from lib.ui import (
     StyleTokens,
     DataTable,
     MessagePanel,
-    SectionBox,
+    QueryPanel,
     SelectionTable,
     Status,
-    Syntax,
-    format_sql_for_display,
 )
 
 
@@ -135,24 +133,11 @@ class AskRenderer:
         """Render generated SQL with syntax highlighting."""
         self.cleanup()  # Stop spinner
 
-        formatted_sql = format_sql_for_display(event.sql)
-
-        # Create syntax-highlighted SQL
-        syntax = Syntax(
-            formatted_sql.strip(),
-            "sql",
-            theme=StyleTokens.SQL_THEME,
-            word_wrap=True,
-            background_color="default",
-        )
-
-        self._console.print(
-            SectionBox(
-                title="Generated SQL",
-                content=syntax,  # Rich Syntax object for highlighting
-                subtitle=f"Explanation: {event.explanation}" if event.explanation else None,
+        self._console.print(QueryPanel(event.sql, title="Generated SQL"))
+        if event.explanation:
+            self._console.print(
+                f"[{StyleTokens.MUTED}]Explanation: {event.explanation}[/{StyleTokens.MUTED}]"
             )
-        )
 
     def _render_result(self, event: "AskResultEvent") -> None:
         """Render query results."""
@@ -163,6 +148,12 @@ class AskRenderer:
                 f"[{StyleTokens.MUTED}]No results returned "
                 f"(0 rows in {event.execution_time_ms:.1f}ms)[/{StyleTokens.MUTED}]"
             )
+            if event.query_hash:
+                short_hash = event.query_hash[:8]
+                self._console.print(
+                    f"\n[{StyleTokens.MUTED}]saved as {short_hash} — "
+                    f"rdst analyze --hash {short_hash}[/{StyleTokens.MUTED}]"
+                )
             return
 
         # Format rows as strings
@@ -174,6 +165,14 @@ class AskRenderer:
             title=f"Results ({event.row_count} {'row' if event.row_count == 1 else 'rows'}, {event.execution_time_ms:.1f}ms)",
         )
         self._console.print(table)
+
+        # Breadcrumb: show saved query info
+        if event.query_hash:
+            short_hash = event.query_hash[:8]
+            self._console.print(
+                f"\n[{StyleTokens.MUTED}]saved as {short_hash} — "
+                f"rdst analyze --hash {short_hash}[/{StyleTokens.MUTED}]"
+            )
 
     def _render_error(self, event: "AskErrorEvent") -> None:
         """Render error event."""

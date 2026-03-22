@@ -9,7 +9,60 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import random
+import sys
+import threading
+import time as _time
+
 from lib.ui import DataTableBase, Prompt, StyleTokens, get_console
+
+
+_CHAT_VERBS = [
+    "Scanning tables", "Reading schema", "Exploring data",
+    "Crunching rows", "Joining tables", "Filtering results",
+    "Aggregating", "Indexing thoughts", "Querying",
+    "Analyzing patterns", "Cross-referencing", "Correlating",
+    "Pivoting", "Sorting insights", "Building query plan",
+]
+
+
+class _ChatSpinner:
+    """Thread-safe spinner with rotating verbs for chat agent wait states."""
+
+    def __init__(self, console):
+        self._console = console
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._status = None
+        self._thread = None
+
+    def start(self) -> None:
+        with self._lock:
+            if self._status is not None:
+                return
+            from lib.ui import Status
+            self._stop_event.clear()
+            self._status = Status(
+                random.choice(_CHAT_VERBS) + "...",
+                spinner="dots",
+                console=self._console,
+            )
+            self._status.start()
+            self._thread = threading.Thread(target=self._rotate, daemon=True)
+            self._thread.start()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stop_event.set()
+            if self._status is not None:
+                self._status.stop()
+                self._status = None
+
+    def _rotate(self) -> None:
+        while not self._stop_event.wait(3):
+            with self._lock:
+                if self._status is not None:
+                    self._status.update(random.choice(_CHAT_VERBS) + "...")
 
 
 @dataclass
@@ -294,18 +347,26 @@ Examples:
             print(f"\nChat with agent '{name}' (target: {agent.target}, timeout: {timeout_display})")
             print("Type 'exit' to end, 'clear' to reset history, 'help' for commands\n")
 
+            # One-time hint if semantic layer is missing
+            schema_summary = chat_agent.get_schema_summary()
+            hint = schema_summary.get("schema_hint") if isinstance(schema_summary, dict) else None
+            if hint:
+                self._console.print(f"[{StyleTokens.MUTED}]{hint}[/{StyleTokens.MUTED}]\n")
+
+            # Track queries saved during this session (hash -> tag, deduplicates)
+            saved_queries: dict[str, str] = {}
+
             while True:
                 try:
                     question = input("You: ").strip()
                 except (EOFError, KeyboardInterrupt):
-                    print("\nGoodbye!")
+                    print()
                     break
 
                 if not question:
                     continue
 
                 if question.lower() in ("exit", "quit", "q"):
-                    print("Goodbye!")
                     break
 
                 if question.lower() == "help":
@@ -349,7 +410,8 @@ Examples:
 
                 # Chat with the agent, streaming progress
                 console = self._console
-                step_num = [0]
+
+                verbose = kwargs.get("verbose", False)
 
                 def _on_chat_event(event: str, data: dict) -> None:
                     if event == "thinking":
@@ -358,46 +420,104 @@ Examples:
                             console.print(f"\n[{StyleTokens.MUTED}]{text}[/{StyleTokens.MUTED}]")
 
                     elif event == "tool_call":
-                        step_num[0] += 1
                         name = data["name"]
                         if name == "query_database":
                             q = data["input"].get("question", "")
-                            console.print(f"\n[{StyleTokens.EMPHASIS}]Step {step_num[0]}:[/{StyleTokens.EMPHASIS}] Querying database: \"{q}\"")
+                            console.print(f"\n[{StyleTokens.EMPHASIS}]> {q}[/{StyleTokens.EMPHASIS}]")
                         elif name == "get_schema":
-                            table = data["input"].get("table_name", "all tables")
-                            console.print(f"\n[{StyleTokens.EMPHASIS}]Step {step_num[0]}:[/{StyleTokens.EMPHASIS}] Getting schema for {table}")
+                            table = data["input"].get("table_name")
+                            label = f"schema: {table}" if table else "schema: all tables"
+                            console.print(f"\n[{StyleTokens.EMPHASIS}]> {label}[/{StyleTokens.EMPHASIS}]")
                         elif name == "run_sql":
                             sql = data["input"].get("sql", "")
-                            preview = sql[:80] + "..." if len(sql) > 80 else sql
-                            console.print(f"\n[{StyleTokens.EMPHASIS}]Step {step_num[0]}:[/{StyleTokens.EMPHASIS}] Running SQL: {preview}")
+                            preview = sql.split('\n')[0][:80]
+                            if len(sql) > 80:
+                                preview += "..."
+                            console.print(f"\n[{StyleTokens.EMPHASIS}]> sql: {preview}[/{StyleTokens.EMPHASIS}]")
 
                     elif event == "tool_result":
                         result = data["result"]
-                        if result.data and result.data.get("sql"):
-                            console.print(f"  SQL: {result.data['sql']}")
+                        if not result.success:
+                            console.print(f"  [{StyleTokens.MUTED}]Query failed, retrying...[/{StyleTokens.MUTED}]")
+                            return
+
                         if result.data and result.data.get("columns") and result.data.get("rows"):
-                            self._print_results(result.data["columns"], result.data["rows"])
                             row_count = result.data.get("row_count", len(result.data["rows"]))
                             exec_time = result.data.get("execution_time_ms", 0)
-                            console.print(f"  ({row_count} rows, {exec_time:.1f}ms)")
-                            if result.data.get("truncated"):
-                                console.print(f"  [{StyleTokens.MUTED}](Results truncated)[/{StyleTokens.MUTED}]")
-                        elif not result.success:
-                            console.print(f"  [{StyleTokens.ERROR}]Error: {result.content}[/{StyleTokens.ERROR}]")
+                            cols = len(result.data["columns"])
 
-                print("\nThinking...")
+                            if verbose:
+                                # Verbose mode: show SQL + full results
+                                if result.data.get("sql"):
+                                    console.print(f"  SQL: {result.data['sql']}")
+                                self._print_results(result.data["columns"], result.data["rows"])
+                                console.print(f"  ({row_count:,} rows, {cols} columns, {exec_time:.0f}ms)")
+                            else:
+                                # Compact mode: summary + small tables only
+                                console.print(f"  [{StyleTokens.MUTED}]{row_count:,} rows, {cols} columns ({exec_time:.0f}ms)[/{StyleTokens.MUTED}]")
+                                if row_count <= 20:
+                                    self._print_results(result.data["columns"], result.data["rows"])
+
+                            if result.data.get("truncated"):
+                                console.print(f"  [{StyleTokens.MUTED}](results truncated)[/{StyleTokens.MUTED}]")
+
+                            # Breadcrumb: show query hash for later access
+                            qhash = result.data.get("query_hash")
+                            qtag = result.data.get("query_tag")
+                            if qhash:
+                                console.print(f"  [{StyleTokens.MUTED}]saved as {qhash[:8]} — rdst analyze --hash {qhash[:8]}[/{StyleTokens.MUTED}]")
+                                saved_queries[qhash[:8]] = qtag or qhash[:8]
+
+                spinner = _ChatSpinner(console) if sys.stdout.isatty() else None
+
+                def _on_event_with_spinner(event: str, data: dict) -> None:
+                    if event == "llm_call":
+                        if spinner:
+                            spinner.start()
+                        return
+                    if event == "tool_call":
+                        if spinner:
+                            spinner.stop()
+                        _on_chat_event(event, data)
+                        if spinner:
+                            spinner.start()
+                        return
+                    if spinner:
+                        spinner.stop()
+                    _on_chat_event(event, data)
+
+                if spinner:
+                    spinner.start()
+                else:
+                    console.print(f"[{StyleTokens.MUTED}]Thinking...[/{StyleTokens.MUTED}]")
+
                 try:
-                    response = chat_agent.chat(question, on_event=_on_chat_event)
+                    response = chat_agent.chat(question, on_event=_on_event_with_spinner)
                 except KeyboardInterrupt:
+                    if spinner:
+                        spinner.stop()
                     print("\n\nInterrupted. Type 'exit' to quit or ask another question.\n")
                     continue
+                finally:
+                    if spinner:
+                        spinner.stop()
 
-                # Display the agent's final response text
+                # Display the agent's final response text with rich markdown
                 if response.text:
-                    print(f"\nA: {response.text}")
+                    from lib.ui import MarkdownContent
+                    console.print()
+                    console.print(MarkdownContent(response.text))
 
                 print()
 
+            # Session summary: show saved queries
+            if saved_queries:
+                console.print(f"\n[{StyleTokens.EMPHASIS}]Saved {len(saved_queries)} queries this session:[/{StyleTokens.EMPHASIS}]")
+                for qhash, tag in saved_queries.items():
+                    console.print(f"  [{StyleTokens.MUTED}]{tag:<45} {qhash}[/{StyleTokens.MUTED}]")
+                console.print(f"\n[{StyleTokens.MUTED}]Run 'rdst analyze --hash <hash> --target {agent.target}' to analyze any query.[/{StyleTokens.MUTED}]")
+
+            print("Goodbye!")
             return RdstResult(ok=True)
         except Exception as e:
             return RdstResult(ok=False, message=str(e))

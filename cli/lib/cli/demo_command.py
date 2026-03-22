@@ -351,20 +351,20 @@ class DemoCommand:
             "recommend a useful index.",
             ["analyze", "-q",
              "SELECT title, score FROM posts WHERE score > 100 ORDER BY score DESC",
-             "--target", DEMO_TARGET])
+             "--target", DEMO_TARGET, "--skip-warning"])
 
         self._tour_step(2, 3, "A query where an index won't help",
             "This query filters on posttypeid which has only ~6 distinct values. "
             "With selectivity stats, the analyzer knows an index provides minimal benefit.",
             ["analyze", "-q",
              "SELECT title FROM posts WHERE posttypeid = 2",
-             "--target", DEMO_TARGET])
+             "--target", DEMO_TARGET, "--skip-warning"])
 
         self._tour_step(3, 3, "A join query",
             "Multi-table queries get full analysis including join efficiency.",
             ["analyze", "-q",
              "SELECT p.title, u.displayname, p.score FROM posts p JOIN users u ON p.owneruserid = u.id WHERE p.score > 50 ORDER BY p.score DESC LIMIT 20",
-             "--target", DEMO_TARGET])
+             "--target", DEMO_TARGET, "--skip-warning"])
 
         return RdstResult(True)
 
@@ -446,14 +446,11 @@ class DemoCommand:
             f"follow threads, and build on previous results.[/{StyleTokens.MUTED}]\n"
         )
 
-        # Create agent if it doesn't exist
-        self._tour_step(1, 2, "Create a chat agent",
-            "First we create a named agent tied to the demo database. Agents wrap "
-            "a database target with safety policies and can be exposed via HTTP, MCP, or Slack.",
-            ["agent", "create", "--name", "demo-agent", "--target", DEMO_TARGET,
+        # Create agent if it doesn't exist (silently)
+        self._run_rdst_quiet(["agent", "create", "--name", "demo-agent", "--target", DEMO_TARGET,
              "--description", "Demo chat agent for DBA StackExchange data"])
 
-        self._tour_step(2, 2, "Start chatting",
+        self._tour_step(1, 1, "Start chatting",
             "Now let's chat with the agent. Ask questions about the data — it can run "
             "multiple queries, follow threads, and build on previous results. "
             "Type 'exit' to end.",

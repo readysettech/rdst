@@ -788,6 +788,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             deny_columns=getattr(args, 'deny_columns', None),
             allow_tables=getattr(args, 'allow_tables', None),
             guard=getattr(args, 'guard', None),
+            verbose=getattr(args, 'verbose', False),
         )
     elif command == 'guard':
         from lib.cli.guard_command import GuardCommand

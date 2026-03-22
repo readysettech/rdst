@@ -239,8 +239,12 @@ SELECTIVITY AWARENESS (use [distinct: N] annotations on columns if available):
     fraction of rows. An index on such a column returns too many rows to be
     useful — the optimizer correctly chooses a seq scan.
   - CRITICAL: If rows_returned / row_estimate > 10%, the filter is NOT selective
-    enough to benefit from an index. A seq scan is optimal. Do NOT recommend
-    an index on such a column — omit it entirely from index_recommendations.
+    enough to benefit from ANY kind of index — including covering indexes,
+    INCLUDE indexes, or composite indexes led by that column. A seq scan is
+    optimal when returning a large fraction of the table. Do NOT recommend
+    any index — omit it entirely from index_recommendations. Instead,
+    suggest alternatives in optimization_opportunities (caching, partitioning,
+    materialized views).
   - If an existing index covers the WHERE columns AND selectivity is low,
     do NOT recommend a new index — the current plan is expected behavior.
   - High null fraction (> 50%): consider partial indexes (WHERE col IS NOT NULL)

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Optional, Dict, Any, Callable
 
 from .context import Ask3Context
 from .presenter import Ask3Presenter
-from .types import Status, DbType, SchemaExpansionRequest
+from .types import Status, DbType, SchemaExpansionRequest, SchemaSource
 from .phases import (
     load_schema,
     filter_schema,
@@ -220,6 +220,10 @@ class Ask3Engine:
             logger.exception(f"Unexpected error in ask3 engine: {e}")
             ctx.mark_error(str(e))
             self.presenter.error(str(e))
+
+        # Hint: suggest schema commands if semantic layer was not used
+        if ctx.schema_source == SchemaSource.DATABASE:
+            self.presenter.schema_hint(ctx.target)
 
         return ctx
 

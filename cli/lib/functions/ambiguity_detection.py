@@ -311,16 +311,22 @@ def collect_clarifications(
 
                 console.print(SectionHeader(question_text))
                 console.print()
-                console.print(SelectionTable(amb.possible_interpretations))
+                all_options = list(amb.possible_interpretations) + ["Other (type your own answer)"]
+                console.print(SelectionTable(all_options))
                 console.print()
 
                 choice = Prompt.ask(
                     "Your choice",
                     choices=[
-                        str(i) for i in range(1, len(amb.possible_interpretations) + 1)
+                        str(i) for i in range(1, len(all_options) + 1)
                     ],
                 )
-                answer = amb.possible_interpretations[int(choice) - 1]
+                choice_idx = int(choice) - 1
+                if choice_idx == len(amb.possible_interpretations):
+                    # Free-text: let user describe what they mean
+                    answer = input("Describe what you mean: ")
+                else:
+                    answer = amb.possible_interpretations[choice_idx]
             else:
                 console.print(SectionHeader(amb.clarifying_question))
                 answer = Prompt.ask("Your answer")

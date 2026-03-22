@@ -184,6 +184,26 @@ class ChatToolExecutor:
         else:
             result_lines.append("No rows returned")
 
+        # Auto-save query to registry for later analysis
+        query_hash = None
+        query_tag = None
+        if response.sql:
+            try:
+                import re
+                from lib.query_registry import QueryRegistry
+                registry = QueryRegistry()
+                slug = re.sub(r'[^a-z0-9]+', '-', question[:40].lower()).strip('-')
+                query_tag = f"chat-{slug}"
+                query_hash, _ = registry.add_query(
+                    sql=response.sql,
+                    tag=query_tag,
+                    source="chat",
+                    target=self.runtime.config.target,
+                )
+                registry.save()
+            except Exception:
+                logger.debug("Failed to auto-save query to registry", exc_info=True)
+
         return ToolResult(
             tool_use_id=tool_use_id,
             success=True,
@@ -195,6 +215,8 @@ class ChatToolExecutor:
                 "row_count": response.row_count,
                 "execution_time_ms": response.execution_time_ms,
                 "truncated": response.truncated,
+                "query_hash": query_hash,
+                "query_tag": query_tag,
             },
         )
 

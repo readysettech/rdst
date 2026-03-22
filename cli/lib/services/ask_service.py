@@ -322,6 +322,7 @@ class AskService:
 
         # Phase 5: Execute query (skip if dry_run)
         if ctx.dry_run:
+            qhash, qtag = self._auto_save_query(ctx)
             yield AskResultEvent(
                 type="result",
                 success=True,
@@ -332,6 +333,8 @@ class AskService:
                 execution_time_ms=0.0,
                 llm_calls=len(ctx.llm_calls),
                 total_tokens=ctx.total_tokens,
+                query_hash=qhash,
+                query_tag=qtag,
             )
             return
 
@@ -345,6 +348,7 @@ class AskService:
         # Yield final result
         if ctx.execution_result and not ctx.execution_result.error:
             ctx.mark_success()
+            qhash, qtag = self._auto_save_query(ctx)
             yield AskResultEvent(
                 type="result",
                 success=True,
@@ -355,6 +359,8 @@ class AskService:
                 execution_time_ms=ctx.execution_result.execution_time_ms,
                 llm_calls=len(ctx.llm_calls),
                 total_tokens=ctx.total_tokens,
+                query_hash=qhash,
+                query_tag=qtag,
             )
         else:
             error_msg = ctx.execution_result.error if ctx.execution_result else "Execution failed"
@@ -363,6 +369,32 @@ class AskService:
                 message=error_msg,
                 phase="execute",
             )
+
+    def _auto_save_query(self, ctx: "Ask3Context") -> tuple[str, str]:
+        """Auto-save generated SQL to the query registry.
+
+        Returns:
+            Tuple of (query_hash, query_tag), or ("", "") on failure.
+        """
+        if not ctx.sql:
+            return "", ""
+        try:
+            from ..query_registry import QueryRegistry, generate_query_name
+
+            registry = QueryRegistry()
+            existing_names = {e.tag for e in registry.list_queries() if e.tag}
+            tag = generate_query_name(ctx.question, existing_names)
+            query_hash, _ = registry.add_query(
+                sql=ctx.sql,
+                source="ask",
+                target=ctx.target or "",
+                tag=tag,
+            )
+            return query_hash, tag
+        except Exception:
+            import logging
+            logging.getLogger(__name__).debug("Failed to auto-save query", exc_info=True)
+            return "", ""
 
     def _detect_ambiguities(
         self, ctx: "Ask3Context"

@@ -748,6 +748,19 @@ class AnalyzeCommand:
                     f"\n[dim]Tip: Use --skip-warning to skip the EXPLAIN ANALYZE confirmation next time.[/dim]"
                 )
 
+            # Hint: suggest schema commands if semantic layer is missing
+            try:
+                from lib.semantic_layer.manager import SemanticLayerManager
+                from lib.functions.schema_collector import build_schema_hint
+                target_name_hint = target or cfg.get_default()
+                if target_name_hint:
+                    mgr = SemanticLayerManager()
+                    hint = build_schema_hint(target_name_hint, mgr.exists(target_name_hint), False)
+                    if hint:
+                        self._console.print(f"\n[dim]{hint}[/dim]")
+            except Exception:
+                logger.debug("Failed to show schema hint", exc_info=True)
+
             return RdstResult(True, "")
 
         except Exception as e:

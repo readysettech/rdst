@@ -68,8 +68,9 @@ class AskInputHandler:
         # Display the question (without inline options - we show them separately)
         self._console.print(MessagePanel(question_text, variant="info"))
 
-        # Display options as numbered list
-        self._console.print(SelectionTable(question.options))
+        # Display options with "Other" escape hatch for free-text input
+        all_options = list(question.options) + ["Other (type your own answer)"]
+        self._console.print(SelectionTable(all_options))
         self._console.print()
 
         # Get user's choice
@@ -79,6 +80,13 @@ class AskInputHandler:
                     f"[{StyleTokens.EMPHASIS}]Your choice[/{StyleTokens.EMPHASIS}]",
                     default=1,
                 )
+                if choice == len(all_options):
+                    # Free-text: let user describe what they mean
+                    answer = input("Describe what you mean: ")
+                    self._console.print(
+                        f"[{StyleTokens.MUTED}]Got it: {answer}[/{StyleTokens.MUTED}]"
+                    )
+                    return answer
                 if 1 <= choice <= len(question.options):
                     selected = question.options[choice - 1]
                     self._console.print(
@@ -88,7 +96,7 @@ class AskInputHandler:
                 else:
                     self._console.print(
                         f"[{StyleTokens.WARNING}]Please enter a number between 1 and "
-                        f"{len(question.options)}[/{StyleTokens.WARNING}]"
+                        f"{len(all_options)}[/{StyleTokens.WARNING}]"
                     )
             except ValueError:
                 self._console.print(

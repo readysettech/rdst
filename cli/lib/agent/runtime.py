@@ -224,24 +224,19 @@ class AgentRuntime:
             from ..engines.ask3.engine import Ask3Engine
             from ..engines.ask3.presenter import Ask3Presenter
 
-            # Silent presenter for agent mode
-            class SilentPresenter(Ask3Presenter):
-                def __init__(self):
-                    super().__init__(verbose=False)
-
-                def info(self, msg: str) -> None:
+            # Silent presenter for agent mode — suppress all output
+            from ..engines.ask3.presenter import QuietPresenter
+            class SilentPresenter(QuietPresenter):
+                def sql_generated(self, sql, explanation=None) -> None:
                     pass
 
-                def phase(self, name: str) -> None:
+                def execution_result(self, columns, rows, time_ms, truncated=False) -> None:
                     pass
 
-                def thinking(self, msg: str) -> None:
+                def interpretations(self, items) -> None:
                     pass
 
-                def schema_loaded(self, source: str, table_count: int) -> None:
-                    pass
-
-                def show_results(self, ctx) -> None:
+                def clarification_question(self, question, options) -> None:
                     pass
 
             self._engine = Ask3Engine(presenter=SilentPresenter())
@@ -528,15 +523,16 @@ class AgentRuntime:
                 return {"tables": tables, "source": "semantic_layer"}
 
             # Fall back to database introspection
-            from ..functions.schema_collector import collect_schema
+            from ..functions.schema_collector import collect_schema, build_schema_hint
 
             target_config = self._get_target_config()
             schema = collect_schema(target_config)
+            hint = build_schema_hint(self.config.target, False, False)
             if schema:
                 tables = [{"name": t, "columns": list(cols.keys())} for t, cols in schema.items()]
-                return {"tables": tables, "source": "database"}
+                return {"tables": tables, "source": "database", "schema_hint": hint}
 
-            return {"tables": [], "source": "unknown"}
+            return {"tables": [], "source": "unknown", "schema_hint": hint}
 
         except Exception as e:
             logger.exception("Failed to get schema summary")

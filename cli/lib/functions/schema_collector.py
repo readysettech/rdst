@@ -167,6 +167,21 @@ def _collect_all_mysql_tables(target_config: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "tables": {}, "error": f"MySQL error: {str(e)}"}
 
 
+def build_schema_hint(target: str, has_semantic_layer: bool, has_column_stats: bool) -> str | None:
+    """Build a user-facing hint suggesting schema commands when metadata is missing."""
+    if not has_semantic_layer:
+        return (
+            f"Tip: Run 'rdst schema init --target {target}' and "
+            f"'rdst schema profile --target {target}' for better results with column statistics."
+        )
+    if not has_column_stats:
+        return (
+            f"Tip: Run 'rdst schema profile --target {target}' to collect "
+            f"column statistics for more accurate recommendations."
+        )
+    return None
+
+
 def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, Any]:
     """
     Workflow step to collect schema information for tables in the query.
@@ -221,18 +236,25 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
 
         # Load semantic layer stats if available
         semantic_stats = {}
+        has_semantic_layer = False
+        has_column_stats = False
         if target:
             try:
                 from lib.semantic_layer.manager import SemanticLayerManager
                 mgr = SemanticLayerManager()
                 if mgr.exists(target):
+                    has_semantic_layer = True
                     layer = mgr.load(target)
                     for tname, tann in layer.tables.items():
                         semantic_stats[tname] = tann.columns
+                        if any(c.distinct_count is not None for c in tann.columns.values()):
+                            has_column_stats = True
             except Exception:
                 pass  # Non-critical — proceed without stats
 
         schema_info = collect_schema_for_query(sql, target_config, semantic_stats=semantic_stats)
+
+        schema_hint = build_schema_hint(target, has_semantic_layer, has_column_stats)
 
         # Extract table names for reporting
         table_names = _extract_table_names_from_sql(sql)
@@ -241,6 +263,7 @@ def collect_target_schema(sql: str, target: str = None, **kwargs) -> Dict[str, A
             "success": True,
             "schema_info": schema_info,
             "tables_analyzed": list(table_names),
+            "schema_hint": schema_hint,
             "engine_version": engine_version,
             "engine_major_version": engine_major_version,
             "error": None,

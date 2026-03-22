@@ -226,6 +226,13 @@ class Ask3Presenter:
             f"\n[{StyleTokens.STATUS_ERROR}]Query Execution Error:[/{StyleTokens.STATUS_ERROR}]\n  {error}"
         )
 
+    def schema_hint(self, target: str) -> None:
+        """Suggest schema commands when semantic layer is missing."""
+        from lib.functions.schema_collector import build_schema_hint
+        hint = build_schema_hint(target, False, False)
+        if hint:
+            self._print(f"\n[{StyleTokens.MUTED}]{hint}[/{StyleTokens.MUTED}]")
+
     # === General ===
 
     def error(self, message: str) -> None:
