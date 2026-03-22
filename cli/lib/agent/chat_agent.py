@@ -8,7 +8,7 @@ when to query the database vs respond conversationally.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 import logging
 
 if TYPE_CHECKING:
@@ -18,6 +18,11 @@ from .chat_tools import CHAT_TOOLS, ChatToolExecutor, ToolResult, format_tool_re
 from .runtime import AgentRuntime
 
 logger = logging.getLogger(__name__)
+
+# Callback type for streaming events during chat processing.
+# event is one of: "thinking", "tool_call", "tool_result"
+# data varies by event type.
+ChatEventCallback = Callable[[str, dict[str, Any]], None]
 
 
 SYSTEM_PROMPT = """You are a helpful data assistant with access to a database. You can help users:
@@ -139,16 +144,29 @@ class ChatAgent:
 
         return summaries
 
-    def chat(self, user_message: str) -> ChatResponse:
+    def chat(
+        self,
+        user_message: str,
+        on_event: ChatEventCallback | None = None,
+    ) -> ChatResponse:
         """
         Process a user message and return a response.
 
         Args:
             user_message: The user's message.
+            on_event: Optional callback for streaming progress events.
+                Events emitted:
+                - ("thinking", {"text": "..."}) - LLM reasoning text between tool calls
+                - ("tool_call", {"name": "...", "input": {...}}) - tool about to execute
+                - ("tool_result", {"result": ToolResult}) - tool finished
 
         Returns:
             ChatResponse with text and any tool results.
         """
+        def _emit(event: str, data: dict[str, Any]) -> None:
+            if on_event:
+                on_event(event, data)
+
         # Add user message to history
         self.messages.append({
             "role": "user",
@@ -159,7 +177,7 @@ class ChatAgent:
         tool_results = []
         max_iterations = 5  # Prevent infinite loops
 
-        for _ in range(max_iterations):
+        for iteration in range(max_iterations):
             response = self._call_llm()
 
             # Check for tool use
@@ -174,6 +192,11 @@ class ChatAgent:
                 })
                 return ChatResponse(text=text, tool_results=tool_results)
 
+            # Emit any thinking text that accompanies tool calls
+            thinking_text = self._extract_text(response)
+            if thinking_text.strip():
+                _emit("thinking", {"text": thinking_text, "iteration": iteration})
+
             # Execute tools and continue loop
             assistant_content = response.get("content", [])
             self.messages.append({
@@ -184,12 +207,23 @@ class ChatAgent:
             # Execute each tool and collect results
             tool_result_blocks = []
             for tool_use in tool_uses:
+                _emit("tool_call", {
+                    "name": tool_use["name"],
+                    "input": tool_use["input"],
+                    "iteration": iteration,
+                })
+
                 result = self.tool_executor.execute(
                     tool_name=tool_use["name"],
                     tool_input=tool_use["input"],
                     tool_use_id=tool_use["id"],
                 )
                 tool_results.append(result)
+
+                _emit("tool_result", {
+                    "result": result,
+                    "iteration": iteration,
+                })
 
                 tool_result_blocks.append({
                     "type": "tool_result",

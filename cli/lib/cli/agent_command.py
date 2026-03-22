@@ -347,30 +347,54 @@ Examples:
                     print()
                     continue
 
-                # Chat with the agent
+                # Chat with the agent, streaming progress
+                console = self._console
+                step_num = [0]
+
+                def _on_chat_event(event: str, data: dict) -> None:
+                    if event == "thinking":
+                        text = data["text"].strip()
+                        if text:
+                            console.print(f"\n[{StyleTokens.MUTED}]{text}[/{StyleTokens.MUTED}]")
+
+                    elif event == "tool_call":
+                        step_num[0] += 1
+                        name = data["name"]
+                        if name == "query_database":
+                            q = data["input"].get("question", "")
+                            console.print(f"\n[{StyleTokens.EMPHASIS}]Step {step_num[0]}:[/{StyleTokens.EMPHASIS}] Querying database: \"{q}\"")
+                        elif name == "get_schema":
+                            table = data["input"].get("table_name", "all tables")
+                            console.print(f"\n[{StyleTokens.EMPHASIS}]Step {step_num[0]}:[/{StyleTokens.EMPHASIS}] Getting schema for {table}")
+                        elif name == "run_sql":
+                            sql = data["input"].get("sql", "")
+                            preview = sql[:80] + "..." if len(sql) > 80 else sql
+                            console.print(f"\n[{StyleTokens.EMPHASIS}]Step {step_num[0]}:[/{StyleTokens.EMPHASIS}] Running SQL: {preview}")
+
+                    elif event == "tool_result":
+                        result = data["result"]
+                        if result.data and result.data.get("sql"):
+                            console.print(f"  SQL: {result.data['sql']}")
+                        if result.data and result.data.get("columns") and result.data.get("rows"):
+                            self._print_results(result.data["columns"], result.data["rows"])
+                            row_count = result.data.get("row_count", len(result.data["rows"]))
+                            exec_time = result.data.get("execution_time_ms", 0)
+                            console.print(f"  ({row_count} rows, {exec_time:.1f}ms)")
+                            if result.data.get("truncated"):
+                                console.print(f"  [{StyleTokens.MUTED}](Results truncated)[/{StyleTokens.MUTED}]")
+                        elif not result.success:
+                            console.print(f"  [{StyleTokens.ERROR}]Error: {result.content}[/{StyleTokens.ERROR}]")
+
                 print("\nThinking...")
                 try:
-                    response = chat_agent.chat(question)
+                    response = chat_agent.chat(question, on_event=_on_chat_event)
                 except KeyboardInterrupt:
                     print("\n\nInterrupted. Type 'exit' to quit or ask another question.\n")
                     continue
 
-                # Display tool results if any
-                for result in response.tool_results:
-                    if result.data and result.data.get("sql"):
-                        print(f"\nSQL: {result.data['sql']}")
-                    if result.data and result.data.get("columns") and result.data.get("rows"):
-                        print()
-                        self._print_results(result.data["columns"], result.data["rows"])
-                        row_count = result.data.get("row_count", len(result.data["rows"]))
-                        exec_time = result.data.get("execution_time_ms", 0)
-                        print(f"\n({row_count} rows, {exec_time:.1f}ms)")
-                        if result.data.get("truncated"):
-                            print("(Results truncated)")
-
-                # Display the agent's response text
+                # Display the agent's final response text
                 if response.text:
-                    print(f"\nAssistant: {response.text}")
+                    print(f"\nA: {response.text}")
 
                 print()
 
