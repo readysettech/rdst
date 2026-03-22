@@ -826,6 +826,53 @@ provide optimization recommendations.""",
             ("rdst claude remove", "Unregister RDST from Claude Code"),
         ],
     ),
+    "demo": CommandDef(
+        name="demo",
+        short_help="Try RDST with a demo database",
+        description="""Try RDST with a demo database (requires Docker).
+
+Spins up a PostgreSQL container, loads the DBA StackExchange dataset (~2M rows),
+and walks you through rdst features interactively.""",
+        subcommand_dest="demo_subcommand",
+        subcommand_defs=[
+            SubcommandDef(
+                name="setup",
+                help="Start a PostgreSQL Docker container for the demo",
+                args=[],
+            ),
+            SubcommandDef(
+                name="load",
+                help="Download and load demo data into the container",
+                args=[],
+            ),
+            SubcommandDef(
+                name="tour",
+                help="Interactive guided walkthrough of rdst features",
+                args=[
+                    ArgDef("tour_name", nargs="?", default="quickstart",
+                           help="Tour: quickstart, schema, analyze, ask, chat"),
+                ],
+            ),
+            SubcommandDef(
+                name="teardown",
+                help="Stop and remove the demo container",
+                args=[],
+            ),
+        ],
+        subcommands=[
+            ("setup", "Start PostgreSQL Docker container"),
+            ("load", "Download and load DBA StackExchange data"),
+            ("tour", "Interactive guided walkthrough"),
+            ("teardown", "Stop and remove demo container"),
+        ],
+        examples=[
+            ("rdst demo setup", "Start demo database"),
+            ("rdst demo load", "Load demo data"),
+            ("rdst demo tour", "Start the quickstart tour"),
+            ("rdst demo tour analyze", "Tour the analyze feature"),
+            ("rdst demo teardown", "Clean up"),
+        ],
+    ),
     "version": CommandDef(
         name="version",
         short_help="Show version information",
@@ -1337,6 +1384,7 @@ COMMAND_ORDER = [
     "cache",
     "fleet",
     "audit",
+    "demo",
     "report",
     "help",
     "claude",
@@ -1348,7 +1396,7 @@ COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ("Analysis", ["top", "analyze", "ask", "agent"]),
     ("Configuration", ["init", "configure", "schema", "query", "guard"]),
     ("Integrations", ["claude", "slack", "web"]),
-    ("Other", ["scan", "report", "help", "version"]),
+    ("Other", ["demo", "scan", "report", "help", "version"]),
 ]
 
 

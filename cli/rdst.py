@@ -340,6 +340,13 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
 
         return cli.schema(**schema_kwargs)
 
+    elif command == 'demo':
+        from lib.cli.demo_command import DemoCommand
+        demo_cmd = DemoCommand()
+        demo_subcommand = getattr(args, 'demo_subcommand', None)
+        tour_name = getattr(args, 'tour_name', 'quickstart')
+        return demo_cmd.run(demo_subcommand, tour_name=tour_name)
+
     elif command == 'scan':
         from lib.cli.scan_command import ScanCommand
         scan_cmd = ScanCommand()

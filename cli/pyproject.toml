@@ -35,6 +35,7 @@ dependencies = [
     "psycopg2-binary",
     "pymysql",
     "cryptography",
+    "py7zr",
     "pandas",
     "rich",
     "toml",

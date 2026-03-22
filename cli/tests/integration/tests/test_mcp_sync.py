@@ -25,6 +25,7 @@ MCP_EXCLUDED_COMMANDS = {
     "ask",  # CLI-only - requires interactive TTY for multi-step flow
     "slack",  # CLI-only - requires running bot process with Socket Mode
     "guard",  # CLI-only - interactive guard management
+    "demo",  # CLI-only - requires Docker and interactive TTY
     "web",  # CLI-only - starts a long-running local server
     # fleet and audit have MCP tools — see SUBCOMMAND_MAPPING
     # Schema subcommands (handled via rdst_schema tool, some are CLI-only)

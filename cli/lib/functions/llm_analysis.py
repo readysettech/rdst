@@ -235,8 +235,12 @@ INDEX NAMING: Always use format idx_tablename_col1_col2 (lowercase, underscores)
 
 SELECTIVITY AWARENESS (use [distinct: N] annotations on columns if available):
   - When [distinct: N] is shown, estimate selectivity = distinct / row_estimate.
-  - Selectivity < 0.01 means an index on that column alone is unlikely to help.
-    Do NOT include it in index_recommendations — omit it entirely.
+  - Low distinct count (< 20) on large tables means each value matches a LARGE
+    fraction of rows. An index on such a column returns too many rows to be
+    useful — the optimizer correctly chooses a seq scan.
+  - CRITICAL: If rows_returned / row_estimate > 10%, the filter is NOT selective
+    enough to benefit from an index. A seq scan is optimal. Do NOT recommend
+    an index on such a column — omit it entirely from index_recommendations.
   - If an existing index covers the WHERE columns AND selectivity is low,
     do NOT recommend a new index — the current plan is expected behavior.
   - High null fraction (> 50%): consider partial indexes (WHERE col IS NOT NULL)
