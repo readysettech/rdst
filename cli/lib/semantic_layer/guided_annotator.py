@@ -205,6 +205,11 @@ class GuidedAnnotator:
             self.console.print(f"[{StyleTokens.ERROR}]No tables could be profiled.[/{StyleTokens.ERROR}]")
             return layer
 
+        # Persist column stats as a side effect of profiling
+        for tname, p in profiles.items():
+            if tname in tables:
+                tables[tname].apply_profile(p)
+
         # Phase 1: LLM analysis
         self.console.print(f"\n[{StyleTokens.ACCENT}]Analyzing schema with AI...[/{StyleTokens.ACCENT}]")
         analyses: dict[str, TableAnalysis] = {}

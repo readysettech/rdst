@@ -8,6 +8,7 @@ Provides CLI commands for managing the semantic layer:
 - rdst schema init - Bootstrap from database schema
 - rdst schema export - Export as YAML
 """
+from __future__ import annotations
 
 from typing import Optional, List, Dict
 import subprocess
@@ -964,6 +965,40 @@ class SchemaCommand:
                 "message": f"Failed to refresh schema: {e}",
                 "data": None,
             }
+
+    def profile(
+        self,
+        target: str,
+        target_config: dict,
+        table_name: str | None = None,
+    ) -> dict:
+        """Collect and persist column statistics for a target."""
+        from ..semantic_layer.data_profiler import DataProfiler
+        from ..semantic_layer.guided_annotator import _parse_row_estimate
+
+        layer = self.manager.load(target)
+        if not layer:
+            return {"ok": False, "message": f"No semantic layer for '{target}'. Run 'rdst schema init' first."}
+
+        profiler = DataProfiler(target_config)
+
+        if table_name:
+            if table_name not in layer.tables:
+                return {"ok": False, "message": f"Table '{table_name}' not found in semantic layer."}
+            tables_to_profile = {table_name: layer.tables[table_name]}
+        else:
+            tables_to_profile = layer.tables
+
+        for tname, tann in tables_to_profile.items():
+            row_est = _parse_row_estimate(tann.row_estimate)
+            tp = profiler.profile_table(
+                tname, tann.columns, row_est, tann.row_estimate or "0",
+                tann.relationships,
+            )
+            tann.apply_profile(tp)
+
+        self.manager.save(layer)
+        return {"ok": True, "message": f"Profiled {len(tables_to_profile)} table(s) for '{target}'."}
 
     def annotate(
         self,

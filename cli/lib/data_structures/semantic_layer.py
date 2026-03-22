@@ -13,6 +13,7 @@ The semantic layer includes:
 
 Storage: Per-target YAML files in ~/.rdst/semantic-layer/<target>.yaml
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -52,6 +53,12 @@ class ColumnAnnotation:
     # Auto-detected enrichment (populated by introspector)
     value_pattern: str = ""  # comma_separated_list (columns requiring split/unnest)
 
+    # Column statistics (populated by DataProfiler, persisted under 'stats' key)
+    null_fraction: float | None = None
+    distinct_count: int | None = None
+    top_values: list[list] | None = None  # [[value, count], ...]
+    stats_profiled_at: str = ""
+
     def to_dict(self) -> dict:
         """Convert to dictionary for YAML serialization."""
         result = {}
@@ -75,11 +82,24 @@ class ColumnAnnotation:
             result['quality_notes'] = self.quality_notes
         if self.value_pattern:
             result['value_pattern'] = self.value_pattern
+        # Column statistics under a separate 'stats' sub-key
+        stats = {}
+        if self.null_fraction is not None:
+            stats['null_fraction'] = round(self.null_fraction, 4)
+        if self.distinct_count is not None:
+            stats['distinct_count'] = self.distinct_count
+        if self.top_values:
+            stats['top_values'] = self.top_values
+        if self.stats_profiled_at:
+            stats['profiled_at'] = self.stats_profiled_at
+        if stats:
+            result['stats'] = stats
         return result
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> 'ColumnAnnotation':
         """Create from dictionary loaded from YAML."""
+        stats = data.get('stats', {})
         return cls(
             name=name,
             description=data.get('description', ''),
@@ -92,6 +112,10 @@ class ColumnAnnotation:
             is_pii=data.get('is_pii', False),
             quality_notes=data.get('quality_notes', ''),
             value_pattern=data.get('value_pattern', ''),
+            null_fraction=stats.get('null_fraction'),
+            distinct_count=stats.get('distinct_count'),
+            top_values=stats.get('top_values'),
+            stats_profiled_at=stats.get('profiled_at', ''),
         )
 
 
@@ -184,6 +208,31 @@ class TableAnnotation:
     # Access pattern hints
     access_hints: list[str] = field(default_factory=list)  # e.g., "Always filter by tenant_id"
 
+    # Table-level profiling stats
+    row_count: int | None = None  # Exact row count from profiling
+    profiled_at: str = ""  # ISO 8601 timestamp
+
+    def apply_profile(self, profile: 'TableProfile', max_cardinality: int = 50) -> None:
+        """Persist stats from a DataProfiler TableProfile."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+
+        self.row_count = profile.row_estimate
+        self.profiled_at = now
+
+        for col_name, cp in profile.columns.items():
+            if col_name not in self.columns:
+                continue
+            col = self.columns[col_name]
+            col.null_fraction = cp.null_fraction
+            col.distinct_count = cp.distinct_count
+            col.stats_profiled_at = now
+
+            if cp.top_values and cp.distinct_count <= max_cardinality:
+                col.top_values = [[v, c] for v, c in cp.top_values.items()]
+            else:
+                col.top_values = None
+
     def to_dict(self) -> dict:
         """Convert to dictionary for YAML serialization."""
         result = {}
@@ -193,6 +242,10 @@ class TableAnnotation:
             result['business_context'] = self.business_context
         if self.row_estimate:
             result['row_estimate'] = self.row_estimate
+        if self.row_count is not None:
+            result['row_count'] = self.row_count
+        if self.profiled_at:
+            result['profiled_at'] = self.profiled_at
         if self.data_freshness:
             result['data_freshness'] = self.data_freshness
 
@@ -242,7 +295,9 @@ class TableAnnotation:
             columns=columns,
             relationships=relationships,
             indexes=indexes,
-            access_hints=data.get('access_hints', [])
+            access_hints=data.get('access_hints', []),
+            row_count=data.get('row_count'),
+            profiled_at=data.get('profiled_at', ''),
         )
 
 

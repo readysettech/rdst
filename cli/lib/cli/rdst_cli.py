@@ -1540,6 +1540,20 @@ class RdstCLI:
 
                 result = schema_cmd.refresh(target, target_config)
                 return RdstResult(bool(result.get("ok")), result.get("message", ""))
+            elif subcommand == "profile":
+                target_config = self._get_target_config(target)
+                if not target_config:
+                    return RdstResult(
+                        False,
+                        f"Target '{target}' not found. Run 'rdst configure' first.",
+                    )
+                if not schema_cmd.manager.exists(target):
+                    return RdstResult(
+                        False,
+                        f"No semantic layer for '{target}'. Run 'rdst schema init' first.",
+                    )
+                result = schema_cmd.profile(target, target_config, kwargs.get("table"))
+                return RdstResult(bool(result.get("ok")), result.get("message", ""))
             elif subcommand == "add-table":
                 result = service.add_table(
                     target,

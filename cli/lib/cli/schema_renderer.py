@@ -133,6 +133,16 @@ class SchemaRenderer:
                             col_node.add(
                                 f"[{StyleTokens.ACCENT}]Pattern: {col.value_pattern}[/{StyleTokens.ACCENT}]"
                             )
+                        # Column statistics
+                        stats_parts = []
+                        if col.null_fraction is not None:
+                            stats_parts.append(f"null: {col.null_fraction:.0%}")
+                        if col.distinct_count is not None:
+                            stats_parts.append(f"distinct: {col.distinct_count:,}")
+                        if stats_parts:
+                            col_node.add(
+                                f"[{StyleTokens.MUTED}]Stats: {', '.join(stats_parts)}[/{StyleTokens.MUTED}]"
+                            )
 
             self._console.print(tree)
 

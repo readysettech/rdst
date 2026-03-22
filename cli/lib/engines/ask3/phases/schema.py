@@ -170,6 +170,10 @@ def _format_semantic_schema(layer) -> str:
                 col_str += f" [enum: {enum_preview}]"
             if col.value_pattern:
                 col_str += f" [pattern: {col.value_pattern}]"
+            if col.null_fraction is not None and col.null_fraction > 0.05:
+                col_str += f" [null: {col.null_fraction:.0%}]"
+            if col.distinct_count is not None:
+                col_str += f" [distinct: {col.distinct_count:,}]"
             col_strs.append(col_str)
 
         parts.append("\n".join(col_strs))

@@ -776,6 +776,8 @@ class SchemaTableColumn:
     is_pii: bool
     enum_values: Optional[Dict[str, str]]
     value_pattern: Optional[str] = None
+    null_fraction: Optional[float] = None
+    distinct_count: Optional[int] = None
 
 
 @dataclass

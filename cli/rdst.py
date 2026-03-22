@@ -323,7 +323,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             "target": getattr(args, "target", None),
         }
 
-        if schema_subcommand in ["show", "edit", "annotate"]:
+        if schema_subcommand in ["show", "edit", "annotate", "profile"]:
             schema_kwargs["table"] = getattr(args, "table", None)
         if schema_subcommand == "annotate":
             schema_kwargs["use_llm"] = getattr(args, "use_llm", False)

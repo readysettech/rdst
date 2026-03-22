@@ -705,6 +705,14 @@ The more comprehensive your semantic layer, the better 'rdst ask' can generate a
                     ArgDef("--target", help="Target database name"),
                 ],
             ),
+            SubcommandDef(
+                name="profile",
+                help="Collect and persist column statistics (null rates, distinct counts, top values)",
+                args=[
+                    ArgDef("table", nargs="?", help="Specific table to profile"),
+                    ArgDef("--target", help="Target database name"),
+                ],
+            ),
         ],
         subcommands=[
             (
@@ -721,6 +729,7 @@ The more comprehensive your semantic layer, the better 'rdst ask' can generate a
             ("delete", "Remove semantic layer for a target"),
             ("list", "List all configured semantic layers"),
             ("refresh", "Update indexes, columns, row estimates — keeps descriptions"),
+            ("profile", "Collect column stats (null rates, distinct counts, top values)"),
         ],
         examples=[
             ("rdst schema init --target mydb", "Bootstrap from database"),
