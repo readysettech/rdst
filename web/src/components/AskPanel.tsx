@@ -1,11 +1,13 @@
 import { useState, useCallback } from "react";
 import { Button } from "@rs/ui-new/button";
+import { Show } from "@rs/ui-new/show";
 import { Text } from "@rs/ui-new/text";
 import { VStack, HStack } from "@rs/ui-new/stack";
 import { Icon } from "@rs/ui-new/icon";
 import { Spinner } from "@rs/ui-new/spinner";
 import { BaseInputTextarea } from "@rs/ui-new/base-input-textarea";
 import { BaseInputRadioGroup } from "@rs/ui-new/base-input-radio-group";
+import { BaseInputText } from "@rs/ui-new/base-input-text";
 import { Card } from "@rs/ui-new/card";
 import { Tag } from "@rs/ui-new/tag";
 import { CopyButton } from "@rs/ui-new/copy-button";
@@ -559,29 +561,93 @@ interface ClarificationPanelProps {
   disabled?: boolean;
 }
 
+const CUSTOM_OPTION_VALUE = "__custom__";
+
+function buildAnswers(
+  selectedOptions: Record<string, string>,
+  customInputs: Record<string, string>,
+): Record<string, string> {
+  const answers: Record<string, string> = {};
+  for (const [id, value] of Object.entries(selectedOptions)) {
+    if (value === CUSTOM_OPTION_VALUE) {
+      const custom = customInputs[id]?.trim();
+      if (custom) answers[id] = custom;
+    } else {
+      answers[id] = value;
+    }
+  }
+  return answers;
+}
+
 function ClarificationPanel({
   questions,
   onSubmit,
   disabled = false,
 }: ClarificationPanelProps) {
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
+  const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const currentQuestion = questions[currentIndex];
   const isLastQuestion = currentIndex === questions.length - 1;
-  const hasAnswer = currentQuestion && answers[currentQuestion.id];
+  const selectedValue = currentQuestion ? selectedOptions[currentQuestion.id] : undefined;
+  const customValue = currentQuestion ? customInputs[currentQuestion.id] : "";
+  const hasAnswer =
+    currentQuestion &&
+    ((selectedValue === CUSTOM_OPTION_VALUE && customValue.trim().length > 0) ||
+      (selectedValue && selectedValue !== CUSTOM_OPTION_VALUE));
 
   const handleSelect = useCallback((questionId: string, option: string) => {
-    setAnswers((prev) => ({ ...prev, [questionId]: option }));
+    setSelectedOptions((prev) => ({ ...prev, [questionId]: option }));
+  }, []);
+
+  const handleCustomChange = useCallback((questionId: string, value: string) => {
+    setCustomInputs((prev) => ({ ...prev, [questionId]: value }));
+  }, []);
+
+  const clearQuestion = useCallback((questionId: string) => {
+    setSelectedOptions((prev) => {
+      const next = { ...prev };
+      delete next[questionId];
+      return next;
+    });
+    setCustomInputs((prev) => {
+      const next = { ...prev };
+      delete next[questionId];
+      return next;
+    });
   }, []);
 
   const handleNext = useCallback(() => {
+    const question = questions[currentIndex];
+    if (!question) return;
+
+    if (selectedOptions[question.id] === CUSTOM_OPTION_VALUE) {
+      const value = customInputs[question.id]?.trim();
+      if (!value) return;
+    }
+
+    const answers = buildAnswers(selectedOptions, customInputs);
     if (isLastQuestion) {
       onSubmit(answers);
     } else {
       setCurrentIndex((prev) => prev + 1);
     }
-  }, [isLastQuestion, answers, onSubmit]);
+  }, [isLastQuestion, onSubmit, selectedOptions, currentIndex, questions, customInputs]);
+
+  const handleSkip = useCallback(() => {
+    if (disabled) return;
+    const question = questions[currentIndex];
+    if (!question) return;
+    clearQuestion(question.id);
+    if (isLastQuestion) {
+      const answers = buildAnswers(selectedOptions, customInputs);
+      delete answers[question.id];
+      onSubmit(answers);
+    } else {
+      setCurrentIndex((prev) => prev + 1);
+    }
+  }, [disabled, isLastQuestion, onSubmit, questions, currentIndex, clearQuestion, selectedOptions, customInputs]);
 
   if (!currentQuestion) {
     return null;
@@ -652,19 +718,47 @@ function ClarificationPanel({
             </Text>
 
             <div className="w-full">
-              <BaseInputRadioGroup
-                options={currentQuestion.options.map((option) => ({
-                  value: option,
-                  label: option,
-                }))}
-                value={answers[currentQuestion.id] || ""}
-                onValueChange={(value) => handleSelect(currentQuestion.id, value)}
-              />
+              <VStack className="gap-3 w-full">
+                <BaseInputRadioGroup
+                  options={[
+                    ...currentQuestion.options.map((option) => ({
+                      value: option,
+                      label: option,
+                    })),
+                    {
+                      value: CUSTOM_OPTION_VALUE,
+                      label: "Something else (let me type it)",
+                    },
+                  ]}
+                  value={selectedValue || ""}
+                  onValueChange={(value) => handleSelect(currentQuestion.id, value)}
+                />
+                <Show when={selectedValue === CUSTOM_OPTION_VALUE}>
+                  <BaseInputText
+                    name={`custom-${currentQuestion.id}`}
+                    placeholder="Type your own answer..."
+                    value={customValue || ""}
+                    onChange={(event) =>
+                      handleCustomChange(currentQuestion.id, event.target.value)
+                    }
+                    disabled={disabled}
+                  />
+                </Show>
+              </VStack>
             </div>
           </VStack>
         </Card.Content>
         <Card.Footer className="border-t border-border-layout-1">
           <HStack className="justify-end items-center w-full">
+            <Button
+              onClick={handleSkip}
+              variant="primary"
+              modifier="ghost"
+              label="Skip question"
+              icon="arrow-right"
+              iconPosition="right"
+              disabled={disabled}
+            />
             <Button
               onClick={handleNext}
               disabled={disabled || !hasAnswer}
