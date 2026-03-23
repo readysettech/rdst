@@ -13,6 +13,8 @@ import tempfile
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
+import pandas as pd
+
 from .types import (
     TopCompleteEvent,
     TopConnectedEvent,
@@ -138,7 +140,9 @@ class TopService:
 
             # Process data
             processed_data = self._process_top_data(
-                data, actual_source, options.limit, options.sort, options.filter_pattern
+                data,
+                actual_source,
+                options,
             )
 
             # Convert to TopQueryData
@@ -297,21 +301,42 @@ class TopService:
                 total_tracked = tracker.get_total_queries_tracked()
 
                 # Convert to TopQueryData
-                queries = [
-                    TopQueryData(
-                        query_hash=self._compute_registry_hash(q.query_text),
-                        query_text=q.query_text,
-                        normalized_query=q.normalized_query,
-                        freq=q.observation_count,
-                        total_time=f"{q.max_duration_seen / 1000:.3f}s",
-                        avg_time=f"{q.avg_duration / 1000:.3f}s",
-                        pct_load="0.0%",  # Not calculated in realtime mode
-                        max_duration_ms=q.max_duration_seen,
-                        current_instances=q.current_instances_running,
-                        observation_count=q.observation_count,
+                # Calculate total cumulative time for load %
+                total_cumulative_ms = sum(
+                    q.avg_duration * q.observation_count for q in top_queries
+                ) or 1.0  # avoid division by zero
+
+                queries = []
+                for q in top_queries:
+                    qps_value = (
+                        (q.observation_count / runtime)
+                        if runtime and runtime > 0
+                        else 0.0
                     )
-                    for q in top_queries
-                ]
+                    if options.min_freq > 0 and q.observation_count < options.min_freq:
+                        continue
+
+                    cumulative_ms = q.avg_duration * q.observation_count
+                    load_pct = (cumulative_ms / total_cumulative_ms) * 100
+
+                    if options.min_load_pct > 0 and load_pct < options.min_load_pct:
+                        continue
+
+                    queries.append(
+                        TopQueryData(
+                            query_hash=self._compute_registry_hash(q.query_text),
+                            query_text=q.query_text,
+                            normalized_query=q.normalized_query,
+                            freq=q.observation_count,
+                            total_time=f"{q.max_duration_seen / 1000:.3f}s",
+                            avg_time=f"{q.avg_duration / 1000:.3f}s",
+                            pct_load=f"{load_pct:.1f}%",
+                            qps=qps_value,
+                            max_duration_ms=q.max_duration_seen,
+                            current_instances=q.current_instances_running,
+                            observation_count=q.observation_count,
+                        )
+                    )
 
                 # Yield queries event
                 yield TopQueriesEvent(
@@ -352,21 +377,30 @@ class TopService:
             # Complete event (only if duration was specified)
             if duration is not None:
                 top_queries = tracker.get_top_n(options.limit, sort_by="max")
-                final_queries = [
-                    TopQueryData(
-                        query_hash=self._compute_registry_hash(q.query_text),
-                        query_text=q.query_text,
-                        normalized_query=q.normalized_query,
-                        freq=q.observation_count,
-                        total_time=f"{q.max_duration_seen / 1000:.3f}s",
-                        avg_time=f"{q.avg_duration / 1000:.3f}s",
-                        pct_load="0.0%",
-                        max_duration_ms=q.max_duration_seen,
-                        current_instances=q.current_instances_running,
-                        observation_count=q.observation_count,
+                final_total_ms = sum(
+                    q.avg_duration * q.observation_count for q in top_queries
+                ) or 1.0
+                final_queries = []
+                for q in top_queries:
+                    if options.min_freq > 0 and q.observation_count < options.min_freq:
+                        continue
+                    load_pct = (q.avg_duration * q.observation_count / final_total_ms) * 100
+                    if options.min_load_pct > 0 and load_pct < options.min_load_pct:
+                        continue
+                    final_queries.append(
+                        TopQueryData(
+                            query_hash=self._compute_registry_hash(q.query_text),
+                            query_text=q.query_text,
+                            normalized_query=q.normalized_query,
+                            freq=q.observation_count,
+                            total_time=f"{q.max_duration_seen / 1000:.3f}s",
+                            avg_time=f"{q.avg_duration / 1000:.3f}s",
+                            pct_load=f"{load_pct:.1f}%",
+                            max_duration_ms=q.max_duration_seen,
+                            current_instances=q.current_instances_running,
+                            observation_count=q.observation_count,
+                        )
                     )
-                    for q in top_queries
-                ]
                 yield TopCompleteEvent(
                     type="complete",
                     success=True,
@@ -636,9 +670,7 @@ class TopService:
         self,
         data: Dict[str, Any],
         source: str,
-        limit: int,
-        sort: str,
-        filter_pattern: Optional[str],
+        options: TopOptions,
     ) -> List[Dict[str, Any]]:
         """Process and format the top queries data."""
         if not data.get("success") or data.get("data") is None:
@@ -668,14 +700,14 @@ class TopService:
                 df = df.drop_duplicates("query_hash", keep="first")
 
         # Apply filter if specified
-        if filter_pattern:
+        if options.filter_pattern:
             try:
-                pattern = re.compile(filter_pattern, re.IGNORECASE)
+                pattern = re.compile(options.filter_pattern, re.IGNORECASE)
                 mask = df["query_text"].str.contains(pattern, na=False)
                 df = df[mask]
             except re.error:
                 mask = df["query_text"].str.contains(
-                    filter_pattern, case=False, na=False
+                    options.filter_pattern, case=False, na=False
                 )
                 df = df[mask]
 
@@ -725,6 +757,23 @@ class TopService:
             else:
                 df["pct_load"] = 0.0
 
+        # QPS is only meaningful for real-time streaming where the sample
+        # window is a known, bounded interval.  In historical mode the
+        # sample_seconds value spans back to the last stats reset, so
+        # freq / sample_seconds would undercount the true rate.
+        df["qps_value"] = 0.0
+
+        # Apply quantitative filters
+        if options.min_freq > 0 and "freq" in df.columns:
+            df = df[df["freq"] >= options.min_freq]
+        if options.min_load_pct > 0 and "pct_load" in df.columns:
+            df = df[df["pct_load"] >= options.min_load_pct]
+        if options.min_total_time_s > 0 and "total_time_sort" in df.columns:
+            df = df[df["total_time_sort"] >= options.min_total_time_s]
+
+        if df.empty:
+            return []
+
         # Sort the data
         sort_column_map = {
             "freq": "freq",
@@ -732,12 +781,12 @@ class TopService:
             "avg_time": "avg_time",
             "load": "pct_load",
         }
-        sort_col = sort_column_map.get(sort, "total_time_sort")
+        sort_col = sort_column_map.get(options.sort, "total_time_sort")
         if sort_col in df.columns:
             df = df.sort_values(sort_col, ascending=False)
 
         # Limit results
-        df = df.head(limit)
+        df = df.head(options.limit)
 
         # Convert to list of dicts
         results = []
@@ -754,6 +803,7 @@ class TopService:
                     "total_time": f"{float(row.get('total_time', 0)):.3f}s",
                     "avg_time": f"{float(row.get('avg_time', 0)):.3f}s",
                     "pct_load": f"{float(row.get('pct_load', 0)):.1f}%",
+                    "qps": float(row.get("qps_value", 0.0)),
                 }
             )
 

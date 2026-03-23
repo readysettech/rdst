@@ -140,7 +140,7 @@ export function TopQueryTable({
                     Query
                   </th>
                   <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
-                    {isRealtime ? 'Obs' : 'Freq'}
+                    Freq
                   </th>
                   <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
                     {isRealtime ? 'Max Dur' : 'Total'}
@@ -148,6 +148,11 @@ export function TopQueryTable({
                   <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
                     Avg
                   </th>
+                  <Show when={isRealtime}>
+                    <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
+                      QPS
+                    </th>
+                  </Show>
                   <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-16">
                     Load
                   </th>
@@ -227,6 +232,13 @@ export function TopQueryTable({
                             {query.avg_time}
                           </Text>
                         </td>
+                        <Show when={isRealtime}>
+                          <td className="px-4 py-3 align-top text-right">
+                            <Text as="span" level="mono-small" className="text-content-layout-1">
+                              {query.qps !== undefined ? query.qps.toFixed(2) : '-'}
+                            </Text>
+                          </td>
+                        </Show>
                         <td className="px-4 py-3 align-top text-right">
                           <Text as="span" level="mono-small" className="text-content-layout-1">
                             {query.pct_load}

@@ -457,12 +457,83 @@ class TestTopServiceCommandSets:
         result = service._process_top_data(
             {"success": True, "data": df},
             "pg_stat",
-            limit=10,
-            sort="total_time",
-            filter_pattern=None,
+            TopOptions(limit=10, sort="total_time", filter_pattern=None),
         )
 
         assert result[0]["query_text"] == "-- note\nSELECT * FROM users WHERE id = 1"
+
+    def test_process_top_data_min_freq_filter(self, service):
+        """min_freq option filters out low-frequency queries."""
+        df = pd.DataFrame(
+            [
+                {"query_text": "SELECT 1", "calls": 10, "total_time": 5.0, "mean_time": 0.5},
+                {"query_text": "SELECT 2", "calls": 2, "total_time": 1.0, "mean_time": 0.5},
+                {"query_text": "SELECT 3", "calls": 50, "total_time": 20.0, "mean_time": 0.4},
+            ]
+        )
+
+        result = service._process_top_data(
+            {"success": True, "data": df},
+            "pg_stat",
+            TopOptions(limit=10, sort="total_time", min_freq=5),
+        )
+
+        texts = [r["query_text"] for r in result]
+        assert "SELECT 1" in texts
+        assert "SELECT 3" in texts
+        assert "SELECT 2" not in texts
+
+    def test_process_top_data_min_load_pct_filter(self, service):
+        """min_load_pct option filters out low-load queries."""
+        df = pd.DataFrame(
+            [
+                {"query_text": "SELECT heavy", "calls": 1, "total_time": 90.0, "mean_time": 90.0, "pct_load": 90.0},
+                {"query_text": "SELECT light", "calls": 1, "total_time": 1.0, "mean_time": 1.0, "pct_load": 1.0},
+            ]
+        )
+
+        result = service._process_top_data(
+            {"success": True, "data": df},
+            "pg_stat",
+            TopOptions(limit=10, sort="total_time", min_load_pct=5.0),
+        )
+
+        texts = [r["query_text"] for r in result]
+        assert "SELECT heavy" in texts
+        assert "SELECT light" not in texts
+
+    def test_process_top_data_qps_zero_in_historical_mode(self, service):
+        """QPS is always 0 in historical mode (sample_seconds is unreliable)."""
+        df = pd.DataFrame(
+            [
+                {"query_text": "SELECT 1", "calls": 100, "total_time": 5.0, "mean_time": 0.05, "sample_seconds": 10.0},
+            ]
+        )
+
+        result = service._process_top_data(
+            {"success": True, "data": df},
+            "pg_stat",
+            TopOptions(limit=10, sort="total_time"),
+        )
+
+        assert len(result) == 1
+        assert result[0].get("qps", 0) == 0.0
+
+    def test_process_top_data_empty_when_all_filtered(self, service):
+        """Returns empty list when all queries filtered by min_freq."""
+        df = pd.DataFrame(
+            [
+                {"query_text": "SELECT 1", "calls": 1, "total_time": 0.1, "mean_time": 0.1},
+            ]
+        )
+
+        result = service._process_top_data(
+            {"success": True, "data": df},
+            "pg_stat",
+            TopOptions(limit=10, sort="total_time", min_freq=100),
+        )
+
+        assert result == []
 
 
 class TestTopServiceEventTypes:

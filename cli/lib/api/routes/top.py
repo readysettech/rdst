@@ -40,6 +40,8 @@ def _serialize_query_data(query: TopQueryData) -> dict:
         "avg_time": query.avg_time,
         "pct_load": query.pct_load,
     }
+    if query.qps is not None:
+        data["qps"] = query.qps
     if query.max_duration_ms is not None:
         data["max_duration_ms"] = round(query.max_duration_ms, 2)
     if query.current_instances is not None:
@@ -134,6 +136,8 @@ async def _realtime_generator(
     limit: int,
     duration: Optional[int],
     auto_save: bool,
+    min_freq: int,
+    min_load_pct: float,
 ) -> AsyncGenerator[dict, None]:
     """Generate SSE events for realtime streaming."""
     try:
@@ -154,6 +158,8 @@ async def _realtime_generator(
         limit=limit,
         poll_interval_ms=200,
         auto_save_registry=auto_save,
+        min_freq=min_freq,
+        min_load_pct=min_load_pct,
     )
 
     try:
@@ -170,6 +176,8 @@ async def _historical_generator(
     sort: str,
     filter_pattern: Optional[str],
     auto_save: bool,
+    min_freq: int,
+    min_load_pct: float,
 ) -> AsyncGenerator[dict, None]:
     """Generate SSE events for historical one-shot."""
     service = TopService()
@@ -179,6 +187,8 @@ async def _historical_generator(
         sort=sort,
         filter_pattern=filter_pattern,
         auto_save_registry=auto_save,
+        min_freq=min_freq,
+        min_load_pct=min_load_pct,
     )
 
     try:
@@ -199,6 +209,8 @@ async def get_top_queries(
     source: str = Query("auto", description="Data source (auto, pg_stat, activity, digest)"),
     sort: str = Query("total_time", description="Sort by (total_time, freq, avg_time, load)"),
     filter_pattern: Optional[str] = Query(None, description="Regex filter for queries"),
+    min_freq: int = Query(0, ge=0, description="Minimum executions/frequency"),
+    min_load_pct: float = Query(0.0, ge=0.0, description="Minimum load percentage"),
     auto_save: bool = Query(True, description="Auto-save queries to registry"),
     stream: bool = Query(False, description="Return SSE stream instead of JSON (alias for realtime)"),
 ):
@@ -234,13 +246,22 @@ async def get_top_queries(
     """
     if realtime:
         return EventSourceResponse(
-            _realtime_generator(guard.target_name, limit, duration, auto_save)
+            _realtime_generator(
+                guard.target_name, limit, duration, auto_save, min_freq, min_load_pct
+            )
         )
 
     if stream:
         return EventSourceResponse(
             _historical_generator(
-                guard.target_name, source, limit, sort, filter_pattern, auto_save
+                guard.target_name,
+                source,
+                limit,
+                sort,
+                filter_pattern,
+                auto_save,
+                min_freq,
+                min_load_pct,
             )
         )
 
@@ -264,6 +285,8 @@ async def get_top_queries(
         sort=sort,
         filter_pattern=filter_pattern,
         auto_save_registry=auto_save,
+        min_freq=min_freq,
+        min_load_pct=min_load_pct,
     )
 
     result = None
@@ -313,6 +336,8 @@ async def get_top_queries_realtime(
         None, description="Duration in seconds (auto-complete after N seconds)"
     ),
     auto_save: bool = Query(True, description="Auto-save queries to registry"),
+    min_freq: int = Query(0, ge=0, description="Minimum executions/frequency"),
+    min_load_pct: float = Query(0.0, ge=0.0, description="Minimum load percentage"),
 ):
     """Realtime top queries via SSE streaming.
 
@@ -342,5 +367,7 @@ async def get_top_queries_realtime(
     ```
     """
     return EventSourceResponse(
-        _realtime_generator(guard.target_name, limit, duration, auto_save)
+        _realtime_generator(
+            guard.target_name, limit, duration, auto_save, min_freq, min_load_pct
+        )
     )

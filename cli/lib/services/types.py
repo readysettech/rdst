@@ -507,6 +507,9 @@ class TopOptions:
     limit: int = 10
     sort: str = "total_time"  # total_time, freq, avg_time, load
     filter_pattern: Optional[str] = None
+    min_freq: int = 0
+    min_load_pct: float = 0.0
+    min_total_time_s: float = 0.0
     # Real-time specific
     poll_interval_ms: int = 200
     auto_save_registry: bool = True
@@ -556,6 +559,7 @@ class TopQueryData:
     total_time: str  # formatted "X.XXXs"
     avg_time: str
     pct_load: str
+    qps: Optional[float] = None
     # Real-time specific (optional)
     max_duration_ms: Optional[float] = None
     current_instances: Optional[int] = None

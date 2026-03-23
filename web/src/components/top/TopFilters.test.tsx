@@ -17,6 +17,10 @@ describe("TopFilters", () => {
         setLimit={vi.fn()}
         filterPattern=""
         setFilterPattern={vi.fn()}
+        minFreq={0}
+        setMinFreq={vi.fn()}
+        minLoadPct={0}
+        setMinLoadPct={vi.fn()}
         duration={0}
         setDuration={vi.fn()}
         autoSave

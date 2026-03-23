@@ -10,6 +10,7 @@ export interface TopQuery {
   total_time: string;
   avg_time: string;
   pct_load: string;
+  qps?: number;
   max_duration_ms?: number;
   current_instances_running?: number;
   observation_count?: number;
@@ -23,6 +24,8 @@ export interface TopOptions {
   filter_pattern?: string;
   duration?: number;
   auto_save?: boolean;
+  min_freq?: number;
+  min_load_pct?: number;
 }
 
 export type TopMode = 'historical' | 'realtime';

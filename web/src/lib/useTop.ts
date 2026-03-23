@@ -25,6 +25,8 @@ interface UseTopOptions {
   filter_pattern?: string;
   duration?: number;
   auto_save?: boolean;
+  min_freq?: number;
+  min_load_pct?: number;
 }
 
 interface UseTopReturn {
@@ -112,6 +114,12 @@ export function useTop(): UseTopReturn {
       if (options?.filter_pattern) {
         params.set('filter_pattern', options.filter_pattern);
       }
+      if (options?.min_freq && options.min_freq > 0) {
+        params.set('min_freq', String(options.min_freq));
+      }
+      if (options?.min_load_pct && options.min_load_pct > 0) {
+        params.set('min_load_pct', String(options.min_load_pct));
+      }
 
       const response = await fetch(`/api/top?${params}`, {
         method: 'GET',
@@ -178,6 +186,12 @@ export function useTop(): UseTopReturn {
     });
     if (options?.duration) {
       params.set('duration', String(options.duration));
+    }
+    if (options?.min_freq && options.min_freq > 0) {
+      params.set('min_freq', String(options.min_freq));
+    }
+    if (options?.min_load_pct && options.min_load_pct > 0) {
+      params.set('min_load_pct', String(options.min_load_pct));
     }
 
     // Use fetch with manual SSE parsing (same pattern as useAnalyze)

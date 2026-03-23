@@ -25,6 +25,10 @@ interface TopFiltersProps {
   setLimit: (limit: number) => void;
   filterPattern: string;
   setFilterPattern: (pattern: string) => void;
+  minFreq: number;
+  setMinFreq: (value: number) => void;
+  minLoadPct: number;
+  setMinLoadPct: (value: number) => void;
   duration: number;
   setDuration: (duration: number) => void;
   autoSave: boolean;
@@ -81,6 +85,10 @@ export function TopFilters({
   setLimit,
   filterPattern,
   setFilterPattern,
+  minFreq,
+  setMinFreq,
+  minLoadPct,
+  setMinLoadPct,
   duration,
   setDuration,
   autoSave,
@@ -180,6 +188,38 @@ export function TopFilters({
                     options={sortOptions}
                     value={sort}
                     onValueChange={setSort}
+                    disabled={isDisabled}
+                  />
+                </VStack>
+
+                <VStack className="gap-1.5 items-start w-32">
+                  <Text as="label" level="label-small" className="text-content-layout-2">
+                    Min Frequency
+                  </Text>
+                  <BaseInputText
+                    name="min-freq"
+                    type="number"
+                    value={String(minFreq)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setMinFreq(Math.max(0, Number(e.target.value) || 0))
+                    }
+                    placeholder="0"
+                    disabled={isDisabled}
+                  />
+                </VStack>
+
+                <VStack className="gap-1.5 items-start w-32">
+                  <Text as="label" level="label-small" className="text-content-layout-2">
+                    Min Load %
+                  </Text>
+                  <BaseInputText
+                    name="min-load"
+                    type="number"
+                    value={String(minLoadPct)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setMinLoadPct(Math.max(0, Number(e.target.value) || 0))
+                    }
+                    placeholder="0"
                     disabled={isDisabled}
                   />
                 </VStack>
