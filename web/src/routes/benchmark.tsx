@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { BaseInputText } from "@rs/ui-new/base-input-text";
+import { BaseInputSelect } from "@rs/ui-new/base-input-select";
 import { Button } from "@rs/ui-new/button";
 import { Card } from "@rs/ui-new/card";
 import { Icon } from "@rs/ui-new/icon";
@@ -17,7 +19,8 @@ import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
 import { useBenchmark } from "../lib/sse";
 import { hasParameters } from "../components/BenchmarkParameterDialog";
 import { SQLDisplay } from "../components/SQLDisplay";
-import type { BenchmarkMode, QueryBenchmarkStats, BenchmarkQueryInput } from "../lib/api";
+import type { BenchmarkMode, QueryBenchmarkStats, BenchmarkQueryInput, TargetInfo } from "../lib/api";
+import { fetchStatus, fetchSchema } from "../lib/api";
 
 export const Route = createFileRoute("/benchmark")({
   component: BenchmarkPage,
@@ -178,6 +181,12 @@ function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
 }
 
 // Metric card component
+const TABLE_REFERENCE_RE = /\b(?:FROM|JOIN)\s+(\w+)/gi;
+
+function extractReferencedTables(sql: string): string[] {
+  return Array.from(sql.matchAll(TABLE_REFERENCE_RE), (m) => m[1].toLowerCase());
+}
+
 function MetricCard({ label, value, variant = "default" }: { label: string; value: string; variant?: "default" | "positive" | "negative" }) {
   return (
     <Card className="flex-1">
@@ -202,29 +211,110 @@ function MetricCard({ label, value, variant = "default" }: { label: string; valu
 export function BenchmarkPage() {
   const { queries, isLoading: registryLoading } = useQueryRegistry();
   const { target } = useTarget();
-  const passwordLock = useTargetPasswordLock(target);
+  const { data: status } = useQuery({
+    queryKey: ["status"],
+    queryFn: fetchStatus,
+    staleTime: 30000,
+  });
+  const availableTargets = status?.targets ?? [];
+  const [destinationTarget, setDestinationTarget] = useState<string | null>(target);
+  const userOverrodeDestination = useRef(false);
+  useEffect(() => {
+    if (userOverrodeDestination.current) return;
+    if (target) {
+      setDestinationTarget(target);
+    } else if (availableTargets.length > 0) {
+      setDestinationTarget(availableTargets[0].name);
+    }
+  }, [target, availableTargets]);
+  const handleDestinationChange = useCallback((value: string) => {
+    userOverrodeDestination.current = true;
+    setDestinationTarget(value || null);
+  }, []);
+  const destinationLock = useTargetPasswordLock(destinationTarget);
   const { start, stop, state, progress, error, reset } = useBenchmark();
 
   const [step, setStep] = useState<WizardStep>("configure");
   const [selectedQueries, setSelectedQueries] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<string>(target || "all");
   const [mode, setMode] = useState<BenchmarkMode>("interval");
   const [intervalMs, setIntervalMs] = useState(100);
   const [concurrency, setConcurrency] = useState(1);
   const [durationSeconds, setDurationSeconds] = useState(30);
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
 
-  const filteredQueries = queries.filter(
-    (q) =>
+  const uniqueQueryTargets = useMemo(() => {
+    const set = new Set<string>();
+    for (const entry of queries) {
+      if (entry.target) {
+        set.add(entry.target);
+      }
+    }
+    return Array.from(set).sort();
+  }, [queries]);
+  const sourceOptions = useMemo(
+    () => [
+      { value: "all", label: "All targets" },
+      ...uniqueQueryTargets.map((name) => ({ value: name, label: name })),
+    ],
+    [uniqueQueryTargets],
+  );
+  const normalizedSourceFilter = sourceOptions.some((option) => option.value === sourceFilter)
+    ? sourceFilter
+    : "all";
+  const destinationOptions = useMemo(
+    () => availableTargets.map((item: TargetInfo) => ({ value: item.name, label: item.name })),
+    [availableTargets],
+  );
+
+  const queryById = useMemo(() => {
+    const map = new Map<string, (typeof queries)[number]>();
+    for (const q of queries) {
+      map.set(q.tag || q.hash, q);
+    }
+    return map;
+  }, [queries]);
+
+  // Fetch destination target schema to detect table mismatches
+  const { data: destSchema } = useQuery({
+    queryKey: ["schema", destinationTarget],
+    queryFn: () => fetchSchema(destinationTarget!),
+    enabled: !!destinationTarget,
+    staleTime: 60_000,
+  });
+
+  const missingTables = useMemo(() => {
+    if (!destSchema?.tables || selectedQueries.length === 0) return [];
+    const destTableNames = new Set(
+      Object.keys(destSchema.tables).map((t) => t.toLowerCase()),
+    );
+    const referencedTables = new Set<string>();
+    for (const id of selectedQueries) {
+      const q = queryById.get(id);
+      if (!q) continue;
+      for (const name of extractReferencedTables(q.sql)) {
+        referencedTables.add(name);
+      }
+    }
+    return Array.from(referencedTables).filter((t) => !destTableNames.has(t));
+  }, [destSchema, selectedQueries, queryById]);
+
+  const filteredQueries = queries.filter((q) => {
+    const matchesSearch =
       !searchTerm.trim() ||
       q.tag?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      q.sql.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      q.sql.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSource =
+      normalizedSourceFilter === "all" ||
+      (q.target && q.target === normalizedSourceFilter);
+    return matchesSearch && matchesSource;
+  });
 
   const selectedQueryObjects = useMemo(() => {
     return selectedQueries
       .map((id) => {
-        const q = queries.find((query) => (query.tag || query.hash) === id);
+        const q = queryById.get(id);
         if (!q) return null;
         return {
           ...q,
@@ -234,7 +324,7 @@ export function BenchmarkPage() {
         };
       })
       .filter((q): q is NonNullable<typeof q> => q !== null);
-  }, [selectedQueries, queries]);
+  }, [selectedQueries, queryById]);
 
   const hasQueriesWithParams = useMemo(() => {
     return selectedQueryObjects.some((q) => q.parameters.length > 0);
@@ -268,16 +358,12 @@ export function BenchmarkPage() {
     });
   }, [selectedQueryObjects]);
 
+  const runTarget = destinationLock.targetName;
   const canStart =
-    !passwordLock.isLocked &&
+    !!runTarget &&
+    !destinationLock.isLocked &&
     selectedQueries.length > 0 &&
     (!hasQueriesWithParams || allParamsFilled);
-
-  useEffect(() => {
-    if (step === "running" && (state === "complete" || state === "error")) {
-      // Stay on running step to show results
-    }
-  }, [state, step]);
 
   const toggleQuery = (identifier: string) => {
     setSelectedQueries((prev) =>
@@ -291,8 +377,8 @@ export function BenchmarkPage() {
   };
 
   const handleStart = () => {
-    if (passwordLock.isLocked) return;
-    if (!canStart) return;
+    if (destinationLock.isLocked) return;
+    if (!canStart || !runTarget) return;
 
     const queryInputs: BenchmarkQueryInput[] = selectedQueryObjects.map((q) => {
       if (q.parameters.length > 0) {
@@ -310,7 +396,7 @@ export function BenchmarkPage() {
     setStep("running");
     start({
       queries: queryInputs,
-      target: target || undefined,
+      target: runTarget,
       mode,
       interval_ms: mode === "interval" ? intervalMs : undefined,
       concurrency: mode === "concurrency" ? concurrency : undefined,
@@ -321,7 +407,7 @@ export function BenchmarkPage() {
   const handleStop = () => stop();
   const handleBack = () => { reset(); setStep("configure"); };
   const handleRunAgain = () => {
-    if (passwordLock.isLocked) return;
+    if (destinationLock.isLocked) return;
     handleStart();
   };
 
@@ -361,16 +447,16 @@ export function BenchmarkPage() {
         </m.div>
 
         <AnimatePresence>
-          {passwordLock.isLocked && (
+          {destinationLock.isLocked && (
             <m.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
             >
               <TargetLockNotice
-                message={passwordLock.message}
-                requirements={passwordLock.missingTargetRequirements}
-                keyringAvailable={passwordLock.keyringAvailable}
+                message={destinationLock.message}
+                requirements={destinationLock.missingTargetRequirements}
+                keyringAvailable={destinationLock.keyringAvailable}
               />
             </m.div>
           )}
@@ -467,17 +553,32 @@ export function BenchmarkPage() {
                     />
                   </VStack>
 
-                  {/* Target */}
+                  {/* Destination Target */}
                   <VStack className="gap-2 items-start">
                     <Text level="label-small" className="text-content-layout-2">
-                      Target Database
+                      Run benchmark against
                     </Text>
-                    <HStack className="gap-2 items-center bg-surface-layout-2 px-3 py-2 rounded-lg w-full">
-                      <Icon name="database" label="Target" className="w-4 h-4 text-content-layout-3" />
-                      <Text level="mono-small" className="text-content-layout-2">
-                        {target || "(default)"}
+                    {destinationOptions.length > 0 ? (
+                      <BaseInputSelect
+                        name="destination-target"
+                        options={destinationOptions}
+                        value={destinationTarget ?? ""}
+                        onValueChange={handleDestinationChange}
+                        placeholder="Select target"
+                      />
+                    ) : (
+                      <Text level="body-small" className="text-content-layout-3 py-2">
+                        No targets configured
                       </Text>
-                    </HStack>
+                    )}
+                    <Text level="caption" className="text-content-layout-3">
+                      Queries will execute against this database.
+                    </Text>
+                    {destinationLock.isLocked && (
+                      <Text level="caption" className="text-content-negative-soft">
+                        {destinationLock.message}
+                      </Text>
+                    )}
                   </VStack>
                 </div>
               </div>
@@ -507,16 +608,29 @@ export function BenchmarkPage() {
                       label={`${selectedQueries.length} selected`}
                     />
                   </HStack>
-                  <div className="w-64">
-                    <BaseInputText
-                      name="search"
-                      placeholder="Filter queries..."
-                      icon="search"
-                      iconPosition="left"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </div>
+                  <HStack className="gap-4 items-end">
+                    <VStack className="gap-1 items-start">
+                      <Text level="label-small" className="text-content-layout-2">
+                        Captured From
+                      </Text>
+                      <BaseInputSelect
+                        name="source-filter"
+                        options={sourceOptions}
+                        value={normalizedSourceFilter}
+                        onValueChange={setSourceFilter}
+                      />
+                    </VStack>
+                    <div className="w-64">
+                      <BaseInputText
+                        name="search"
+                        placeholder="Filter queries..."
+                        icon="search"
+                        iconPosition="left"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                      />
+                    </div>
+                  </HStack>
                 </HStack>
               </div>
 
@@ -589,6 +703,9 @@ export function BenchmarkPage() {
                               <Text level="mono-small" className="text-content-layout-3">
                                 {query.hash.slice(0, 8)}
                               </Text>
+                              {query.target && (
+                                <Tag size="small" variant="informative" modifier="ghost" label={query.target} />
+                              )}
                               {queryHasParams && (
                                 <Tag size="small" variant="warning" modifier="ghost" label="Has params" />
                               )}
@@ -687,6 +804,25 @@ export function BenchmarkPage() {
           )}
         </AnimatePresence>
 
+        {/* Table mismatch warning */}
+        <Show when={missingTables.length > 0}>
+          <Card className="w-full border-border-warning-soft">
+            <Card.Content className="p-4">
+              <HStack className="gap-3 items-start">
+                <Icon name="alert" label="Warning" className="w-5 h-5 text-content-warning-soft mt-0.5" />
+                <VStack className="gap-1">
+                  <Text level="label-small" className="text-content-warning-soft">
+                    Table mismatch — selected queries reference tables not found in {destinationTarget}
+                  </Text>
+                  <Text level="caption" className="text-content-layout-3">
+                    Missing: {missingTables.join(", ")}. The benchmark may fail with SQL errors.
+                  </Text>
+                </VStack>
+              </HStack>
+            </Card.Content>
+          </Card>
+        </Show>
+
         {/* Start Button */}
         <m.div
           initial={{ opacity: 0 }}
@@ -765,16 +901,16 @@ export function BenchmarkPage() {
       </m.div>
 
       <AnimatePresence>
-        {passwordLock.isLocked && (
+        {destinationLock.isLocked && (
           <m.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -12 }}
           >
             <TargetLockNotice
-              message={passwordLock.message}
-              requirements={passwordLock.missingTargetRequirements}
-              keyringAvailable={passwordLock.keyringAvailable}
+              message={destinationLock.message}
+              requirements={destinationLock.missingTargetRequirements}
+              keyringAvailable={destinationLock.keyringAvailable}
             />
           </m.div>
         )}
@@ -947,7 +1083,7 @@ export function BenchmarkPage() {
               icon="play"
               iconPosition="left"
               onClick={handleRunAgain}
-              disabled={passwordLock.isLocked}
+              disabled={destinationLock.isLocked}
             />
           </HStack>
         </m.div>
