@@ -19,21 +19,7 @@ export const Route = createFileRoute("/query-registry")({
   component: QueryRegistryPage,
 });
 
-function formatTimestamp(isoString: string): string {
-  if (!isoString) return "";
-  const date = new Date(isoString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
-}
+import { formatTimestamp, formatDuration } from "../lib/formatters";
 
 function formatSource(source: string): string {
   switch (source) {
@@ -69,7 +55,19 @@ function getSourceVariant(source: string): "positive" | "warning" | "informative
 
 function QueryRegistryPage() {
   const navigate = useNavigate();
-  const { queries, isLoading, removeQuery, updateTag, addMutation: addQueryMutation } = useQueryRegistry();
+  const {
+    queries,
+    isLoading,
+    isFetching,
+    total,
+    offset,
+    nextPage,
+    prevPage,
+    resetPagination,
+    removeQuery,
+    updateTag,
+    addMutation: addQueryMutation,
+  } = useQueryRegistry(150);
   const [searchTerm, setSearchTerm] = useState("");
   const [editingHash, setEditingHash] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState("");
@@ -114,6 +112,11 @@ function QueryRegistryPage() {
       },
     });
   };
+
+  const pageStart = total === 0 ? 0 : offset + 1;
+  const pageEnd = offset + queries.length;
+  const hasPrevPage = offset > 0;
+  const hasNextPage = pageEnd < total;
 
   return (
     <div className="space-y-6 w-full">
@@ -230,19 +233,50 @@ function QueryRegistryPage() {
                     size="small"
                     variant="informative"
                     modifier="ghost"
-                    label={`${queries.length} total`}
+                    label={
+                      total > 0
+                        ? `Showing ${pageStart}-${Math.min(pageEnd, total)} of ${total}`
+                        : `${queries.length} total`
+                    }
                   />
                 </HStack>
-                <div className="w-64">
-                  <BaseInputText
-                    name="search"
-                    placeholder="Search queries..."
-                    icon="search"
-                    iconPosition="left"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
+                <HStack className="gap-3 items-center">
+                  <div className="w-64">
+                    <BaseInputText
+                      name="search"
+                      placeholder="Search queries..."
+                      icon="search"
+                      iconPosition="left"
+                      value={searchTerm}
+                      onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        resetPagination();
+                      }}
+                    />
+                  </div>
+                  <HStack className="gap-2">
+                    <Button
+                      variant="primary"
+                      modifier="ghost"
+                      size="small"
+                      label="Previous"
+                      icon="arrow-left"
+                      iconPosition="left"
+                      disabled={!hasPrevPage || isFetching}
+                      onClick={() => prevPage()}
+                    />
+                    <Button
+                      variant="primary"
+                      modifier="ghost"
+                      size="small"
+                      label="Next"
+                      icon="arrow-right"
+                      iconPosition="right"
+                      disabled={!hasNextPage || isFetching}
+                      onClick={() => nextPage()}
+                    />
+                  </HStack>
+                </HStack>
               </HStack>
             </div>
 
@@ -415,15 +449,49 @@ function QueryRegistryPage() {
                                       </Text>
                                     </HStack>
                                   )}
-                                  <div
-                                    className="text-left bg-surface-layout-2 px-3 py-2 rounded-lg max-w-md"
-                                    title={`${entry.sql}\n\nUse the Analyze action to run this query.`}
-                                  >
+                                  <div className="text-left bg-surface-layout-2 px-3 py-2 rounded-lg max-h-40 overflow-auto w-full">
                                     <SQLDisplay
-                                      sql={entry.sql.length > 60 ? `${entry.sql.slice(0, 60)}...` : entry.sql}
-                                      wrap={false}
+                                      sql={entry.sql}
+                                      wrap
+                                      showCopy
                                     />
                                   </div>
+                                  <HStack className="gap-2 flex-wrap items-center w-full">
+                                    <Tag
+                                      size="small"
+                                      variant="informative"
+                                      modifier="ghost"
+                                      label={`Runs: ${entry.frequency}`}
+                                    />
+                                    <Tag
+                                      size="small"
+                                      variant="warning"
+                                      modifier="ghost"
+                                      label={`Avg ${formatDuration(entry.avg_duration_ms)}`}
+                                    />
+                                    <Tag
+                                      size="small"
+                                      variant="warning"
+                                      modifier="ghost"
+                                      label={`Max ${formatDuration(entry.max_duration_ms)}`}
+                                    />
+                                    <Show when={(entry.observation_count ?? 0) > 0}>
+                                      <Tag
+                                        size="small"
+                                        variant="positive"
+                                        modifier="ghost"
+                                        label={`${entry.observation_count} obs`}
+                                      />
+                                    </Show>
+                                    <Show when={entry.most_recent_params && Object.keys(entry.most_recent_params).length > 0}>
+                                      <Tag
+                                        size="small"
+                                        variant="primary"
+                                        modifier="ghost"
+                                        label="Stored params"
+                                      />
+                                    </Show>
+                                  </HStack>
                                 </VStack>
                               </td>
                               <td className="px-4 py-3 align-top">
@@ -450,12 +518,19 @@ function QueryRegistryPage() {
                                 </Show>
                               </td>
                               <td className="px-4 py-3 align-top">
-                                <HStack className="gap-1.5 items-center">
-                                  <Icon name="observe" label="Time" className="w-3 h-3 text-content-layout-3" />
-                                  <Text level="caption" className="text-content-layout-3 whitespace-nowrap">
-                                    {formatTimestamp(entry.last_analyzed)}
-                                  </Text>
-                                </HStack>
+                                <VStack className="gap-1 items-start">
+                                  <HStack className="gap-1.5 items-center">
+                                    <Icon name="observe" label="Time" className="w-3 h-3 text-content-layout-3" />
+                                    <Text level="caption" className="text-content-layout-3 whitespace-nowrap">
+                                      {formatTimestamp(entry.last_analyzed)}
+                                    </Text>
+                                  </HStack>
+                                  <Show when={entry.first_analyzed && entry.first_analyzed !== entry.last_analyzed}>
+                                    <Text level="caption" className="text-content-layout-3 whitespace-nowrap">
+                                      First seen {formatTimestamp(entry.first_analyzed || "")}
+                                    </Text>
+                                  </Show>
+                                </VStack>
                               </td>
                               <td className="px-4 py-3 align-top">
                                 <HStack className="gap-1 justify-end">

@@ -1,17 +1,28 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useCallback, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { fetchQueryRegistry, addQueryToRegistry, removeQueryFromRegistry, updateQueryTag, type QueryRegistryEntry } from './api';
 
 export type { QueryRegistryEntry };
 
-export function useQueryRegistry() {
+export function useQueryRegistry(initialLimit = 100) {
   const queryClient = useQueryClient();
+  const [limit, setLimit] = useState(initialLimit);
+  const [offset, setOffset] = useState(0);
 
-  const { data: queries = [], isLoading } = useQuery({
-    queryKey: ['queryRegistry', 50],
-    queryFn: () => fetchQueryRegistry(50),
-    select: (data) => data.queries,
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['queryRegistry', limit, offset],
+    queryFn: () => fetchQueryRegistry(limit, offset),
     staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
   });
+  const queries = data?.queries ?? [];
+  const total = data?.total ?? 0;
+
+  useEffect(() => {
+    if (total > 0 && offset >= total) {
+      setOffset(Math.max(total - limit, 0));
+    }
+  }, [total, offset, limit]);
 
   const addMutation = useMutation({
     mutationFn: ({ sql, target }: { sql: string; target?: string }) =>
@@ -64,9 +75,30 @@ export function useQueryRegistry() {
     updateTagMutation.mutate({ hash, tag });
   };
 
+  const nextPage = useCallback(() => {
+    setOffset((prev) => prev + limit);
+  }, [limit]);
+
+  const prevPage = useCallback(() => {
+    setOffset((prev) => Math.max(prev - limit, 0));
+  }, [limit]);
+
+  const resetPagination = useCallback(() => {
+    setOffset(0);
+  }, []);
+
   return {
     queries,
     isLoading,
+    isFetching,
+    total,
+    limit,
+    offset,
+    setLimit,
+    setOffset,
+    nextPage,
+    prevPage,
+    resetPagination,
     addQuery,
     addMutation,
     removeQuery,

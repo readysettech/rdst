@@ -48,6 +48,15 @@ function setup(lockActive: boolean) {
     addMutation: { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, isError: false, isIdle: true, isSuccess: false, data: undefined, error: null, reset: vi.fn(), status: 'idle', variables: undefined, failureCount: 0, failureReason: null, submittedAt: 0, context: undefined, isPaused: false } as any,
     removeQuery: vi.fn(),
     updateTag: vi.fn(),
+    isFetching: false,
+    total: 1,
+    limit: 50,
+    offset: 0,
+    setLimit: vi.fn(),
+    setOffset: vi.fn(),
+    nextPage: vi.fn(),
+    prevPage: vi.fn(),
+    resetPagination: vi.fn(),
   });
 
   vi.mocked(useBenchmark).mockReturnValue({

@@ -23,10 +23,18 @@ class QueryRegistryEntry(BaseModel):
     frequency: int
     source: str
     most_recent_params: dict = {}
+    first_analyzed: Optional[str] = None
+    last_target: Optional[str] = None
+    max_duration_ms: float = 0.0
+    avg_duration_ms: float = 0.0
+    observation_count: int = 0
 
 
 class QueryRegistryResponse(BaseModel):
     queries: list[QueryRegistryEntry]
+    total: int
+    limit: Optional[int] = None
+    offset: int = 0
     error: Optional[str] = None
 
 
@@ -47,7 +55,9 @@ class RemoveQueryResponse(BaseModel):
 
 
 @router.get("/query-registry")
-async def get_query_registry(limit: int = 50) -> QueryRegistryResponse:
+async def get_query_registry(
+    limit: Optional[int] = 200, offset: int = 0
+) -> QueryRegistryResponse:
     """Get queries from the shared query registry."""
     try:
         from ...query_registry import QueryRegistry
@@ -55,7 +65,20 @@ async def get_query_registry(limit: int = 50) -> QueryRegistryResponse:
         registry = QueryRegistry()
         registry.load()
 
-        queries = registry.list_queries(limit=limit)
+        all_queries = registry.list_queries(limit=None)
+        total = len(all_queries)
+
+        if offset < 0:
+            offset = 0
+        if limit is not None and limit < 0:
+            limit = None
+
+        if offset > 0:
+            all_queries = all_queries[offset:]
+        if limit:
+            queries = all_queries[:limit]
+        else:
+            queries = all_queries
 
         return QueryRegistryResponse(
             queries=[
@@ -68,13 +91,23 @@ async def get_query_registry(limit: int = 50) -> QueryRegistryResponse:
                     frequency=q.frequency,
                     source=q.source,
                     most_recent_params=q.most_recent_params,
+                    first_analyzed=q.first_analyzed,
+                    last_target=q.last_target,
+                    max_duration_ms=q.max_duration_ms,
+                    avg_duration_ms=q.avg_duration_ms,
+                    observation_count=q.observation_count,
                 )
                 for q in queries
-            ]
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
         )
 
     except Exception as e:
-        return QueryRegistryResponse(queries=[], error=str(e))
+        return QueryRegistryResponse(
+            queries=[], total=0, limit=limit, offset=offset, error=str(e)
+        )
 
 
 @router.post("/query-registry")

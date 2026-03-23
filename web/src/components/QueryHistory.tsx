@@ -8,26 +8,11 @@ import { Card } from '@rs/ui-new/card';
 import { m } from '@rs/ui-new/motion';
 import { SQLDisplay } from './SQLDisplay';
 import type { QueryRegistryEntry } from '../lib/useQueryRegistry';
+import { formatTimestamp } from '../lib/formatters';
 
 interface QueryHistoryProps {
   queries: QueryRegistryEntry[];
   onSelect: (sql: string) => void;
-}
-
-function formatTimestamp(isoString: string): string {
-  if (!isoString) return '';
-  const date = new Date(isoString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
 }
 
 function truncateQuery(query: string, maxLength = 80): string {

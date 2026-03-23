@@ -333,15 +333,30 @@ export interface QueryRegistryEntry {
   frequency: number;
   source: string;
   most_recent_params?: Record<string, string | number>;
+  first_analyzed?: string;
+  last_target?: string;
+  max_duration_ms?: number;
+  avg_duration_ms?: number;
+  observation_count?: number;
 }
 
 export interface QueryRegistryResponse {
   queries: QueryRegistryEntry[];
+  total: number;
+  limit?: number | null;
+  offset: number;
   error?: string | null;
 }
 
-export async function fetchQueryRegistry(limit = 50): Promise<QueryRegistryResponse> {
-  const response = await fetch(`/api/query-registry?limit=${limit}`);
+export async function fetchQueryRegistry(limit?: number, offset = 0): Promise<QueryRegistryResponse> {
+  const params = new URLSearchParams();
+  if (limit !== undefined) {
+    params.set("limit", String(limit));
+  }
+  if (offset > 0) {
+    params.set("offset", String(offset));
+  }
+  const response = await fetch(`/api/query-registry?${params.toString()}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch registry: ${response.status}`);
   }

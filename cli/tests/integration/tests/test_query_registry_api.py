@@ -35,7 +35,11 @@ async def test_query_registry_post_strips_comments_and_persists_canonical_sql(
         get_response = await client.get("/api/query-registry?limit=10")
         assert get_response.status_code == 200
 
-    queries = get_response.json()["queries"]
+    payload = get_response.json()
+    queries = payload["queries"]
     assert len(queries) == 1
+    assert payload["total"] == 1
+    assert payload["limit"] == 10
+    assert payload["offset"] == 0
     assert queries[0]["hash"] == post_payload["hash"]
     assert queries[0]["sql"] == "SELECT * FROM users WHERE id = :p1"
