@@ -3,7 +3,7 @@
  */
 
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Text } from '@rs/ui-new/text';
 import { Show } from '@rs/ui-new/show';
 import { TargetLockNotice } from '../components';
@@ -27,7 +27,7 @@ export const Route = createFileRoute('/top')({
 
 function TopPage() {
   const navigate = useNavigate();
-  const { addMutation: addQueryMutation } = useQueryRegistry();
+  const { queries: registryQueries, addMutation: addQueryMutation } = useQueryRegistry();
   const { target } = useTarget();
   const passwordLock = useTargetPasswordLock(target);
 
@@ -42,6 +42,18 @@ function TopPage() {
 
   // Parameter dialog state
   const [paramDialogQuery, setParamDialogQuery] = useState<string | null>(null);
+  const [paramDialogStoredParams, setParamDialogStoredParams] = useState<Record<string, string | number> | undefined>(undefined);
+
+  // Build a lookup from query hash to registry entry for stored params
+  const registryParamsByHash = useMemo(() => {
+    const map = new Map<string, Record<string, string | number>>();
+    for (const entry of registryQueries) {
+      if (entry.most_recent_params && Object.keys(entry.most_recent_params).length > 0) {
+        map.set(entry.hash, entry.most_recent_params);
+      }
+    }
+    return map;
+  }, [registryQueries]);
 
   // Hook state
   const {
@@ -99,9 +111,11 @@ function TopPage() {
   const handleAnalyze = useCallback(
     (query: TopQuery) => {
       if (passwordLock.isLocked) return;
+      const storedParams = registryParamsByHash.get(query.query_hash);
       // Check if query has parameters that need substitution
       if (hasParameters(query.query_text)) {
         setParamDialogQuery(query.query_text);
+        setParamDialogStoredParams(storedParams);
         return;
       }
 
@@ -110,11 +124,17 @@ function TopPage() {
         search: {
           query: query.query_text,
           target: target || undefined,
+          params: storedParams ? JSON.stringify(storedParams) : undefined,
         },
       });
     },
-    [passwordLock.isLocked, navigate, target]
+    [passwordLock.isLocked, navigate, target, registryParamsByHash]
   );
+
+  const handleParamDialogClose = useCallback(() => {
+    setParamDialogQuery(null);
+    setParamDialogStoredParams(undefined);
+  }, []);
 
   const handleParamSubmit = useCallback(
     (substitutedQuery: string) => {
@@ -227,9 +247,10 @@ function TopPage() {
 
       <ParameterDialog
         isOpen={paramDialogQuery !== null}
-        onClose={() => setParamDialogQuery(null)}
+        onClose={handleParamDialogClose}
         onSubmit={handleParamSubmit}
         query={paramDialogQuery || ''}
+        initialValues={paramDialogStoredParams}
       />
     </div>
   );

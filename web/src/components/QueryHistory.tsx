@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react';
 import { Button } from '@rs/ui-new/button';
 import { Show } from '@rs/ui-new/show';
 import { Tag } from '@rs/ui-new/tag';
@@ -5,7 +6,9 @@ import { Text } from '@rs/ui-new/text';
 import { Icon } from '@rs/ui-new/icon';
 import { HStack, VStack } from '@rs/ui-new/stack';
 import { Card } from '@rs/ui-new/card';
+import { BaseInputText } from '@rs/ui-new/base-input-text';
 import { m } from '@rs/ui-new/motion';
+import { Link } from '@tanstack/react-router';
 import { SQLDisplay } from './SQLDisplay';
 import type { QueryRegistryEntry } from '../lib/useQueryRegistry';
 import { formatTimestamp } from '../lib/formatters';
@@ -15,16 +18,27 @@ interface QueryHistoryProps {
   onSelect: (sql: string) => void;
 }
 
-function truncateQuery(query: string, maxLength = 80): string {
-  const singleLine = query.replace(/\s+/g, ' ').trim();
-  if (singleLine.length <= maxLength) return singleLine;
-  return singleLine.slice(0, maxLength) + '...';
-}
+const PAGE_SIZE = 10;
 
 export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
-  const displayQueries = queries.slice(0, 5);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  if (displayQueries.length === 0) {
+  const filteredQueries = useMemo(() => {
+    if (!searchTerm.trim()) return queries;
+    const term = searchTerm.toLowerCase();
+    return queries.filter(
+      (q) =>
+        q.sql.toLowerCase().includes(term) ||
+        q.tag?.toLowerCase().includes(term) ||
+        q.target?.toLowerCase().includes(term)
+    );
+  }, [queries, searchTerm]);
+
+  const displayQueries = filteredQueries.slice(0, visibleCount);
+  const hasMore = filteredQueries.length > visibleCount;
+
+  if (queries.length === 0) {
     return (
       <Card className="w-full">
         <Card.Content className="py-12">
@@ -55,15 +69,31 @@ export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
           <Text level="label-small" className="text-content-layout-2">
             Recent Queries
           </Text>
-        </HStack>
-        <Show when={queries.length > 5}>
           <Tag
+            size="small"
             variant="informative"
             modifier="ghost"
-            size="small"
-            label={`Showing 5 of ${queries.length}`}
+            label={searchTerm ? `${filteredQueries.length} of ${queries.length}` : `${queries.length}`}
           />
-        </Show>
+        </HStack>
+        <HStack className="gap-3 items-center">
+          <div className="w-52">
+            <BaseInputText
+              name="history-search"
+              placeholder="Search queries..."
+              icon="search"
+              iconPosition="left"
+              value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setVisibleCount(PAGE_SIZE); }}
+            />
+          </div>
+          <Link
+            to="/query-registry"
+            className="text-sm text-content-primary-soft hover:underline whitespace-nowrap"
+          >
+            View all
+          </Link>
+        </HStack>
       </HStack>
 
       {/* Query list */}
@@ -85,11 +115,12 @@ export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
                   {/* Query content */}
                   <VStack className="gap-2 flex-1 min-w-0 items-start">
                     {/* SQL Preview */}
-                    <div className="w-full overflow-hidden rounded-lg bg-surface-layout-2 px-3 py-2">
+                    <div className="w-full rounded-lg bg-surface-layout-2 px-3 py-2 max-h-32 overflow-auto">
                       <SQLDisplay
-                        sql={truncateQuery(entry.sql)}
+                        sql={entry.sql}
                         className="text-sm"
-                        wrap={false}
+                        wrap
+                        showCopy
                       />
                     </div>
 
@@ -154,6 +185,26 @@ export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
           </m.div>
         ))}
       </div>
+
+      <Show when={hasMore}>
+        <div className="flex justify-center pt-1">
+          <Button
+            variant="primary"
+            modifier="ghost"
+            size="small"
+            label={`Show more (${filteredQueries.length - visibleCount} remaining)`}
+            onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+          />
+        </div>
+      </Show>
+
+      <Show when={searchTerm.trim().length > 0 && filteredQueries.length === 0}>
+        <div className="text-center py-6">
+          <Text level="body-small" className="text-content-layout-3">
+            No queries match "{searchTerm}"
+          </Text>
+        </div>
+      </Show>
     </div>
   );
 }
