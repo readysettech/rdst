@@ -522,6 +522,21 @@ export function TestedOptimizationsSection({
   const rewriteResults = testing.rewrite_results || [];
   const originalTime =
     testing.original_performance?.execution_time_ms || 0;
+  const baselineRowsReturned = testing.original_performance?.rows_returned;
+
+  const isRowCountMismatch = (baseline: unknown, rewrite: unknown): boolean =>
+    typeof baseline === "number" &&
+    typeof rewrite === "number" &&
+    baseline >= 0 &&
+    rewrite >= 0 &&
+    baseline !== rewrite;
+
+  const bestRewriteRowsReturned =
+    testing.best_rewrite?.performance?.rows_returned;
+  const bestRewriteMismatch = isRowCountMismatch(
+    baselineRowsReturned,
+    bestRewriteRowsReturned,
+  );
 
   if (rewriteResults.length === 0) {
     return (
@@ -559,6 +574,24 @@ export function TestedOptimizationsSection({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: 0.2 }}
     >
+      {bestRewriteMismatch && (
+        <div className="rounded-xl border border-border-negative-soft bg-surface-negative-soft/40 p-4">
+          <HStack className="gap-3 items-start">
+            <div className="w-8 h-8 rounded-lg bg-surface-negative-soft flex items-center justify-center">
+              <Icon name="alert" label="Mismatch" className="w-4 h-4 text-content-negative-soft" />
+            </div>
+            <VStack className="gap-1 items-start">
+              <Text level="label-medium" className="text-content-negative-soft">
+                Row count mismatch detected
+              </Text>
+              <Text level="body-small" className="text-content-layout-2">
+                Best rewrite returns {bestRewriteRowsReturned?.toLocaleString() ?? "?"} rows, but the original returned {baselineRowsReturned?.toLocaleString() ?? "?"}.
+                Review carefully before adopting this rewrite.
+              </Text>
+            </VStack>
+          </HStack>
+        </div>
+      )}
       <SectionHeader
         icon="test-tube"
         title="Tested Optimizations"
@@ -570,6 +603,11 @@ export function TestedOptimizationsSection({
             rewrite.improvement?.overall?.improvement_pct || 0;
           const rewriteTime =
             rewrite.performance?.execution_time_ms || 0;
+          const rewriteRowsReturned = rewrite.performance?.rows_returned;
+          const rowCountMismatch = isRowCountMismatch(
+            baselineRowsReturned,
+            rewriteRowsReturned,
+          );
 
           let status: {
             icon: ValidIconName;
@@ -659,6 +697,14 @@ export function TestedOptimizationsSection({
                       >
                         vs {originalTime.toFixed(2)}ms original
                       </Text>
+                    )}
+                    {rowCountMismatch && (
+                      <Tag
+                        size="small"
+                        variant="negative"
+                        modifier="ghost"
+                        label={`Returns ${rewriteRowsReturned?.toLocaleString() ?? "?"} rows (${baselineRowsReturned?.toLocaleString() ?? "?"} original)`}
+                      />
                     )}
                   </VStack>
                 </HStack>

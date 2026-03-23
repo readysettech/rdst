@@ -79,6 +79,9 @@ export interface TestedRewrite {
   sql: string;
   performance: {
     execution_time_ms: number;
+    rows_returned?: number;
+    rows_examined?: number;
+    cost_estimate?: number;
   };
   improvement: {
     overall: {
@@ -96,6 +99,9 @@ export interface RewriteTesting {
   message?: string;
   original_performance?: {
     execution_time_ms: number;
+    rows_returned?: number;
+    rows_examined?: number;
+    cost_estimate?: number;
   };
   rewrite_results?: TestedRewrite[];
   best_rewrite?: TestedRewrite;

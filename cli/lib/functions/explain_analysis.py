@@ -5,6 +5,7 @@ Executes EXPLAIN ANALYZE queries against target databases to gather
 actual execution plans and performance metrics for analysis.
 """
 
+import json
 import os
 import time
 import sys
@@ -34,6 +35,24 @@ except ImportError:
 
 # Import shared cancellation utilities
 from lib.db_connection import cancel_postgres_by_pid, cancel_mysql_by_thread_id
+
+
+def _normalize_plan_data(raw: Any) -> Dict[str, Any]:
+    """Ensure plan data is a parsed dict, handling string JSON from psycopg2."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list) and len(raw) > 0 and isinstance(raw[0], dict):
+        return raw[0]
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                return parsed[0]
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return {}
 
 
 def _resolve_explain_password(target_config: Dict[str, Any]) -> str:
@@ -252,7 +271,8 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
                     explain_plan_time_ms = (end_time - start_time) * 1000
 
                     if result and result[0]:
-                        explain_plan_data = result[0][0] if isinstance(result[0], list) else result[0]
+                        raw = result[0][0] if isinstance(result[0], list) else result[0]
+                        explain_plan_data = _normalize_plan_data(raw)
         except Exception as explain_error:
             return {
                 "success": False,
@@ -283,7 +303,8 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
                     with query_lock:
                         query_result['completed'] = True
                         if result and result[0]:
-                            query_result['data'] = result[0][0] if isinstance(result[0], list) else result[0]
+                            raw = result[0][0] if isinstance(result[0], list) else result[0]
+                            query_result['data'] = _normalize_plan_data(raw)
             except Exception as e:
                 with query_lock:
                     query_result['completed'] = True
@@ -851,9 +872,16 @@ def _mysql_connection(conn_params):
 
 # PostgreSQL plan analysis helpers
 def _extract_postgres_rows_examined(plan_data: Dict[str, Any]) -> int:
-    """Extract total rows examined from PostgreSQL EXPLAIN plan."""
+    """Extract total rows examined from PostgreSQL EXPLAIN plan.
+
+    Uses 'Actual Rows' from EXPLAIN ANALYZE output, falling back to
+    'Plan Rows' (estimated) when ANALYZE data isn't available.
+    """
     def extract_from_node(node):
-        total = node.get('Actual Rows', 0)
+        rows = node.get('Actual Rows')
+        if rows is None:
+            rows = node.get('Plan Rows', 0)
+        total = rows
         for child in node.get('Plans', []):
             total += extract_from_node(child)
         return total
@@ -864,16 +892,27 @@ def _extract_postgres_rows_examined(plan_data: Dict[str, Any]) -> int:
 
 
 def _extract_postgres_rows_returned(plan_data: Dict[str, Any]) -> int:
-    """Extract rows returned from PostgreSQL EXPLAIN plan."""
+    """Extract rows returned from PostgreSQL EXPLAIN plan.
+
+    Uses 'Actual Rows' from the top-level Plan node, falling back to
+    'Plan Rows' (estimated) when ANALYZE data isn't available.
+    """
     if isinstance(plan_data, dict) and 'Plan' in plan_data:
-        return plan_data['Plan'].get('Actual Rows', 0)
+        plan = plan_data['Plan']
+        rows = plan.get('Actual Rows')
+        if rows is None:
+            rows = plan.get('Plan Rows', 0)
+        return rows
     return 0
 
 
 def _extract_postgres_cost(plan_data: Dict[str, Any]) -> float:
     """Extract total cost from PostgreSQL EXPLAIN plan."""
     if isinstance(plan_data, dict) and 'Plan' in plan_data:
-        return plan_data['Plan'].get('Total Cost', 0.0)
+        try:
+            return float(plan_data['Plan'].get('Total Cost', 0.0))
+        except (TypeError, ValueError):
+            return 0.0
     return 0.0
 
 

@@ -289,6 +289,77 @@ class TestExplainAnalysisHelpers:
         assert explain_analysis._extract_postgres_cost({}) == 0.0
         assert explain_analysis._extract_postgres_actual_time({}) == 0.0
 
+    def test_normalize_plan_data_dict(self):
+        """_normalize_plan_data passes through a plain dict."""
+        explain_analysis = _import_module_directly(
+            "explain_analysis",
+            _lib_path / "functions" / "explain_analysis.py"
+        )
+        d = {"Plan": {"Node Type": "Seq Scan"}}
+        assert explain_analysis._normalize_plan_data(d) == d
+
+    def test_normalize_plan_data_list(self):
+        """_normalize_plan_data unwraps a list with one dict element."""
+        explain_analysis = _import_module_directly(
+            "explain_analysis",
+            _lib_path / "functions" / "explain_analysis.py"
+        )
+        inner = {"Plan": {"Node Type": "Seq Scan"}}
+        assert explain_analysis._normalize_plan_data([inner]) == inner
+
+    def test_normalize_plan_data_json_string(self):
+        """_normalize_plan_data parses a JSON string (psycopg2 edge case)."""
+        import json
+        explain_analysis = _import_module_directly(
+            "explain_analysis",
+            _lib_path / "functions" / "explain_analysis.py"
+        )
+        inner = {"Plan": {"Node Type": "Index Scan"}}
+        raw = json.dumps([inner])
+        assert explain_analysis._normalize_plan_data(raw) == inner
+
+    def test_normalize_plan_data_invalid(self):
+        """_normalize_plan_data returns empty dict for unrecognized input."""
+        explain_analysis = _import_module_directly(
+            "explain_analysis",
+            _lib_path / "functions" / "explain_analysis.py"
+        )
+        assert explain_analysis._normalize_plan_data(42) == {}
+        assert explain_analysis._normalize_plan_data("not json") == {}
+        assert explain_analysis._normalize_plan_data([]) == {}
+
+    def test_rows_examined_falls_back_to_plan_rows(self):
+        """Rows examined uses Plan Rows when Actual Rows is absent."""
+        explain_analysis = _import_module_directly(
+            "explain_analysis",
+            _lib_path / "functions" / "explain_analysis.py"
+        )
+        plan_data = {
+            "Plan": {
+                "Plan Rows": 200,
+                "Plans": [{"Plan Rows": 50}]
+            }
+        }
+        assert explain_analysis._extract_postgres_rows_examined(plan_data) == 250
+
+    def test_rows_returned_falls_back_to_plan_rows(self):
+        """Rows returned uses Plan Rows when Actual Rows is absent."""
+        explain_analysis = _import_module_directly(
+            "explain_analysis",
+            _lib_path / "functions" / "explain_analysis.py"
+        )
+        plan_data = {"Plan": {"Plan Rows": 75}}
+        assert explain_analysis._extract_postgres_rows_returned(plan_data) == 75
+
+    def test_cost_handles_string_value(self):
+        """Cost extraction handles string Total Cost without crashing."""
+        explain_analysis = _import_module_directly(
+            "explain_analysis",
+            _lib_path / "functions" / "explain_analysis.py"
+        )
+        plan_data = {"Plan": {"Total Cost": "99.5"}}
+        assert explain_analysis._extract_postgres_cost(plan_data) == 99.5
+
 
 class TestMySQLJsonHelpers:
     """Tests for MySQL JSON format helper functions."""
