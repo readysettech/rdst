@@ -243,6 +243,7 @@ export interface StatusResponse {
   default_target: string | null;
   targets: TargetInfo[];
   version: string | null;
+  data_directory?: string | null;
   error: string | null;
 }
 

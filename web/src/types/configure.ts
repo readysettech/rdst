@@ -7,6 +7,16 @@ export interface ConfigureTarget {
   engine: string;
   has_password: boolean;
   is_default: boolean;
+  host?: string;
+  port?: number;
+  database?: string;
+  user?: string;
+  tls?: boolean;
+  read_only?: boolean;
+  password_env?: string;
+  proxy?: string;
+  endpoint_verified?: boolean;
+  verified?: boolean;
 }
 
 export interface ConfigureFormData {

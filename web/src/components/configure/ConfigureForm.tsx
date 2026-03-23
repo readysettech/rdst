@@ -94,8 +94,11 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
   const [urlError, setUrlError] = useState<string | null>(null);
   const [name, setName] = useState(initialData?.name || '');
   const [engine, setEngine] = useState(initialData?.engine || 'postgresql');
+  const defaultPort =
+    initialData?.port ??
+    ((initialData?.engine || 'postgresql') === 'mysql' ? 3306 : 5432);
   const [host, setHost] = useState(initialData?.host || 'localhost');
-  const [port, setPort] = useState(initialData?.port || 5432);
+  const [port, setPort] = useState(defaultPort);
   const [database, setDatabase] = useState(initialData?.database || '');
   const [user, setUser] = useState(initialData?.user || '');
   const [passwordEnv, setPasswordEnv] = useState(initialData?.password_env || '');

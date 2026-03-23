@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
@@ -18,6 +20,7 @@ class StatusResponse(BaseModel):
     default_target: Optional[str] = None
     targets: list[TargetInfo]
     version: Optional[str] = None
+    data_directory: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -64,12 +67,14 @@ async def get_status() -> StatusResponse:
                 )
 
         configured = len(targets_list) > 0 and any(t.has_password for t in targets_list)
+        data_dir = str(Path.home() / ".rdst")
 
         return StatusResponse(
             configured=configured,
             default_target=default_target,
             targets=targets_list,
             version=_get_version(),
+            data_directory=data_dir,
         )
 
     except Exception as e:

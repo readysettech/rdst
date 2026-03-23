@@ -4,17 +4,19 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useMemo } from "react";
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Text } from "@rs/ui-new/text";
 import { Button } from "@rs/ui-new/button";
 import { Icon } from "@rs/ui-new/icon";
 import { HStack, VStack } from "@rs/ui-new/stack";
 import { Show } from "@rs/ui-new/show";
 import { Alert } from "@rs/ui-new/alert";
+import { CopyButton } from "@rs/ui-new/copy-button";
 import { m } from "@rs/ui-new/motion";
 import { useConfigure } from "../lib/useConfigure";
 import { EnvSecretsDialog } from "../components/EnvSecretsDialog";
 import type { EnvRequirement } from "../lib/api";
+import { fetchStatus } from "../lib/api";
 import {
   ConfigureForm,
   ConfigureTargetList,
@@ -46,6 +48,13 @@ function ConfigurePage() {
     error,
     loading,
   } = useConfigure();
+
+  const { data: statusData } = useQuery({
+    queryKey: ["status"],
+    queryFn: fetchStatus,
+    staleTime: 60_000,
+  });
+  const dataDirectory = statusData?.data_directory ?? null;
 
   const { envRequirements, anthropicRequirement, anthropicSource, isTrialSource: trialSourceDetected, trialStatus } = useTrialSource();
 
@@ -114,6 +123,19 @@ function ConfigurePage() {
     testConnection(targetName);
   };
 
+  const editingInitialData = editingTarget
+    ? {
+        name: editingTarget.name,
+        engine: editingTarget.engine,
+        host: editingTarget.host,
+        port: editingTarget.port,
+        database: editingTarget.database,
+        user: editingTarget.user,
+        password_env: editingTarget.password_env,
+        tls: editingTarget.tls,
+        read_only: editingTarget.read_only,
+      }
+    : undefined;
 
   return (
     <div className="space-y-6 w-full">
@@ -150,6 +172,40 @@ function ConfigurePage() {
           </Show>
         </HStack>
       </m.div>
+
+      {/* Data Storage Info */}
+      <Show when={!!dataDirectory}>
+        <m.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <div className="rounded-xl border border-border-layout-1 bg-surface-layout-2/50 p-4">
+            <HStack className="gap-3 items-start">
+              <div className="w-9 h-9 rounded-xl bg-surface-informative-soft flex items-center justify-center shrink-0">
+                <Icon name="info" label="Storage" className="w-4 h-4 text-content-informative-soft" />
+              </div>
+              <VStack className="gap-1 items-start flex-1 min-w-0">
+                <Text level="label-small" className="text-content-layout-1">
+                  Data Storage
+                </Text>
+                <Text level="body-small" className="text-content-layout-3">
+                  All RDST data is stored locally on your machine. Nothing is sent to external servers.
+                </Text>
+                <HStack className="gap-2 items-center mt-1">
+                  <code className="text-xs bg-surface-layout-3 px-2 py-1 rounded font-mono text-content-layout-2">
+                    {dataDirectory}
+                  </code>
+                  <CopyButton text={dataDirectory || ""} />
+                </HStack>
+                <Text level="caption" className="text-content-layout-3 mt-0.5">
+                  Contains connection configs, saved queries, semantic layer, and analysis history. Passwords are stored in your system keyring, never in plain text.
+                </Text>
+              </VStack>
+            </HStack>
+          </div>
+        </m.div>
+      </Show>
 
       <Show when={showAnthropicAction}>
         <m.div
@@ -231,14 +287,8 @@ function ConfigurePage() {
           transition={{ duration: 0.3 }}
         >
           <ConfigureForm
-            initialData={
-              editingTarget
-                ? {
-                    name: editingTarget.name,
-                    engine: editingTarget.engine,
-                  }
-                : undefined
-            }
+            key={editingTarget ? `edit-${editingTarget.name}` : 'new-target'}
+            initialData={editingInitialData}
             onSubmit={handleFormSubmit}
             onCancel={handleFormCancel}
             isLoading={loading}
