@@ -289,11 +289,6 @@ and Readyset caching opportunities.""",
                 help="Analyze multiple queries together for holistic index recommendations (coming soon)",
             ),
             ArgDef(
-                "--large-query-bypass",
-                action="store_true",
-                help="Bypass the 4KB query size limit (allows up to 10KB) for -q, -f, or --stdin input",
-            ),
-            ArgDef(
                 "--json",
                 action="store_true",
                 help="Output results as JSON (for programmatic use)",

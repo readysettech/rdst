@@ -791,7 +791,6 @@ class RdstCLI:
         fast: bool = False,
         interactive: bool = False,
         review: bool = False,
-        large_query_bypass: Optional[str] = None,
         output_json: bool = False,
         skip_warning: bool = False,
         **kwargs,
@@ -848,7 +847,6 @@ class RdstCLI:
                 name=name,
                 positional_query=positional_query,
                 save_as=save_as,
-                large_query_bypass=large_query_bypass,
             )
 
             # Use explicit --target, then registry target (from --hash/--name

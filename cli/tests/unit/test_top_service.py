@@ -427,21 +427,27 @@ class TestTopServiceCommandSets:
 
     def test_raw_query_command_sets_preserve_newlines(self, service):
         """Top command sets should not flatten whitespace for raw SQL sources."""
-        assert "LEFT(query, 4096) as query_text" in COMMAND_SETS["rdst_top_pg_stat"][
-            "commands"
-        ]["pg_stat_queries"]["query"]
-        assert "LEFT(query, 4096) as query_text" in COMMAND_SETS["rdst_top_pg_activity"][
-            "commands"
-        ]["pg_activity_queries"]["query"]
-        assert "LEFT(INFO, 4096) as query_text" in COMMAND_SETS[
-            "rdst_top_mysql_activity"
-        ]["commands"]["mysql_activity_queries"]["query"]
-        assert "LEFT(sql_text, 4096) as query_text" in COMMAND_SETS[
-            "rdst_top_mysql_slowlog"
-        ]["commands"]["mysql_slowlog_queries"]["query"]
+        from lib.data_manager_service.data_manager_service_command_sets import (
+            COMMAND_SETS,
+            MAX_QUERY_LENGTH,
+        )
+
+        pg_stat_sql = COMMAND_SETS["rdst_top_pg_stat"]["commands"]["pg_stat_queries"]["query"]
+        assert f", {MAX_QUERY_LENGTH}) as query_text" in pg_stat_sql
+
+        pg_activity_sql = COMMAND_SETS["rdst_top_pg_activity"]["commands"]["pg_activity_queries"]["query"]
+        assert f", {MAX_QUERY_LENGTH}) as query_text" in pg_activity_sql
+
+        mysql_activity_sql = COMMAND_SETS["rdst_top_mysql_activity"]["commands"]["mysql_activity_queries"]["query"]
+        assert f", {MAX_QUERY_LENGTH}) as query_text" in mysql_activity_sql
+
+        mysql_slowlog_sql = COMMAND_SETS["rdst_top_mysql_slowlog"]["commands"]["mysql_slowlog_queries"]["query"]
+        assert f", {MAX_QUERY_LENGTH}) as query_text" in mysql_slowlog_sql
 
     def test_process_top_data_preserves_multiline_query_text(self, service):
         """Top processing should keep raw multiline SQL intact."""
+        import pandas as pd
+
         df = pd.DataFrame(
             [
                 {
@@ -534,7 +540,6 @@ class TestTopServiceCommandSets:
         )
 
         assert result == []
-
 
 class TestTopServiceEventTypes:
     """Tests for event type structure."""

@@ -7,10 +7,12 @@ DEFAULT_TIMEOUT = 30
 MAX_RETRIES = 3
 RETRY_DELAY = 1
 
-# Maximum query length to capture from database query logs (hard-capped at 4KB)
+# Maximum query length to capture from database query logs.
 # This limit applies to queries captured from rdst top and saved to the registry.
-# For analyzing larger queries (up to 10KB), use: rdst analyze --large-query-bypass '<query>'
-MAX_QUERY_LENGTH = 4096
+MAX_QUERY_LENGTH = 64 * 1024  # 64KB
+
+# Threshold below which we warn about database query size settings
+DB_QUERY_SIZE_WARN_THRESHOLD = 4 * 1024  # 4KB
 
 
 class DataManagerQueryType(Enum):

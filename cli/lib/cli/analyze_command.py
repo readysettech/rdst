@@ -87,7 +87,6 @@ class AnalyzeCommand:
         name: Optional[str] = None,
         positional_query: Optional[str] = None,
         save_as: Optional[str] = None,
-        large_query_bypass: bool = False,
     ) -> AnalyzeInput:
         """
         Resolve query input using strict precedence rules.
@@ -102,7 +101,6 @@ class AnalyzeCommand:
             name: Query name for registry lookup
             positional_query: Positional query argument (backward compatibility)
             save_as: Name to save query as after analysis
-            large_query_bypass: If True, allows queries up to 10KB instead of 4KB
 
         Returns:
             AnalyzeInput with resolved SQL and metadata
@@ -141,17 +139,15 @@ class AnalyzeCommand:
 
             # 3. Inline query
             if inline_query:
-                return self._resolve_inline_query(
-                    inline_query, save_as, large_query_bypass
-                )
+                return self._resolve_inline_query(inline_query, save_as)
 
             # 4. File input
             if file_path:
-                return self._resolve_file_input(file_path, save_as, large_query_bypass)
+                return self._resolve_file_input(file_path, save_as)
 
             # 5. Stdin input
             if use_stdin:
-                return self._resolve_stdin_input(save_as, large_query_bypass)
+                return self._resolve_stdin_input(save_as)
 
             # 6. Interactive prompt
             if not positional_query:
@@ -162,9 +158,7 @@ class AnalyzeCommand:
             if positional_query and self._looks_like_hash(positional_query):
                 return self._resolve_by_hash(positional_query, save_as)
 
-            return self._resolve_inline_query(
-                positional_query, save_as, large_query_bypass
-            )
+            return self._resolve_inline_query(positional_query, save_as)
 
         except Exception as e:
             raise AnalyzeInputError(f"Failed to resolve input: {e}")
@@ -221,55 +215,12 @@ class AnalyzeCommand:
             registry_target=entry.last_target,
         )
 
-    def _enforce_query_size_limit(self, query: str, bypass: bool = False) -> None:
-        """
-        Enforce query size limits.
-
-        Default limit is 4KB (MAX_QUERY_LENGTH). Use --large-query-bypass
-        for one-time analysis of queries up to 10KB.
-
-        Args:
-            query: The SQL query string to check
-            bypass: If True, allow up to 10KB instead of 4KB
-
-        Raises:
-            AnalyzeInputError: If query exceeds the size limit
-        """
-        from lib.data_manager_service.data_manager_service_command_sets import (
-            MAX_QUERY_LENGTH,
-        )
-
-        query_bytes = len(query.encode("utf-8"))
-
-        if not bypass:
-            # Default 4KB limit (MAX_QUERY_LENGTH) - registry limit
-            if query_bytes > MAX_QUERY_LENGTH:
-                raise AnalyzeInputError(
-                    f"Query size ({query_bytes:,} bytes) exceeds the default limit (4KB).\n\n"
-                    "Use --large-query-bypass for one-time analysis of larger queries:\n"
-                    "  rdst analyze --large-query-bypass -f your_file.sql\n"
-                    "  rdst analyze --large-query-bypass -q '<your query>'\n\n"
-                    "This allows queries up to 10KB (will not be saved to registry)."
-                )
-        else:
-            # With bypass, allow up to 10KB
-            max_size = 10 * 1024  # 10KB
-            if query_bytes > max_size:
-                raise AnalyzeInputError(
-                    f"Query size ({query_bytes:,} bytes) exceeds maximum allowed size (10KB).\n\n"
-                    "Please reduce your query size or break it into smaller parts."
-                )
-
-    def _resolve_inline_query(
-        self, query: str, save_as: str, bypass: bool = False
-    ) -> AnalyzeInput:
+    def _resolve_inline_query(self, query: str, save_as: str) -> AnalyzeInput:
         """Resolve inline query string."""
         if not query or not query.strip():
             raise AnalyzeInputError("Empty query provided")
 
         query = query.strip()
-        self._enforce_query_size_limit(query, bypass)
-
         # Normalize and hash
         normalized_sql = normalize_sql(query)
         query_hash = hash_sql(query)
@@ -282,9 +233,7 @@ class AnalyzeCommand:
             save_as=save_as,
         )
 
-    def _resolve_file_input(
-        self, file_path: str, save_as: str, bypass: bool = False
-    ) -> AnalyzeInput:
+    def _resolve_file_input(self, file_path: str, save_as: str) -> AnalyzeInput:
         """Resolve query from file input."""
         path = Path(file_path)
 
@@ -319,7 +268,6 @@ class AnalyzeCommand:
             )
 
         query = statements[0].strip()
-        self._enforce_query_size_limit(query, bypass)
 
         normalized_sql = normalize_sql(query)
         query_hash = hash_sql(query)
@@ -332,7 +280,7 @@ class AnalyzeCommand:
             save_as=save_as,
         )
 
-    def _resolve_stdin_input(self, save_as: str, bypass: bool = False) -> AnalyzeInput:
+    def _resolve_stdin_input(self, save_as: str) -> AnalyzeInput:
         """Resolve query from stdin input."""
         if not sys.stdin.isatty():
             # Reading from pipe
@@ -349,8 +297,6 @@ class AnalyzeCommand:
             raise AnalyzeInputError("Empty input received from stdin")
 
         content = content.strip()
-        self._enforce_query_size_limit(content, bypass)
-
         normalized_sql = normalize_sql(content)
         query_hash = hash_sql(content)
 

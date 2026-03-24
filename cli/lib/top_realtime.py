@@ -13,8 +13,12 @@ import time
 from typing import Dict, Any
 
 # Import UI system for styled text and console
-from lib.ui import StyleTokens, get_console, NextSteps
+from lib.ui import StyleTokens, get_console, NextSteps, NoticePanel
 
+from lib.data_manager_service.data_manager_service_command_sets import (
+    DB_QUERY_SIZE_WARN_THRESHOLD,
+    MAX_QUERY_LENGTH,
+)
 from lib.db_connection import create_direct_connection, close_connection
 from lib.top_monitor import ActivityQueryCollector, QueryTracker
 from lib.top_display import TopDisplay, format_query_for_save
@@ -30,6 +34,38 @@ try:
     HAS_QUERY_REGISTRY = True
 except ImportError:
     HAS_QUERY_REGISTRY = False
+
+
+def _check_and_warn_db_limit(connection, db_engine: str, console) -> None:
+    """Check the database's query text size limit and warn if too low."""
+    try:
+        from lib.db_connection import format_db_limit_command, query_db_query_size_limit
+
+        result = query_db_query_size_limit(connection, db_engine, mode="realtime")
+        if result is None:
+            return
+        limit_bytes, setting_name = result
+        if limit_bytes >= DB_QUERY_SIZE_WARN_THRESHOLD:
+            return
+
+        limit_kb = limit_bytes // 1024
+        rec_kb = DB_QUERY_SIZE_WARN_THRESHOLD // 1024
+        console.print(
+            NoticePanel(
+                title="LOW DATABASE QUERY SIZE LIMIT",
+                description=f"Your database's {setting_name} is set to {limit_kb}KB.",
+                variant="warning",
+                action_hint=(
+                    f"Queries longer than {limit_kb}KB will be truncated. "
+                    f"Increase to at least {rec_kb}KB:"
+                ),
+                action_command=format_db_limit_command(
+                    setting_name, DB_QUERY_SIZE_WARN_THRESHOLD, db_engine
+                ),
+            )
+        )
+    except Exception:
+        pass
 
 
 def run_realtime_monitor(
@@ -69,6 +105,9 @@ def run_realtime_monitor(
         # Connect to database (silently)
         connection = create_direct_connection(target_config)
         db_engine = target_config.get("engine", "").lower()
+
+        # Check database query size limit
+        _check_and_warn_db_limit(connection, db_engine, console)
 
         # Create collector and tracker
         collector = ActivityQueryCollector(db_engine, connection)
@@ -517,10 +556,10 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
                         }
                     )
                 except ValueError:
-                    # Query exceeds 4KB limit
+                    # Query exceeds registry size limit
                     skipped_queries.append(idx)
                     status = (
-                        f"[{StyleTokens.WARNING}]skipped (>4KB)[/{StyleTokens.WARNING}]"
+                        f"[{StyleTokens.WARNING}]skipped (>{MAX_QUERY_LENGTH // 1024}KB)[/{StyleTokens.WARNING}]"
                     )
 
             # Print saved query with status
@@ -534,10 +573,7 @@ def save_queries_to_registry(queries, selected_indices, target_config, console):
         # Summary
         if skipped_queries:
             console.print(
-                f"\n[{StyleTokens.WARNING}]Note: {len(skipped_queries)} queries exceeded the 4KB limit and were not saved.[/{StyleTokens.WARNING}]"
-            )
-            console.print(
-                f"[{StyleTokens.WARNING}]Use 'rdst analyze --large-query-bypass' to analyze large queries.[/{StyleTokens.WARNING}]"
+                f"\n[{StyleTokens.WARNING}]Note: {len(skipped_queries)} queries exceeded the {MAX_QUERY_LENGTH // 1024}KB limit and were not saved.[/{StyleTokens.WARNING}]"
             )
 
         if new_count > 0 and existing_count > 0:

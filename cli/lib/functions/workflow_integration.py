@@ -40,21 +40,7 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
             }
 
         # Store/update query in query registry using the original SQL
-        # Skip registry storage for large_query_bypass (queries > 4KB)
         source = kwargs.get("source", "analyze")
-        if source == "large_query_bypass":
-            # Large queries are not saved to registry - just generate the hash
-            from ..query_registry.query_registry import hash_sql
-
-            stored_hash = hash_sql(query)
-            return {
-                "success": True,
-                "query_hash": stored_hash,
-                "analysis_id": stored_hash,
-                "is_new_query": True,
-                "message": f"Query analyzed (hash: {stored_hash}). Large queries are not saved to registry.",
-            }
-
         query_registry = QueryRegistry()
 
         # Use the original SQL (not normalized) for proper parameter extraction

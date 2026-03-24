@@ -15,6 +15,7 @@ from ...services.top_service import TopService
 from ...services.types import (
     TopCompleteEvent,
     TopConnectedEvent,
+    TopDbLimitWarningEvent,
     TopErrorEvent,
     TopEvent,
     TopInput,
@@ -77,6 +78,18 @@ def _event_to_sse(event: TopEvent) -> dict:
                     "from_source": event.from_source,
                     "to_source": event.to_source,
                     "reason": event.reason,
+                }
+            ),
+        }
+    elif isinstance(event, TopDbLimitWarningEvent):
+        return {
+            "event": "db_limit_warning",
+            "data": json.dumps(
+                {
+                    "db_limit_bytes": event.db_limit_bytes,
+                    "recommended_bytes": event.recommended_bytes,
+                    "setting_name": event.setting_name,
+                    "db_engine": event.db_engine,
                 }
             ),
         }
@@ -294,12 +307,15 @@ async def get_top_queries(
     db_engine = ""
     actual_source = source
     error_message = None
+    db_limit_warning = None
 
     async for event in service.get_top_queries(input_data, options):
         if isinstance(event, TopConnectedEvent):
             target_name = event.target_name
             db_engine = event.db_engine
             actual_source = event.source
+        elif isinstance(event, TopDbLimitWarningEvent):
+            db_limit_warning = event
         elif isinstance(event, TopCompleteEvent):
             result = event
         elif isinstance(event, TopErrorEvent):
@@ -318,7 +334,7 @@ async def get_top_queries(
             "error": "No results collected",
         }
 
-    return {
+    response = {
         "success": True,
         "target": target_name,
         "engine": db_engine,
@@ -326,6 +342,14 @@ async def get_top_queries(
         "queries": [_serialize_query_data(q) for q in result.queries],
         "newly_saved": result.newly_saved,
     }
+    if db_limit_warning:
+        response["db_limit_warning"] = {
+            "db_limit_bytes": db_limit_warning.db_limit_bytes,
+            "recommended_bytes": db_limit_warning.recommended_bytes,
+            "setting_name": db_limit_warning.setting_name,
+            "db_engine": db_limit_warning.db_engine,
+        }
+    return response
 
 
 @router.get("/top/realtime")

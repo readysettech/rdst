@@ -490,15 +490,14 @@ class TestEdgeCases:
         assert entry is not None
 
     def test_query_at_size_limit(self, temp_dir):
-        """Test handling queries at the 4KB size limit."""
+        """Test handling queries under the 16KB size limit."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Create a query just under 4KB
-        # "SELECT col0, col1, ... FROM table WHERE id = 1" pattern
+        # Create a query under 16KB
         columns = ", ".join([f"col{i}" for i in range(400)])  # ~2KB
         sql = f"SELECT {columns} FROM small_table WHERE id = 1"
-        assert len(sql.encode("utf-8")) < 4096, "Test query should be under 4KB"
+        assert len(sql.encode("utf-8")) < 16384, "Test query should be under 16KB"
 
         query_hash, _ = registry.add_query(sql)
         entry = registry.get_query(query_hash)
@@ -506,94 +505,115 @@ class TestEdgeCases:
         assert entry is not None
 
     def test_query_exceeds_size_limit(self, temp_dir):
-        """Test that queries exceeding 4KB are rejected."""
+        """Test that queries exceeding 64KB are rejected."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Create a query over 4KB
-        columns = ", ".join([f"col{i}" for i in range(800)])  # >4KB
-        sql = f"SELECT {columns} FROM large_table WHERE id = 1"
-        assert len(sql.encode("utf-8")) > 4096, "Test query should be over 4KB"
+        # Create a query over 64KB
+        base = "SELECT * FROM t WHERE x = "
+        padding_needed = 65537 - len(base.encode("utf-8"))
+        sql = base + "'" + "x" * (padding_needed - 2) + "'"
+        assert len(sql.encode("utf-8")) > 65536, "Test query should be over 64KB"
 
         with pytest.raises(ValueError) as exc_info:
             registry.add_query(sql)
 
         assert "exceeds registry limit" in str(exc_info.value)
-        assert "4KB" in str(exc_info.value)
 
 
 class TestQuerySizeLimits:
-    """Tests for query size limit enforcement (4KB default, 10KB bypass max)."""
+    """Tests for query size limit enforcement (16KB default, configurable via env var)."""
 
-    def test_registry_accepts_query_under_4kb(self, temp_dir):
-        """Test that queries under 4KB are accepted by registry."""
+    def test_registry_accepts_query_under_limit(self, temp_dir):
+        """Test that queries under 16KB are accepted by registry."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Query well under 4KB
         sql = "SELECT * FROM users WHERE id = 1"
-        assert len(sql.encode("utf-8")) < 4096
+        assert len(sql.encode("utf-8")) < 16384
 
         query_hash, is_new = registry.add_query(sql)
         assert is_new is True
         assert registry.get_query(query_hash) is not None
 
-    def test_registry_rejects_query_over_4kb(self, temp_dir):
-        """Test that queries over 4KB are rejected by registry."""
+    def test_registry_rejects_query_over_limit(self, temp_dir):
+        """Test that queries over 64KB are rejected by registry."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Create query over 4KB
-        columns = ", ".join([f"column_{i}" for i in range(600)])
-        sql = f"SELECT {columns} FROM large_table WHERE id = 1"
-        assert len(sql.encode("utf-8")) > 4096
+        # Create query over 64KB
+        base = "SELECT * FROM t WHERE x = "
+        padding_needed = 65537 - len(base.encode("utf-8"))
+        sql = base + "'" + "x" * (padding_needed - 2) + "'"
+        assert len(sql.encode("utf-8")) > 65536
 
         with pytest.raises(ValueError) as exc_info:
             registry.add_query(sql)
 
         assert "exceeds registry limit" in str(exc_info.value)
 
-    def test_query_exactly_at_4kb_limit(self, temp_dir):
-        """Test query at exactly 4096 bytes boundary."""
+    def test_query_exactly_at_limit(self, temp_dir):
+        """Test query at exactly 65536 bytes boundary."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Build query that's exactly 4096 bytes
+        # Build query that's exactly 65536 bytes
         base = "SELECT * FROM t WHERE x = "
-        padding_needed = 4096 - len(base.encode("utf-8"))
+        padding_needed = 65536 - len(base.encode("utf-8"))
         sql = base + "'" + "x" * (padding_needed - 2) + "'"
-        assert len(sql.encode("utf-8")) == 4096
+        assert len(sql.encode("utf-8")) == 65536
 
         # Exactly at limit should be accepted
         query_hash, is_new = registry.add_query(sql)
         assert is_new is True
 
     def test_query_one_byte_over_limit(self, temp_dir):
-        """Test query at 4097 bytes is rejected."""
+        """Test query at 65537 bytes is rejected."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        # Build query that's 4097 bytes
+        # Build query that's 65537 bytes
         base = "SELECT * FROM t WHERE x = "
-        padding_needed = 4097 - len(base.encode("utf-8"))
+        padding_needed = 65537 - len(base.encode("utf-8"))
         sql = base + "'" + "x" * (padding_needed - 2) + "'"
-        assert len(sql.encode("utf-8")) == 4097
+        assert len(sql.encode("utf-8")) == 65537
 
         with pytest.raises(ValueError):
             registry.add_query(sql)
 
-    def test_error_message_includes_bypass_hint(self, temp_dir):
-        """Test that error message mentions --large-query-bypass."""
+    def test_query_under_64kb_accepted(self, temp_dir):
+        """Test that queries under 64KB are accepted."""
         registry_path = temp_dir / "test_queries.toml"
         registry = QueryRegistry(registry_path=str(registry_path))
 
-        columns = ", ".join([f"col{i}" for i in range(800)])
-        sql = f"SELECT {columns} FROM table WHERE id = 1"
+        # Build query that's ~32KB
+        base = "SELECT * FROM t WHERE x = "
+        padding_needed = 32768 - len(base.encode("utf-8"))
+        sql = base + "'" + "x" * (padding_needed - 2) + "'"
+        assert len(sql.encode("utf-8")) == 32768
 
-        with pytest.raises(ValueError) as exc_info:
-            registry.add_query(sql)
+        query_hash, is_new = registry.add_query(sql)
+        assert is_new is True
 
-        assert "--large-query-bypass" in str(exc_info.value)
+
+class TestQueryLengthConstants:
+    """Tests for MAX_QUERY_LENGTH constant."""
+
+    def test_max_query_length_is_64kb(self):
+        """MAX_QUERY_LENGTH should be 64KB."""
+        from lib.data_manager_service.data_manager_service_command_sets import (
+            MAX_QUERY_LENGTH,
+        )
+
+        assert MAX_QUERY_LENGTH == 64 * 1024
+
+    def test_db_query_size_warn_threshold(self):
+        """DB_QUERY_SIZE_WARN_THRESHOLD should be 4KB."""
+        from lib.data_manager_service.data_manager_service_command_sets import (
+            DB_QUERY_SIZE_WARN_THRESHOLD,
+        )
+
+        assert DB_QUERY_SIZE_WARN_THRESHOLD == 4 * 1024
 
 
 class TestVerifyQueryCompleteness:

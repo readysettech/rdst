@@ -11,13 +11,14 @@ import os
 import re
 import tempfile
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Set
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
 from .types import (
     TopCompleteEvent,
     TopConnectedEvent,
+    TopDbLimitWarningEvent,
     TopErrorEvent,
     TopEvent,
     TopInput,
@@ -28,7 +29,6 @@ from .types import (
     TopSourceFallbackEvent,
     TopStatusEvent,
 )
-
 logger = logging.getLogger(__name__)
 
 
@@ -130,6 +130,14 @@ class TopService:
                 db_engine=db_engine,
                 source=actual_source,
             )
+
+            # 3b. Check database query size limit (MySQL digest tables
+            # truncate; PG pg_stat_statements does not — see mode="historical")
+            warning_event = await self._check_db_limit_for_historical(
+                target_config, db_engine
+            )
+            if warning_event:
+                yield warning_event
 
             # 4. Fallback event if applicable
             if fallback_event:
@@ -264,6 +272,25 @@ class TopService:
                 db_engine=db_engine,
                 source="activity",  # Real-time always uses activity source
             )
+
+            # Check database query size limit
+            from ..data_manager_service.data_manager_service_command_sets import (
+                DB_QUERY_SIZE_WARN_THRESHOLD,
+            )
+
+            result = await self._check_database_query_size_limit(
+                connection, db_engine, mode="realtime"
+            )
+            if result is not None:
+                db_limit_bytes, setting_name = result
+                if db_limit_bytes < DB_QUERY_SIZE_WARN_THRESHOLD:
+                    yield TopDbLimitWarningEvent(
+                        type="db_limit_warning",
+                        db_limit_bytes=db_limit_bytes,
+                        recommended_bytes=DB_QUERY_SIZE_WARN_THRESHOLD,
+                        setting_name=setting_name,
+                        db_engine=db_engine,
+                    )
 
             # Create collector and tracker
             from ..top_monitor import ActivityQueryCollector, QueryTracker
@@ -429,6 +456,55 @@ class TopService:
     # =========================================================================
     # Helper Methods
     # =========================================================================
+
+    async def _check_database_query_size_limit(
+        self, connection, db_engine: str, mode: str = "realtime"
+    ) -> Optional[Tuple[int, str]]:
+        """Check the database's query text size limit using an existing connection.
+
+        Returns (limit_bytes, setting_name) or None if not applicable.
+        """
+        from ..db_connection import query_db_query_size_limit
+
+        return await asyncio.to_thread(
+            query_db_query_size_limit, connection, db_engine, mode
+        )
+
+    async def _check_db_limit_for_historical(
+        self, target_config: Dict[str, Any], db_engine: str
+    ) -> Optional[TopDbLimitWarningEvent]:
+        """Check db query size limit for historical mode (creates a temporary connection)."""
+        from ..data_manager_service.data_manager_service_command_sets import (
+            DB_QUERY_SIZE_WARN_THRESHOLD,
+        )
+        from ..db_connection import close_connection, query_db_query_size_limit
+
+        def _check(cfg, engine):
+            from ..db_connection import create_direct_connection
+
+            conn = create_direct_connection(cfg)
+            try:
+                return query_db_query_size_limit(conn, engine, mode="historical")
+            finally:
+                close_connection(conn)
+
+        try:
+            result = await asyncio.to_thread(_check, target_config, db_engine)
+        except Exception:
+            return None
+
+        if result is None:
+            return None
+        db_limit_bytes, setting_name = result
+        if db_limit_bytes >= DB_QUERY_SIZE_WARN_THRESHOLD:
+            return None
+        return TopDbLimitWarningEvent(
+            type="db_limit_warning",
+            db_limit_bytes=db_limit_bytes,
+            recommended_bytes=DB_QUERY_SIZE_WARN_THRESHOLD,
+            setting_name=setting_name,
+            db_engine=db_engine,
+        )
 
     async def _load_config(
         self, target: Optional[str]

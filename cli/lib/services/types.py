@@ -549,6 +549,17 @@ class TopSourceFallbackEvent:
 
 
 @dataclass
+class TopDbLimitWarningEvent:
+    """Database query size limit is below recommended threshold."""
+
+    type: Literal["db_limit_warning"]
+    db_limit_bytes: int
+    recommended_bytes: int
+    setting_name: str
+    db_engine: str
+
+
+@dataclass
 class TopQueryData:
     """Individual query data."""
 
@@ -614,6 +625,7 @@ TopEvent = Union[
     TopStatusEvent,
     TopConnectedEvent,
     TopSourceFallbackEvent,
+    TopDbLimitWarningEvent,
     TopQueriesEvent,
     TopQuerySavedEvent,
     TopCompleteEvent,

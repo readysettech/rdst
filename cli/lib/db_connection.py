@@ -6,7 +6,7 @@ without using DataManager infrastructure.
 """
 
 import os
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Literal, Optional, Tuple
 
 
 def resolve_connection_params(target: Optional[str] = None, target_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -187,6 +187,77 @@ def _create_mysql_connection(host: str, port: int, user: str, password: str, dat
         return conn
     except Exception as e:
         raise RuntimeError(f"Failed to connect to MySQL: {e}")
+
+
+def parse_pg_size(value: str) -> int:
+    """Parse PostgreSQL size string like '1kB', '8kB', '1MB' to bytes."""
+    value = value.strip()
+    upper = value.upper()
+    if upper.endswith("KB"):
+        return int(value[:-2]) * 1024
+    elif upper.endswith("MB"):
+        return int(value[:-2]) * 1024 * 1024
+    elif upper.endswith("GB"):
+        return int(value[:-2]) * 1024 * 1024 * 1024
+    return int(value)
+
+
+def format_db_limit_command(setting_name: str, recommended_bytes: int, db_engine: str) -> str:
+    """Format the SQL command to fix a low query size limit setting."""
+    if "postgres" in db_engine:
+        return (
+            f"ALTER SYSTEM SET {setting_name} = "
+            f"{recommended_bytes};  -- then restart PostgreSQL"
+        )
+    return f"SET GLOBAL {setting_name} = {recommended_bytes};"
+
+
+def query_db_query_size_limit(
+    connection, db_engine: str, mode: Literal["realtime", "historical"] = "realtime"
+) -> Optional[Tuple[int, str]]:
+    """Query the database's query text size limit.
+
+    Returns (limit_bytes, setting_name) or None if not applicable / cannot be determined.
+
+    Args:
+        connection: Database connection object
+        db_engine: 'postgresql' or 'mysql'
+        mode: 'realtime' or 'historical' — determines which settings matter:
+            - realtime: PG track_activity_query_size truncates pg_stat_activity.
+              MySQL PROCESSLIST.INFO is unlimited — returns None.
+            - historical: MySQL performance_schema_max_digest_length truncates digest tables.
+              PG pg_stat_statements stores full text (no limit since PG 9.4) — returns None.
+    """
+    is_pg = "postgres" in db_engine
+    is_mysql = "mysql" in db_engine
+
+    # Only check settings that actually cause truncation for this mode
+    if mode == "realtime" and not is_pg:
+        return None
+    if mode == "historical" and not is_mysql:
+        return None
+
+    cursor = connection.cursor()
+    try:
+        if is_pg:
+            cursor.execute("SHOW track_activity_query_size")
+            row = cursor.fetchone()
+            if row:
+                return (parse_pg_size(str(row[0])), "track_activity_query_size")
+            return None
+        elif is_mysql:
+            cursor.execute("SELECT @@performance_schema_max_digest_length")
+            row = cursor.fetchone()
+            return (int(row[0]), "performance_schema_max_digest_length") if row else None
+    except Exception:
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        cursor.close()
+    return None
 
 
 def close_connection(connection):

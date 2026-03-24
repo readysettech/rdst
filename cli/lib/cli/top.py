@@ -34,7 +34,6 @@ from lib.ui import (
     Live,
     MessagePanel,
     NextSteps,
-    NoticePanel,
     Prompt,
     SectionBox,
     StatusLine,
@@ -953,14 +952,12 @@ class TopCommand:
             query_bytes = len(query_text.encode("utf-8")) if query_text else 0
 
             if query_bytes > MAX_QUERY_LENGTH:
-                # Query exceeds 4KB limit - cannot save to registry
                 return RdstResult(
                     False,
-                    f"Query size ({query_bytes:,} bytes) exceeds the 4KB limit.\n\n"
-                    "Queries captured from 'rdst top' cannot exceed 4KB.\n"
-                    "To analyze this query, get the full SQL from your application and run:\n"
-                    f"  rdst analyze --large-query-bypass '<full query>'\n\n"
-                    "This allows one-time analysis of queries up to 10KB.",
+                    f"Query size ({query_bytes:,} bytes) exceeds the "
+                    f"{MAX_QUERY_LENGTH // 1024}KB registry limit.\n\n"
+                    "To analyze this query, provide the full SQL with:\n"
+                    f"  rdst analyze -q '<full query>'",
                 )
 
             # Store query in registry
@@ -1002,6 +999,10 @@ class TopCommand:
         self, queries: List[dict], selected_indices: Optional[List[int]], target_name: str
     ):
         """Save queries to query registry (from realtime mode)."""
+        from ..data_manager_service.data_manager_service_command_sets import (
+            MAX_QUERY_LENGTH,
+        )
+
         try:
             from ..query_registry import QueryRegistry
             from ..query_registry.query_registry import generate_query_name
@@ -1091,7 +1092,7 @@ class TopCommand:
                     except ValueError:
                         skipped_queries.append(idx)
                         status = (
-                            f"[{StyleTokens.WARNING}]skipped (>4KB)[/{StyleTokens.WARNING}]"
+                            f"[{StyleTokens.WARNING}]skipped (>{MAX_QUERY_LENGTH // 1024}KB)[/{StyleTokens.WARNING}]"
                         )
 
                 query_preview = query.get("normalized_query", query_text)[:70] + (
@@ -1103,10 +1104,7 @@ class TopCommand:
 
             if skipped_queries:
                 self._console.print(
-                    f"\n[{StyleTokens.WARNING}]Note: {len(skipped_queries)} queries exceeded the 4KB limit and were not saved.[/{StyleTokens.WARNING}]"
-                )
-                self._console.print(
-                    f"[{StyleTokens.WARNING}]Use 'rdst analyze --large-query-bypass' to analyze large queries.[/{StyleTokens.WARNING}]"
+                    f"\n[{StyleTokens.WARNING}]Note: {len(skipped_queries)} queries exceeded the {MAX_QUERY_LENGTH // 1024}KB limit and were not saved.[/{StyleTokens.WARNING}]"
                 )
 
             if new_count > 0 and existing_count > 0:

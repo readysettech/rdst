@@ -14,6 +14,7 @@ from lib.ui import (
     Icons,
     Rule,
     MessagePanel,
+    NoticePanel,
     QueryPanel,
     SQLPreview,
     InlineSQL,
@@ -55,6 +56,7 @@ OUTPUT_FILE = Path(__file__).parent / "storybook_output.html"
 
 COMPONENTS = {
     "MessagePanel": MessagePanel,
+    "NoticePanel": NoticePanel,
     "QueryPanel": QueryPanel,
     "SQLPreview": SQLPreview,
     "InlineSQL": InlineSQL,
@@ -85,10 +87,11 @@ COMPONENTS = {
     "SectionBox": SectionBox,
     "Rule": Rule,
     "KeyboardShortcuts": KeyboardShortcuts,
+    "TopViewScene": None,  # Uses builder
 }
 
 CATEGORIES = {
-    "Messages": ["MessagePanel"],
+    "Messages": ["MessagePanel", "NoticePanel"],
     "SQL": ["QueryPanel", "SQLPreview", "InlineSQL"],
     "Tables": [
         "DataTable",
@@ -118,6 +121,7 @@ CATEGORIES = {
         "Rule",
         "KeyboardShortcuts",
     ],
+    "Scenes": ["TopViewScene"],
 }
 
 
@@ -150,6 +154,58 @@ def _build_sample_metric_row() -> MetricRow:
     )
 
 
+from rich.console import Group as RichGroup
+
+
+def _build_top_view_scene():
+    """Build a static rendering of the rdst top view with a db limit warning."""
+    return RichGroup(
+        NoticePanel(
+            title="LOW DATABASE QUERY SIZE LIMIT",
+            description="Your database's track_activity_query_size is set to 1KB.",
+            variant="warning",
+            action_hint="Queries longer than 1KB will be truncated. Increase to at least 4KB:",
+            action_command="ALTER SYSTEM SET track_activity_query_size = 4096;  -- then restart PostgreSQL",
+        ),
+        MonitorHeader(
+            title="rdst top — prod-db (postgresql/activity)",
+            stats={"queries": "3", "runtime": "12s", "saved": "2"},
+            hint="Press q to quit, 0-9 to save, a to save all",
+        ),
+        TopQueryTable(
+            queries=[
+                {
+                    "query_hash": "a1b2c3d4e5f6",
+                    "query_text": "SELECT u.*, o.total FROM users u JOIN orders o ON u.id = o.user_id WHERE u.status = 'active'",
+                    "freq": 3450,
+                    "total_time": "42.1s",
+                    "avg_time": "12ms",
+                    "pct_load": "58%",
+                },
+                {
+                    "query_hash": "f6e5d4c3b2a1",
+                    "query_text": "SELECT COUNT(*) FROM orders WHERE created_at > now() - interval '1 hour'",
+                    "freq": 1200,
+                    "total_time": "18.3s",
+                    "avg_time": "15ms",
+                    "pct_load": "25%",
+                },
+                {
+                    "query_hash": "11223344aabb",
+                    "query_text": "UPDATE inventory SET qty = qty - 1 WHERE sku = $1 AND qty > 0",
+                    "freq": 890,
+                    "total_time": "8.7s",
+                    "avg_time": "10ms",
+                    "pct_load": "12%",
+                },
+            ],
+            source="activity",
+            target_name="prod-db",
+            db_engine="postgresql",
+        ),
+    )
+
+
 # =============================================================================
 # Sample Data for Each Component
 # =============================================================================
@@ -166,6 +222,24 @@ SAMPLE_DATA = {
             },
             {"content": "This action cannot be undone", "variant": "warning"},
             {"content": "Processing your request...", "variant": "info"},
+        ],
+    },
+    "NoticePanel": {
+        "props": {
+            "title": "LOW DATABASE QUERY SIZE LIMIT",
+            "description": "Your database's track_activity_query_size is set to 1,024 bytes.",
+            "variant": "warning",
+            "action_hint": "Queries longer than 1,024 bytes will be truncated. Increase to at least 4,096 bytes:",
+            "action_command": "ALTER SYSTEM SET track_activity_query_size = 4096;  -- then restart PostgreSQL",
+        },
+        "variants": [
+            {
+                "title": "REWRITE TESTING SKIPPED",
+                "description": "This query contains parameter placeholders without actual values.",
+                "variant": "info",
+                "bullets": ["Query was captured from rdst top", "Query was normalized from performance_schema"],
+                "bullets_header": "This typically happens when:",
+            },
         ],
     },
     "QueryPanel": {
@@ -517,6 +591,10 @@ SAMPLE_DATA = {
             {"value": 50, "label": "Medium"},
             {"value": 25, "label": "Low"},
         ],
+    },
+    "TopViewScene": {
+        "props": {},
+        "builder": _build_top_view_scene,
     },
 }
 

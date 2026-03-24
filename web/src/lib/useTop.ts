@@ -10,6 +10,7 @@ import type {
   TopConnectionInfo,
   TopSourceFallback,
   TopConnectedEventData,
+  TopDbLimitWarningEventData,
   TopSourceFallbackEventData,
   TopQueriesEventData,
   TopQuerySavedEventData,
@@ -41,6 +42,7 @@ interface UseTopReturn {
   queries: TopQuery[];
   connectionInfo: TopConnectionInfo | null;
   sourceFallback: TopSourceFallback | null;
+  dbLimitWarning: TopDbLimitWarningEventData | null;
   runtimeSeconds: number;
   totalTracked: number;
   newlySaved: number;
@@ -53,6 +55,7 @@ export function useTop(): UseTopReturn {
   const [queries, setQueries] = useState<TopQuery[]>([]);
   const [connectionInfo, setConnectionInfo] = useState<TopConnectionInfo | null>(null);
   const [sourceFallback, setSourceFallback] = useState<TopSourceFallback | null>(null);
+  const [dbLimitWarning, setDbLimitWarning] = useState<TopDbLimitWarningEventData | null>(null);
   const [runtimeSeconds, setRuntimeSeconds] = useState(0);
   const [totalTracked, setTotalTracked] = useState(0);
   const [newlySaved, setNewlySaved] = useState(0);
@@ -71,6 +74,7 @@ export function useTop(): UseTopReturn {
     setQueries([]);
     setConnectionInfo(null);
     setSourceFallback(null);
+    setDbLimitWarning(null);
     setRuntimeSeconds(0);
     setTotalTracked(0);
     setNewlySaved(0);
@@ -101,6 +105,7 @@ export function useTop(): UseTopReturn {
     setQueries([]);
     setConnectionInfo(null);
     setSourceFallback(null);
+    setDbLimitWarning(null);
     setError(null);
 
     try {
@@ -146,6 +151,9 @@ export function useTop(): UseTopReturn {
       });
       setQueries(data.queries || []);
       setNewlySaved(data.newly_saved || 0);
+      if (data.db_limit_warning) {
+        setDbLimitWarning(data.db_limit_warning);
+      }
       setState('complete');
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
@@ -172,6 +180,7 @@ export function useTop(): UseTopReturn {
     setQueries([]);
     setConnectionInfo(null);
     setSourceFallback(null);
+    setDbLimitWarning(null);
     setRuntimeSeconds(0);
     setTotalTracked(0);
     setNewlySaved(0);
@@ -270,6 +279,12 @@ export function useTop(): UseTopReturn {
                     break;
                   }
 
+                  case 'db_limit_warning': {
+                    const warningData = data as TopDbLimitWarningEventData;
+                    setDbLimitWarning(warningData);
+                    break;
+                  }
+
                   case 'queries': {
                     const queriesData = data as TopQueriesEventData;
                     setQueries(queriesData.queries);
@@ -344,6 +359,7 @@ export function useTop(): UseTopReturn {
     queries,
     connectionInfo,
     sourceFallback,
+    dbLimitWarning,
     runtimeSeconds,
     totalTracked,
     newlySaved,

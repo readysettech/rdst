@@ -81,6 +81,13 @@ export interface TopCompleteEventData {
   newly_saved: number;
 }
 
+export interface TopDbLimitWarningEventData {
+  db_limit_bytes: number;
+  recommended_bytes: number;
+  setting_name: string;
+  db_engine: string;
+}
+
 export interface TopErrorEventData {
   message: string;
   stage?: string;
@@ -95,4 +102,5 @@ export interface TopHistoricalResponse {
   queries?: TopQuery[];
   newly_saved?: number;
   error?: string;
+  db_limit_warning?: TopDbLimitWarningEventData;
 }

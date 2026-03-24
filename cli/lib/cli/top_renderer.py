@@ -28,6 +28,7 @@ from lib.ui import (
 from ..services.types import (
     TopCompleteEvent,
     TopConnectedEvent,
+    TopDbLimitWarningEvent,
     TopErrorEvent,
     TopEvent,
     TopQueriesEvent,
@@ -85,6 +86,7 @@ class TopRenderer:
         self._total_tracked: int = 0
         self._auto_saved_count: int = 0
         self._last_display_update: float = 0.0
+        self._db_limit_warning: Optional[TopDbLimitWarningEvent] = None
 
     def render(self, event: TopEvent) -> None:
         """Render an event to the terminal.
@@ -98,6 +100,11 @@ class TopRenderer:
             self._render_connected(event)
         elif isinstance(event, TopSourceFallbackEvent):
             self._render_fallback(event)
+        elif isinstance(event, TopDbLimitWarningEvent):
+            if self._db_limit_warning is None:
+                self._db_limit_warning = event
+                if not self._realtime:
+                    self._render_db_limit_warning(event)
         elif isinstance(event, TopQueriesEvent):
             self._render_queries(event)
         elif isinstance(event, TopQuerySavedEvent):
@@ -186,6 +193,27 @@ class TopRenderer:
                     bullets=[event.reason] if event.reason else None,
                 )
             )
+
+    def _render_db_limit_warning(self, event: TopDbLimitWarningEvent) -> None:
+        """Render a database query size limit warning (snapshot/historical mode)."""
+        from ..db_connection import format_db_limit_command
+
+        limit_kb = event.db_limit_bytes // 1024
+        rec_kb = event.recommended_bytes // 1024
+        self._console.print(
+            NoticePanel(
+                title="LOW DATABASE QUERY SIZE LIMIT",
+                description=f"Your database's {event.setting_name} is set to {limit_kb}KB.",
+                variant="warning",
+                action_hint=(
+                    f"Queries longer than {limit_kb}KB will be truncated. "
+                    f"Increase to at least {rec_kb}KB:"
+                ),
+                action_command=format_db_limit_command(
+                    event.setting_name, event.recommended_bytes, event.db_engine
+                ),
+            )
+        )
 
     def _render_queries(self, event: TopQueriesEvent) -> None:
         """Render a queries event."""
@@ -294,7 +322,21 @@ class TopRenderer:
             stats["Auto-Saved"] = str(self._auto_saved_count)
 
         warning = None
-        if self._db_engine and self._db_engine.lower() == "mysql":
+        warning_detail = None
+        if self._db_limit_warning:
+            from ..db_connection import format_db_limit_command
+
+            w = self._db_limit_warning
+            limit_kb = w.db_limit_bytes // 1024
+            rec_kb = w.recommended_bytes // 1024
+            warning = (
+                f"{w.setting_name} is set to {limit_kb}KB — "
+                f"increase to at least {rec_kb}KB:"
+            )
+            warning_detail = format_db_limit_command(
+                w.setting_name, w.recommended_bytes, w.db_engine
+            )
+        elif self._db_engine and self._db_engine.lower() == "mysql":
             warning = (
                 "MySQL: Queries <1s may not be tracked. Duration has 1s granularity."
             )
@@ -304,6 +346,7 @@ class TopRenderer:
             stats=stats,
             hint="Press Ctrl+C to exit.",
             warning=warning,
+            warning_detail=warning_detail,
         )
 
         # Create table

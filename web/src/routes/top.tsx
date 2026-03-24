@@ -5,7 +5,10 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState, useCallback, useMemo } from 'react';
 import { Text } from '@rs/ui-new/text';
+import { Icon } from '@rs/ui-new/icon';
+import { HStack, VStack } from '@rs/ui-new/stack';
 import { Show } from '@rs/ui-new/show';
+import { CopyButton } from '@rs/ui-new/copy-button';
 import { TargetLockNotice } from '../components';
 import { useTarget } from '../hooks/useTarget';
 import { useTop } from '../lib/useTop';
@@ -19,13 +22,54 @@ import {
   ParameterDialog,
   hasParameters,
 } from '../components/top';
-import type { TopMode, TopQuery } from '../types/top';
+import type { TopDbLimitWarningEventData, TopMode, TopQuery } from '../types/top';
 
 export const Route = createFileRoute('/top')({
   component: TopPage,
 });
 
-function TopPage() {
+function formatKB(bytes: number) {
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
+function DbLimitWarning({ warning: w }: { warning: TopDbLimitWarningEventData }) {
+  const isPostgres = w.db_engine.includes('postgres');
+  const sql = isPostgres
+    ? `ALTER SYSTEM SET ${w.setting_name} = ${w.recommended_bytes};`
+    : `SET GLOBAL ${w.setting_name} = ${w.recommended_bytes};`;
+
+  return (
+    <div className="bg-surface-warning-soft/50 rounded-xl border border-border-warning-soft p-5">
+      <HStack className="gap-3 items-start">
+        <div className="w-8 h-8 rounded-lg bg-surface-warning-soft flex items-center justify-center shrink-0 mt-0.5">
+          <Icon name="alert" label="Warning" className="w-4 h-4 text-content-warning-soft" />
+        </div>
+        <VStack className="gap-2 items-start flex-1 min-w-0">
+          <VStack className="gap-0.5 items-start">
+            <Text level="label-small" className="text-content-warning-soft">
+              Low Database Query Size Limit
+            </Text>
+            <Text level="body-small" className="text-content-layout-2">
+              <code className="font-mono">{w.setting_name}</code> is set
+              to {formatKB(w.db_limit_bytes)}. Increase to at least {formatKB(w.recommended_bytes)} to
+              avoid query truncation.
+            </Text>
+          </VStack>
+          <div className="w-full relative group">
+            <pre className="px-3 py-2.5 rounded-lg bg-surface-layout-1 text-xs font-mono text-content-layout-1 overflow-x-auto">
+              {sql}{isPostgres ? '\n-- Then restart PostgreSQL' : ''}
+            </pre>
+            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <CopyButton value={sql} />
+            </div>
+          </div>
+        </VStack>
+      </HStack>
+    </div>
+  );
+}
+
+export function TopPage() {
   const navigate = useNavigate();
   const { queries: registryQueries, addMutation: addQueryMutation } = useQueryRegistry();
   const { target } = useTarget();
@@ -65,6 +109,7 @@ function TopPage() {
     queries,
     connectionInfo,
     sourceFallback,
+    dbLimitWarning,
     runtimeSeconds,
     totalTracked,
     newlySaved,
@@ -229,6 +274,8 @@ function TopPage() {
           isRealtime={mode === 'realtime'}
         />
       </Show>
+
+      {dbLimitWarning && <DbLimitWarning warning={dbLimitWarning} />}
 
       <Show when={error !== null}>
         <div className="bg-surface-negative-soft rounded-xl border border-border-negative p-4">

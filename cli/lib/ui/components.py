@@ -302,6 +302,7 @@ def NoticePanel(
     bullets_header: Optional[str] = None,
     action_hint: Optional[str] = None,
     action_command: Optional[str] = None,
+    padding: Tuple[int, int] = (1, 2),
 ) -> "StyledPanel":
     """
     Structured notice panel with description, bullet points, and action hints.
@@ -363,7 +364,7 @@ def NoticePanel(
     body = "\n".join(parts)
     formatted_title = f"{icon}  {title}"
 
-    return StyledPanel(body, title=formatted_title, variant=variant, padding=(1, 2))
+    return StyledPanel(body, title=formatted_title, variant=variant, padding=padding)
 
 
 # =============================================================================
@@ -1841,6 +1842,7 @@ class MonitorHeaderPanel(HeaderPanelBase):
         self._header_title = title
         self._stats: dict = {}
         self._warning: Optional[str] = None
+        self._warning_detail: Optional[str] = None
         self._hint: Optional[str] = None
 
     def with_stats(self, stats: dict) -> "MonitorHeaderPanel":
@@ -1851,24 +1853,28 @@ class MonitorHeaderPanel(HeaderPanelBase):
         self._warning = warning
         return self
 
+    def with_warning_detail(self, detail: str) -> "MonitorHeaderPanel":
+        self._warning_detail = detail
+        return self
+
     def with_hint(self, hint: str) -> "MonitorHeaderPanel":
         self._hint = hint
         return self
 
     def _build_panel(self) -> Panel:
-        content = Text()
-        content.append(f"{self._header_title}\n", style=StyleTokens.HEADER)
+        lines = [f"[{StyleTokens.HEADER}]{self._header_title}[/{StyleTokens.HEADER}]"]
         if self._stats:
             stat_parts = [f"{k}: {v}" for k, v in self._stats.items()]
-            content.append("  │  ".join(stat_parts), style=StyleTokens.MUTED)
+            lines.append(f"[{StyleTokens.MUTED}]{'  │  '.join(stat_parts)}[/{StyleTokens.MUTED}]")
         if self._warning:
-            content.append("\n\n")
-            content.append(f"{Icons.WARNING} ", style=f"bold {StyleTokens.WARNING}")
-            content.append(self._warning, style=StyleTokens.WARNING)
+            lines.append("")
+            lines.append(f"[bold {StyleTokens.WARNING}]/!\\ {self._warning}[/bold {StyleTokens.WARNING}]")
+            if self._warning_detail:
+                lines.append(f"  [{StyleTokens.ACCENT}]{self._warning_detail}[/{StyleTokens.ACCENT}]")
         if self._hint:
-            content.append("\n\n")
-            content.append(self._hint, style=StyleTokens.SECONDARY)
-        self.content = content
+            lines.append("")
+            lines.append(f"[{StyleTokens.SECONDARY}]{self._hint}[/{StyleTokens.SECONDARY}]")
+        self.content = "\n".join(lines)
         return super()._build_panel()
 
     def __str__(self):
@@ -1891,12 +1897,15 @@ class MonitorHeader(MonitorHeaderPanel):
         stats: dict = None,
         hint: str = None,
         warning: str = None,
+        warning_detail: str = None,
     ):
         super().__init__(title)
         if stats:
             self.with_stats(stats)
         if warning:
             self.with_warning(warning)
+        if warning_detail:
+            self.with_warning_detail(warning_detail)
         if hint:
             self.with_hint(hint)
 

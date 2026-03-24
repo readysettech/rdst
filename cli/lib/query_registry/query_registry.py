@@ -748,14 +748,13 @@ class QueryRegistry:
 
         canonical_sql = canonicalize_sql(sql)
 
-        # Enforce 4KB size limit for registry storage
+        # Enforce size limit for registry storage
         query_bytes = len(canonical_sql.encode("utf-8")) if canonical_sql else 0
 
         if query_bytes > MAX_QUERY_LENGTH:
             raise ValueError(
-                f"Query size ({query_bytes:,} bytes) exceeds registry limit (4KB). "
-                "Large queries cannot be saved to the registry. "
-                "Use 'rdst analyze --large-query-bypass' for one-time analysis of large queries."
+                f"Query size ({query_bytes:,} bytes) exceeds registry limit "
+                f"({MAX_QUERY_LENGTH // 1024}KB)."
             )
 
         is_valid, parse_error = verify_query_completeness(canonical_sql, dialect)
