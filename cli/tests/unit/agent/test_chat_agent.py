@@ -21,7 +21,7 @@ class TestChatTools:
         tool_names = [t["name"] for t in CHAT_TOOLS]
         assert "query_database" in tool_names
         assert "get_schema" in tool_names
-        assert "run_sql" in tool_names
+        assert "run_sql" not in tool_names  # removed for security
 
     def test_query_database_schema(self):
         """query_database should have question parameter."""
@@ -34,12 +34,6 @@ class TestChatTools:
         tool = next(t for t in CHAT_TOOLS if t["name"] == "get_schema")
         assert "table_name" in tool["input_schema"]["properties"]
         assert tool["input_schema"]["required"] == []
-
-    def test_run_sql_schema(self):
-        """run_sql should have sql parameter."""
-        tool = next(t for t in CHAT_TOOLS if t["name"] == "run_sql")
-        assert "sql" in tool["input_schema"]["properties"]
-        assert "sql" in tool["input_schema"]["required"]
 
 
 class TestChatToolExecutor:

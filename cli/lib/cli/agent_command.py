@@ -428,12 +428,6 @@ Examples:
                             table = data["input"].get("table_name")
                             label = f"schema: {table}" if table else "schema: all tables"
                             console.print(f"\n[{StyleTokens.EMPHASIS}]> {label}[/{StyleTokens.EMPHASIS}]")
-                        elif name == "run_sql":
-                            sql = data["input"].get("sql", "")
-                            preview = sql.split('\n')[0][:80]
-                            if len(sql) > 80:
-                                preview += "..."
-                            console.print(f"\n[{StyleTokens.EMPHASIS}]> sql: {preview}[/{StyleTokens.EMPHASIS}]")
 
                     elif event == "tool_result":
                         result = data["result"]

@@ -57,24 +57,6 @@ CHAT_TOOLS = [
             "required": [],
         },
     },
-    {
-        "name": "run_sql",
-        "description": (
-            "Execute a specific SQL query provided by the user. "
-            "Use this when the user provides explicit SQL to run, or asks to re-run "
-            "a previous query with modifications. Safety checks still apply."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "sql": {
-                    "type": "string",
-                    "description": "The SQL query to execute",
-                },
-            },
-            "required": ["sql"],
-        },
-    },
 ]
 
 
@@ -120,7 +102,6 @@ class ChatToolExecutor:
         handlers = {
             "query_database": self._query_database,
             "get_schema": self._get_schema,
-            "run_sql": self._run_sql,
         }
 
         handler = handlers.get(tool_name)
@@ -279,124 +260,6 @@ class ChatToolExecutor:
             content="\n".join(lines),
             data={"tables": tables, "source": schema.get("source")},
         )
-
-    def _run_sql(self, inputs: dict[str, Any], tool_use_id: str) -> ToolResult:
-        """Execute provided SQL directly."""
-        sql = inputs.get("sql", "")
-        if not sql:
-            return ToolResult(
-                tool_use_id=tool_use_id,
-                success=False,
-                content="No SQL provided",
-            )
-
-        try:
-            import os
-            import time
-
-            target_config = self.runtime._get_target_config()
-
-            # Validate safety first
-            self.runtime._validate_safety(sql)
-
-            # Get limits
-            guard = self.runtime._get_guard_config()
-            if guard:
-                max_rows = guard.limits.max_rows
-                timeout_seconds = guard.limits.timeout_seconds
-            else:
-                max_rows = self.runtime.config.safety.max_rows
-                timeout_seconds = self.runtime.config.safety.timeout_seconds
-
-            # Execute the SQL using psycopg2 directly
-            import psycopg2
-
-            host = target_config.get('host', 'localhost')
-            port = target_config.get('port', 5432)
-            user = target_config.get('user') or target_config.get('username')
-            database = target_config.get('database') or target_config.get('dbname')
-
-            from lib.services.password_resolver import resolve_password_value
-            password = resolve_password_value(target_config)
-
-            tls_enabled = target_config.get('tls', False)
-            sslmode = 'prefer' if tls_enabled else 'disable'
-
-            conn = psycopg2.connect(
-                host=host,
-                port=port,
-                user=user,
-                password=password,
-                database=database,
-                connect_timeout=10,
-                sslmode=sslmode
-            )
-
-            try:
-                start = time.time()
-
-                with conn.cursor() as cursor:
-                    if timeout_seconds > 0:
-                        timeout_ms = timeout_seconds * 1000
-                        cursor.execute(f"SET statement_timeout = '{timeout_ms}ms'")
-
-                    cursor.execute(sql)
-                    columns = [desc[0] for desc in cursor.description] if cursor.description else []
-                    rows = cursor.fetchmany(max_rows + 1)
-
-                    execution_time_ms = (time.time() - start) * 1000
-                    truncated = len(rows) > max_rows
-                    if truncated:
-                        rows = rows[:max_rows]
-
-                    # Convert to list of lists
-                    rows_list = [list(row) for row in rows]
-
-                    # Apply masking
-                    masked_rows = self.runtime._apply_masking(columns, rows_list)
-
-                    # Format result
-                    result_lines = [f"Executed: {sql}", ""]
-
-                    if columns and masked_rows:
-                        result_lines.append("Results:")
-                        result_lines.append(" | ".join(columns))
-                        result_lines.append("-" * 40)
-                        for row in masked_rows[:20]:
-                            result_lines.append(" | ".join(str(v) if v is not None else "NULL" for v in row))
-
-                        row_count = len(masked_rows)
-                        if row_count > 20:
-                            result_lines.append(f"... ({row_count} total rows)")
-                        if truncated:
-                            result_lines.append("(Results truncated by safety limit)")
-                    else:
-                        result_lines.append("No rows returned")
-
-                    return ToolResult(
-                        tool_use_id=tool_use_id,
-                        success=True,
-                        content="\n".join(result_lines),
-                        data={
-                            "sql": sql,
-                            "columns": columns,
-                            "rows": masked_rows,
-                            "row_count": len(masked_rows),
-                            "execution_time_ms": execution_time_ms,
-                            "truncated": truncated,
-                        },
-                    )
-            finally:
-                conn.close()
-
-        except Exception as e:
-            return ToolResult(
-                tool_use_id=tool_use_id,
-                success=False,
-                content=f"SQL execution failed: {e}",
-                data={"sql": sql},
-            )
-
 
 def format_tool_result_for_display(result: ToolResult) -> str:
     """

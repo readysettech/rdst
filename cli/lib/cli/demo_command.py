@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 
 from lib.ui import StyleTokens, get_console, MessagePanel, NextSteps
@@ -411,7 +412,6 @@ class DemoCommand:
             None)
 
         # Start background traffic
-        import sys
         bg_process = subprocess.Popen(
             [sys.executable, "rdst.py", "query", "run"] + list(DEMO_QUERIES.keys()) +
             ["--target", DEMO_TARGET, "--duration", "60", "--interval", "200", "--quiet"],
@@ -446,11 +446,37 @@ class DemoCommand:
             f"follow threads, and build on previous results.[/{StyleTokens.MUTED}]\n"
         )
 
-        # Create agent if it doesn't exist (silently)
-        self._run_rdst_quiet(["agent", "create", "--name", "demo-agent", "--target", DEMO_TARGET,
-             "--description", "Demo chat agent for DBA StackExchange data"])
+        # Show the create command but handle "already exists" gracefully
+        create_cmd = ["agent", "create", "--name", "demo-agent", "--target", DEMO_TARGET,
+             "--description", "Demo chat agent for DBA StackExchange data"]
+        self._tour_step(1, 2, "Create a chat agent",
+            "Agents wrap a database target with safety policies. You create one with "
+            "'rdst agent create', giving it a name and target. Agents can be exposed "
+            "via HTTP API, MCP (for Claude Code), or Slack.",
+            None)
 
-        self._tour_step(1, 1, "Start chatting",
+        cmd_str = "rdst " + " ".join(f'"{a}"' if " " in a else a for a in create_cmd)
+        self.console.print(f"\n  [{StyleTokens.COMMAND}]$ {cmd_str}[/{StyleTokens.COMMAND}]\n")
+
+        # Try to create; if exists, just note it
+        result = subprocess.run(
+            [sys.executable, "rdst.py"] + create_cmd,
+            cwd=self._find_src_dir(),
+            capture_output=True, text=True,
+        )
+        if "already exists" in result.stdout + result.stderr:
+            self.console.print(f"  [{StyleTokens.SUCCESS}]✓[/{StyleTokens.SUCCESS}] Agent 'demo-agent' already exists")
+        elif result.returncode == 0:
+            self.console.print(f"  [{StyleTokens.SUCCESS}]✓[/{StyleTokens.SUCCESS}] Agent 'demo-agent' created")
+        else:
+            self.console.print(result.stdout.strip() if result.stdout.strip() else result.stderr.strip())
+
+        try:
+            input("\nPress Enter to continue... ")
+        except (EOFError, KeyboardInterrupt):
+            pass
+
+        self._tour_step(2, 2, "Start chatting",
             "Now let's chat with the agent. Ask questions about the data — it can run "
             "multiple queries, follow threads, and build on previous results. "
             "Type 'exit' to end.",
@@ -543,7 +569,6 @@ class DemoCommand:
 
     def _run_rdst(self, args: list[str]):
         """Run an rdst subcommand via the same entry point."""
-        import sys
         subprocess.run(
             [sys.executable, "rdst.py"] + args,
             cwd=self._find_src_dir(),
@@ -551,7 +576,6 @@ class DemoCommand:
 
     def _run_rdst_quiet(self, args: list[str]):
         """Run an rdst subcommand silently."""
-        import sys
         subprocess.run(
             [sys.executable, "rdst.py"] + args,
             cwd=self._find_src_dir(),
@@ -561,7 +585,6 @@ class DemoCommand:
 
     def _run_rdst_interactive(self, args: list[str]):
         """Run an rdst subcommand interactively (inherits stdin/stdout)."""
-        import sys
         subprocess.run(
             [sys.executable, "rdst.py"] + args,
             cwd=self._find_src_dir(),

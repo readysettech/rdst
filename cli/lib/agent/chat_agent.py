@@ -29,8 +29,7 @@ SYSTEM_PROMPT = """You are a helpful data assistant with access to a database. Y
 
 1. Query data using natural language (use the query_database tool)
 2. Explore the database schema (use the get_schema tool)
-3. Execute specific SQL queries (use the run_sql tool)
-4. Discuss and explain query results, SQL syntax, and data patterns
+3. Discuss and explain query results, SQL syntax, and data patterns
 
 ## When to use tools:
 
@@ -38,16 +37,12 @@ SYSTEM_PROMPT = """You are a helpful data assistant with access to a database. Y
 - User wants to retrieve, count, or analyze data
 - User asks questions like "show me...", "how many...", "what is the average..."
 - User asks to "select", "find", "list", or "get" data
+- User provides explicit SQL — rephrase it as a natural language question
 
 **USE get_schema when:**
 - User asks about available tables or columns
 - User asks "what data do you have?" or "what tables exist?"
 - User needs to know column names or types
-
-**USE run_sql when:**
-- User provides explicit SQL to execute
-- User asks to re-run or modify a previous query
-- User says "run this SQL: ..."
 
 **DON'T use tools when:**
 - User asks about previous results (you have the context)
