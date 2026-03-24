@@ -6,7 +6,6 @@ import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { Modal, ModalContent, ModalContentContainer } from '@rs/ui-new/modal'
-import { Show } from '@rs/ui-new/show'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -14,6 +13,7 @@ import {
   getParameterColor,
 } from '../parameterHighlighting'
 import { SQLDisplay } from '../SQLDisplay'
+import { useFormatSql } from '../../lib/useFormatSql'
 import {
   detectParameters,
   hasParameters,
@@ -39,6 +39,8 @@ export function ParameterDialog({
   initialValues,
 }: ParameterDialogProps) {
   const parameters = useMemo(() => detectParameters(query), [query])
+  const formattedQuery = useFormatSql(query)
+  const displayQuery = formattedQuery ?? query
   const parameterHighlights = useMemo(
     () =>
       buildParameterHighlights(
@@ -76,16 +78,12 @@ export function ParameterDialog({
     onSubmit(substituted)
   }
 
-  const previewQuery = useMemo(() => {
-    return substituteParameters(query, parameters, values)
-  }, [query, parameters, values])
-
   const allFilled = Object.values(values).every((v) => v.trim() !== '')
 
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={isOpen}>
-        <ModalContent size="base" className="p-0 gap-0">
+        <ModalContent size="extra-large" className="p-0 gap-0">
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-border-layout-1 bg-surface-layout-1">
             <div className="flex items-center gap-3">
@@ -113,36 +111,36 @@ export function ParameterDialog({
             </div>
           </div>
 
-          {/* Content */}
-          <div className="p-5 space-y-5 max-h-[60vh] overflow-auto">
-            {/* Original Query */}
-            <div>
+          {/* Content — two columns: SQL left, params right */}
+          <div className="grid grid-cols-2 gap-5 p-5 h-[min(65vh,560px)]">
+            {/* Left: SQL Query */}
+            <div className="flex flex-col min-h-0">
               <Text
                 as="label"
                 level="label-small"
-                className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                className="text-content-layout-3 uppercase tracking-wider mb-2 shrink-0"
               >
                 Original Query
               </Text>
-              <div className="bg-surface-layout-1 rounded-lg p-3 max-h-24 overflow-auto border border-border-layout-1">
+              <div className="bg-surface-layout-1 rounded-lg p-3 border border-border-layout-1 min-h-0 overflow-auto flex-1 [&_.cm-scroller]:!overflow-visible">
                 <SQLDisplay
-                  sql={query}
+                  sql={displayQuery}
                   wrap
                   parameterHighlights={parameterHighlights}
                 />
               </div>
             </div>
 
-            {/* Parameter Inputs */}
-            <div>
+            {/* Right: Parameters */}
+            <div className="flex flex-col min-h-0">
               <Text
                 as="label"
                 level="label-small"
-                className="text-content-layout-3 uppercase tracking-wider block mb-3"
+                className="text-content-layout-3 uppercase tracking-wider mb-2 shrink-0"
               >
                 Parameters
               </Text>
-              <div className="space-y-3">
+              <div className="min-h-0 overflow-auto flex-1 space-y-3">
                 {parameters.map((param) => {
                   const key =
                     param.placeholder === '?'
@@ -178,28 +176,12 @@ export function ParameterDialog({
                     </div>
                   )
                 })}
-              </div>
-              <Text level="body-small" className="text-content-layout-3 mt-2">
-                Strings are automatically quoted. Numbers, NULL, TRUE, FALSE are
-                passed as-is.
-              </Text>
-            </div>
-
-            {/* Preview */}
-            <Show when={Object.values(values).some((v) => v.trim() !== '')}>
-              <div>
-                <Text
-                  as="label"
-                  level="label-small"
-                  className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                >
-                  Preview
+                <Text level="body-small" className="text-content-layout-3">
+                  Strings are automatically quoted. Numbers, NULL, TRUE, FALSE
+                  are passed as-is.
                 </Text>
-                <div className="bg-surface-positive-soft/30 rounded-lg p-3 max-h-24 overflow-auto border border-border-positive/30">
-                  <SQLDisplay sql={previewQuery} wrap />
-                </div>
               </div>
-            </Show>
+            </div>
           </div>
 
           {/* Footer */}

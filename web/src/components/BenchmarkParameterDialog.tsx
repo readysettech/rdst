@@ -39,6 +39,8 @@ interface BenchmarkParameterDialogProps {
   queries: QueryWithParams[]
 }
 
+const MANY_PARAMS_THRESHOLD = 8
+
 export function BenchmarkParameterDialog({
   isOpen,
   onClose,
@@ -53,7 +55,7 @@ export function BenchmarkParameterDialog({
         parameters.map((parameter) => parameter.placeholder)
       )
       return {
-        ...q, // spreads identifier, sql, name, and mostRecentParams
+        ...q,
         parameters,
         parameterHighlights,
         colorByPlaceholder: new Map<string, number>(
@@ -66,10 +68,8 @@ export function BenchmarkParameterDialog({
     })
   }, [queries])
 
-  // Values keyed by "identifier:placeholder"
   const [values, setValues] = useState<Record<string, string>>({})
 
-  // Initialize values when queries change, using stored params if available
   useEffect(() => {
     const init: Record<string, string> = {}
     for (const q of queryParams) {
@@ -112,7 +112,6 @@ export function BenchmarkParameterDialog({
     onSubmit(substituted)
   }
 
-  // Check if all parameters are filled
   const allFilled = useMemo(() => {
     for (const q of queryParams) {
       for (const p of q.parameters) {
@@ -132,11 +131,21 @@ export function BenchmarkParameterDialog({
     (sum, q) => sum + q.parameters.length,
     0
   )
+  const hasMany = totalParams >= MANY_PARAMS_THRESHOLD
+  const [expandedQueries, setExpandedQueries] = useState<Set<string>>(() => new Set())
+  const toggleQueryExpanded = (id: string) => {
+    setExpandedQueries((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={isOpen}>
-        <ModalContent size="large" className="p-0 gap-0">
+        <ModalContent size={hasMany ? 'extra-large' : 'large'} className="p-0 gap-0">
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-border-layout-1 bg-surface-layout-1">
             <div className="flex items-center gap-3">
@@ -167,18 +176,38 @@ export function BenchmarkParameterDialog({
           <div className="p-5 space-y-6 max-h-[60vh] overflow-auto">
             {queryParams.map((q) => (
               <div key={q.identifier} className="space-y-3">
-                {/* Query header */}
-                <div className="flex items-center gap-2">
-                  <Text level="label-small" className="text-content-layout-1">
-                    {q.name}
-                  </Text>
-                  <Text level="mono-small" className="text-content-layout-3">
-                    {q.identifier.slice(0, 8)}
-                  </Text>
+                {/* Query header with expand toggle */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Text level="label-small" className="text-content-layout-1">
+                      {q.name}
+                    </Text>
+                    <Text level="mono-small" className="text-content-layout-3">
+                      {q.identifier.slice(0, 8)}
+                    </Text>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleQueryExpanded(q.identifier)}
+                    className="flex items-center gap-1 text-content-layout-3 hover:text-content-layout-2 transition-colors cursor-pointer"
+                  >
+                    <Icon
+                      name={expandedQueries.has(q.identifier) ? 'chevron-down' : 'chevron-right'}
+                      label="Toggle query"
+                      className="w-3 h-3"
+                    />
+                    <Text level="caption">
+                      {expandedQueries.has(q.identifier) ? 'Collapse' : 'Expand'}
+                    </Text>
+                  </button>
                 </div>
 
                 {/* Original SQL */}
-                <div className="bg-surface-layout-1 rounded-lg p-3 max-h-40 overflow-auto border border-border-layout-1">
+                <div
+                  className={`bg-surface-layout-1 rounded-lg p-3 overflow-auto border border-border-layout-1 ${
+                    expandedQueries.has(q.identifier) ? 'max-h-80' : 'max-h-32'
+                  }`}
+                >
                   <SQLDisplay
                     sql={q.sql}
                     wrap
@@ -188,7 +217,9 @@ export function BenchmarkParameterDialog({
 
                 {/* Parameter inputs */}
                 <Show when={q.parameters.length > 0}>
-                  <div className="space-y-2 pl-4 border-l-2 border-border-layout-2">
+                  <div className={`pl-4 border-l-2 border-border-layout-2 ${
+                    q.parameters.length >= MANY_PARAMS_THRESHOLD ? 'grid grid-cols-2 gap-2' : 'space-y-2'
+                  }`}>
                     {q.parameters.map((param) => {
                       const key =
                         param.placeholder === '?'
