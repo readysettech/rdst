@@ -25,6 +25,10 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
 from ..debug import SessionInspector, StateViewer, SnapshotBrowser, LLMInspector, Formatter as F
 
 logger = logging.getLogger(__name__)
@@ -40,7 +44,7 @@ class RdstDbgCommand:
         Args:
             sessions_root: Root directory for sessions (default: ~/.rdst/sessions/)
         """
-        self.sessions_root = sessions_root or Path.home() / ".rdst" / "sessions"
+        self.sessions_root = sessions_root or RDST_DATA_DIR / "sessions"
 
     def find_session_dir(self, session_id: str) -> Optional[Path]:
         """

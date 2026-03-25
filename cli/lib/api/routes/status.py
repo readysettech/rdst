@@ -1,9 +1,8 @@
-from pathlib import Path
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 
+from ...constants import RDST_DATA_DIR
 from ...services.password_resolver import resolve_password
 
 router = APIRouter()
@@ -67,7 +66,7 @@ async def get_status() -> StatusResponse:
                 )
 
         configured = len(targets_list) > 0 and any(t.has_password for t in targets_list)
-        data_dir = str(Path.home() / ".rdst")
+        data_dir = str(RDST_DATA_DIR)
 
         return StatusResponse(
             configured=configured,

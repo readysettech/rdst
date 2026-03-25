@@ -15,10 +15,14 @@ import sys
 import uuid
 import platform
 import threading
-from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 import json
+
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
 
 # Will be lazy-imported to avoid startup cost
 _posthog = None
@@ -89,7 +93,7 @@ class TelemetryManager:
         self._enabled: Optional[bool] = None
         self._initialized = False
         self._stats: Optional[Dict[str, int]] = None
-        self._rdst_dir = Path.home() / ".rdst"
+        self._rdst_dir = RDST_DATA_DIR
         self._lock = threading.Lock()
 
     def _ensure_initialized(self):

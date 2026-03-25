@@ -13,13 +13,18 @@ from pathlib import Path
 from typing import Any
 import yaml
 
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
+
 
 def _utcnow_iso() -> str:
     """Return current UTC time as ISO string."""
     return datetime.now(timezone.utc).isoformat()
 
 
-AGENTS_DIR = Path.home() / ".rdst" / "agents"
+AGENTS_DIR = RDST_DATA_DIR / "agents"
 
 
 @dataclass

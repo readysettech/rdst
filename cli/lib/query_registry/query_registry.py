@@ -13,6 +13,11 @@ import logging
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
 from typing import Dict, List, Optional, Any, Tuple
 import toml
 import sqlglot
@@ -644,7 +649,7 @@ class QueryRegistry:
         if registry_path:
             self.registry_path = Path(registry_path)
         else:
-            self.registry_path = Path.home() / ".rdst" / "queries.toml"
+            self.registry_path = RDST_DATA_DIR / "queries.toml"
 
         # In-memory cache of queries
         self._queries: Dict[str, QueryEntry] = {}

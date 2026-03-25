@@ -328,42 +328,9 @@ class TopService:
                 total_tracked = tracker.get_total_queries_tracked()
 
                 # Convert to TopQueryData
-                # Calculate total cumulative time for load %
-                total_cumulative_ms = sum(
-                    q.avg_duration * q.observation_count for q in top_queries
-                ) or 1.0  # avoid division by zero
-
-                queries = []
-                for q in top_queries:
-                    qps_value = (
-                        (q.observation_count / runtime)
-                        if runtime and runtime > 0
-                        else 0.0
-                    )
-                    if options.min_freq > 0 and q.observation_count < options.min_freq:
-                        continue
-
-                    cumulative_ms = q.avg_duration * q.observation_count
-                    load_pct = (cumulative_ms / total_cumulative_ms) * 100
-
-                    if options.min_load_pct > 0 and load_pct < options.min_load_pct:
-                        continue
-
-                    queries.append(
-                        TopQueryData(
-                            query_hash=self._compute_registry_hash(q.query_text),
-                            query_text=q.query_text,
-                            normalized_query=q.normalized_query,
-                            freq=q.observation_count,
-                            total_time=f"{q.max_duration_seen / 1000:.3f}s",
-                            avg_time=f"{q.avg_duration / 1000:.3f}s",
-                            pct_load=f"{load_pct:.1f}%",
-                            qps=qps_value,
-                            max_duration_ms=q.max_duration_seen,
-                            current_instances=q.current_instances_running,
-                            observation_count=q.observation_count,
-                        )
-                    )
+                queries = self._filter_and_build_realtime_queries(
+                    top_queries, options, runtime=runtime,
+                )
 
                 # Yield queries event
                 yield TopQueriesEvent(
@@ -404,30 +371,9 @@ class TopService:
             # Complete event (only if duration was specified)
             if duration is not None:
                 top_queries = tracker.get_top_n(options.limit, sort_by="max")
-                final_total_ms = sum(
-                    q.avg_duration * q.observation_count for q in top_queries
-                ) or 1.0
-                final_queries = []
-                for q in top_queries:
-                    if options.min_freq > 0 and q.observation_count < options.min_freq:
-                        continue
-                    load_pct = (q.avg_duration * q.observation_count / final_total_ms) * 100
-                    if options.min_load_pct > 0 and load_pct < options.min_load_pct:
-                        continue
-                    final_queries.append(
-                        TopQueryData(
-                            query_hash=self._compute_registry_hash(q.query_text),
-                            query_text=q.query_text,
-                            normalized_query=q.normalized_query,
-                            freq=q.observation_count,
-                            total_time=f"{q.max_duration_seen / 1000:.3f}s",
-                            avg_time=f"{q.avg_duration / 1000:.3f}s",
-                            pct_load=f"{load_pct:.1f}%",
-                            max_duration_ms=q.max_duration_seen,
-                            current_instances=q.current_instances_running,
-                            observation_count=q.observation_count,
-                        )
-                    )
+                final_queries = self._filter_and_build_realtime_queries(
+                    top_queries, options,
+                )
                 yield TopCompleteEvent(
                     type="complete",
                     success=True,
@@ -833,10 +779,8 @@ class TopService:
             else:
                 df["pct_load"] = 0.0
 
-        # QPS is only meaningful for real-time streaming where the sample
-        # window is a known, bounded interval.  In historical mode the
-        # sample_seconds value spans back to the last stats reset, so
-        # freq / sample_seconds would undercount the true rate.
+        # QPS only meaningful in realtime mode; historical sample_seconds
+        # spans back to last stats reset so freq/sample_seconds is misleading.
         df["qps_value"] = 0.0
 
         # Apply quantitative filters
@@ -890,6 +834,57 @@ class TopService:
         from ..db_connection import create_direct_connection
 
         return create_direct_connection(target_config)
+
+    def _filter_and_build_realtime_queries(
+        self,
+        top_queries: list,
+        options: TopOptions,
+        runtime: Optional[float] = None,
+    ) -> List[TopQueryData]:
+        """Filter tracked queries and build TopQueryData list."""
+        if not top_queries:
+            return []
+
+        total_ms = sum(
+            q.avg_duration * q.observation_count for q in top_queries
+        ) or 1.0
+
+        result: List[TopQueryData] = []
+        for q in top_queries:
+            if options.min_freq > 0 and q.observation_count < options.min_freq:
+                continue
+
+            cumulative_ms = q.avg_duration * q.observation_count
+            # Total cumulative time in seconds (matches historical total_time_sort)
+            if options.min_total_time_s > 0 and (cumulative_ms / 1000) < options.min_total_time_s:
+                continue
+
+            load_pct = (cumulative_ms / total_ms) * 100
+            if options.min_load_pct > 0 and load_pct < options.min_load_pct:
+                continue
+
+            qps_value = (
+                (q.observation_count / runtime)
+                if runtime and runtime > 0
+                else None
+            )
+
+            result.append(
+                TopQueryData(
+                    query_hash=self._compute_registry_hash(q.query_text),
+                    query_text=q.query_text,
+                    normalized_query=q.normalized_query,
+                    freq=q.observation_count,
+                    total_time=f"{q.max_duration_seen / 1000:.3f}s",
+                    avg_time=f"{q.avg_duration / 1000:.3f}s",
+                    pct_load=f"{load_pct:.1f}%",
+                    qps=qps_value,
+                    max_duration_ms=q.max_duration_seen,
+                    current_instances=q.current_instances_running,
+                    observation_count=q.observation_count,
+                )
+            )
+        return result
 
     def _compute_registry_hash(self, query_text: str) -> str:
         """Compute the registry hash for a query."""

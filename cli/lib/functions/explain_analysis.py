@@ -871,6 +871,12 @@ def _mysql_connection(conn_params):
 
 
 # PostgreSQL plan analysis helpers
+def _get_plan_row_count(node: Dict[str, Any]) -> int:
+    """Get row count from a plan node, preferring Actual Rows over Plan Rows."""
+    rows = node.get('Actual Rows')
+    return rows if rows is not None else node.get('Plan Rows', 0)
+
+
 def _extract_postgres_rows_examined(plan_data: Dict[str, Any]) -> int:
     """Extract total rows examined from PostgreSQL EXPLAIN plan.
 
@@ -878,10 +884,7 @@ def _extract_postgres_rows_examined(plan_data: Dict[str, Any]) -> int:
     'Plan Rows' (estimated) when ANALYZE data isn't available.
     """
     def extract_from_node(node):
-        rows = node.get('Actual Rows')
-        if rows is None:
-            rows = node.get('Plan Rows', 0)
-        total = rows
+        total = _get_plan_row_count(node)
         for child in node.get('Plans', []):
             total += extract_from_node(child)
         return total
@@ -898,11 +901,7 @@ def _extract_postgres_rows_returned(plan_data: Dict[str, Any]) -> int:
     'Plan Rows' (estimated) when ANALYZE data isn't available.
     """
     if isinstance(plan_data, dict) and 'Plan' in plan_data:
-        plan = plan_data['Plan']
-        rows = plan.get('Actual Rows')
-        if rows is None:
-            rows = plan.get('Plan Rows', 0)
-        return rows
+        return _get_plan_row_count(plan_data['Plan'])
     return 0
 
 

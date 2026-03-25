@@ -6,8 +6,12 @@ querying the live database. Used for shallow analysis mode where DB
 connection is not available at scan time.
 """
 
-from pathlib import Path
 from typing import Dict, Any
+
+try:
+    from ..constants import RDST_SEMANTIC_LAYER_DIR
+except ImportError:
+    from lib.constants import RDST_SEMANTIC_LAYER_DIR
 
 from ..data_structures.semantic_layer import SemanticLayer
 
@@ -42,7 +46,7 @@ def collect_schema_from_yaml(target: str = None, **kwargs) -> Dict[str, Any]:
         }
 
     # Check if semantic layer YAML exists
-    schema_path = Path.home() / ".rdst" / "semantic-layer" / f"{target}.yaml"
+    schema_path = RDST_SEMANTIC_LAYER_DIR / f"{target}.yaml"
 
     if not schema_path.exists():
         return {

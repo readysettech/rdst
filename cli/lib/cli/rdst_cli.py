@@ -22,6 +22,10 @@ import toml
 from rich.console import Group
 
 from lib.ui import KeyValueTable, MessagePanel, SimpleTree, get_console
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
 
 # Local cloud agent modules (will be used by future implementations)
 # We import lazily inside methods to avoid side-effects and heavy imports at module load time.
@@ -223,7 +227,7 @@ class TargetsConfig:
     """Simple TOML-based targets storage under ~/.rdst/config.toml"""
 
     def __init__(self, path: Optional[str] = None):
-        self.path = Path(path) if path else Path.home() / ".rdst" / "config.toml"
+        self.path = Path(path) if path else RDST_DATA_DIR / "config.toml"
         self._data: Dict[str, Any] = {
             "targets": {},
             "default": None,

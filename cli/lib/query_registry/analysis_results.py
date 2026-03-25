@@ -13,6 +13,11 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
 import toml
 
 from .query_registry import QueryRegistry, hash_sql
@@ -92,7 +97,7 @@ class AnalysisResultsRegistry:
         if registry_path:
             self.registry_path = Path(registry_path)
         else:
-            self.registry_path = Path.home() / ".rdst" / "analysis_results.toml"
+            self.registry_path = RDST_DATA_DIR / "analysis_results.toml"
 
         # In-memory cache of analysis results
         self._results: Dict[str, Dict[str, AnalysisResult]] = {}  # {query_hash: {analysis_id: result}}

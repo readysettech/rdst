@@ -24,7 +24,6 @@ class QueryRegistryEntry(BaseModel):
     source: str
     most_recent_params: dict = {}
     first_analyzed: Optional[str] = None
-    last_target: Optional[str] = None
     max_duration_ms: float = 0.0
     avg_duration_ms: float = 0.0
     observation_count: int = 0
@@ -92,7 +91,6 @@ async def get_query_registry(
                     source=q.source,
                     most_recent_params=q.most_recent_params,
                     first_analyzed=q.first_analyzed,
-                    last_target=q.last_target,
                     max_duration_ms=q.max_duration_ms,
                     avg_duration_ms=q.avg_duration_ms,
                     observation_count=q.observation_count,

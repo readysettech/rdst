@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
 from .formatters import Formatter as F
 
 logger = logging.getLogger(__name__)
@@ -46,7 +50,7 @@ class SessionInspector:
             SessionInspector instance
         """
         if sessions_root is None:
-            sessions_root = Path.home() / ".rdst" / "sessions"
+            sessions_root = RDST_DATA_DIR / "sessions"
 
         # Find matching session directory
         for session_dir in sessions_root.iterdir():

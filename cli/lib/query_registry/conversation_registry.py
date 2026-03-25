@@ -12,6 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
+
 
 @dataclass
 class ConversationMessage:
@@ -139,7 +144,7 @@ class ConversationRegistry:
         if conversations_dir:
             self.conversations_dir = Path(conversations_dir)
         else:
-            self.conversations_dir = Path.home() / ".rdst" / "conversations"
+            self.conversations_dir = RDST_DATA_DIR / "conversations"
 
         self._ensure_directory()
 

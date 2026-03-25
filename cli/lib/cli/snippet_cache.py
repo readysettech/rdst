@@ -17,9 +17,13 @@ Cache storage: ~/.rdst/cache/scan-snippets/<project>.json
 
 import json
 import hashlib
-from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional, Any
+
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
 
 
 class SnippetCache:
@@ -35,7 +39,7 @@ class SnippetCache:
 
     def __init__(self, project_name: str = "default"):
         self.project_name = project_name
-        self.cache_dir = Path.home() / ".rdst" / "cache" / "scan-snippets"
+        self.cache_dir = RDST_DATA_DIR / "cache" / "scan-snippets"
         self.cache_file = self.cache_dir / f"{project_name}.json"
         self.cache: Dict[str, Dict[str, Any]] = {}
         self._load()

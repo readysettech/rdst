@@ -146,11 +146,8 @@ def _event_to_sse(event: TopEvent) -> dict:
 
 async def _realtime_generator(
     target: str,
-    limit: int,
+    options: TopOptions,
     duration: Optional[int],
-    auto_save: bool,
-    min_freq: int,
-    min_load_pct: float,
 ) -> AsyncGenerator[dict, None]:
     """Generate SSE events for realtime streaming."""
     try:
@@ -159,7 +156,7 @@ async def _realtime_generator(
             "source": "web",
             "target": target,
             "mode": "realtime",
-            "limit": limit,
+            "limit": options.limit,
             "duration": duration,
         })
     except Exception:
@@ -167,13 +164,6 @@ async def _realtime_generator(
 
     service = TopService()
     input_data = TopInput(target=target, source="activity")
-    options = TopOptions(
-        limit=limit,
-        poll_interval_ms=200,
-        auto_save_registry=auto_save,
-        min_freq=min_freq,
-        min_load_pct=min_load_pct,
-    )
 
     try:
         async for event in service.stream_realtime(input_data, options, duration):
@@ -185,24 +175,11 @@ async def _realtime_generator(
 async def _historical_generator(
     target: str,
     source: str,
-    limit: int,
-    sort: str,
-    filter_pattern: Optional[str],
-    auto_save: bool,
-    min_freq: int,
-    min_load_pct: float,
+    options: TopOptions,
 ) -> AsyncGenerator[dict, None]:
     """Generate SSE events for historical one-shot."""
     service = TopService()
     input_data = TopInput(target=target, source=source)
-    options = TopOptions(
-        limit=limit,
-        sort=sort,
-        filter_pattern=filter_pattern,
-        auto_save_registry=auto_save,
-        min_freq=min_freq,
-        min_load_pct=min_load_pct,
-    )
 
     try:
         async for event in service.get_top_queries(input_data, options):
@@ -224,6 +201,7 @@ async def get_top_queries(
     filter_pattern: Optional[str] = Query(None, description="Regex filter for queries"),
     min_freq: int = Query(0, ge=0, description="Minimum executions/frequency"),
     min_load_pct: float = Query(0.0, ge=0.0, description="Minimum load percentage"),
+    min_total_time_s: float = Query(0.0, ge=0.0, description="Minimum total time in seconds"),
     auto_save: bool = Query(True, description="Auto-save queries to registry"),
     stream: bool = Query(False, description="Return SSE stream instead of JSON (alias for realtime)"),
 ):
@@ -257,25 +235,24 @@ async def get_top_queries(
     GET /api/top?target=mydb&realtime=true&duration=10
     ```
     """
+    options = TopOptions(
+        limit=limit,
+        sort=sort,
+        filter_pattern=filter_pattern,
+        auto_save_registry=auto_save,
+        min_freq=min_freq,
+        min_load_pct=min_load_pct,
+        min_total_time_s=min_total_time_s,
+    )
+
     if realtime:
         return EventSourceResponse(
-            _realtime_generator(
-                guard.target_name, limit, duration, auto_save, min_freq, min_load_pct
-            )
+            _realtime_generator(guard.target_name, options, duration)
         )
 
     if stream:
         return EventSourceResponse(
-            _historical_generator(
-                guard.target_name,
-                source,
-                limit,
-                sort,
-                filter_pattern,
-                auto_save,
-                min_freq,
-                min_load_pct,
-            )
+            _historical_generator(guard.target_name, source, options)
         )
 
     try:
@@ -293,14 +270,6 @@ async def get_top_queries(
     # Historical one-shot - collect all events and return JSON
     service = TopService()
     input_data = TopInput(target=guard.target_name, source=source)
-    options = TopOptions(
-        limit=limit,
-        sort=sort,
-        filter_pattern=filter_pattern,
-        auto_save_registry=auto_save,
-        min_freq=min_freq,
-        min_load_pct=min_load_pct,
-    )
 
     result = None
     target_name = ""
@@ -362,6 +331,7 @@ async def get_top_queries_realtime(
     auto_save: bool = Query(True, description="Auto-save queries to registry"),
     min_freq: int = Query(0, ge=0, description="Minimum executions/frequency"),
     min_load_pct: float = Query(0.0, ge=0.0, description="Minimum load percentage"),
+    min_total_time_s: float = Query(0.0, ge=0.0, description="Minimum total time in seconds"),
 ):
     """Realtime top queries via SSE streaming.
 
@@ -390,8 +360,13 @@ async def get_top_queries_realtime(
     });
     ```
     """
+    options = TopOptions(
+        limit=limit,
+        auto_save_registry=auto_save,
+        min_freq=min_freq,
+        min_load_pct=min_load_pct,
+        min_total_time_s=min_total_time_s,
+    )
     return EventSourceResponse(
-        _realtime_generator(
-            guard.target_name, limit, duration, auto_save, min_freq, min_load_pct
-        )
+        _realtime_generator(guard.target_name, options, duration)
     )

@@ -6,7 +6,6 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 try:
@@ -19,8 +18,13 @@ try:
 except ImportError:
     tomli_w = None
 
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
 
-SLACK_CONFIG_DIR = Path.home() / ".rdst" / "slack"
+
+SLACK_CONFIG_DIR = RDST_DATA_DIR / "slack"
 CREDENTIALS_FILE = SLACK_CONFIG_DIR / "credentials.json"
 AGENTS_DIR = SLACK_CONFIG_DIR / "agents"
 

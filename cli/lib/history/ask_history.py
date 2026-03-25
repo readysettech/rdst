@@ -10,6 +10,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
+
 
 @dataclass
 class HistoryEntry:
@@ -42,7 +47,7 @@ class AskHistory:
             history_file: Path to history file (default: ~/.rdst/ask_history.jsonl)
         """
         if history_file is None:
-            history_file = Path.home() / '.rdst' / 'ask_history.jsonl'
+            history_file = RDST_DATA_DIR / 'ask_history.jsonl'
 
         self.history_file = Path(history_file)
         self._ensure_directory()

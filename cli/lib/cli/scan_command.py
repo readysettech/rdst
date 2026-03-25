@@ -39,6 +39,10 @@ from lib.ui import (
 from contextlib import contextmanager
 
 from .rdst_cli import RdstResult
+try:
+    from ..constants import RDST_SEMANTIC_LAYER_DIR
+except ImportError:
+    from lib.constants import RDST_SEMANTIC_LAYER_DIR
 
 
 @contextmanager
@@ -351,7 +355,7 @@ class ScanCommand:
         """Detect SQL dialect from target's semantic layer YAML."""
         if not target:
             return "PostgreSQL"
-        schema_file = Path.home() / ".rdst" / "semantic-layer" / f"{target}.yaml"
+        schema_file = RDST_SEMANTIC_LAYER_DIR / f"{target}.yaml"
         if schema_file.exists():
             try:
                 content = schema_file.read_text()

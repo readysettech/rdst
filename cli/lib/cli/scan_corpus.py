@@ -13,9 +13,13 @@ matched across different sources:
 import os
 import hashlib
 import json
-from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Any
+
+try:
+    from ..constants import RDST_DATA_DIR
+except ImportError:
+    from lib.constants import RDST_DATA_DIR
 
 # Import deep normalization from query_registry for cross-source matching
 from lib.query_registry.query_registry import hash_sql_deep, normalize_sql_deep
@@ -37,7 +41,7 @@ class QueryCorpus:
 
     def __init__(self, project_name: str = "default"):
         self.project_name = project_name
-        self.corpus_dir = Path.home() / ".rdst" / "corpus"
+        self.corpus_dir = RDST_DATA_DIR / "corpus"
         self.corpus_file = self.corpus_dir / f"{project_name}.yaml"
         self.queries: Dict[str, Dict] = {}  # hash -> query data
         self.metadata: Dict[str, Any] = {}
