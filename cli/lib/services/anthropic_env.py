@@ -72,7 +72,7 @@ def get_anthropic_source(
 def get_anthropic_api_key(
     secret_store: Any | None = None,
     cfg: Any | None = None,
- ) -> str | None:
+) -> str | None:
     """Return the first configured Anthropic credential."""
     direct_key = os.environ.get("ANTHROPIC_API_KEY")
     if direct_key:

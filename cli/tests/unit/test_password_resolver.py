@@ -15,7 +15,6 @@ class FakeSecretStore:
     def is_available(self) -> bool:
         return True
 
-
 # -- Priority order tests --
 
 
@@ -88,7 +87,6 @@ def test_default_secret_store_instantiated(monkeypatch):
     # Should not raise — just returns missing since keychain likely empty in test
     result = resolve_password(cfg)
     assert result.source in ("secure_store", "missing")
-
 
 
 # -- resolve_password_value tests --

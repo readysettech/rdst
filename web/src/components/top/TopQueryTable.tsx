@@ -12,6 +12,7 @@ import { Card } from '@rs/ui-new/card';
 import { Show } from '@rs/ui-new/show';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
 import { SQLDisplay } from '../SQLDisplay';
+import { CacheButton } from '../CacheButton';
 import type { TopQuery, TopState } from '../../types/top';
 
 interface TopQueryTableProps {
@@ -19,6 +20,9 @@ interface TopQueryTableProps {
   state: TopState;
   isRealtime: boolean;
   onAnalyze: (query: TopQuery) => void;
+  onCache?: (query: TopQuery) => void;
+  cachingHash?: string | null;
+  isCached?: (sql: string) => boolean;
 }
 
 function getCollapsedPreview(sql: string): string {
@@ -47,6 +51,9 @@ export function TopQueryTable({
   state,
   isRealtime,
   onAnalyze,
+  onCache,
+  cachingHash,
+  isCached,
 }: TopQueryTableProps) {
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
 
@@ -125,161 +132,97 @@ export function TopQueryTable({
             </HStack>
           </div>
 
-          {/* Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-surface-layout-2/30">
-                  <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium w-10">
-                    #
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
-                    Hash
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium">
-                    Query
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
-                    Freq
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
-                    {isRealtime ? 'Max Dur' : 'Total'}
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
-                    Avg
-                  </th>
-                  <Show when={isRealtime}>
-                    <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
-                      QPS
-                    </th>
-                  </Show>
-                  <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-16">
-                    Load
-                  </th>
-                  <Show when={isRealtime}>
-                    <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-16">
-                      Now
-                    </th>
-                  </Show>
-                  <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-28">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border-layout-1">
-                <AnimatePresence mode="popLayout">
-                  {queries.map((query, index) => {
-                    const isExpanded = expandedHash === query.query_hash;
-                    const hasRunning = (query.current_instances_running ?? 0) > 0;
-                    const collapsedPreview = getCollapsedPreview(query.query_text);
+          {/* Query rows */}
+          <div className="divide-y divide-border-layout-1">
+            <AnimatePresence mode="popLayout">
+              {queries.map((query, index) => {
+                const isExpanded = expandedHash === query.query_hash;
+                const hasRunning = (query.current_instances_running ?? 0) > 0;
+                const collapsedPreview = getCollapsedPreview(query.query_text);
 
-                    return (
-                      <m.tr
-                        key={query.query_hash}
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 10 }}
-                        transition={{ duration: 0.2, delay: index * 0.03 }}
-                        className={`group transition-colors ${hasRunning ? 'bg-surface-positive-soft/20' : 'hover:bg-surface-layout-2/50'}`}
-                      >
-                        <td className="px-4 py-3 align-top">
-                          <Text as="span" level="mono-small" className="text-content-layout-3">
-                            {index + 1}
-                          </Text>
-                        </td>
-                        <td className="px-4 py-3 align-top">
-                          <Text as="span" level="mono-small" className="text-content-layout-2">
-                            {query.query_hash.slice(0, 8)}
-                          </Text>
-                        </td>
-                        <td className="px-4 py-3 align-top">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedHash(isExpanded ? null : query.query_hash)
-                            }
-                            className="text-left bg-surface-layout-2 px-3 py-2 rounded-lg hover:bg-surface-primary-soft transition-colors cursor-pointer max-w-lg block"
-                            title={query.query_text}
-                          >
-                            <SQLDisplay
-                              sql={
-                                isExpanded
-                                  ? query.query_text
-                                  : collapsedPreview.length > 80
-                                    ? `${collapsedPreview.slice(0, 80)}...`
-                                    : collapsedPreview
-                              }
-                              wrap={isExpanded}
-                            />
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 align-top text-right">
-                          <Text as="span" level="mono-small" className="text-content-layout-1">
-                            {isRealtime && query.observation_count !== undefined
-                              ? query.observation_count
-                              : query.freq}
-                          </Text>
-                        </td>
-                        <td className="px-4 py-3 align-top text-right">
-                          <Text as="span" level="mono-small" className="text-content-layout-1">
-                            {isRealtime && query.max_duration_ms !== undefined
-                              ? `${query.max_duration_ms.toFixed(1)}ms`
-                              : query.total_time}
-                          </Text>
-                        </td>
-                        <td className="px-4 py-3 align-top text-right">
-                          <Text as="span" level="mono-small" className="text-content-layout-1">
-                            {query.avg_time}
-                          </Text>
-                        </td>
-                        <Show when={isRealtime}>
-                          <td className="px-4 py-3 align-top text-right">
-                            <Text as="span" level="mono-small" className="text-content-layout-1">
-                              {query.qps !== undefined ? query.qps.toFixed(2) : '-'}
-                            </Text>
-                          </td>
+                return (
+                  <m.div
+                    key={query.query_hash}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    transition={{ duration: 0.2, delay: index * 0.03 }}
+                    className={`group px-5 py-3.5 transition-colors ${hasRunning ? 'bg-surface-positive-soft/20' : 'hover:bg-surface-layout-2/30'}`}
+                  >
+                    {/* Row 1: Hash + Actions */}
+                    <HStack className="justify-between items-center gap-3">
+                      <HStack className="gap-2 items-center">
+                        <Text as="span" level="mono-small" className="text-content-layout-3">
+                          {query.query_hash.slice(0, 8)}
+                        </Text>
+                        <Show when={hasRunning}>
+                          <Tag size="small" variant="positive" modifier="solid" label={`${query.current_instances_running} running`} />
                         </Show>
-                        <td className="px-4 py-3 align-top text-right">
-                          <Text as="span" level="mono-small" className="text-content-layout-1">
-                            {query.pct_load}
-                          </Text>
-                        </td>
-                        <Show when={isRealtime}>
-                          <td className="px-4 py-3 align-top text-right">
-                            <Show when={hasRunning}>
-                              <Tag
-                                size="small"
-                                variant="positive"
-                                modifier="solid"
-                                label={String(query.current_instances_running)}
-                              />
-                            </Show>
-                            <Show when={!hasRunning}>
-                              <Text as="span" level="mono-small" className="text-content-layout-3">
-                                -
-                              </Text>
-                            </Show>
-                          </td>
-                        </Show>
-                        <td className="px-4 py-3 align-top">
-                          <div className="flex justify-end">
-                            <Button
-                              variant="primary"
-                              modifier="ghost"
-                              size="small"
-                              icon="speedometer"
-                              iconPosition="left"
-                              label="Analyze"
-                              onClick={() => onAnalyze(query)}
-                            />
-                          </div>
-                        </td>
-                      </m.tr>
-                    );
-                  })}
-                </AnimatePresence>
-              </tbody>
-            </table>
+                      </HStack>
+                      <div className="shrink-0 flex gap-1 items-center">
+                        {onCache && (
+                          <CacheButton
+                            cached={!!isCached?.(query.query_text)}
+                            loading={cachingHash === query.query_hash}
+                            onClick={() => onCache(query)}
+                          />
+                        )}
+                        <Button
+                          variant="primary"
+                          modifier="ghost"
+                          size="small"
+                          icon="speedometer"
+                          iconPosition="left"
+                          label="Analyze"
+                          onClick={() => onAnalyze(query)}
+                        />
+                      </div>
+                    </HStack>
+
+                    {/* Row 2: SQL */}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedHash(isExpanded ? null : query.query_hash)}
+                      className="mt-2 text-left bg-surface-layout-2 px-3 py-2 rounded-lg hover:ring-1 hover:ring-border-primary-soft transition-all cursor-pointer w-full block"
+                      title={query.query_text}
+                    >
+                      <SQLDisplay
+                        sql={
+                          isExpanded
+                            ? query.query_text
+                            : collapsedPreview.length > 120
+                              ? `${collapsedPreview.slice(0, 120)}...`
+                              : collapsedPreview
+                        }
+                        wrap={isExpanded}
+                        showCopy={isExpanded}
+                      />
+                    </button>
+
+                    {/* Row 3: Stats */}
+                    <HStack className="mt-2 gap-2 flex-wrap items-center">
+                      <Tag
+                        size="small"
+                        variant="informative"
+                        modifier="ghost"
+                        label={`Freq: ${isRealtime && query.observation_count !== undefined ? query.observation_count : query.freq}`}
+                      />
+                      <Tag
+                        size="small"
+                        variant="warning"
+                        modifier="ghost"
+                        label={`${isRealtime ? 'Max' : 'Total'}: ${isRealtime && query.max_duration_ms !== undefined ? `${query.max_duration_ms.toFixed(1)}ms` : query.total_time}`}
+                      />
+                      <Tag size="small" variant="warning" modifier="ghost" label={`Avg: ${query.avg_time}`} />
+                      <Tag size="small" variant="primary" modifier="ghost" label={`Load: ${query.pct_load}`} />
+                      <Show when={isRealtime && query.qps !== undefined}>
+                        <Tag size="small" variant="informative" modifier="ghost" label={`QPS: ${query.qps?.toFixed(2)}`} />
+                      </Show>
+                    </HStack>
+                  </m.div>
+                );
+              })}
+            </AnimatePresence>
           </div>
         </Card.Content>
       </Card>

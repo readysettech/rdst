@@ -17,6 +17,7 @@ import { useTarget } from '../hooks/useTarget';
 import { useRecentScanDirs } from '../hooks/useRecentScanDirs';
 import { useScan } from '../lib/useScan';
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
+import { useCacheAction } from '../lib/useCacheAction';
 import {
   ScanHeader,
   ScanFilters,
@@ -34,6 +35,13 @@ function ScanPage() {
   const { target } = useTarget();
   const { recentDirs, addRecentDir } = useRecentScanDirs();
   const passwordLock = useTargetPasswordLock(target);
+
+  // Cache integration
+  const { cacheQuery, cachingId: cachingHash } = useCacheAction({ target });
+
+  const handleCacheQuery = useCallback((sql: string) => {
+    cacheQuery(sql, sql);
+  }, [cacheQuery]);
 
   // Filter state
   const [directory, setDirectory] = useState('');
@@ -238,7 +246,13 @@ function ScanPage() {
 
             {summary && <ScanSummaryPanel summary={summary} />}
 
-            <ScanResultsTable queries={queries} state={state} target={target} />
+            <ScanResultsTable
+              queries={queries}
+              state={state}
+              target={target}
+              onCacheQuery={handleCacheQuery}
+              cachingHash={cachingHash}
+            />
 
             {summary?.analysis && <ScanAnalysisTable analysis={summary.analysis} scanTarget={scanTarget} />}
           </m.div>

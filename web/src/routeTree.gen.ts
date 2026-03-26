@@ -19,6 +19,7 @@ import { Route as QueryRegistryRouteImport } from './routes/query-registry'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as DevSettingsRouteImport } from './routes/dev-settings'
 import { Route as ConfigureRouteImport } from './routes/configure'
+import { Route as CacheRouteImport } from './routes/cache'
 import { Route as BenchmarkRouteImport } from './routes/benchmark'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as IndexRouteImport } from './routes/index'
@@ -73,6 +74,11 @@ const ConfigureRoute = ConfigureRouteImport.update({
   path: '/configure',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CacheRoute = CacheRouteImport.update({
+  id: '/cache',
+  path: '/cache',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BenchmarkRoute = BenchmarkRouteImport.update({
   id: '/benchmark',
   path: '/benchmark',
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/benchmark': typeof BenchmarkRoute
+  '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
   '/dev-settings': typeof DevSettingsRoute
   '/onboarding': typeof OnboardingRoute
@@ -108,6 +115,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/benchmark': typeof BenchmarkRoute
+  '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
   '/dev-settings': typeof DevSettingsRoute
   '/onboarding': typeof OnboardingRoute
@@ -124,6 +132,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
   '/benchmark': typeof BenchmarkRoute
+  '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
   '/dev-settings': typeof DevSettingsRoute
   '/onboarding': typeof OnboardingRoute
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/'
     | '/ask'
     | '/benchmark'
+    | '/cache'
     | '/configure'
     | '/dev-settings'
     | '/onboarding'
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
     | '/'
     | '/ask'
     | '/benchmark'
+    | '/cache'
     | '/configure'
     | '/dev-settings'
     | '/onboarding'
@@ -171,6 +182,7 @@ export interface FileRouteTypes {
     | '/'
     | '/ask'
     | '/benchmark'
+    | '/cache'
     | '/configure'
     | '/dev-settings'
     | '/onboarding'
@@ -187,6 +199,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AskRoute: typeof AskRoute
   BenchmarkRoute: typeof BenchmarkRoute
+  CacheRoute: typeof CacheRoute
   ConfigureRoute: typeof ConfigureRoute
   DevSettingsRoute: typeof DevSettingsRoute
   OnboardingRoute: typeof OnboardingRoute
@@ -271,6 +284,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfigureRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cache': {
+      id: '/cache'
+      path: '/cache'
+      fullPath: '/cache'
+      preLoaderRoute: typeof CacheRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/benchmark': {
       id: '/benchmark'
       path: '/benchmark'
@@ -299,6 +319,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AskRoute: AskRoute,
   BenchmarkRoute: BenchmarkRoute,
+  CacheRoute: CacheRoute,
   ConfigureRoute: ConfigureRoute,
   DevSettingsRoute: DevSettingsRoute,
   OnboardingRoute: OnboardingRoute,

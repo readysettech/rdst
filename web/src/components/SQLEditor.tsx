@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { sql, PostgreSQL, MySQL } from "@codemirror/lang-sql";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, tooltips } from "@codemirror/view";
 import {
   autocompletion,
   startCompletion,
@@ -266,6 +266,7 @@ export function SQLEditor({
         },
       ]),
       createSQLLinter(schema),
+      tooltips({ parent: document.body }),
       EditorView.lineWrapping,
       EditorView.updateListener.of((update) => {
         if (update.focusChanged) {

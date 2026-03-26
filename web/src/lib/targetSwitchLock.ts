@@ -7,7 +7,9 @@ export type TargetLockReason =
   | 'top'
   | 'scan'
   | 'benchmark'
-  | 'readyset';
+  | 'readyset'
+  | 'cache-deploy'
+  | 'cache-run';
 
 interface TargetSwitchLockState {
   isLocked: boolean;
@@ -22,6 +24,8 @@ const reasonMessage: Record<TargetLockReason, string> = {
   scan: 'Target switching is disabled while Scan is in progress.',
   benchmark: 'Target switching is disabled while Benchmark is in progress.',
   readyset: 'Target switching is disabled while Readyset operations are in progress.',
+  'cache-deploy': 'Target switching is disabled while cache deployment is in progress.',
+  'cache-run': 'Target switching is disabled while cache performance comparison is in progress.',
 };
 
 const lockCounts = new Map<TargetLockReason, number>();

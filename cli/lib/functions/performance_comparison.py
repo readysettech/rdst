@@ -17,6 +17,168 @@ from lib.ui import (
 from lib.ui.theme import duration_style
 
 
+def _open_persistent_connection(db_config: Dict[str, Any]):
+    """Open a persistent database connection for benchmarking.
+
+    Returns (connection, engine) tuple. Caller must close the connection.
+    """
+    engine = (db_config.get("engine") or "postgresql").lower()
+    host = str(db_config.get("host") or "localhost")
+    default_port = 3306 if engine == "mysql" else 5432
+    port = int(db_config.get("port") or default_port)
+    database = str(db_config.get("database") or "")
+    user = str(db_config.get("user") or "")
+    password = db_config.get("password", "")
+
+    if engine == "mysql":
+        normalized_host = host if host != "localhost" else "127.0.0.1"
+        import pymysql
+        conn = pymysql.connect(
+            host=normalized_host, port=port, user=user,
+            password=password, database=database, connect_timeout=30,
+            autocommit=True,
+        )
+    else:
+        import psycopg2
+        conn = psycopg2.connect(
+            host=host, port=port, user=user,
+            password=password, database=database, connect_timeout=30,
+        )
+        conn.autocommit = True
+    return conn, engine
+
+
+def _execute_on_connection(conn, query: str, engine: str) -> Dict[str, Any]:
+    """Execute a query on an existing connection and measure query time only."""
+    try:
+        start = time.perf_counter()
+        with conn.cursor() as cursor:
+            cursor.execute(query)
+            cursor.fetchall()
+        end = time.perf_counter()
+        return {"success": True, "execution_time_ms": (end - start) * 1000}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def run_comparison(
+    query: str,
+    original_db_config: Dict[str, Any],
+    readyset_db_config: Dict[str, Any],
+    iterations: int = 5,
+    warmup_iterations: int = 2,
+    on_progress: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Run a headless performance comparison — no console output.
+
+    Uses persistent connections so that connection overhead is excluded
+    from timing measurements.  Only query execution time is measured.
+
+    Args:
+        on_progress: Optional callable(stage, current, total) for progress updates.
+
+    Suitable for service-layer / API use.
+    """
+    def _progress(stage: str, current: int, total: int):
+        if on_progress:
+            try:
+                on_progress(stage, current, total)
+            except Exception:
+                pass
+
+    origin_conn = None
+    cache_conn = None
+    try:
+        # Open persistent connections up front
+        origin_conn, origin_engine = _open_persistent_connection(original_db_config)
+        cache_conn, cache_engine = _open_persistent_connection(readyset_db_config)
+
+        total_steps = warmup_iterations * 2 + iterations * 2
+
+        # Warmup — both targets
+        for i in range(warmup_iterations):
+            _execute_on_connection(origin_conn, query, origin_engine)
+            _progress("warmup", i + 1, warmup_iterations * 2)
+        for i in range(warmup_iterations):
+            _execute_on_connection(cache_conn, query, cache_engine)
+            _progress("warmup", warmup_iterations + i + 1, warmup_iterations * 2)
+
+        # Benchmark Original DB
+        original_times: List[float] = []
+        for i in range(iterations):
+            result = _execute_on_connection(origin_conn, query, origin_engine)
+            if result["success"]:
+                original_times.append(result["execution_time_ms"])
+            _progress("origin", i + 1, iterations)
+
+        if not original_times:
+            return {"success": False, "error": "All original database queries failed"}
+
+        # Benchmark Readyset
+        readyset_times: List[float] = []
+        for i in range(iterations):
+            result = _execute_on_connection(cache_conn, query, cache_engine)
+            if result["success"]:
+                readyset_times.append(result["execution_time_ms"])
+            _progress("cache", i + 1, iterations)
+
+        if not readyset_times:
+            return {"success": False, "error": "All Readyset queries failed"}
+
+        original_stats = _calculate_statistics(original_times)
+        readyset_stats = _calculate_statistics(readyset_times)
+
+        speedup = (
+            original_stats["mean"] / readyset_stats["mean"]
+            if readyset_stats["mean"] > 0
+            else 0
+        )
+        speedup_median = (
+            original_stats["median"] / readyset_stats["median"]
+            if readyset_stats["median"] > 0
+            else 0
+        )
+
+        return {
+            "success": True,
+            "query": query,
+            "iterations": iterations,
+            "original": {
+                "host": original_db_config.get("host"),
+                "port": original_db_config.get("port"),
+                "stats": original_stats,
+                "times": original_times,
+            },
+            "readyset": {
+                "host": readyset_db_config.get("host"),
+                "port": readyset_db_config.get("port"),
+                "stats": readyset_stats,
+                "times": readyset_times,
+            },
+            "speedup": {
+                "mean": speedup,
+                "median": speedup_median,
+                "improvement_pct": ((speedup - 1) * 100)
+                if speedup >= 1
+                else -((1 - speedup) * 100),
+            },
+            "winner": "readyset" if speedup > 1 else "original",
+        }
+    except Exception as e:
+        return {"success": False, "error": f"Performance comparison failed: {str(e)}"}
+    finally:
+        if origin_conn:
+            try:
+                origin_conn.close()
+            except Exception:
+                pass
+        if cache_conn:
+            try:
+                cache_conn.close()
+            except Exception:
+                pass
+
+
 def compare_query_performance(
     query: Optional[str] = None,
     original_db_config: Optional[Dict[str, Any]] = None,
@@ -30,21 +192,8 @@ def compare_query_performance(
     """
     Compare query performance between original database and Readyset.
 
-    Executes the query multiple times against both the original database
-    and Readyset, collecting timing statistics.
-
-    Args:
-        query: SQL query to benchmark
-        original_db_config: Original database configuration
-        readyset_port: Port where Readyset is listening
-        readyset_host: Host where Readyset is running
-        iterations: Number of benchmark iterations
-        warmup_iterations: Number of warmup runs (not counted in stats)
-        readyset_db_config: Readyset database configuration (for auth). If not provided, uses original_db_config credentials
-        **kwargs: Additional workflow parameters
-
-    Returns:
-        Dict containing performance comparison results
+    CLI-facing wrapper that prints Rich output during execution.
+    Delegates to run_comparison() for the actual benchmarking.
     """
     try:
         if not query or not original_db_config:
@@ -63,26 +212,12 @@ def compare_query_performance(
         readyset_db_config = cast(Dict[str, Any], readyset_db_config or {})
 
         iterations = int(iterations)
-
         warmup_iterations = int(warmup_iterations)
         readyset_port = int(readyset_port)
 
         engine = (original_db_config.get("engine") or "postgresql").lower()
 
-        console = get_console()
-        console.print(SectionHeader("Benchmarking Query Performance"))
-        console.print(StatusLine("Iterations", str(iterations)))
-        console.print(StatusLine("Warmup", f"{warmup_iterations} iterations"))
-        console.print()
-
-        # Warmup - Original DB
-        console.print(StatusLine("Warmup", "Original database"))
-        for i in range(warmup_iterations):
-            _execute_query_timed(query, original_db_config, is_readyset=False)
-
-        # Warmup - Readyset
-        console.print(StatusLine("Warmup", "Readyset"))
-        # Use readyset_db_config if provided (for test container auth), otherwise fall back to original creds
+        # Build readyset config
         if readyset_db_config:
             readyset_config = {
                 "engine": engine,
@@ -103,7 +238,21 @@ def compare_query_performance(
                 "user": original_db_config.get("user"),
                 "password": original_db_config.get("password", ""),
             }
-        for i in range(warmup_iterations):
+
+        console = get_console()
+        console.print(SectionHeader("Benchmarking Query Performance"))
+        console.print(StatusLine("Iterations", str(iterations)))
+        console.print(StatusLine("Warmup", f"{warmup_iterations} iterations"))
+        console.print()
+
+        # Warmup - Original DB
+        console.print(StatusLine("Warmup", "Original database"))
+        for _ in range(warmup_iterations):
+            _execute_query_timed(query, original_db_config, is_readyset=False)
+
+        # Warmup - Readyset
+        console.print(StatusLine("Warmup", "Readyset"))
+        for _ in range(warmup_iterations):
             _execute_query_timed(query, readyset_config, is_readyset=True)
 
         console.print()

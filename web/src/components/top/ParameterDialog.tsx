@@ -29,6 +29,8 @@ interface ParameterDialogProps {
   onSubmit: (substitutedQuery: string) => void
   query: string
   initialValues?: Record<string, string | number>
+  submitLabel?: string
+  submitIcon?: 'speedometer' | 'play' | 'tick'
 }
 
 export function ParameterDialog({
@@ -37,6 +39,8 @@ export function ParameterDialog({
   onSubmit,
   query,
   initialValues,
+  submitLabel = 'Analyze Query',
+  submitIcon = 'speedometer',
 }: ParameterDialogProps) {
   const parameters = useMemo(() => detectParameters(query), [query])
   const formattedQuery = useFormatSql(query)
@@ -195,8 +199,8 @@ export function ParameterDialog({
             <Button
               variant="primary"
               modifier="solid"
-              label="Analyze Query"
-              icon="speedometer"
+              label={submitLabel}
+              icon={submitIcon}
               iconPosition="left"
               onClick={handleSubmit}
               disabled={!allFilled}

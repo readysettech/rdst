@@ -28,6 +28,10 @@ interface AnalysisResultsProps {
   readysetCacheability?: ReadysetCacheability;
   error?: string;
   target?: string;
+  cacheDeployed?: boolean;
+  onCacheQuery?: () => void;
+  onDeployNavigate?: () => void;
+  isCaching?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +153,10 @@ export function AnalysisResults({
   readysetCacheability,
   error,
   target,
+  cacheDeployed,
+  onCacheQuery,
+  onDeployNavigate,
+  isCaching,
 }: AnalysisResultsProps) {
   if (state === "idle") {
     return (
@@ -435,7 +443,13 @@ export function AnalysisResults({
           )}
 
         {cacheability && (
-          <ReadysetCacheabilitySection cacheability={cacheability} />
+          <ReadysetCacheabilitySection
+            cacheability={cacheability}
+            cacheDeployed={cacheDeployed}
+            onCacheQuery={onCacheQuery}
+            onDeployNavigate={onDeployNavigate}
+            isCaching={isCaching}
+          />
         )}
 
         {!hasLLMAnalysis && (

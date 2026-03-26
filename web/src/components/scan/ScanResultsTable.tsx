@@ -24,6 +24,8 @@ interface ScanResultsTableProps {
   queries: ScanQuery[];
   state: ScanState;
   target: string | null;
+  onCacheQuery?: (sql: string) => void;
+  cachingHash?: string | null;
 }
 
 interface FileGroup {
@@ -230,9 +232,11 @@ interface QueryRowProps {
   qIdx: number;
   onViewDetail: () => void;
   onAnalyze: () => void;
+  onCache?: () => void;
+  isCaching?: boolean;
 }
 
-function QueryRow({ query, qIdx, onViewDetail, onAnalyze }: QueryRowProps) {
+function QueryRow({ query, qIdx, onViewDetail, onAnalyze, onCache, isCaching }: QueryRowProps) {
   const collapsedSql = query.sql ? collapseWhitespace(query.sql) : '';
   const sqlPreview =
     collapsedSql.length > 120 ? `${collapsedSql.slice(0, 120)}...` : collapsedSql;
@@ -272,7 +276,19 @@ function QueryRow({ query, qIdx, onViewDetail, onAnalyze }: QueryRowProps) {
             />
           )}
         </HStack>
-        <div className="shrink-0">
+        <div className="shrink-0 flex gap-1">
+          <Show when={query.status === 'sql' && !!query.sql && !!onCache}>
+            <Button
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              icon="database-settings"
+              iconPosition="left"
+              label="Cache"
+              loading={isCaching}
+              onClick={onCache}
+            />
+          </Show>
           <Show when={query.status === 'sql' && !!query.sql}>
             <Button
               variant="primary"
@@ -322,7 +338,7 @@ function QueryRow({ query, qIdx, onViewDetail, onAnalyze }: QueryRowProps) {
   );
 }
 
-export function ScanResultsTable({ queries, state, target }: ScanResultsTableProps) {
+export function ScanResultsTable({ queries, state, target, onCacheQuery, cachingHash }: ScanResultsTableProps) {
   const navigate = useNavigate();
   const [detailQuery, setDetailQuery] = useState<ScanQuery | null>(null);
   const fileGroups = useMemo(() => groupByFile(queries), [queries]);
@@ -477,6 +493,8 @@ export function ScanResultsTable({ queries, state, target }: ScanResultsTablePro
                               qIdx={qIdx}
                               onViewDetail={() => setDetailQuery(query)}
                               onAnalyze={() => handleAnalyze(query)}
+                              onCache={onCacheQuery && query.sql ? () => onCacheQuery(query.sql!) : undefined}
+                              isCaching={cachingHash === query.snippet_hash}
                             />
                           ))}
                         </div>

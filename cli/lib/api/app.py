@@ -65,6 +65,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         analyze,
         ask,
         browse,
+        cache,
         configure,
         dev,
         env,
@@ -83,6 +84,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
 
     app.include_router(analyze.router, prefix="/api")
     app.include_router(browse.router, prefix="/api", tags=["browse"])
+    app.include_router(cache.router, prefix="/api", tags=["cache"])
     app.include_router(ask.router, prefix="/api", tags=["ask"])
     app.include_router(configure.router, prefix="/api", tags=["configure"])
     app.include_router(interactive.router, prefix="/api", tags=["interactive"])

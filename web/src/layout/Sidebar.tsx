@@ -65,6 +65,7 @@ const navItems = [
     icon: "folder-file" as const,
     to: "/query-registry",
   },
+  { label: "Cache", icon: "database-settings" as const, to: "/cache" },
   { label: "Benchmark", icon: "play" as const, to: "/benchmark" },
   { label: "Schema", icon: "layers" as const, to: "/schema" },
   { label: "Configure", icon: "settings" as const, to: "/configure" },

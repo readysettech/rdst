@@ -14,6 +14,7 @@ import { useTarget } from '../hooks/useTarget';
 import { useTop } from '../lib/useTop';
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
 import { useQueryRegistry } from '../lib/useQueryRegistry';
+import { useCacheAction } from '../lib/useCacheAction';
 import {
   TopFilters,
   TopHeader,
@@ -74,6 +75,13 @@ export function TopPage() {
   const { queries: registryQueries, addMutation: addQueryMutation } = useQueryRegistry();
   const { target } = useTarget();
   const passwordLock = useTargetPasswordLock(target);
+
+  // Cache integration
+  const { cacheQuery, cachingId: cachingHash, isCached } = useCacheAction({ target });
+
+  const handleCacheQuery = useCallback((query: TopQuery) => {
+    cacheQuery(query.query_text, query.query_hash);
+  }, [cacheQuery]);
 
   // Filter state
   const [mode, setMode] = useState<TopMode>('historical');
@@ -290,6 +298,9 @@ export function TopPage() {
         state={state}
         isRealtime={mode === 'realtime'}
         onAnalyze={handleAnalyze}
+        onCache={handleCacheQuery}
+        cachingHash={cachingHash}
+        isCached={isCached}
       />
 
       <ParameterDialog

@@ -1576,3 +1576,135 @@ WorkloadEvent = Union[
     WorkloadCompleteEvent,
     WorkloadErrorEvent,
 ]
+
+
+# ============================================================================
+# Cache Types
+# ============================================================================
+
+
+@dataclass
+class CacheInput:
+    """Input for cache service operations."""
+
+    target: str
+    query: Optional[str] = None
+    cache_id: Optional[str] = None
+    tag: Optional[str] = None
+
+
+@dataclass
+class CacheOptions:
+    """Options for cache service execution."""
+
+    dry_run: bool = False
+    mode: str = "docker"
+    port: Optional[int] = None
+    deploy_config: str = "readyset"
+    json_output: bool = False
+    yes: bool = False
+    # Non-Docker deploy options (CLI only)
+    namespace: Optional[str] = None
+    kubeconfig: Optional[str] = None
+    host: Optional[str] = None
+    ssh_key: Optional[str] = None
+    ssh_user: Optional[str] = None
+
+
+# ============================================================================
+# Cache Events
+# ============================================================================
+
+
+@dataclass
+class CacheStatusEvent:
+    """Cache deployment status."""
+
+    type: Literal["cache_status"]
+    deployed: bool
+    running: bool
+    endpoint: Optional[str] = None
+    cache_target: Optional[str] = None
+    container_name: Optional[str] = None
+
+
+@dataclass
+class CacheDeployCompleteEvent:
+    """Cache deployment completed."""
+
+    type: Literal["deploy_complete"]
+    success: bool
+    deployed: bool
+    running: bool
+    endpoint: Optional[str] = None
+    cache_target: Optional[str] = None
+    container_name: Optional[str] = None
+
+
+@dataclass
+class CacheListEvent:
+    """List of cached queries."""
+
+    type: Literal["cache_list"]
+    success: bool
+    caches: List[Dict[str, str]]
+    count: int
+
+
+@dataclass
+class CacheAddEvent:
+    """Cache add result."""
+
+    type: Literal["cache_add"]
+    success: bool
+    supported: bool
+    query: str
+    query_hash: Optional[str] = None
+    detail: Optional[str] = None
+
+
+@dataclass
+class CacheDeleteEvent:
+    """Cache delete result."""
+
+    type: Literal["cache_delete"]
+    success: bool
+    cache_id: str
+
+
+@dataclass
+class CacheDropAllEvent:
+    """Drop all caches result."""
+
+    type: Literal["cache_drop_all"]
+    success: bool
+    count: int
+
+
+@dataclass
+class CacheRunCompleteEvent:
+    """Performance comparison result (origin vs cache)."""
+
+    type: Literal["cache_run_complete"]
+    success: bool
+    query: str
+    iterations: int
+    origin_stats: Dict[str, float]
+    cache_stats: Dict[str, float]
+    speedup_mean: float
+    speedup_median: float
+    improvement_pct: float
+    winner: str  # "readyset" or "origin"
+
+
+CacheEvent = Union[
+    ProgressEvent,
+    CacheStatusEvent,
+    CacheDeployCompleteEvent,
+    CacheListEvent,
+    CacheAddEvent,
+    CacheDeleteEvent,
+    CacheDropAllEvent,
+    CacheRunCompleteEvent,
+    ErrorEvent,
+]

@@ -8,6 +8,7 @@ import { Tag } from "@rs/ui-new/tag";
 import { Text } from "@rs/ui-new/text";
 import { Card } from "@rs/ui-new/card";
 import { Icon } from "@rs/ui-new/icon";
+import { Button } from "@rs/ui-new/button";
 import { HStack, VStack } from "@rs/ui-new/stack";
 import { m } from "@rs/ui-new/motion";
 import { SQLDisplay } from "../SQLDisplay";
@@ -924,8 +925,16 @@ export function AdditionalRecommendationsSection({
 
 export function ReadysetCacheabilitySection({
   cacheability,
+  cacheDeployed,
+  onCacheQuery,
+  onDeployNavigate,
+  isCaching,
 }: {
   cacheability: ReadysetCacheability;
+  cacheDeployed?: boolean;
+  onCacheQuery?: () => void;
+  onDeployNavigate?: () => void;
+  isCaching?: boolean;
 }) {
   if (!cacheability.checked) return null;
 
@@ -981,10 +990,12 @@ export function ReadysetCacheabilitySection({
                 )}
               </VStack>
             </HStack>
-            <Tag
-              variant={isCacheable ? "positive" : "negative"}
-              label={isCacheable ? "READY" : "BLOCKED"}
-            />
+            <HStack className="gap-2 items-center">
+              <Tag
+                variant={isCacheable ? "positive" : "negative"}
+                label={isCacheable ? "READY" : "BLOCKED"}
+              />
+            </HStack>
           </HStack>
           {cacheability.explanation && (
             <Text
@@ -993,6 +1004,37 @@ export function ReadysetCacheabilitySection({
             >
               {cacheability.explanation}
             </Text>
+          )}
+
+          {/* Cache action buttons */}
+          {isCacheable && (onCacheQuery || onDeployNavigate) && (
+            <m.div
+              className="mt-5 pt-5 border-t border-border-layout-1/30"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.6 }}
+            >
+              {cacheDeployed ? (
+                <Button
+                  variant="primary"
+                  modifier="solid"
+                  label="Cache This Query"
+                  icon="add"
+                  iconPosition="left"
+                  onClick={onCacheQuery}
+                  loading={isCaching}
+                />
+              ) : (
+                <Button
+                  variant="primary"
+                  modifier="outline"
+                  label="Deploy Cache First"
+                  icon="database-settings"
+                  iconPosition="left"
+                  onClick={onDeployNavigate}
+                />
+              )}
+            </m.div>
           )}
         </div>
         {cacheability.issues && cacheability.issues.length > 0 && (

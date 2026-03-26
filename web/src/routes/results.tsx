@@ -10,6 +10,7 @@ import { AnalysisResults, SQLDisplay, InteractivePanel, TargetLockNotice } from 
 import { useAnalyze } from '../lib/sse';
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
 import { ParameterDialog, hasParameters } from '../components/top';
+import { useCacheAction } from '../lib/useCacheAction';
 
 type ResultsSearch = {
   query: string;
@@ -51,6 +52,15 @@ export function ResultsPage({ search }: ResultsPageProps) {
   const { analyze, state, progress, results, rewriteTesting, readysetCacheability, error } = useAnalyze();
   const passwordLock = useTargetPasswordLock(target);
   const [isInteractiveOpen, setIsInteractiveOpen] = useState(false);
+
+  // Cache integration
+  const { cacheQuery, isPending: isCachePending } = useCacheAction({ target: target || null });
+
+  const handleCacheQuery = useCallback(() => {
+    if (query && target) {
+      cacheQuery(query, query);
+    }
+  }, [query, target, cacheQuery]);
   const [hasExistingChat, setHasExistingChat] = useState(false);
 
   // Check if query has parameters that need substitution
@@ -220,6 +230,9 @@ export function ResultsPage({ search }: ResultsPageProps) {
         readysetCacheability={readysetCacheability}
         error={error}
         target={target}
+        cacheDeployed={true}
+        onCacheQuery={handleCacheQuery}
+        isCaching={isCachePending}
       />
 
       {/* Interactive panel */}
