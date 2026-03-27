@@ -793,7 +793,7 @@ class QueryRegistry:
             entry = self._queries[query_hash]
             entry.last_analyzed = now
             entry.frequency = frequency if frequency > 0 else entry.frequency
-            if tag and not entry.tag:  # Don't overwrite existing tags
+            if tag:
                 entry.tag = tag
             if target:  # Update last target used
                 entry.last_target = target

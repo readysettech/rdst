@@ -352,9 +352,9 @@ class TestQueryRegistry:
         assert is_new1 is True
         assert is_new2 is False
 
-        # Tag should not be overwritten
+        # Tag should be updated to new alias
         entry = registry.get_query(hash1)
-        assert entry.tag == "first"
+        assert entry.tag == "second"
 
     def test_get_query_by_tag(self, temp_dir):
         """Test retrieving query by tag."""
@@ -366,6 +366,22 @@ class TestQueryRegistry:
 
         entry = registry.get_query_by_tag("pending_orders")
         assert entry is not None
+
+    def test_update_tag_on_existing_hash(self, temp_dir):
+        # Adding same query twice with different tag should update alias.
+        registry_path = temp_dir / "test_queries.toml"
+        registry = QueryRegistry(registry_path=str(registry_path))
+
+        sql = "SELECT * FROM customers WHERE id = 5"
+        query_hash, _ = registry.add_query(sql, tag="first-name")
+
+        # Re-add same SQL with new tag
+        _, is_new = registry.add_query(sql, tag="renamed")
+        assert is_new is False
+
+        entry = registry.get_query(query_hash)
+        assert entry is not None
+        assert entry.tag == "renamed"
 
     def test_get_nonexistent_query(self, temp_dir):
         """Test getting a query that doesn't exist."""
