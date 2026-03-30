@@ -128,6 +128,7 @@ class TrialService:
         try:
             from lib.telemetry import telemetry
             telemetry.track("trial_registration", {
+                "display_name": "RDST Token Requested",
                 "email": email,
                 "email_domain": email.split("@")[1] if "@" in email else "unknown",
                 "email_tier": resp_data.get("email_tier", "business"),
@@ -182,6 +183,7 @@ class TrialService:
         try:
             from lib.telemetry import telemetry
             telemetry.track("trial_activated", {
+                "display_name": "RDST Token Confirmed",
                 "email": email,
                 "email_domain": email.split("@")[1] if "@" in email else "unknown",
                 "email_tier": email_tier or "unknown",

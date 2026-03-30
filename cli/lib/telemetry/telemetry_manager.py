@@ -599,6 +599,7 @@ class TelemetryManager:
         self._increment_stat("installations", 1)
 
         properties = {
+            "display_name": "RDST Installed",
             "install_method": install_method,  # pipx, uvx, pip, source
             "shell": os.environ.get("SHELL", "unknown"),
             "terminal": os.environ.get("TERM", "unknown"),
@@ -647,9 +648,28 @@ class TelemetryManager:
 
         self.track_with_stats("analyze_run", properties)
 
-        # Slack notification only for first successful analyze
-        # (failed analyze goes to PostHog only)
+        # Track first successful analyze as a separate event for Slack alerts
         if is_first_success:
+            first_analyze_props: Dict[str, Any] = {
+                "display_name": "RDST First Analyze",
+                "target_engine": target_engine,
+                "duration_ms": duration_ms,
+            }
+            # Include trial email if available
+            try:
+                config_file = self._rdst_dir / "config.toml"
+                if config_file.exists():
+                    content = config_file.read_text()
+                    if "[trial]" in content:
+                        import tomllib
+                        data = tomllib.loads(content)
+                        trial_email = data.get("trial", {}).get("email")
+                        if trial_email:
+                            first_analyze_props["email"] = trial_email
+                            first_analyze_props["email_domain"] = trial_email.split("@")[1] if "@" in trial_email else "unknown"
+            except Exception:
+                pass
+            self.track("first_analyze", first_analyze_props)
             self._slack_notify_first_analyze(target_engine, duration_ms)
 
     def track_top(
