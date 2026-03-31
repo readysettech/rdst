@@ -185,7 +185,7 @@ for i, line in enumerate(lines):
   if [[ "$CAPTURED_QUERIES" -gt 0 ]]; then
     run_cmd "Audit: verify registry" "${RDST_CMD[@]}" query list
     # Queries saved with capture_ or audit_ tags
-    if echo "$LAST_OUTPUT" | grep -q "capture_\|audit_"; then
+    if grep -q "capture_\|audit_" "$LAST_OUTPUT_FILE"; then
       echo "PASS: Queries auto-saved to registry"
     else
       echo "SKIP: Queries not found in registry (may not have been captured)"
@@ -264,7 +264,7 @@ for i, line in enumerate(lines):
     fi
 
     # Check for workload analysis in the output
-    if echo "$LAST_OUTPUT" | grep -q "analysis\|readyset_recommendation\|capture_characterization"; then
+    if grep -q "analysis\|readyset_recommendation\|capture_characterization" "$LAST_OUTPUT_FILE"; then
       echo "PASS: Audit duration with LLM insights (workload analysis present)"
     else
       echo "PASS: Audit duration with LLM insights (no workload queries captured for analysis)"
