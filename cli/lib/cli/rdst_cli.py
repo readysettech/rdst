@@ -341,6 +341,16 @@ class TargetsConfig:
         if model:
             self._data["llm"]["model"] = model
 
+    # User email (persisted from trial signup, feedback, etc.)
+    def get_email(self) -> Optional[str]:
+        """Get stored user email."""
+        return self._data.get("email")
+
+    def set_email(self, email: str) -> None:
+        """Store user email if not already set."""
+        if email and not self._data.get("email"):
+            self._data["email"] = email
+
     # Trial configuration methods
     def get_trial_config(self) -> Dict[str, Any]:
         """Get trial configuration."""

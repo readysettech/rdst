@@ -655,18 +655,18 @@ class TelemetryManager:
                 "target_engine": target_engine,
                 "duration_ms": duration_ms,
             }
-            # Include trial email if available
+            # Include email if available (from trial signup, feedback, etc.)
             try:
-                config_file = self._rdst_dir / "config.toml"
-                if config_file.exists():
-                    content = config_file.read_text()
-                    if "[trial]" in content:
-                        import tomllib
-                        data = tomllib.loads(content)
-                        trial_email = data.get("trial", {}).get("email")
-                        if trial_email:
-                            first_analyze_props["email"] = trial_email
-                            first_analyze_props["email_domain"] = trial_email.split("@")[1] if "@" in trial_email else "unknown"
+                from lib.cli.rdst_cli import TargetsConfig
+                cfg = TargetsConfig()
+                cfg.load()
+                email = cfg.get_email()
+                if not email:
+                    # Fall back to trial config email
+                    email = cfg.get_trial_config().get("email")
+                if email:
+                    first_analyze_props["email"] = email
+                    first_analyze_props["email_domain"] = email.split("@")[1] if "@" in email else "unknown"
             except Exception:
                 pass
             self.track("first_analyze", first_analyze_props)
@@ -876,6 +876,18 @@ class TelemetryManager:
             properties["query_sql"] = query_sql
         if include_plan and plan_json:
             properties["plan_json"] = plan_json
+
+        # Save email for enriching future telemetry events (first_analyze, etc.)
+        if email:
+            try:
+                from lib.cli.rdst_cli import TargetsConfig
+                cfg = TargetsConfig()
+                cfg.load()
+                if not cfg.get_email():
+                    cfg.set_email(email)
+                    cfg.save()
+            except Exception:
+                pass
 
         # Track in PostHog
         self.track_with_stats("feedback_submitted", properties)

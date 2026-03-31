@@ -124,7 +124,7 @@ class TrialService:
                 status_code=resp.status_code,
             )
 
-        # Success — track signup event
+        # Track signup and persist email for later telemetry enrichment (e.g. first_analyze)
         try:
             from lib.telemetry import telemetry
             telemetry.track("trial_registration", {

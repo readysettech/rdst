@@ -1310,6 +1310,21 @@ class ConfigurationWizard:
             limit_display = resp_data.get("limit_display", "$5.00")
             email_tier = resp_data.get("email_tier", "business")
 
+            try:
+                from lib.telemetry import telemetry
+                telemetry.track("trial_registration", {
+                    "display_name": "RDST Token Requested",
+                    "email": email,
+                    "email_domain": email.split("@")[1] if "@" in email else "unknown",
+                    "email_tier": email_tier,
+                    "limit_display": limit_display,
+                    "source": "cli",
+                })
+            except Exception:
+                pass
+
+            cfg.set_email(email)
+
             self.console.print(
                 MessagePanel(
                     f"Verification email sent to {email}\n\n"
@@ -1348,6 +1363,18 @@ class ConfigurationWizard:
             "status": "active",
         })
         cfg.save()
+
+        try:
+            from lib.telemetry import telemetry
+            telemetry.track("trial_activated", {
+                "display_name": "RDST Token Confirmed",
+                "email": email,
+                "email_domain": email.split("@")[1] if "@" in email else "unknown",
+                "email_tier": resp_data.get("email_tier", "unknown"),
+                "source": "cli",
+            })
+        except Exception:
+            pass
 
         self.console.print(
             MessagePanel(
