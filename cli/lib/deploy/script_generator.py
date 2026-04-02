@@ -24,6 +24,44 @@ from lib.deploy import READYSET_IMAGE
 SQUEEPY_IMAGE = "docker.io/readysettech/squeepy:latest"  # placeholder until published
 
 
+_LOCALHOST_ALIASES = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _normalize_host(host: str) -> str:
+    """Normalize localhost variants to a single value for comparison."""
+    return "localhost" if host in _LOCALHOST_ALIASES else host
+
+
+def _find_available_port(engine: str, deploy_host: str = "localhost") -> int:
+    """Find a ReadySet port that doesn't conflict with existing cache targets on the same host.
+
+    Only matters when deploying to the same host (e.g., multiple local Docker caches).
+    Remote hosts on different IPs can share the same port number.
+    """
+    default_port = DEFAULT_PORTS.get(engine, 5433)
+    normalized_deploy = _normalize_host(deploy_host)
+
+    try:
+        from lib.cli.rdst_cli import TargetsConfig
+        cfg = TargetsConfig()
+        cfg.load()
+
+        used_ports = set()
+        for _, config in cfg._data.get("targets", {}).items():
+            if config.get("target_type") != "readyset":
+                continue
+            if _normalize_host(config.get("host", "localhost")) != normalized_deploy:
+                continue
+            used_ports.add(int(config.get("port", 0)))
+
+        port = default_port
+        while port in used_ports:
+            port += 1
+        return port
+    except Exception:
+        return default_port
+
+
 def build_variables(
     target_name: str,
     target_config: dict,
@@ -34,8 +72,10 @@ def build_variables(
 ) -> Dict[str, str]:
     """Build template variables dict from target config."""
     engine = target_config.get("engine", "postgresql")
-    default_port = DEFAULT_PORTS.get(engine, 5433)
-    readyset_port = port or default_port
+    if port:
+        readyset_port = port
+    else:
+        readyset_port = _find_available_port(engine)
 
     return {
         "db_host": target_config.get("host", "localhost"),

@@ -40,6 +40,7 @@ class DeployCommand:
         kubeconfig: Optional[str] = None,
         script_only: bool = False,
         output_json: bool = False,
+        quiet: bool = False,
     ) -> RdstResult:
         if not target:
             return RdstResult(False, "Target is required. Use: rdst cache deploy --target <name> --mode <mode>")
@@ -55,20 +56,22 @@ class DeployCommand:
             host=host, ssh_key=ssh_key, ssh_user=ssh_user,
         )
         success, data, error_msg = asyncio.run(
-            self._execute_deploy(input_data, options, output_json)
+            self._execute_deploy(input_data, options, output_json, quiet=quiet)
         )
         if not success:
             return RdstResult(False, error_msg or "Deployment failed")
         return RdstResult(True, "")
 
     async def _execute_deploy(
-        self, input_data: CacheInput, options: CacheOptions, output_json: bool,
+        self, input_data: CacheInput, options: CacheOptions,
+        output_json: bool, quiet: bool = False,
     ):
         console = get_console()
         service = CacheService()
         last_event = None
 
-        console.print(f"\n{Icons.ROCKET} Deploying ReadySet for target '{input_data.target}' ({options.mode})...\n")
+        if not quiet:
+            console.print(f"\n{Icons.ROCKET} Deploying Readyset for target '{input_data.target}' ({options.mode})...\n")
 
         async for event in service.deploy(input_data, options):
             if isinstance(event, ProgressEvent):
@@ -79,7 +82,9 @@ class DeployCommand:
             return (False, None, last_event.message)
 
         if isinstance(last_event, CacheDeployCompleteEvent):
-            if output_json:
+            if quiet:
+                return (True, None, None)
+            elif output_json:
                 print(json.dumps({
                     "success": True,
                     "endpoint": last_event.endpoint,
@@ -105,9 +110,9 @@ class DeployCommand:
                     f"  Cache target: {last_event.cache_target}\n"
                     f"{container_line}"
                     f"  Next steps:\n"
+                    f"    rdst query cache-compare <query> --target {input_data.target} --count 100\n"
                     f"    rdst cache add <query> --target {last_event.cache_target}\n"
-                    f"    rdst cache show --target {last_event.cache_target}\n"
-                    f"    rdst query run <hash> --target {last_event.cache_target}\n",
+                    f"    rdst cache show --target {last_event.cache_target}\n",
                     title="Deploy Complete",
                     variant="success",
                 ))

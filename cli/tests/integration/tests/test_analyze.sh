@@ -98,56 +98,55 @@ test_analyze_interactive_flag() {
 }
 
 test_readyset_flag() {
-  log_section "4. Analyze with --readyset Flag (${DB_ENGINE})"
+  log_section "4. Analyze Auto-Readyset (${DB_ENGINE})"
 
-  # Note: --readyset flag requires a running Readyset container
-  # Cache tests have already created Readyset containers we can use
+  # Readyset analysis runs automatically when a cache target exists.
+  # No --readyset flag needed. Cache tests should have deployed ReadySet already.
 
-  # Use simple queries that Readyset can cache (equality comparisons)
   local simple_query="SELECT * FROM title_basics WHERE tconst = 'tt0000005'"
 
-  run_cmd "Analyze with --readyset using SQL text" \
+  # Verify --readyset flag is rejected (removed)
+  run_expect_fail "Verify --readyset flag removed" \
+    "${RDST_CMD[@]}" analyze --readyset --target "$TARGET_NAME" --skip-warning --query "$simple_query"
+  assert_contains "unrecognized arguments" "old flag should be rejected"
+
+  # Analyze with deployed cache — Readyset section should appear automatically
+  run_cmd "Analyze with auto-Readyset (SQL text)" \
     "${RDST_CMD[@]}" analyze \
     --target "$TARGET_NAME" \
-    --readyset \
     --skip-warning \
     --query "$simple_query"
-  assert_contains "RDST Query Analysis" "analyze --readyset should show analysis"
-  # Check that Readyset analysis was attempted (may succeed or fail gracefully)
-  assert_regex "READYSET|Readyset|readyset" "analyze --readyset should mention Readyset"
+  assert_contains "RDST Query Analysis" "should show analysis header"
+  assert_regex "Readyset Performance" "should show Readyset section"
 
-  # Store query to get hash for next test
+  # Get hash for next test
   local READYSET_HASH
   READYSET_HASH=$(latest_hash_from_list)
-  [[ -n "$READYSET_HASH" ]] || fail "Failed to capture readyset query hash"
+  [[ -n "$READYSET_HASH" ]] || fail "Failed to capture query hash"
 
-  run_cmd "Analyze with --readyset using hash (${READYSET_HASH})" \
-    "${RDST_CMD[@]}" analyze --readyset "$READYSET_HASH" --skip-warning
-  assert_contains "RDST Query Analysis" "analyze --readyset by hash should run analysis"
-  assert_regex "READYSET|Readyset|readyset" "analyze --readyset by hash should mention Readyset"
+  run_cmd "Analyze with auto-Readyset (by hash ${READYSET_HASH})" \
+    "${RDST_CMD[@]}" analyze --hash "$READYSET_HASH" --skip-warning
+  assert_contains "RDST Query Analysis" "hash analyze should show analysis"
+  assert_regex "Readyset" "hash analyze should mention Readyset"
 
-  run_cmd "Analyze with --readyset and save tag" \
+  run_cmd "Analyze with save tag" \
     "${RDST_CMD[@]}" analyze \
     --target "$TARGET_NAME" \
-    --readyset \
     --skip-warning \
     --save-as "readyset-test" \
     --query "SELECT * FROM title_basics WHERE tconst = 'tt0000006'"
-  assert_contains "RDST Query Analysis" "analyze --readyset with tag should run analysis"
-  assert_regex "READYSET|Readyset|readyset" "analyze --readyset with tag should mention Readyset"
+  assert_contains "RDST Query Analysis" "save-as should run analysis"
 
-  run_cmd "Analyze with --readyset using name" \
-    "${RDST_CMD[@]}" analyze --readyset --name "readyset-test" --skip-warning
-  assert_contains "RDST Query Analysis" "analyze --readyset by name should run analysis"
-  assert_regex "READYSET|Readyset|readyset" "analyze --readyset by name should mention Readyset"
+  run_cmd "Analyze by name" \
+    "${RDST_CMD[@]}" analyze --name "readyset-test" --skip-warning
+  assert_contains "RDST Query Analysis" "name analyze should run"
 
-  # Test with a basic SELECT to verify functionality
-  run_cmd "Analyze with --readyset using basic query" \
+  # Verify breadcrumbs say cache-compare, not --readyset-cache
+  run_cmd "Verify breadcrumbs" \
     "${RDST_CMD[@]}" analyze \
     --target "$TARGET_NAME" \
-    --readyset \
     --skip-warning \
     --query "SELECT * FROM title_basics WHERE tconst = 'tt0000007' LIMIT 1"
-  assert_contains "RDST Query Analysis" "basic query should run analysis"
-  # Just verify the command ran - Readyset analysis may or may not succeed
+  assert_contains "cache-compare" "breadcrumbs should reference cache-compare"
+  assert_not_contains "readyset-cache" "breadcrumbs should NOT reference old flag"
 }

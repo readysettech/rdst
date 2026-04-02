@@ -284,7 +284,7 @@ class TestFormatAnalyzeOutput:
         }
 
         result = format_analyze_output(workflow_result)
-        assert "Readyset Cache Performance Analysis" in result
+        assert "Readyset Performance" in result
         assert "PERFORMANCE COMPARISON" in result
 
 

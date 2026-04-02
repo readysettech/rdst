@@ -1157,10 +1157,13 @@ class QueryStatsTableBase(DataTableBase):
         failures = self._extract_field(qs, "failures", 0)
         has_timings = hasattr(qs, "timings_ms") and qs.timings_ms
 
+        # Show measured count (excludes warm-up) if timings available
+        measured = len(qs.timings_ms) if has_timings else successes
+
         row: List[Any] = [
             str(query_name),
-            str(executions),
-            str(successes),
+            str(measured),
+            str(measured),
             str(failures),
         ]
 

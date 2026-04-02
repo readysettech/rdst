@@ -10,6 +10,7 @@ def explain_create_cache_readyset(
     readyset_port: int | str = 5433,
     readyset_host: str = "localhost",
     test_db_config: Dict[str, Any] = None,
+    quiet: bool = False,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -50,9 +51,10 @@ def explain_create_cache_readyset(
         # Build EXPLAIN CREATE CACHE command
         explain_query = f"EXPLAIN CREATE CACHE FROM {query}"
 
-        print(
-            f"Running EXPLAIN CREATE CACHE against Readyset on port {readyset_port}..."
-        )
+        if not quiet:
+            print(
+                f"Running EXPLAIN CREATE CACHE against Readyset on port {readyset_port}..."
+            )
 
         if engine == "mysql":
             result = _run_explain_mysql(
@@ -395,6 +397,7 @@ def create_cache_readyset(
     readyset_port: int | str = 5433,
     readyset_host: str = "localhost",
     test_db_config: Dict[str, Any] = None,
+    quiet: bool = False,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -429,7 +432,8 @@ def create_cache_readyset(
         # Build CREATE SHALLOW CACHE command (shallow mode - no replication)
         cache_query = f"CREATE SHALLOW CACHE FROM {query}"
 
-        print(f"Creating cache in Readyset on port {readyset_port}...")
+        if not quiet:
+            print(f"Creating cache in Readyset on port {readyset_port}...")
 
         if engine == "mysql":
             result = _run_cache_mysql(
@@ -839,6 +843,7 @@ def warm_cache_and_measure(
     test_db_config: Dict[str, Any] = None,
     warmup_runs: int = 2,
     measure_runs: int = 3,
+    quiet: bool = False,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -882,7 +887,8 @@ def warm_cache_and_measure(
         timings = []
         total_runs = warmup_runs + measure_runs
 
-        print(f"Warming cache ({warmup_runs} warmup + {measure_runs} measured runs)...")
+        if not quiet:
+            print(f"Warming cache ({warmup_runs} warmup + {measure_runs} measured runs)...")
 
         # Use a single persistent connection to avoid measuring connection overhead
         if engine == "mysql":
@@ -921,7 +927,8 @@ def warm_cache_and_measure(
         warm_times_ms = timings[warmup_runs:]  # Skip warmup runs for measurement
         avg_warm_time_ms = sum(warm_times_ms) / len(warm_times_ms) if warm_times_ms else 0
 
-        print(f"  Cached query time: {avg_warm_time_ms:.2f}ms")
+        if not quiet:
+            print(f"  Cached query time: {avg_warm_time_ms:.2f}ms")
 
         return {
             "success": True,

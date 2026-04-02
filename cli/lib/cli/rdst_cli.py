@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, List
 import os
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs, unquote
 import toml
@@ -865,7 +866,6 @@ class RdstCLI:
         positional_query: Optional[str] = None,
         target: Optional[str] = None,
         save_as: Optional[str] = None,
-        readyset_cache: bool = False,
         fast: bool = False,
         interactive: bool = False,
         review: bool = False,
@@ -894,7 +894,6 @@ class RdstCLI:
             positional_query: Positional query argument
             target: Target database
             save_as: Name to save query as after analysis
-            readyset_cache: Whether to test Readyset caching with Docker container
             fast: Whether to skip EXPLAIN ANALYZE and use EXPLAIN only
             interactive: Whether to enter interactive mode after analysis
             review: Whether to review conversation history instead of analyzing
@@ -950,8 +949,6 @@ class RdstCLI:
             result = analyze_cmd.execute_analyze(
                 resolved_input,
                 target=target_db,
-                readyset=readyset_cache,
-                readyset_cache=readyset_cache,
                 fast=fast,
                 interactive=interactive,
                 review=review,
@@ -971,7 +968,7 @@ class RdstCLI:
                 else (
                     "fast"
                     if fast
-                    else ("readyset_cache" if readyset_cache else "standard")
+                    else "standard"
                 )
             )
 

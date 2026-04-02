@@ -65,7 +65,7 @@ test_cache_add_sql() {
   assert_contains "Shallow cache created" "should confirm shallow cache"
   assert_contains "rdst cache show" "should show view hint"
   assert_contains "rdst cache delete" "should show delete hint"
-  assert_contains "rdst query run" "should show benchmark hint"
+  assert_contains "cache-compare" "should show compare hint"
 }
 
 test_cache_show_populated() {

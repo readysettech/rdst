@@ -277,43 +277,45 @@ test_query_run() {
     --target "$TARGET_NAME"
   assert_contains "Query added" "second query add should succeed"
 
-  # Test 1: Singleton mode (run once)
+  # Test 1: Singleton mode (run once, with warm-up)
+  # Singleton now runs 2 executions: 1 warm-up (excluded) + 1 measured
   run_cmd "Run query once (singleton mode)" \
-    "${RDST_CMD[@]}" query run run-test-1
-  assert_contains "Completed 1 executions" "singleton should complete 1 execution"
+    "${RDST_CMD[@]}" query run run-test-1 --skip-warning
+  assert_contains "1 measured executions" "singleton should show 1 measured"
+  assert_contains "Warm-up query has been excluded" "should show warm-up note"
   assert_contains "Summary" "should show summary"
 
-  # Test 2: Count-limited execution
+  # Test 2: Count-limited execution (count + 1 warm-up)
   run_cmd "Run query with count limit" \
-    "${RDST_CMD[@]}" query run run-test-1 --count 5
-  assert_contains "Completed 5 executions" "should complete exactly 5 executions"
+    "${RDST_CMD[@]}" query run run-test-1 --count 5 --skip-warning
+  assert_contains "5 measured executions" "should show 5 measured"
   assert_regex "QPS" "should show queries per second"
 
   # Test 3: Duration-limited execution (short duration)
   run_cmd "Run query with duration limit" \
-    "${RDST_CMD[@]}" query run run-test-1 --duration 1
+    "${RDST_CMD[@]}" query run run-test-1 --duration 1 --skip-warning
   assert_regex "Duration.*[0-9]" "should show duration"
-  # Should complete at least 1 execution
-  assert_regex "Completed [0-9]+ executions" "should complete some executions"
+  assert_regex "measured executions" "should complete some measured executions"
 
   # Test 4: Interval mode
   run_cmd "Run query with interval" \
-    "${RDST_CMD[@]}" query run run-test-1 --interval 200 --count 3
-  assert_contains "Completed 3 executions" "interval mode should complete 3 executions"
+    "${RDST_CMD[@]}" query run run-test-1 --interval 200 --count 3 --skip-warning
+  assert_contains "3 measured executions" "interval mode should show 3 measured"
 
   # Test 5: Multiple queries (round-robin)
+  # With 2 queries and --count 4, each query gets 1 warmup slot,
+  # so total = 4 + 2 warmups = 6, measured = 4
   run_cmd "Run multiple queries round-robin" \
-    "${RDST_CMD[@]}" query run run-test-1 run-test-2 --count 4
-  assert_contains "Completed 4 executions" "should complete 4 total executions"
-  # Both queries should appear in output (either in progress or summary)
+    "${RDST_CMD[@]}" query run run-test-1 run-test-2 --count 4 --skip-warning
+  assert_contains "4 measured executions" "should show 4 measured"
   assert_regex "run-test-1" "first query should appear"
   assert_regex "run-test-2" "second query should appear"
 
   # Test 6: Quiet mode
   run_cmd "Run query in quiet mode" \
-    "${RDST_CMD[@]}" query run run-test-1 --count 3 --quiet
+    "${RDST_CMD[@]}" query run run-test-1 --count 3 --quiet --skip-warning
   assert_contains "Summary" "quiet mode should still show summary"
-  assert_contains "Completed 3 executions" "quiet mode should complete executions"
+  assert_contains "3 measured executions" "quiet mode should show measured"
 
   # Test 7: Validation - conflicting flags
   run_expect_fail "Run with conflicting interval and concurrency" \

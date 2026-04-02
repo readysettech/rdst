@@ -89,6 +89,7 @@ class ActivityQueryCollector:
     """
 
     # PostgreSQL: Fetch top 250 individual processes by duration
+    # Filters exclude system/internal queries to show only user-initiated SQL
     PG_ACTIVITY_QUERY = """
         SELECT
             pid as process_id,
@@ -100,11 +101,20 @@ class ActivityQueryCollector:
           AND query NOT LIKE '%pg_stat_activity%'
           AND query_start IS NOT NULL
           AND datname = current_database()
+          AND query NOT LIKE 'SET %'
+          AND query NOT LIKE 'SHOW %'
+          AND query NOT LIKE 'SELECT 1%'
+          AND query NOT LIKE 'BEGIN%'
+          AND query NOT LIKE 'COMMIT%'
+          AND query NOT LIKE 'ROLLBACK%'
+          AND query NOT LIKE '%pg_catalog%'
+          AND usename NOT IN ('rdsadmin', 'rdsrepladmin', 'readyset', 'replicator')
         ORDER BY duration_ms DESC
         LIMIT 250
     """
 
     # MySQL: Fetch top 250 individual processes by duration
+    # Filters exclude system/internal queries to show only user-initiated SQL
     MYSQL_ACTIVITY_QUERY = """
         SELECT
             ID as process_id,
@@ -113,9 +123,14 @@ class ActivityQueryCollector:
         FROM information_schema.PROCESSLIST
         WHERE COMMAND != 'Sleep'
           AND COMMAND != 'Daemon'
+          AND COMMAND NOT IN ('Binlog Dump', 'Binlog Dump GTID')
           AND USER != 'event_scheduler'
+          AND USER NOT IN ('rdsadmin', 'readyset', 'replicator', 'system user')
           AND INFO IS NOT NULL
           AND INFO NOT LIKE '%PROCESSLIST%'
+          AND INFO NOT LIKE 'SET %'
+          AND INFO NOT LIKE 'SHOW %'
+          AND INFO NOT LIKE 'SELECT 1%'
           AND DB = DATABASE()
         ORDER BY duration_ms DESC
         LIMIT 250

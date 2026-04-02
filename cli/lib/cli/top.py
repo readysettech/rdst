@@ -430,6 +430,7 @@ class TopCommand:
                         target_name,
                         "--query",
                         query.query_text,
+                        "--skip-warning",
                         "--interactive",
                     ]
 

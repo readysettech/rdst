@@ -3,6 +3,7 @@ Modern interactive configuration wizard for rdst CLI.
 Handles database target configuration with a beautiful, step-by-step interface.
 """
 
+import sys
 from typing import List, Dict, Optional, Any
 from ..llm_manager.claude_provider import AnthropicModel
 from .rdst_cli import (
@@ -243,6 +244,12 @@ class ConfigurationWizard:
         # Get existing config for edit
         existing = cfg.get(name) if (is_edit and name) else {}
 
+        # If target already exists on add, silently treat as update (no wizard, just overwrite)
+        target_already_existed = False
+        if not is_edit and name and cfg.get(name):
+            target_already_existed = True
+            existing = cfg.get(name)
+
         # Quick edit: if only changing group/tags with --skip-verify, skip wizard entirely
         group_arg = kwargs.get("group")
         tags_arg = kwargs.get("tags")
@@ -344,33 +351,123 @@ class ConfigurationWizard:
         cfg.save()
 
         # Show success
-        action = "updated" if is_edit else "added"
-        self._show_success(
-            f"Target '{target_name}'", f"has been {action} successfully!"
-        )
-
-        # Breadcrumb: show next steps using NextSteps component
-        if not is_edit:
-            steps = NextSteps(
-                [
-                    (f"rdst top --target {target_name}", "Monitor slow queries"),
-                    (
-                        f'rdst analyze -q "SELECT ..." --target {target_name}',
-                        "Analyze a query",
-                    ),
-                    (f"rdst configure test {target_name}", "Test connection"),
-                ]
+        if target_already_existed:
+            self._show_success(
+                f"Target '{target_name}'", "configuration confirmed."
             )
+        elif is_edit:
+            self._show_success(
+                f"Target '{target_name}'", "has been updated."
+            )
+        else:
+            self._show_success(
+                f"Target '{target_name}'", "has been added."
+            )
+
+        # Offer to set up Readyset cache (skip only if cache already exists)
+        cache_deployed = False
+        cache_target_name = f"{target_name}-cache"
+        existing_cache = cfg.get(cache_target_name)
+        if existing_cache and existing_cache.get("target_type") == "readyset":
+            cache_deployed = True  # Cache already configured, skip prompt
+        elif (
+            config_data.get("verified")
+            and merged.get("target_type", "database") != "readyset"
+            and sys.stdout.isatty()
+        ):
+            self.console.print()
+            self.console.print(
+                MessagePanel(
+                    "Readyset can cache your queries for dramatically faster reads.\n"
+                    "This will start a local Docker container connected to your database.\n"
+                    "You can skip this and set it up later with: rdst cache deploy",
+                    title="Set Up Readyset Cache?",
+                    variant="info",
+                )
+            )
+            if Confirm.ask("Deploy a local Readyset cache for this target?", default=True):
+                try:
+                    from .cache_deploy import DeployCommand
+                    deploy_cmd = DeployCommand()
+                    self.console.print("[dim]Starting Readyset container...[/dim]")
+                    deploy_result = deploy_cmd.execute(target=target_name, mode="docker", quiet=True)
+                    if deploy_result.ok:
+                        cache_deployed = True
+                    else:
+                        self.console.print(
+                            MessagePanel(
+                                f"Cache deploy failed: {deploy_result.message}\n"
+                                f"You can try again later: rdst cache deploy --target {target_name} --mode docker",
+                                variant="warning",
+                            )
+                        )
+                except Exception as e:
+                    self.console.print(
+                        MessagePanel(
+                            f"Cache setup failed: {e}\n"
+                            f"You can set it up later: rdst cache deploy --target {target_name} --mode docker",
+                            variant="warning",
+                        )
+                    )
+
+        # Show connection string if cache was deployed
+        if cache_deployed:
+            cfg = TargetsConfig()
+            cfg.load()
+            cache_config = cfg.get(cache_target_name)
+            if cache_config:
+                engine = cache_config.get("engine", "postgresql")
+                proto = "mysql" if engine == "mysql" else "postgresql"
+                c_host = cache_config.get("host", "localhost")
+                c_port = cache_config.get("port")
+                c_user = cache_config.get("user", "")
+                c_db = cache_config.get("database", "")
+                pw_env = cache_config.get("password_env", "")
+                pw_display = f"${{{pw_env}}}" if pw_env else "<password>"
+                conn_str = f"{proto}://{c_user}:{pw_display}@{c_host}:{c_port}/{c_db}"
+                pw_note = f"\n  Password: Use ${pw_env} (same as upstream)" if pw_env else ""
+                self.console.print()
+                self.console.print(
+                    MessagePanel(
+                        f"Readyset cache is running.\n\n"
+                        f"  Connection string:\n"
+                        f"    {conn_str}{pw_note}",
+                        title="Readyset Ready",
+                        variant="success",
+                    )
+                )
+
+        # Next steps — one clean block at the bottom
+        if not is_edit:
+            next_step_list = [
+                (f"rdst top --target {target_name}", "Monitor slow queries"),
+                (
+                    f'rdst analyze -q "SELECT ..." --target {target_name}',
+                    "Analyze a query",
+                ),
+            ]
+            if cache_deployed:
+                next_step_list.append(
+                    (f"rdst query cache-compare <query> --target {target_name} --count 100",
+                     "Compare upstream vs cached performance")
+                )
+            else:
+                next_step_list.append(
+                    (f"rdst cache deploy --target {target_name} --mode docker",
+                     "Set up Readyset cache")
+                )
+            steps = NextSteps(next_step_list)
             self.console.print(steps)
 
-        # Return empty message since _show_success already displayed status
         return RdstResult(
             True,
-            "",
+            " ",  # Non-empty to suppress JSON dump in main handler
             data={
                 "target": target_name,
                 "config": config_data,
                 "default": cfg.get_default(),
+                "cache_deployed": cache_deployed,
+                "cache_target": cache_target_name if cache_deployed else None,
             },
         )
 

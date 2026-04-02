@@ -190,6 +190,15 @@ class AnalyzeService:
             return None, None
 
         target_config = cfg.get(target_name)
+
+        # Never run EXPLAIN ANALYZE against a Readyset cache target.
+        # If user specified a cache target, resolve to its upstream.
+        if target_config and target_config.get("target_type") == "readyset":
+            upstream_name = target_config.get("upstream_target")
+            if upstream_name:
+                target_name = upstream_name
+                target_config = cfg.get(upstream_name)
+
         return target_name, target_config
 
     def _get_workflow_path(self) -> Path:
@@ -229,14 +238,14 @@ class AnalyzeService:
             workflow_path=workflow_path,
         )
 
-        readyset_task = None
-        if options.readyset_cache:
-            readyset_task = asyncio.to_thread(
-                self._run_readyset_analysis_sync,
-                input=input,
-                target_name=target_name,
-                target_config=target_config,
-            )
+        # Always attempt Readyset analysis in parallel.
+        # Failures are non-fatal — handled when awaited at line ~272.
+        readyset_task = asyncio.to_thread(
+            self._run_readyset_analysis_sync,
+            input=input,
+            target_name=target_name,
+            target_config=target_config,
+        )
 
         workflow_result = None
         try:
@@ -256,12 +265,20 @@ class AnalyzeService:
         readyset_result = None
         if readyset_task:
             try:
-                readyset_result = await readyset_task
+                # Wait up to 60s for Readyset after workflow completes.
+                # If Docker is pulling an image or hanging, don't block the output.
+                readyset_result = await asyncio.wait_for(readyset_task, timeout=60)
                 if isinstance(readyset_result, Exception):
                     readyset_result = {
                         "success": False,
                         "error": f"Readyset analysis failed: {readyset_result}",
                     }
+            except asyncio.TimeoutError:
+                readyset_result = {
+                    "success": False,
+                    "error": "Readyset analysis timed out (Docker may still be starting). "
+                             "Run 'rdst cache deploy' to set up Readyset separately.",
+                }
             except Exception as e:
                 readyset_result = {
                     "success": False,
@@ -375,10 +392,16 @@ class AnalyzeService:
         target_name: str,
         target_config: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Synchronous readyset analysis using shallow mode (runs in thread).
+        """Synchronous readyset analysis (runs in thread).
 
-        Uses shallow caching - single Readyset container connecting directly
-        to the upstream database without a test sub-container.
+        Checks for an existing cache target (local Docker, remote EC2, etc.)
+        and uses it if connectable. Does NOT spin up ephemeral containers.
+
+        Flow:
+        1. Look for a cache target configured for this upstream
+        2. If found and connectable → test cacheability, warm, measure, drop
+        3. If found but not connectable → error with hint
+        4. If not found → tell user to deploy with rdst cache deploy
 
         Args:
             input: Analysis input with query
@@ -388,14 +411,8 @@ class AnalyzeService:
         Returns:
             Readyset analysis result dict
         """
-        import os
-
         try:
-            from ..functions.readyset_container import (
-                start_readyset_container_direct,
-                wait_for_readyset_ready_shallow,
-                check_readyset_container_status,
-            )
+            from ..cli.rdst_cli import TargetsConfig
             from ..functions.readyset_explain_cache import (
                 explain_create_cache_readyset,
                 create_cache_readyset,
@@ -403,71 +420,75 @@ class AnalyzeService:
                 get_cache_id_for_query,
                 warm_cache_and_measure,
             )
-
             from .password_resolver import resolve_password_value
-            password = resolve_password_value(target_config)
 
-            resolved_config = {**target_config, "password": password}
+            # Find a cache target for this upstream
+            cfg = TargetsConfig()
+            cfg.load()
 
-            engine = target_config.get("engine", "postgresql")
-            readyset_port = 5433 if engine == "postgresql" else 3307
-            container_name = f"rdst-readyset-{target_name}"
+            cache_target_name = None
+            cache_config = None
 
-            # Check if container already running
-            status = check_readyset_container_status(
-                readyset_container_name=container_name
-            )
+            # Search all targets for one that references this upstream
+            for name, config in cfg._data.get("targets", {}).items():
+                if (
+                    config.get("target_type") == "readyset"
+                    and config.get("upstream_target") == target_name
+                ):
+                    cache_target_name = name
+                    cache_config = config
+                    break
 
-            if not status.get("running"):
-                # Start container in shallow mode (direct upstream connection)
-                start_result = start_readyset_container_direct(
-                    target_config=resolved_config,
-                    readyset_port=readyset_port,
-                    readyset_container_name=container_name,
-                )
+            # Also check the conventional name {target}-cache
+            if not cache_config:
+                conventional = f"{target_name}-cache"
+                check = cfg.get(conventional)
+                if check and check.get("target_type") == "readyset":
+                    cache_target_name = conventional
+                    cache_config = check
 
-                if not start_result.get("success"):
-                    return {
-                        "success": False,
-                        "error": start_result.get("error", "Failed to start Readyset"),
-                        "error_type": start_result.get("error_type"),
-                        "remediation": start_result.get("remediation"),
-                    }
-
-            # Wait for readyset to be ready
-            ready_result = wait_for_readyset_ready_shallow(
-                readyset_container_name=container_name,
-                timeout=120,
-            )
-
-            if not ready_result.get("success"):
+            if not cache_config:
                 return {
                     "success": False,
-                    "error": ready_result.get("error", "Readyset not ready"),
-                    "error_type": ready_result.get("error_type"),
-                    "remediation": ready_result.get("remediation"),
+                    "no_cache_target": True,
+                    "error": "No Readyset cache target configured.",
+                    "remediation": (
+                        f"Deploy a cache to see Readyset performance:\n"
+                        f"  rdst cache deploy --target {target_name} --mode docker"
+                    ),
                 }
 
-            # Build config for Readyset connection
-            test_db_config = {
+            # Cache target exists — try to connect
+            engine = cache_config.get("engine", target_config.get("engine", "postgresql"))
+            cache_host = cache_config.get("host", "localhost")
+            cache_port = cache_config.get("port", 5433 if engine == "postgresql" else 3307)
+            cache_password = resolve_password_value(cache_config)
+
+            cache_db_config = {
                 "engine": engine,
-                "host": "localhost",
-                "port": readyset_port,
-                "database": target_config.get("database"),
-                "user": target_config.get("user"),
-                "password": password,
+                "host": cache_host,
+                "port": int(cache_port),
+                "database": cache_config.get("database", target_config.get("database")),
+                "user": cache_config.get("user", target_config.get("user")),
+                "password": cache_password,
             }
 
-            # Run EXPLAIN CREATE CACHE
+            # Run EXPLAIN CREATE CACHE (connectivity failures caught by outer except)
+            # All calls use quiet=True — this runs in a background thread
+            # and should not print to stdout (the main workflow handles display)
             explain_result = explain_create_cache_readyset(
                 query=input.sql,
-                readyset_port=readyset_port,
-                test_db_config=test_db_config,
+                readyset_port=int(cache_port),
+                readyset_host=cache_host,
+                test_db_config=cache_db_config,
+                quiet=True,
             )
 
-            # Try to create cache if cacheable
+            # Try to create cache, warm, measure, then DROP (analyze is ephemeral)
             create_result = {}
+            warm_result = {}
             cache_id = None
+
             if explain_result.get("cacheable", False):
                 already_cached = (
                     "already cached" in explain_result.get("explanation", "").lower()
@@ -479,48 +500,52 @@ class AnalyzeService:
                         "already_cached": True,
                         "message": "Query already cached",
                     }
-                    # Get the cache ID for cleanup
                     cache_id = get_cache_id_for_query(
                         query=input.sql,
-                        readyset_port=readyset_port,
-                        db_config=test_db_config,
+                        readyset_port=int(cache_port),
+                        db_config=cache_db_config,
                     )
                 else:
                     create_result = create_cache_readyset(
                         query=input.sql,
-                        readyset_port=readyset_port,
-                        test_db_config=test_db_config,
+                        readyset_port=int(cache_port),
+                        readyset_host=cache_host,
+                        test_db_config=cache_db_config,
+                        quiet=True,
                     )
                     if create_result.get("success"):
                         cache_id = get_cache_id_for_query(
                             query=input.sql,
-                            readyset_port=readyset_port,
-                            db_config=test_db_config,
+                            readyset_port=int(cache_port),
+                            db_config=cache_db_config,
                         )
 
-                # Warm the cache and measure performance
-                warm_result = {}
+                # Warm and measure
                 if create_result.get("success") or create_result.get("already_cached"):
                     warm_result = warm_cache_and_measure(
                         query=input.sql,
-                        readyset_port=readyset_port,
-                        test_db_config=test_db_config,
+                        readyset_port=int(cache_port),
+                        readyset_host=cache_host,
+                        test_db_config=cache_db_config,
                         warmup_runs=2,
                         measure_runs=3,
+                        quiet=True,
                     )
 
-                # Drop the cache after testing (ephemeral container)
-                if cache_id:
+                # Always drop — analyze is not an explicit cache add
+                if cache_id and not already_cached:
                     drop_cache_readyset(
                         cache_name=cache_id,
-                        readyset_port=readyset_port,
-                        test_db_config=test_db_config,
+                        readyset_port=int(cache_port),
+                        readyset_host=cache_host,
+                        test_db_config=cache_db_config,
                     )
 
             return {
                 "success": True,
                 "checked": True,
-                "readyset_port": readyset_port,
+                "cache_target": cache_target_name,
+                "readyset_port": int(cache_port),
                 "shallow_mode": True,
                 "explain_cache_result": explain_result,
                 "create_cache_result": create_result,

@@ -456,13 +456,12 @@ class AnalyzeCommand:
         self,
         resolved_input: AnalyzeInput,
         target: Optional[str] = None,
-        readyset: bool = False,
-        readyset_cache: bool = False,
         fast: bool = False,
         interactive: bool = False,
         review: bool = False,
         output_json: bool = False,
         skip_warning: bool = False,
+        **kwargs,
     ) -> RdstResult:
         """
         Execute the analyze command with resolved input using the workflow engine.
@@ -635,22 +634,7 @@ class AnalyzeCommand:
                     if not output_json:
                         print()
 
-            # Backward compatibility: treat --readyset as alias for --readyset-cache.
-            if readyset and not readyset_cache:
-                readyset_cache = True
-
-            # Check Docker availability upfront when --readyset-cache is enabled
-            if readyset_cache:
-                from ..functions.readyset_container import check_docker_available
-
-                docker_status = check_docker_available()
-                if not docker_status.get("success"):
-                    error_msg = docker_status.get('error', 'Docker not available')
-                    remediation = docker_status.get('remediation', '')
-                    full_msg = f"--readyset-cache requires Docker: {error_msg}"
-                    if remediation:
-                        full_msg += f"\nHint: {remediation}"
-                    return RdstResult(False, full_msg)
+            # Readyset analysis always runs in parallel (Docker check is soft/non-fatal)
 
             # EXPLAIN ANALYZE safety warning (unless --skip-warning or --fast)
             showed_warning = False
@@ -674,11 +658,20 @@ class AnalyzeCommand:
                     return RdstResult(False, "Analysis cancelled by user")
                 showed_warning = True
 
+            # Resolve cache target to upstream before analysis
+            resolved_target = target
+            if target:
+                _cfg = TargetsConfig()
+                _cfg.load()
+                _tc = _cfg.get(target)
+                if _tc and _tc.get("target_type") == "readyset":
+                    resolved_target = _tc.get("upstream_target") or target
+
             success, workflow_result, error_msg = asyncio.run(
                 self._execute_analyze_async(
                     resolved_input=resolved_input,
-                    target=target,
-                    readyset_cache=readyset_cache,
+                    target=resolved_target,
+                    readyset_cache=True,
                     fast=fast,
                     quiet=output_json,
                 )
@@ -702,6 +695,12 @@ class AnalyzeCommand:
             cfg.load()
             target_name = target or cfg.get_default()
             target_config = cfg.get(target_name) if target_name else {}
+            # Resolve cache target to upstream for display
+            if target_config and target_config.get("target_type") == "readyset":
+                upstream_name = target_config.get("upstream_target")
+                if upstream_name:
+                    target_name = upstream_name
+                    target_config = cfg.get(upstream_name) or target_config
             workflow_result["target_config"] = target_config
             formatted_results = format_analyze_output(workflow_result)
 
@@ -919,9 +918,9 @@ class AnalyzeCommand:
         self,
         resolved_input: AnalyzeInput,
         target: Optional[str] = None,
-        readyset_cache: bool = False,
         fast: bool = False,
         quiet: bool = False,
+        **kwargs,
     ) -> tuple[bool, dict, Optional[str]]:
         """Execute analysis using AnalyzeService async generator."""
         from lib.services.analyze_service import AnalyzeService
@@ -948,7 +947,7 @@ class AnalyzeCommand:
         options_data = AnalyzeOptions(
             target=target,
             fast=fast,
-            readyset_cache=readyset_cache,
+            readyset_cache=True,
             test_rewrites=True,
             model=None,
         )

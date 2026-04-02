@@ -11,6 +11,7 @@ import os
 import re
 import signal
 import statistics
+import sys
 import subprocess  # nosemgrep: gitlab.bandit.B404
 import tempfile
 import threading
@@ -102,6 +103,7 @@ class RunStatistics:
     start_time: float
     query_stats: dict[str, QueryStats] = field(default_factory=dict)
     _lock: Lock = field(default_factory=Lock)
+    _warmup_done: set = field(default_factory=set)
 
     def record_execution(
         self, query_hash: str, query_name: str, duration_ms: float, success: bool
@@ -112,6 +114,12 @@ class RunStatistics:
 
             stats = self.query_stats[query_hash]
             stats.executions += 1
+
+            # First successful execution per query is a warm-up — excluded from stats entirely
+            if success and query_hash not in self._warmup_done:
+                self._warmup_done.add(query_hash)
+                return
+
             if success:
                 stats.successes += 1
                 stats.timings_ms.append(duration_ms)
@@ -175,6 +183,8 @@ class QueryCommand:
             return self.delete(**kwargs)
         elif subcommand == "run":
             return self.run(**kwargs)
+        elif subcommand == "cache-compare":
+            return self.cache_compare(**kwargs)
         else:
             return RdstResult(
                 ok=False,
@@ -1462,6 +1472,7 @@ class QueryCommand:
         quiet: bool = False,
         file: str | None = None,
         analyze: bool = False,
+        skip_warning: bool = False,
         **kwargs,
     ):
         """
@@ -1526,6 +1537,11 @@ class QueryCommand:
         else:
             mode = "concurrency"
 
+        # Handle singleton mode before query resolution
+        if mode == "singleton":
+            mode = "interval"
+            interval = 0
+
         # Resolve queries from registry
         try:
             resolved_queries = self._resolve_queries(queries)
@@ -1534,6 +1550,13 @@ class QueryCommand:
 
         if not resolved_queries:
             return RdstResult(ok=False, message="No queries to run. Provide query names/hashes or use --file.", data={})
+
+        # Add warm-up slots: one per unique query (first execution of each is excluded)
+        num_queries = len(resolved_queries)
+        if count is not None:
+            count += num_queries
+        else:
+            count = num_queries + 1  # singleton: 1 measured + 1 warmup per query
 
         # Get target configuration
         cfg = TargetsConfig()
@@ -1558,6 +1581,23 @@ class QueryCommand:
                 message=f"Target '{target}' not found in configuration",
                 data={"target": target},
             )
+
+        # Warn about running queries against production
+        if not skip_warning and not quiet and sys.stdout.isatty():
+            from lib.ui import Confirm, MessagePanel
+            desc = f"{count} times" if count else f"continuously"
+            if duration:
+                desc += f" for up to {duration}s"
+            self.console.print(
+                MessagePanel(
+                    f"This will execute queries against '{target}' ({desc}).\n\n"
+                    f"To suppress this prompt: --skip-warning",
+                    variant="warning",
+                    title="Query Execution Warning",
+                )
+            )
+            if not Confirm.ask("Continue?", default=True):
+                return RdstResult(False, "Cancelled by user")
 
         # Initialize statistics
         stats = RunStatistics(start_time=time.perf_counter())
@@ -1661,16 +1701,18 @@ class QueryCommand:
         # Print summary
         self._print_run_summary(stats)
 
+        # Report measured counts (excluding warm-up)
+        total_measured = sum(len(s.timings_ms) for s in stats.query_stats.values())
         result_data = {
-            "total_executions": stats.total_executions,
-            "total_successes": stats.total_successes,
+            "total_executions": total_measured,
+            "total_successes": total_measured,
             "total_failures": stats.total_failures,
             "elapsed_seconds": stats.elapsed_seconds,
             "queries": {
                 h: {
                     "name": s.query_name,
-                    "executions": s.executions,
-                    "successes": s.successes,
+                    "executions": len(s.timings_ms),
+                    "successes": len(s.timings_ms),
                     "failures": s.failures,
                     "min_ms": s.min_ms,
                     "avg_ms": s.avg_ms,
@@ -1773,8 +1815,367 @@ class QueryCommand:
 
         return RdstResult(
             ok=True,
-            message=f"Completed {stats.total_executions} executions",
+            message=f"Completed {total_measured} measured executions ({stats.total_executions} total including warm-up)",
             data=result_data,
+        )
+
+    def cache_compare(
+        self,
+        queries: list[str] | None = None,
+        target: str | None = None,
+        interval: int | None = None,
+        concurrency: int | None = None,
+        duration: int | None = None,
+        count: int = 100,
+        quiet: bool = False,
+        skip_warning: bool = False,
+        **kwargs,
+    ):
+        """
+        Compare query performance between upstream database and Readyset cache.
+
+        Requires a deployed cache target. Runs the query against both upstream
+        and cache, showing a side-by-side comparison. Temporary caches are
+        dropped after comparison — use 'cache add' to persist.
+
+        Accepts query names, hashes, or inline SQL (auto-added to registry).
+        """
+        from .rdst_cli import RdstResult, TargetsConfig
+        from lib.db_connection import create_direct_connection, close_connection
+        import statistics
+        import hashlib
+
+        queries = queries or []
+
+        if not queries:
+            return RdstResult(ok=False, message='No queries specified. Usage: rdst query cache-compare "SELECT ..." --target <name>')
+
+        # Resolve upstream target first (before warning or query resolution)
+        cfg = TargetsConfig()
+        cfg.load()
+        if not target:
+            target = cfg.get_default()
+        if not target:
+            return RdstResult(ok=False, message="No target specified. Use --target or configure a default.")
+
+        upstream_config = cfg.get(target)
+        if not upstream_config:
+            return RdstResult(ok=False, message=f"Target '{target}' not found in configuration.")
+
+        # If upstream target is actually a cache target, resolve to its upstream
+        if upstream_config.get("target_type") == "readyset":
+            real_upstream = upstream_config.get("upstream_target")
+            if real_upstream:
+                target = real_upstream
+                upstream_config = cfg.get(target)
+
+        # Check cache target exists BEFORE anything else
+        cache_target_name = None
+        cache_config = None
+        for name, config in cfg._data.get("targets", {}).items():
+            if (
+                config.get("target_type") == "readyset"
+                and config.get("upstream_target") == target
+            ):
+                cache_target_name = name
+                cache_config = config
+                break
+        if not cache_config:
+            conventional = f"{target}-cache"
+            check = cfg.get(conventional)
+            if check and check.get("target_type") == "readyset":
+                cache_target_name = conventional
+                cache_config = check
+
+        if not cache_config:
+            self.console.print(
+                MessagePanel(
+                    f"No Readyset cache deployed for '{target}'.\n\n"
+                    f"Deploy a cache first:\n"
+                    f"  rdst cache deploy --target {target} --mode docker",
+                    variant="warning",
+                )
+            )
+            return RdstResult(ok=True, message=" ")
+
+        # Determine execution mode (same logic as run)
+        if interval is not None and concurrency is not None:
+            return RdstResult(ok=False, message="Cannot specify both --interval and --concurrency")
+
+        if interval is None and concurrency is None:
+            mode = "interval"
+            run_interval = 0  # tight loop
+        elif interval is not None:
+            mode = "interval"
+            run_interval = interval
+        else:
+            mode = "concurrency"
+            run_interval = 0
+
+        # Add 1 to count for warm-up
+        run_count = (count + 1) if count else None
+
+        # Warn about running queries against production
+        if not skip_warning and not quiet and sys.stdout.isatty():
+            from lib.ui import Confirm
+            desc = f"{count} times" if count else "continuously"
+            if duration:
+                desc += f" for up to {duration}s"
+            self.console.print(
+                MessagePanel(
+                    f"This will run each query {desc} against your upstream database\n"
+                    f"and {desc} against the Readyset cache.\n\n"
+                    f"To suppress this prompt: --skip-warning",
+                    variant="warning",
+                    title="Query Execution Warning",
+                )
+            )
+            if not Confirm.ask("Continue?", default=True):
+                return RdstResult(True, " ")
+
+        # Resolve queries — if an arg looks like SQL, auto-add to registry
+        resolved_queries = []
+        registry = QueryRegistry()
+        registry.load()
+        for q in queries:
+            if q.strip().upper().startswith(("SELECT", "WITH")):
+                qhash = registry.get_or_create_hash(q)
+                if not registry.get_query(qhash):
+                    registry.add_query(sql=q, target=target, source="cache-compare")
+                    registry.save()
+                if not quiet:
+                    self.console.print(f"[dim]Query registered (hash: {qhash[:8]})[/dim]")
+                to_resolve = [qhash]
+            else:
+                to_resolve = [q]
+            try:
+                resolved_queries.extend(self._resolve_queries(to_resolve))
+            except ValueError as e:
+                return RdstResult(ok=False, message=str(e))
+
+        if not resolved_queries:
+            return RdstResult(ok=False, message="No queries found in registry.")
+
+        # Test connectivity to cache target
+        from lib.services.password_resolver import resolve_password_value
+        from ..functions.readyset_explain_cache import (
+            create_cache_readyset,
+            get_cache_id_for_query,
+            drop_cache_readyset,
+        )
+
+        cache_password = resolve_password_value(cache_config)
+        cache_port = int(cache_config.get("port", 5433))
+        cache_host = cache_config.get("host", "localhost")
+        cache_db_config = {
+            "engine": cache_config.get("engine", "postgresql"),
+            "host": cache_host,
+            "port": cache_port,
+            "database": cache_config.get("database"),
+            "user": cache_config.get("user"),
+            "password": cache_password,
+        }
+
+        # Open a persistent connection to ReadySet for cache management.
+        # This also serves as the connectivity test — no separate test_conn needed.
+        if not quiet:
+            self.console.print("[dim]Preparing cache for comparison...[/dim]")
+
+        engine = cache_db_config.get("engine", "postgresql")
+        try:
+            if engine == "mysql":
+                import pymysql
+                cache_conn = pymysql.connect(
+                    host=cache_host, port=cache_port,
+                    user=cache_db_config["user"], password=cache_password or "",
+                    database=cache_db_config["database"], connect_timeout=10,
+                )
+            else:
+                import psycopg2
+                cache_conn = psycopg2.connect(
+                    host=cache_host, port=cache_port,
+                    user=cache_db_config["user"], password=cache_password or "",
+                    database=cache_db_config["database"], connect_timeout=10,
+                )
+        except Exception as conn_err:
+            return RdstResult(
+                ok=False,
+                message=(
+                    f"Cache target '{cache_target_name}' exists but failed to connect: {conn_err}\n\n"
+                    f"Check that the cache is running:\n"
+                    f"  docker ps --filter name=rdst-readyset\n"
+                    f"Or redeploy:\n"
+                    f"  rdst cache deploy --target {target} --mode docker"
+                ),
+            )
+
+        cache_conn.autocommit = True
+        cache_cur = cache_conn.cursor()
+
+        # Snapshot existing cache IDs once before creating new ones
+        cache_cur.execute("SHOW CACHES")
+        before_ids = {str(r[0]) for r in cache_cur.fetchall() if r and str(r[0]).startswith("q_")}
+
+        created_cache_ids = []
+        for entry, sql in resolved_queries:
+            try:
+                cache_cur.execute(f"CREATE SHALLOW CACHE FROM {sql}")
+                try:
+                    cache_cur.fetchall()
+                except Exception:
+                    pass
+            except Exception as e:
+                if not quiet:
+                    self.console.print(f"[yellow]Warning: Could not create cache for query: {e}[/yellow]")
+
+        # Diff to find what we created
+        cache_cur.execute("SHOW CACHES")
+        after_ids = {str(r[0]) for r in cache_cur.fetchall() if r and str(r[0]).startswith("q_")}
+        created_cache_ids = list(after_ids - before_ids)
+
+        # Run against upstream
+        if not quiet:
+            desc = f"{count} iterations" if count else "continuously"
+            self.console.print(f"\n[bold]Running {desc} against upstream ({target})...[/bold]")
+
+        upstream_stats = RunStatistics(start_time=time.perf_counter())
+        run_fn = self._run_concurrency if mode == "concurrency" else self._run_interval
+        if mode == "concurrency":
+            run_fn(
+                resolved_queries, upstream_config, upstream_stats,
+                concurrency, threading.Event(), duration, run_count,
+                True, create_direct_connection, close_connection,
+            )
+        else:
+            run_fn(
+                resolved_queries, upstream_config, upstream_stats,
+                run_interval, threading.Event(), duration, run_count,
+                True, create_direct_connection, close_connection,
+            )
+
+        # Run against cache
+        if not quiet:
+            self.console.print(f"[bold]Running {desc} against cache ({cache_target_name})...[/bold]")
+
+        cache_stats = RunStatistics(start_time=time.perf_counter())
+        if mode == "concurrency":
+            run_fn(
+                resolved_queries, cache_config, cache_stats,
+                concurrency, threading.Event(), duration, run_count,
+                True, create_direct_connection, close_connection,
+            )
+        else:
+            run_fn(
+                resolved_queries, cache_config, cache_stats,
+                run_interval, threading.Event(), duration, run_count,
+                True, create_direct_connection, close_connection,
+        )
+
+        # Build comparison output
+        from lib.ui import SectionBox, DataTable, KeyValueTable, StyledPanel
+
+        for entry, sql in resolved_queries:
+            qhash = entry.hash
+            qname = entry.tag or qhash[:8]
+
+            u_stats = upstream_stats.query_stats.get(qhash)
+            c_stats = cache_stats.query_stats.get(qhash)
+
+            if not u_stats or not c_stats or not u_stats.timings_ms or not c_stats.timings_ms:
+                self.console.print(f"[yellow]Insufficient data for query '{qname}'[/yellow]")
+                continue
+
+            u_avg = u_stats.avg_ms
+            c_avg = c_stats.avg_ms
+            improvement = ((u_avg - c_avg) / u_avg * 100) if u_avg > 0 else 0
+
+            def _fmt_improvement(upstream_val, cache_val):
+                if upstream_val <= 0:
+                    return "-"
+                pct = (upstream_val - cache_val) / upstream_val * 100
+                color = "green" if pct > 0 else "red"
+                return f"[{color}]{pct:+.1f}%[/{color}]"
+
+            rows = [
+                ("Min", f"{u_stats.min_ms:.2f}ms", f"{c_stats.min_ms:.2f}ms",
+                 _fmt_improvement(u_stats.min_ms, c_stats.min_ms)),
+                ("Avg", f"{u_avg:.2f}ms", f"{c_avg:.2f}ms",
+                 _fmt_improvement(u_avg, c_avg)),
+                ("P50", f"{u_stats.p50_ms:.2f}ms", f"{c_stats.p50_ms:.2f}ms",
+                 _fmt_improvement(u_stats.p50_ms, c_stats.p50_ms)),
+                ("P95", f"{u_stats.p95_ms:.2f}ms", f"{c_stats.p95_ms:.2f}ms",
+                 _fmt_improvement(u_stats.p95_ms, c_stats.p95_ms)),
+                ("P99", f"{u_stats.p99_ms:.2f}ms", f"{c_stats.p99_ms:.2f}ms",
+                 _fmt_improvement(u_stats.p99_ms, c_stats.p99_ms)),
+                ("Max", f"{u_stats.max_ms:.2f}ms", f"{c_stats.max_ms:.2f}ms",
+                 _fmt_improvement(u_stats.max_ms, c_stats.max_ms)),
+            ]
+
+            self.console.print()
+            self.console.print(DataTable(
+                title=f"Performance Comparison: {qname}",
+                columns=["Metric", f"Upstream ({target})", f"Cache ({cache_target_name})", "Improvement"],
+                rows=rows,
+            ))
+
+            # Summary
+            color = "green" if improvement > 0 else "red"
+            self.console.print(
+                f"\n  Average improvement: [{color}]{improvement:+.1f}%[/{color}] "
+                f"({u_avg:.2f}ms -> {c_avg:.2f}ms)"
+            )
+
+        # Show connection string
+        engine = cache_config.get("engine", "postgresql")
+        proto = "mysql" if engine == "mysql" else "postgresql"
+        host = cache_config.get("host", "localhost")
+        port = cache_config.get("port")
+        user = cache_config.get("user", "")
+        db = cache_config.get("database", "")
+        password_env = cache_config.get("password_env", "")
+        pw_display = f"${{{password_env}}}" if password_env else "<password>"
+        conn_str = f"{proto}://{user}:{pw_display}@{host}:{port}/{db}"
+        password_note = f"\n  Password: Use ${password_env} (same as upstream)" if password_env else ""
+
+        self.console.print()
+        self.console.print(StyledPanel(
+            f"Connect your application to Readyset:\n  {conn_str}{password_note}",
+            title="Readyset Connection String",
+        ))
+        self.console.print("[dim]Note: Warm-up query has been excluded from results for each query.[/dim]")
+
+        # Drop caches we created (not pre-existing ones)
+        if created_cache_ids:
+            if not quiet:
+                self.console.print(f"[dim]Cleaning up {len(created_cache_ids)} temporary cache(s)...[/dim]")
+            for cid in created_cache_ids:
+                try:
+                    cache_cur.execute(f"DROP CACHE {cid}")
+                except Exception:
+                    pass  # Best effort cleanup
+
+        # Close cache management connection
+        try:
+            cache_cur.close()
+            cache_conn.close()
+        except Exception:
+            pass
+
+        # Next steps
+        first_hash = resolved_queries[0][0].hash[:8]
+        self.console.print(f"\n[dim]Next steps:[/dim]")
+        self.console.print(f"  [dim]rdst cache add {first_hash} --target {cache_target_name}[/dim]  Persist this cache for your application")
+        self.console.print(f"  [dim]rdst cache show --target {cache_target_name}[/dim]  View active caches")
+        self.console.print(f"  [dim]rdst analyze --hash {first_hash} --target {target}[/dim]  Deep query analysis")
+
+        return RdstResult(
+            ok=True,
+            message="Comparison complete",
+            data={
+                "upstream_target": target,
+                "cache_target": cache_target_name,
+                "connection_string": conn_str,
+            },
         )
 
     def _load_queries_from_file(self, file_path: str):
@@ -1997,6 +2398,7 @@ class QueryCommand:
                     self._create_progress_table(stats),
                     console=self.console,
                     refresh_per_second=4,
+                    transient=True,
                 ) as live:
                     run_loop(live)
             else:
@@ -2157,6 +2559,7 @@ class QueryCommand:
                     self._create_progress_table(stats),
                     console=self.console,
                     refresh_per_second=4,
+                    transient=True,
                 ) as live:
                     run_executor(live)
             else:
@@ -2193,12 +2596,13 @@ class QueryCommand:
         self.console.print()
         self.console.print(table)
 
-        # Summary line
+        # Summary line (use measured count, excluding warm-up)
         elapsed = stats.elapsed_seconds
-        qps = stats.total_executions / elapsed if elapsed > 0 else 0
+        total_measured = sum(len(s.timings_ms) for s in stats.query_stats.values())
+        qps = total_measured / elapsed if elapsed > 0 else 0
         error_rate = (
-            (stats.total_failures / stats.total_executions * 100)
-            if stats.total_executions > 0
+            (stats.total_failures / max(total_measured, 1) * 100)
+            if total_measured > 0
             else 0
         )
 
@@ -2211,3 +2615,4 @@ class QueryCommand:
                 }
             )
         )
+        self.console.print("[dim]Note: Warm-up query has been excluded from results for each query.[/dim]")

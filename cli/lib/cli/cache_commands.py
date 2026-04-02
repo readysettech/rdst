@@ -35,6 +35,7 @@ from lib.ui import (
     InlineSQL,
     MessagePanel,
     StyledPanel,
+    StyleTokens,
 )
 
 from .rdst_cli import RdstResult
@@ -112,6 +113,35 @@ class CacheCommands:
                         title=f"Caches on {target} ({last_event.count} total)",
                     )
                     self._console.print(table)
+
+                    # Show connection string
+                    from lib.services.password_resolver import resolve_password_value
+                    from .rdst_cli import TargetsConfig
+                    cfg = TargetsConfig()
+                    cfg.load()
+                    tc = cfg.get(target) or {}
+                    engine = tc.get("engine", "postgresql")
+                    proto = "mysql" if engine == "mysql" else "postgresql"
+                    host = tc.get("host", "localhost")
+                    port = tc.get("port")
+                    user = tc.get("user", "")
+                    db = tc.get("database", "")
+                    pw_env = tc.get("password_env", "")
+                    pw_display = f"${{{pw_env}}}" if pw_env else "<password>"
+                    conn_str = f"{proto}://{user}:{pw_display}@{host}:{port}/{db}"
+                    pw_note = f"\n  Password: Use ${pw_env} (same as upstream)" if pw_env else ""
+                    self._console.print(StyledPanel(
+                        f"Connect your application to Readyset:\n  {conn_str}{pw_note}",
+                        title="Readyset Connection String",
+                    ))
+
+                    # Show compare hint
+                    hashes_with_registry = [c.get("registry_hash", "")[:8] for c in caches if c.get("registry_hash")]
+                    upstream = tc.get("upstream_target", target)
+                    if hashes_with_registry:
+                        self._console.print(
+                            f"\n  Compare: rdst query cache-compare {hashes_with_registry[0]} --target {upstream} --count 100"
+                        )
             return (True, caches, None)
 
         return (False, None, "Unexpected response")
@@ -191,9 +221,8 @@ class CacheCommands:
                         }, indent=2))
                     else:
                         saved_hash = last_event.query_hash
-                        upstream = (target_config or {}).get("upstream_target", "")
-                        run_hint = f"  Benchmark:   rdst query run {saved_hash} --target {target}\n" if saved_hash else ""
-                        compare_hint = f"  Compare:     rdst query run {saved_hash} --target {upstream}\n" if saved_hash and upstream else ""
+                        upstream = (target_config or {}).get("upstream_target", target)
+                        compare_hint = f"  Compare: rdst query cache-compare {saved_hash} --target {upstream} --count 100\n" if saved_hash else ""
                         self._console.print(StyledPanel(
                             f"Shallow cache created successfully\n\n"
                             f"  Query: {str(InlineSQL(last_event.query, max_length=80))}\n"
@@ -201,7 +230,7 @@ class CacheCommands:
                             + (f"  Hash: {saved_hash}\n" if saved_hash else "")
                             + f"\n  View caches: rdst cache show --target {target}\n"
                             f"  Delete:      rdst cache delete <cache_id> --target {target}\n"
-                            + run_hint + compare_hint,
+                            + compare_hint,
                             title="Cache Created", variant="success",
                         ))
                 elif not last_event.supported:
@@ -322,3 +351,112 @@ class CacheCommands:
             return (True, None, None)
 
         return (False, None, "Unexpected response")
+
+    # ------------------------------------------------------------------
+    # rdst cache remove
+    # ------------------------------------------------------------------
+
+    def remove(
+        self,
+        target: Optional[str] = None,
+        target_config: Optional[Dict[str, Any]] = None,
+        json_output: bool = False,
+        yes: bool = False,
+    ) -> RdstResult:
+        """Remove a Readyset cache deployment — stops container (if local) and removes target config."""
+        import subprocess
+
+        from .rdst_cli import TargetsConfig
+
+        # Fall back to default target if none specified
+        if not target:
+            cfg = TargetsConfig()
+            cfg.load()
+            target = cfg.get_default()
+            if target:
+                target_config = cfg.get(target)
+
+        if not target:
+            return self._error("No target specified and no default configured.", hint="rdst cache remove --target <name>")
+        if not target_config:
+            return self._error(f"Target '{target}' not found in configuration.")
+
+        # If they passed an upstream target, find its cache target
+        if target_config.get("target_type") != "readyset":
+            cfg = TargetsConfig()
+            cfg.load()
+            cache_target = None
+            cache_config = None
+            for name, config in cfg._data.get("targets", {}).items():
+                if config.get("target_type") == "readyset" and config.get("upstream_target") == target:
+                    cache_target = name
+                    cache_config = config
+                    break
+            if not cache_config:
+                conventional = f"{target}-cache"
+                check = cfg.get(conventional)
+                if check and check.get("target_type") == "readyset":
+                    cache_target = conventional
+                    cache_config = check
+            if not cache_config:
+                return self._error(
+                    f"No cache found for target '{target}'.",
+                    hint=f"Nothing to remove. Deploy first with:\n  rdst cache deploy --target {target} --mode docker",
+                )
+            target = cache_target
+            target_config = cache_config
+
+        container_name = target_config.get("container_name")
+        deploy_mode = target_config.get("deploy_mode", "")
+        host = target_config.get("host", "")
+        upstream = target_config.get("upstream_target", "unknown")
+
+        if not yes:
+            from lib.ui import Confirm
+            msg = f"Remove cache target '{target}'"
+            if deploy_mode == "docker" and container_name:
+                msg += f" and stop Docker container '{container_name}'"
+            msg += "?"
+            if not Confirm.ask(msg, default=False):
+                return RdstResult(False, "Cancelled")
+
+        container_stopped = False
+        if deploy_mode == "docker" and container_name:
+            try:
+                result = subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=15)
+                if result.returncode == 0:
+                    container_stopped = True
+                else:
+                    self._console.print(f"[{StyleTokens.WARNING}]Could not remove container '{container_name}': {result.stderr.strip()}[/{StyleTokens.WARNING}]")
+            except Exception as e:
+                self._console.print(f"[{StyleTokens.WARNING}]Could not remove container: {e}[/{StyleTokens.WARNING}]")
+        elif deploy_mode == "systemd":
+            self._console.print(f"[{StyleTokens.MUTED}]Systemd service — stop manually:\n  sudo systemctl stop readyset-{upstream}[/{StyleTokens.MUTED}]")
+        elif deploy_mode in ("kubernetes", "remote") or (host and host not in ("localhost", "127.0.0.1", "::1", "0.0.0.0")):
+            self._console.print(f"[{StyleTokens.MUTED}]Remote/K8s cache at {host} — not managed locally.\nRemove the Readyset instance manually if needed.[/{StyleTokens.MUTED}]")
+        elif container_name:
+            try:
+                result = subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=15)
+                if result.returncode == 0:
+                    container_stopped = True
+            except Exception:
+                pass
+
+        # Remove target from config
+        cfg = TargetsConfig()
+        cfg.load()
+        if target in cfg._data.get("targets", {}):
+            del cfg._data["targets"][target]
+            if cfg.get_default() == target:
+                cfg.set_default(upstream)
+            cfg.save()
+
+        if json_output:
+            print(json.dumps({"success": True, "target_removed": target, "container_stopped": container_stopped, "upstream": upstream}, indent=2))
+        else:
+            parts = [f"Cache target '{target}' removed."]
+            if container_stopped:
+                parts.append(f"Docker container '{container_name}' stopped and removed.")
+            self._console.print(MessagePanel("\n".join(parts), variant="success"))
+
+        return RdstResult(True, " ")

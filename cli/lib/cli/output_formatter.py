@@ -518,18 +518,24 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
 
     if analysis_id:
         readyset_analysis = workflow_result.get("readyset_analysis") or {}
-        if not readyset_analysis.get("success"):
+        if readyset_analysis.get("no_cache_target") or not readyset_analysis.get("success"):
+            # No cache or failed — show deploy then cache-compare as sequential steps
             next_steps.add_step(
-                f"rdst analyze --hash {analysis_id} --readyset-cache",
-                "Test Readyset caching",
+                f"rdst cache deploy --target {target} --mode docker",
+                "Deploy Readyset cache",
+            )
+            next_steps.add_step(
+                f"rdst query cache-compare {analysis_id} --target {target} --count 100",
+                "Then compare upstream vs cached performance",
+            )
+        elif readyset_analysis.get("success"):
+            next_steps.add_step(
+                f"rdst query cache-compare {analysis_id} --target {target} --count 100",
+                "Compare upstream vs cached performance",
             )
         next_steps.add_step(
             f"rdst analyze --hash {analysis_id} --interactive",
             "Ask follow-up questions",
-        )
-        next_steps.add_step(
-            f"rdst query show --hash {analysis_id}",
-            "View saved query details",
         )
 
     lines.append(_capture(next_steps))
@@ -1066,14 +1072,19 @@ def _format_readyset_cacheability(
 ) -> List[str]:
     content_parts: List[Any] = []
 
-    # Check for errors first
+    # Check for no cache target or errors
     if readyset_analysis and not readyset_analysis.get("success") and readyset_analysis.get("error"):
         error_msg = readyset_analysis.get("error", "Unknown error")
         remediation = readyset_analysis.get("remediation")
+        is_no_cache = readyset_analysis.get("no_cache_target", False)
 
-        content_parts.append(f"[{StyleTokens.ERROR}]ERROR[/{StyleTokens.ERROR}]")
-        content_parts.append(Text(""))
-        content_parts.append(f"[{StyleTokens.ERROR}]{error_msg}[/{StyleTokens.ERROR}]")
+        if is_no_cache:
+            # Informational — not an error, just no cache configured yet
+            content_parts.append(f"[{StyleTokens.MUTED}]{error_msg}[/{StyleTokens.MUTED}]")
+        else:
+            content_parts.append(f"[{StyleTokens.ERROR}]ERROR[/{StyleTokens.ERROR}]")
+            content_parts.append(Text(""))
+            content_parts.append(f"[{StyleTokens.ERROR}]{error_msg}[/{StyleTokens.ERROR}]")
 
         if remediation:
             content_parts.append(Text(""))
@@ -1082,7 +1093,7 @@ def _format_readyset_cacheability(
         return [
             _capture(
                 SectionBox(
-                    f"{Icons.ROCKET} Readyset Cache Analysis",
+                    f"{Icons.ROCKET} Readyset Performance",
                     content=Group(*content_parts),
                 )
             )
@@ -1179,7 +1190,7 @@ def _format_readyset_cacheability(
     return [
         _capture(
             SectionBox(
-                f"{Icons.ROCKET} Readyset Cache Performance Analysis",
+                f"{Icons.ROCKET} Readyset Performance",
                 content=Group(*content_parts),
             )
         )
@@ -1237,6 +1248,7 @@ def _format_next_steps(
 ) -> List[str]:
     """Actionable next steps for the user."""
     analysis_id = metadata.get("analysis_id", "")
+    target = metadata.get("target", "unknown")
     if not analysis_id:
         return []
 
@@ -1287,16 +1299,21 @@ def _format_next_steps(
 
     if not readyset_checked:
         next_steps.add_step(
-            f"rdst analyze --hash {analysis_id} --readyset-cache",
-            "Test Readyset caching",
+            f"rdst cache deploy --target {target} --mode docker",
+            "Deploy Readyset cache",
+        )
+        next_steps.add_step(
+            f"rdst query cache-compare {analysis_id} --target {target} --count 100",
+            "Then compare upstream vs cached performance",
+        )
+    else:
+        next_steps.add_step(
+            f"rdst query cache-compare {analysis_id} --target {target} --count 100",
+            "Compare upstream vs cached performance",
         )
     next_steps.add_step(
         f"rdst analyze --hash {analysis_id} --interactive",
         "Ask follow-up questions",
-    )
-    next_steps.add_step(
-        f"rdst query show {analysis_id}",
-        "View saved query details",
     )
 
     return [_capture(next_steps)]

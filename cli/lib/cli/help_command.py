@@ -107,10 +107,11 @@ rdst analyze -q "SELECT ..." --target mydb
 rdst analyze -q "SELECT ..." --target mydb --interactive
 ```
 
-**Step 4: Test Readyset Caching (Optional)**
+**Step 4: Compare Readyset Performance**
 ```bash
-# Requires Docker installed and running
-rdst analyze -q "SELECT ..." --target mydb --readyset-cache
+# Readyset caching is tested automatically during analyze (if Docker is available)
+# For a dedicated benchmark comparison:
+rdst query cache-compare <query-name> --target mydb --count 100
 ```
 
 **Step 5: Iterate**
@@ -163,8 +164,8 @@ rdst analyze -q "SELECT * FROM orders WHERE status = 'pending'" --target mydb
 # Fast mode (10s timeout for slow queries)
 rdst analyze -q "SELECT * FROM big_table" --target mydb --fast
 
-# Test Readyset cacheability (requires Docker)
-rdst analyze -q "SELECT * FROM orders" --target mydb --readyset-cache
+# Readyset caching is tested automatically (requires Docker)
+rdst analyze -q "SELECT * FROM orders" --target mydb
 
 # Continue previous analysis interactively
 rdst analyze --hash abc123 --interactive
@@ -446,7 +447,7 @@ error with instructions to deploy first.
 #### rdst cache deploy
 Deploy ReadySet shallow cache permanently to local, remote, or Kubernetes environments.
 
-If a ReadySet container already exists from a prior `analyze --readyset-cache`, it will
+If a ReadySet container already exists from a prior `analyze --target mydb`, it will
 be promoted to a permanent deployment. Otherwise creates a new one.
 
 ```bash
@@ -477,7 +478,7 @@ rdst cache deploy --target mydb --mode docker --json
 
 Deployment modes:
 - **docker**: Runs ReadySet in a Docker container with `--restart=unless-stopped`.
-  For local deploy, reuses/promotes existing containers from `analyze --readyset-cache`.
+  For local deploy, reuses/promotes existing containers from `analyze --target mydb`.
 - **systemd**: Installs ReadySet as a native binary with a systemd service unit.
   Extracts binary from Docker image, creates config and service file.
 - **kubernetes**: Creates Kubernetes Secret, Deployment, and Service via kubectl.
@@ -893,10 +894,10 @@ without a keyring backend, use environment variables instead.
 5. Re-run analysis to verify improvement
 
 ### Testing Readyset Caching
-1. Run `rdst analyze -q "..." --target mydb --readyset-cache`
-2. Wait 30-60 seconds for containers to start
-3. Review if query is cacheable
-4. If cacheable, see the CREATE CACHE command for production
+1. Run `rdst analyze -q "..." --target mydb` (Readyset tested automatically if Docker available)
+2. Review the Readyset Performance section in the output
+3. For a full benchmark: `rdst query cache-compare <query> --target mydb --count 100`
+4. If cacheable, deploy permanently: `rdst cache deploy --target mydb --mode docker`
 
 ### Benchmarking Queries
 1. Discover slow queries with `rdst top --target mydb`
@@ -1129,21 +1130,24 @@ Annotations are **optional** but recommended for complex schemas with business l
 - Run `rdst configure llm --provider anthropic`
 - Export ANTHROPIC_API_KEY environment variable
 
-## Docker Requirements (--readyset-cache)
+## Docker Requirements (Readyset Performance)
 
-The `--readyset-cache` flag for `rdst analyze` uses Docker to test Readyset cacheability.
+`rdst analyze` automatically tests Readyset caching in parallel when Docker is available.
+`rdst query cache-compare` and `rdst cache deploy` also use Docker.
 
 **Prerequisites:**
 - Docker must be installed and running
 - User must have permission to run Docker commands
 - First run downloads container image (~500MB)
 
-**What happens when you use --readyset-cache:**
-1. RDST starts a single Readyset container (`rdst-readyset`) that connects directly to your upstream database
-2. Uses shallow caching mode - no data replication or snapshotting required
-3. Attempts to cache the query in Readyset
-4. Reports cacheability status and any issues
-5. Container is kept running for subsequent tests
+**What happens automatically:**
+1. RDST starts a Readyset container that connects directly to your upstream database
+2. Uses shallow caching mode (10-minute TTL) - no data replication required
+3. Attempts to cache the query and measures performance
+4. Reports cacheability status and cached query latency
+5. Container is kept running for subsequent use
+
+**If Docker is not available:** Readyset performance testing is silently skipped. All other analysis runs normally.
 
 **Resource usage:**
 - Memory: ~500MB-1GB for Readyset container
@@ -1153,11 +1157,11 @@ The `--readyset-cache` flag for `rdst analyze` uses Docker to test Readyset cach
 **Cleanup:**
 Container remains running after tests. To stop it:
 ```bash
-docker stop rdst-readyset
-docker rm rdst-readyset
+docker stop rdst-readyset-<target>
+docker rm rdst-readyset-<target>
 ```
 
-**Important:** The first `--readyset-cache` run may take 30-60 seconds while the image downloads.
+**Important:** The first run may take 30-60 seconds while the image downloads.
 Subsequent runs are faster (5-10 seconds).
 
 ## Troubleshooting
@@ -1232,17 +1236,13 @@ class HelpCommand:
             except Exception:
                 pass
         if not api_key:
-            return HelpResult(
-                success=False,
-                answer="",
-                error="""No LLM API key configured.
-
-Options:
-  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)
-  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."
-     Get one at: https://console.anthropic.com/
-""",
+            # Use keyword-based fallback when no API key available
+            result = self._fallback_search(question, "no_api_key")
+            result.answer += (
+                "\n\n---\n"
+                "Note: For more detailed AI-powered help, run `rdst init` to get a free API key."
             )
+            return result
 
         try:
             from lib.llm_manager.llm_manager import LLMManager
@@ -1301,8 +1301,9 @@ rdst analyze -q "YOUR SQL QUERY" --target your-target
 
 Options:
 - --fast: Skip slow queries (10s timeout)
-- --readyset-cache: Test if query can be cached by Readyset
 - --interactive: Continue analysis conversation
+
+Readyset cache performance is tested automatically when Docker is available.
 
 Example:
 ```bash
@@ -1404,31 +1405,33 @@ Set default: `rdst configure default --target NAME`"""
 
 The password must be exported before each session."""
         elif "cache" in question_lower or "readyset" in question_lower:
-            answer = """ReadySet shallow caching — two approaches:
+            answer = """ReadySet shallow caching:
 
-**Quick test (ephemeral, for exploration):**
+**Automatic testing during analyze:**
 ```bash
-rdst analyze -q "YOUR QUERY" --target your-target --readyset-cache
+rdst analyze -q "YOUR QUERY" --target mydb
+# Readyset performance is tested automatically if Docker is available
 ```
 
-**Production caching (persistent, via rdst cache commands):**
+**Compare performance (upstream vs cache):**
+```bash
+rdst query cache-compare <query> --target mydb --count 100
+# Auto-deploys cache if needed, shows side-by-side comparison
+```
+
+**Manual cache management:**
 ```bash
 # 1. Deploy ReadySet (auto-registers mydb-cache target)
 rdst cache deploy --target mydb --mode docker
 
-# 2. Cache queries (target must be readyset type, e.g., mydb-cache)
+# 2. Cache queries
 rdst cache add "SELECT * FROM orders WHERE id = 1" --target mydb-cache
 
-# 3. View caches (shows cache name, type, TTL)
+# 3. View caches and connection string
 rdst cache show --target mydb-cache
 
-# 4. Benchmark cached vs direct
-rdst query run <hash> --target mydb-cache  # Cached (fast)
-rdst query run <hash> --target mydb        # Direct DB (slow)
-
-# 5. Remove caches
+# 4. Remove caches
 rdst cache delete <cache_name> --target mydb-cache
-rdst cache drop-all --target mydb-cache --yes
 ```
 
 Cache commands require a ReadySet target (target_type=readyset).

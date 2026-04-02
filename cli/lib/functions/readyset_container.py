@@ -617,6 +617,7 @@ def start_readyset_container_direct(
             '-e', 'DEPLOYMENT_MODE=standalone',
             '-e', 'QUERY_CACHING=explicit',
             '-e', 'CACHE_MODE=shallow',
+            '-e', 'DEFAULT_TTL_MS=600000',
             '-p', f'{readyset_port}:{readyset_port}',
             '--add-host=host.docker.internal:host-gateway',
             READYSET_IMAGE,

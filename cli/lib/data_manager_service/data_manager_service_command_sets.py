@@ -556,6 +556,12 @@ COMMAND_SETS = {
                       AND query NOT LIKE '%pg_stat_statements%'
                       AND query NOT LIKE '%information_schema%'
                       AND query NOT LIKE 'EXPLAIN%'
+                      AND query NOT LIKE 'SET %'
+                      AND query NOT LIKE 'SHOW %'
+                      AND query NOT LIKE 'SELECT 1%'
+                      AND query NOT LIKE 'BEGIN%'
+                      AND query NOT LIKE 'COMMIT%'
+                      AND query NOT LIKE 'ROLLBACK%'
                     ORDER BY total_exec_time DESC
                     LIMIT 50
                 """,
@@ -667,6 +673,9 @@ COMMAND_SETS = {
                       AND DIGEST_TEXT NOT LIKE '%performance_schema%'
                       AND DIGEST_TEXT NOT LIKE '%information_schema%'
                       AND DIGEST_TEXT NOT LIKE 'EXPLAIN%'
+                      AND DIGEST_TEXT NOT LIKE 'SET %'
+                      AND DIGEST_TEXT NOT LIKE 'SHOW %'
+                      AND DIGEST_TEXT NOT LIKE 'SELECT 1%'
                     ORDER BY SUM_TIMER_WAIT DESC
                     LIMIT 50
                 """,
@@ -743,6 +752,9 @@ COMMAND_SETS = {
                       AND sql_text NOT LIKE '%slow_log%'
                       AND sql_text NOT LIKE '%information_schema%'
                       AND sql_text NOT LIKE '%performance_schema%'
+                      AND sql_text NOT LIKE 'SET %'
+                      AND sql_text NOT LIKE 'SHOW %'
+                      AND sql_text NOT LIKE 'SELECT 1%'
                     GROUP BY sql_text
                     ORDER BY total_time DESC
                     LIMIT 50

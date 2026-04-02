@@ -18,7 +18,7 @@ def deploy_local_docker(
     """Deploy ReadySet locally via Docker.
 
     Two paths:
-    1. Container exists from prior analyze --readyset-cache → promote to permanent
+    1. Container exists from prior analyze → promote to permanent
     2. No container → create new with persistent flags
     """
     # Check for existing container (both naming conventions)
@@ -184,6 +184,7 @@ def _create_container(
         "-e", f"DEPLOYMENT_MODE=standalone",
         "-e", f"QUERY_CACHING=explicit",
         "-e", f"CACHE_MODE=shallow",
+        "-e", "DEFAULT_TTL_MS=600000",
         "-p", f"{readyset_port}:{readyset_port}",
         "--add-host=host.docker.internal:host-gateway",
         image,

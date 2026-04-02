@@ -167,7 +167,7 @@ Examples:
   rdst configure add --target prod --connection-string "postgresql://user:pass@host:5432/db"
   rdst configure list
   rdst analyze "SELECT * FROM users WHERE active = true"
-  rdst analyze "SELECT COUNT(*) FROM orders WHERE status = 'pending'" --readyset-cache
+  rdst analyze "SELECT COUNT(*) FROM orders WHERE status = 'pending'"
   rdst top --limit 10
   rdst top --source slowlog --target mysql-db
         """,
@@ -207,7 +207,6 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             "name",
             "target",
             "save_as",
-            "readyset_cache",
             "fast",
             "interactive",
             "review",
@@ -227,7 +226,6 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             positional_query=getattr(args, "query", None),  # positional argument
             target=getattr(args, "target", None),
             save_as=getattr(args, "save_as", None),
-            readyset_cache=getattr(args, "readyset_cache", False),
             fast=getattr(args, "fast", False),
             interactive=getattr(args, "interactive", False),
             review=getattr(args, "review", False),
@@ -278,6 +276,16 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             query_kwargs["quiet"] = getattr(args, "quiet", False)
             query_kwargs["file"] = getattr(args, "file", None)
             query_kwargs["analyze"] = getattr(args, "analyze", False)
+            query_kwargs["skip_warning"] = getattr(args, "skip_warning", False)
+        if query_subcommand == "cache-compare":
+            query_kwargs["queries"] = getattr(args, "queries", [])
+            query_kwargs["target"] = getattr(args, "target", None)
+            query_kwargs["interval"] = getattr(args, "interval", None)
+            query_kwargs["concurrency"] = getattr(args, "concurrency", None)
+            query_kwargs["duration"] = getattr(args, "duration", None)
+            query_kwargs["count"] = getattr(args, "count", 100)
+            query_kwargs["quiet"] = getattr(args, "quiet", False)
+            query_kwargs["skip_warning"] = getattr(args, "skip_warning", False)
 
         result = cli.query(subcommand=query_subcommand, **query_kwargs)
 
@@ -433,6 +441,13 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             )
         elif cache_subcommand == 'drop-all':
             return cache_cmd.drop_all(
+                target=cache_target,
+                target_config=cache_target_config,
+                json_output=getattr(args, 'json_output', False),
+                yes=getattr(args, 'yes', False),
+            )
+        elif cache_subcommand == 'remove':
+            return cache_cmd.remove(
                 target=cache_target,
                 target_config=cache_target_config,
                 json_output=getattr(args, 'json_output', False),

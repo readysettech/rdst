@@ -121,7 +121,7 @@ def setup_readyset_containers(
         # Get database engine from target config
         engine = target_config.get("engine", "postgresql").lower()
 
-        # Validate that database name is configured (required for --readyset-cache)
+        # Validate that database name is configured (required for Readyset analysis)
         if "database" not in target_config or not target_config["database"]:
             return {
                 "success": False,
