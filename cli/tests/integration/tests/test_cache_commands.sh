@@ -94,24 +94,42 @@ test_cache_show_json() {
 test_cache_add_by_hash() {
   log_section "Cache Commands: Add by Hash (${DB_ENGINE})"
 
-  # First, get a hash from the query list
-  run_cmd "List queries for hash" \
-    "${RDST_CMD[@]}" query list
+  # Add a fresh query so we have a known hash to test with
+  run_cmd "Add query for hash test" \
+    "${RDST_CMD[@]}" query add hash-cache-test \
+    --query "SELECT * FROM title_basics WHERE tconst = 'tt0000005'" \
+    --target "$TARGET_NAME"
+
+  # Get the hash
   local CACHE_HASH
   CACHE_HASH=$(latest_hash_from_list)
 
   if [[ -z "$CACHE_HASH" ]]; then
-    echo "SKIP: No query hash available for hash-based cache add"
-    return 0
+    fail "Failed to get hash for cache add by hash test"
   fi
 
-  # Use a different query to avoid "already cached" issues
-  # Add a new query first, then cache it by hash
+  # Drop existing caches so we get a clean test
+  run_cmd "Drop caches before hash test" \
+    "${RDST_CMD[@]}" cache drop-all --target "$CACHE_TARGET_NAME" --yes
+
+  # Cache add by hash — must succeed
   run_cmd "Cache add (hash ${CACHE_HASH})" \
     "${RDST_CMD[@]}" cache add "$CACHE_HASH" --target "$CACHE_TARGET_NAME"
+  assert_contains "Cache Created" "cache add by hash should succeed"
+  assert_contains "Shallow cache created" "should confirm shallow cache"
 
-  # This may succeed (creates cache) or fail (already cached / same query)
-  # Both are acceptable outcomes for this test
+  # Also test by query name
+  run_cmd "Drop caches before name test" \
+    "${RDST_CMD[@]}" cache drop-all --target "$CACHE_TARGET_NAME" --yes
+
+  run_cmd "Cache add (name hash-cache-test)" \
+    "${RDST_CMD[@]}" cache add hash-cache-test --target "$CACHE_TARGET_NAME"
+  assert_contains "Cache Created" "cache add by name should succeed"
+
+  # Verify cache exists
+  run_cmd "Verify cache after hash/name add" \
+    "${RDST_CMD[@]}" cache show --target "$CACHE_TARGET_NAME"
+  assert_contains "1 total" "should have 1 cache"
 }
 
 test_cache_delete() {

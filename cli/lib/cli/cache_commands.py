@@ -165,6 +165,36 @@ class CacheCommands:
         if not target:
             return self._error("Target is required.", hint="rdst cache add <query> --target <name>")
 
+        # Resolve hash or name from registry if input is not raw SQL
+        if not query.strip().upper().startswith(("SELECT", "WITH")):
+            from lib.query_registry.query_registry import QueryRegistry
+            import re
+            registry = QueryRegistry()
+            registry.load()
+            entry = registry.get_query_by_tag(query) or registry.get_query(query)
+            if entry:
+                sql = entry.sql
+                # Convert :p1/:p2 registry placeholders to engine-appropriate format
+                if ":p" in sql:
+                    engine = (target_config or {}).get("engine", "mysql")
+                    if engine == "mysql":
+                        sql = re.sub(r':p\d+', '?', sql)
+                    else:
+                        counter = [0]
+                        def _pg_placeholder(m):
+                            counter[0] += 1
+                            return f'${counter[0]}'
+                        sql = re.sub(r':p\d+', _pg_placeholder, sql)
+                query = sql
+            else:
+                q_upper = query.strip().upper()
+                if q_upper.startswith(("INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER")):
+                    return self._error("Only SELECT queries can be cached by Readyset.")
+                return self._error(
+                    f"'{query}' was not found in the query registry.",
+                    hint="Use a SELECT query, a query name, or a registry hash.",
+                )
+
         input_data = CacheInput(target=target, query=query, tag=tag)
         options = CacheOptions(dry_run=dry_run, json_output=json_output)
         success, data, error_msg = asyncio.run(
