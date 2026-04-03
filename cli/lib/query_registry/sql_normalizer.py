@@ -11,8 +11,22 @@ import logging
 from typing import Tuple, Dict, Any, Optional, Set
 
 from sqlglot import parse_one, exp
+from sqlglot.generator import Generator as _BaseGenerator
 
 logger = logging.getLogger(__name__)
+
+
+class _ReadysetCompatGenerator(_BaseGenerator):
+    """Custom SQL generator that omits AS for table aliases.
+
+    sqlglot's default generator produces 'FROM table AS alias' but
+    ReadySet's query ID hashing treats 'FROM table alias' (no AS) as
+    a different query. Since the wire protocol sends queries without AS,
+    we must generate SQL without AS to ensure cache ID consistency.
+    """
+
+    def table_sql(self, expression: exp.Table, sep: str = " ") -> str:
+        return super().table_sql(expression, sep=sep)
 
 
 def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str, dict]]:
@@ -46,7 +60,7 @@ def normalize_and_extract(sql: str, dialect: str = None) -> Tuple[str, Dict[str,
         # Replace with named :p1, :p2 placeholder
         literal.replace(exp.Placeholder(this=param_name))
 
-    return tree.sql(), params
+    return _ReadysetCompatGenerator().generate(tree), params
 
 
 def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str = None) -> str:
@@ -83,7 +97,7 @@ def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str =
                 replacement = exp.Literal.number(param_info['value'])
             placeholder.replace(replacement)
 
-    return tree.sql(dialect=dialect)
+    return _ReadysetCompatGenerator().generate(tree)
 
 
 def get_placeholder_names(normalized_sql: str, dialect: str = None) -> Set[str]:

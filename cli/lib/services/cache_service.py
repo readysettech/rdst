@@ -891,6 +891,7 @@ class CacheService:
                 "engine": target_config.get("engine", "postgresql"),
                 "host": host,
                 "port": int(variables.get("readyset_port", 5433)),
+                "metrics_port": int(variables.get("metrics_port", 6034)),
                 "user": target_config.get("user", ""),
                 "database": target_config.get("database", ""),
                 "password": target_config.get("password", ""),

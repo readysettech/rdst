@@ -185,7 +185,9 @@ def _create_container(
         "-e", f"QUERY_CACHING=explicit",
         "-e", f"CACHE_MODE=shallow",
         "-e", "DEFAULT_TTL_MS=600000",
+        "-e", f"METRICS_ADDRESS=0.0.0.0:{variables.get('metrics_port', '6034')}",
         "-p", f"{readyset_port}:{readyset_port}",
+        "-p", f"{variables.get('metrics_port', '6034')}:{variables.get('metrics_port', '6034')}",
         "--add-host=host.docker.internal:host-gateway",
         image,
     ]

@@ -130,8 +130,10 @@ class CacheCommands:
                     pw_display = f"${{{pw_env}}}" if pw_env else "<password>"
                     conn_str = f"{proto}://{user}:{pw_display}@{host}:{port}/{db}"
                     pw_note = f"\n  Password: Use ${pw_env} (same as upstream)" if pw_env else ""
+                    metrics_port = tc.get("metrics_port")
+                    metrics_line = f"\n  Metrics:  http://{host}:{metrics_port}/metrics" if metrics_port else ""
                     self._console.print(StyledPanel(
-                        f"Connect your application to Readyset:\n  {conn_str}{pw_note}",
+                        f"Connect your application to Readyset:\n  {conn_str}{pw_note}{metrics_line}",
                         title="Readyset Connection String",
                     ))
 
@@ -185,6 +187,9 @@ class CacheCommands:
                             counter[0] += 1
                             return f'${counter[0]}'
                         sql = re.sub(r':p\d+', _pg_placeholder, sql)
+                # Safety: strip AS from table aliases in case the registry entry
+                # was stored by an older version that used sqlglot's AS-adding behavior
+                sql = re.sub(r'\b(\w+)\s+AS\s+(\w+)', r'\1 \2', sql)
                 query = sql
             else:
                 q_upper = query.strip().upper()
@@ -194,6 +199,94 @@ class CacheCommands:
                     f"'{query}' was not found in the query registry.",
                     hint="Use a SELECT query, a query name, or a registry hash.",
                 )
+
+        # Before creating cache from SQL text, check if ReadySet already has
+        # this query as a proxied query. Using the proxied query ID ensures
+        # the cache matches how the wire protocol sees the query, avoiding
+        # normalization mismatches (e.g., sqlglot adds AS to table aliases).
+        input_data = CacheInput(target=target, query=query, tag=tag)
+        if target_config:
+            try:
+                from lib.services.password_resolver import resolve_password_value
+                import re as _re
+                _host = target_config.get("host", "localhost")
+                _port = int(target_config.get("port", 5433))
+                _password = resolve_password_value(target_config)
+                _engine = (target_config or {}).get("engine", "postgresql")
+
+                if _engine == "mysql":
+                    import pymysql
+                    _conn = pymysql.connect(
+                        host=_host, port=_port,
+                        user=target_config.get("user", ""),
+                        password=_password or "",
+                        database=target_config.get("database", ""),
+                        connect_timeout=5,
+                    )
+                else:
+                    import psycopg2
+                    _conn = psycopg2.connect(
+                        host=_host, port=_port,
+                        user=target_config.get("user", ""),
+                        password=_password or "",
+                        database=target_config.get("database", ""),
+                        connect_timeout=5,
+                    )
+                _conn.autocommit = True
+                _cur = _conn.cursor()
+                _cur.execute("SHOW PROXIED QUERIES")
+                _proxied = _cur.fetchall()
+
+                # Normalize for fuzzy matching: collapse whitespace, lowercase,
+                # strip all AS keywords, normalize placeholders, strip semicolons
+                def _norm(s):
+                    s = _re.sub(r'\s+', ' ', str(s).strip().lower()).rstrip(';')
+                    # Remove ALL standalone AS (table aliases AND column aliases)
+                    s = _re.sub(r'\bas\b', '', s)
+                    s = _re.sub(r'\s+', ' ', s)  # re-collapse after AS removal
+                    s = _re.sub(r'\$\d+', '?', s)
+                    s = _re.sub(r':p\d+', '?', s)
+                    s = _re.sub(r'\?', '?', s)
+                    return s.strip()
+
+                query_norm = _norm(query)
+                for row in _proxied:
+                    # SHOW PROXIED QUERIES: (query_id, query_text, supported, count)
+                    proxied_text = str(row[1])
+                    proxied_id = str(row[0])
+                    if _norm(proxied_text) == query_norm:
+                        # Match found — create cache directly using query ID
+                        # (bypass CacheService which would fail static check on ID)
+                        _cur.execute(f"CREATE SHALLOW CACHE FROM {proxied_id}")
+                        try:
+                            _cur.fetchall()
+                        except Exception:
+                            pass
+                        _cur.close()
+                        _conn.close()
+
+                        # Save to registry if tag provided
+                        if tag:
+                            from lib.query_registry.query_registry import QueryRegistry
+                            registry = QueryRegistry()
+                            registry.load()
+                            registry.add_query(sql=query, tag=tag, target=target)
+                            registry.save()
+
+                        self._console.print(StyledPanel(
+                            f"Shallow cache created successfully (from proxied query)\n\n"
+                            f"  Query ID: {proxied_id}\n"
+                            f"  Target: {target}\n\n"
+                            f"  View caches: rdst cache show --target {target}\n"
+                            f"  Delete:      rdst cache delete {proxied_id} --target {target}",
+                            title="Cache Created", variant="success",
+                        ))
+                        return RdstResult(True, "")
+
+                _cur.close()
+                _conn.close()
+            except Exception:
+                pass  # Fall through to SQL-based cache creation
 
         input_data = CacheInput(target=target, query=query, tag=tag)
         options = CacheOptions(dry_run=dry_run, json_output=json_output)

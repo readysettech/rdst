@@ -431,7 +431,6 @@ class TopCommand:
                         "--query",
                         query.query_text,
                         "--skip-warning",
-                        "--interactive",
                     ]
 
                     try:
@@ -464,7 +463,7 @@ class TopCommand:
                         target_name,
                     )
 
-        return RdstResult(True, "Real-time monitoring stopped")
+        return RdstResult(True, " ")
 
     def _run_snapshot_realtime(
         self,

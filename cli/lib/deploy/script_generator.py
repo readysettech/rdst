@@ -19,6 +19,9 @@ DEFAULT_PORTS = {
     "mysql": 3307,
 }
 
+# Default Prometheus metrics port
+DEFAULT_METRICS_PORT = 6034
+
 # Default images
 from lib.deploy import READYSET_IMAGE
 SQUEEPY_IMAGE = "docker.io/readysettech/squeepy:latest"  # placeholder until published
@@ -62,6 +65,32 @@ def _find_available_port(engine: str, deploy_host: str = "localhost") -> int:
         return default_port
 
 
+def _find_available_metrics_port(deploy_host: str = "localhost") -> int:
+    """Find a Prometheus metrics port that doesn't conflict with existing caches."""
+    normalized_deploy = _normalize_host(deploy_host)
+    try:
+        from lib.cli.rdst_cli import TargetsConfig
+        cfg = TargetsConfig()
+        cfg.load()
+
+        used_ports = set()
+        for _, config in cfg._data.get("targets", {}).items():
+            if config.get("target_type") != "readyset":
+                continue
+            if _normalize_host(config.get("host", "localhost")) != normalized_deploy:
+                continue
+            metrics_port = config.get("metrics_port")
+            if metrics_port:
+                used_ports.add(int(metrics_port))
+
+        port = DEFAULT_METRICS_PORT
+        while port in used_ports:
+            port += 1
+        return port
+    except Exception:
+        return DEFAULT_METRICS_PORT
+
+
 def build_variables(
     target_name: str,
     target_config: dict,
@@ -77,6 +106,8 @@ def build_variables(
     else:
         readyset_port = _find_available_port(engine)
 
+    metrics_port = _find_available_metrics_port()
+
     return {
         "db_host": target_config.get("host", "localhost"),
         "db_port": str(target_config.get("port", 5432)),
@@ -84,6 +115,7 @@ def build_variables(
         "db_name": target_config.get("database", ""),
         "db_engine": engine,
         "readyset_port": str(readyset_port),
+        "metrics_port": str(metrics_port),
         "container_name": f"rdst-readyset-{target_name}",
         "target_name": target_name,
         "readyset_image": READYSET_IMAGE,
