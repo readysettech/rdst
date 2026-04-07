@@ -127,6 +127,7 @@ docker run -d \
   -e DATABASE_TYPE="$DB_TYPE" \
   -e LISTEN_ADDRESS="0.0.0.0:${READYSET_PORT}" \
   -e DEPLOYMENT_MODE="standalone" \
+  -e DEPLOYMENT_ENV="rdst_docker" \
   -e QUERY_CACHING="explicit" \
   -e CACHE_MODE="shallow" \
   -p "${READYSET_PORT}:${READYSET_PORT}" \

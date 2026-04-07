@@ -155,6 +155,7 @@ Environment=UPSTREAM_DB_URL=${DB_URL}
 Environment=DATABASE_TYPE=${DB_TYPE}
 Environment=LISTEN_ADDRESS=0.0.0.0:${READYSET_PORT}
 Environment=DEPLOYMENT_MODE=standalone
+Environment=DEPLOYMENT_ENV=rdst_systemd
 Environment=QUERY_CACHING=explicit
 Environment=CACHE_MODE=shallow
 
