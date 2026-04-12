@@ -10,18 +10,16 @@ from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from typing import Any, Dict, Optional
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.types import (
-    ConfigureInput,
-    ConfigureOptions,
-    ConfigureStatusEvent,
-    ConfigureTargetListEvent,
-    ConfigureTargetDetailEvent,
+from features.configure.events import (
     ConfigureConnectionTestEvent,
-    ConfigureSuccessEvent,
     ConfigureErrorEvent,
     ConfigureInputNeededEvent,
+    ConfigureStatusEvent,
+    ConfigureSuccessEvent,
+    ConfigureTargetDetailEvent,
+    ConfigureTargetListEvent,
 )
+from features.configure.models import ConfigureInput, ConfigureOptions
 
 
 class TestConfigureServiceInit:
@@ -33,7 +31,7 @@ class TestConfigureServiceInit:
         Verifies that ConfigureService can be instantiated without errors.
         This test will fail until ConfigureService is implemented.
         """
-        from lib.services.configure_service import ConfigureService
+        from features.configure.service import ConfigureService
 
         service = ConfigureService()
         assert service is not None
@@ -48,7 +46,7 @@ class TestConfigureServiceListTargets:
 
         Provides a fresh service instance for each test.
         """
-        from lib.services.configure_service import ConfigureService
+        from features.configure.service import ConfigureService
 
         return ConfigureService()
 

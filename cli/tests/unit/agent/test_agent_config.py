@@ -9,7 +9,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from lib.agent.config import (
+from features.agent.config import (
     AgentConfig,
     SafetyConfig,
     RestrictionsConfig,

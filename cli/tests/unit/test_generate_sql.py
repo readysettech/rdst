@@ -9,8 +9,8 @@ continuing with fabricated SQL.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from lib.engines.ask3.context import Ask3Context
-from lib.engines.ask3.types import Status
+from features.ask.engine.ask3.context import Ask3Context
+from features.ask.engine.ask3.types import Status
 
 
 class TestGenerateSqlConfidenceGate:
@@ -62,7 +62,7 @@ class TestGenerateSqlConfidenceGate:
         generate_sql() should NOT continue with fabricated SQL. It should mark
         the context as error so the pipeline stops.
         """
-        from lib.engines.ask3.phases.generate import generate_sql
+        from features.ask.engine.ask3.phases.generate import generate_sql
 
         ctx = self._make_ctx()
         mock_presenter = MagicMock()
@@ -74,7 +74,7 @@ class TestGenerateSqlConfidenceGate:
         )
 
         with patch(
-            "lib.functions.sql_generation.generate_sql_from_nl",
+            "features.ask.sql_generation.generate_sql_from_nl",
             return_value=mock_result,
         ):
             result_ctx = generate_sql(ctx, mock_presenter, llm_manager=MagicMock())
@@ -88,7 +88,7 @@ class TestGenerateSqlConfidenceGate:
 
     def test_moderate_confidence_continues(self):
         """Moderate confidence (0.7+) should proceed normally."""
-        from lib.engines.ask3.phases.generate import generate_sql
+        from features.ask.engine.ask3.phases.generate import generate_sql
 
         ctx = self._make_ctx()
         mock_presenter = MagicMock()
@@ -100,7 +100,7 @@ class TestGenerateSqlConfidenceGate:
         )
 
         with patch(
-            "lib.functions.sql_generation.generate_sql_from_nl",
+            "features.ask.sql_generation.generate_sql_from_nl",
             return_value=mock_result,
         ):
             result_ctx = generate_sql(ctx, mock_presenter, llm_manager=MagicMock())

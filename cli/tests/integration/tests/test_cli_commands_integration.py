@@ -33,21 +33,21 @@ class TestTopCommandIntegration:
 
     def test_top_command_initialization(self):
         """Test TopCommand can be instantiated."""
-        from lib.cli.top import TopCommand
+        from features.top.cli.command import TopCommand
 
         cmd = TopCommand()
         assert cmd is not None
 
     def test_top_command_snapshot_mode(self, mock_targets_config):
         """Test top command service and event types are available."""
-        from lib.services.top_service import TopService
-        from lib.services.types import (
-            TopStatusEvent,
+        from features.top.service import TopService
+        from features.top.events import (
+            TopCompleteEvent,
             TopConnectedEvent,
             TopQueriesEvent,
-            TopCompleteEvent,
-            TopQueryData,
+            TopStatusEvent,
         )
+        from features.top.models import TopQueryData
 
         # Verify service can be instantiated
         service = TopService()
@@ -113,8 +113,8 @@ class TestInitCommandIntegration:
 
     def test_init_status_uses_init_service(self, mock_targets_config):
         """Test init status command uses InitService."""
-        from lib.services.init_service import InitService
-        from lib.services.types import InitStatus
+        from features.init.service import InitService
+        from features.init.models import InitStatus
 
         service = InitService()
 
@@ -126,8 +126,8 @@ class TestInitCommandIntegration:
 
     def test_init_validate_uses_init_service(self, mock_targets_config):
         """Test init validate command uses InitService."""
-        from lib.services.init_service import InitService
-        from lib.services.types import InitValidationResult
+        from features.init.service import InitService
+        from features.init.models import InitValidationResult
 
         mock_targets_config.list_targets.return_value = ["test-target"]
         mock_targets_config.get.return_value = {"engine": "postgresql"}
@@ -163,12 +163,9 @@ class TestConfigureCommandIntegration:
 
     def test_configure_list_uses_service(self, mock_targets_config):
         """Test configure list uses ConfigureService."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import (
-            ConfigureInput,
-            ConfigureOptions,
-            ConfigureTargetListEvent,
-        )
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureTargetListEvent
+        from features.configure.models import ConfigureInput, ConfigureOptions
 
         service = ConfigureService()
 
@@ -210,13 +207,9 @@ class TestAnalyzeCommandIntegration:
 
     def test_analyze_command_uses_service(self, mock_targets_config):
         """Test analyze command uses AnalyzeService."""
-        from lib.services.analyze_service import AnalyzeService
-        from lib.services.types import (
-            AnalyzeInput,
-            AnalyzeOptions,
-            ProgressEvent,
-            ErrorEvent,
-        )
+        from features.analyze.service import AnalyzeService
+        from features.analyze.models import AnalyzeInput, AnalyzeOptions
+        from shared.service_events import ErrorEvent, ProgressEvent
 
         service = AnalyzeService()
 
@@ -268,13 +261,9 @@ class TestAskCommandIntegration:
 
     def test_ask_command_uses_service(self, mock_targets_config):
         """Test ask command uses AskService."""
-        from lib.services.ask_service import AskService
-        from lib.services.types import (
-            AskInput,
-            AskOptions,
-            AskStatusEvent,
-            AskErrorEvent,
-        )
+        from features.ask.service import AskService
+        from features.ask.events import AskErrorEvent, AskStatusEvent
+        from features.ask.models import AskInput, AskOptions
 
         service = AskService()
 
@@ -313,12 +302,12 @@ class TestCLIServiceIntegration:
 
     def test_service_yields_typed_events(self):
         """Test that services yield properly typed events."""
-        from lib.services.types import (
-            TopStatusEvent,
-            TopConnectedEvent,
-            TopQueriesEvent,
+        from features.top.events import (
             TopCompleteEvent,
+            TopConnectedEvent,
             TopErrorEvent,
+            TopQueriesEvent,
+            TopStatusEvent,
         )
 
         # Verify event types can be instantiated
@@ -335,13 +324,13 @@ class TestCLIServiceIntegration:
 
     def test_renderer_can_handle_all_event_types(self):
         """Test that renderers handle all event types without error."""
-        from lib.cli.top_renderer import TopRenderer
-        from lib.services.types import (
-            TopStatusEvent,
-            TopConnectedEvent,
-            TopQueriesEvent,
+        from features.top.cli.renderer import TopRenderer
+        from features.top.events import (
             TopCompleteEvent,
+            TopConnectedEvent,
             TopErrorEvent,
+            TopQueriesEvent,
+            TopStatusEvent,
         )
 
         renderer = TopRenderer()
@@ -387,8 +376,9 @@ class TestErrorHandlingIntegration:
 
     def test_service_errors_are_typed(self):
         """Test that service errors use typed ErrorEvent."""
-        from lib.services.analyze_service import AnalyzeService
-        from lib.services.types import AnalyzeInput, AnalyzeOptions, ErrorEvent
+        from features.analyze.service import AnalyzeService
+        from features.analyze.models import AnalyzeInput, AnalyzeOptions
+        from shared.service_events import ErrorEvent
 
         service = AnalyzeService()
 
@@ -413,8 +403,8 @@ class TestErrorHandlingIntegration:
 
     def test_renderer_handles_error_events(self):
         """Test that renderer properly handles error events."""
-        from lib.cli.analyze_renderer import AnalyzeRenderer
-        from lib.services.types import ErrorEvent
+        from features.analyze.cli.renderer import AnalyzeRenderer
+        from shared.service_events import ErrorEvent
 
         renderer = AnalyzeRenderer()
         renderer._console = Mock()

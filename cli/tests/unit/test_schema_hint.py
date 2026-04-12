@@ -1,6 +1,6 @@
 """Tests for build_schema_hint in schema_collector."""
 
-from lib.functions.schema_collector import build_schema_hint
+from features.schema.schema_collector import build_schema_hint
 
 
 def test_no_semantic_layer_returns_init_and_profile_hint():

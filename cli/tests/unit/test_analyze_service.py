@@ -11,22 +11,19 @@ from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.types import (
-    AnalyzeInput,
-    AnalyzeOptions,
-    ProgressEvent,
-    CompleteEvent,
-    ErrorEvent,
-    ExplainCompleteEvent,
-    RewritesTestedEvent,
-    ReadysetCheckedEvent,
-)
-from lib.services.analyze_service import (
+from features.analyze.service import (
     AnalyzeService,
     STEP_PROGRESS,
     _serialize_for_json,
 )
+from features.analyze.events import (
+    CompleteEvent,
+    ExplainCompleteEvent,
+    ReadysetCheckedEvent,
+    RewritesTestedEvent,
+)
+from features.analyze.models import AnalyzeInput, AnalyzeOptions
+from shared.service_events import ErrorEvent, ProgressEvent
 
 
 class TestAnalyzeServiceInit:
@@ -669,11 +666,11 @@ class TestAnalyzeServiceFastMode:
         mock_execution.context = {"success": True}
         mock_mgr.get_workflow_status.return_value = mock_execution
 
-        # WorkflowManager is imported inside the method, so we need to patch it there
+        # AnalyzeService resolves workflow runtime types through shared.workflow_manager.
         with patch(
-            "lib.workflow_manager.workflow_manager.WorkflowManager"
-        ) as mock_wm_class:
-            mock_wm_class.from_file.return_value = mock_mgr
+            "features.analyze.service.get_workflow_components",
+            return_value=(Mock(from_file=Mock(return_value=mock_mgr)), {}, Mock()),
+        ):
 
             mock_path = Mock()
             mock_path.__str__ = Mock(return_value="/path/to/workflow.json")

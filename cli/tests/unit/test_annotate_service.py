@@ -10,15 +10,14 @@ import os
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from typing import Any, Dict, List
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.types import (
+from features.schema.events import (
     AnnotateStartedEvent,
     AnnotateProgressEvent,
     AnnotateTableCompleteEvent,
     AnnotateCompleteEvent,
     AnnotateErrorEvent,
 )
-from lib.services.annotate_service import AnnotateService
+from features.schema.annotate_service import AnnotateService
 
 
 class TestAnnotateServiceInit:
@@ -62,7 +61,7 @@ class TestAnnotateServiceAnnotate:
 
         # Simulate no Anthropic credential available
         with patch(
-            "lib.services.annotate_service.has_anthropic_api_key",
+            "features.schema.annotate_service.has_anthropic_api_key",
             return_value=False,
         ):
             async for event in service.annotate("test-target", target_config):
@@ -78,11 +77,10 @@ class TestAnnotateServiceAnnotate:
         events = []
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
-            # Patch at the actual import location (lazy import inside annotate())
             with patch(
-                "lib.semantic_layer.manager.SemanticLayerManager"
-            ) as MockManager:
-                MockManager.return_value.exists.return_value = False
+                "features.schema.annotate_service.create_semantic_layer_manager"
+            ) as create_manager:
+                create_manager.return_value.exists.return_value = False
 
                 async for event in service.annotate("nonexistent", target_config):
                     events.append(event)
@@ -98,9 +96,9 @@ class TestAnnotateServiceAnnotate:
 
         with patch.dict(os.environ, {"RDST_TRIAL_TOKEN": "test-token"}, clear=True):
             with patch(
-                "lib.semantic_layer.manager.SemanticLayerManager"
-            ) as MockManager:
-                MockManager.return_value.exists.return_value = False
+                "features.schema.annotate_service.create_semantic_layer_manager"
+            ) as create_manager:
+                create_manager.return_value.exists.return_value = False
 
                 async for event in service.annotate("nonexistent", target_config):
                     events.append(event)
@@ -120,22 +118,18 @@ class TestAnnotateServiceAnnotate:
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
             with patch(
-                "lib.semantic_layer.manager.SemanticLayerManager"
-            ) as MockManager:
-                MockManager.return_value.exists.return_value = True
-                MockManager.return_value.load.return_value = mock_layer
+                "features.schema.annotate_service.create_semantic_layer_manager"
+            ) as create_manager:
+                create_manager.return_value.exists.return_value = True
+                create_manager.return_value.load.return_value = mock_layer
 
                 with patch(
-                    "lib.semantic_layer.ai_annotator.AIAnnotator"
-                ) as MockAnnotator:
-                    # Mock the annotator to do nothing
+                    "features.schema.annotate_service.create_ai_annotator"
+                ) as create_annotator:
                     mock_ai = Mock()
-                    mock_ai.generate_table_annotations.return_value = (
-                        "desc",
-                        "context",
-                        {},
-                    )
-                    MockAnnotator.return_value = mock_ai
+                    mock_ai.generate_table_description.return_value = "desc"
+                    mock_ai.generate_column_description.return_value = "desc"
+                    create_annotator.return_value = mock_ai
 
                     async for event in service.annotate("test-target", target_config):
                         events.append(event)

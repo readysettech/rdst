@@ -10,20 +10,21 @@ import pytest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from typing import Any, Dict, List
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.types import (
-    AskInput,
-    AskOptions,
-    AskStatusEvent,
-    AskSchemaLoadedEvent,
+from features.ask.service import AskService
+from features.ask.events import (
     AskClarificationNeededEvent,
-    AskSqlGeneratedEvent,
-    AskResultEvent,
     AskErrorEvent,
-    AskInterpretation,
-    AskClarificationQuestion,
+    AskResultEvent,
+    AskSchemaLoadedEvent,
+    AskSqlGeneratedEvent,
+    AskStatusEvent,
 )
-from lib.services.ask_service import AskService
+from features.ask.models import (
+    AskClarificationQuestion,
+    AskInput,
+    AskInterpretation,
+    AskOptions,
+)
 
 
 class TestAskServiceInit:
@@ -315,7 +316,7 @@ class TestAskServiceSessionManagement:
 
     def test_sessions_dict_exists(self):
         """Test that _sessions storage exists."""
-        from lib.services.ask_service import _sessions
+        from features.ask.service import _sessions
 
         assert isinstance(_sessions, dict)
 
@@ -335,7 +336,7 @@ class TestAskServiceLoadConfig:
         mock_cfg.get_default.return_value = "default-target"
         mock_cfg.get.return_value = {"engine": "postgresql", "host": "localhost"}
 
-        with patch("lib.cli.rdst_cli.TargetsConfig", return_value=mock_cfg):
+        with patch("features.ask.service.create_targets_config", return_value=mock_cfg):
             target_name, config = await service._load_config("explicit-target")
 
         assert target_name == "explicit-target"
@@ -349,7 +350,7 @@ class TestAskServiceLoadConfig:
         mock_cfg.get_default.return_value = "default-target"
         mock_cfg.get.return_value = {"engine": "postgresql"}
 
-        with patch("lib.cli.rdst_cli.TargetsConfig", return_value=mock_cfg):
+        with patch("features.ask.service.create_targets_config", return_value=mock_cfg):
             target_name, config = await service._load_config(None)
 
         assert target_name == "default-target"
@@ -361,7 +362,7 @@ class TestAskServiceLoadConfig:
         mock_cfg.get_default.return_value = None
         mock_cfg.get.return_value = None
 
-        with patch("lib.cli.rdst_cli.TargetsConfig", return_value=mock_cfg):
+        with patch("features.ask.service.create_targets_config", return_value=mock_cfg):
             target_name, config = await service._load_config(None)
 
         assert target_name is None
@@ -416,7 +417,7 @@ class TestAskServiceNullSchema:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
-            with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+            with patch("features.ask.service.load_schema") as mock_load:
                 def fake_load_schema(ctx, presenter, sem_mgr):
                     # Simulate _collect_from_database returning (None, error_string)
                     # without calling mark_error — the bug scenario.
@@ -445,9 +446,9 @@ class TestAskServiceNullSchema:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
-            with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+            with patch("features.ask.service.load_schema") as mock_load:
                 def fake_load_schema(ctx, presenter, sem_mgr):
-                    from lib.engines.ask3.types import SchemaInfo, SchemaSource
+                    from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
                     ctx.schema_info = SchemaInfo(
                         target="test-target",
                         db_type="postgresql",
@@ -477,7 +478,7 @@ class TestAskServiceNullSchema:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
-            with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+            with patch("features.ask.service.load_schema") as mock_load:
                 def fake_load_schema(ctx, presenter, sem_mgr):
                     ctx.schema_info = None
                     ctx.schema_formatted = "Schema information: Collection failed (connection refused)"
@@ -485,7 +486,7 @@ class TestAskServiceNullSchema:
 
                 mock_load.side_effect = fake_load_schema
 
-                with patch("lib.engines.ask3.phases.filter_schema") as mock_filter:
+                with patch("features.ask.service.filter_schema") as mock_filter:
                     async for event in service.ask(input_data, options):
                         events.append(event)
 
@@ -543,17 +544,17 @@ class TestAskServiceErrorHandling:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
-            with patch("lib.engines.ask3.Ask3Context") as mock_ctx_class:
+            with patch("features.ask.service.create_context") as mock_create_context:
                 mock_ctx = Mock()
                 mock_ctx.status = Mock()
                 mock_ctx.status.value = "error"
-                from lib.engines.ask3 import Status
+                from features.ask.engine.ask3 import Status
 
                 mock_ctx.status = Status.ERROR
                 mock_ctx.error_message = "Schema load timed out"
-                mock_ctx_class.return_value = mock_ctx
+                mock_create_context.return_value = mock_ctx
 
-                with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+                with patch("features.ask.service.load_schema") as mock_load:
                     mock_load.return_value = mock_ctx
 
                     async for event in service.ask(input_data, options):
@@ -647,7 +648,7 @@ class TestAskServiceDryRun:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         def fake_load(ctx, p, s):
-            from lib.engines.ask3.types import SchemaInfo, SchemaSource
+            from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
             ctx.schema_info = SchemaInfo(
                 target="test-target",
                 db_type="postgresql",
@@ -670,11 +671,11 @@ class TestAskServiceDryRun:
             return ctx
 
         with patch.object(service, "_load_config", side_effect=mock_load_config), \
-             patch("lib.engines.ask3.phases.load_schema", side_effect=fake_load), \
-             patch("lib.engines.ask3.phases.filter_schema", side_effect=fake_filter), \
-             patch("lib.engines.ask3.phases.generate_sql", side_effect=fake_gen), \
-             patch("lib.engines.ask3.phases.validate_sql", side_effect=fake_val), \
-             patch("lib.engines.ask3.phases.execute_query") as mock_exec:
+             patch("features.ask.service.load_schema", side_effect=fake_load), \
+             patch("features.ask.service.filter_schema", side_effect=fake_filter), \
+             patch("features.ask.service.generate_sql", side_effect=fake_gen), \
+             patch("features.ask.service.validate_sql", side_effect=fake_val), \
+             patch("features.ask.service.execute_query") as mock_exec:
 
             async for event in service.ask(input_data, dry_run_options):
                 events.append(event)
@@ -736,17 +737,17 @@ class TestAskServiceTimeoutScenarios:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
-            # Mock the Ask3Context and phases
-            with patch("lib.engines.ask3.Ask3Context") as mock_ctx_class:
+            # Mock the Ask3 context factory and phases
+            with patch("features.ask.service.create_context") as mock_create_context:
                 mock_ctx = Mock()
                 mock_ctx.status = Mock()
-                from lib.engines.ask3 import Status
+                from features.ask.engine.ask3 import Status
 
                 mock_ctx.status = Status.ERROR
                 mock_ctx.error_message = "LLM request timed out"
-                mock_ctx_class.return_value = mock_ctx
+                mock_create_context.return_value = mock_ctx
 
-                with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+                with patch("features.ask.service.load_schema") as mock_load:
                     mock_load.return_value = mock_ctx
 
                     async for event in service.ask(input_data, options):
@@ -808,15 +809,15 @@ class TestAskServiceNetworkFailures:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
-            with patch("lib.engines.ask3.Ask3Context") as mock_ctx_class:
+            with patch("features.ask.service.create_context") as mock_create_context:
                 mock_ctx = Mock()
-                from lib.engines.ask3 import Status
+                from features.ask.engine.ask3 import Status
 
                 mock_ctx.status = Status.ERROR
                 mock_ctx.error_message = "Connection refused"
-                mock_ctx_class.return_value = mock_ctx
+                mock_create_context.return_value = mock_ctx
 
-                with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+                with patch("features.ask.service.load_schema") as mock_load:
                     mock_load.return_value = mock_ctx
 
                     async for event in service.ask(input_data, options):
@@ -833,15 +834,15 @@ class TestAskServiceNetworkFailures:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
-            with patch("lib.engines.ask3.Ask3Context") as mock_ctx_class:
+            with patch("features.ask.service.create_context") as mock_create_context:
                 mock_ctx = Mock()
-                from lib.engines.ask3 import Status
+                from features.ask.engine.ask3 import Status
 
                 mock_ctx.status = Status.ERROR
                 mock_ctx.error_message = "Network error calling LLM API"
-                mock_ctx_class.return_value = mock_ctx
+                mock_create_context.return_value = mock_ctx
 
-                with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+                with patch("features.ask.service.load_schema") as mock_load:
                     mock_load.return_value = mock_ctx
 
                     async for event in service.ask(input_data, options):
@@ -858,15 +859,15 @@ class TestAskServiceNetworkFailures:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
-            with patch("lib.engines.ask3.Ask3Context") as mock_ctx_class:
+            with patch("features.ask.service.create_context") as mock_create_context:
                 mock_ctx = Mock()
-                from lib.engines.ask3 import Status
+                from features.ask.engine.ask3 import Status
 
                 mock_ctx.status = Status.ERROR
                 mock_ctx.error_message = "Authentication failed"
-                mock_ctx_class.return_value = mock_ctx
+                mock_create_context.return_value = mock_ctx
 
-                with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+                with patch("features.ask.service.load_schema") as mock_load:
                     mock_load.return_value = mock_ctx
 
                     async for event in service.ask(input_data, options):
@@ -885,9 +886,9 @@ class TestAskServiceNetworkFailures:
             return ("test-target", {"engine": "postgresql", "host": "localhost"})
 
         with patch.object(service, "_load_config", side_effect=mock_load_config):
-            with patch("lib.engines.ask3.Ask3Context") as mock_ctx_class:
+            with patch("features.ask.service.create_context") as mock_create_context:
                 mock_ctx = Mock()
-                from lib.engines.ask3 import Status
+                from features.ask.engine.ask3 import Status
 
                 # Status.SUCCESS means schema loaded OK, but we'll fail on next step
                 mock_ctx.status = Status.SUCCESS
@@ -896,12 +897,12 @@ class TestAskServiceNetworkFailures:
                 mock_ctx.schema_source = "test"
                 mock_ctx.all_available_tables = ["users"]
                 mock_ctx.error_message = None
-                mock_ctx_class.return_value = mock_ctx
+                mock_create_context.return_value = mock_ctx
 
-                with patch("lib.engines.ask3.phases.load_schema") as mock_load:
+                with patch("features.ask.service.load_schema") as mock_load:
                     mock_load.return_value = mock_ctx
 
-                    with patch("lib.engines.ask3.phases.filter_schema") as mock_filter:
+                    with patch("features.ask.service.filter_schema") as mock_filter:
                         # Simulate network error during filter
                         mock_filter.side_effect = ConnectionError("Network lost")
 

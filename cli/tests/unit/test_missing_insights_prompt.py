@@ -14,7 +14,7 @@ class TestEstimateVsActualGuidance:
 
     def _get_prompt_source(self) -> str:
         import inspect
-        from lib.functions import llm_analysis
+        from features.analyze.functions import llm_analysis
 
         return inspect.getsource(llm_analysis)
 
@@ -61,7 +61,7 @@ class TestWorkMemGuidance:
 
     def _get_prompt_source(self) -> str:
         import inspect
-        from lib.functions import llm_analysis
+        from features.analyze.functions import llm_analysis
 
         return inspect.getsource(llm_analysis)
 

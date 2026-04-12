@@ -2,7 +2,7 @@
 
 import json
 
-from lib.api.routes.registry import _progress_to_sse
+from features.query_registry.api.routes import _progress_to_sse
 
 
 class _UnknownProgress:

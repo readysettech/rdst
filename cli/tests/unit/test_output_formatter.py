@@ -7,7 +7,7 @@ Unit tests for analyze output formatting.
 
 import json
 
-from lib.cli.output_formatter import format_analyze_output
+from features.analyze.cli.output_formatter import format_analyze_output
 
 
 class TestEngineDisplay:
@@ -81,7 +81,7 @@ class TestJsonOutputKeys:
         FormatFinalResults is kept because scan (and other JSON consumers)
         may use the pre-formatted analysis summary.
         """
-        from lib.cli import analyze_command
+        from features.analyze.cli import command as analyze_command
         import inspect
 
         source = inspect.getsource(analyze_command.AnalyzeCommand.execute_analyze)

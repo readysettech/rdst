@@ -5,7 +5,7 @@ import subprocess
 import pytest
 from unittest.mock import Mock, patch
 
-from lib.functions.readyset_container import (
+from features.cache.readyset_container import (
     start_readyset_container_direct,
     wait_for_readyset_ready_shallow,
     check_readyset_container_status,

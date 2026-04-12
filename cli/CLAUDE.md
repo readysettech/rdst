@@ -6,6 +6,8 @@
 
 **Entry point**: `rdst.py` - main CLI
 
+**Architecture**: See [ARCHITECTURE.md](/Users/faruk/Developer/readyset/rdst/ARCHITECTURE.md) for the current `features/` + `shared/` ownership model.
+
 ## Running RDST
 
 ### Local Development (Recommended)
@@ -31,33 +33,6 @@ pip install -e .
 ```
 
 After installation, you can run `rdst <command>` directly instead of `python3 rdst.py <command>`.
-
-## Project Structure
-
-```
-rdst/
-├── rdst.py                 # CLI entry point, argparse setup
-├── mcp_server.py           # MCP server for Claude Code integration
-├── lib/
-│   ├── cli/                # Command implementations
-│   │   ├── rdst_cli.py     # RdstCLI class with all command methods
-│   │   ├── analyze_command.py   # Main analyze logic (~2400 lines)
-│   │   ├── top.py          # Top slow queries command
-│   │   ├── configuration_wizard.py  # Target setup wizard
-│   │   ├── help_command.py      # Help/documentation lookup (rdst help "question")
-│   │   └── query_command.py     # Query registry management
-│   ├── functions/          # Core business logic
-│   │   ├── llm_analysis.py      # LLM prompts & analysis (~950 lines)
-│   │   ├── explain_analysis.py  # EXPLAIN ANALYZE execution
-│   │   ├── schema_collector.py  # DB schema introspection
-│   │   └── rewrite_testing.py   # Query rewrite benchmarking
-│   ├── llm_manager/        # LLM provider abstraction
-│   ├── engines/            # Ask3 text-to-SQL engine (rdst ask)
-│   ├── semantic_layer/     # Schema semantic context (rdst schema)
-│   └── prompts/            # LLM prompt templates
-├── test/                   # Test cases
-└── devtools/               # Development utilities
-```
 
 ## Key Commands
 
@@ -85,10 +60,10 @@ rdst/
 
 ```bash
 # Run all tests
-pytest test/
+pytest tests/
 
 # Run specific test file
-pytest test/test_ask3_engine/test_engine.py -v
+pytest tests/ask_experimental/test_ask3_engine/test_engine.py -v
 
 # Quick validation
 python3 rdst.py version
@@ -99,10 +74,11 @@ python3 rdst.py --help
 
 ### Adding New Features
 
-1. **Add CLI command** in `rdst.py` (argparse) and `lib/cli/rdst_cli.py` (method)
-2. **Add tests** - look at existing patterns in `test/`
-3. **Update help docs** if user-facing - see `lib/cli/help_command.py` (RDST_DOCS constant)
-4. **Update MCP tools** if should be exposed to Claude - see `mcp_server.py`
+1. **Add the feature behavior** under `features/<name>/`
+2. **Wire CLI/parser changes** through `rdst.py`, `shared/cli/rdst_cli.py`, and the feature's `cli/command.py`
+3. **Add tests** - look at existing patterns in `tests/`
+4. **Update help docs** if user-facing - see `shared/cli/help_command.py` (RDST_DOCS constant)
+5. **Update MCP tools** if should be exposed to Claude - see `mcp_server.py`
 
 ### Code Patterns
 
@@ -113,14 +89,14 @@ python3 rdst.py --help
 
 ### Domain-Specific Guidelines
 
-- **UI Components**: See `lib/ui/AGENTS.md` for Rich component patterns (StyledPanel, DataTable, etc.)
-- **Ask3 Engine**: See `lib/engines/ask3/AGENTS.md` for NL-to-SQL phase architecture
+- **UI Components**: Use `shared.ui` and the Rich import rule below
+- **Ask3 Engine**: See `features/ask/engine/ask3/` for the NL-to-SQL engine
 - **Devtools**: See `devtools/AGENTS.md` for storybook rendering
 - **Web Client**: See `web-apps/apps/rdst/AGENTS.md` for React frontend patterns
 
 ### Rich Component Imports (CRITICAL)
 
-**Never import Rich components directly.** Always import from `lib.ui`:
+**Never import Rich components directly.** Always import from `shared.ui`:
 
 ```python
 # WRONG
@@ -128,18 +104,18 @@ from rich.console import Group
 from rich.text import Text
 
 # CORRECT
-from lib.ui import Group, Text, Tree, Spinner, Live
+from shared.ui import Group, Text, Tree, Spinner, Live
 ```
 
-If you need a Rich component not yet exported, add it to `lib/ui/components.py` and `lib/ui/__init__.py`.
+If you need a Rich component not yet exported, add it to `shared/ui/components.py` and `shared/ui/__init__.py`.
 
 ### Critical Files to Preserve
 
 These files contain important improvements - be careful when merging:
 
-- `lib/functions/llm_analysis.py` - Anti-pattern rules, SELECT \* column variance fix
-- `lib/functions/explain_analysis.py` - Interactive skip mechanism
-- `lib/cli/analyze_command.py` - All UX improvements
+- `features/analyze/functions/llm_analysis.py` - Anti-pattern rules, SELECT \* column variance fix
+- `features/analyze/functions/explain_analysis.py` - Interactive skip mechanism
+- `features/analyze/cli/command.py` - Analyze UX improvements
 
 ## Natural Language to SQL (rdst ask)
 

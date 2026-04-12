@@ -9,26 +9,25 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from typing import Any, Dict, List
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.types import (
-    SchemaStatus,
+from features.schema.service import SchemaService
+from features.schema.models import (
+    SchemaCustomType,
+    SchemaDeleteResult,
     SchemaDetails,
+    SchemaExportResult,
+    SchemaExtension,
+    SchemaInitOptions,
+    SchemaInitResult,
+    SchemaMetric,
+    SchemaStatus,
     SchemaTable,
     SchemaTableColumn,
     SchemaTableRelationship,
-    SchemaTerminology,
-    SchemaExtension,
-    SchemaCustomType,
-    SchemaMetric,
-    SchemaTargetSummary,
     SchemaTargetList,
-    SchemaInitOptions,
-    SchemaInitResult,
-    SchemaExportResult,
-    SchemaDeleteResult,
+    SchemaTargetSummary,
+    SchemaTerminology,
     SchemaUpdateResult,
 )
-from lib.services.schema_service import SchemaService
 
 
 class TestSchemaServiceInit:
@@ -36,13 +35,13 @@ class TestSchemaServiceInit:
 
     def test_initialization(self):
         """Test service initializes correctly."""
-        with patch("lib.services.schema_service.SemanticLayerManager"):
+        with patch("features.schema.service.SemanticLayerManager"):
             service = SchemaService()
             assert service is not None
 
     def test_has_required_methods(self):
         """Test service has required methods."""
-        with patch("lib.services.schema_service.SemanticLayerManager"):
+        with patch("features.schema.service.SemanticLayerManager"):
             service = SchemaService()
             assert hasattr(service, "get_status")
             assert hasattr(service, "get_schema")
@@ -67,7 +66,7 @@ class TestSchemaServiceGetStatus:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -118,7 +117,7 @@ class TestSchemaServiceGetSchema:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -205,7 +204,7 @@ class TestSchemaServiceListTargets:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -248,7 +247,7 @@ class TestSchemaServiceInitMethod:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -277,7 +276,7 @@ class TestSchemaServiceInitMethod:
         mock_layer.tables = {"users": Mock(columns={"id": Mock()}, relationships=[])}
 
         with patch(
-            "lib.services.schema_service.SchemaIntrospector"
+            "features.schema.service.SchemaIntrospector"
         ) as MockIntrospector:
             MockIntrospector.return_value.introspect.return_value = mock_layer
             service._manager.get_path.return_value = "/path/to/layer"
@@ -295,7 +294,7 @@ class TestSchemaServiceInitMethod:
         service._manager.exists.return_value = False
 
         with patch(
-            "lib.services.schema_service.SchemaIntrospector"
+            "features.schema.service.SchemaIntrospector"
         ) as MockIntrospector:
             MockIntrospector.return_value.introspect.side_effect = ConnectionError(
                 "Could not connect"
@@ -319,7 +318,7 @@ class TestSchemaServiceExport:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -381,7 +380,7 @@ class TestSchemaServiceDelete:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -419,7 +418,7 @@ class TestSchemaServiceAddTable:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -463,7 +462,7 @@ class TestSchemaServiceAddTerminology:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -498,7 +497,7 @@ class TestSchemaServiceAddMetric:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -533,7 +532,7 @@ class TestSchemaServiceAnnotate:
     def service(self, mock_manager):
         """Create SchemaService instance with mocked manager."""
         with patch(
-            "lib.services.schema_service.SemanticLayerManager",
+            "features.schema.service.SemanticLayerManager",
             return_value=mock_manager,
         ):
             svc = SchemaService()
@@ -542,7 +541,7 @@ class TestSchemaServiceAnnotate:
     def test_annotate_requires_anthropic_key(self, service):
         """Test annotate returns key error when neither env var is set."""
         with patch.dict("os.environ", {}, clear=True):
-            with patch("lib.services.schema_service.has_anthropic_api_key", return_value=False):
+            with patch("features.schema.service.has_anthropic_api_key", return_value=False):
                 result = service.annotate("test-target", {"engine": "postgresql"})
 
         assert result.success is False

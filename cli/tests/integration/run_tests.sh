@@ -140,10 +140,23 @@ run_mcp_sync_check() {
   echo
 }
 
+# Run architecture sync check (no database required)
+run_architecture_sync_check() {
+  log_section "Running Architecture Sync Check"
+  python3 "${SCRIPT_DIR}/tests/test_architecture_sync.py"
+  if [[ $? -ne 0 ]]; then
+    echo "✗ Architecture sync check failed - ARCHITECTURE.md is out of sync with features/"
+    exit 1
+  fi
+  echo "✓ Architecture sync check passed"
+  echo
+}
+
 # Main execution
 main() {
-  # Run MCP sync check first (no database needed)
+  # Run sync checks first (no database needed)
   run_mcp_sync_check
+  run_architecture_sync_check
 
   setup_upstream_databases
 

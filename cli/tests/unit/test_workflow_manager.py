@@ -5,25 +5,12 @@ Tests the workflow execution engine including step execution, retry logic,
 template rendering, and parallel branch execution.
 """
 
-import pytest
-import importlib.util
-import sys
 import time
-from pathlib import Path
 
-# Import module directly to avoid package __init__.py issues
-def _import_module_directly(module_name, file_path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+import pytest
 
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-workflow_manager = _import_module_directly(
-    "workflow_manager",
-    _lib_path / "workflow_manager" / "workflow_manager.py"
-)
+import shared.workflow_manager as workflow_manager
+import shared.workflow_manager_runtime as workflow_runtime
 
 WorkflowManager = workflow_manager.WorkflowManager
 WorkflowStatus = workflow_manager.WorkflowStatus
@@ -555,7 +542,7 @@ class TestDefaultFunctions:
 
     def test_get_db_size(self):
         """Test get_db_size returns expected structure."""
-        result = workflow_manager.get_db_size()
+        result = workflow_runtime.get_db_size()
 
         assert "size_mb" in result
         assert "size_gb" in result
@@ -563,7 +550,7 @@ class TestDefaultFunctions:
 
     def test_get_table_count(self):
         """Test get_table_count returns expected structure."""
-        result = workflow_manager.get_table_count()
+        result = workflow_runtime.get_table_count()
 
         assert "table_count" in result
         assert "view_count" in result
@@ -571,7 +558,7 @@ class TestDefaultFunctions:
 
     def test_get_query_stats(self):
         """Test get_query_stats returns expected structure."""
-        result = workflow_manager.get_query_stats()
+        result = workflow_runtime.get_query_stats()
 
         assert "total_queries" in result
         assert "avg_response_time_ms" in result
@@ -579,7 +566,7 @@ class TestDefaultFunctions:
 
     def test_analyze_schema(self):
         """Test analyze_schema returns expected structure."""
-        result = workflow_manager.analyze_schema()
+        result = workflow_runtime.analyze_schema()
 
         assert "tables" in result
         assert "indexes" in result

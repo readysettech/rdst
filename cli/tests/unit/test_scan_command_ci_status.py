@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from lib.cli.scan_command import ScanCommand
+from features.scan.cli.command import ScanCommand
 
 
 def test_deep_analysis_all_failures_sets_ci_status_fail():

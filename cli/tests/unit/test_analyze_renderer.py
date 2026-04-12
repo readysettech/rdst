@@ -10,16 +10,14 @@ import time
 from unittest.mock import Mock, patch, MagicMock
 from typing import Any, Dict, List
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.types import (
-    ProgressEvent,
-    ExplainCompleteEvent,
-    RewritesTestedEvent,
-    ReadysetCheckedEvent,
+from features.analyze.cli.renderer import AnalyzeRenderer, QuietRenderer
+from features.analyze.events import (
     CompleteEvent,
-    ErrorEvent,
+    ExplainCompleteEvent,
+    ReadysetCheckedEvent,
+    RewritesTestedEvent,
 )
-from lib.cli.analyze_renderer import AnalyzeRenderer, QuietRenderer
+from shared.service_events import ErrorEvent, ProgressEvent
 
 
 class TestAnalyzeRendererInit:
@@ -63,7 +61,7 @@ class TestAnalyzeRendererRenderEvents:
             message="Validating query safety...",
         )
 
-        with patch("lib.cli.analyze_renderer.Status") as mock_status_class:
+        with patch("features.analyze.cli.renderer.Status") as mock_status_class:
             mock_status = Mock()
             mock_status_class.return_value = mock_status
 
@@ -100,12 +98,12 @@ class TestAnalyzeRendererRenderEvents:
             message="Running EXPLAIN ANALYZE...",
         )
 
-        with patch("lib.cli.analyze_renderer.Status") as mock_status_class:
-            with patch("lib.cli.analyze_renderer.time.monotonic", return_value=100.0):
+        with patch("features.analyze.cli.renderer.Status") as mock_status_class:
+            with patch("features.analyze.cli.renderer.time.monotonic", return_value=100.0):
                 renderer.render(event)
 
             status_message = mock_status_class.call_args[0][0]
-            with patch("lib.cli.analyze_renderer.time.monotonic", return_value=115.0):
+            with patch("features.analyze.cli.renderer.time.monotonic", return_value=115.0):
                 assert status_message.__rich__() == "Running EXPLAIN ANALYZE... (15s)"
 
     def test_progress_timer_resets_on_stage_change(self, renderer):
@@ -123,11 +121,11 @@ class TestAnalyzeRendererRenderEvents:
             message="Running EXPLAIN ANALYZE...",
         )
 
-        with patch("lib.cli.analyze_renderer.time.monotonic", return_value=80.0):
+        with patch("features.analyze.cli.renderer.time.monotonic", return_value=80.0):
             renderer.render(event)
 
         status_message = mock_status.update.call_args[0][0]
-        with patch("lib.cli.analyze_renderer.time.monotonic", return_value=81.0):
+        with patch("features.analyze.cli.renderer.time.monotonic", return_value=81.0):
             assert status_message.__rich__() == "Running EXPLAIN ANALYZE... (1s)"
 
     def test_render_progress_event_100_percent_stops_spinner(self, renderer):

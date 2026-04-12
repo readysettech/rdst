@@ -10,7 +10,7 @@ import json
 import pytest
 from unittest.mock import Mock, MagicMock, patch, call
 
-from lib.semantic_layer.guided_annotator import (
+from features.schema.semantic_layer.guided_annotator import (
     GuidedAnnotator,
     TableAnalysis,
     ColumnDraft,
@@ -19,13 +19,13 @@ from lib.semantic_layer.guided_annotator import (
     _parse_row_estimate,
     SYSTEM_MESSAGE,
 )
-from lib.data_structures.semantic_layer import (
+from features.schema.semantic_models import (
     SemanticLayer,
     TableAnnotation,
     ColumnAnnotation,
     Relationship,
 )
-from lib.semantic_layer.data_profiler import TableProfile, ColumnProfile
+from features.schema.semantic_layer.data_profiler import TableProfile, ColumnProfile
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -333,9 +333,9 @@ class TestAnalyzeTable:
 
 
 class TestGuidedAnnotatorRun:
-    @patch("lib.semantic_layer.guided_annotator.DataProfiler")
-    @patch("lib.semantic_layer.guided_annotator.GuidedAnnotator._review_table")
-    @patch("lib.semantic_layer.manager.SemanticLayerManager")
+    @patch("features.schema.semantic_layer.guided_annotator.DataProfiler")
+    @patch("features.schema.semantic_layer.guided_annotator.GuidedAnnotator._review_table")
+    @patch("features.schema.semantic_layer.manager.SemanticLayerManager")
     def test_run_profiles_and_analyzes(
         self, MockManager, mock_review, MockProfiler, mock_llm, mock_console, layer, target_config,
     ):
@@ -372,8 +372,8 @@ class TestGuidedAnnotatorRun:
         mock_llm.query.assert_called_once()
         mock_review.assert_called_once()
 
-    @patch("lib.semantic_layer.guided_annotator.DataProfiler")
-    @patch("lib.semantic_layer.manager.SemanticLayerManager")
+    @patch("features.schema.semantic_layer.guided_annotator.DataProfiler")
+    @patch("features.schema.semantic_layer.manager.SemanticLayerManager")
     def test_run_single_table(
         self, MockManager, MockProfiler, mock_llm, mock_console, layer, target_config,
     ):
@@ -404,9 +404,9 @@ class TestGuidedAnnotatorRun:
         args = mock_profiler_instance.profile_table.call_args
         assert args[0][0] == "users"
 
-    @patch("lib.semantic_layer.guided_annotator.DataProfiler")
-    @patch("lib.semantic_layer.guided_annotator.GuidedAnnotator._review_table")
-    @patch("lib.semantic_layer.manager.SemanticLayerManager")
+    @patch("features.schema.semantic_layer.guided_annotator.DataProfiler")
+    @patch("features.schema.semantic_layer.guided_annotator.GuidedAnnotator._review_table")
+    @patch("features.schema.semantic_layer.manager.SemanticLayerManager")
     def test_run_auto_accept_passed_to_review(
         self, MockManager, mock_review, MockProfiler, mock_llm, mock_console, layer, target_config,
     ):

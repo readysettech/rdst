@@ -1,8 +1,9 @@
 """Tests for audit scoring logic."""
 
-from lib.fleet.models import AuditMetrics, SizingVerdict
-from lib.fleet.audit_scoring import compute_cache_opportunity, compute_sizing_verdict
-from lib.fleet.pricing_data import monthly_cost, estimate_class_from_shared_buffers, suggest_downsize
+from features.audit.models import AuditMetrics
+from features.audit.scoring import compute_cache_opportunity, compute_sizing_verdict
+from features.fleet.models import SizingVerdict
+from features.fleet.pricing import monthly_cost, estimate_class_from_shared_buffers, suggest_downsize
 
 
 class TestSizingVerdict:

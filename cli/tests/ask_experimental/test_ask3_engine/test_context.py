@@ -4,8 +4,8 @@ import sys
 sys.path.insert(0, '.')
 
 import pytest
-from lib.engines.ask3.context import Ask3Context
-from lib.engines.ask3.types import (
+from features.ask.engine.ask3.context import Ask3Context
+from features.ask.engine.ask3.types import (
     Status,
     DbType,
     SchemaSource,

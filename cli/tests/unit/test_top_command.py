@@ -8,7 +8,7 @@ management, separate from TopService (which has its own tests).
 import pytest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 
-from lib.services.types import TopErrorEvent
+from features.top.events import TopErrorEvent
 
 
 class TestTopCommandNonexistentTarget:
@@ -22,7 +22,7 @@ class TestTopCommandNonexistentTarget:
         but the CLI layer has a variable scoping bug where live_started is
         defined inside run_async() but referenced outside it.
         """
-        from lib.cli.top import TopCommand
+        from features.top.cli.command import TopCommand
 
         async def mock_stream_realtime(input_data, options, callback):
             yield TopErrorEvent(
@@ -34,7 +34,7 @@ class TestTopCommandNonexistentTarget:
         cmd = TopCommand()
 
         with (
-            patch("lib.services.top_service.TopService") as MockService,
+            patch("features.top.cli.command.TopService") as MockService,
             patch.object(cmd, "_console", MagicMock()),
             patch.object(cmd, "_force_restore_terminal"),
         ):

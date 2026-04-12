@@ -5,7 +5,7 @@ Verifies that all LLM response fields are preserved through validation,
 particularly index_recommendations which scan_command depends on.
 """
 
-from lib.functions.llm_analysis import _validate_analysis_structure
+from features.analyze.functions.llm_analysis import _validate_analysis_structure
 
 
 class TestValidateAnalysisStructure:

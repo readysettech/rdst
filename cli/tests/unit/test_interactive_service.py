@@ -11,17 +11,16 @@ from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.interactive_service import (
+from features.interactive.service import (
     InteractiveService,
     _get_interactive_mode_prompt,
 )
-from lib.services.types import (
+from features.interactive.events import (
     ChunkEvent,
-    MessageEvent,
     InteractiveCompleteEvent,
     InteractiveErrorEvent,
     InteractiveEvent,
+    MessageEvent,
 )
 
 

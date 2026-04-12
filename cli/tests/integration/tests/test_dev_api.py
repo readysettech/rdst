@@ -6,9 +6,9 @@ from unittest.mock import Mock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from lib.api.app import create_app
-from lib.cli.rdst_cli import TargetsConfig
-from lib.services.anthropic_env import get_anthropic_source
+from shared.api.app import create_app
+from shared.config.targets import TargetsConfig
+from shared.anthropic_env import get_anthropic_source
 
 
 @pytest.fixture
@@ -42,14 +42,14 @@ async def test_clear_keyring_allows_loopback_same_host_and_clears_trial_config(a
 
     with (
         patch(
-            "lib.services.env_requirements_service.EnvRequirementsService",
+            "shared.api.routes.dev.EnvRequirementsService",
             return_value=env_service,
         ),
         patch(
-            "lib.services.secret_store_service.SecretStoreService",
+            "shared.api.routes.dev.SecretStoreService",
             return_value=secret_store,
         ),
-        patch("lib.cli.rdst_cli.TargetsConfig", return_value=config),
+        patch("shared.api.routes.dev.TargetsConfig", return_value=config),
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(

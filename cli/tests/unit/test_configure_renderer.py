@@ -9,8 +9,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from typing import Any, Dict, List
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.types import (
+from features.configure.events import (
     ConfigureStatusEvent,
     ConfigureTargetListEvent,
     ConfigureTargetDetailEvent,
@@ -19,7 +18,7 @@ from lib.services.types import (
     ConfigureErrorEvent,
     ConfigureInputNeededEvent,
 )
-from lib.cli.configure_renderer import ConfigureRenderer
+from features.configure.cli.renderer import ConfigureRenderer
 
 
 class TestConfigureRendererInit:

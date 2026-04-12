@@ -48,7 +48,7 @@ def get_cli_commands():
     """Get CLI commands from parser_data.py COMMAND_ORDER."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     parser_data_path = os.path.join(
-        script_dir, "..", "..", "..", "lib", "cli", "parser_data.py"
+        script_dir, "..", "..", "..", "shared", "cli", "parser_data.py"
     )
 
     try:
@@ -75,7 +75,7 @@ def get_cli_commands():
 def get_documented_commands():
     """Get commands documented in RDST_DOCS from the help command module."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    help_docs_path = os.path.join(script_dir, "..", "..", "..", "lib", "cli", "help_command.py")
+    help_docs_path = os.path.join(script_dir, "..", "..", "..", "shared", "cli", "help_command.py")
 
     try:
         with open(help_docs_path, "r") as f:
@@ -149,7 +149,7 @@ def check_sync():
             print(f"  - {error}")
         print()
         print("To fix:")
-        print("  - Add missing commands to RDST_DOCS in lib/cli/help_command.py")
+        print("  - Add missing commands to RDST_DOCS in shared/cli/help_command.py")
         print("  - Or add command to DOCS_EXCLUDED_COMMANDS if intentionally excluded")
         print("  - Or remove stale documentation for removed commands")
         return False

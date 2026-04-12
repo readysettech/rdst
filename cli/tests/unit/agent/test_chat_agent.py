@@ -4,13 +4,13 @@ import os
 import pytest
 from unittest.mock import MagicMock, patch
 
-from lib.agent.chat_tools import (
+from features.agent.chat_tools import (
     CHAT_TOOLS,
     ChatToolExecutor,
     ToolResult,
     format_tool_result_for_display,
 )
-from lib.agent.chat_agent import ChatAgent, ChatMessage, ChatResponse
+from features.agent.chat_agent import ChatAgent, ChatMessage, ChatResponse
 
 
 class TestChatTools:

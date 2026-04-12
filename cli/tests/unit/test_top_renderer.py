@@ -9,18 +9,17 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from typing import Any, Dict, List
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.types import (
-    TopStatusEvent,
-    TopConnectedEvent,
-    TopSourceFallbackEvent,
-    TopQueriesEvent,
-    TopQueryData,
-    TopQuerySavedEvent,
+from features.top.cli.renderer import TopRenderer, render_top_queries_json
+from features.top.events import (
     TopCompleteEvent,
+    TopConnectedEvent,
     TopErrorEvent,
+    TopQueriesEvent,
+    TopQuerySavedEvent,
+    TopSourceFallbackEvent,
+    TopStatusEvent,
 )
-from lib.cli.top_renderer import TopRenderer, render_top_queries_json
+from features.top.models import TopQueryData
 
 
 class TestTopRendererInit:

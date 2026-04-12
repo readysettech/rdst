@@ -1,5 +1,5 @@
 import pytest
-from lib.cli.rdst_cli import parse_connection_string
+from shared.config.targets import parse_connection_string
 
 
 class TestConnectionStringParser:

@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from lib.fleet.aws_discovery import _parse_instance, _ENGINE_MAP
+from features.fleet.discovery import _parse_instance, _ENGINE_MAP
 
 
 class TestEngineMapping:
@@ -124,7 +124,7 @@ class TestParseInstance:
 
 class TestSecretsResolver:
     def test_extract_region_from_arn(self):
-        from lib.fleet.secrets_resolver import _extract_region_from_arn
+        from features.fleet.secrets import _extract_region_from_arn
 
         assert _extract_region_from_arn(
             "arn:aws:secretsmanager:us-east-2:123456:secret:my-secret"
@@ -132,7 +132,7 @@ class TestSecretsResolver:
         assert _extract_region_from_arn("not-an-arn") is None
 
     def test_cache_behavior(self):
-        from lib.fleet.secrets_resolver import _cache, clear_cache
+        from features.fleet.secrets import _cache, clear_cache
 
         clear_cache()
         assert len(_cache) == 0
@@ -141,7 +141,7 @@ class TestSecretsResolver:
         import time
         _cache["test-arn"] = ("cached-value", time.time() + 3600)
 
-        from lib.fleet.secrets_resolver import resolve_secret
+        from features.fleet.secrets import resolve_secret
         # Should return cached value without calling AWS
         result = resolve_secret("test-arn")
         assert result == "cached-value"
@@ -151,7 +151,7 @@ class TestSecretsResolver:
 
 class TestAwsAuth:
     def test_detect_credentials_with_env(self):
-        from lib.fleet.aws_auth import detect_aws_credentials
+        from features.fleet.auth import detect_aws_credentials
         import os
 
         old_key = os.environ.get("AWS_ACCESS_KEY_ID")

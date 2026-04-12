@@ -77,18 +77,15 @@ path = "_version_build.py"
 pattern = "__version__ = ['\"](?P<version>[^'\"]+)['\"]"
 
 [tool.hatch.build.targets.wheel]
-packages = ["lib"]
-exclude = [
-    "lib/ui/AGENTS.md",  # Symlink that breaks sdist->wheel build
-]
+packages = ["features", "shared"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "rdst.py" = "rdst.py"
 "mcp_server.py" = "mcp_server.py"
-"lib/web_dist" = "lib/web_dist"
+"web_dist" = "web_dist"
 
 [tool.hatch.build.targets.sdist.force-include]
-"lib/web_dist" = "lib/web_dist"
+"web_dist" = "web_dist"
 
 [dependency-groups]
 dev = [

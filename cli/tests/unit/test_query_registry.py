@@ -8,7 +8,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from query_registry.query_registry import (
+from shared.query_registry.query_registry import (
     normalize_sql,
     hash_sql,
     extract_parameters_from_sql,
@@ -617,17 +617,13 @@ class TestQueryLengthConstants:
 
     def test_max_query_length_is_64kb(self):
         """MAX_QUERY_LENGTH should be 64KB."""
-        from lib.data_manager_service.data_manager_service_command_sets import (
-            MAX_QUERY_LENGTH,
-        )
+        from shared.query_capture_limits import MAX_QUERY_LENGTH
 
         assert MAX_QUERY_LENGTH == 64 * 1024
 
     def test_db_query_size_warn_threshold(self):
         """DB_QUERY_SIZE_WARN_THRESHOLD should be 4KB."""
-        from lib.data_manager_service.data_manager_service_command_sets import (
-            DB_QUERY_SIZE_WARN_THRESHOLD,
-        )
+        from shared.query_capture_limits import DB_QUERY_SIZE_WARN_THRESHOLD
 
         assert DB_QUERY_SIZE_WARN_THRESHOLD == 4 * 1024
 

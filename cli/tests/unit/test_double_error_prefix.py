@@ -16,7 +16,9 @@ class TestNoDoubleErrorPrefix:
     def test_ask_error_result_no_error_prefix(self):
         """The ask command error handler must not prefix messages with 'Error:'."""
         # Read the ask command source and find the error_event handling block
-        cli_path = Path(__file__).parent.parent.parent / "lib" / "cli" / "rdst_cli.py"
+        cli_path = (
+            Path(__file__).parent.parent.parent / "shared" / "cli" / "rdst_cli.py"
+        )
         source = cli_path.read_text()
 
         # Find the pattern: message=f"Error: {error_event.message}"

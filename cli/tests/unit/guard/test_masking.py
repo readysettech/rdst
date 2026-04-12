@@ -2,7 +2,7 @@
 
 import pytest
 
-from lib.guard.masking import mask_value, mask_results, get_masked_columns
+from features.guard.masking import mask_value, mask_results, get_masked_columns
 
 
 class TestMaskValue:

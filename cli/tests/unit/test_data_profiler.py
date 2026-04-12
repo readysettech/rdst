@@ -8,13 +8,13 @@ using mock database cursors — no real DB connection needed.
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 
-from lib.semantic_layer.data_profiler import (
+from features.schema.semantic_layer.data_profiler import (
     DataProfiler,
     TableProfile,
     ColumnProfile,
     _safe_str,
 )
-from lib.data_structures.semantic_layer import ColumnAnnotation, Relationship
+from features.schema.semantic_models import ColumnAnnotation, Relationship
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ class TestPostgresProfile:
     def _require_psycopg2(self):
         pytest.importorskip("psycopg2")
 
-    @patch("lib.semantic_layer.data_profiler.DataProfiler._connect")
+    @patch("features.schema.semantic_layer.data_profiler.DataProfiler._connect")
     def test_profile_populates_stats(self, mock_connect, pg_config, columns, relationships):
         """Column stats (null fraction, distinct count) are populated."""
         # Stats query: total=1000, then per-column: cnt, dist, nulls
@@ -148,7 +148,7 @@ class TestPostgresProfile:
         assert id_profile.null_fraction == 0.0
         assert id_profile.distinct_count == 1000
 
-    @patch("lib.semantic_layer.data_profiler.DataProfiler._connect")
+    @patch("features.schema.semantic_layer.data_profiler.DataProfiler._connect")
     def test_profile_table_name_and_fks(self, mock_connect, pg_config, columns, relationships):
         """Table-level metadata is captured."""
         mock_conn = MagicMock()

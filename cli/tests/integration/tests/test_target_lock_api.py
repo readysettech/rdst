@@ -6,8 +6,8 @@ from unittest.mock import Mock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from lib.api.app import create_app
-from lib.api.routes.target_guard import TARGET_PASSWORD_REQUIRED_CODE
+from shared.api.app import create_app
+from shared.api.target_guard import TARGET_PASSWORD_REQUIRED_CODE
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ async def test_target_bound_endpoints_return_423_when_password_missing(
 ):
     monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
 
-    with patch("lib.api.routes.target_guard.TargetsConfig", return_value=_mock_config()):
+    with patch("shared.api.target_guard.TargetsConfig", return_value=_mock_config()):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.request(method, url, json=payload)

@@ -2,14 +2,9 @@
 
 from unittest.mock import Mock
 
-from lib.cli.schema_renderer import SchemaRenderer
-from lib.services.types import (
-    SchemaCompleteEvent,
-    SchemaDetails,
-    SchemaErrorEvent,
-    SchemaInitResult,
-    SchemaStatusEvent,
-)
+from features.schema.cli.renderer import SchemaRenderer
+from features.schema.events import SchemaCompleteEvent, SchemaErrorEvent, SchemaStatusEvent
+from features.schema.models import SchemaDetails, SchemaInitResult
 
 
 def test_render_status_event_suppressed():

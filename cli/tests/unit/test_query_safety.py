@@ -5,20 +5,8 @@ Tests the query safety validation functionality that prevents destructive SQL op
 """
 
 import pytest
-import importlib.util
-import sys
-from pathlib import Path
 
-# Import module directly to avoid package __init__.py issues
-def _import_module_directly(module_name, file_path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-query_safety = _import_module_directly("query_safety", _lib_path / "functions" / "query_safety.py")
+import shared.query_safety as query_safety
 
 validate_query_safety = query_safety.validate_query_safety
 DANGEROUS_KEYWORDS = query_safety.DANGEROUS_KEYWORDS

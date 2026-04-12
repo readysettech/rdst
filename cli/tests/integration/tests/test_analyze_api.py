@@ -7,14 +7,10 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from lib.api.app import create_app
-from lib.api.routes.target_guard import TargetGuard
-from lib.services.types import (
-    CompleteEvent,
-    ErrorEvent,
-    ProgressEvent,
-    RewritesTestedEvent,
-)
+from shared.api.app import create_app
+from shared.api.target_guard import TargetGuard
+from shared.service_events import ErrorEvent, ProgressEvent
+from features.analyze.events import CompleteEvent, RewritesTestedEvent
 
 
 @pytest.fixture
@@ -26,7 +22,7 @@ def app():
 @pytest.fixture(autouse=True)
 def _allow_target_password(monkeypatch):
     monkeypatch.setattr(
-        "lib.api.routes.target_guard.ensure_target_password",
+        "shared.api.target_guard.ensure_target_password",
         lambda target=None: TargetGuard(
             target or "prod",
             {"engine": "postgresql", "password": "test-password"},
@@ -53,7 +49,7 @@ async def _collect_sse_events(response):
 @pytest.mark.asyncio
 async def test_analyze_streams_progress_events(app):
     """Analyze endpoint streams progress events during analysis."""
-    with patch("lib.api.routes.analyze.AnalyzeService") as mock_service_class:
+    with patch("features.analyze.api.routes.AnalyzeService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_analyze(input_data, options_data):
@@ -95,7 +91,7 @@ async def test_analyze_emits_rewrites_event_when_enabled(app):
     """Analyze endpoint emits rewrites_tested when test_rewrites=true."""
     captured_options = []
 
-    with patch("lib.api.routes.analyze.AnalyzeService") as mock_service_class:
+    with patch("features.analyze.api.routes.AnalyzeService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_analyze(input_data, options_data):
@@ -133,7 +129,7 @@ async def test_analyze_emits_rewrites_event_when_enabled(app):
 @pytest.mark.asyncio
 async def test_analyze_complete_event_has_expected_fields(app):
     """Analyze endpoint returns complete event with expected fields."""
-    with patch("lib.api.routes.analyze.AnalyzeService") as mock_service_class:
+    with patch("features.analyze.api.routes.AnalyzeService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_analyze(input_data, options_data):
@@ -177,7 +173,7 @@ async def test_analyze_complete_event_has_expected_fields(app):
 @pytest.mark.asyncio
 async def test_analyze_error_includes_partial_results(app):
     """Analyze endpoint streams error event with partial results."""
-    with patch("lib.api.routes.analyze.AnalyzeService") as mock_service_class:
+    with patch("features.analyze.api.routes.AnalyzeService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_analyze(input_data, options_data):

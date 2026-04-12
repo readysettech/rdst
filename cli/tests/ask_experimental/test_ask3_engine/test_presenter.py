@@ -5,8 +5,8 @@ sys.path.insert(0, '.')
 
 import pytest
 from io import StringIO
-from lib.engines.ask3.presenter import Ask3Presenter, QuietPresenter
-from lib.engines.ask3.types import Interpretation, ValidationError
+from features.ask.engine.ask3.presenter import Ask3Presenter, QuietPresenter
+from features.ask.engine.ask3.types import Interpretation, ValidationError
 
 
 class TestAsk3Presenter:

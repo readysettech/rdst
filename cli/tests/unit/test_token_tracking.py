@@ -13,7 +13,7 @@ class TestSqlGenerationTokenTracking:
 
     def test_callback_receives_nonzero_tokens(self):
         """Callback tokens arg must match what LLM returns, not default to 0."""
-        from lib.functions.sql_generation import generate_sql_from_nl
+        from features.ask.sql_generation import generate_sql_from_nl
 
         # Mock LLM manager that returns a valid response with token count
         mock_llm = MagicMock()

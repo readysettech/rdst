@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from lib.api.app import create_app
+from shared.api.app import create_app
 
 
 def _write_dist_fixture(dist_dir: Path) -> None:

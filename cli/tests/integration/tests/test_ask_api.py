@@ -7,18 +7,17 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from lib.api.app import create_app
-from lib.api.routes.target_guard import TargetGuard
-from lib.services.types import (
+from shared.api.app import create_app
+from shared.api.target_guard import TargetGuard
+from features.ask.events import (
     AskClarificationNeededEvent,
-    AskClarificationQuestion,
     AskErrorEvent,
-    AskInterpretation,
     AskResultEvent,
     AskSchemaLoadedEvent,
     AskSqlGeneratedEvent,
     AskStatusEvent,
 )
+from features.ask.models import AskClarificationQuestion, AskInterpretation
 
 
 @pytest.fixture
@@ -30,7 +29,7 @@ def app():
 @pytest.fixture(autouse=True)
 def _allow_target_password(monkeypatch):
     monkeypatch.setattr(
-        "lib.api.routes.target_guard.ensure_target_password",
+        "shared.api.target_guard.ensure_target_password",
         lambda target=None: TargetGuard(
             target or "prod",
             {"engine": "postgresql", "password": "test-password"},
@@ -57,7 +56,7 @@ async def _collect_sse_events(response):
 @pytest.mark.asyncio
 async def test_ask_streams_nl_to_sql_flow(app):
     """Ask endpoint streams status -> sql -> result for NL question."""
-    with patch("lib.api.routes.ask.AskService") as mock_service_class:
+    with patch("features.ask.api.routes.AskService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_ask(input_data, options_data):
@@ -117,7 +116,7 @@ async def test_ask_streams_nl_to_sql_flow(app):
 @pytest.mark.asyncio
 async def test_ask_streams_clarification_needed(app):
     """Ask endpoint returns clarification_needed event when ambiguous."""
-    with patch("lib.api.routes.ask.AskService") as mock_service_class:
+    with patch("features.ask.api.routes.AskService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_ask(input_data, options_data):
@@ -163,7 +162,7 @@ async def test_ask_streams_clarification_needed(app):
 @pytest.mark.asyncio
 async def test_ask_resume_uses_resume_path(app):
     """Ask endpoint uses service.resume when session_id is provided."""
-    with patch("lib.api.routes.ask.AskService") as mock_service_class:
+    with patch("features.ask.api.routes.AskService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_resume(session_id, clarification_answers):
@@ -203,7 +202,7 @@ async def test_ask_resume_uses_resume_path(app):
 @pytest.mark.asyncio
 async def test_ask_streams_error_event(app):
     """Ask endpoint streams error event when service returns AskErrorEvent."""
-    with patch("lib.api.routes.ask.AskService") as mock_service_class:
+    with patch("features.ask.api.routes.AskService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_ask(input_data, options_data):

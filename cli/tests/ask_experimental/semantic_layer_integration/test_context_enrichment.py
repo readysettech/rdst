@@ -9,8 +9,13 @@ import sys
 import os
 sys.path.insert(0, '.')
 
-from lib.semantic_layer.manager import SemanticLayerManager
-from lib.data_structures.semantic_layer import SemanticLayer, TableAnnotation, ColumnAnnotation, Relationship
+from features.schema.semantic_layer.manager import SemanticLayerManager
+from features.schema.semantic_models import (
+    SemanticLayer,
+    TableAnnotation,
+    ColumnAnnotation,
+    Relationship,
+)
 
 
 def setup_test_semantic_layer():
@@ -177,54 +182,19 @@ def test_context_retrieval():
 
 
 def test_ask3_integration():
-    """Test that ask3 engine uses semantic context"""
+    """Test that ask context can be built from the semantic layer."""
     print("\n" + "="*60)
     print("Test: Ask3 Engine Integration")
     print("="*60)
 
     try:
-        from lib.engines.ask3_engine import Ask3NLToSQLEngine
-
-        print("\n1. Initializing ask3 engine...")
-
-        # Create a mock target config
-        # Note: This test verifies the _get_semantic_context method exists and works
-
-        # Verify the method exists
-        engine = Ask3NLToSQLEngine()
-
-        if not hasattr(engine, '_get_semantic_context'):
-            print("  ✗ FAILED: _get_semantic_context method not found")
-            return False
-
-        print("  ✓ _get_semantic_context method exists")
-
-        # Verify semantic layer manager is initialized
-        if not hasattr(engine, 'semantic_layer_manager'):
-            print("  ✗ FAILED: semantic_layer_manager not initialized")
-            return False
-
-        print("  ✓ semantic_layer_manager initialized")
-
-        # Verify semantic layer learner is initialized
-        if not hasattr(engine, 'semantic_layer_learner'):
-            print("  ✗ FAILED: semantic_layer_learner not initialized")
-            return False
-
-        print("  ✓ semantic_layer_learner initialized")
-
-        print("\n2. Testing context retrieval method...")
-
-        # Create a mock state for testing
-        class MockState:
-            def __init__(self):
-                self.target = "test_db"
-                self.nl_question = "Show me active users"
-
-        engine.state = MockState()
-
-        # Call the method
-        context = engine._get_semantic_context(tables_included=["users"])
+        print("\n1. Building ask context from semantic layer...")
+        manager = SemanticLayerManager()
+        context = manager.get_full_context(
+            target="test_db",
+            user_question="Show me active users",
+            relevant_tables=["users"],
+        )
 
         if not context:
             print("  ⚠ WARNING: No context returned (semantic layer may not exist)")
@@ -244,7 +214,7 @@ def test_ask3_integration():
             print("  ✗ Column descriptions NOT found in context")
             return False
 
-        print("\n✓ Ask3 integration is properly configured")
+        print("\n✓ Ask context can be built from semantic layer")
         return True
 
     except Exception as e:

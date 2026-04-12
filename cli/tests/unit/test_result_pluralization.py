@@ -9,9 +9,9 @@ from pathlib import Path
 
 
 _FILES_WITH_ROW_TITLES = [
-    "lib/engines/ask3/renderer.py",
-    "lib/engines/ask3/presenter.py",
-    "lib/functions/result_display.py",
+    "features/ask/engine/ask3/renderer.py",
+    "features/ask/engine/ask3/presenter.py",
+    "features/analyze/functions/result_display.py",
 ]
 
 

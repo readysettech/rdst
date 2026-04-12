@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from lib.fleet.csv_importer import (
+from features.fleet.csv_importer import (
     detect_region_from_hostname,
     parse_csv,
 )
@@ -213,7 +213,7 @@ class TestParseCSV:
 
 class TestFleetMemberToConfig:
     def test_basic_config(self):
-        from lib.fleet.models import FleetMember
+        from features.fleet.models import FleetMember
 
         m = FleetMember(
             name="test",
@@ -233,7 +233,7 @@ class TestFleetMemberToConfig:
         assert "group" not in cfg  # None not stored
 
     def test_config_with_fleet_fields(self):
-        from lib.fleet.models import FleetMember
+        from features.fleet.models import FleetMember
 
         m = FleetMember(
             name="test",

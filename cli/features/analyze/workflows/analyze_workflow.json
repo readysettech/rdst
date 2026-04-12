@@ -1,0 +1,255 @@
+{
+    "Comment": "RDST Analyze Workflow - Complete SQL performance analysis with LLM insights and rewrite testing",
+    "StartAt": "ValidateQuerySafety",
+    "States": {
+        "ValidateQuerySafety": {
+            "Type": "Task",
+            "Resource": "validate_query_safety",
+            "Parameters": {
+                "sql": "{{$.query}}"
+            },
+            "ResultPath": "$.safety_check",
+            "Next": "CheckSafetyResult",
+            "Retry": {
+                "MaxAttempts": 1,
+                "IntervalSeconds": 0
+            }
+        },
+        "CheckSafetyResult": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.safety_check.safe",
+                    "BooleanEquals": false,
+                    "Next": "SafetyFailure"
+                }
+            ],
+            "Default": "NormalizeForRegistry"
+        },
+        "SafetyFailure": {
+            "Type": "Fail",
+            "Error": "QuerySafetyError",
+            "Cause": "Query failed safety validation: {{$.safety_check.issues}}"
+        },
+        "NormalizeForRegistry": {
+            "Type": "Task",
+            "Resource": "normalize_for_registry",
+            "Parameters": {
+                "sql": "{{$.query}}"
+            },
+            "ResultPath": "$.registry_normalization",
+            "Next": "ParameterizeForLLM"
+        },
+        "ParameterizeForLLM": {
+            "Type": "Task",
+            "Resource": "parameterize_for_llm",
+            "Parameters": {
+                "sql": "{{$.query}}"
+            },
+            "ResultPath": "$.llm_parameterization",
+            "Next": "CheckLLMSafety"
+        },
+        "CheckLLMSafety": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.llm_parameterization.safe_for_llm",
+                    "BooleanEquals": false,
+                    "Next": "LLMSafetyFailure"
+                }
+            ],
+            "Default": "ExecuteExplainAnalyze"
+        },
+        "LLMSafetyFailure": {
+            "Type": "Fail",
+            "Error": "LLMSafetyError",
+            "Cause": "Query sensitivity score too high for LLM analysis: {{$.llm_parameterization.sensitivity_score}}"
+        },
+        "ExecuteExplainAnalyze": {
+            "Type": "Task",
+            "Resource": "execute_explain_analyze",
+            "Parameters": {
+                "sql": "{{$.query}}",
+                "target": "{{$.target}}",
+                "target_config": "{{$.target_config}}",
+                "fast_mode": "{{$.fast_mode}}"
+            },
+            "ResultPath": "$.explain_results",
+            "Next": "CheckExplainSuccess",
+            "Retry": {
+                "MaxAttempts": 2,
+                "IntervalSeconds": 1,
+                "BackoffRate": 2.0
+            },
+            "TimeoutSeconds": 660
+        },
+        "CheckExplainSuccess": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.explain_results.success",
+                    "BooleanEquals": false,
+                    "Next": "ExplainFailure"
+                }
+            ],
+            "Default": "CollectQueryMetrics"
+        },
+        "ExplainFailure": {
+            "Type": "Fail",
+            "Error": "ExplainAnalysisError",
+            "Cause": "EXPLAIN ANALYZE failed: {{$.explain_results.error}}"
+        },
+        "CollectQueryMetrics": {
+            "Type": "Task",
+            "Resource": "collect_query_metrics",
+            "Parameters": {
+                "sql": "{{$.query}}",
+                "target": "{{$.target}}",
+                "query_hash": "{{$.registry_normalization.hash}}",
+                "target_config": "{{$.target_config}}"
+            },
+            "ResultPath": "$.query_metrics",
+            "Next": "PerformLLMAnalysis",
+            "Retry": {
+                "MaxAttempts": 1,
+                "IntervalSeconds": 0
+            }
+        },
+        "PerformLLMAnalysis": {
+            "Type": "Task",
+            "Resource": "analyze_with_llm",
+            "Parameters": {
+                "explain_results": "{{$.explain_results}}",
+                "query_metrics": "{{$.query_metrics}}",
+                "parameterized_sql": "{{$.llm_parameterization.parameterized_sql}}",
+                "original_sql": "{{$.query}}",
+                "target_config": "{{$.target_config}}",
+                "model": "{{$.llm_model}}"
+            },
+            "ResultPath": "$.llm_analysis",
+            "Next": "CheckLLMAnalysisSuccess",
+            "Retry": {
+                "MaxAttempts": 2,
+                "IntervalSeconds": 2,
+                "BackoffRate": 2.0
+            },
+            "TimeoutSeconds": 60
+        },
+        "CheckLLMAnalysisSuccess": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.llm_analysis.success",
+                    "BooleanEquals": false,
+                    "Next": "LLMAnalysisPartialFailure"
+                }
+            ],
+            "Default": "ExtractOptimizationSuggestions"
+        },
+        "LLMAnalysisPartialFailure": {
+            "Type": "Pass",
+            "Comment": "LLM analysis failed but continue with available data",
+            "Parameters": {
+                "llm_analysis": {
+                    "success": false,
+                    "error": "{{$.llm_analysis.error}}",
+                    "analysis_results": {},
+                    "hotspots": [],
+                    "optimization_suggestions": []
+                }
+            },
+            "ResultPath": "$.llm_analysis",
+            "Next": "SkipOptimizationExtraction"
+        },
+        "ExtractOptimizationSuggestions": {
+            "Type": "Task",
+            "Resource": "extract_rewrites",
+            "Parameters": {
+                "analysis_results": "{{$.llm_analysis}}",
+                "parameterized_sql": "{{$.llm_parameterization.parameterized_sql}}",
+                "database_engine": "{{$.explain_results.database_engine}}",
+                "model": "{{$.llm_model}}"
+            },
+            "ResultPath": "$.optimization_suggestions",
+            "Next": "CheckRewriteTestingNeeded",
+            "Retry": {
+                "MaxAttempts": 1,
+                "IntervalSeconds": 1
+            }
+        },
+        "SkipOptimizationExtraction": {
+            "Type": "Pass",
+            "Parameters": {
+                "optimization_suggestions": {
+                    "success": false,
+                    "rewrite_suggestions": [],
+                    "index_suggestions": [],
+                    "caching_recommendations": {}
+                }
+            },
+            "ResultPath": "$.optimization_suggestions",
+            "Next": "StoreAnalysisResults"
+        },
+        "CheckRewriteTestingNeeded": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.test_rewrites",
+                    "BooleanEquals": true,
+                    "Next": "TestQueryRewrites"
+                }
+            ],
+            "Default": "StoreAnalysisResults"
+        },
+        "TestQueryRewrites": {
+            "Type": "Task",
+            "Resource": "test_query_rewrites",
+            "Parameters": {
+                "original_sql": "{{$.query}}",
+                "rewrite_suggestions": "{{$.optimization_suggestions.rewrite_suggestions}}",
+                "target": "{{$.target}}",
+                "target_config": "{{$.target_config}}"
+            },
+            "ResultPath": "$.rewrite_test_results",
+            "Next": "StoreAnalysisResults",
+            "Retry": {
+                "MaxAttempts": 1,
+                "IntervalSeconds": 1
+            },
+            "TimeoutSeconds": 300
+        },
+        "StoreAnalysisResults": {
+            "Type": "Task",
+            "Resource": "store_analysis_results",
+            "Parameters": {
+                "query_hash": "{{$.registry_normalization.hash}}",
+                "query": "{{$.query}}",
+                "target": "{{$.target}}",
+                "explain_results": "{{$.explain_results}}",
+                "query_metrics": "{{$.query_metrics}}",
+                "llm_analysis": "{{$.llm_analysis}}",
+                "optimization_suggestions": "{{$.optimization_suggestions}}",
+                "rewrite_test_results": "{{$.rewrite_test_results}}",
+                "registry_normalization": "{{$.registry_normalization}}",
+                "llm_parameterization": "{{$.llm_parameterization}}"
+            },
+            "ResultPath": "$.storage_result",
+            "Next": "FormatFinalResults"
+        },
+        "FormatFinalResults": {
+            "Type": "Task",
+            "Resource": "format_analysis_output",
+            "Parameters": {
+                "explain_results": "{{$.explain_results}}",
+                "llm_analysis": "{{$.llm_analysis}}",
+                "optimization_suggestions": "{{$.optimization_suggestions}}",
+                "rewrite_test_results": "{{$.rewrite_test_results}}",
+                "query_metrics": "{{$.query_metrics}}",
+                "query": "{{$.query}}",
+                "target": "{{$.target}}",
+                "analysis_id": "{{$.storage_result.analysis_id}}"
+            },
+            "End": true
+        }
+    }
+}

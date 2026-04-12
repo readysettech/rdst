@@ -4,23 +4,11 @@ Unit tests for LLM manager base module.
 Tests base provider infrastructure (LLMError, LLMDefaults, Conversation, etc.)
 """
 
-import pytest
-import importlib.util
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
-# Import module directly to avoid package __init__.py issues
-def _import_module_directly(module_name, file_path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+import pytest
 
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-
-base = _import_module_directly("base", _lib_path / "llm_manager" / "base.py")
+from shared.llm_manager import base
 
 # Import classes
 LLMError = base.LLMError

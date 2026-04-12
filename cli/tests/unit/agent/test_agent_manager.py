@@ -8,14 +8,14 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from lib.agent.manager import (
+from features.agent.manager import (
     AgentManager,
     AgentNotFoundError,
     AgentExistsError,
     InvalidAgentNameError,
     validate_agent_name,
 )
-from lib.agent.config import AgentConfig
+from features.agent.config import AgentConfig
 
 
 class TestValidateAgentName:

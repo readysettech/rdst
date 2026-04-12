@@ -4,6 +4,8 @@ Provides a clean API for test code to drive tmux sessions without
 dealing with subprocess calls or JSON parsing directly.
 """
 
+from __future__ import annotations
+
 import json
 import subprocess
 import sys

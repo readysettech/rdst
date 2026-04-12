@@ -5,7 +5,7 @@ sys.path.insert(0, '.')
 
 import pytest
 from unittest.mock import Mock, patch
-from lib.engines.ask3.phases.filter import (
+from features.ask.engine.ask3.phases.filter import (
     _extract_semantic_concepts,
     _match_tables_and_columns,
     _detect_negative_clause_tables,

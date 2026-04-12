@@ -11,8 +11,8 @@ import json
 import pytest
 from unittest.mock import patch, MagicMock
 
-from lib.llm_manager.claude_provider import ClaudeProvider
-from lib.llm_manager.base import ProviderRequest
+from shared.llm_manager.claude_provider import ClaudeProvider
+from shared.llm_manager.base import ProviderRequest
 
 
 class TestJsonObjectResponseFormat:
@@ -54,7 +54,7 @@ class TestJsonObjectResponseFormat:
         }
         mock_response.headers = {}
 
-        with patch("lib.llm_manager.claude_provider.requests.post", return_value=mock_response) as mock_post:
+        with patch("shared.llm_manager.claude_provider.requests.post", return_value=mock_response) as mock_post:
             provider.complete(request, api_key="test-key")
 
             # Inspect the payload sent to Claude
@@ -107,7 +107,7 @@ class TestJsonObjectResponseFormat:
         }
         mock_response.headers = {}
 
-        with patch("lib.llm_manager.claude_provider.requests.post", return_value=mock_response) as mock_post:
+        with patch("shared.llm_manager.claude_provider.requests.post", return_value=mock_response) as mock_post:
             provider.complete(request, api_key="test-key")
 
             payload = json.loads(mock_post.call_args.kwargs.get("data") or mock_post.call_args[1].get("data"))

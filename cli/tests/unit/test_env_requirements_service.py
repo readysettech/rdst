@@ -2,7 +2,7 @@
 
 from unittest.mock import Mock, patch
 
-from lib.services.env_requirements_service import EnvRequirementsService
+from shared.env_requirements_service import EnvRequirementsService
 
 
 class FakeSecretStore:

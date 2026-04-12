@@ -3,7 +3,7 @@
 import os
 from unittest.mock import Mock, patch
 
-from lib.services.secret_store_service import SecretStoreService
+from shared.secret_store_service import SecretStoreService
 
 
 def _build_backend(class_name: str, module_name: str):

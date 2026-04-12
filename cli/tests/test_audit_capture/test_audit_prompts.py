@@ -1,7 +1,7 @@
 """Tests for workload and fleet LLM prompts."""
 
-from lib.prompts.audit_prompts import build_audit_capture_prompt
-from lib.fleet.fleet_llm import build_fleet_insights_prompt
+from features.audit.prompts import build_audit_capture_prompt
+from features.fleet.llm import build_fleet_insights_prompt
 
 
 class TestWorkloadPrompt:

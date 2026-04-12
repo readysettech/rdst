@@ -2,7 +2,11 @@
 
 from unittest.mock import Mock
 
-from lib.services.password_resolver import PasswordResolution, resolve_password, resolve_password_value
+from shared.password_resolver import (
+    PasswordResolution,
+    resolve_password,
+    resolve_password_value,
+)
 
 
 class FakeSecretStore:

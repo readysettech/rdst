@@ -6,7 +6,7 @@ the renderer should still show LLM-suggested rewrites — just without timing
 comparison. Currently, all rewrites are hidden when baseline_skipped=True.
 """
 
-from lib.cli.output_formatter import _format_tested_optimizations
+from features.analyze.cli.output_formatter import _format_tested_optimizations
 
 
 def _make_rewrite_testing(*, baseline_skipped=False, rewrites=None):

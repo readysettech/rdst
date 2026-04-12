@@ -22,9 +22,8 @@ def test_restore_web_required_env_vars_reports_restored_and_missing():
     ]
     mock_service.secret_store = mock_secret_store
 
-    with patch(
-        "lib.services.env_requirements_service.EnvRequirementsService",
-        return_value=mock_service,
+    with patch.object(
+        rdst, "_get_env_requirements_service_class", return_value=Mock(return_value=mock_service)
     ):
         with patch.dict(
             "os.environ",
@@ -39,9 +38,8 @@ def test_restore_web_required_env_vars_reports_restored_and_missing():
 
 
 def test_restore_web_required_env_vars_handles_failures_without_blocking():
-    with patch(
-        "lib.services.env_requirements_service.EnvRequirementsService",
-        side_effect=RuntimeError("boom"),
+    with patch.object(
+        rdst, "_get_env_requirements_service_class", side_effect=RuntimeError("boom")
     ):
         restored, missing, errors = rdst._restore_web_required_env_vars()
 
@@ -66,9 +64,8 @@ def test_clear_web_required_env_vars_reports_cleared_and_missing():
     ]
     mock_service.secret_store = mock_secret_store
 
-    with patch(
-        "lib.services.env_requirements_service.EnvRequirementsService",
-        return_value=mock_service,
+    with patch.object(
+        rdst, "_get_env_requirements_service_class", return_value=Mock(return_value=mock_service)
     ):
         cleared, missing, errors = rdst._clear_web_required_env_vars()
 
@@ -78,9 +75,8 @@ def test_clear_web_required_env_vars_reports_cleared_and_missing():
 
 
 def test_clear_web_required_env_vars_handles_failures_without_blocking():
-    with patch(
-        "lib.services.env_requirements_service.EnvRequirementsService",
-        side_effect=RuntimeError("boom"),
+    with patch.object(
+        rdst, "_get_env_requirements_service_class", side_effect=RuntimeError("boom")
     ):
         cleared, missing, errors = rdst._clear_web_required_env_vars()
 
@@ -115,7 +111,8 @@ def test_web_auto_mode_serves_embedded_frontend(tmp_path):
         with patch.object(
             rdst, "_restore_web_required_env_vars", return_value=([], [], [])
         ):
-            with patch("lib.api.app.create_app", return_value=Mock()) as create_app:
+            create_app = Mock(return_value=Mock())
+            with patch.object(rdst, "_get_create_app", return_value=create_app):
                 with patch.dict("sys.modules", {"uvicorn": fake_uvicorn}):
                     with patch.dict("os.environ", {}, clear=True):
                         result = rdst.execute_command(Mock(), _web_args())
@@ -134,7 +131,8 @@ def test_web_auto_mode_falls_back_to_api_only_without_embedded_frontend():
         with patch.object(
             rdst, "_restore_web_required_env_vars", return_value=([], [], [])
         ):
-            with patch("lib.api.app.create_app", return_value=Mock()) as create_app:
+            create_app = Mock(return_value=Mock())
+            with patch.object(rdst, "_get_create_app", return_value=create_app):
                 with patch.dict("sys.modules", {"uvicorn": fake_uvicorn}):
                     with patch.dict(
                         "os.environ",

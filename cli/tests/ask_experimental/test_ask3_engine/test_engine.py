@@ -6,10 +6,10 @@ sys.path.insert(0, '.')
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from lib.engines.ask3.engine import Ask3Engine, create_engine
-from lib.engines.ask3.context import Ask3Context
-from lib.engines.ask3.presenter import QuietPresenter
-from lib.engines.ask3.types import Status, DbType
+from features.ask.engine.ask3.engine import Ask3Engine, create_engine
+from features.ask.engine.ask3.context import Ask3Context
+from features.ask.engine.ask3.presenter import QuietPresenter
+from features.ask.engine.ask3.types import Status, DbType
 
 
 class MockLLMManager:

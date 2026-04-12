@@ -17,10 +17,12 @@ def temp_rdst_dir():
 
 @pytest.fixture
 def mock_telemetry():
-    with patch("lib.telemetry.telemetry") as mock_tel:
-        mock_tel.track = MagicMock()
-        mock_tel.track_with_stats = MagicMock()
-        yield mock_tel
+    with patch("shared.telemetry.telemetry") as mock_tel:
+        with patch("features.configure.cli.wizard.telemetry", mock_tel):
+            with patch("features.trial.service.telemetry", mock_tel):
+                mock_tel.track = MagicMock()
+                mock_tel.track_with_stats = MagicMock()
+                yield mock_tel
 
 
 def _run_wizard_registration(mock_telemetry, email="user@example.com", token="valid-trial-token-12345"):
@@ -39,13 +41,13 @@ def _run_wizard_registration(mock_telemetry, email="user@example.com", token="va
     mock_requests = MagicMock()
     mock_requests.post.return_value = mock_response
 
-    from lib.cli.configuration_wizard import ConfigurationWizard
+    from features.configure.cli.wizard import ConfigurationWizard
 
     wizard = ConfigurationWizard.__new__(ConfigurationWizard)
     wizard.console = MagicMock()
 
     with (
-        patch("lib.cli.configuration_wizard.Prompt") as mock_prompt,
+        patch("features.configure.cli.wizard.Prompt") as mock_prompt,
         patch.dict("sys.modules", {"requests": mock_requests}),
     ):
         mock_prompt.ask.side_effect = [email, token]
@@ -56,8 +58,8 @@ def _run_wizard_registration(mock_telemetry, email="user@example.com", token="va
 
 class TestInstallationDisplayName:
     def test_includes_display_name(self, temp_rdst_dir):
-        with patch("lib.telemetry.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
-            from lib.telemetry.telemetry_manager import TelemetryManager
+        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
+            from shared.telemetry_manager import TelemetryManager
 
             tm = TelemetryManager()
             tm._rdst_dir = temp_rdst_dir
@@ -115,7 +117,7 @@ class TestWizardTrialEvents:
 
 class TestFirstAnalyze:
     def _make_tm(self, temp_rdst_dir, successful_analyzes=0):
-        from lib.telemetry.telemetry_manager import TelemetryManager
+        from shared.telemetry_manager import TelemetryManager
 
         stats_file = temp_rdst_dir / "stats.json"
         stats_file.write_text(json.dumps({"successful_analyzes": successful_analyzes}))
@@ -133,14 +135,14 @@ class TestFirstAnalyze:
         mock_cfg.get_email.return_value = "john@xyzcompany.com"
         mock_cfg.get_trial_config.return_value = {"email": "john@xyzcompany.com"}
 
-        with patch("lib.telemetry.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
+        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
             tm = self._make_tm(temp_rdst_dir)
 
             with (
                 patch.object(tm, "track") as mock_track,
-                patch("lib.cli.rdst_cli.TargetsConfig") as mock_cfg_cls,
+                patch("shared.config.targets.create_targets_config") as mock_cfg_factory,
             ):
-                mock_cfg_cls.return_value = mock_cfg
+                mock_cfg_factory.return_value = mock_cfg
                 tm.track_analyze(query_hash="abc123", success=True, target_engine="postgresql", duration_ms=500)
 
                 calls = [c for c in mock_track.call_args_list if c[0][0] == "first_analyze"]
@@ -154,7 +156,7 @@ class TestFirstAnalyze:
         config_file = temp_rdst_dir / "config.toml"
         config_file.write_text("")
 
-        with patch("lib.telemetry.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
+        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
             tm = self._make_tm(temp_rdst_dir)
 
             with patch.object(tm, "track") as mock_track:
@@ -165,7 +167,7 @@ class TestFirstAnalyze:
                 assert "email" not in calls[0][0][1]
 
     def test_does_not_fire_on_subsequent_runs(self, temp_rdst_dir):
-        with patch("lib.telemetry.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
+        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
             tm = self._make_tm(temp_rdst_dir, successful_analyzes=5)
 
             with patch.object(tm, "track") as mock_track:
@@ -177,7 +179,7 @@ class TestFirstAnalyze:
 
 class TestEmailPersistence:
     def test_stores_on_first_call(self):
-        from lib.cli.rdst_cli import TargetsConfig
+        from shared.config.targets import TargetsConfig
         cfg = TargetsConfig.__new__(TargetsConfig)
         cfg._data = {}
         cfg._path = None
@@ -186,7 +188,7 @@ class TestEmailPersistence:
         assert cfg.get_email() == "user@example.com"
 
     def test_does_not_overwrite_existing(self):
-        from lib.cli.rdst_cli import TargetsConfig
+        from shared.config.targets import TargetsConfig
         cfg = TargetsConfig.__new__(TargetsConfig)
         cfg._data = {"email": "first@example.com"}
         cfg._path = None
@@ -195,7 +197,7 @@ class TestEmailPersistence:
         assert cfg.get_email() == "first@example.com"
 
     def test_ignores_empty_string(self):
-        from lib.cli.rdst_cli import TargetsConfig
+        from shared.config.targets import TargetsConfig
         cfg = TargetsConfig.__new__(TargetsConfig)
         cfg._data = {}
         cfg._path = None
@@ -204,8 +206,8 @@ class TestEmailPersistence:
         assert cfg.get_email() is None
 
     def test_feedback_saves_email(self, temp_rdst_dir):
-        with patch("lib.telemetry.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
-            from lib.telemetry.telemetry_manager import TelemetryManager
+        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
+            from shared.telemetry_manager import TelemetryManager
 
             tm = TelemetryManager()
             tm._rdst_dir = temp_rdst_dir
@@ -219,9 +221,9 @@ class TestEmailPersistence:
             with (
                 patch.object(tm, "track_with_stats"),
                 patch.object(tm, "_slack_notify_feedback"),
-                patch("lib.cli.rdst_cli.TargetsConfig") as mock_cfg_cls,
+                patch("shared.config.targets.create_targets_config") as mock_cfg_factory,
             ):
-                mock_cfg_cls.return_value = mock_cfg
+                mock_cfg_factory.return_value = mock_cfg
                 tm.submit_feedback(reason="Great tool!", sentiment="positive", email="feedback@example.com")
 
                 mock_cfg.set_email.assert_called_once_with("feedback@example.com")
@@ -252,9 +254,9 @@ class TestTrialServiceDisplayName:
 
         with patch.dict("sys.modules", {"httpx": mock_httpx}):
             import importlib
-            import lib.services.trial_service as ts_mod
+            import features.trial.service as ts_mod
             importlib.reload(ts_mod)
-            from lib.services.trial_service import TrialService
+            from features.trial.service import TrialService
 
             svc = TrialService()
             with patch.object(svc, "_load_config") as mock_load:
@@ -277,7 +279,7 @@ class TestTrialServiceDisplayName:
     def test_activation_has_display_name(self, mock_telemetry):
         import asyncio as _asyncio
 
-        from lib.services.trial_service import TrialService
+        from features.trial.service import TrialService
 
         svc = TrialService()
         with patch.object(svc, "_load_config", return_value=MagicMock()):

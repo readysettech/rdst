@@ -15,7 +15,7 @@ class TestCorrelatedSubqueryRewriteGuidance:
     def _get_analyze_prompt(self) -> str:
         """Extract the ANALYZE_PROMPT string from llm_analysis.py source."""
         import inspect
-        from lib.functions import llm_analysis
+        from features.analyze.functions import llm_analysis
 
         source = inspect.getsource(llm_analysis)
         return source

@@ -15,7 +15,7 @@ import os
 # Add parent directory to path to import lib modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
-from lib.functions.sql_validation import validate_sql_for_ask, estimate_query_complexity
+from features.ask.sql_validation import validate_sql_for_ask, estimate_query_complexity
 
 
 def test_limit_injection():

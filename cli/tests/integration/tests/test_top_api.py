@@ -7,16 +7,16 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from lib.api.app import create_app
-from lib.api.routes.target_guard import TargetGuard
-from lib.services.types import (
+from shared.api.app import create_app
+from shared.api.target_guard import TargetGuard
+from features.top.events import (
     TopCompleteEvent,
     TopConnectedEvent,
     TopErrorEvent,
     TopQueriesEvent,
-    TopQueryData,
     TopStatusEvent,
 )
+from features.top.models import TopQueryData
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def app():
 @pytest.fixture(autouse=True)
 def _allow_target_password(monkeypatch):
     monkeypatch.setattr(
-        "lib.api.routes.target_guard.ensure_target_password",
+        "shared.api.target_guard.ensure_target_password",
         lambda target=None: TargetGuard(
             target or "prod",
             {"engine": "postgresql", "password": "test-password"},
@@ -70,7 +70,7 @@ def _sample_query(query_hash="q_1"):
 @pytest.mark.asyncio
 async def test_top_historical_json_success(app):
     """/api/top returns JSON snapshot in non-stream mode."""
-    with patch("lib.api.routes.top.TopService") as mock_service_class:
+    with patch("features.top.api.routes.TopService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_get_top_queries(input_data, options_data):
@@ -111,7 +111,7 @@ async def test_top_historical_json_success(app):
 @pytest.mark.asyncio
 async def test_top_historical_json_error(app):
     """/api/top returns JSON error payload when service emits TopErrorEvent."""
-    with patch("lib.api.routes.top.TopService") as mock_service_class:
+    with patch("features.top.api.routes.TopService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_get_top_queries(input_data, options_data):
@@ -134,7 +134,7 @@ async def test_top_historical_json_error(app):
 @pytest.mark.asyncio
 async def test_top_historical_stream_sse(app):
     """/api/top?stream=true streams historical events via SSE."""
-    with patch("lib.api.routes.top.TopService") as mock_service_class:
+    with patch("features.top.api.routes.TopService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_get_top_queries(input_data, options_data):
@@ -183,7 +183,7 @@ async def test_top_historical_stream_sse(app):
 @pytest.mark.asyncio
 async def test_top_realtime_stream_sse(app):
     """/api/top?realtime=true streams realtime monitoring events."""
-    with patch("lib.api.routes.top.TopService") as mock_service_class:
+    with patch("features.top.api.routes.TopService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_stream_realtime(input_data, options_data, duration):

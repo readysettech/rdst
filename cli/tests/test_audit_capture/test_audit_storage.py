@@ -3,8 +3,8 @@
 import tempfile
 from pathlib import Path
 
-from lib.fleet.models import DatabaseSnapshot, WorkloadQuery, WorkloadRun
-from lib.audit_storage import AuditStorage
+from features.audit.models import DatabaseSnapshot, WorkloadQuery, WorkloadRun
+from features.audit.storage import AuditStorage
 
 
 def _make_run(run_id="test_run_1", target="mydb"):
@@ -92,7 +92,7 @@ class TestAuditStorage:
 
 class TestSnapshotDelta:
     def test_compute_delta(self):
-        from lib.functions.query_stats import compute_snapshot_delta
+        from features.audit.query_stats import compute_snapshot_delta
 
         start = DatabaseSnapshot(
             timestamp="t1", engine="postgresql",
@@ -117,7 +117,7 @@ class TestSnapshotDelta:
         assert "cache_hit_ratio_delta" in delta
 
     def test_mysql_delta(self):
-        from lib.functions.query_stats import compute_snapshot_delta
+        from features.audit.query_stats import compute_snapshot_delta
 
         start = DatabaseSnapshot(
             timestamp="t1", engine="mysql",
@@ -136,7 +136,7 @@ class TestSnapshotDelta:
 
 class TestCaptureServiceHelpers:
     def test_parse_duration(self):
-        from lib.services.capture_service import _parse_duration
+        from features.audit.capture_service import _parse_duration
 
         assert _parse_duration("30m") == 1800
         assert _parse_duration("1h") == 3600
@@ -145,7 +145,7 @@ class TestCaptureServiceHelpers:
         assert _parse_duration("120") == 120
 
     def test_normalize(self):
-        from lib.services.capture_service import _normalize
+        from features.audit.capture_service import _normalize
 
         assert "?" in _normalize("SELECT * FROM users WHERE id = 123")
         assert "?" in _normalize("SELECT * FROM users WHERE name = 'alice'")

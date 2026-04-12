@@ -10,8 +10,8 @@ import os
 import time
 sys.path.insert(0, '.')
 
-from lib.semantic_layer.manager import SemanticLayerManager
-from lib.data_structures.semantic_layer import SemanticLayer, TableAnnotation, ColumnAnnotation
+from features.schema.semantic_layer.manager import SemanticLayerManager
+from features.schema.semantic_models import SemanticLayer, TableAnnotation, ColumnAnnotation
 
 
 def setup_complete_semantic_layer():
@@ -128,7 +128,7 @@ def setup_incomplete_semantic_layer():
 
 
 def test_semantic_layer_schema_collection():
-    """Test that ask3 can use semantic layer for schema collection"""
+    """Test that ask schema formatting can use semantic layer directly."""
     print("\n" + "="*60)
     print("Test: Schema Collection from Semantic Layer")
     print("="*60)
@@ -136,22 +136,10 @@ def test_semantic_layer_schema_collection():
     target, layer = setup_complete_semantic_layer()
 
     try:
-        from lib.engines.ask3_engine import Ask3NLToSQLEngine
-
-        # Create engine
-        engine = Ask3NLToSQLEngine()
-
-        # Create mock state
-        class MockState:
-            def __init__(self):
-                self.target = target
-                self.nl_question = "Test question"
-                self.extra_data = {}
-
-        engine.state = MockState()
+        from features.ask.engine.ask3.phases.schema import _format_semantic_schema, _is_complete
 
         print("\n1. Testing _has_complete_schema()...")
-        is_complete = engine._has_complete_schema(layer)
+        is_complete = _is_complete(layer)
 
         if is_complete:
             print("  ✓ Semantic layer recognized as complete")
@@ -161,7 +149,7 @@ def test_semantic_layer_schema_collection():
 
         print("\n2. Testing _format_semantic_schema()...")
         start_time = time.time()
-        schema = engine._format_semantic_schema(layer)
+        schema = _format_semantic_schema(layer)
         elapsed = time.time() - start_time
 
         print(f"  ⏱ Schema generation took: {elapsed:.3f}s")
@@ -206,7 +194,7 @@ def test_semantic_layer_schema_collection():
 
 
 def test_incomplete_semantic_layer_fallback():
-    """Test that incomplete semantic layer triggers fallback"""
+    """Test that incomplete semantic layer is detected."""
     print("\n" + "="*60)
     print("Test: Incomplete Semantic Layer Fallback")
     print("="*60)
@@ -214,21 +202,10 @@ def test_incomplete_semantic_layer_fallback():
     target, layer = setup_incomplete_semantic_layer()
 
     try:
-        from lib.engines.ask3_engine import Ask3NLToSQLEngine
-
-        # Create engine
-        engine = Ask3NLToSQLEngine()
-
-        # Create mock state
-        class MockState:
-            def __init__(self):
-                self.target = target
-                self.extra_data = {}
-
-        engine.state = MockState()
+        from features.ask.engine.ask3.phases.schema import _is_complete
 
         print("\n1. Testing _has_complete_schema()...")
-        is_complete = engine._has_complete_schema(layer)
+        is_complete = _is_complete(layer)
 
         if not is_complete:
             print("  ✓ Incomplete semantic layer correctly identified")
@@ -245,7 +222,7 @@ def test_incomplete_semantic_layer_fallback():
 
 
 def test_semantic_table_info_retrieval():
-    """Test that individual table info can be retrieved"""
+    """Test that semantic layer manager can retrieve table info."""
     print("\n" + "="*60)
     print("Test: Semantic Table Info Retrieval")
     print("="*60)
@@ -253,20 +230,11 @@ def test_semantic_table_info_retrieval():
     target, layer = setup_complete_semantic_layer()
 
     try:
-        from lib.engines.ask3_engine import Ask3NLToSQLEngine
-
-        # Create engine
-        engine = Ask3NLToSQLEngine()
-
-        # Create mock state
-        class MockState:
-            def __init__(self):
-                self.target = target
-
-        engine.state = MockState()
+        manager = SemanticLayerManager()
+        loaded_layer = manager.load(target)
 
         print("\n1. Testing _get_semantic_table_info('users')...")
-        table_info = engine._get_semantic_table_info("users")
+        table_info = loaded_layer.tables.get("users")
 
         if not table_info:
             print("  ✗ No table info returned")
@@ -278,7 +246,7 @@ def test_semantic_table_info_retrieval():
 
         # Test non-existent table
         print("\n2. Testing _get_semantic_table_info('nonexistent')...")
-        table_info = engine._get_semantic_table_info("nonexistent")
+        table_info = loaded_layer.tables.get("nonexistent")
 
         if table_info is None:
             print("  ✓ Correctly returned None for non-existent table")

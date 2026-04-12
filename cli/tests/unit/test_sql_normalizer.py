@@ -6,7 +6,7 @@ SQL parameterization using SQLGlot.
 """
 
 import pytest
-from lib.query_registry.sql_normalizer import (
+from shared.query_registry.sql_normalizer import (
     normalize_and_extract,
     reconstruct_sql,
     get_placeholder_names,

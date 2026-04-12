@@ -7,12 +7,12 @@ from unittest.mock import Mock, patch
 import pytest
 from fastapi import HTTPException
 
-from lib.api.routes.target_guard import (
+from shared.api.target_guard import (
     TARGET_PASSWORD_REQUIRED_CODE,
     ensure_target_password,
     resolve_target_config,
 )
-from lib.services.password_resolver import PasswordResolution
+from shared.password_resolver import PasswordResolution
 
 
 def _mock_config(
@@ -33,7 +33,7 @@ def _mock_config(
 
 def test_resolve_target_config_uses_explicit_target():
     cfg = _mock_config()
-    with patch("lib.api.routes.target_guard.TargetsConfig", return_value=cfg):
+    with patch("shared.api.target_guard.TargetsConfig", return_value=cfg):
         target_name, target_config = resolve_target_config("staging")
 
     assert target_name == "staging"
@@ -42,7 +42,7 @@ def test_resolve_target_config_uses_explicit_target():
 
 def test_resolve_target_config_uses_default_target_when_not_provided():
     cfg = _mock_config(default_target="prod")
-    with patch("lib.api.routes.target_guard.TargetsConfig", return_value=cfg):
+    with patch("shared.api.target_guard.TargetsConfig", return_value=cfg):
         target_name, _ = resolve_target_config(None)
 
     assert target_name == "prod"
@@ -50,7 +50,7 @@ def test_resolve_target_config_uses_default_target_when_not_provided():
 
 def test_resolve_target_config_raises_400_when_no_target():
     cfg = _mock_config(default_target=None)
-    with patch("lib.api.routes.target_guard.TargetsConfig", return_value=cfg):
+    with patch("shared.api.target_guard.TargetsConfig", return_value=cfg):
         with pytest.raises(HTTPException) as exc_info:
             resolve_target_config(None)
 
@@ -59,7 +59,7 @@ def test_resolve_target_config_raises_400_when_no_target():
 
 def test_resolve_target_config_raises_404_when_target_not_found():
     cfg = _mock_config(targets={"prod": {"password": "x"}})
-    with patch("lib.api.routes.target_guard.TargetsConfig", return_value=cfg):
+    with patch("shared.api.target_guard.TargetsConfig", return_value=cfg):
         with pytest.raises(HTTPException) as exc_info:
             resolve_target_config("staging")
 
@@ -68,7 +68,7 @@ def test_resolve_target_config_raises_404_when_target_not_found():
 
 def test_ensure_target_password_allows_direct_password():
     cfg = _mock_config()
-    with patch("lib.api.routes.target_guard.TargetsConfig", return_value=cfg):
+    with patch("shared.api.target_guard.TargetsConfig", return_value=cfg):
         target_name, _ = ensure_target_password("staging")
 
     assert target_name == "staging"
@@ -77,7 +77,7 @@ def test_ensure_target_password_allows_direct_password():
 def test_ensure_target_password_allows_password_env(monkeypatch):
     monkeypatch.setenv("PROD_DB_PASSWORD", "from-env")
     cfg = _mock_config()
-    with patch("lib.api.routes.target_guard.TargetsConfig", return_value=cfg):
+    with patch("shared.api.target_guard.TargetsConfig", return_value=cfg):
         target_name, _ = ensure_target_password("prod")
 
     assert target_name == "prod"
@@ -86,7 +86,7 @@ def test_ensure_target_password_allows_password_env(monkeypatch):
 def test_ensure_target_password_raises_423_with_structured_detail(monkeypatch):
     monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
     cfg = _mock_config()
-    with patch("lib.api.routes.target_guard.TargetsConfig", return_value=cfg):
+    with patch("shared.api.target_guard.TargetsConfig", return_value=cfg):
         with pytest.raises(HTTPException) as exc_info:
             ensure_target_password("prod")
 
@@ -102,9 +102,9 @@ def test_ensure_target_password_allows_keychain_password(monkeypatch):
     monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
     cfg = _mock_config()
     with (
-        patch("lib.api.routes.target_guard.TargetsConfig", return_value=cfg),
+        patch("shared.api.target_guard.TargetsConfig", return_value=cfg),
         patch(
-            "lib.api.routes.target_guard.resolve_password",
+            "shared.api.target_guard.resolve_password",
             return_value=PasswordResolution(available=True, source="secure_store"),
         ),
     ):

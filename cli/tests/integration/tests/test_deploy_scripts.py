@@ -23,7 +23,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 rdst_dir = os.path.join(script_dir, "..", "..", "..")
 sys.path.insert(0, rdst_dir)
 
-from lib.deploy.script_generator import (
+from shared.deploy.script_generator import (
     generate_script,
     build_variables,
     generate_k8s_apply_manifests,
@@ -315,14 +315,14 @@ class TestErrorHandling:
             generate_script("invalid_mode", mysql_variables)
 
     def test_deploy_command_missing_target(self):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
         cmd = DeployCommand()
         result = cmd.execute(target=None)
         assert not result.ok
         assert "Target is required" in result.message
 
     def test_deploy_command_nonexistent_target(self):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
         cmd = DeployCommand()
         result = cmd.execute(target="nonexistent_target_12345")
         assert not result.ok
@@ -337,7 +337,7 @@ class TestEndpointBuilding:
     """Tests for connection endpoint string generation."""
 
     def test_mysql_endpoint(self, mysql_variables):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
         cmd = DeployCommand()
         endpoint = cmd._build_endpoint(mysql_variables)
         assert endpoint.startswith("mysql://")
@@ -346,20 +346,20 @@ class TestEndpointBuilding:
         assert "myapp" in endpoint
 
     def test_postgres_endpoint(self, postgres_variables):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
         cmd = DeployCommand()
         endpoint = cmd._build_endpoint(postgres_variables)
         assert endpoint.startswith("postgresql://")
         assert "5433" in endpoint
 
     def test_custom_host(self, mysql_variables):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
         cmd = DeployCommand()
         endpoint = cmd._build_endpoint(mysql_variables, host="10.0.1.50")
         assert "10.0.1.50" in endpoint
 
     def test_k8s_service_host(self, mysql_variables):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
         cmd = DeployCommand()
         endpoint = cmd._build_endpoint(
             mysql_variables,
@@ -376,7 +376,7 @@ class TestPasswordInjection:
     """Tests for password injection in remote deployment scripts."""
 
     def test_inject_password_docker(self, mysql_variables):
-        from lib.deploy.remote import _inject_password
+        from shared.deploy.remote import _inject_password
         script = generate_script("docker", mysql_variables)
         injected = _inject_password(script, "mypassword")
         # shlex.quote wraps in single quotes for safety
@@ -385,7 +385,7 @@ class TestPasswordInjection:
         assert "read -s" not in injected
 
     def test_inject_password_systemd(self, mysql_variables):
-        from lib.deploy.remote import _inject_password
+        from shared.deploy.remote import _inject_password
         script = generate_script("systemd", mysql_variables)
         injected = _inject_password(script, "mypassword")
         assert "DB_PASSWORD=" in injected
@@ -395,7 +395,7 @@ class TestPasswordInjection:
     def test_inject_password_special_chars(self, mysql_variables):
         """Ensure shell metacharacters are safely escaped via shlex.quote."""
         import shlex
-        from lib.deploy.remote import _inject_password
+        from shared.deploy.remote import _inject_password
         script = generate_script("docker", mysql_variables)
         dangerous = 'pa$$word"; rm -rf / #'
         injected = _inject_password(script, dangerous)
@@ -407,7 +407,7 @@ class TestPasswordInjection:
         assert pw_line.strip() == expected
 
     def test_no_password_empty_string(self, mysql_variables):
-        from lib.deploy.remote import _inject_password
+        from shared.deploy.remote import _inject_password
         script = generate_script("docker", mysql_variables)
         injected = _inject_password(script, "")
         # Empty password should still replace the read block

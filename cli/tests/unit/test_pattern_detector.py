@@ -1,6 +1,6 @@
-"""Tests for lib.semantic_layer.pattern_detector."""
+"""Tests for schema semantic-layer pattern detection."""
 
-from lib.semantic_layer.pattern_detector import (
+from features.schema.semantic_layer.pattern_detector import (
     detect_delimiter_columns_sql_postgres,
     detect_delimiter_columns_sql_mysql,
     DELIMITER_FRACTION_THRESHOLD,

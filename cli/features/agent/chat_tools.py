@@ -1,0 +1,320 @@
+"""
+Chat Tools for Conversational Agent
+
+Defines tools available to the ChatAgent for interacting with databases.
+The LLM decides when to use each tool based on user intent.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+import json
+import logging
+
+if TYPE_CHECKING:
+    from .runtime import AgentRuntime
+
+logger = logging.getLogger(__name__)
+
+
+# Anthropic tool definitions
+CHAT_TOOLS = [
+    {
+        "name": "query_database",
+        "description": (
+            "Convert a natural language question into SQL and execute it against the database. "
+            "Use this when the user wants to retrieve, count, analyze, or explore data. "
+            "Examples: 'Show me top customers', 'How many orders last month?', "
+            "'What's the average order value?'"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "Natural language question about the data",
+                },
+            },
+            "required": ["question"],
+        },
+    },
+    {
+        "name": "get_schema",
+        "description": (
+            "Get information about database tables and columns. "
+            "Use this when the user asks about what data is available, table structures, "
+            "or column names. Can get all tables or details for a specific table."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "table_name": {
+                    "type": "string",
+                    "description": "Optional: specific table to get details for. If omitted, returns all tables.",
+                },
+            },
+            "required": [],
+        },
+    },
+]
+
+
+@dataclass
+class ToolResult:
+    """Result from executing a tool."""
+
+    tool_use_id: str
+    success: bool
+    content: str
+    data: dict[str, Any] | None = None
+
+
+class ChatToolExecutor:
+    """
+    Executes chat tools using the AgentRuntime.
+
+    Wraps AgentRuntime methods to provide tool-compatible interface
+    with proper error handling and result formatting.
+    """
+
+    def __init__(self, runtime: "AgentRuntime"):
+        """
+        Initialize the tool executor.
+
+        Args:
+            runtime: AgentRuntime for database operations.
+        """
+        self.runtime = runtime
+
+    def execute(self, tool_name: str, tool_input: dict[str, Any], tool_use_id: str) -> ToolResult:
+        """
+        Execute a tool by name.
+
+        Args:
+            tool_name: Name of the tool to execute.
+            tool_input: Input parameters for the tool.
+            tool_use_id: ID from the tool_use block.
+
+        Returns:
+            ToolResult with execution outcome.
+        """
+        handlers = {
+            "query_database": self._query_database,
+            "get_schema": self._get_schema,
+        }
+
+        handler = handlers.get(tool_name)
+        if not handler:
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                success=False,
+                content=f"Unknown tool: {tool_name}",
+            )
+
+        try:
+            return handler(tool_input, tool_use_id)
+        except Exception as e:
+            logger.exception(f"Tool execution failed: {tool_name}")
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                success=False,
+                content=f"Tool error: {e}",
+            )
+
+    def _query_database(self, inputs: dict[str, Any], tool_use_id: str) -> ToolResult:
+        """Execute natural language query via Ask3Engine."""
+        question = inputs.get("question", "")
+        if not question:
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                success=False,
+                content="No question provided",
+            )
+
+        response = self.runtime.ask(question)
+
+        if not response.success:
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                success=False,
+                content=f"Query failed: {response.error}",
+                data={"sql": response.sql} if response.sql else None,
+            )
+
+        # Format successful result
+        result_lines = []
+
+        if response.sql:
+            result_lines.append(f"SQL: {response.sql}")
+            result_lines.append("")
+
+        if response.columns and response.rows:
+            # Format as simple table for LLM context
+            result_lines.append("Results:")
+            result_lines.append(" | ".join(response.columns))
+            result_lines.append("-" * 40)
+            for row in response.rows[:20]:  # Limit rows for context
+                result_lines.append(" | ".join(str(v) if v is not None else "NULL" for v in row))
+
+            if response.row_count > 20:
+                result_lines.append(f"... ({response.row_count} total rows)")
+
+            if response.truncated:
+                result_lines.append("(Results truncated by safety limit)")
+        else:
+            result_lines.append("No rows returned")
+
+        # Auto-save query to registry for later analysis
+        query_hash = None
+        query_tag = None
+        if response.sql:
+            try:
+                import re
+                from shared.query_registry import QueryRegistry
+                registry = QueryRegistry()
+                slug = re.sub(r'[^a-z0-9]+', '-', question[:40].lower()).strip('-')
+                query_tag = f"chat-{slug}"
+                query_hash, _ = registry.add_query(
+                    sql=response.sql,
+                    tag=query_tag,
+                    source="chat",
+                    target=self.runtime.config.target,
+                )
+                registry.save()
+            except Exception:
+                logger.debug("Failed to auto-save query to registry", exc_info=True)
+
+        return ToolResult(
+            tool_use_id=tool_use_id,
+            success=True,
+            content="\n".join(result_lines),
+            data={
+                "sql": response.sql,
+                "columns": response.columns,
+                "rows": response.rows,
+                "row_count": response.row_count,
+                "execution_time_ms": response.execution_time_ms,
+                "truncated": response.truncated,
+                "query_hash": query_hash,
+                "query_tag": query_tag,
+            },
+        )
+
+    def _get_schema(self, inputs: dict[str, Any], tool_use_id: str) -> ToolResult:
+        """Get database schema information."""
+        table_name = inputs.get("table_name")
+
+        schema = self.runtime.get_schema_summary()
+
+        if "error" in schema:
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                success=False,
+                content=f"Failed to get schema: {schema['error']}",
+            )
+
+        tables = schema.get("tables", [])
+
+        if not tables:
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                success=True,
+                content="No tables found in schema",
+            )
+
+        # If specific table requested, filter
+        if table_name:
+            table_name_lower = table_name.lower()
+            tables = [t for t in tables if t["name"].lower() == table_name_lower]
+
+            if not tables:
+                return ToolResult(
+                    tool_use_id=tool_use_id,
+                    success=False,
+                    content=f"Table '{table_name}' not found",
+                )
+
+        # Format schema info
+        lines = [f"Schema (source: {schema.get('source', 'unknown')})", ""]
+
+        for table in tables:
+            lines.append(f"Table: {table['name']}")
+            if table.get("description"):
+                lines.append(f"  Description: {table['description']}")
+            if table.get("columns"):
+                cols = table["columns"]
+                if isinstance(cols, list):
+                    lines.append(f"  Columns: {', '.join(cols)}")
+                elif isinstance(cols, dict):
+                    for col_name, col_info in cols.items():
+                        if isinstance(col_info, dict):
+                            lines.append(f"    {col_name}: {col_info.get('type', 'unknown')}")
+                        else:
+                            lines.append(f"    {col_name}")
+            lines.append("")
+
+        return ToolResult(
+            tool_use_id=tool_use_id,
+            success=True,
+            content="\n".join(lines),
+            data={"tables": tables, "source": schema.get("source")},
+        )
+
+def format_tool_result_for_display(result: ToolResult) -> str:
+    """
+    Format tool result for terminal display.
+
+    Args:
+        result: ToolResult to format.
+
+    Returns:
+        Human-readable string for display.
+    """
+    if not result.success:
+        return f"Error: {result.content}"
+
+    # For query results with data, format nicely
+    if result.data and "columns" in result.data and "rows" in result.data:
+        lines = []
+        if result.data.get("sql"):
+            lines.append(f"SQL: {result.data['sql']}")
+            lines.append("")
+
+        columns = result.data["columns"]
+        rows = result.data["rows"]
+
+        if columns and rows:
+            # Calculate column widths
+            widths = [len(str(c)) for c in columns]
+            for row in rows[:20]:
+                for i, val in enumerate(row):
+                    if i < len(widths):
+                        widths[i] = max(widths[i], len(str(val) if val is not None else "NULL"))
+
+            # Format header
+            header = " | ".join(str(c).ljust(widths[i]) for i, c in enumerate(columns))
+            lines.append(header)
+            lines.append("-" * len(header))
+
+            # Format rows
+            for row in rows[:20]:
+                row_str = " | ".join(
+                    (str(v) if v is not None else "NULL").ljust(widths[i])
+                    for i, v in enumerate(row)
+                )
+                lines.append(row_str)
+
+            row_count = result.data.get("row_count", len(rows))
+            if row_count > 20:
+                lines.append(f"... ({row_count} total rows)")
+
+            lines.append("")
+            lines.append(f"({row_count} rows, {result.data.get('execution_time_ms', 0):.1f}ms)")
+
+            if result.data.get("truncated"):
+                lines.append("(Results truncated by safety limit)")
+
+            return "\n".join(lines)
+
+    return result.content

@@ -9,8 +9,13 @@ import sys
 import os
 sys.path.insert(0, '.')
 
-from lib.semantic_layer.manager import SemanticLayerManager
-from lib.data_structures.semantic_layer import SemanticLayer, TableAnnotation, ColumnAnnotation, Terminology
+from features.schema.semantic_layer.manager import SemanticLayerManager
+from features.schema.semantic_models import (
+    SemanticLayer,
+    TableAnnotation,
+    ColumnAnnotation,
+    Terminology,
+)
 
 
 def setup_test_with_terminology():
@@ -188,33 +193,21 @@ def test_terminology_in_context():
 
 
 def test_ask3_uses_terminology():
-    """Test that ask3 engine can access terminology"""
+    """Test that ask context generation can access terminology."""
     print("\n" + "="*60)
     print("Test: Ask3 Terminology Integration")
     print("="*60)
 
     try:
-        from lib.engines.ask3_engine import Ask3NLToSQLEngine
-
         target, layer = setup_test_with_terminology()
 
-        print("\n1. Creating ask3 engine with mock state...")
-
-        engine = Ask3NLToSQLEngine()
-
-        # Create mock state
-        class MockState:
-            def __init__(self):
-                self.target = target
-                self.nl_question = "Show me premium users"
-
-        engine.state = MockState()
-
-        print("  ✓ Engine created with mock state")
-
-        print("\n2. Calling _get_semantic_context()...")
-
-        context = engine._get_semantic_context(tables_included=["users"])
+        print("\n1. Building semantic context...")
+        manager = SemanticLayerManager()
+        context = manager.get_full_context(
+            target=target,
+            user_question="Show me premium users",
+            relevant_tables=["users"],
+        )
 
         if not context:
             print("  ⚠ WARNING: No context returned")
@@ -234,7 +227,7 @@ def test_ask3_uses_terminology():
             print("  ✗ SQL pattern for 'premium' NOT found")
             return False
 
-        print("\n✓ Ask3 can access and use terminology")
+        print("\n✓ Ask context can access and use terminology")
         return True
 
     except Exception as e:

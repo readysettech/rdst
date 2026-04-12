@@ -4,25 +4,9 @@ Integration tests for Readyset cacheability checks.
 Adapted from cloud/cloud_agent/test_readyset_cacheability.py
 """
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
 
-# Import module directly to avoid package __init__.py issues
-def _import_module_directly(module_name, file_path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-readyset_cacheability = _import_module_directly(
-    "readyset_cacheability",
-    _lib_path / "functions" / "readyset_cacheability.py"
-)
+from features.cache import readyset_cacheability
 
 check_readyset_cacheability = readyset_cacheability.check_readyset_cacheability
 generate_explain_create_cache = readyset_cacheability.generate_explain_create_cache

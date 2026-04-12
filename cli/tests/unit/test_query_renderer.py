@@ -2,8 +2,12 @@
 
 from unittest.mock import Mock
 
-from lib.cli.query_renderer import QueryRenderer
-from lib.services.types import QueryCompleteEvent, QueryErrorEvent, QueryStatusEvent
+from features.query_registry.cli.renderer import QueryRenderer
+from features.query_registry.events import (
+    QueryCompleteEvent,
+    QueryErrorEvent,
+    QueryStatusEvent,
+)
 
 
 def test_render_status_event_suppressed():

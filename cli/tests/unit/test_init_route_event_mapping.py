@@ -2,7 +2,7 @@
 
 import json
 
-from lib.api.routes.init import _event_to_sse
+from features.init.api.routes import _event_to_sse
 
 
 class _UnknownInitEvent:

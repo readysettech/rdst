@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from rich.console import Console
 from rich.theme import Theme
 
-from lib.ui import (
+from shared.ui import (
     StyleTokens,
     Icons,
     Rule,
@@ -45,7 +45,7 @@ from lib.ui import (
     PriorityTag,
     ProgressBar,
 )
-from lib.ui.theme import THEME_DEFINITION
+from shared.ui.theme import THEME_DEFINITION
 
 OUTPUT_FILE = Path(__file__).parent / "storybook_output.html"
 

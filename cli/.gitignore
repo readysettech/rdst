@@ -1,7 +1,7 @@
 # Build artifacts
 build/
 dist/
-lib/web_dist/
+web_dist/
 *.deb
 *.rpm
 *.rpm.al23

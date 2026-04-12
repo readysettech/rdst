@@ -7,13 +7,13 @@ from unittest import mock
 class TestDockerAvailable:
 
     def test_docker_in_path(self):
-        from lib.api.docker_prepull import _docker_available
+        from shared.api.docker_prepull import _docker_available
 
         with mock.patch("shutil.which", return_value="/usr/local/bin/docker"):
             assert _docker_available() is True
 
     def test_docker_not_in_path(self):
-        from lib.api.docker_prepull import _docker_available
+        from shared.api.docker_prepull import _docker_available
 
         with mock.patch("shutil.which", return_value=None):
             assert _docker_available() is False
@@ -22,7 +22,7 @@ class TestDockerAvailable:
 class TestPullImage:
 
     def test_successful_pull(self, capsys):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": True,
@@ -45,7 +45,7 @@ class TestPullImage:
         assert "Pre-pulled ReadySet image" in captured.out
 
     def test_failed_pull_with_stderr(self, capsys):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": True,
@@ -69,7 +69,7 @@ class TestPullImage:
         assert "pre-pull failed" in captured.out
 
     def test_failed_pull_empty_stderr(self):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": True,
@@ -88,7 +88,7 @@ class TestPullImage:
         assert prepull._pull_status["error"] == "Pull failed"
 
     def test_timeout(self, capsys):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": True,
@@ -110,7 +110,7 @@ class TestPullImage:
         assert "timed out" in captured.out
 
     def test_exception(self, capsys):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": True,
@@ -133,7 +133,7 @@ class TestPullImage:
 class TestStartPrepull:
 
     def test_noop_if_already_started(self):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": True,
@@ -147,7 +147,7 @@ class TestStartPrepull:
             mock_thread.assert_not_called()
 
     def test_noop_if_docker_missing(self):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": False,
@@ -164,7 +164,7 @@ class TestStartPrepull:
         assert prepull._pull_status["started"] is False
 
     def test_starts_daemon_thread(self, capsys):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": False,
@@ -197,7 +197,7 @@ class TestStartPrepull:
 class TestGetPrepullStatus:
 
     def test_returns_copy(self):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": True,
@@ -216,7 +216,7 @@ class TestGetPrepullStatus:
         assert prepull._pull_status["success"] is True
 
     def test_has_all_fields(self):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": True,
@@ -237,7 +237,7 @@ class TestGetPrepullStatus:
 class TestEndToEnd:
 
     def test_full_flow(self):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": False,
@@ -264,7 +264,7 @@ class TestEndToEnd:
         assert status["error"] is None
 
     def test_only_starts_once(self):
-        import lib.api.docker_prepull as prepull
+        import shared.api.docker_prepull as prepull
 
         prepull._pull_status = {
             "started": False,

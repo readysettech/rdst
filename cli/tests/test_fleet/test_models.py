@@ -3,23 +3,25 @@
 import json
 from dataclasses import asdict
 
-from lib.fleet.models import (
+from features.audit.models import (
     AuditMetrics,
     AuditResult,
     CacheOpportunityScore,
     DatabaseSnapshot,
-    FleetAuditSnapshot,
-    FleetDiff,
-    FleetDiffEntry,
-    FleetMember,
     IntermediateSnapshot,
     SizingAssessment,
-    SizingVerdict,
     TableStats,
     WorkloadAnalysis,
     WorkloadDiff,
     WorkloadQuery,
     WorkloadRun,
+)
+from features.fleet.models import (
+    FleetAuditSnapshot,
+    FleetDiff,
+    FleetDiffEntry,
+    FleetMember,
+    SizingVerdict,
 )
 
 

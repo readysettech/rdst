@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from lib.cli.query_command import QueryCommand
+from features.query_registry.cli.command import QueryCommand
 
 
 def test_run_singleton_succeeds_from_worker_thread_without_signal_error():
@@ -30,7 +30,7 @@ def test_run_singleton_succeeds_from_worker_thread_without_signal_error():
     with (
         patch.object(cmd, "_resolve_queries", return_value=[(entry, "SELECT 1")]),
         patch.object(cmd, "_print_run_summary", return_value=None),
-        patch("lib.cli.rdst_cli.TargetsConfig", return_value=cfg),
+        patch("shared.config.targets.create_targets_config", return_value=cfg),
         patch.object(cmd, "_run_interval", side_effect=fake_interval),
     ):
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -61,15 +61,15 @@ def test_run_singleton_tolerates_signal_install_failure():
     with (
         patch.object(cmd, "_resolve_queries", return_value=[(entry, "SELECT 1")]),
         patch.object(cmd, "_print_run_summary", return_value=None),
-        patch("lib.cli.rdst_cli.TargetsConfig", return_value=cfg),
+        patch("shared.config.targets.create_targets_config", return_value=cfg),
         patch(
-            "lib.cli.query_command.signal.signal",
+            "features.query_registry.cli.command.signal.signal",
             side_effect=ValueError(
                 "signal only works in main thread of the main interpreter"
             ),
         ),
         patch(
-            "lib.cli.query_command.signal.getsignal",
+            "features.query_registry.cli.command.signal.getsignal",
             return_value=object(),
         ),
         patch.object(cmd, "_run_interval", side_effect=fake_interval),
@@ -82,7 +82,7 @@ def test_run_singleton_tolerates_signal_install_failure():
 
 def test_warmup_first_execution_excluded_from_timings():
     """First successful execution per query is warm-up — excluded from timing stats."""
-    from lib.cli.query_command import RunStatistics
+    from features.query_registry.cli.command import RunStatistics
     import time
 
     stats = RunStatistics(start_time=time.perf_counter())
@@ -98,7 +98,7 @@ def test_warmup_first_execution_excluded_from_timings():
 
 def test_warmup_per_query_independent():
     """Each query has its own independent warm-up."""
-    from lib.cli.query_command import RunStatistics
+    from features.query_registry.cli.command import RunStatistics
     import time
 
     stats = RunStatistics(start_time=time.perf_counter())
@@ -115,7 +115,7 @@ def test_warmup_per_query_independent():
 
 def test_warmup_failure_not_counted_as_warmup():
     """Failed execution doesn't consume the warm-up slot."""
-    from lib.cli.query_command import RunStatistics
+    from features.query_registry.cli.command import RunStatistics
     import time
 
     stats = RunStatistics(start_time=time.perf_counter())

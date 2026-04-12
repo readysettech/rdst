@@ -3,19 +3,17 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from lib.services.types import (
-    CacheInput,
-    CacheOptions,
-    CacheStatusEvent,
-    CacheDeployCompleteEvent,
-    CacheListEvent,
+from features.cache.events import (
     CacheAddEvent,
     CacheDeleteEvent,
+    CacheDeployCompleteEvent,
     CacheDropAllEvent,
+    CacheListEvent,
+    CacheStatusEvent,
     CacheRunCompleteEvent,
-    ProgressEvent,
-    ErrorEvent,
 )
+from features.cache.models import CacheInput, CacheOptions
+from shared.service_events import ErrorEvent, ProgressEvent
 
 
 # ============================================================================
@@ -116,10 +114,10 @@ class TestCacheTypes:
 class TestCacheTargetResolution:
     def test_resolve_direct_readyset_target(self):
         """If the target itself is already a readyset target, use it directly."""
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             mock_cfg = MockConfig.return_value
             # First call for "mydb-cache" itself returns a readyset config
             mock_cfg.get.return_value = {
@@ -133,7 +131,7 @@ class TestCacheTargetResolution:
             assert config["target_type"] == "readyset"
 
     def test_resolve_by_naming_convention(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -142,7 +140,7 @@ class TestCacheTargetResolution:
             "host": "127.0.0.1",
             "port": 5433,
         }
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             mock_cfg = MockConfig.return_value
             # "mydb" is a database target, "mydb-cache" is the readyset target
             mock_cfg.get.side_effect = lambda name: cache_config if name == "mydb-cache" else None
@@ -151,10 +149,10 @@ class TestCacheTargetResolution:
             assert config["target_type"] == "readyset"
 
     def test_resolve_not_found(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             mock_cfg = MockConfig.return_value
             mock_cfg.get.return_value = None
             mock_cfg.list_targets.return_value = []
@@ -162,10 +160,10 @@ class TestCacheTargetResolution:
             assert result is None
 
     def test_resolve_by_upstream_search(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             mock_cfg = MockConfig.return_value
             # Convention name doesn't match
             mock_cfg.get.side_effect = lambda name: (
@@ -179,10 +177,10 @@ class TestCacheTargetResolution:
             assert config["upstream_target"] == "mydb"
 
     def test_resolve_skips_non_readyset(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             mock_cfg = MockConfig.return_value
             mock_cfg.get.return_value = None
             mock_cfg.list_targets.return_value = ["mydb", "other"]
@@ -204,7 +202,7 @@ class TestCacheTargetResolution:
 class TestCacheStatus:
     @pytest.mark.asyncio
     async def test_status_not_deployed(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         with patch.object(service, "_resolve_cache_target", return_value=None):
@@ -216,7 +214,7 @@ class TestCacheStatus:
 
     @pytest.mark.asyncio
     async def test_status_deployed_running(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -237,7 +235,7 @@ class TestCacheStatus:
 
     @pytest.mark.asyncio
     async def test_status_deployed_stopped(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -261,7 +259,7 @@ class TestCacheStatus:
 class TestCacheList:
     @pytest.mark.asyncio
     async def test_list_no_cache_target(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         with patch.object(service, "_resolve_cache_target", return_value=None):
@@ -270,7 +268,7 @@ class TestCacheList:
 
     @pytest.mark.asyncio
     async def test_list_empty(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -288,7 +286,7 @@ class TestCacheList:
 
     @pytest.mark.asyncio
     async def test_list_with_entries(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -318,7 +316,7 @@ class TestCacheList:
 class TestCacheAdd:
     @pytest.mark.asyncio
     async def test_add_dry_run_supported(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -327,7 +325,7 @@ class TestCacheAdd:
             "database": "myapp",
         }
         with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
-            with patch("lib.functions.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": True}):
+            with patch("features.cache.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": True}):
                 with patch.object(service, "_run_readyset_sql", return_value={"success": True, "output": "yes, supported"}):
                     events = [e async for e in service.add_cache(
                         CacheInput(target="mydb", query="SELECT 1"),
@@ -339,7 +337,7 @@ class TestCacheAdd:
 
     @pytest.mark.asyncio
     async def test_add_dry_run_not_supported(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -348,7 +346,7 @@ class TestCacheAdd:
             "database": "myapp",
         }
         with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
-            with patch("lib.functions.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": True}):
+            with patch("features.cache.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": True}):
                 with patch.object(service, "_run_readyset_sql", return_value={"success": True, "output": "unsupported: subquery"}):
                     events = [e async for e in service.add_cache(
                         CacheInput(target="mydb", query="SELECT (SELECT 1)"),
@@ -360,7 +358,7 @@ class TestCacheAdd:
 
     @pytest.mark.asyncio
     async def test_add_creates_cache(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -369,7 +367,7 @@ class TestCacheAdd:
             "database": "myapp",
         }
         with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
-            with patch("lib.functions.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": True}):
+            with patch("features.cache.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": True}):
                 with patch.object(service, "_run_readyset_sql", return_value={"success": True, "output": "yes"}):
                     with patch.object(service, "_save_to_registry", return_value="abc123def456"):
                         events = [e async for e in service.add_cache(
@@ -383,7 +381,7 @@ class TestCacheAdd:
 
     @pytest.mark.asyncio
     async def test_add_static_check_fails(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -392,7 +390,7 @@ class TestCacheAdd:
             "database": "myapp",
         }
         with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
-            with patch("lib.functions.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": False, "issues": ["Uses window function"]}):
+            with patch("features.cache.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": False, "issues": ["Uses window function"]}):
                 events = [e async for e in service.add_cache(
                     CacheInput(target="mydb", query="SELECT ROW_NUMBER() OVER()"),
                     CacheOptions(dry_run=True),
@@ -403,7 +401,7 @@ class TestCacheAdd:
 
     @pytest.mark.asyncio
     async def test_add_no_cache_target(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         with patch.object(service, "_resolve_cache_target", return_value=None):
@@ -422,7 +420,7 @@ class TestCacheAdd:
 class TestCacheDelete:
     @pytest.mark.asyncio
     async def test_delete_success(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -441,7 +439,7 @@ class TestCacheDelete:
 
     @pytest.mark.asyncio
     async def test_delete_invalid_id(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -459,7 +457,7 @@ class TestCacheDelete:
 class TestCacheDropAll:
     @pytest.mark.asyncio
     async def test_drop_all_success(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -481,7 +479,7 @@ class TestCacheDropAll:
 
     @pytest.mark.asyncio
     async def test_drop_all_empty(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         cache_config = {
@@ -505,7 +503,7 @@ class TestCacheRunComparison:
 
     @pytest.mark.asyncio
     async def test_run_comparison_success(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         origin_config = {
@@ -535,12 +533,12 @@ class TestCacheRunComparison:
             "winner": "readyset",
         }
 
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             MockConfig.return_value.load.return_value = None
             MockConfig.return_value.get.return_value = origin_config
             with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
-                with patch("lib.services.cache_service.resolve_password_value", return_value="secret"):
-                    with patch("lib.functions.performance_comparison.run_comparison", return_value=comparison_result):
+                with patch("features.cache.service.resolve_password_value", return_value="secret"):
+                    with patch("features.cache.performance_comparison.run_comparison", return_value=comparison_result):
                         events = [e async for e in service.run_comparison(
                             CacheInput(target="mydb", query="SELECT 1"), iterations=5, warmup=2,
                         )]
@@ -557,7 +555,7 @@ class TestCacheRunComparison:
 
     @pytest.mark.asyncio
     async def test_run_comparison_no_cache_target(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         origin_config = {
@@ -565,7 +563,7 @@ class TestCacheRunComparison:
             "user": "admin", "database": "myapp",
         }
 
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             MockConfig.return_value.load.return_value = None
             MockConfig.return_value.get.return_value = origin_config
             with patch.object(service, "_resolve_cache_target", return_value=None):
@@ -579,7 +577,7 @@ class TestCacheRunComparison:
 
     @pytest.mark.asyncio
     async def test_run_comparison_no_query(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         events = [e async for e in service.run_comparison(
@@ -592,7 +590,7 @@ class TestCacheRunComparison:
 
     @pytest.mark.asyncio
     async def test_run_comparison_failure(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         origin_config = {
@@ -606,12 +604,12 @@ class TestCacheRunComparison:
         }
         failed_result = {"success": False, "error": "All original database queries failed"}
 
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             MockConfig.return_value.load.return_value = None
             MockConfig.return_value.get.return_value = origin_config
             with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
-                with patch("lib.services.cache_service.resolve_password_value", return_value="secret"):
-                    with patch("lib.functions.performance_comparison.run_comparison", return_value=failed_result):
+                with patch("features.cache.service.resolve_password_value", return_value="secret"):
+                    with patch("features.cache.performance_comparison.run_comparison", return_value=failed_result):
                         events = [e async for e in service.run_comparison(
                             CacheInput(target="mydb", query="SELECT 1"),
                         )]
@@ -631,7 +629,7 @@ class TestDeployNonDocker:
     @pytest.mark.asyncio
     async def test_deploy_kubernetes_registers_with_cluster_host(self):
         """K8s deploy auto-registers with in-cluster DNS host."""
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         target_config = {
@@ -644,12 +642,12 @@ class TestDeployNonDocker:
             "port": "5433", "rollout_ready": True,
         }
 
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             MockConfig.return_value.load.return_value = None
             MockConfig.return_value.get.return_value = target_config
-            with patch("lib.services.cache_service.resolve_password_value", return_value="secret"):
-                with patch("lib.deploy.script_generator.build_variables", return_value={"db_engine": "postgresql", "readyset_port": 5433, "db_user": "admin", "db_name": "myapp", "container_name": "rs-mydb"}):
-                    with patch("lib.deploy.kubernetes.deploy_kubernetes", return_value=k8s_result):
+            with patch("features.cache.service.resolve_password_value", return_value="secret"):
+                with patch("shared.deploy.script_generator.build_variables", return_value={"db_engine": "postgresql", "readyset_port": 5433, "db_user": "admin", "db_name": "myapp", "container_name": "rs-mydb"}):
+                    with patch("shared.deploy.kubernetes.deploy_kubernetes", return_value=k8s_result):
                         with patch.object(service, "_register_cache_target", return_value="mydb-cache") as mock_register:
                             events = [e async for e in service.deploy(
                                 CacheInput(target="mydb"),
@@ -665,7 +663,7 @@ class TestDeployNonDocker:
 
     @pytest.mark.asyncio
     async def test_deploy_systemd_registers_local_target(self):
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         target_config = {
@@ -674,12 +672,12 @@ class TestDeployNonDocker:
         }
         systemd_result = {"success": True, "service_name": "readyset-cache-mydb"}
 
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             MockConfig.return_value.load.return_value = None
             MockConfig.return_value.get.return_value = target_config
-            with patch("lib.services.cache_service.resolve_password_value", return_value="secret"):
-                with patch("lib.deploy.script_generator.build_variables", return_value={"db_engine": "postgresql", "readyset_port": 5433, "db_user": "admin", "db_name": "myapp", "container_name": "rs-mydb"}):
-                    with patch("lib.deploy.local_systemd.deploy_local_systemd", return_value=systemd_result):
+            with patch("features.cache.service.resolve_password_value", return_value="secret"):
+                with patch("shared.deploy.script_generator.build_variables", return_value={"db_engine": "postgresql", "readyset_port": 5433, "db_user": "admin", "db_name": "myapp", "container_name": "rs-mydb"}):
+                    with patch("shared.deploy.local_systemd.deploy_local_systemd", return_value=systemd_result):
                         with patch.object(service, "_register_cache_target", return_value="mydb-cache") as mock_register:
                             events = [e async for e in service.deploy(
                                 CacheInput(target="mydb"),
@@ -700,7 +698,7 @@ class TestDeployNonDocker:
     @pytest.mark.asyncio
     async def test_deploy_remote_registers_with_ssh_host(self):
         """Remote/SSH deploy auto-registers with the SSH host."""
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         target_config = {
@@ -709,12 +707,12 @@ class TestDeployNonDocker:
         }
         remote_result = {"success": True, "returncode": 0, "output": "Deployed OK"}
 
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             MockConfig.return_value.load.return_value = None
             MockConfig.return_value.get.return_value = target_config
-            with patch("lib.services.cache_service.resolve_password_value", return_value="secret"):
-                with patch("lib.deploy.script_generator.build_variables", return_value={"db_engine": "postgresql", "readyset_port": 5433, "db_user": "admin", "db_name": "myapp", "container_name": "rs-mydb"}):
-                    with patch("lib.deploy.remote.deploy_remote", return_value=remote_result):
+            with patch("features.cache.service.resolve_password_value", return_value="secret"):
+                with patch("shared.deploy.script_generator.build_variables", return_value={"db_engine": "postgresql", "readyset_port": 5433, "db_user": "admin", "db_name": "myapp", "container_name": "rs-mydb"}):
+                    with patch("shared.deploy.remote.deploy_remote", return_value=remote_result):
                         with patch.object(service, "_register_cache_target", return_value="mydb-cache") as mock_register:
                             events = [e async for e in service.deploy(
                                 CacheInput(target="mydb"),
@@ -731,7 +729,7 @@ class TestDeployNonDocker:
     @pytest.mark.asyncio
     async def test_deploy_docker_registers_target(self):
         """Regression: Docker deploy still auto-registers."""
-        from lib.services.cache_service import CacheService
+        from features.cache.service import CacheService
 
         service = CacheService()
         target_config = {
@@ -740,12 +738,12 @@ class TestDeployNonDocker:
         }
         docker_result = {"success": True, "container_name": "rs-mydb"}
 
-        with patch("lib.services.cache_service.TargetsConfig") as MockConfig:
+        with patch("features.cache.service.TargetsConfig") as MockConfig:
             MockConfig.return_value.load.return_value = None
             MockConfig.return_value.get.return_value = target_config
-            with patch("lib.services.cache_service.resolve_password_value", return_value="secret"):
-                with patch("lib.deploy.script_generator.build_variables", return_value={"db_engine": "postgresql", "readyset_port": 5433, "db_user": "admin", "db_name": "myapp", "container_name": "rs-mydb"}):
-                    with patch("lib.deploy.local_docker.deploy_local_docker", return_value=docker_result):
+            with patch("features.cache.service.resolve_password_value", return_value="secret"):
+                with patch("shared.deploy.script_generator.build_variables", return_value={"db_engine": "postgresql", "readyset_port": 5433, "db_user": "admin", "db_name": "myapp", "container_name": "rs-mydb"}):
+                    with patch("shared.deploy.local_docker.deploy_local_docker", return_value=docker_result):
                         with patch.object(service, "_register_cache_target", return_value="mydb-cache") as mock_register:
                             events = [e async for e in service.deploy(
                                 CacheInput(target="mydb"),

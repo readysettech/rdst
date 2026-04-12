@@ -4,8 +4,8 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from lib.api.app import create_app
-from lib.query_registry import hash_sql
+from shared.api.app import create_app
+from shared.query_registry import hash_sql
 
 
 @pytest.fixture
@@ -19,8 +19,7 @@ async def test_query_registry_post_strips_comments_and_persists_canonical_sql(
     app, tmp_path, monkeypatch
 ):
     """POST /api/query-registry should save comment-prefixed SQL successfully."""
-    monkeypatch.setattr("lib.constants.RDST_DATA_DIR", tmp_path / ".rdst")
-    monkeypatch.setattr("lib.query_registry.query_registry.RDST_DATA_DIR", tmp_path / ".rdst")
+    monkeypatch.setattr("shared.constants.RDST_DATA_DIR", tmp_path / ".rdst")
 
     sql = "-- look up one user\nSELECT * FROM users WHERE id = 42"
 

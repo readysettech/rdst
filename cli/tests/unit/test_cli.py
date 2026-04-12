@@ -4,26 +4,12 @@ Unit tests for CLI modules.
 Tests output_formatter, rdst_cli (TargetsConfig), and related CLI utilities.
 """
 
-import pytest
-import importlib.util
-import sys
 from pathlib import Path
 
+import pytest
 
-# Import module directly to avoid package __init__.py issues
-def _import_module_directly(module_name, file_path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-output_formatter = _import_module_directly(
-    "output_formatter", _lib_path / "cli" / "output_formatter.py"
-)
-rdst_cli = _import_module_directly("rdst_cli", _lib_path / "cli" / "rdst_cli.py")
+from features.analyze.cli import output_formatter
+from shared.cli import parser_data, rdst_cli
 
 # Import functions
 format_analyze_output = output_formatter.format_analyze_output
@@ -502,9 +488,6 @@ class TestDefaultPortFor:
         assert default_port_for(None) == 3306
 
 
-parser_data = _import_module_directly("parser_data", _lib_path / "cli" / "parser_data.py")
 COMMANDS = parser_data.COMMANDS
 CommandDef = parser_data.CommandDef
 ArgDef = parser_data.ArgDef
-
-

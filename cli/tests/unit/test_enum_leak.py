@@ -13,7 +13,7 @@ class TestDefaultModelReturnType:
 
     def test_default_model_is_plain_str(self):
         """default_model() should return a plain string, not an AnthropicModel member."""
-        from lib.llm_manager.claude_provider import ClaudeProvider
+        from shared.llm_manager.claude_provider import ClaudeProvider
 
         provider = ClaudeProvider()
         model = provider.default_model()
@@ -28,7 +28,7 @@ class TestDefaultModelReturnType:
 
     def test_default_model_starts_with_claude(self):
         """default_model() value should be a real model ID, not an enum repr."""
-        from lib.llm_manager.claude_provider import ClaudeProvider
+        from shared.llm_manager.claude_provider import ClaudeProvider
 
         provider = ClaudeProvider()
         model = provider.default_model()
@@ -43,8 +43,8 @@ class TestStringifyEnum:
 
     def test_stringify_str_enum_uses_value(self):
         """_stringify(AnthropicModel.SONNET_4_5) must return the value string."""
-        from lib.workflow_manager.workflow_manager import _stringify
-        from lib.llm_manager.claude_provider import AnthropicModel
+        from shared.workflow_manager import _stringify
+        from shared.llm_manager.claude_provider import AnthropicModel
 
         result = _stringify(AnthropicModel.SONNET_4_5)
 
@@ -55,6 +55,6 @@ class TestStringifyEnum:
 
     def test_stringify_plain_str_unchanged(self):
         """_stringify on a plain string should return it unchanged."""
-        from lib.workflow_manager.workflow_manager import _stringify
+        from shared.workflow_manager import _stringify
 
         assert _stringify("claude-sonnet-4-5") == "claude-sonnet-4-5"

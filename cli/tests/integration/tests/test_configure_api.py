@@ -11,8 +11,8 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from httpx import AsyncClient, ASGITransport
 
-from lib.api.app import create_app
-from lib.services.types import (
+from shared.api.app import create_app
+from features.configure.events import (
     ConfigureTargetListEvent,
     ConfigureTargetDetailEvent,
     ConfigureSuccessEvent,
@@ -36,7 +36,7 @@ def app():
 @pytest.mark.asyncio
 async def test_list_targets_empty(app):
     """Test listing targets when none configured."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_list_targets(*args, **kwargs):
@@ -62,7 +62,7 @@ async def test_list_targets_empty(app):
 @pytest.mark.asyncio
 async def test_list_targets_with_targets(app):
     """Test listing targets when targets exist."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_list_targets(*args, **kwargs):
@@ -103,7 +103,7 @@ async def test_list_targets_with_targets(app):
 @pytest.mark.asyncio
 async def test_list_targets_error(app):
     """Test listing targets when service returns error."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_list_targets(*args, **kwargs):
@@ -133,7 +133,7 @@ async def test_list_targets_error(app):
 @pytest.mark.asyncio
 async def test_get_target_exists(app):
     """Test getting a target that exists."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_get_target(name):
@@ -172,7 +172,7 @@ async def test_get_target_exists(app):
 @pytest.mark.asyncio
 async def test_get_target_not_found(app):
     """Test getting a target that doesn't exist."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_get_target(name):
@@ -203,7 +203,7 @@ async def test_get_target_not_found(app):
 @pytest.mark.asyncio
 async def test_add_target_success(app):
     """Test adding a new target successfully."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_add_target(*args, **kwargs):
@@ -244,7 +244,7 @@ async def test_add_target_success(app):
 @pytest.mark.asyncio
 async def test_add_target_duplicate(app):
     """Test adding a target that already exists."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_add_target(*args, **kwargs):
@@ -310,7 +310,7 @@ async def test_add_target_validation_error(app):
 @pytest.mark.asyncio
 async def test_update_target_success(app):
     """Test updating an existing target."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_update_target(*args, **kwargs):
@@ -349,7 +349,7 @@ async def test_update_target_success(app):
 @pytest.mark.asyncio
 async def test_update_target_not_found(app):
     """Test updating a target that doesn't exist."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_update_target(*args, **kwargs):
@@ -391,7 +391,7 @@ async def test_update_target_not_found(app):
 @pytest.mark.asyncio
 async def test_remove_target_success(app):
     """Test removing an existing target."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_remove_target(name):
@@ -418,7 +418,7 @@ async def test_remove_target_success(app):
 @pytest.mark.asyncio
 async def test_remove_target_not_found(app):
     """Test removing a target that doesn't exist."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_remove_target(name):
@@ -449,7 +449,7 @@ async def test_remove_target_not_found(app):
 @pytest.mark.asyncio
 async def test_set_default_success(app):
     """Test setting a target as default."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_set_default(name):
@@ -479,7 +479,7 @@ async def test_set_default_success(app):
 @pytest.mark.asyncio
 async def test_set_default_not_found(app):
     """Test setting default to a target that doesn't exist."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_set_default(name):
@@ -513,7 +513,7 @@ async def test_set_default_not_found(app):
 @pytest.mark.asyncio
 async def test_connection_success(app):
     """Test connection test endpoint with successful connection."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_test_connection(name):
@@ -565,7 +565,7 @@ async def test_connection_success(app):
 @pytest.mark.asyncio
 async def test_connection_failure(app):
     """Test connection test endpoint with failed connection."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_test_connection(name):
@@ -612,7 +612,7 @@ async def test_connection_failure(app):
 @pytest.mark.asyncio
 async def test_connection_target_not_found(app):
     """Test connection test endpoint with nonexistent target."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_test_connection(name):
@@ -653,7 +653,7 @@ async def test_connection_target_not_found(app):
 @pytest.mark.asyncio
 async def test_add_target_with_mysql_engine(app):
     """Test adding a MySQL target."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_add_target(*args, **kwargs):
@@ -692,7 +692,7 @@ async def test_add_target_with_mysql_engine(app):
 @pytest.mark.asyncio
 async def test_add_target_minimal_fields(app):
     """Test adding a target with only required fields."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_add_target(*args, **kwargs):
@@ -727,7 +727,7 @@ async def test_add_target_minimal_fields(app):
 @pytest.mark.asyncio
 async def test_list_targets_no_response(app):
     """Test list targets when service yields no events."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_list_targets(*args, **kwargs):
@@ -750,7 +750,7 @@ async def test_list_targets_no_response(app):
 @pytest.mark.asyncio
 async def test_get_target_no_response(app):
     """Test get target when service yields no events."""
-    with patch("lib.api.routes.configure.ConfigureService") as mock_service_class:
+    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
         mock_service = mock_service_class.return_value
 
         async def mock_get_target(name):

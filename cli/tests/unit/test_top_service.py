@@ -11,21 +11,22 @@ import pandas as pd
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from typing import Any, Dict, List, Optional
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.data_manager_service.data_manager_service_command_sets import COMMAND_SETS
-from lib.services.types import (
+from features.top.command_sets import TOP_COMMAND_SETS
+from features.top.service import TopService
+from features.top.events import (
+    TopCompleteEvent,
+    TopConnectedEvent,
+    TopErrorEvent,
+    TopQueriesEvent,
+    TopQuerySavedEvent,
+    TopSourceFallbackEvent,
+    TopStatusEvent,
+)
+from features.top.models import (
     TopInput,
     TopOptions,
-    TopStatusEvent,
-    TopConnectedEvent,
-    TopSourceFallbackEvent,
-    TopQueriesEvent,
     TopQueryData,
-    TopQuerySavedEvent,
-    TopCompleteEvent,
-    TopErrorEvent,
 )
-from lib.services.top_service import TopService
 
 
 class TestTopServiceInit:
@@ -427,21 +428,20 @@ class TestTopServiceCommandSets:
 
     def test_raw_query_command_sets_preserve_newlines(self, service):
         """Top command sets should not flatten whitespace for raw SQL sources."""
-        from lib.data_manager_service.data_manager_service_command_sets import (
-            COMMAND_SETS,
+        from shared.data_manager_service.data_manager_service_command_sets import (
             MAX_QUERY_LENGTH,
         )
 
-        pg_stat_sql = COMMAND_SETS["rdst_top_pg_stat"]["commands"]["pg_stat_queries"]["query"]
+        pg_stat_sql = TOP_COMMAND_SETS["rdst_top_pg_stat"]["commands"]["pg_stat_queries"]["query"]
         assert f", {MAX_QUERY_LENGTH}) as query_text" in pg_stat_sql
 
-        pg_activity_sql = COMMAND_SETS["rdst_top_pg_activity"]["commands"]["pg_activity_queries"]["query"]
+        pg_activity_sql = TOP_COMMAND_SETS["rdst_top_pg_activity"]["commands"]["pg_activity_queries"]["query"]
         assert f", {MAX_QUERY_LENGTH}) as query_text" in pg_activity_sql
 
-        mysql_activity_sql = COMMAND_SETS["rdst_top_mysql_activity"]["commands"]["mysql_activity_queries"]["query"]
+        mysql_activity_sql = TOP_COMMAND_SETS["rdst_top_mysql_activity"]["commands"]["mysql_activity_queries"]["query"]
         assert f", {MAX_QUERY_LENGTH}) as query_text" in mysql_activity_sql
 
-        mysql_slowlog_sql = COMMAND_SETS["rdst_top_mysql_slowlog"]["commands"]["mysql_slowlog_queries"]["query"]
+        mysql_slowlog_sql = TOP_COMMAND_SETS["rdst_top_mysql_slowlog"]["commands"]["mysql_slowlog_queries"]["query"]
         assert f", {MAX_QUERY_LENGTH}) as query_text" in mysql_slowlog_sql
 
     def test_process_top_data_preserves_multiline_query_text(self, service):

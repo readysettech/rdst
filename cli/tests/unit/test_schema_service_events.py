@@ -3,19 +3,14 @@
 import pytest
 from unittest.mock import Mock, patch
 
-from lib.services.schema_service import SchemaService
-from lib.services.types import (
-    SchemaCompleteEvent,
-    SchemaErrorEvent,
-    SchemaInitOptions,
-    SchemaInitResult,
-    SchemaStatusEvent,
-)
+from features.schema.service import SchemaService
+from features.schema.events import SchemaCompleteEvent, SchemaErrorEvent, SchemaStatusEvent
+from features.schema.models import SchemaInitOptions, SchemaInitResult
 
 
 @pytest.fixture
 def service():
-    with patch("lib.services.schema_service.SemanticLayerManager"):
+    with patch("features.schema.service.SemanticLayerManager"):
         return SchemaService()
 
 

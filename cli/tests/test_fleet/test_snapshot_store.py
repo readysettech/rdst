@@ -5,15 +5,17 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
-from lib.fleet.models import (
+from features.audit.models import (
     AuditMetrics,
     AuditResult,
     CacheOpportunityScore,
-    FleetAuditSnapshot,
     SizingAssessment,
+)
+from features.fleet.models import (
+    FleetAuditSnapshot,
     SizingVerdict,
 )
-from lib.fleet.snapshot_store import SnapshotStore
+from features.fleet.snapshot_store import SnapshotStore
 
 
 def _make_snapshot(snapshot_id, targets=2, cache_hit=99.0):

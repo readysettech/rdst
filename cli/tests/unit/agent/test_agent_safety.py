@@ -7,7 +7,7 @@ column denial, and table whitelisting.
 
 import pytest
 
-from lib.agent.runtime import (
+from features.agent.runtime import (
     validate_read_only,
     inject_limit,
     validate_columns,

@@ -2197,7 +2197,7 @@ Cache created. Next steps:
     elif name == "rdst_agent_list":
         # List all configured data agents
         try:
-            from lib.agent import AgentManager
+            from features.agent import AgentManager
             manager = AgentManager()
             names = manager.list()
 
@@ -2245,7 +2245,7 @@ Cache created. Next steps:
             }
 
         try:
-            from lib.agent import AgentManager, AgentRuntime
+            from features.agent import AgentManager, AgentRuntime
             manager = AgentManager()
 
             if not manager.exists(agent_name):

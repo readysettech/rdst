@@ -1,1 +1,0 @@
-../../../aidoc/projects/rdst-cli/design/ui-design-system.md

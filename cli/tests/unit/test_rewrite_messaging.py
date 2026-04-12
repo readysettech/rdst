@@ -12,7 +12,7 @@ class TestRewriteMessagingNoRewrites:
     """When no rewrites are suggested, message should be positive, not failure-framing."""
 
     def _render(self, rewrite_testing):
-        from lib.cli.output_formatter import _format_tested_optimizations
+        from features.analyze.cli.output_formatter import _format_tested_optimizations
 
         lines = _format_tested_optimizations(rewrite_testing)
         return "\n".join(lines)

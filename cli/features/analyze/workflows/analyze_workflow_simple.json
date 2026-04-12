@@ -1,0 +1,156 @@
+{
+    "Comment": "RDST Analyze Workflow - Simplified for WorkflowManager (no Choice states)",
+    "StartAt": "ValidateQuerySafety",
+    "States": {
+        "ValidateQuerySafety": {
+            "Type": "Task",
+            "Resource": "validate_query_safety",
+            "Parameters": {
+                "sql": "{{query}}"
+            },
+            "ResultPath": "$.safety_check",
+            "Next": "NormalizeForRegistry"
+        },
+        "NormalizeForRegistry": {
+            "Type": "Task",
+            "Resource": "normalize_for_registry",
+            "Parameters": {
+                "sql": "{{query}}"
+            },
+            "ResultPath": "$.registry_normalization",
+            "Next": "ParameterizeForLLM"
+        },
+        "ParameterizeForLLM": {
+            "Type": "Task",
+            "Resource": "parameterize_for_llm",
+            "Parameters": {
+                "sql": "{{query}}"
+            },
+            "ResultPath": "$.llm_parameterization",
+            "Next": "ExecuteExplainAnalyze"
+        },
+        "ExecuteExplainAnalyze": {
+            "Type": "Task",
+            "Resource": "execute_explain_analyze",
+            "Parameters": {
+                "sql": "{{query}}",
+                "target": "{{target}}",
+                "target_config": "{{target_config}}",
+                "fast_mode": "{{fast_mode}}"
+            },
+            "ResultPath": "$.explain_results",
+            "Next": "CollectQueryMetrics",
+            "Retry": {
+                "MaxAttempts": 2,
+                "IntervalSeconds": 1,
+                "BackoffRate": 2.0
+            },
+            "TimeoutSeconds": 600
+        },
+        "CollectQueryMetrics": {
+            "Type": "Task",
+            "Resource": "collect_query_metrics",
+            "Parameters": {
+                "sql": "{{query}}",
+                "target": "{{target}}",
+                "query_hash": "{{registry_normalization.hash}}"
+            },
+            "ResultPath": "$.query_metrics",
+            "Next": "CollectDatabaseSchema"
+        },
+        "CollectDatabaseSchema": {
+            "Type": "Task",
+            "Resource": "collect_target_schema",
+            "Parameters": {
+                "sql": "{{query}}",
+                "target": "{{target}}",
+                "target_config": "{{target_config}}"
+            },
+            "ResultPath": "$.schema_collection",
+            "Next": "PerformLLMAnalysis",
+            "Retry": {
+                "MaxAttempts": 1,
+                "IntervalSeconds": 0
+            },
+            "TimeoutSeconds": 10
+        },
+        "PerformLLMAnalysis": {
+            "Type": "Task",
+            "Resource": "analyze_with_llm",
+            "Parameters": {
+                "explain_results": "{{explain_results}}",
+                "query_metrics": "{{query_metrics}}",
+                "parameterized_sql": "{{llm_parameterization.parameterized_sql}}",
+                "original_sql": "{{query}}",
+                "schema_info": "{{schema_collection.schema_info}}",
+                "model": "{{llm_model}}"
+            },
+            "ResultPath": "$.llm_analysis",
+            "Next": "TestQueryRewrites",
+            "Retry": {
+                "MaxAttempts": 1,
+                "IntervalSeconds": 2
+            },
+            "TimeoutSeconds": 60
+        },
+        "TestQueryRewrites": {
+            "Type": "Task",
+            "Resource": "test_query_rewrites",
+            "Parameters": {
+                "original_sql": "{{query}}",
+                "rewrite_suggestions": "{{llm_analysis.rewrite_suggestions}}",
+                "target": "{{target}}",
+                "original_sql_for_comparison": "{{query}}",
+                "fast_mode": "{{fast_mode}}",
+                "baseline_result": "{{explain_results}}"
+            },
+            "ResultPath": "$.rewrite_test_results",
+            "Next": "CheckReadysetCacheability",
+            "TimeoutSeconds": 300
+        },
+        "CheckReadysetCacheability": {
+            "Type": "Task",
+            "Resource": "check_readyset_cacheability",
+            "Parameters": {
+                "query": "{{query}}",
+                "query_frequency": "{{query_metrics.execution_count}}"
+            },
+            "ResultPath": "$.readyset_cacheability",
+            "Next": "StoreAnalysisResults"
+        },
+        "StoreAnalysisResults": {
+            "Type": "Task",
+            "Resource": "store_analysis_results",
+            "Parameters": {
+                "query_hash": "{{registry_normalization.hash}}",
+                "query": "{{query}}",
+                "target": "{{target}}",
+                "explain_results": "{{explain_results}}",
+                "query_metrics": "{{query_metrics}}",
+                "llm_analysis": "{{llm_analysis}}",
+                "rewrite_test_results": "{{rewrite_test_results}}",
+                "registry_normalization": "{{registry_normalization}}",
+                "llm_parameterization": "{{llm_parameterization}}"
+            },
+            "ResultPath": "$.storage_result",
+            "Next": "FormatFinalResults"
+        },
+        "FormatFinalResults": {
+            "Type": "Task",
+            "Resource": "format_analysis_output",
+            "Parameters": {
+                "explain_results": "{{explain_results}}",
+                "llm_analysis": "{{llm_analysis}}",
+                "rewrite_test_results": "{{rewrite_test_results}}",
+                "query_metrics": "{{query_metrics}}",
+                "query": "{{query}}",
+                "parameterized_sql": "{{llm_parameterization.parameterized_sql}}",
+                "normalized_query": "{{registry_normalization.normalized_sql}}",
+                "target": "{{target}}",
+                "analysis_id": "{{storage_result.analysis_id}}",
+                "readyset_cacheability": "{{readyset_cacheability}}"
+            },
+            "End": true
+        }
+    }
+}

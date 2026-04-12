@@ -2,7 +2,10 @@
 
 import json
 
-from lib.api.routes.semantic_layer import _annotate_event_to_sse, _schema_event_to_sse
+from features.schema.api.semantic_layer_routes import (
+    _annotate_event_to_sse,
+    _schema_event_to_sse,
+)
 
 
 class _UnknownEvent:

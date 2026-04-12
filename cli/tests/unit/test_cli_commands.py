@@ -8,61 +8,12 @@ service architecture. See test_top_service.py and test_top_renderer.py for
 comprehensive tests of the service and renderer.
 """
 
-import importlib.util
-import sys
-import types
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-
-# Import module directly to avoid package __init__.py issues
-def _import_module_directly(module_name, file_path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-
-# Import query_command module
-query_command = _import_module_directly(
-    "query_command", _lib_path / "cli" / "query_command.py"
-)
-
-
-# For top.py, we need to handle its relative imports specially
-def _import_top_module():
-    """Import top.py with mocked relative imports."""
-    # Read the source
-    top_path = _lib_path / "cli" / "top.py"
-    with open(top_path, "r") as f:
-        source = f.read()
-
-    # Replace the relative import with a local function
-    source = source.replace(
-        "from ..query_registry import hash_sql",
-        "def hash_sql(sql): return sql[:12] if len(sql) >= 12 else sql.ljust(12, '0')",
-    )
-
-    # Create module
-    module = types.ModuleType("top")
-    module.__file__ = str(top_path)
-    sys.modules["top"] = module
-
-    # Execute in module namespace
-    exec(compile(source, str(top_path), "exec"), module.__dict__)
-
-    return module
-
-
-top = _import_top_module()
-
-QueryCommand = query_command.QueryCommand
-TopCommand = top.TopCommand
+from features.query_registry.cli.command import QueryCommand
+from features.top.cli.command import TopCommand
 
 
 class TestQueryCommand:
@@ -70,6 +21,8 @@ class TestQueryCommand:
 
     def test_initialization(self):
         """Test QueryCommand initialization."""
+        from features.query_registry.cli import command as query_command
+
         with patch.object(query_command, "QueryRegistry") as mock_registry_class:
             mock_registry = MagicMock()
             mock_registry_class.return_value = mock_registry
@@ -108,7 +61,7 @@ class TestSubcommandHelpDescriptions:
     def test_subcommands_have_description(self):
         """Every subcommand's parser should have a description for --help."""
         import argparse
-        from lib.cli.parser_data import COMMANDS, build_all_subparsers
+        from shared.cli.parser_data import COMMANDS, build_all_subparsers
 
         root = argparse.ArgumentParser()
         subparsers = root.add_subparsers()

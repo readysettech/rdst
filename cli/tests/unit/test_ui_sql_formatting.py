@@ -10,9 +10,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from lib.ui.console import create_console
-import lib.ui.components as ui_components
-import lib.ui.theme as ui_theme
+from shared.ui.console import create_console
+import shared.ui.components as ui_components
+import shared.ui.theme as ui_theme
 
 
 def _capture(renderable, width: int = 100) -> str:

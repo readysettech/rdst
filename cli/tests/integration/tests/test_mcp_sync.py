@@ -59,7 +59,7 @@ def get_cli_commands():
     """Get CLI commands from parser_data.py COMMAND_ORDER."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     parser_data_path = os.path.join(
-        script_dir, "..", "..", "..", "lib", "cli", "parser_data.py"
+        script_dir, "..", "..", "..", "shared", "cli", "parser_data.py"
     )
 
     try:

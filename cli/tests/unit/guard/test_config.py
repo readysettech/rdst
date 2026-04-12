@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import yaml
 
-from lib.guard.config import (
+from features.guard.config import (
     GuardConfig,
     MaskingConfig,
     RestrictionsConfig,

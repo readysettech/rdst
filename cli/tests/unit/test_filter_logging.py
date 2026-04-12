@@ -7,7 +7,7 @@ They are expected recovery paths and should be DEBUG only.
 
 import logging
 
-from lib.engines.ask3.phases.filter import _extract_semantic_concepts
+from features.ask.engine.ask3.phases.filter import _extract_semantic_concepts
 
 
 class TestFilterLoggingLevels:
@@ -15,7 +15,7 @@ class TestFilterLoggingLevels:
 
     def test_semantic_extraction_no_response_is_debug(self):
         """When LLM returns empty response, no WARNING should be emitted."""
-        logger = logging.getLogger("lib.engines.ask3.phases.filter")
+        logger = logging.getLogger("features.ask.engine.ask3.phases.filter")
         with _assert_no_warnings(logger):
             result = _extract_semantic_concepts(
                 question="How many movies?",
@@ -26,7 +26,7 @@ class TestFilterLoggingLevels:
 
     def test_semantic_extraction_bad_json_is_debug(self):
         """When LLM returns unparseable JSON, no WARNING should be emitted."""
-        logger = logging.getLogger("lib.engines.ask3.phases.filter")
+        logger = logging.getLogger("features.ask.engine.ask3.phases.filter")
         with _assert_no_warnings(logger):
             result = _extract_semantic_concepts(
                 question="How many movies?",
@@ -38,7 +38,7 @@ class TestFilterLoggingLevels:
     def test_all_methods_failed_is_debug(self):
         """'All methods failed, using full schema' must not be a WARNING."""
         import inspect
-        from lib.engines.ask3.phases import filter as filter_mod
+        from features.ask.engine.ask3.phases import filter as filter_mod
 
         source = inspect.getsource(filter_mod.filter_schema)
         # The "All methods failed" message must be debug, not warning

@@ -110,7 +110,7 @@ def mock_empty_config():
 def patch_load_config_with_target(mock_config_with_target):
     """Patch _load_config to return mock config with target."""
     with patch(
-        "lib.services.configure_service.ConfigureService._load_config",
+        "features.configure.service.ConfigureService._load_config",
         return_value=mock_config_with_target,
     ):
         yield mock_config_with_target
@@ -120,7 +120,7 @@ def patch_load_config_with_target(mock_config_with_target):
 def patch_load_config_empty(mock_empty_config):
     """Patch _load_config to return empty mock config."""
     with patch(
-        "lib.services.configure_service.ConfigureService._load_config",
+        "features.configure.service.ConfigureService._load_config",
         return_value=mock_empty_config,
     ):
         yield mock_empty_config
@@ -137,13 +137,12 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_list_targets_with_targets(self, patch_load_config_with_target):
         """Test listing targets when targets exist."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import (
-            ConfigureInput,
-            ConfigureOptions,
+        from features.configure.service import ConfigureService
+        from features.configure.events import (
             ConfigureTargetListEvent,
             ConfigureStatusEvent,
         )
+        from features.configure.models import ConfigureInput, ConfigureOptions
 
         service = ConfigureService()
         input_data = ConfigureInput()
@@ -175,11 +174,11 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_list_targets_empty(self, patch_load_config_empty):
         """Test listing targets when no targets exist."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import (
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureTargetListEvent
+        from features.configure.models import (
             ConfigureInput,
             ConfigureOptions,
-            ConfigureTargetListEvent,
         )
 
         service = ConfigureService()
@@ -199,8 +198,8 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_get_target_existing(self, patch_load_config_with_target):
         """Test getting an existing target."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import ConfigureTargetDetailEvent
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureTargetDetailEvent
 
         service = ConfigureService()
 
@@ -223,8 +222,8 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_get_target_not_found(self, patch_load_config_with_target):
         """Test getting a non-existent target."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import ConfigureErrorEvent
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureErrorEvent
 
         service = ConfigureService()
 
@@ -239,11 +238,11 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_add_target_success(self, patch_load_config_empty):
         """Test adding a new target."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import (
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureSuccessEvent
+        from features.configure.models import (
             ConfigureInput,
             ConfigureOptions,
-            ConfigureSuccessEvent,
         )
 
         service = ConfigureService()
@@ -271,11 +270,11 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_add_target_duplicate(self, patch_load_config_with_target):
         """Test adding a duplicate target fails."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import (
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureErrorEvent
+        from features.configure.models import (
             ConfigureInput,
             ConfigureOptions,
-            ConfigureErrorEvent,
         )
 
         service = ConfigureService()
@@ -301,11 +300,11 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_update_target_success(self, patch_load_config_with_target):
         """Test updating an existing target."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import (
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureSuccessEvent
+        from features.configure.models import (
             ConfigureInput,
             ConfigureOptions,
-            ConfigureSuccessEvent,
         )
 
         service = ConfigureService()
@@ -328,11 +327,11 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_update_target_not_found(self, patch_load_config_with_target):
         """Test updating a non-existent target fails."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import (
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureErrorEvent
+        from features.configure.models import (
             ConfigureInput,
             ConfigureOptions,
-            ConfigureErrorEvent,
         )
 
         service = ConfigureService()
@@ -350,8 +349,8 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_remove_target_success(self, patch_load_config_with_target):
         """Test removing an existing target."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import ConfigureSuccessEvent
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureSuccessEvent
 
         service = ConfigureService()
 
@@ -366,8 +365,8 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_remove_target_not_found(self, patch_load_config_with_target):
         """Test removing a non-existent target fails."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import ConfigureErrorEvent
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureErrorEvent
 
         service = ConfigureService()
 
@@ -382,8 +381,8 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_set_default_success(self, patch_load_config_with_target):
         """Test setting a target as default."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import ConfigureSuccessEvent
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureSuccessEvent
 
         service = ConfigureService()
 
@@ -398,8 +397,8 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_set_default_not_found(self, patch_load_config_with_target):
         """Test setting a non-existent target as default fails."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import ConfigureErrorEvent
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureErrorEvent
 
         service = ConfigureService()
 
@@ -416,8 +415,8 @@ class TestConfigureServiceIntegration:
         self, patch_load_config_with_target
     ):
         """Test connection test for non-existent target."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import ConfigureErrorEvent
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureErrorEvent
 
         service = ConfigureService()
 
@@ -432,8 +431,8 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_test_connection_success(self, patch_load_config_with_target):
         """Test connection test with mocked database connection."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import (
+        from features.configure.service import ConfigureService
+        from features.configure.events import (
             ConfigureStatusEvent,
             ConfigureConnectionTestEvent,
         )
@@ -481,8 +480,8 @@ class TestConfigureServiceIntegration:
     @pytest.mark.asyncio
     async def test_test_connection_failure(self, patch_load_config_with_target):
         """Test connection test with failed connection."""
-        from lib.services.configure_service import ConfigureService
-        from lib.services.types import ConfigureConnectionTestEvent
+        from features.configure.service import ConfigureService
+        from features.configure.events import ConfigureConnectionTestEvent
 
         # Set the password env var
         os.environ["TEST_DB_PASSWORD"] = "testpass"
@@ -529,7 +528,7 @@ class TestConfigureAPIIntegration:
     @pytest.fixture
     def app(self):
         """Create FastAPI app for testing."""
-        from lib.api.app import create_app
+        from shared.api.app import create_app
 
         return create_app()
 
@@ -539,7 +538,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -563,7 +562,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_empty_config,
         ):
             transport = ASGITransport(app=app)
@@ -584,7 +583,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -610,7 +609,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -631,7 +630,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_empty_config,
         ):
             transport = ASGITransport(app=app)
@@ -663,7 +662,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -694,7 +693,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -726,7 +725,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -758,7 +757,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -779,7 +778,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -800,7 +799,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -822,7 +821,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)
@@ -842,7 +841,7 @@ class TestConfigureAPIIntegration:
     async def test_test_connection_endpoint_sse(self, app, mock_config_with_target):
         """Test POST /api/configure/targets/{name}/test SSE endpoint."""
         from httpx import AsyncClient, ASGITransport
-        from lib.services.configure_service import ConfigureService
+        from features.configure.service import ConfigureService
 
         # Set the password env var
         os.environ["TEST_DB_PASSWORD"] = "testpass"
@@ -851,7 +850,7 @@ class TestConfigureAPIIntegration:
             # Mock both _load_config and _perform_connection_test
             with (
                 patch(
-                    "lib.services.configure_service.ConfigureService._load_config",
+                    "features.configure.service.ConfigureService._load_config",
                     return_value=mock_config_with_target,
                 ),
                 patch.object(
@@ -904,7 +903,7 @@ class TestConfigureAPIIntegration:
         from httpx import AsyncClient, ASGITransport
 
         with patch(
-            "lib.services.configure_service.ConfigureService._load_config",
+            "features.configure.service.ConfigureService._load_config",
             return_value=mock_config_with_target,
         ):
             transport = ASGITransport(app=app)

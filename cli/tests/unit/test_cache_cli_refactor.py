@@ -2,16 +2,15 @@
 
 from unittest.mock import patch
 
-from lib.services.types import (
+from features.cache.events import (
     CacheAddEvent,
     CacheDeleteEvent,
     CacheDropAllEvent,
     CacheListEvent,
     CacheDeployCompleteEvent,
-    CacheInput,
-    ErrorEvent,
-    ProgressEvent,
 )
+from features.cache.models import CacheInput
+from shared.service_events import ErrorEvent, ProgressEvent
 
 
 # ---------------------------------------------------------------------------
@@ -32,13 +31,13 @@ async def _async_gen(*events):
 
 class TestCacheShowDelegation:
     def test_show_delegates_to_service(self):
-        from lib.cli.cache_commands import CacheCommands
+        from features.cache.cli.command import CacheCommands
 
         cmd = CacheCommands()
         list_event = CacheListEvent(
             type="cache_list", success=True, caches=[], count=0,
         )
-        with patch("lib.cli.cache_commands.CacheService") as MockService:
+        with patch("features.cache.cli.command.CacheService") as MockService:
             MockService.return_value.list_caches.return_value = _async_gen(list_event)
             result = cmd.show(target="mydb-cache", target_config={"target_type": "readyset"})
 
@@ -46,11 +45,11 @@ class TestCacheShowDelegation:
         MockService.return_value.list_caches.assert_called_once()
 
     def test_show_error_returns_failed_result(self):
-        from lib.cli.cache_commands import CacheCommands
+        from features.cache.cli.command import CacheCommands
 
         cmd = CacheCommands()
         error_event = ErrorEvent(type="error", message="Connection refused", stage="list")
-        with patch("lib.cli.cache_commands.CacheService") as MockService:
+        with patch("features.cache.cli.command.CacheService") as MockService:
             MockService.return_value.list_caches.return_value = _async_gen(error_event)
             result = cmd.show(target="mydb-cache", target_config={"target_type": "readyset"})
 
@@ -64,14 +63,14 @@ class TestCacheShowDelegation:
 
 class TestCacheAddDelegation:
     def test_add_dry_run_delegates_to_service(self):
-        from lib.cli.cache_commands import CacheCommands
+        from features.cache.cli.command import CacheCommands
 
         cmd = CacheCommands()
         add_event = CacheAddEvent(
             type="cache_add", success=True, supported=True,
             query="SELECT 1", detail="yes",
         )
-        with patch("lib.cli.cache_commands.CacheService") as MockService:
+        with patch("features.cache.cli.command.CacheService") as MockService:
             MockService.return_value.add_cache.return_value = _async_gen(add_event)
             result = cmd.add(
                 query="SELECT 1", target="mydb-cache",
@@ -83,7 +82,7 @@ class TestCacheAddDelegation:
         MockService.return_value.add_cache.assert_called_once()
 
     def test_add_creates_cache_delegates(self):
-        from lib.cli.cache_commands import CacheCommands
+        from features.cache.cli.command import CacheCommands
 
         cmd = CacheCommands()
         progress = ProgressEvent(type="progress", stage="create", percent=60, message="Creating...")
@@ -91,7 +90,7 @@ class TestCacheAddDelegation:
             type="cache_add", success=True, supported=True,
             query="SELECT 1", query_hash="abc123",
         )
-        with patch("lib.cli.cache_commands.CacheService") as MockService:
+        with patch("features.cache.cli.command.CacheService") as MockService:
             MockService.return_value.add_cache.return_value = _async_gen(progress, add_event)
             result = cmd.add(
                 query="SELECT 1", target="mydb-cache",
@@ -109,13 +108,13 @@ class TestCacheAddDelegation:
 
 class TestCacheDeleteDelegation:
     def test_delete_delegates_to_service(self):
-        from lib.cli.cache_commands import CacheCommands
+        from features.cache.cli.command import CacheCommands
 
         cmd = CacheCommands()
         delete_event = CacheDeleteEvent(
             type="cache_delete", success=True, cache_id="q_abc123",
         )
-        with patch("lib.cli.cache_commands.CacheService") as MockService:
+        with patch("features.cache.cli.command.CacheService") as MockService:
             MockService.return_value.delete_cache.return_value = _async_gen(delete_event)
             result = cmd.delete(
                 cache_id="q_abc123", target="mydb-cache",
@@ -133,13 +132,13 @@ class TestCacheDeleteDelegation:
 
 class TestCacheDropAllDelegation:
     def test_drop_all_delegates_to_service(self):
-        from lib.cli.cache_commands import CacheCommands
+        from features.cache.cli.command import CacheCommands
 
         cmd = CacheCommands()
         drop_event = CacheDropAllEvent(
             type="cache_drop_all", success=True, count=3,
         )
-        with patch("lib.cli.cache_commands.CacheService") as MockService:
+        with patch("features.cache.cli.command.CacheService") as MockService:
             MockService.return_value.drop_all.return_value = _async_gen(drop_event)
             result = cmd.drop_all(
                 target="mydb-cache",
@@ -158,7 +157,7 @@ class TestCacheDropAllDelegation:
 
 class TestDeployDelegation:
     def test_deploy_delegates_to_service(self):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
 
         cmd = DeployCommand()
         progress = ProgressEvent(type="progress", stage="deploying", percent=50, message="Deploying...")
@@ -167,7 +166,7 @@ class TestDeployDelegation:
             endpoint="postgresql://admin@127.0.0.1:5433/myapp",
             cache_target="mydb-cache", container_name="rdst-readyset-mydb",
         )
-        with patch("lib.cli.cache_deploy.CacheService") as MockService:
+        with patch("features.cache.cli.deploy.CacheService") as MockService:
             MockService.return_value.deploy.return_value = _async_gen(progress, complete)
             result = cmd.execute(target="mydb", mode="docker")
 
@@ -178,18 +177,18 @@ class TestDeployDelegation:
         assert args[1].mode == "docker"
 
     def test_deploy_failure_returns_failed_result(self):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
 
         cmd = DeployCommand()
         error = ErrorEvent(type="error", message="Docker not running", stage="deploy")
-        with patch("lib.cli.cache_deploy.CacheService") as MockService:
+        with patch("features.cache.cli.deploy.CacheService") as MockService:
             MockService.return_value.deploy.return_value = _async_gen(error)
             result = cmd.execute(target="mydb", mode="docker")
 
         assert result.ok is False
 
     def test_deploy_kubernetes_shows_access_guidance(self):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
 
         cmd = DeployCommand()
         progress = ProgressEvent(
@@ -201,10 +200,10 @@ class TestDeployDelegation:
             endpoint="postgresql://admin@readyset-cache-mydb.readyset.svc.cluster.local:5433/myapp",
             cache_target=None, container_name="",
         )
-        with patch("lib.cli.cache_deploy.CacheService") as MockService, patch(
-            "lib.cli.cache_deploy.get_console"
+        with patch("features.cache.cli.deploy.CacheService") as MockService, patch(
+            "features.cache.cli.deploy.get_console"
         ) as mock_console, patch(
-            "lib.cli.cache_deploy.StyledPanel",
+            "features.cache.cli.deploy.StyledPanel",
             side_effect=lambda body, **_: body,
         ):
             MockService.return_value.deploy.return_value = _async_gen(progress, complete)
@@ -218,7 +217,7 @@ class TestDeployDelegation:
         assert "svc/readyset-cache-mydb" in rendered
 
     def test_deploy_remote_systemd_passes_host_options(self):
-        from lib.cli.cache_deploy import DeployCommand
+        from features.cache.cli.deploy import DeployCommand
 
         cmd = DeployCommand()
         complete = CacheDeployCompleteEvent(
@@ -226,7 +225,7 @@ class TestDeployDelegation:
             endpoint="postgresql://admin@10.0.0.5:5433/myapp",
             cache_target="mydb-cache", container_name="",
         )
-        with patch("lib.cli.cache_deploy.CacheService") as MockService:
+        with patch("features.cache.cli.deploy.CacheService") as MockService:
             MockService.return_value.deploy.return_value = _async_gen(complete)
             result = cmd.execute(
                 target="mydb", mode="systemd", host="10.0.0.5",

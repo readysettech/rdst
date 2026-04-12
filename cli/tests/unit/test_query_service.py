@@ -3,14 +3,14 @@
 import pytest
 from unittest.mock import Mock, patch
 
-from lib.services.query_service import QueryService
-from lib.services.types import (
+from features.query_registry.service import QueryService
+from features.query_registry.events import (
     QueryBenchmarkProgressEvent,
-    QueryCommandInput,
     QueryCompleteEvent,
     QueryErrorEvent,
     QueryStatusEvent,
 )
+from features.query_registry.models import QueryCommandInput
 
 
 @pytest.mark.asyncio
@@ -18,7 +18,10 @@ async def test_execute_emits_status_and_complete():
     service = QueryService()
     mock_result = Mock(ok=True, message="ok", data={"x": 1})
 
-    with patch("lib.cli.query_command.QueryCommand.execute", return_value=mock_result):
+    with patch(
+        "features.query_registry.cli.command.QueryCommand.execute",
+        return_value=mock_result,
+    ):
         events = [
             event
             async for event in service.execute(
@@ -37,7 +40,8 @@ async def test_execute_emits_error_on_exception():
     service = QueryService()
 
     with patch(
-        "lib.cli.query_command.QueryCommand.execute", side_effect=RuntimeError("boom")
+        "features.query_registry.cli.command.QueryCommand.execute",
+        side_effect=RuntimeError("boom"),
     ):
         events = [
             event

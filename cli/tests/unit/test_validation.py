@@ -17,12 +17,15 @@ def _import_module_directly(module_name, file_path):
     spec.loader.exec_module(module)
     return module
 
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-validation = _import_module_directly("validation", _lib_path / "functions" / "validation.py")
+_feature_path = Path(__file__).parent.parent.parent / "features"
+validation = _import_module_directly(
+    "validation", _feature_path / "analyze" / "functions" / "validation.py"
+)
 
 validate_recommendations = validation.validate_recommendations
 _extract_existing_indexes = validation._extract_existing_indexes
 _extract_index_name_from_create = validation._extract_index_name_from_create
+reorder_index_columns = validation.reorder_index_columns
 
 
 class TestValidateRecommendations:
@@ -383,8 +386,6 @@ class TestReorderIndexColumns:
 
     def test_range_before_equality_gets_reordered(self):
         """Index with range column before equality column must be reordered."""
-        from lib.functions.validation import reorder_index_columns
-
         sql = "SELECT * FROM title_basics WHERE titletype = 'movie' AND startyear >= 2000"
         recommendations = [
             {
@@ -401,8 +402,6 @@ class TestReorderIndexColumns:
 
     def test_equality_columns_already_first_unchanged(self):
         """Index that already has correct EQR ordering should not be changed."""
-        from lib.functions.validation import reorder_index_columns
-
         sql = "SELECT * FROM title_basics WHERE titletype = 'movie' AND startyear >= 2000"
         recommendations = [
             {
@@ -417,8 +416,6 @@ class TestReorderIndexColumns:
 
     def test_in_clause_treated_as_equality(self):
         """IN clause should be treated as equality for EQR ordering."""
-        from lib.functions.validation import reorder_index_columns
-
         sql = "SELECT * FROM t WHERE x > 10 AND y IN (1, 2, 3)"
         recommendations = [
             {
@@ -434,8 +431,6 @@ class TestReorderIndexColumns:
 
     def test_between_treated_as_range(self):
         """BETWEEN should be treated as range for EQR ordering."""
-        from lib.functions.validation import reorder_index_columns
-
         sql = "SELECT * FROM t WHERE category = 'A' AND price BETWEEN 10 AND 100"
         recommendations = [
             {
@@ -450,8 +445,6 @@ class TestReorderIndexColumns:
 
     def test_non_where_columns_preserved_after_eqr(self):
         """Columns not in WHERE clause should remain at end of index."""
-        from lib.functions.validation import reorder_index_columns
-
         sql = "SELECT * FROM t WHERE category = 'A' AND price > 10 ORDER BY name"
         recommendations = [
             {
@@ -467,8 +460,6 @@ class TestReorderIndexColumns:
 
     def test_unparseable_sql_leaves_recommendations_unchanged(self):
         """If SQL can't be parsed, don't modify recommendations."""
-        from lib.functions.validation import reorder_index_columns
-
         sql = "THIS IS NOT VALID SQL AT ALL"
         recommendations = [
             {

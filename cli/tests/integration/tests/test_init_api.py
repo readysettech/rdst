@@ -5,8 +5,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import patch
 
-from lib.api.app import create_app
-from lib.services.types import InitCompleteEvent, InitStatus, InitValidationResult
+from shared.api.app import create_app
+from features.init.events import InitCompleteEvent
+from features.init.models import InitStatus, InitValidationResult
 
 
 @pytest.fixture
@@ -23,7 +24,7 @@ async def _events(*items):
 @pytest.mark.asyncio
 async def test_init_status_endpoint(app):
     """GET /api/init/status returns onboarding state."""
-    with patch("lib.api.routes.init.InitService") as mock_service_class:
+    with patch("features.init.api.routes.InitService") as mock_service_class:
         mock_service = mock_service_class.return_value
         status = InitStatus(
             initialized=False,
@@ -58,7 +59,7 @@ async def test_init_status_endpoint(app):
 @pytest.mark.asyncio
 async def test_init_validate_endpoint_with_specific_targets(app):
     """POST /api/init/validate validates specific target subset."""
-    with patch("lib.api.routes.init.InitService") as mock_service_class:
+    with patch("features.init.api.routes.InitService") as mock_service_class:
         mock_service = mock_service_class.return_value
         validation = InitValidationResult(
             target_results=[
@@ -93,7 +94,7 @@ async def test_init_validate_endpoint_with_specific_targets(app):
 @pytest.mark.asyncio
 async def test_init_complete_endpoint(app):
     """POST /api/init/complete marks init completed."""
-    with patch("lib.api.routes.init.InitService") as mock_service_class:
+    with patch("features.init.api.routes.InitService") as mock_service_class:
         mock_service = mock_service_class.return_value
         mock_service.mark_complete_events.return_value = _events(
             InitCompleteEvent(type="complete", success=True)

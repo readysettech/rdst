@@ -4,14 +4,14 @@ import pytest
 from pathlib import Path
 import tempfile
 
-from lib.guard.config import (
+from features.guard.config import (
     GuardConfig,
     MaskingConfig,
     GuardsConfig,
     RestrictionsConfig,
     LimitsConfig,
 )
-from lib.guard.manager import (
+from features.guard.manager import (
     GuardManager,
     GuardNotFoundError,
     GuardExistsError,

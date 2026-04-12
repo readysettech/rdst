@@ -7,20 +7,8 @@ Tests the dual parameterization strategy:
 """
 
 import pytest
-import importlib.util
-import sys
-from pathlib import Path
 
-# Import module directly to avoid package __init__.py issues
-def _import_module_directly(module_name, file_path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-query_parameterization = _import_module_directly("query_parameterization", _lib_path / "functions" / "query_parameterization.py")
+import shared.query_parameterization as query_parameterization
 
 normalize_for_registry = query_parameterization.normalize_for_registry
 parameterize_for_llm = query_parameterization.parameterize_for_llm

@@ -5,7 +5,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import Mock, patch
 
-from lib.api.app import create_app
+from shared.api.app import create_app
 
 
 @pytest.fixture
@@ -34,7 +34,9 @@ async def test_get_env_requirements_returns_contract(app):
         },
     ]
 
-    with patch("lib.api.routes.env.EnvRequirementsService", return_value=mock_service):
+    with patch(
+        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
+    ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/api/env/requirements")
@@ -56,7 +58,9 @@ async def test_set_env_secret_persisted_success(app):
         "message": "Saved",
     }
 
-    with patch("lib.api.routes.env.EnvRequirementsService", return_value=mock_service):
+    with patch(
+        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
+    ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
@@ -81,7 +85,9 @@ async def test_set_env_secret_session_only_fallback(app):
         "message": "Session only",
     }
 
-    with patch("lib.api.routes.env.EnvRequirementsService", return_value=mock_service):
+    with patch(
+        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
+    ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
@@ -101,7 +107,9 @@ async def test_set_env_secret_rejects_non_allowlisted_name(app):
     mock_service = Mock()
     mock_service.get_allowed_secret_names.return_value = ["PROD_DB_PASSWORD"]
 
-    with patch("lib.api.routes.env.EnvRequirementsService", return_value=mock_service):
+    with patch(
+        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
+    ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
@@ -120,7 +128,9 @@ async def test_set_env_secret_rejects_mismatched_origin(app):
     mock_service = Mock()
     mock_service.get_allowed_secret_names.return_value = ["PROD_DB_PASSWORD"]
 
-    with patch("lib.api.routes.env.EnvRequirementsService", return_value=mock_service):
+    with patch(
+        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
+    ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8787") as client:
             response = await client.post(

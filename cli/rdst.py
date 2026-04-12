@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 
 # UI system
-from lib.ui import StyleTokens, get_console, DataTable, SectionHeader
+from shared.ui import StyleTokens, get_console, DataTable, SectionHeader
 
 
 def _resolve_embedded_web_dist_dir() -> Path | None:
@@ -24,7 +24,7 @@ def _resolve_embedded_web_dist_dir() -> Path | None:
     candidates = []
     if env_dir:
         candidates.append(Path(env_dir).expanduser())
-    candidates.append(Path(__file__).resolve().parent / "lib" / "web_dist")
+    candidates.append(Path(__file__).resolve().parent / "web_dist")
 
     for candidate in candidates:
         path = candidate.resolve()
@@ -35,10 +35,17 @@ def _resolve_embedded_web_dist_dir() -> Path | None:
 
 
 def _resolve_rdst_source_dir(repo_root: Path | None = None) -> Path:
+    def _looks_like_rdst_source_dir(candidate: Path) -> bool:
+        return (
+            (candidate / "rdst.py").exists()
+            and (candidate / "features").is_dir()
+            and (candidate / "shared").is_dir()
+        )
+
     env_dir = os.environ.get("RDST_SOURCE_DIR")
     if env_dir:
         candidate = Path(env_dir).expanduser().resolve()
-        if (candidate / "rdst.py").exists() and (candidate / "lib").is_dir():
+        if _looks_like_rdst_source_dir(candidate):
             return candidate
 
     cwd = Path.cwd()
@@ -56,7 +63,7 @@ def _resolve_rdst_source_dir(repo_root: Path | None = None) -> Path:
 
     for candidate in candidates:
         path = candidate.resolve()
-        if (path / "rdst.py").exists() and (path / "lib").is_dir():
+        if _looks_like_rdst_source_dir(path):
             return path
 
     return Path(__file__).resolve().parent
@@ -65,9 +72,9 @@ def _resolve_rdst_source_dir(repo_root: Path | None = None) -> Path:
 def _restore_web_required_env_vars() -> tuple[list[str], list[str], list[str]]:
     """Restore required env vars from secure store for `rdst web` startup."""
     try:
-        from lib.services.env_requirements_service import EnvRequirementsService
+        service_class = _get_env_requirements_service_class()
 
-        requirements = EnvRequirementsService()
+        requirements = service_class()
         required_names = requirements.get_required_names_for_restore()
         if not required_names:
             return [], [], []
@@ -86,9 +93,9 @@ def _restore_web_required_env_vars() -> tuple[list[str], list[str], list[str]]:
 def _clear_web_required_env_vars() -> tuple[list[str], list[str], list[str]]:
     """Clear required env vars from secure store and current process env."""
     try:
-        from lib.services.env_requirements_service import EnvRequirementsService
+        service_class = _get_env_requirements_service_class()
 
-        requirements = EnvRequirementsService()
+        requirements = service_class()
         required_names = requirements.get_allowed_secret_names()
         if not required_names:
             return [], [], []
@@ -102,9 +109,21 @@ def _clear_web_required_env_vars() -> tuple[list[str], list[str], list[str]]:
         return [], [], [f"Keyring clear failed: {e}"]
 
 
+def _get_env_requirements_service_class():
+    from shared.env_requirements_service import EnvRequirementsService
+
+    return EnvRequirementsService
+
+
+def _get_create_app():
+    from shared.api.app import create_app
+
+    return create_app
+
+
 def print_rich_help():
     """Print colorized help using Rich."""
-    from lib.cli.parser_data import get_grouped_commands, get_main_examples
+    from shared.cli.parser_data import get_grouped_commands, get_main_examples
 
     console = get_console()
 
@@ -140,11 +159,11 @@ def print_rich_help():
 
 
 # Import the CLI functionality
-from lib.cli import RdstCLI, RdstResult
+from shared.cli import RdstCLI, RdstResult
 
 
 def parse_arguments() -> argparse.Namespace:
-    from lib.cli.parser_data import build_all_subparsers
+    from shared.cli.parser_data import build_all_subparsers
 
     parser = argparse.ArgumentParser(
         prog="rdst",
@@ -349,14 +368,14 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         return cli.schema(**schema_kwargs)
 
     elif command == 'demo':
-        from lib.cli.demo_command import DemoCommand
+        from features.demo.cli import DemoCommand
         demo_cmd = DemoCommand()
         demo_subcommand = getattr(args, 'demo_subcommand', None)
         tour_name = getattr(args, 'tour_name', 'quickstart')
         return demo_cmd.run(demo_subcommand, tour_name=tour_name)
 
     elif command == 'scan':
-        from lib.cli.scan_command import ScanCommand
+        from features.scan.cli.command import ScanCommand
         scan_cmd = ScanCommand()
         output_format = getattr(args, 'output', 'table')
         return scan_cmd.execute(
@@ -385,7 +404,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
 
         # Deploy has its own target loading (loads DB target, not cache target)
         if cache_subcommand == 'deploy':
-            from lib.cli.cache_deploy import DeployCommand
+            from features.cache.cli.deploy import DeployCommand
             deploy_cmd = DeployCommand()
             return deploy_cmd.execute(
                 target=getattr(args, 'target', None),
@@ -402,8 +421,8 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             )
 
         # Other cache subcommands need target config
-        from lib.cli.cache_commands import CacheCommands
-        from lib.cli.rdst_cli import TargetsConfig
+        from features.cache.cli.command import CacheCommands
+        from shared.config.targets import TargetsConfig
         cache_cmd = CacheCommands()
 
         # Load target config for cache commands
@@ -467,7 +486,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
                 "Fleet command requires a subcommand: configure, import, discover, list, status, audit, diff, snapshots\n"
                 "Try: rdst fleet --help",
             )
-        from lib.cli.fleet_command import FleetCommand
+        from features.fleet.cli.command import FleetCommand
 
         fleet_cmd = FleetCommand()
         return fleet_cmd.execute(subcommand=fleet_subcommand, args=args)
@@ -477,7 +496,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
     # =========================================================================
     elif command == "audit":
         audit_subcommand = getattr(args, "audit_subcommand", None)
-        from lib.cli.audit_command import AuditCommand
+        from features.audit.cli.command import AuditCommand
 
         audit_cmd = AuditCommand()
         if audit_subcommand in ("list", "show"):
@@ -642,7 +661,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
 
         return RdstResult(False, f"Unknown action: {action}")
     elif command == "report":
-        from lib.cli.report_command import ReportCommand
+        from shared.cli.report_command import ReportCommand
 
         report_cmd = ReportCommand()
         success = report_cmd.run(
@@ -712,7 +731,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
         restored_envs, missing_envs, restore_errors = _restore_web_required_env_vars()
 
         try:
-            from lib.telemetry import telemetry
+            from shared.telemetry import telemetry
             telemetry.track("web_started", {
                 "host": host,
                 "port": port,
@@ -749,7 +768,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
 
         if reload:
             uvicorn.run(
-                "lib.api.app:create_app",
+                "shared.api.app:create_app",
                 host=host,
                 port=port,
                 reload=True,
@@ -757,10 +776,8 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
                 reload_dirs=[str(rdst_dir)],
             )
         else:
-            from lib.api.app import create_app
-
             static_dir_arg = str(dist_dir) if serve_static and dist_dir else None
-            app = create_app(static_dist_dir=static_dir_arg)
+            app = _get_create_app()(static_dist_dir=static_dir_arg)
             uvicorn.run(app, host=host, port=port)
         return RdstResult(True, "")
     elif command == "help" or command is None:
@@ -768,7 +785,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
         question = " ".join(getattr(args, "question", []) or [])
         if question:
             # Answer the question using the help command
-            from lib.cli.help_command import HelpCommand
+            from shared.cli.help_command import HelpCommand
 
             help_cmd = HelpCommand()
             result = help_cmd.run(question)
@@ -781,14 +798,14 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             # Show general help
             return cli.help()
     elif command == 'slack':
-        from lib.cli.slack_command import SlackCommand
+        from features.slack.cli import SlackCommand
         slack_cmd = SlackCommand()
         return slack_cmd.execute(
             subcommand=getattr(args, 'subcommand', 'list'),
             agent=getattr(args, 'agent', None),
         )
     elif command == 'agent':
-        from lib.cli.agent_command import AgentCommand
+        from features.agent.cli import AgentCommand
         agent_cmd = AgentCommand()
         # Support both --name and positional agent_name
         name = getattr(args, 'name', None) or getattr(args, 'agent_name', None)
@@ -806,7 +823,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             verbose=getattr(args, 'verbose', False),
         )
     elif command == 'guard':
-        from lib.cli.guard_command import GuardCommand
+        from features.guard.cli import GuardCommand
         guard_cmd = GuardCommand()
         # Support both --name and positional guard_name
         name = getattr(args, 'name', None) or getattr(args, 'guard_name', None)
@@ -863,7 +880,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
         ]
 
         # Use UI system components
-        from lib.ui import get_console, DataTable, SectionHeader
+        from shared.ui import get_console, DataTable, SectionHeader
 
         console = get_console()
 
@@ -915,7 +932,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             return cli.init()
         elif cmd == "query":
             # Query command now has subcommands
-            from lib.ui import SelectPrompt, Prompt
+            from shared.ui import SelectPrompt, Prompt
 
             options = [
                 "add - Add a new query",
@@ -995,7 +1012,7 @@ def main():
 
             # Check for periodic NPS prompt (every ~100 commands)
             try:
-                from lib.telemetry import telemetry
+                from shared.telemetry import telemetry
 
                 if telemetry.should_show_nps_prompt():
                     telemetry.show_nps_prompt()
@@ -1012,7 +1029,7 @@ def main():
     except Exception as e:
         # Report crash to telemetry
         try:
-            from lib.telemetry import telemetry
+            from shared.telemetry import telemetry
 
             command = (
                 args.command
@@ -1023,17 +1040,15 @@ def main():
         except Exception:
             pass  # Don't fail if telemetry fails
 
-        if args.verbose if "args" in locals() else False:
-            import traceback
+        import traceback
 
-            traceback.print_exc()
-        else:
-            print(f"Error: {e}", file=sys.stderr)
+        traceback.print_exc()
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     finally:
         # Ensure telemetry events are flushed before exit
         try:
-            from lib.telemetry import telemetry
+            from shared.telemetry import telemetry
 
             telemetry.flush()
         except Exception:

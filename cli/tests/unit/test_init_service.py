@@ -7,12 +7,12 @@ target validation, LLM configuration, and error handling.
 
 import pytest
 import os
+import os
 from unittest.mock import Mock, patch, MagicMock
 from typing import Any, Dict, List
 
-# Import from lib package (conftest.py adds rdst root to path)
-from lib.services.types import InitStatus, InitValidationResult
-from lib.services.init_service import InitService
+from features.init.service import InitService
+from features.init.models import InitStatus, InitValidationResult
 
 
 class TestInitServiceInit:
@@ -127,7 +127,7 @@ class TestInitServiceGetStatus:
         with patch.object(service, "_load_config", return_value=mock_config):
             with patch.dict(os.environ, {}, clear=True):
                 with patch(
-                    "lib.services.init_service.has_anthropic_api_key",
+                    "features.init.service.has_anthropic_api_key",
                     return_value=False,
                 ):
                     status = service.get_status()
@@ -288,10 +288,10 @@ class TestInitServiceCheckLLM:
     def test_anthropic_key_missing(self, service, mock_config):
         """Test check_llm when no usable Anthropic credential is set."""
         with patch.dict(os.environ, {}, clear=True), patch(
-            "lib.services.init_service.has_anthropic_api_key",
+            "features.init.service.has_anthropic_api_key",
             return_value=False,
         ), patch(
-            "lib.services.init_service.get_anthropic_source",
+            "features.init.service.get_anthropic_source",
             return_value="missing",
         ):
             result = service.check_llm(mock_config)
@@ -306,7 +306,7 @@ class TestInitServiceCheckLLM:
         mock_llm.query.return_value = {"text": "pong"}
 
         with patch.dict(os.environ, {}, clear=True):
-            with patch("lib.llm_manager.llm_manager.LLMManager", return_value=mock_llm):
+            with patch("features.init.service.create_llm_manager", return_value=mock_llm):
                 result = service.check_llm(mock_config)
 
         assert result["success"] is True
@@ -328,7 +328,7 @@ class TestInitServiceCheckLLM:
         mock_llm.query.return_value = {"text": "pong"}
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
-            with patch("lib.llm_manager.llm_manager.LLMManager", return_value=mock_llm):
+            with patch("features.init.service.create_llm_manager", return_value=mock_llm):
                 result = service.check_llm(mock_config)
 
         assert result["success"] is True
@@ -339,7 +339,7 @@ class TestInitServiceCheckLLM:
         mock_llm.query.return_value = {"text": "pong"}
 
         with patch.dict(os.environ, {"RDST_TRIAL_TOKEN": "test-token"}, clear=True):
-            with patch("lib.llm_manager.llm_manager.LLMManager", return_value=mock_llm):
+            with patch("features.init.service.create_llm_manager", return_value=mock_llm):
                 result = service.check_llm(mock_config)
 
         assert result["success"] is True
@@ -350,7 +350,7 @@ class TestInitServiceCheckLLM:
         mock_llm.query.side_effect = Exception("API Error")
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
-            with patch("lib.llm_manager.llm_manager.LLMManager", return_value=mock_llm):
+            with patch("features.init.service.create_llm_manager", return_value=mock_llm):
                 result = service.check_llm(mock_config)
 
         assert result["success"] is False
@@ -368,7 +368,7 @@ class TestInitServiceCheckLLM:
         mock_llm.query.return_value = {"text": "pong"}
 
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}, clear=True):
-            with patch("lib.llm_manager.llm_manager.LLMManager", return_value=mock_llm):
+            with patch("features.init.service.create_llm_manager", return_value=mock_llm):
                 result = service.check_llm(cfg)
 
         assert result["success"] is True
@@ -438,27 +438,25 @@ class TestInitServiceTestTarget:
             "password_env": "DB_PASS",
         }
 
-        mock_dm = Mock()
-        mock_dm.connect.return_value = True
-        mock_dm.get_connection_state.return_value = {
+        mock_state = {
             "attempted": True,
             "success": True,
+            "error": None,
         }
-        mock_dm.disconnect = Mock()
 
         with patch.dict(os.environ, {"DB_PASS": "secret"}):
             with patch(
-                "lib.data_manager.data_manager.DataManager", return_value=mock_dm
-            ):
-                with patch("lib.data_manager.data_manager.ConnectionConfig") as mock_connection_config:
-                    ok, msg, verification = service._test_target(target)
+                "shared.db_connection.probe_target_connection",
+                return_value=mock_state,
+            ) as mock_probe:
+                ok, msg, verification = service._test_target(target)
 
         assert ok is True
         assert "Connected" in msg
-        assert mock_connection_config.call_args.kwargs["ssl_mode"] == "prefer"
+        assert mock_probe.call_args.kwargs["connect_timeout"] == 3
 
     def test_postgresql_connection_honors_tls_flag(self, service):
-        """Test _test_target preserves TLS when building the connection config."""
+        """Test _test_target passes TLS targets through to direct probing."""
         target = {
             "engine": "postgresql",
             "host": "localhost",
@@ -469,24 +467,22 @@ class TestInitServiceTestTarget:
             "tls": True,
         }
 
-        mock_dm = Mock()
-        mock_dm.connect.return_value = True
-        mock_dm.get_connection_state.return_value = {
+        mock_state = {
             "attempted": True,
             "success": True,
+            "error": None,
         }
-        mock_dm.disconnect = Mock()
 
         with patch.dict(os.environ, {"DB_PASS": "secret"}):
             with patch(
-                "lib.data_manager.data_manager.DataManager", return_value=mock_dm
-            ):
-                with patch("lib.data_manager.data_manager.ConnectionConfig") as mock_connection_config:
-                    ok, msg, verification = service._test_target(target)
+                "shared.db_connection.probe_target_connection",
+                return_value=mock_state,
+            ) as mock_probe:
+                ok, msg, verification = service._test_target(target)
 
         assert ok is True
         assert "Connected" in msg
-        assert mock_connection_config.call_args.kwargs["ssl_mode"] == "require"
+        assert mock_probe.call_args.args[0]["tls"] is True
 
     def test_mysql_connection_success(self, service):
         """Test _test_target with successful MySQL connection."""
@@ -499,16 +495,16 @@ class TestInitServiceTestTarget:
             "password": "secret",
         }
 
-        mock_dm = Mock()
-        mock_dm.connect.return_value = True
-        mock_dm.get_connection_state.return_value = {
+        mock_state = {
             "attempted": True,
             "success": True,
+            "error": None,
         }
-        mock_dm.disconnect = Mock()
 
-        with patch("lib.data_manager.data_manager.DataManager", return_value=mock_dm):
-            with patch("lib.data_manager.data_manager.ConnectionConfig"):
+        with patch(
+            "shared.db_connection.probe_target_connection",
+            return_value=mock_state,
+        ):
                 ok, msg, verification = service._test_target(target)
 
         assert ok is True

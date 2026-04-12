@@ -16,9 +16,15 @@ def _import_module_directly(module_name, file_path):
     spec.loader.exec_module(module)
     return module
 
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-parallel_merge = _import_module_directly("parallel_merge", _lib_path / "functions" / "parallel_merge.py")
-query_metrics = _import_module_directly("query_metrics", _lib_path / "functions" / "query_metrics.py")
+_rdst_path = Path(__file__).parent.parent.parent
+parallel_merge = _import_module_directly(
+    "parallel_merge",
+    _rdst_path / "features" / "analyze" / "functions" / "parallel_merge.py",
+)
+query_metrics = _import_module_directly(
+    "query_metrics",
+    _rdst_path / "features" / "analyze" / "functions" / "query_metrics.py",
+)
 
 merge_parallel_analysis_results = parallel_merge.merge_parallel_analysis_results
 _extract_table_names_from_sql = query_metrics._extract_table_names_from_sql
@@ -219,7 +225,7 @@ class TestExplainAnalysisHelpers:
         # Import the module
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
 
         plan_data = {
@@ -239,7 +245,7 @@ class TestExplainAnalysisHelpers:
         """Test PostgreSQL rows returned extraction."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
 
         plan_data = {
@@ -253,7 +259,7 @@ class TestExplainAnalysisHelpers:
         """Test PostgreSQL cost extraction."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
 
         plan_data = {
@@ -267,7 +273,7 @@ class TestExplainAnalysisHelpers:
         """Test PostgreSQL actual time extraction."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
 
         plan_data = {
@@ -281,7 +287,7 @@ class TestExplainAnalysisHelpers:
         """Test handling of empty plan data."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
 
         assert explain_analysis._extract_postgres_rows_examined({}) == 0
@@ -293,7 +299,7 @@ class TestExplainAnalysisHelpers:
         """_normalize_plan_data passes through a plain dict."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
         d = {"Plan": {"Node Type": "Seq Scan"}}
         assert explain_analysis._normalize_plan_data(d) == d
@@ -302,7 +308,7 @@ class TestExplainAnalysisHelpers:
         """_normalize_plan_data unwraps a list with one dict element."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
         inner = {"Plan": {"Node Type": "Seq Scan"}}
         assert explain_analysis._normalize_plan_data([inner]) == inner
@@ -312,7 +318,7 @@ class TestExplainAnalysisHelpers:
         import json
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
         inner = {"Plan": {"Node Type": "Index Scan"}}
         raw = json.dumps([inner])
@@ -322,7 +328,7 @@ class TestExplainAnalysisHelpers:
         """_normalize_plan_data returns empty dict for unrecognized input."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
         assert explain_analysis._normalize_plan_data(42) == {}
         assert explain_analysis._normalize_plan_data("not json") == {}
@@ -332,7 +338,7 @@ class TestExplainAnalysisHelpers:
         """Rows examined uses Plan Rows when Actual Rows is absent."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
         plan_data = {
             "Plan": {
@@ -346,7 +352,7 @@ class TestExplainAnalysisHelpers:
         """Rows returned uses Plan Rows when Actual Rows is absent."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
         plan_data = {"Plan": {"Plan Rows": 75}}
         assert explain_analysis._extract_postgres_rows_returned(plan_data) == 75
@@ -355,7 +361,7 @@ class TestExplainAnalysisHelpers:
         """Cost extraction handles string Total Cost without crashing."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
         plan_data = {"Plan": {"Total Cost": "99.5"}}
         assert explain_analysis._extract_postgres_cost(plan_data) == 99.5
@@ -368,7 +374,7 @@ class TestMySQLJsonHelpers:
         """Test MySQL JSON cost extraction."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
 
         plan_data = {
@@ -386,7 +392,7 @@ class TestMySQLJsonHelpers:
         """Test MySQL JSON rows returned extraction."""
         explain_analysis = _import_module_directly(
             "explain_analysis",
-            _lib_path / "functions" / "explain_analysis.py"
+            _rdst_path / "features" / "analyze" / "functions" / "explain_analysis.py"
         )
 
         plan_data = {
@@ -404,7 +410,7 @@ class TestExecuteExplainAnalyze:
 
     def test_missing_target_config(self):
         """Test error when target config is missing."""
-        from lib.functions.explain_analysis import execute_explain_analyze
+        from features.analyze.functions.explain_analysis import execute_explain_analyze
 
         result = execute_explain_analyze(
             sql="SELECT * FROM users",
@@ -416,7 +422,7 @@ class TestExecuteExplainAnalyze:
 
     def test_unsupported_engine(self):
         """Test error for unsupported database engine."""
-        from lib.functions.explain_analysis import execute_explain_analyze
+        from features.analyze.functions.explain_analysis import execute_explain_analyze
 
         result = execute_explain_analyze(
             sql="SELECT * FROM users",
@@ -429,7 +435,7 @@ class TestExecuteExplainAnalyze:
 
     def test_mysql_parameterized_query(self):
         """Test MySQL rejects parameterized queries."""
-        from lib.functions.explain_analysis import execute_explain_analyze
+        from features.analyze.functions.explain_analysis import execute_explain_analyze
 
         result = execute_explain_analyze(
             sql="SELECT * FROM users WHERE id = ?",

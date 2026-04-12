@@ -4,35 +4,11 @@ Unit tests for analysis functions.
 Tests schema_collector, readyset_cacheability, and performance_comparison.
 """
 
-import importlib.util
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-
-# Import module directly to avoid package __init__.py issues
-def _import_module_directly(module_name, file_path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_lib_path = Path(__file__).parent.parent.parent / "lib"
-
-# Import modules
-schema_collector = _import_module_directly(
-    "schema_collector", _lib_path / "functions" / "schema_collector.py"
-)
-readyset_cacheability = _import_module_directly(
-    "readyset_cacheability", _lib_path / "functions" / "readyset_cacheability.py"
-)
-performance_comparison = _import_module_directly(
-    "performance_comparison", _lib_path / "functions" / "performance_comparison.py"
-)
+from features.cache import performance_comparison, readyset_cacheability
+from features.schema import schema_collector
 
 # Functions to test
 collect_target_schema = schema_collector.collect_target_schema

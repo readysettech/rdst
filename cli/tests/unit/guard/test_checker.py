@@ -2,8 +2,8 @@
 
 import pytest
 
-from lib.guard.config import GuardConfig, GuardsConfig, RestrictionsConfig
-from lib.guard.checker import (
+from features.guard.config import GuardConfig, GuardsConfig, RestrictionsConfig
+from features.guard.checker import (
     check_query,
     check_read_only,
     check_require_where,

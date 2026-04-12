@@ -7,7 +7,7 @@ that detect installed extensions and custom types to provide context to the LLM.
 
 from unittest.mock import Mock
 
-from lib.functions.schema_collector import (
+from features.schema.schema_collector import (
     _collect_postgres_extensions,
     _collect_postgres_custom_types
 )
@@ -221,12 +221,12 @@ class TestIntegrationSchemaCollector:
 # Semantic Layer Extension/CustomType Tests
 # =============================================================================
 
-from lib.data_structures.semantic_layer import (
+from features.schema.semantic_models import (
     SemanticLayer,
     Extension,
     CustomType
 )
-from lib.semantic_layer.introspector import SchemaIntrospector
+from features.schema.semantic_layer.introspector import SchemaIntrospector
 
 
 class TestExtensionDataclass:

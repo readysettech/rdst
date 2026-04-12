@@ -19,7 +19,8 @@ class TestWorkflowPassesCacheability:
 
         workflow_path = (
             pathlib.Path(__file__).parents[2]
-            / "lib"
+            / "features"
+            / "analyze"
             / "workflows"
             / "analyze_workflow_simple.json"
         )
@@ -40,7 +41,9 @@ class TestFormatReadysetCacheabilityFlat:
     """_format_readyset_cacheability must handle the flat dict from check_readyset_cacheability."""
 
     def _get_formatter(self):
-        from lib.functions.workflow_integration import _format_readyset_cacheability
+        from features.analyze.functions.workflow_integration import (
+            _format_readyset_cacheability,
+        )
 
         return _format_readyset_cacheability
 

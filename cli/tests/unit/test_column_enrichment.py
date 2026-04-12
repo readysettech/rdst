@@ -6,7 +6,7 @@ Covers:
 - Empty pattern not serialized
 """
 
-from lib.data_structures.semantic_layer import ColumnAnnotation
+from features.schema.semantic_models import ColumnAnnotation
 
 
 class TestColumnAnnotationEnrichment:
