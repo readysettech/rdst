@@ -178,8 +178,10 @@ class AskRenderer:
         """Render error event."""
         self.cleanup()  # Stop spinner
 
+        from shared.ui import create_console
+        stderr_console = create_console(stderr=True)
         phase_info = f" (during {event.phase})" if event.phase else ""
-        self._console.print(
+        stderr_console.print(
             f"\n[{StyleTokens.STATUS_ERROR}]Error{phase_info}:[/{StyleTokens.STATUS_ERROR}] "
             f"{event.message}"
         )

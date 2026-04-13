@@ -45,7 +45,11 @@ class TestTopCommandNonexistentTarget:
 
         # Should return a clean error, not crash with NameError
         assert result.ok is False
-        assert "not found" in result.message
+        # The renderer already printed the error to the console (MessagePanel via console.print),
+        # so result.message must be empty to avoid duplicate output in rdst.py main().
+        assert result.message == "", (
+            f"top command must return empty message after renderer prints error. Got: {result.message!r}"
+        )
         # The error should NOT contain Python internals
         assert "NameError" not in result.message
         assert "live_started" not in result.message

@@ -300,7 +300,8 @@ class TopRenderer:
 
     def _render_error(self, event: TopErrorEvent) -> None:
         """Render an error event."""
-        self._console.print(
+        stderr_console = create_console(stderr=True)
+        stderr_console.print(
             MessagePanel(
                 event.message,
                 title=f"Error{' (' + event.stage + ')' if event.stage else ''}",

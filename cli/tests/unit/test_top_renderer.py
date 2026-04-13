@@ -196,10 +196,15 @@ class TestTopRendererRenderEvents:
             stage="config",
         )
 
-        renderer.render(event)
+        mock_stderr_console = Mock()
+        with patch(
+            "features.top.cli.renderer.create_console",
+            return_value=mock_stderr_console,
+        ):
+            renderer.render(event)
 
-        # Should print error message
-        renderer._console.print.assert_called()
+        # Should print error message to stderr console
+        mock_stderr_console.print.assert_called()
 
 
 class TestTopRendererRealtimeMode:

@@ -33,6 +33,9 @@ class TestValidateAgentName:
             "MyAgent",
             "a",
             "A",
+            "_test_name",
+            "_agent",
+            "__double_underscore",
         ]
         for name in valid_names:
             validate_agent_name(name)  # Should not raise
@@ -50,17 +53,17 @@ class TestValidateAgentName:
 
     def test_name_starting_with_number_raises(self):
         """Test name starting with number raises error."""
-        with pytest.raises(InvalidAgentNameError, match="must start with a letter"):
+        with pytest.raises(InvalidAgentNameError, match="must start with a letter or underscore"):
             validate_agent_name("123agent")
 
     def test_name_starting_with_hyphen_raises(self):
         """Test name starting with hyphen raises error."""
-        with pytest.raises(InvalidAgentNameError, match="must start with a letter"):
+        with pytest.raises(InvalidAgentNameError, match="must start with a letter or underscore"):
             validate_agent_name("-agent")
 
     def test_name_with_spaces_raises(self):
         """Test name with spaces raises error."""
-        with pytest.raises(InvalidAgentNameError, match="must start with a letter"):
+        with pytest.raises(InvalidAgentNameError, match="must start with a letter or underscore"):
             validate_agent_name("my agent")
 
     def test_name_with_special_chars_raises(self):

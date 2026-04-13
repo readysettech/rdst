@@ -23,7 +23,7 @@ from shared.ui import (
 
 # Embedded documentation for RDST
 RDST_DOCS = """
-# RDST (Readyset Data and SQL Toolkit) Documentation
+# RDST (ReadySet Data and SQL Toolkit) Documentation
 
 ## Overview
 RDST is a CLI tool for database performance analysis and SQL query optimization.
@@ -92,7 +92,7 @@ rdst top --target mydb --duration 30
 rdst top --source slowlog --target mysql-db
 
 # Save interesting queries to analyze later
-rdst query save abc123 --name "slow-order-query"
+rdst query add abc123 --name "slow-order-query"
 ```
 
 **Step 3: Analyze Queries**
@@ -107,9 +107,9 @@ rdst analyze -q "SELECT ..." --target mydb
 rdst analyze -q "SELECT ..." --target mydb --interactive
 ```
 
-**Step 4: Compare Readyset Performance**
+**Step 4: Compare ReadySet Performance**
 ```bash
-# Readyset caching is tested automatically during analyze (if Docker is available)
+# ReadySet caching is tested automatically during analyze (if Docker is available)
 # For a dedicated benchmark comparison:
 rdst query cache-compare <query-name> --target mydb --count 100
 ```
@@ -150,8 +150,6 @@ rdst configure remove --target old-db
 # Set default target
 rdst configure default --target prod-db
 
-# Configure LLM provider
-rdst configure llm --provider anthropic
 ```
 
 ### rdst analyze
@@ -164,7 +162,7 @@ rdst analyze -q "SELECT * FROM orders WHERE status = 'pending'" --target mydb
 # Fast mode (10s timeout for slow queries)
 rdst analyze -q "SELECT * FROM big_table" --target mydb --fast
 
-# Readyset caching is tested automatically (requires Docker)
+# ReadySet caching is tested automatically (requires Docker)
 rdst analyze -q "SELECT * FROM orders" --target mydb
 
 # Continue previous analysis interactively
@@ -583,7 +581,7 @@ rdst cache drop-all --target mydb-cache --yes
 
 ### rdst audit
 Health audit of a single database target. Includes metrics,
-top queries, and Readyset cache opportunity scoring.
+top queries, and ReadySet cache opportunity scoring.
 
 ```bash
 # Quick audit (metrics + top queries + insights)
@@ -609,7 +607,7 @@ Collects: connection utilization, buffer cache hit rate,
 database size, read/write ratio, replication status,
 top queries from pg_stat_statements / performance_schema.
 Computes sizing verdict (under-provisioned/oversized/
-right-sized) and Readyset cache opportunity score (0-100).
+right-sized) and ReadySet cache opportunity score (0-100).
 
 #### Duration mode (`--duration`)
 
@@ -796,7 +794,7 @@ with three credential options:
 To remove a target: `rdst configure remove --target <name>`
 
 #### fleet list
-List all fleet targets (excludes Readyset cache targets).
+List all fleet targets (excludes ReadySet cache targets).
 
 ```bash
 rdst fleet list
@@ -899,6 +897,139 @@ rdst fleet audit --save post-migration --duration 2m
 rdst fleet diff baseline post-migration
 ```
 
+### rdst guard
+Manage reusable safety policies for data agents.
+
+#### guard create
+Create a new guard policy.
+
+```bash
+rdst guard create --name my-policy
+```
+
+#### guard list
+List all guard policies.
+
+```bash
+rdst guard list
+```
+
+#### guard show
+Show details of a guard policy.
+
+```bash
+rdst guard show --name my-policy
+```
+
+#### guard delete
+Delete a guard policy.
+
+```bash
+rdst guard delete --name my-policy
+```
+
+#### guard edit
+Edit a guard policy in $EDITOR.
+
+```bash
+rdst guard edit --name my-policy
+```
+
+#### guard check
+Check whether a SQL query passes a guard policy.
+
+```bash
+rdst guard check --guard my-policy --sql "DELETE FROM users"
+```
+
+### rdst agent
+Manage and run data agents with safety policies.
+
+#### agent create
+Create a new data agent.
+
+```bash
+rdst agent create --name my-agent --target mydb
+```
+
+#### agent list
+List all data agents.
+
+```bash
+rdst agent list
+```
+
+#### agent show
+Show details of a data agent.
+
+```bash
+rdst agent show --name my-agent
+```
+
+#### agent delete
+Delete a data agent.
+
+```bash
+rdst agent delete --name my-agent
+```
+
+#### agent chat
+Start an interactive chat session with a data agent.
+
+```bash
+rdst agent chat --name my-agent
+rdst agent chat --name my-agent --target mydb
+```
+
+The agent uses AI to answer questions about your data, guided by its
+configured safety policies (guards).
+
+### rdst web
+Start the RDST web UI and API server.
+
+```bash
+# Start server on default port (8787)
+rdst web
+
+# Specify host and port
+rdst web --host 0.0.0.0 --port 9000
+
+# Clear persisted secure env vars from keyring
+rdst web --clear
+```
+
+The web server provides a browser-based interface and REST API for all RDST
+functionality. Requires `pip install rdst[server]` for server dependencies.
+
+### rdst slack
+Manage Slack integrations for data agents.
+
+```bash
+# List configured Slack agents
+rdst slack list
+
+# Connect a data agent to Slack
+rdst slack connect --agent my-agent
+```
+
+The Slack integration lets data agents answer database questions directly from
+Slack channels and DMs.
+
+### rdst claude
+Register or remove RDST as a Claude Code MCP server.
+
+```bash
+# Register RDST with Claude Code
+rdst claude add
+
+# Remove RDST from Claude Code
+rdst claude remove
+```
+
+After registering, start a new Claude Code session and type `/rdst` to activate
+RDST mode. Claude will have access to all RDST tools for query analysis and
+optimization.
+
 ## Password Handling
 RDST never stores passwords in config files. Each target has a
 `password_env` field specifying a key name used to look up the
@@ -932,9 +1063,9 @@ without a keyring backend, use environment variables instead.
 4. Create suggested indexes
 5. Re-run analysis to verify improvement
 
-### Testing Readyset Caching
-1. Run `rdst analyze -q "..." --target mydb` (Readyset tested automatically if Docker available)
-2. Review the Readyset Performance section in the output
+### Testing ReadySet Caching
+1. Run `rdst analyze -q "..." --target mydb` (ReadySet tested automatically if Docker available)
+2. Review the ReadySet Performance section in the output
 3. For a full benchmark: `rdst query cache-compare <query> --target mydb --count 100`
 4. If cacheable, deploy permanently: `rdst cache deploy --target mydb --mode docker`
 
@@ -1166,12 +1297,12 @@ Annotations are **optional** but recommended for complex schemas with business l
 - Ensure database is running
 
 ### "No LLM API key configured"
-- Run `rdst configure llm --provider anthropic`
 - Export ANTHROPIC_API_KEY environment variable
+- Or run `rdst init` to configure your API key interactively
 
-## Docker Requirements (Readyset Performance)
+## Docker Requirements (ReadySet Performance)
 
-`rdst analyze` automatically tests Readyset caching in parallel when Docker is available.
+`rdst analyze` automatically tests ReadySet caching in parallel when Docker is available.
 `rdst query cache-compare` and `rdst cache deploy` also use Docker.
 
 **Prerequisites:**
@@ -1180,16 +1311,16 @@ Annotations are **optional** but recommended for complex schemas with business l
 - First run downloads container image (~500MB)
 
 **What happens automatically:**
-1. RDST starts a Readyset container that connects directly to your upstream database
+1. RDST starts a ReadySet container that connects directly to your upstream database
 2. Uses shallow caching mode (10-minute TTL) - no data replication required
 3. Attempts to cache the query and measures performance
 4. Reports cacheability status and cached query latency
 5. Container is kept running for subsequent use
 
-**If Docker is not available:** Readyset performance testing is silently skipped. All other analysis runs normally.
+**If Docker is not available:** ReadySet performance testing is silently skipped. All other analysis runs normally.
 
 **Resource usage:**
-- Memory: ~500MB-1GB for Readyset container
+- Memory: ~500MB-1GB for ReadySet container
 - Disk: ~500MB for image (first run)
 - CPU: Moderate during cacheability testing
 
@@ -1205,9 +1336,9 @@ Subsequent runs are faster (5-10 seconds).
 
 ## Troubleshooting
 
-### Readyset cache errors
+### ReadySet cache errors
 - Docker not found: Install Docker and ensure daemon is running
-- If a query can't be cached, Readyset will explain why in the output
+- If a query can't be cached, ReadySet will explain why in the output
 
 ### MySQL slow log not accessible
 If `rdst top --source slowlog` fails:
@@ -1342,7 +1473,7 @@ Options:
 - --fast: Skip slow queries (10s timeout)
 - --interactive: Continue analysis conversation
 
-Readyset cache performance is tested automatically when Docker is available.
+ReadySet cache performance is tested automatically when Docker is available.
 
 Example:
 ```bash
@@ -1449,7 +1580,7 @@ The password must be exported before each session."""
 **Automatic testing during analyze:**
 ```bash
 rdst analyze -q "YOUR QUERY" --target mydb
-# Readyset performance is tested automatically if Docker is available
+# ReadySet performance is tested automatically if Docker is available
 ```
 
 **Compare performance (upstream vs cache):**
@@ -1494,7 +1625,6 @@ This wizard will:
 Or manually:
 ```bash
 rdst configure add --target mydb --engine postgresql ...
-rdst configure llm --provider anthropic
 export ANTHROPIC_API_KEY="your-key"
 ```"""
         else:

@@ -151,7 +151,7 @@ class AnalyzeService:
             if target_config is None:
                 yield ErrorEvent(
                     type="error",
-                    message=f"Target '{target_name}' not found",
+                    message=f"Target '{target_name}' not found. Run 'rdst configure add' to set one up.",
                 )
                 return
 

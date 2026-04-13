@@ -46,8 +46,8 @@ class TargetNotFoundError(AgentManagerError):
     pass
 
 
-# Valid agent name pattern: alphanumeric, hyphens, underscores
-AGENT_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+# Valid agent name pattern: alphanumeric, hyphens, underscores, may start with underscore
+AGENT_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
 
 
 def validate_agent_name(name: str) -> None:
@@ -69,7 +69,7 @@ def validate_agent_name(name: str) -> None:
     if not AGENT_NAME_PATTERN.match(name):
         raise InvalidAgentNameError(
             f"Invalid agent name '{name}'. "
-            "Name must start with a letter and contain only "
+            "Name must start with a letter or underscore and contain only "
             "letters, numbers, hyphens, and underscores."
         )
 

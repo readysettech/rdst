@@ -42,8 +42,8 @@ def load_schema(
     presenter.schema_loading(ctx.target)
 
     # Import here to avoid circular imports
-    # Path: lib/engines/ask3/phases/schema.py -> lib/semantic_layer/manager.py
-    from ....semantic_layer.manager import SemanticLayerManager
+    # Path: features/ask/engine/ask3/phases/schema.py -> features/schema/semantic_layer/manager.py
+    from features.schema.semantic_layer.manager import SemanticLayerManager
 
     if semantic_manager is None:
         semantic_manager = SemanticLayerManager()

@@ -308,12 +308,10 @@ class QueryCommand:
             )
             self.console.print(NextSteps(steps))
 
-            msg = ""
-
             return RdstResult(
                 ok=True,
-                message=msg,
-                data={"name": name, "hash": query_hash, "is_new": is_new, "sql": sql},
+                message="Query added successfully",
+                data=None,
             )
         except Exception as e:
             return RdstResult(
@@ -676,7 +674,7 @@ class QueryCommand:
                     data={"name": name},
                 )
             query_hash = entry.hash
-            identifier = f"query '{name}'"
+            identifier = f"'{name}'"
         elif hash:
             entry = self.registry.get_query(hash)
             if not entry:
@@ -709,7 +707,10 @@ class QueryCommand:
         try:
             removed = self.registry.remove_query(query_hash)
             if removed:
-                msg = f"✓ Query deleted: {identifier} (hash: {query_hash})"
+                if hash and not name:
+                    msg = f"✓ Query deleted (hash: {query_hash})"
+                else:
+                    msg = f"✓ Query deleted: {identifier} (hash: {query_hash})"
                 return RdstResult(
                     ok=True, message=msg, data={"hash": query_hash, "name": name or ""}
                 )
@@ -819,7 +820,8 @@ class QueryCommand:
         queries = queries[:limit]
 
         # Build title with filter info
-        title_parts = [f"Query Registry ({len(queries)} queries"]
+        query_word = "query" if len(queries) == 1 else "queries"
+        title_parts = [f"Query Registry ({len(queries)} {query_word}"]
         if target:
             title_parts.append(f", target: {target}")
         if filter:
@@ -833,7 +835,7 @@ class QueryCommand:
 
         return RdstResult(
             ok=True,
-            message=f"Listed {len(queries)} queries",
+            message=f"Listed {len(queries)} {query_word}",
             data={
                 "queries": [
                     {
@@ -867,7 +869,8 @@ class QueryCommand:
             self.console.print("\033[H\033[J", end="")
 
             # Build title with filter info
-            title_parts = [f"Query Registry ({total} queries"]
+            query_word = "query" if total == 1 else "queries"
+            title_parts = [f"Query Registry ({total} {query_word}"]
             if target:
                 title_parts.append(f", target: {target}")
             if filter:
@@ -908,7 +911,7 @@ class QueryCommand:
             if choice == "" or choice == "\x1b" or choice.lower() == "q":
                 return RdstResult(
                     ok=True,
-                    message=f"Listed {total} queries",
+                    message=f"Listed {total} {'query' if total == 1 else 'queries'}",
                     data={
                         "queries": [
                             {
@@ -1031,6 +1034,15 @@ class QueryCommand:
 
         # Handle both name and query_name (from argparse)
         name = name or query_name
+
+        # Require either a name or a hash
+        if not name and not hash:
+            return RdstResult(
+                ok=False,
+                message="Must provide either a query name or --hash for show.\n"
+                "Usage: rdst query show <name>  or  rdst query show --hash <hash>",
+                data={},
+            )
 
         # Look up by name or hash
         if name:
@@ -1585,7 +1597,7 @@ class QueryCommand:
         if not target_config:
             return RdstResult(
                 ok=False,
-                message=f"Target '{target}' not found in configuration",
+                message=f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
                 data={"target": target},
             )
 
@@ -1868,7 +1880,7 @@ class QueryCommand:
 
         upstream_config = cfg.get(target)
         if not upstream_config:
-            return RdstResult(ok=False, message=f"Target '{target}' not found in configuration.")
+            return RdstResult(ok=False, message=f"Target '{target}' not found. Run 'rdst configure add' to set one up.")
 
         # If upstream target is actually a cache target, resolve to its upstream
         if upstream_config.get("target_type") == "readyset":

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-rdst - Readyset Data and SQL Toolkit
+rdst - ReadySet Data and SQL Toolkit
 
 A command-line interface for diagnostics, query analysis, performance tuning,
-and caching with Readyset.
+and caching with ReadySet.
 """
 
 from __future__ import annotations
@@ -12,7 +12,15 @@ import json
 import os
 import argparse
 import sys
+import signal
 from pathlib import Path
+
+# Restore default SIGINT behavior so KeyboardInterrupt is raised instead of
+# calling sys.exit(130).  Raising KeyboardInterrupt lets ThreadPoolExecutor
+# tear down gracefully and allows `except KeyboardInterrupt` blocks (e.g. in
+# report_command.py) to catch Ctrl-C correctly.  The main() try/except catches
+# KeyboardInterrupt and exits with code 1.
+signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 
 # UI system
@@ -129,7 +137,7 @@ def print_rich_help():
 
     # Header
     console.print()
-    console.print(SectionHeader("rdst", "Readyset Data and SQL Toolkit"))
+    console.print(SectionHeader("ReadySet Data and SQL Toolkit"))
     console.print(
         f"[{StyleTokens.MUTED}]Troubleshoot latency, analyze queries, and get tuning insights.[/{StyleTokens.MUTED}]"
     )
@@ -167,7 +175,7 @@ def parse_arguments() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         prog="rdst",
-        description="Readyset Data and SQL Toolkit - Diagnose, analyze, and optimize SQL performance",
+        description="ReadySet Data and SQL Toolkit - Diagnose, analyze, and optimize SQL performance",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
@@ -197,6 +205,21 @@ Examples:
         "--verbose", "-v", action="store_true", help="Enable verbose output"
     )
 
+    try:
+        from importlib.metadata import version as _get_version
+        _pkg_version = _get_version("rdst")
+    except Exception:
+        try:
+            from _version import __version__ as _pkg_version
+        except Exception:
+            _pkg_version = "unknown"
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"ReadySet Data and SQL Toolkit (rdst) version {_pkg_version}",
+        help="Show version information and exit",
+    )
+
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     build_all_subparsers(subparsers)
 
@@ -212,6 +235,10 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
     command = args.command
 
     if command == "configure":
+        # configure now uses add_subparsers(); subcommand is in configure_subcommand
+        configure_subcommand = getattr(args, "configure_subcommand", None)
+        if configure_subcommand is not None:
+            kwargs["subcommand"] = configure_subcommand
         return cli.configure(config_path=args.config, **kwargs)
     elif command == "top":
         return cli.top(**kwargs)
@@ -508,6 +535,9 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         return cli.version()
     elif command == "claude":
         # Register or remove RDST from Claude Code
+        import shutil
+        import subprocess
+
         action = getattr(args, "action", "add")
 
         # Check if claude CLI is available
@@ -550,7 +580,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             # Install the /rdst slash command globally
             slash_cmd_content = """# RDST Mode Activated
 
-You have RDST (Readyset Data and SQL Toolkit) tools available.
+You have RDST (ReadySet Data and SQL Toolkit) tools available.
 
 **First, call the `rdst_help` tool to check the user's setup.**
 
@@ -807,10 +837,11 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
     elif command == 'agent':
         from features.agent.cli import AgentCommand
         agent_cmd = AgentCommand()
+        # agent now uses add_subparsers(); subcommand is in agent_subcommand
         # Support both --name and positional agent_name
         name = getattr(args, 'name', None) or getattr(args, 'agent_name', None)
         return agent_cmd.execute(
-            subcommand=getattr(args, 'subcommand', None),
+            subcommand=getattr(args, 'agent_subcommand', None),
             name=name,
             target=getattr(args, 'target', None),
             description=getattr(args, 'description', ''),
@@ -825,10 +856,13 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
     elif command == 'guard':
         from features.guard.cli import GuardCommand
         guard_cmd = GuardCommand()
+        # guard now uses add_subparsers(); subcommand is in guard_subcommand
         # Support both --name and positional guard_name
         name = getattr(args, 'name', None) or getattr(args, 'guard_name', None)
+        # For 'check': positional 'sql' arg or --sql flag (stored as sql_flag)
+        sql = getattr(args, 'sql', None) or getattr(args, 'sql_flag', None)
         return guard_cmd.execute(
-            subcommand=getattr(args, 'subcommand', None),
+            subcommand=getattr(args, 'guard_subcommand', None),
             name=name,
             description=getattr(args, 'description', ''),
             mask=getattr(args, 'mask', None),
@@ -845,7 +879,7 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             schema_context=getattr(args, 'schema_context', None),
             max_rows=getattr(args, 'max_rows', 1000),
             timeout=getattr(args, 'timeout', 30),
-            sql=getattr(args, 'sql', None),
+            sql=sql,
             check_guard=getattr(args, 'check_guard', None),
             target=getattr(args, 'target', None),
         )
@@ -857,27 +891,26 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
     """Interactive menu when no command is provided.
 
     Presents a simple numbered list of commands and prompts for minimal
-    required inputs when needed. Falls back to help on invalid input.
+    required inputs when needed. Re-prompts on invalid input.
     """
     try:
         # If stdin is not a TTY, fall back to help behavior
         if not sys.stdin.isatty():
             return cli.help()
 
-        # Define commands once
-        commands = [
-            ("configure", "Manage database targets"),
-            ("top", "Live view of slow queries"),
-            ("analyze", "Analyze a SQL query"),
-            ("ask", "Ask questions in natural language"),
-            ("init", "First-time setup wizard"),
-            ("query", "Manage query registry"),
-            ("schema", "Manage semantic layer"),
-            ("version", "Show version information"),
-            ("report", "Submit feedback or bug reports"),
-            ("help", "Show help"),
-            ("Exit", "Exit rdst"),
+        from shared.cli.parser_data import COMMANDS as _PARSER_COMMANDS
+
+        # Build the commands list from parser_data so descriptions stay in sync.
+        # Order matches what --help shows; 'exit' is appended as a menu-only entry.
+        _menu_command_names = [
+            "configure", "top", "analyze", "ask", "scan", "agent", "guard",
+            "init", "query", "schema", "cache", "fleet", "audit", "demo",
+            "version", "report", "help", "claude", "slack", "web",
         ]
+        commands = [
+            (name, _PARSER_COMMANDS[name].short_help)
+            for name in _menu_command_names
+        ] + [("exit", "Exit rdst")]
 
         # Use UI system components
         from shared.ui import get_console, DataTable, SectionHeader
@@ -886,7 +919,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
 
         # Header
         console.print()
-        console.print(SectionHeader("rdst", "Readyset Data and SQL Toolkit"))
+        console.print(SectionHeader("ReadySet Data and SQL Toolkit"))
         console.print(
             f"[{StyleTokens.MUTED}]Troubleshoot latency, analyze queries, and get tuning insights.[/{StyleTokens.MUTED}]"
         )
@@ -900,16 +933,28 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             show_row_numbers=True,
         )
         console.print(table)
-        choice = input("Select option [1]: ").strip()
-        if not choice:
-            choice_idx = 1
-        else:
+
+        while True:
+            choice = input("Select option [1]: ").strip()
+            if not choice:
+                choice_idx = 1
+                break
+            if choice.lower() in ("q", "quit", "exit"):
+                return RdstResult(True, "Goodbye!")
             try:
                 choice_idx = int(choice)
             except ValueError:
-                return cli.help()
-        if choice_idx < 1 or choice_idx > len(commands):
-            return cli.help()
+                console.print(
+                    f"[red]Invalid option. Please enter a number 1-{len(commands)} or 'q' to quit.[/red]"
+                )
+                continue
+            if choice_idx < 1 or choice_idx > len(commands):
+                console.print(
+                    f"[red]Invalid option. Please enter a number 1-{len(commands)} or 'q' to quit.[/red]"
+                )
+                continue
+            break
+
         cmd = commands[choice_idx - 1][0]
 
         # Prompt for required parameters for certain commands
@@ -966,6 +1011,33 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
                 return cli.query(subcommand="delete", name=queryname)
             else:
                 return RdstResult(False, "Invalid query subcommand")
+        elif cmd == "scan":
+            directory = input("Directory to scan [.]: ").strip() or "."
+            from features.scan.cli.command import ScanCommand
+            scan_cmd = ScanCommand()
+            return scan_cmd.execute(
+                subcommand="scan",
+                directory=directory,
+                dry_run=False,
+                analyze=False,
+                target=None,
+                output_json=False,
+                file_pattern=None,
+                diff=None,
+                shallow=False,
+                warn_threshold=50,
+                fail_threshold=30,
+                nosave=False,
+                sequential=False,
+            )
+        elif cmd == "agent":
+            from features.agent.cli import AgentCommand
+            agent_cmd = AgentCommand()
+            return agent_cmd.execute(subcommand="list")
+        elif cmd == "guard":
+            from features.guard.cli import GuardCommand
+            guard_cmd = GuardCommand()
+            return guard_cmd.execute(subcommand="list")
         elif cmd == "ask":
             return cli.ask()
         elif cmd == "schema":
@@ -973,15 +1045,31 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
         elif cmd == "version":
             return cli.version()
         elif cmd == "report":
-            title = input("Title: ").strip()
-            if not title:
-                return RdstResult(False, "report requires a title")
-            body = input("Body (optional): ").strip()
-            return cli.report(title, body=body)
-        else:  # help, Exit
+            from shared.cli.report_command import ReportCommand
+            report_cmd = ReportCommand()
+            success = report_cmd.run()
+            return RdstResult(success, "")
+        elif cmd == "cache":
+            return RdstResult(True, "Run: rdst cache --help")
+        elif cmd == "fleet":
+            return RdstResult(True, "Run: rdst fleet --help")
+        elif cmd == "audit":
+            return RdstResult(True, "Run: rdst audit --help")
+        elif cmd == "demo":
+            return RdstResult(True, "Run: rdst demo --help")
+        elif cmd == "claude":
+            return RdstResult(True, "Run: rdst claude --help")
+        elif cmd == "slack":
+            return RdstResult(True, "Run: rdst slack --help")
+        elif cmd == "web":
+            return RdstResult(True, "Run: rdst web --help")
+        elif cmd == "help":
             return cli.help()
+        else:  # exit
+            return RdstResult(True, "Goodbye!")
     except (EOFError, KeyboardInterrupt):
-        return cli.help()
+        get_console().print("\n[yellow]Cancelled[/yellow]")
+        return RdstResult(True, "")
 
 
 def main():

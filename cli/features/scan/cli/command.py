@@ -171,7 +171,7 @@ class ScanCommand:
             return RdstResult(
                 False,
                 "Target required for scan.\n\n"
-                "Usage: rdst scan ./path --target <target>\n\n"
+                "Usage: rdst scan ./path --schema <target>\n\n"
                 "The target database is needed to:\n"
                 "  1. Load schema context for ORM→SQL conversion\n"
                 "  2. Associate queries with the correct database\n"
@@ -245,7 +245,17 @@ class ScanCommand:
         asyncio.run(run_async())
 
         if error_message:
-            return RdstResult(False, error_message)
+            if output_json:
+                # JSON mode: ScanQuietRenderer suppresses all output, so we must
+                # emit a machine-readable error ourselves.  Write to stderr so
+                # stdout stays clean for pipe-friendly consumers.
+                import sys as _sys
+                _sys.stderr.write(json.dumps({"error": error_message}) + "\n")
+                # Also carry the message in RdstResult so rdst.py prints it.
+                return RdstResult(False, error_message)
+            # Table mode: the renderer already printed the error via _render_error;
+            # return ok=False with empty message so rdst.py doesn't print it twice.
+            return RdstResult(False, "")
 
         # No files found
         if not orm_files and not all_queries:
@@ -255,7 +265,13 @@ class ScanCommand:
                     "No ORM files in diff.",
                     data={"files": [], "queries": [], "diff": diff, "status": "pass"}
                 )
-            return RdstResult(True, "No files with ORM patterns found.", data={"files": [], "queries": []})
+            # The renderer already printed "No files with ORM patterns found." via
+            # _render_files_found; return empty message to avoid a second print.
+            # Only populate data when --output json is explicitly requested so that
+            # rdst.py does not dump raw JSON in default table mode (Bug 2).
+            if output_json:
+                return RdstResult(True, json.dumps({"files": [], "queries": []}, indent=2), data={"files": [], "queries": []})
+            return RdstResult(True, "")
 
         # Build results dict matching _print_report expectations
         results: Dict[str, Any] = {
@@ -1749,8 +1765,10 @@ class ScanCommand:
             "issues": [],
         }
 
+        is_failure = results["status"] in ("fail", "error")
+
         if output_json:
-            return RdstResult(True, json.dumps(results, indent=2), data=results)
+            return RdstResult(not is_failure, json.dumps(results, indent=2), data=results)
 
         # Pretty print
         if not self.console:
@@ -1758,7 +1776,7 @@ class ScanCommand:
             print(f"Total queries: {results['total_queries']}")
             print(f"New queries: {results['new_queries']}")
             print(f"With issues: {results['queries_with_issues']}")
-            return RdstResult(True, "", data=results)
+            return RdstResult(not is_failure, "", data=results)
 
         status_color = {"pass": "green", "warning": "yellow", "error": "red"}.get(results["status"], "white")
         self.console.print()
@@ -1777,4 +1795,4 @@ class ScanCommand:
             for issue in results["issues"][:10]:
                 self.console.print(f"  [{issue['hash'][:8]}] {issue['file']}: {issue['issue']}")
 
-        return RdstResult(True, "", data=results)
+        return RdstResult(not is_failure, "", data=results)

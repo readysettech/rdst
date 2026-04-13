@@ -98,7 +98,7 @@ class TopService:
             if target_config is None:
                 yield TopErrorEvent(
                     type="error",
-                    message=f"Target '{target_name}' not found",
+                    message=f"Target '{target_name}' not found. Run 'rdst configure add' to set one up.",
                     stage="config",
                 )
                 return
@@ -255,7 +255,7 @@ class TopService:
             if target_config is None:
                 yield TopErrorEvent(
                     type="error",
-                    message=f"Target '{target_name}' not found",
+                    message=f"Target '{target_name}' not found. Run 'rdst configure add' to set one up.",
                     stage="config",
                 )
                 return

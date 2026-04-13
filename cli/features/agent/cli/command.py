@@ -222,7 +222,7 @@ Examples:
         names = manager.list()
 
         if not names:
-            return RdstResult(ok=True, message="No agents configured")
+            return RdstResult(ok=True, message="No agents configured. Create one with 'rdst agent create --name NAME --target TARGET'")
 
         table = DataTableBase(title="Data Agents")
         table.add_column("Name", style=StyleTokens.ACCENT)

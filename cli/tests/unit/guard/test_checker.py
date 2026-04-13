@@ -461,3 +461,133 @@ class TestCheckEstimatedRows:
         assert hasattr(result, "level")
         assert hasattr(result, "guard_name")
         assert result.guard_name == "max_estimated_rows"
+
+
+# ---------------------------------------------------------------------------
+# Tests for Bug 1 (P1 SECURITY): multi-statement SQL bypasses guard checks
+# ---------------------------------------------------------------------------
+
+class TestMultiStatementRejection:
+    """Multi-statement SQL must be rejected by the read_only guard."""
+
+    def test_multi_statement_select_then_drop(self):
+        """SELECT followed by DROP TABLE must be blocked."""
+        result = check_read_only(
+            "SELECT id FROM users WHERE id=1 LIMIT 10; DROP TABLE users;"
+        )
+        assert result.passed is False
+        assert result.level == "block"
+        assert "multi-statement" in result.message.lower()
+
+    def test_multi_statement_select_then_insert(self):
+        """SELECT followed by INSERT must be blocked."""
+        result = check_read_only(
+            "SELECT 1; INSERT INTO users (name) VALUES ('x')"
+        )
+        assert result.passed is False
+        assert result.level == "block"
+
+    def test_single_statement_with_trailing_semicolon_allowed(self):
+        """A single statement ending with a semicolon should not be blocked."""
+        result = check_read_only("SELECT id FROM users WHERE id = 1;")
+        assert result.passed is True
+
+    def test_single_statement_no_semicolon_allowed(self):
+        """A normal single-statement SELECT should pass unchanged."""
+        result = check_read_only("SELECT id FROM users WHERE id = 1 LIMIT 10")
+        assert result.passed is True
+
+    def test_check_query_blocks_multi_statement(self):
+        """check_query must surface the multi-statement block result."""
+        from features.guard.config import GuardConfig
+        config = GuardConfig(name="test")
+        results = check_query(
+            "SELECT id FROM users; DROP TABLE users;",
+            config,
+        )
+        read_only_result = next(r for r in results if r.guard_name == "read_only")
+        assert read_only_result.passed is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for Bug 2 (P2): UNION queries must enforce required_filters per arm
+# ---------------------------------------------------------------------------
+
+class TestUnionRequiredFilters:
+    """Each UNION arm must independently satisfy required_filters."""
+
+    def test_union_second_arm_missing_filter_is_blocked(self):
+        """UNION where the second arm lacks the required filter must fail."""
+        # orders arm has id=1 filter; users arm has NO id filter at all
+        result = check_required_filters(
+            "SELECT id FROM orders WHERE id=1 UNION SELECT name FROM users LIMIT 10",
+            required_filters={"users": ["id"]},
+        )
+        assert result.passed is False
+        assert result.level == "block"
+        assert "users" in result.message
+
+    def test_union_both_arms_have_filter_passes(self):
+        """UNION where both arms satisfy required filters must pass."""
+        result = check_required_filters(
+            (
+                "SELECT id FROM orders WHERE id = 1 "
+                "UNION "
+                "SELECT id FROM users WHERE id = 2"
+            ),
+            required_filters={"users": ["id"], "orders": ["id"]},
+        )
+        assert result.passed is True
+
+    def test_union_first_arm_filter_does_not_satisfy_second_arm(self):
+        """A filter present only in the first UNION arm must not satisfy the second."""
+        result = check_required_filters(
+            "SELECT id FROM users WHERE id = 1 UNION SELECT name FROM users",
+            required_filters={"users": ["id"]},
+        )
+        assert result.passed is False
+
+    def test_non_union_query_still_works(self):
+        """Plain (non-UNION) queries must still be checked correctly."""
+        result = check_required_filters(
+            "SELECT id FROM users WHERE id = 42",
+            required_filters={"users": ["id"]},
+        )
+        assert result.passed is True
+
+
+# ---------------------------------------------------------------------------
+# Tests for Bug 3 (P2): CTE aliases must not trigger allowlist violations
+# ---------------------------------------------------------------------------
+
+class TestCTEAliasAllowedTables:
+    """CTE alias names must not be treated as real tables in allowlist checks."""
+
+    def test_cte_alias_not_blocked(self):
+        """Query using a CTE alias as the outer table reference should pass."""
+        result = check_allowed_tables(
+            "WITH u AS (SELECT * FROM users WHERE id=1) SELECT name FROM u LIMIT 10",
+            allowed_tables=["users"],
+        )
+        assert result.passed is True
+
+    def test_real_disallowed_table_still_blocked(self):
+        """A CTE that reads from a disallowed table must still be blocked."""
+        result = check_allowed_tables(
+            "WITH s AS (SELECT * FROM secrets) SELECT name FROM s",
+            allowed_tables=["users"],
+        )
+        assert result.passed is False
+        assert "secrets" in result.message
+
+    def test_cte_alias_with_multiple_allowed_tables(self):
+        """Multiple CTEs whose real tables are all allowed should pass."""
+        result = check_allowed_tables(
+            (
+                "WITH o AS (SELECT * FROM orders WHERE id=1), "
+                "u AS (SELECT * FROM users WHERE id=1) "
+                "SELECT u.name FROM u JOIN o ON o.user_id = u.id"
+            ),
+            allowed_tables=["orders", "users"],
+        )
+        assert result.passed is True

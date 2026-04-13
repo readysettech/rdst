@@ -63,72 +63,148 @@ COMMANDS: dict[str, CommandDef] = {
 
 Targets are saved connection profiles that RDST uses to connect to your databases.
 Each target has a name, connection details, and an environment variable for the password.""",
-        args=[
-            ArgDef(
-                "subcommand",
-                nargs="?",
-                default="menu",
-                help="Subcommand: menu (default), add, edit, list, remove, default, test",
-            ),
-            ArgDef("name", nargs="?", help="Target name for edit/remove/default"),
-            ArgDef(
-                "--connection-string",
-                help="Database connection string (postgresql://user:pass@host:port/db or mysql://...)",
-            ),
-            ArgDef("--target", aliases=["--name"], help="Target name"),
-            ArgDef(
-                "--engine",
-                choices=["postgresql", "mysql"],
-                help="Database engine (overrides connection string)",
-            ),
-            ArgDef("--host", help="Database host (overrides connection string)"),
-            ArgDef(
-                "--port", type=int, help="Database port (overrides connection string)"
-            ),
-            ArgDef("--user", help="Database user (overrides connection string)"),
-            ArgDef("--database", help="Database name (overrides connection string)"),
-            ArgDef("--password-env", help="Environment variable for password"),
-            ArgDef("--read-only", action="store_true", help="Read-only connection"),
-            ArgDef(
-                "--proxy",
-                choices=[
-                    "none",
-                    "readyset",
-                    "proxysql",
-                    "pgbouncer",
-                    "tunnel",
-                    "custom",
+        subcommand_dest="configure_subcommand",
+        subcommand_defs=[
+            SubcommandDef(
+                name="add",
+                help="Add a new database target",
+                args=[
+                    ArgDef(
+                        "--connection-string",
+                        help="Database connection string (postgresql://user:pass@host:port/db or mysql://...)",
+                    ),
+                    ArgDef("--target", aliases=["--name"], help="Target name"),
+                    ArgDef(
+                        "--engine",
+                        choices=["postgresql", "mysql"],
+                        help="Database engine (overrides connection string)",
+                    ),
+                    ArgDef("--host", help="Database host (overrides connection string)"),
+                    ArgDef(
+                        "--port", type=int, help="Database port (overrides connection string)"
+                    ),
+                    ArgDef("--user", help="Database user (overrides connection string)"),
+                    ArgDef("--database", help="Database name (overrides connection string)"),
+                    ArgDef("--password-env", help="Environment variable for password"),
+                    ArgDef("--read-only", action="store_true", help="Read-only connection"),
+                    ArgDef(
+                        "--proxy",
+                        choices=["none", "readyset", "proxysql", "pgbouncer", "tunnel", "custom"],
+                        help="Proxy type",
+                    ),
+                    ArgDef(
+                        "--tls",
+                        action="store_true",
+                        help="Enable TLS (overrides connection string)",
+                    ),
+                    ArgDef(
+                        "--no-tls",
+                        action="store_true",
+                        help="Disable TLS (overrides connection string)",
+                    ),
+                    ArgDef("--default", action="store_true", help="Set as default target"),
+                    ArgDef(
+                        "--skip-verify",
+                        action="store_true",
+                        help="Skip connection verification (for non-interactive use)",
+                    ),
+                    ArgDef(
+                        "--group",
+                        help="Fleet group (e.g., production, us-east-1, my-aurora-cluster)",
+                    ),
+                    ArgDef(
+                        "--tags",
+                        help="Comma-separated tags (e.g., aurora,reader)",
+                    ),
                 ],
-                help="Proxy type",
             ),
-            ArgDef(
-                "--tls",
-                action="store_true",
-                help="Enable TLS (overrides connection string)",
+            SubcommandDef(
+                name="list",
+                help="List all configured targets",
+                args=[],
             ),
-            ArgDef(
-                "--no-tls",
-                action="store_true",
-                help="Disable TLS (overrides connection string)",
+            SubcommandDef(
+                name="edit",
+                help="Edit an existing target",
+                args=[
+                    ArgDef("name", nargs="?", help="Target name to edit"),
+                    ArgDef(
+                        "--connection-string",
+                        help="Database connection string (postgresql://user:pass@host:port/db or mysql://...)",
+                    ),
+                    ArgDef("--target", aliases=["--name"], help="Target name"),
+                    ArgDef(
+                        "--engine",
+                        choices=["postgresql", "mysql"],
+                        help="Database engine (overrides connection string)",
+                    ),
+                    ArgDef("--host", help="Database host (overrides connection string)"),
+                    ArgDef(
+                        "--port", type=int, help="Database port (overrides connection string)"
+                    ),
+                    ArgDef("--user", help="Database user (overrides connection string)"),
+                    ArgDef("--database", help="Database name (overrides connection string)"),
+                    ArgDef("--password-env", help="Environment variable for password"),
+                    ArgDef("--read-only", action="store_true", help="Read-only connection"),
+                    ArgDef(
+                        "--proxy",
+                        choices=["none", "readyset", "proxysql", "pgbouncer", "tunnel", "custom"],
+                        help="Proxy type",
+                    ),
+                    ArgDef(
+                        "--tls",
+                        action="store_true",
+                        help="Enable TLS (overrides connection string)",
+                    ),
+                    ArgDef(
+                        "--no-tls",
+                        action="store_true",
+                        help="Disable TLS (overrides connection string)",
+                    ),
+                    ArgDef("--default", action="store_true", help="Set as default target"),
+                    ArgDef(
+                        "--skip-verify",
+                        action="store_true",
+                        help="Skip connection verification (for non-interactive use)",
+                    ),
+                    ArgDef(
+                        "--group",
+                        help="Fleet group (e.g., production, us-east-1, my-aurora-cluster)",
+                    ),
+                    ArgDef(
+                        "--tags",
+                        help="Comma-separated tags (e.g., aurora,reader)",
+                    ),
+                ],
             ),
-            ArgDef("--default", action="store_true", help="Set as default target"),
-            ArgDef(
-                "--confirm",
-                action="store_true",
-                help="Confirm removal without prompting",
+            SubcommandDef(
+                name="remove",
+                help="Remove a target",
+                args=[
+                    ArgDef("name", nargs="?", help="Target name to remove"),
+                    ArgDef("--target", aliases=["--name"], help="Target name"),
+                    ArgDef(
+                        "--confirm",
+                        action="store_true",
+                        help="Confirm removal without prompting",
+                    ),
+                ],
             ),
-            ArgDef(
-                "--skip-verify",
-                action="store_true",
-                help="Skip connection verification (for non-interactive use)",
+            SubcommandDef(
+                name="default",
+                help="Set the default target",
+                args=[
+                    ArgDef("name", nargs="?", help="Target name to set as default"),
+                    ArgDef("--target", aliases=["--name"], help="Target name"),
+                ],
             ),
-            ArgDef(
-                "--group",
-                help="Fleet group (e.g., production, us-east-1, my-aurora-cluster)",
-            ),
-            ArgDef(
-                "--tags",
-                help="Comma-separated tags (e.g., aurora,reader)",
+            SubcommandDef(
+                name="test",
+                help="Test connection to a target",
+                args=[
+                    ArgDef("name", nargs="?", help="Target name to test"),
+                    ArgDef("--target", aliases=["--name"], help="Target name"),
+                ],
             ),
         ],
         subcommands=[
@@ -151,7 +227,7 @@ Each target has a name, connection details, and an environment variable for the 
     ),
     "top": CommandDef(
         name="top",
-        short_help="Live view of slow queries",
+        short_help="Monitor slow queries in real-time",
         description="""Monitor database queries in real-time and identify slow queries.
 
 Queries are automatically saved to the registry as they're detected.
@@ -241,7 +317,7 @@ MySQL Slow Log Setup:
         description="""Analyze a SQL query for performance issues and get optimization recommendations.
 
 Runs EXPLAIN ANALYZE and uses AI to provide index recommendations, query rewrites,
-and Readyset caching opportunities.""",
+and ReadySet caching opportunities.""",
         args=[
             MutuallyExclusiveGroup(
                 args=[
@@ -314,7 +390,7 @@ and Readyset caching opportunities.""",
             ("rdst analyze -f query.sql --target mydb", "Analyze query from file"),
             (
                 'rdst analyze -q "SELECT ..." --target mydb',
-                "Analyze with automatic Readyset performance test",
+                "Analyze with automatic ReadySet performance test",
             ),
         ],
     ),
@@ -373,7 +449,7 @@ Modes:
     ),
     "init": CommandDef(
         name="init",
-        short_help="First-time setup wizard",
+        short_help="Set up rdst for first use",
         description="""Run the first-time setup wizard to configure RDST.
 
 This interactive wizard helps you:
@@ -406,7 +482,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                 name="add",
                 help="Add a new query to registry",
                 args=[
-                    ArgDef("query_name", help="Name for the query"),
+                    ArgDef("query_name", nargs="?", help="Name for the query"),
                     ArgDef(
                         "--query",
                         short="-q",
@@ -420,7 +496,11 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                 name="import",
                 help="Import multiple queries from SQL file",
                 args=[
-                    ArgDef("file", help="Path to SQL file containing multiple queries"),
+                    ArgDef(
+                        "file",
+                        nargs="?",
+                        help="Path to SQL file containing multiple queries",
+                    ),
                     ArgDef(
                         "--update",
                         action="store_true",
@@ -441,7 +521,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                             ArgDef("query_name", nargs="?", help="Query name to edit"),
                             ArgDef("--hash", help="Query hash to edit"),
                         ],
-                        required=True,
+                        required=False,
                     ),
                 ],
             ),
@@ -477,7 +557,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                             ArgDef("query_name", nargs="?", help="Query name to show"),
                             ArgDef("--hash", help="Query hash to show"),
                         ],
-                        required=True,
+                        required=False,
                     ),
                 ],
             ),
@@ -492,7 +572,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                             ),
                             ArgDef("--hash", help="Query hash to delete"),
                         ],
-                        required=True,
+                        required=False,
                     ),
                     ArgDef(
                         "--force", action="store_true", help="Skip confirmation prompt"
@@ -510,7 +590,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                             ),
                             ArgDef("--hash", help="Query hash to delete"),
                         ],
-                        required=True,
+                        required=False,
                     ),
                     ArgDef(
                         "--force", action="store_true", help="Skip confirmation prompt"
@@ -582,7 +662,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
             ),
             SubcommandDef(
                 name="cache-compare",
-                help="Compare query performance: upstream vs Readyset cache",
+                help="Compare query performance: upstream vs ReadySet cache",
                 args=[
                     ArgDef(
                         "queries",
@@ -642,7 +722,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
             ("delete", "Delete a query by name or hash"),
             ("import", "Import multiple queries from a SQL file"),
             ("run", "Run saved queries for benchmarking/load generation"),
-            ("cache-compare", "Compare query performance: upstream vs Readyset cache"),
+            ("cache-compare", "Compare query performance: upstream vs ReadySet cache"),
         ],
         examples=[
             ('rdst query add my-query -q "SELECT * FROM users"', "Add a query"),
@@ -1029,25 +1109,74 @@ database targets. Users can @mention the bot or DM it to ask questions.""",
 
 Create named agents that wrap your database targets with safety policies,
 then expose them via HTTP API, MCP, or Slack.""",
-        args=[
-            ArgDef(
-                "subcommand",
-                nargs="?",
-                default=None,
-                choices=["create", "list", "show", "delete", "chat", "serve", "mcp", "slack"],
-                help="Subcommand: create, list, show, delete, chat, serve, mcp, slack",
+        subcommand_dest="agent_subcommand",
+        subcommand_defs=[
+            SubcommandDef(
+                name="create",
+                help="Create a new data agent",
+                args=[
+                    ArgDef("--name", short="-n", help="Agent name"),
+                    ArgDef("--target", short="-t", help="Database target"),
+                    ArgDef("--description", short="-d", default="", help="Agent description"),
+                    ArgDef("--max-rows", type=int, default=1000, help="Maximum rows to return (default 1000)"),
+                    ArgDef("--timeout", type=int, default=600, help="Query timeout in seconds (default 600 = 10 min)"),
+                    ArgDef("--deny-columns", nargs="*", help="Column patterns to deny access"),
+                    ArgDef("--allow-tables", nargs="*", help="Tables to allow (whitelist)"),
+                    ArgDef("--guard", short="-g", help="Guard to apply (created via rdst guard create)"),
+                ],
             ),
-            ArgDef("agent_name", nargs="?", help="Agent name (positional for show/delete)"),
-            ArgDef("--name", short="-n", help="Agent name"),
-            ArgDef("--target", short="-t", help="Database target (for create)"),
-            ArgDef("--description", short="-d", default="", help="Agent description (for create)"),
-            ArgDef("--max-rows", type=int, default=1000, help="Maximum rows to return (default 1000)"),
-            ArgDef("--timeout", type=int, default=600, help="Query timeout in seconds (default 600 = 10 min)"),
-            ArgDef("--port", short="-p", type=int, default=8080, help="HTTP port (for serve)"),
-            ArgDef("--deny-columns", nargs="*", help="Column patterns to deny access"),
-            ArgDef("--allow-tables", nargs="*", help="Tables to allow (whitelist)"),
-            ArgDef("--guard", short="-g", help="Guard to apply (created via rdst guard create)"),
-            ArgDef("--verbose", action="store_true", help="Show full SQL and results in chat (default: compact)"),
+            SubcommandDef(
+                name="list",
+                help="List all configured agents",
+                args=[],
+            ),
+            SubcommandDef(
+                name="show",
+                help="Show agent details",
+                args=[
+                    ArgDef("agent_name", nargs="?", help="Agent name"),
+                    ArgDef("--name", short="-n", help="Agent name"),
+                ],
+            ),
+            SubcommandDef(
+                name="delete",
+                help="Delete an agent",
+                args=[
+                    ArgDef("agent_name", nargs="?", help="Agent name"),
+                    ArgDef("--name", short="-n", help="Agent name"),
+                ],
+            ),
+            SubcommandDef(
+                name="chat",
+                help="Interactive chat with an agent",
+                args=[
+                    ArgDef("--name", short="-n", help="Agent name"),
+                    ArgDef("--verbose", action="store_true", help="Show full SQL and results (default: compact)"),
+                ],
+            ),
+            SubcommandDef(
+                name="serve",
+                help="Start HTTP API server",
+                args=[
+                    ArgDef("--name", short="-n", help="Agent name"),
+                    ArgDef("--port", short="-p", type=int, default=8080, help="HTTP port (default: 8080)"),
+                    ArgDef("--verbose", action="store_true", help="Verbose output"),
+                ],
+            ),
+            SubcommandDef(
+                name="mcp",
+                help="Start MCP server mode",
+                args=[
+                    ArgDef("--name", short="-n", help="Agent name"),
+                ],
+            ),
+            SubcommandDef(
+                name="slack",
+                help="Start Slack bot mode",
+                args=[
+                    ArgDef("--name", short="-n", help="Agent name"),
+                ],
+            ),
         ],
         subcommands=[
             ("create", "Create a new data agent"),
@@ -1073,34 +1202,69 @@ then expose them via HTTP API, MCP, or Slack.""",
 
 A guard specifies output masking, query restrictions, and execution limits
 that can be applied to one or more agents.""",
-        args=[
-            ArgDef(
-                "subcommand",
-                nargs="?",
-                default=None,
-                choices=["create", "list", "show", "delete", "edit", "check"],
-                help="Subcommand: create, list, show, delete, edit, check",
+        subcommand_dest="guard_subcommand",
+        subcommand_defs=[
+            SubcommandDef(
+                name="create",
+                help="Create a new guard",
+                args=[
+                    ArgDef("--name", short="-n", help="Guard name"),
+                    ArgDef("--description", short="-d", default="", help="Guard description"),
+                    ArgDef("--mask", action="append", metavar="PATTERN:TYPE", help='Add masking pattern (e.g., "*.email:email", "*.ssn:redact")'),
+                    ArgDef("--deny-columns", nargs="*", help="Column patterns to deny access"),
+                    ArgDef("--allow-tables", nargs="*", help="Tables to allow (whitelist)"),
+                    ArgDef("--require-where", action="store_true", help="Require WHERE clause"),
+                    ArgDef("--require-limit", action="store_true", help="Require LIMIT clause"),
+                    ArgDef("--no-select-star", action="store_true", help="Disallow SELECT *"),
+                    ArgDef("--max-tables", type=int, help="Maximum tables in JOIN"),
+                    ArgDef("--cost-limit", type=int, help="EXPLAIN cost threshold"),
+                    ArgDef("--max-estimated-rows", type=int, help="Max rows from EXPLAIN estimate"),
+                    ArgDef("--required-filters", action="append", metavar="TABLE:COLS", help='Require filter on columns (e.g., "users:id,email")'),
+                    ArgDef("--intent", help="Natural language policy intent (LLM derives rules)"),
+                    ArgDef("--schema-context", help="Database schema context for intent derivation"),
+                    ArgDef("--max-rows", type=int, default=1000, help="Maximum rows to return"),
+                    ArgDef("--timeout", type=int, default=30, help="Query timeout in seconds"),
+                ],
             ),
-            ArgDef("guard_name", nargs="?", help="Guard name (positional for show/delete/edit)"),
-            ArgDef("--name", short="-n", help="Guard name"),
-            ArgDef("--description", short="-d", default="", help="Guard description"),
-            ArgDef("--mask", action="append", metavar="PATTERN:TYPE", help='Add masking pattern (e.g., "*.email:email", "*.ssn:redact")'),
-            ArgDef("--deny-columns", nargs="*", help="Column patterns to deny access"),
-            ArgDef("--allow-tables", nargs="*", help="Tables to allow (whitelist)"),
-            ArgDef("--require-where", action="store_true", help="Require WHERE clause"),
-            ArgDef("--require-limit", action="store_true", help="Require LIMIT clause"),
-            ArgDef("--no-select-star", action="store_true", help="Disallow SELECT *"),
-            ArgDef("--max-tables", type=int, help="Maximum tables in JOIN"),
-            ArgDef("--cost-limit", type=int, help="EXPLAIN cost threshold"),
-            ArgDef("--max-estimated-rows", type=int, help="Max rows from EXPLAIN estimate"),
-            ArgDef("--required-filters", action="append", metavar="TABLE:COLS", help='Require filter on columns (e.g., "users:id,email")'),
-            ArgDef("--intent", help="Natural language policy intent (LLM derives rules)"),
-            ArgDef("--schema-context", help="Database schema context for intent derivation"),
-            ArgDef("--max-rows", type=int, default=1000, help="Maximum rows to return"),
-            ArgDef("--timeout", type=int, default=30, help="Query timeout in seconds"),
-            ArgDef("--sql", help="SQL to check (alternative to positional)"),
-            ArgDef("--guard", short="-g", dest="check_guard", help="Guard to check against"),
-            ArgDef("--target", short="-t", help="Target database (for cost estimation)"),
+            SubcommandDef(
+                name="list",
+                help="List all configured guards",
+                args=[],
+            ),
+            SubcommandDef(
+                name="show",
+                help="Show guard details",
+                args=[
+                    ArgDef("guard_name", nargs="?", help="Guard name"),
+                    ArgDef("--name", short="-n", help="Guard name"),
+                ],
+            ),
+            SubcommandDef(
+                name="delete",
+                help="Delete a guard",
+                args=[
+                    ArgDef("guard_name", nargs="?", help="Guard name"),
+                    ArgDef("--name", short="-n", help="Guard name"),
+                ],
+            ),
+            SubcommandDef(
+                name="edit",
+                help="Edit guard in $EDITOR",
+                args=[
+                    ArgDef("guard_name", nargs="?", help="Guard name"),
+                    ArgDef("--name", short="-n", help="Guard name"),
+                ],
+            ),
+            SubcommandDef(
+                name="check",
+                help="Test SQL against a guard (pre-flight validation)",
+                args=[
+                    ArgDef("sql", nargs="?", help="SQL to check"),
+                    ArgDef("--sql", dest="sql_flag", help="SQL to check (alternative to positional)"),
+                    ArgDef("--guard", short="-g", dest="check_guard", help="Guard to check against"),
+                    ArgDef("--target", short="-t", help="Target database (for cost estimation)"),
+                ],
+            ),
         ],
         subcommands=[
             ("create", "Create a new guard"),
@@ -1401,7 +1565,7 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
     # =========================================================================
     "audit": CommandDef(
         name="audit",
-        short_help="Deep health audit of a database target",
+        short_help="Run a deep health audit of a database target",
         description="Run a deep health audit on a single database target. Collects metrics, sizing assessment, and cache opportunity score.",
         args=[
             ArgDef("audit_subcommand", nargs="?", default=None,
@@ -1466,6 +1630,7 @@ COMMAND_ORDER = [
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ("Analysis", ["top", "analyze", "ask", "agent"]),
     ("Configuration", ["init", "configure", "schema", "query", "guard"]),
+    ("Cache & Fleet", ["cache", "fleet", "audit"]),
     ("Integrations", ["claude", "slack", "web"]),
     ("Other", ["demo", "scan", "report", "help", "version"]),
 ]
@@ -1493,7 +1658,7 @@ def get_main_examples() -> List[Tuple[str, str]]:
         ("rdst init", "First-time setup wizard"),
         ("rdst top --target mydb", "Monitor slow queries"),
         ('rdst analyze -q "SELECT * FROM users" --target mydb', "Analyze a query"),
-        ('rdst query cache-compare my-query --target mydb', "Compare upstream vs Readyset cache performance"),
+        ('rdst query cache-compare my-query --target mydb', "Compare upstream vs ReadySet cache performance"),
         ('rdst help "how do I find slow queries?"', "Quick docs lookup"),
     ]
 

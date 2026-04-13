@@ -100,12 +100,31 @@ def check_query(
 
 
 def check_read_only(sql: str) -> CheckResult:
-    """Check that query is read-only (SELECT/WITH only)."""
+    """Check that query is read-only (SELECT/WITH only).
+
+    Also rejects multi-statement SQL (e.g. SELECT ...; DROP TABLE ...) which
+    would bypass all other guards because sqlglot.parse_one() silently discards
+    every statement after the first semicolon.
+    """
     # Strip SQL comments before checking
-    sql_stripped = _strip_sql_comments(sql).strip().upper()
+    sql_stripped = _strip_sql_comments(sql).strip()
+
+    # Reject multi-statement SQL: any semicolon followed by non-whitespace
+    # content is evidence of a second statement.
+    import re
+    if re.search(r';\s*\S', sql_stripped):
+        return CheckResult(
+            passed=False,
+            level="block",
+            guard_name="read_only",
+            message="Multi-statement SQL is not allowed",
+            suggestion="Submit one statement at a time",
+        )
+
+    sql_upper = sql_stripped.upper()
 
     # Allow SELECT and WITH (CTEs)
-    if sql_stripped.startswith("SELECT") or sql_stripped.startswith("WITH"):
+    if sql_upper.startswith("SELECT") or sql_upper.startswith("WITH"):
         return CheckResult(
             passed=True,
             level="info",
@@ -116,7 +135,7 @@ def check_read_only(sql: str) -> CheckResult:
     # Block write operations
     write_keywords = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE"]
     for kw in write_keywords:
-        if sql_stripped.startswith(kw):
+        if sql_upper.startswith(kw):
             return CheckResult(
                 passed=False,
                 level="block",
@@ -193,7 +212,7 @@ def check_require_where(sql: str) -> CheckResult:
     except Exception as e:
         logger.warning(f"Could not parse SQL for WHERE check: {e}")
         return CheckResult(
-            passed=True,
+            passed=False,
             level="warn",
             guard_name="require_where",
             message=f"Could not verify WHERE clause: {e}",
@@ -235,7 +254,7 @@ def check_require_limit(sql: str) -> CheckResult:
     except Exception as e:
         logger.warning(f"Could not parse SQL for LIMIT check: {e}")
         return CheckResult(
-            passed=True,
+            passed=False,
             level="warn",
             guard_name="require_limit",
             message=f"Could not verify LIMIT clause: {e}",
@@ -277,7 +296,7 @@ def check_no_select_star(sql: str) -> CheckResult:
     except Exception as e:
         logger.warning(f"Could not parse SQL for SELECT * check: {e}")
         return CheckResult(
-            passed=True,
+            passed=False,
             level="warn",
             guard_name="no_select_star",
             message=f"Could not check for SELECT *: {e}",
@@ -324,7 +343,7 @@ def check_max_tables(sql: str, max_tables: int) -> CheckResult:
     except Exception as e:
         logger.warning(f"Could not parse SQL for table count: {e}")
         return CheckResult(
-            passed=True,
+            passed=False,
             level="warn",
             guard_name="max_tables",
             message=f"Could not count tables: {e}",
@@ -375,7 +394,7 @@ def check_denied_columns(sql: str, denied_columns: list[str]) -> CheckResult:
     except Exception as e:
         logger.warning(f"Could not parse SQL for column check: {e}")
         return CheckResult(
-            passed=True,
+            passed=False,
             level="warn",
             guard_name="denied_columns",
             message=f"Could not check denied columns: {e}",
@@ -383,11 +402,22 @@ def check_denied_columns(sql: str, denied_columns: list[str]) -> CheckResult:
 
 
 def check_allowed_tables(sql: str, allowed_tables: list[str]) -> CheckResult:
-    """Check that query only references allowed tables."""
+    """Check that query only references allowed tables.
+
+    CTE aliases defined within the same query are excluded from the allowlist
+    check because they are not real tables — they are derived from other
+    expressions that are themselves checked.
+    """
     try:
         import sqlglot
 
         parsed = sqlglot.parse_one(sql)
+
+        # Collect CTE alias names so we can skip them during the table check.
+        cte_names: set[str] = set()
+        for cte in parsed.find_all(sqlglot.exp.CTE):
+            if cte.alias:
+                cte_names.add(cte.alias.lower())
 
         # Find all table references
         allowed_lower = [t.lower() for t in allowed_tables]
@@ -395,6 +425,9 @@ def check_allowed_tables(sql: str, allowed_tables: list[str]) -> CheckResult:
 
         for table in parsed.find_all(sqlglot.exp.Table):
             table_name = table.name.lower()
+            # Skip references to CTE aliases — they are not real tables.
+            if table_name in cte_names:
+                continue
             if table_name not in allowed_lower:
                 violations.append(table_name)
 
@@ -425,7 +458,7 @@ def check_allowed_tables(sql: str, allowed_tables: list[str]) -> CheckResult:
     except Exception as e:
         logger.warning(f"Could not parse SQL for table check: {e}")
         return CheckResult(
-            passed=True,
+            passed=False,
             level="warn",
             guard_name="allowed_tables",
             message=f"Could not check allowed tables: {e}",
@@ -571,6 +604,29 @@ def _get_mysql_cost(sql: str, config: dict[str, Any]) -> float | None:
     return None
 
 
+def _collect_select_arms(parsed) -> list:
+    """Return each independent SELECT arm of a query.
+
+    For plain SELECT / CTE queries there is only one arm.  For UNION /
+    INTERSECT / EXCEPT queries every participating SELECT is treated as a
+    separate arm that must independently satisfy required-filter rules.
+    """
+    import sqlglot
+
+    arms: list = []
+    set_op_types = (sqlglot.exp.Union, sqlglot.exp.Intersect, sqlglot.exp.Except)
+
+    def _walk(node) -> None:
+        if isinstance(node, set_op_types):
+            _walk(node.left)
+            _walk(node.right)
+        else:
+            arms.append(node)
+
+    _walk(parsed)
+    return arms
+
+
 def check_required_filters(
     sql: str,
     required_filters: dict[str, list[str]],
@@ -581,6 +637,10 @@ def check_required_filters(
     - "WHERE id IS NOT NULL" - doesn't actually filter
     - "WHERE 1=1" - always true
     - "WHERE true" - always true
+
+    For UNION / INTERSECT / EXCEPT queries every SELECT arm is checked
+    independently so that a filter present in one arm cannot satisfy the
+    requirement for another arm that accesses the same table without a filter.
 
     Args:
         sql: The SQL query to check.
@@ -596,43 +656,47 @@ def check_required_filters(
 
         parsed = sqlglot.parse_one(sql)
 
-        # Find all tables in query
-        tables_in_query: set[str] = set()
-        for table in parsed.find_all(sqlglot.exp.Table):
-            if table.name:
-                tables_in_query.add(table.name.lower())
+        # Split into individual SELECT arms (handles UNION / INTERSECT / EXCEPT).
+        arms = _collect_select_arms(parsed)
 
-        # Check each table with requirements
-        for table, required_cols in required_filters.items():
-            if table.lower() not in tables_in_query:
-                continue
+        for arm in arms:
+            # Find all tables referenced in this arm only.
+            tables_in_arm: set[str] = set()
+            for table in arm.find_all(sqlglot.exp.Table):
+                if table.name:
+                    tables_in_arm.add(table.name.lower())
 
-            # Find WHERE clause
-            where = parsed.find(sqlglot.exp.Where)
-            if not where:
-                return CheckResult(
-                    passed=False,
-                    level="block",
-                    guard_name="required_filters",
-                    message=f"Query on '{table}' requires filter on: {', '.join(required_cols)}",
-                    suggestion=f"Add WHERE clause filtering on {' or '.join(required_cols)}",
-                )
+            # Check each table with requirements against *this arm*.
+            for table, required_cols in required_filters.items():
+                if table.lower() not in tables_in_arm:
+                    continue
 
-            # Check for meaningful filter on at least one required column
-            has_meaningful_filter = False
-            for col in required_cols:
-                if _has_value_filter(where, col):
-                    has_meaningful_filter = True
-                    break
+                # Find WHERE clause scoped to this arm.
+                where = arm.find(sqlglot.exp.Where)
+                if not where:
+                    return CheckResult(
+                        passed=False,
+                        level="block",
+                        guard_name="required_filters",
+                        message=f"Query on '{table}' requires filter on: {', '.join(required_cols)}",
+                        suggestion=f"Add WHERE clause filtering on {' or '.join(required_cols)}",
+                    )
 
-            if not has_meaningful_filter:
-                return CheckResult(
-                    passed=False,
-                    level="block",
-                    guard_name="required_filters",
-                    message=f"Query on '{table}' requires actual value filter on: {', '.join(required_cols)}",
-                    suggestion="Use a specific value like 'WHERE id = 123', not 'WHERE id IS NOT NULL'",
-                )
+                # Check for meaningful filter on at least one required column.
+                has_meaningful_filter = False
+                for col in required_cols:
+                    if _has_value_filter(where, col):
+                        has_meaningful_filter = True
+                        break
+
+                if not has_meaningful_filter:
+                    return CheckResult(
+                        passed=False,
+                        level="block",
+                        guard_name="required_filters",
+                        message=f"Query on '{table}' requires actual value filter on: {', '.join(required_cols)}",
+                        suggestion="Use a specific value like 'WHERE id = 123', not 'WHERE id IS NOT NULL'",
+                    )
 
         return CheckResult(
             passed=True,
@@ -652,7 +716,7 @@ def check_required_filters(
     except Exception as e:
         logger.warning(f"Could not check required filters: {e}")
         return CheckResult(
-            passed=True,
+            passed=False,
             level="warn",
             guard_name="required_filters",
             message=f"Could not check required filters: {e}",

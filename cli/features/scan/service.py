@@ -119,10 +119,11 @@ class ScanService:
         await asyncio.sleep(0)  # Yield control
 
         # Phase 2: File discovery
+        scan_label = single_file if single_file else directory
         yield ScanStatusEvent(
             type="status",
             phase="discovery",
-            message=f"Scanning {directory} for ORM patterns..."
+            message=f"Scanning {scan_label} for ORM patterns..."
             + (f" (diff: {options.diff})" if options.diff else ""),
         )
 
@@ -441,14 +442,47 @@ class ScanService:
 
     @staticmethod
     def _detect_orms(filepath: Path, content: str) -> List[str]:
-        """Detect ORM patterns in file content, filtering by language."""
+        """Detect ORM patterns in file content, filtering by language.
+
+        For Python files, import lines are checked first so that ambiguous
+        method-name patterns (e.g. .filter(), .all(), .first() which appear in
+        both SQLAlchemy and Django) don't cause false-positive ORM labels.
+
+        Priority for Python:
+          1. If the file imports from sqlalchemy → include sqlalchemy, skip django
+             (unless it also imports from django)
+          2. If the file imports from django → include django, skip sqlalchemy
+             (unless it also imports from sqlalchemy)
+          3. If neither explicit import is found → fall back to pattern matching
+             for both (keeps backwards compatibility for files with no imports)
+        """
+        import re as _re
         detected_orms = []
         is_python = filepath.suffix == ".py"
         is_js_ts = filepath.suffix in _JS_EXTENSIONS
+
+        # --- Import-aware disambiguation for Python SQLAlchemy vs Django ---
+        python_orm_skip: set = set()
+        if is_python:
+            has_sqlalchemy_import = bool(
+                _re.search(r'^\s*(from|import)\s+sqlalchemy', content, _re.MULTILINE)
+            )
+            has_django_import = bool(
+                _re.search(r'^\s*(from|import)\s+django', content, _re.MULTILINE)
+            )
+            # If only one framework is imported, skip the other to avoid false positives
+            if has_sqlalchemy_import and not has_django_import:
+                python_orm_skip.add("django")
+            elif has_django_import and not has_sqlalchemy_import:
+                python_orm_skip.add("sqlalchemy")
+            # If both are imported (rare but valid), allow both through
+
         for orm_name, patterns in ORM_PATTERNS_COMPILED.items():
             if is_python and orm_name in ("prisma", "drizzle"):
                 continue
             if is_js_ts and orm_name in ("sqlalchemy", "django"):
+                continue
+            if is_python and orm_name in python_orm_skip:
                 continue
             for pattern in patterns:
                 if pattern.search(content):
@@ -631,6 +665,36 @@ class ScanService:
         }
         return "/".join(name_map.get(t, t) for t in sorted(orm_types))
 
+    @staticmethod
+    def _extract_text_literal_sql(orm_code: str) -> Optional[str]:
+        """Extract the literal SQL string from SQLAlchemy text("...") patterns.
+
+        Handles patterns like:
+          session.execute(text("SELECT * FROM users WHERE active = true"))
+          db.execute(text('SELECT id FROM orders WHERE status = $1'))
+          result = session.execute(text(\"\"\"SELECT ...\"\"\"))
+
+        Returns the raw SQL string if found, otherwise None.
+        This bypasses the LLM entirely — the snippet already *is* SQL.
+        """
+        # Match text("...") or text('...') or text(\"\"\"...\"\"\") or text('''...''')
+        # We look for the innermost string argument to text(...)
+        patterns = [
+            # Triple-quoted strings first (more specific)
+            r'text\s*\(\s*"""([\s\S]*?)"""\s*\)',
+            r"text\s*\(\s*'''([\s\S]*?)'''\s*\)",
+            # Single-quoted strings
+            r'text\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)',
+            r"text\s*\(\s*'((?:[^'\\]|\\.)*)'\s*\)",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, orm_code, re.DOTALL)
+            if m:
+                sql = m.group(1).strip()
+                if sql:
+                    return sql
+        return None
+
     def _batch_convert_snippets(
         self,
         queries: List[Dict],
@@ -638,17 +702,45 @@ class ScanService:
         schema_context: str,
         sql_dialect: str = "PostgreSQL",
     ) -> None:
-        """Convert ORM snippets to SQL in batches via LLM."""
+        """Convert ORM snippets to SQL in batches via LLM.
+
+        Raw SQLAlchemy text("SQL...") snippets are extracted directly without
+        calling the LLM — the literal SQL is already present in the snippet.
+        """
         from shared.llm_manager import LLMManager
+
+        # --- Pre-pass: resolve text("SQL...") patterns without LLM (Bug 3 fix) ---
+        needs_llm: List[Dict] = []
+        for q in queries:
+            orm_code = q.get("orm_code", "")
+            literal_sql = self._extract_text_literal_sql(orm_code)
+            if literal_sql is not None:
+                q["sql"] = literal_sql
+                q["issues"] = self._detect_issues(literal_sql)
+                snippet_cache.set(
+                    q.get("snippet_hash", ""),
+                    literal_sql,
+                    q["issues"],
+                    orm_code,
+                )
+            else:
+                needs_llm.append(q)
+
+        # If all snippets were resolved via text() extraction, nothing left to do
+        if not needs_llm:
+            return
 
         llm = LLMManager()
         schema_section = f"\n\nDatabase Schema:\n{schema_context}" if schema_context else ""
-        orm_desc = self._describe_orm_types(queries)
+        orm_desc = self._describe_orm_types(needs_llm)
 
         snippets_list = []
-        for j, q in enumerate(queries):
+        for j, q in enumerate(needs_llm):
             snippets_list.append(f'{j + 1}. {q.get("orm_code", "")}')
         snippets_text = "\n\n".join(snippets_list)
+
+        # Remap: subsequent code uses `queries` variable; point it at needs_llm
+        queries = needs_llm
 
         system_message = f"""Convert {orm_desc} ORM snippets to {sql_dialect} SQL.
 {schema_section}
@@ -756,6 +848,8 @@ Respond with ONLY this JSON (no markdown code blocks):
                 return "Session management, not a query"
             if re.search(r"\.(add|add_all|merge|delete)\(", orm_code):
                 return "Write operation without SELECT"
+            if re.search(r'\b(SELECT|INSERT|UPDATE|DELETE|WITH)\b', orm_code, re.IGNORECASE):
+                return "Table not found in schema"
             return "Not a database query"
         return "Could not convert to SQL"
 

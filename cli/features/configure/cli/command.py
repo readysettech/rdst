@@ -198,8 +198,15 @@ class ConfigureCommand:
                 return wizard.configure_targets(subcmd, cfg, **kwargs)
 
             if result:
+                if subcmd == "list":
+                    return RdstResult(True, "")
                 return RdstResult(True, "Operation completed successfully")
             if error:
+                # For subcmds that use the renderer (test, remove, default),
+                # the renderer already printed the error to the console.
+                # Return empty message to avoid a duplicate print in rdst.py main().
+                if subcmd in ("test", "remove", "default", "edit"):
+                    return RdstResult(False, "")
                 return RdstResult(False, getattr(error, "message", str(error)))
             return RdstResult(True, "Operation completed")
         except Exception as e:

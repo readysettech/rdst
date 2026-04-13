@@ -68,7 +68,7 @@ class ReportCommand:
                 include_query=include_query,
                 include_plan=include_plan,
             )
-        except (KeyboardInterrupt, EOFError):
+        except (KeyboardInterrupt, EOFError, SystemExit):
             self.console.print(MessagePanel("Feedback cancelled", variant="warning"))
             return False
 
@@ -84,6 +84,16 @@ class ReportCommand:
     ) -> bool:
         """Internal report flow - wrapped by run() for Ctrl-C handling."""
         from shared.telemetry import telemetry
+
+        # Validate mutually exclusive flags
+        if positive and negative:
+            self.console.print(
+                MessagePanel(
+                    "--positive and --negative cannot be used together. Please choose one.",
+                    variant="error",
+                )
+            )
+            return False
 
         # Check if we're in fully interactive mode (no args provided)
         fully_interactive = (
@@ -168,6 +178,17 @@ class ReportCommand:
                 include_query = True
             if plan_json and not include_plan:
                 include_plan = True
+
+        # Validate email if provided via CLI flag (non-interactive path)
+        if email and not fully_interactive:
+            if not ("@" in email and "." in email):
+                self.console.print(
+                    MessagePanel(
+                        f"Invalid email address: '{email}'. Please provide a valid email.",
+                        variant="error",
+                    )
+                )
+                return False
 
         # Submit feedback
         try:

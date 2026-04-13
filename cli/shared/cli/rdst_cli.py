@@ -1,5 +1,5 @@
 """
-Readyset CLI stubs (programmatic surface)
+ReadySet CLI stubs (programmatic surface)
 
 This module defines a small, modern-feeling programmatic interface for a future
 `rdst` CLI. Each method returns a structured result and serves as a stub where
@@ -555,7 +555,9 @@ class RdstCLI:
                     payload.get("data") or {},
                 )
             if error_event:
-                return RdstResult(False, error_event.message)
+                # QueryRenderer already printed the error to the console.
+                # Return empty message so rdst.py main() does not print it again.
+                return RdstResult(False, "")
             return RdstResult(False, "query command returned no result")
         except Exception as e:
             return RdstResult(False, f"query command failed: {e}")
@@ -566,28 +568,34 @@ class RdstCLI:
         banner = (
             "\n"
             "==============================================\n"
-            "  Readyset Data and SQL Toolkit (rdst)\n"
+            "  ReadySet Data and SQL Toolkit (rdst)\n"
             "==============================================\n"
         )
         intro = (
             "Troubleshoot latency, analyze queries, and get tuning insights.\n"
             "\n"
             "Common commands:\n"
-            "  - rdst configure        Manage database targets and profiles\n"
-            "  - rdst configure llm    Configure AI analysis provider (independent of targets)\n"
-            "  - rdst analyze          Explain a SQL query\n"
-            "  - rdst cache            Evaluate Readyset caching benefits\n"
-            "  - rdst top              Live view of top slow queries\n"
-            "  - rdst init             First-time setup wizard\n"
-            "  - rdst query list             Show saved queries\n"
-            "  - rdst query            Manage query registry\n"
-            "  - rdst version          Show version information\n"
+            "  - rdst init             Set up rdst for first use\n"
+            "  - rdst configure        Manage database targets and connection profiles\n"
+            "  - rdst top              Monitor slow queries in real-time\n"
+            "  - rdst analyze          Analyze SQL query performance\n"
+            "  - rdst ask              Ask questions about your database in natural language\n"
+            "  - rdst agent            Manage and run data agents with safety policies\n"
+            "  - rdst query            Manage saved queries (add/list/delete)\n"
+            "  - rdst schema           Manage semantic layer for your database\n"
+            "  - rdst cache            Deploy and manage ReadySet shallow caches\n"
+            "  - rdst fleet            Manage and audit database fleets\n"
+            "  - rdst audit            Run a deep health audit of a database target\n"
+            "  - rdst guard            Manage reusable safety policies\n"
+            "  - rdst scan             Scan codebase for ORM queries (experimental)\n"
             "  - rdst report           Submit feedback or bug reports\n"
+            "  - rdst version          Show version information\n"
             "\n"
             "Examples:\n"
+            "  rdst init\n"
             "  rdst configure add --target prod --host db.example.com --user admin\n"
-            "  rdst configure llm\n"
-            '  rdst analyze "SELECT * FROM users WHERE active = true"\n'
+            '  rdst analyze -q "SELECT * FROM users WHERE active = true" --target mydb\n'
+            '  rdst help "how do I find slow queries?"\n'
         )
         return RdstResult(True, f"{banner}{intro}")
 
@@ -607,7 +615,7 @@ class RdstCLI:
                 pkg_version = "unknown"
 
         return RdstResult(
-            True, f"Readyset Data and SQL Toolkit (rdst) version {pkg_version}"
+            True, f"ReadySet Data and SQL Toolkit (rdst) version {pkg_version}"
         )
 
     # rdst report
@@ -672,18 +680,27 @@ class RdstCLI:
             rdst ask "Show slow queries" --verbose
         """
         import asyncio
-        from features.ask.engine.ask3.input_handler import (
-            AskInputHandler,
-            NonInteractiveInputHandler,
-        )
-        from features.ask.engine.ask3.renderer import AskRenderer
-        from features.ask.events import (
-            AskClarificationNeededEvent,
-            AskResultEvent,
-            AskErrorEvent,
-        )
-        from features.ask.models import AskInput, AskOptions
-        from features.ask.service import AskService
+        try:
+            from features.ask.engine.ask3.input_handler import (
+                AskInputHandler,
+                NonInteractiveInputHandler,
+            )
+            from features.ask.engine.ask3.renderer import AskRenderer
+            from features.ask.events import (
+                AskClarificationNeededEvent,
+                AskResultEvent,
+                AskErrorEvent,
+            )
+            from features.ask.models import AskInput, AskOptions
+            from features.ask.service import AskService
+        except ImportError as import_err:
+            return RdstResult(
+                False,
+                "The 'ask' command is not available. "
+                "Some required components could not be loaded. "
+                "Try reinstalling rdst or check your installation. "
+                f"(detail: {import_err})",
+            )
 
         # Interactive prompt if no question provided
         if not question:
@@ -799,9 +816,11 @@ class RdstCLI:
             elif error_event:
                 if "cancelled" in error_event.message.lower():
                     return RdstResult(ok=False, message="Operation cancelled by user")
+                # The renderer already displayed the error to the console, so return
+                # an empty message to avoid a duplicate print in rdst.py main().
                 return RdstResult(
                     ok=False,
-                    message=error_event.message,
+                    message="",
                     data={"phase": error_event.phase} if error_event.phase else {},
                 )
 
@@ -890,10 +909,16 @@ class RdstCLI:
                     auto_accept = kwargs.get("auto_accept", False)
                     sample_rows = kwargs.get("sample_rows", 5)
                     target_config = self._get_target_config(target)
+                    # Validate target exists before entering wizard
+                    if not target_config:
+                        return RdstResult(
+                            False,
+                            f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
+                        )
                     if use_llm and not target_config:
                         return RdstResult(
                             False,
-                            f"Target '{target}' not found. Run 'rdst configure' first.",
+                            f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
                         )
                     if auto_accept and not use_llm:
                         return RdstResult(
@@ -928,6 +953,14 @@ class RdstCLI:
                         error_event = event
 
             if subcommand == "show":
+                # Check that the target is configured before checking for semantic layer.
+                # This gives a clearer error when the target itself doesn't exist.
+                target_cfg = self._get_target_config(target)
+                if not target_cfg and not service._manager.exists(target):
+                    return RdstResult(
+                        False,
+                        f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
+                    )
                 asyncio.run(
                     _consume(service.get_schema_events(target, kwargs.get("table")))
                 )
@@ -936,7 +969,7 @@ class RdstCLI:
                 if not target_config:
                     return RdstResult(
                         False,
-                        f"Target '{target}' not found. Run 'rdst configure' first.",
+                        f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
                     )
                 if kwargs.get("interactive", False):
                     # keep interactive enum flow on legacy command
@@ -958,6 +991,12 @@ class RdstCLI:
                     _consume(service.init_events(target, target_config, options))
                 )
             elif subcommand == "export":
+                export_target_config = self._get_target_config(target)
+                if not export_target_config:
+                    return RdstResult(
+                        False,
+                        f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
+                    )
                 asyncio.run(
                     _consume(
                         service.export_events(
@@ -966,6 +1005,18 @@ class RdstCLI:
                     )
                 )
             elif subcommand == "delete":
+                # Validate target and schema existence before prompting
+                delete_target_config = self._get_target_config(target)
+                if not delete_target_config:
+                    return RdstResult(
+                        False,
+                        f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
+                    )
+                if not service._manager.exists(target):
+                    return RdstResult(
+                        False,
+                        f"No semantic layer found for '{target}'. Run 'rdst schema init' first.",
+                    )
                 force = kwargs.get("force", False)
                 if not force:
                     try:
@@ -986,7 +1037,7 @@ class RdstCLI:
                 if not target_config:
                     return RdstResult(
                         False,
-                        f"Target '{target}' not found. Run 'rdst configure' first.",
+                        f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
                     )
 
                 result = schema_cmd.refresh(target, target_config)
@@ -996,7 +1047,7 @@ class RdstCLI:
                 if not target_config:
                     return RdstResult(
                         False,
-                        f"Target '{target}' not found. Run 'rdst configure' first.",
+                        f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
                     )
                 if not schema_cmd.manager.exists(target):
                     return RdstResult(
@@ -1029,7 +1080,9 @@ class RdstCLI:
                 return RdstResult(False, f"Unknown schema subcommand: {subcommand}")
 
             if error_event:
-                return RdstResult(False, error_event.message)
+                # The renderer already displayed the error to the console via Rich,
+                # so return an empty message to avoid a duplicate print in rdst.py main().
+                return RdstResult(False, "")
             if not complete_event:
                 return RdstResult(False, "schema command returned no result")
 

@@ -153,6 +153,18 @@ class ASTQueryExtractor(ast.NodeVisitor):
         # Sort by line number for deterministic ordering
         self.queries.sort(key=lambda q: q.start_line)
 
+        # Deduplicate: for ORM chains like session.execute(stmt).scalars().all(),
+        # both 'execute' and 'all' are TERMINAL_METHODS so the visitor fires twice,
+        # producing two entries with the same snippet (and thus the same hash).
+        # Keep only the first occurrence of each snippet_hash.
+        seen_hashes: Set[str] = set()
+        unique_queries: List[ExtractedQuery] = []
+        for q in self.queries:
+            if q.snippet_hash not in seen_hashes:
+                seen_hashes.add(q.snippet_hash)
+                unique_queries.append(q)
+        self.queries = unique_queries
+
         return self.queries
 
     def _collect_metadata(self, tree: ast.AST):
@@ -265,8 +277,27 @@ class ASTQueryExtractor(ast.NodeVisitor):
         # Continue visiting children
         self.generic_visit(node)
 
+    def _collect_names_in_expr(self, node: ast.AST) -> Set[str]:
+        """Collect all Name node ids referenced within an expression."""
+        names: Set[str] = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name):
+                names.add(child.id)
+        return names
+
     def _extract_query_at_node(self, node: ast.Call, terminal_method: str):
-        """Extract the ORM query snippet for a terminal method call."""
+        """Extract the ORM query snippet for a terminal method call.
+
+        Also looks backwards in the same function scope for variable assignments
+        whose targets are referenced in the terminal expression. This handles
+        patterns like:
+
+            stmt = select(User).where(...)
+            result = session.execute(stmt).scalars().all()
+
+        In that case both lines are included in the extracted snippet so the LLM
+        can understand the full query.
+        """
         if not self.current_function:
             return  # Skip queries not in a function
 
@@ -278,6 +309,37 @@ class ASTQueryExtractor(ast.NodeVisitor):
         if start < 1 or end > len(self.lines):
             return
 
+        # Determine which names (variables) are used in the terminal expression
+        expr_names = self._collect_names_in_expr(node)
+
+        # Walk the function body's AST to find preceding assignments that define
+        # variables referenced in this expression.  We only look within the same
+        # function and before the current line.
+        preceding_lines: List[Tuple[int, int]] = []  # (start_line, end_line) of assignments
+        try:
+            tree = ast.parse(self.source)
+        except SyntaxError:
+            tree = None
+
+        if tree and expr_names:
+            for func_node in ast.walk(tree):
+                if not isinstance(func_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if func_node.name != self.current_function:
+                    continue
+                for stmt in ast.walk(func_node):
+                    if not isinstance(stmt, ast.Assign):
+                        continue
+                    stmt_end = getattr(stmt, 'end_lineno', stmt.lineno)
+                    if stmt_end >= start:
+                        continue  # Only look at statements *before* the terminal call
+                    # Check if any assignment target name is used in our expression
+                    for target in stmt.targets:
+                        if isinstance(target, ast.Name) and target.id in expr_names:
+                            stmt_start = stmt.lineno
+                            preceding_lines.append((stmt_start, stmt_end))
+                            break
+
         snippet_lines = self.lines[start - 1:end]
         # Strip leading indentation uniformly (dedent)
         if snippet_lines:
@@ -286,6 +348,24 @@ class ASTQueryExtractor(ast.NodeVisitor):
                 default=0,
             )
             snippet_lines = [line[min_indent:] for line in snippet_lines]
+
+        # Prepend relevant preceding assignments
+        if preceding_lines:
+            preceding_lines.sort(key=lambda t: t[0])
+            ref_indent = min(
+                (len(self.lines[s - 1]) - len(self.lines[s - 1].lstrip()))
+                for s, _ in preceding_lines
+                if s >= 1 and s <= len(self.lines) and self.lines[s - 1].strip()
+            ) if preceding_lines else 0
+            prefix_parts: List[str] = []
+            for ps, pe in preceding_lines:
+                if ps < 1 or pe > len(self.lines):
+                    continue
+                for line in self.lines[ps - 1:pe]:
+                    prefix_parts.append(line[ref_indent:])
+            if prefix_parts:
+                snippet_lines = prefix_parts + snippet_lines
+
         orm_snippet = '\n'.join(snippet_lines).strip()
 
         if not orm_snippet:

@@ -10,7 +10,7 @@ from .config import (
     RestrictionsConfig,
 )
 from .intent import derive_rules_from_intent, format_derived_rules
-from .manager import GuardExistsError, GuardManager, GuardNotFoundError
+from .manager import GuardExistsError, GuardManager, GuardNotFoundError, InvalidGuardNameError
 from .masking import get_masked_columns, mask_results, mask_value
 
 __all__ = [
@@ -20,6 +20,7 @@ __all__ = [
     "GuardExistsError",
     "GuardManager",
     "GuardNotFoundError",
+    "InvalidGuardNameError",
     "GuardsConfig",
     "LimitsConfig",
     "MaskingConfig",

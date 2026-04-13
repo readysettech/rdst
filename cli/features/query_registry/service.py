@@ -264,7 +264,7 @@ class QueryService:
 
             target_config = cfg.get(target)
             if not target_config:
-                raise ValueError(f"Target '{target}' not found")
+                raise ValueError(f"Target '{target}' not found. Run 'rdst configure add' to set one up.")
 
             query_stats: dict[str, _QueryStats] = {}
             stats_lock = Lock()

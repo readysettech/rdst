@@ -6,10 +6,16 @@ Handles creating, listing, loading, and deleting guards stored in ~/.rdst/guards
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Iterator
 
 from .config import GuardConfig, GUARDS_DIR
+
+# Guard names must start with a letter or underscore and contain only
+# letters, digits, underscores, and hyphens. Slashes, dots, and other
+# path-special characters are forbidden to prevent path traversal.
+GUARD_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
 
 
 class GuardNotFoundError(Exception):
@@ -20,6 +26,34 @@ class GuardNotFoundError(Exception):
 class GuardExistsError(Exception):
     """Raised when trying to create a guard that already exists."""
     pass
+
+
+class InvalidGuardNameError(Exception):
+    """Raised when a guard name is invalid."""
+    pass
+
+
+def validate_guard_name(name: str) -> None:
+    """Validate a guard name.
+
+    Args:
+        name: Guard name to validate.
+
+    Raises:
+        InvalidGuardNameError: If name is invalid.
+    """
+    if not name:
+        raise InvalidGuardNameError("Guard name cannot be empty")
+
+    if len(name) > 64:
+        raise InvalidGuardNameError("Guard name cannot exceed 64 characters")
+
+    if not GUARD_NAME_PATTERN.match(name):
+        raise InvalidGuardNameError(
+            f"Invalid guard name '{name}'. "
+            "Names must start with a letter or underscore and contain only "
+            "letters, digits, underscores, and hyphens."
+        )
 
 
 class GuardManager:
@@ -55,8 +89,10 @@ class GuardManager:
             Path to the created guard file.
 
         Raises:
+            InvalidGuardNameError: If the guard name is invalid.
             GuardExistsError: If guard exists and overwrite is False.
         """
+        validate_guard_name(config.name)
         path = self._guard_path(config.name)
 
         if path.exists() and not overwrite:
@@ -153,9 +189,11 @@ class GuardManager:
             Path to the renamed guard file.
 
         Raises:
+            InvalidGuardNameError: If the new name is invalid.
             GuardNotFoundError: If old guard doesn't exist.
             GuardExistsError: If new name already exists.
         """
+        validate_guard_name(new_name)
         if not self.exists(old_name):
             raise GuardNotFoundError(f"Guard '{old_name}' not found")
 

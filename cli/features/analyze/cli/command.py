@@ -650,6 +650,16 @@ class AnalyzeCommand:
 
             # Readyset analysis always runs in parallel (Docker check is soft/non-fatal)
 
+            # Validate target exists BEFORE showing the EXPLAIN ANALYZE prompt
+            if target:
+                _validate_cfg = TargetsConfig()
+                _validate_cfg.load()
+                if not _validate_cfg.get(target):
+                    return RdstResult(
+                        False,
+                        f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
+                    )
+
             # EXPLAIN ANALYZE safety warning (unless --skip-warning or --fast)
             showed_warning = False
             if not skip_warning and not fast and not output_json and sys.stdout.isatty():

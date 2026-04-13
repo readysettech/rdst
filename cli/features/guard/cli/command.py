@@ -26,6 +26,7 @@ from features.guard import (
     GuardExistsError,
     GuardManager,
     GuardNotFoundError,
+    InvalidGuardNameError,
     check_query,
     derive_rules_from_intent,
     format_derived_rules,
@@ -224,6 +225,8 @@ Run 'rdst guard create --help' for full options."""
                 f"Created guard '{name}' at {path}",
                 data={"name": name, "path": str(path)},
             )
+        except InvalidGuardNameError as e:
+            return RdstResult(False, str(e))
         except GuardExistsError:
             return RdstResult(False, f"Guard '{name}' already exists. Use 'rdst guard delete {name}' first.")
 
@@ -314,9 +317,11 @@ Run 'rdst guard create --help' for full options."""
             return RdstResult(True, "No guards configured. Create one with 'rdst guard create --name NAME'")
 
         # Build table output
+        name_width = max(len(g.name) for g in guards)
+        name_width = max(name_width, 4)  # at least as wide as "NAME"
         lines = []
-        lines.append(f"{'NAME':<20} {'TYPE':<10} {'MASKS':<6} {'GUARDS':<20} {'MAX_ROWS':<10}")
-        lines.append("-" * 70)
+        lines.append(f"{'NAME':<{name_width}} {'TYPE':<10} {'MASKS':<6} {'GUARDS':<20} {'MAX_ROWS':<10}")
+        lines.append("-" * (name_width + 50))
 
         for guard in guards:
             mask_count = len(guard.masking.patterns)
@@ -334,13 +339,15 @@ Run 'rdst guard create --help' for full options."""
                 guards_list.append("est_rows")
             if guard.guards.max_tables:
                 guards_list.append(f"tbl:{guard.guards.max_tables}")
+            if guard.guards.no_select_star:
+                guards_list.append("no_select*")
 
             guards_str = ", ".join(guards_list) if guards_list else "-"
             if len(guards_str) > 20:
                 guards_str = guards_str[:17] + "..."
 
             lines.append(
-                f"{guard.name:<20} {guard_type:<10} {mask_count:<6} {guards_str:<20} {guard.limits.max_rows:<10}"
+                f"{guard.name:<{name_width}} {guard_type:<10} {mask_count:<6} {guards_str:<20} {guard.limits.max_rows:<10}"
             )
 
         return RdstResult(True, "\n".join(lines), data={"guards": [g.name for g in guards]})
@@ -348,7 +355,7 @@ Run 'rdst guard create --help' for full options."""
     def _show(self, name: str | None) -> RdstResult:
         """Show guard details."""
         if not name:
-            return RdstResult(False, "Guard name required")
+            return RdstResult(False, "Guard name required. Usage: rdst guard show <name>")
 
         try:
             config = self.manager.get(name)
@@ -416,7 +423,7 @@ Run 'rdst guard create --help' for full options."""
     def _delete(self, name: str | None) -> RdstResult:
         """Delete a guard."""
         if not name:
-            return RdstResult(False, "Guard name required")
+            return RdstResult(False, "Guard name required. Usage: rdst guard delete <name>")
 
         try:
             self.manager.delete(name)
@@ -427,7 +434,7 @@ Run 'rdst guard create --help' for full options."""
     def _edit(self, name: str | None) -> RdstResult:
         """Edit guard in $EDITOR."""
         if not name:
-            return RdstResult(False, "Guard name required")
+            return RdstResult(False, "Guard name required. Usage: rdst guard edit <name>")
 
         try:
             config = self.manager.get(name)

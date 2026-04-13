@@ -326,15 +326,18 @@ class TopCommand:
 
         # Display error after Live cleanup so it's visible on the normal terminal
         if error_event is not None:
+            stderr_console = create_console(stderr=True)
             if not live_started:
                 # Error before Live display started — restore terminal and show clearly
                 self._force_restore_terminal()
-                self._console.print(
+                stderr_console.print(
                     MessagePanel(error_event.message, title="Error", variant="error")
                 )
             else:
                 renderer.render(error_event)
-            return RdstResult(False, error_event.message)
+            # The renderer (or stderr_console.print above) already displayed the error.
+            # Return empty message so rdst.py main() does not print it again.
+            return RdstResult(False, "")
 
         # Handle post-exit actions
         current_queries = renderer.get_current_queries()
