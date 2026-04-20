@@ -225,8 +225,18 @@ class TargetsConfig:
         return self._data.get("email")
 
     def set_email(self, email: str) -> None:
-        if email and not self._data.get("email"):
+        """Store or update user email (always overwrites — used by report flow)."""
+        if email:
             self._data["email"] = email
+
+    def get_report_token(self) -> Optional[str]:
+        """Get the verified report delivery token (keyservice)."""
+        return self._data.get("report_token")
+
+    def set_report_token(self, token: str) -> None:
+        """Store a verified report_token returned by the keyservice."""
+        if token:
+            self._data["report_token"] = token
 
     def get_trial_config(self) -> Dict[str, Any]:
         return self._data.get("trial", {})

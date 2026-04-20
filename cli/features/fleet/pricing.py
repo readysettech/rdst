@@ -39,6 +39,7 @@ RDS_PRICING: Dict[str, Dict[str, Any]] = {
     "db.r5.2xlarge": {"vcpu": 8, "memory_gb": 64, "price_usd_hr": 0.960},
     "db.r5.4xlarge": {"vcpu": 16, "memory_gb": 128, "price_usd_hr": 1.920},
     # R6g (memory optimized, Graviton)
+    "db.r6g.medium": {"vcpu": 1, "memory_gb": 8, "price_usd_hr": 0.109},
     "db.r6g.large": {"vcpu": 2, "memory_gb": 16, "price_usd_hr": 0.218},
     "db.r6g.xlarge": {"vcpu": 4, "memory_gb": 32, "price_usd_hr": 0.435},
     "db.r6g.2xlarge": {"vcpu": 8, "memory_gb": 64, "price_usd_hr": 0.870},
@@ -131,3 +132,63 @@ def suggest_downsize(instance_class: str) -> Optional[Dict[str, Any]]:
         }
 
     return None
+
+
+def suggest_downsize_with_readyset(
+    instance_class: str,
+    cacheable_read_pct: float = 75.0,
+    current_utilization_pct: float = 50.0,
+) -> Optional[Dict[str, Any]]:
+    """Suggest a smaller instance class assuming Readyset offloads cacheable reads.
+
+    Estimates post-Readyset utilization and finds the smallest instance that
+    can handle the remaining workload. Caps the offload assumption at 75%.
+
+    Returns dict with instance_class, monthly_cost, projected_utilization, offload_pct.
+    """
+    current = RDS_PRICING.get(instance_class)
+    if not current:
+        return None
+
+    # Cap offload at 75% — conservative guardrail
+    offload_pct = min(cacheable_read_pct, 75.0)
+    if offload_pct <= 0:
+        return None
+
+    projected_util = current_utilization_pct * (1 - offload_pct / 100)
+
+    # Current instance memory as capacity proxy
+    current_mem = current["memory_gb"]
+    needed_mem = max(current_mem * (1 - offload_pct / 100), 2.0)
+
+    parts = instance_class.rsplit(".", 1)
+    if len(parts) != 2:
+        return None
+    family = parts[0]
+
+    size_order = ["micro", "small", "medium", "large", "xlarge", "2xlarge", "4xlarge", "8xlarge", "12xlarge", "16xlarge"]
+    best = None
+    for size in size_order:
+        candidate = f"{family}.{size}"
+        info = RDS_PRICING.get(candidate)
+        if info and info["memory_gb"] >= needed_mem:
+            best = {
+                "instance_class": candidate,
+                "monthly_cost": round(info["price_usd_hr"] * _HOURS_PER_MONTH, 2),
+                "projected_utilization_pct": round(projected_util, 1),
+                "offload_pct": round(offload_pct, 0),
+            }
+            break
+
+    # Don't recommend same-or-larger
+    if best:
+        current_cost = round(current["price_usd_hr"] * _HOURS_PER_MONTH, 2)
+        if best["monthly_cost"] >= current_cost:
+            return None
+
+    return best
+
+
+def get_instance_info(instance_class: str) -> Optional[Dict[str, Any]]:
+    """Get vCPU, memory, and pricing info for an instance class."""
+    return RDS_PRICING.get(instance_class)

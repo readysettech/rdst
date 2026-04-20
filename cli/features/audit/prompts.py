@@ -69,6 +69,18 @@ INDEX RECOMMENDATION RULES:
 - For truncated queries (ending abruptly), note that recommendations may be incomplete
 {truncation_warning}
 
+IMPORTANT: The report the user sees shows ONLY the captured queries (from the capture window).
+Your main recommendations (index_recommendations, optimization_priorities, top_bottlenecks,
+caching_candidates, not_cacheable) MUST reference only captured query hashes — the ones from
+the "TOP QUERIES BY TOTAL TIME" section above. Use the call counts from the capture window,
+NOT the cumulative counts.
+
+If you notice important patterns in the CUMULATIVE TOP QUERIES that were NOT seen during the
+capture window, put those observations in the "historical_observations" array. Each observation
+should include the full query text and hash so the user can investigate with rdst analyze.
+Only include historical observations if they are genuinely important — do not add them just
+to fill the section.
+
 Provide your analysis as JSON with these fields:
 {{
   "workload_characterization": "Brief description (e.g., 'read-heavy OLTP with high query repetition')",
@@ -98,6 +110,9 @@ Provide your analysis as JSON with these fields:
   "capacity_insights": ["insight1", "insight2"],
   "optimization_priorities": [
     {{"priority": 1, "action": "...", "category": "index|rewrite|config|schema|cache", "effort": "low|medium|high", "impact": "high|medium|low", "details": "..."}}
+  ],
+  "historical_observations": [
+    {{"query_hash": "...", "query_text": "full SQL text", "observation": "why this matters", "calls_cumulative": <int>}}
   ]
 }}
 

@@ -54,7 +54,9 @@ class AuditService:
         yield AuditStatusEvent(type="status", phase="connect", message=f"Auditing {target_name}...")
         yield AuditTargetStartEvent(type="target_start", target_name=target_name, index=0, total=1)
 
-        result = self.audit_target(target_name, target_config)
+        # Progress messages from audit_target — collected here, yielded as status events below.
+        _progress_msgs: list[str] = []
+        result = self.audit_target(target_name, target_config, on_progress=lambda m: _progress_msgs.append(m))
         if result.error:
             yield AuditTargetErrorEvent(
                 type="target_error",
@@ -144,8 +146,16 @@ class AuditService:
             },
         )
 
-    def audit_target(self, target_name: str, target_config: dict[str, Any]) -> AuditResult:
-        """Audit a single target. Never raises."""
+    def audit_target(self, target_name: str, target_config: dict[str, Any], on_progress=None) -> AuditResult:
+        """Audit a single target. Never raises.
+
+        on_progress: optional callable(message: str) — called at each phase
+        boundary so the CLI can show a spinner with elapsed time.
+        """
+        def _progress(msg: str):
+            if on_progress:
+                on_progress(msg)
+
         engine = target_config.get("engine", "unknown")
         host = target_config.get("host", "unknown")
         region = target_config.get("region")
@@ -153,6 +163,7 @@ class AuditService:
         group = target_config.get("group")
         tags = target_config.get("tags", [])
 
+        _progress("Collecting database metrics...")
         try:
             metrics = collect_metrics(target_config)
         except Exception as exc:
@@ -178,6 +189,56 @@ class AuditService:
         )
         self._enrich_aws_storage(metrics, host, region)
 
+        _progress("Checking cloud metrics...")
+        # Pull CloudWatch CPU data if this looks like an RDS instance
+        cloudwatch_cpu: dict[str, Any] | None = None
+        if region and "rds.amazonaws.com" in (host or ""):
+            try:
+                from features.fleet.cloudwatch_metrics import (
+                    collect_cloudwatch_cpu,
+                    derive_rds_identifier,
+                )
+
+                rds_id = derive_rds_identifier(target_name, host)
+                if not rds_id:
+                    cluster_name = host.split(".")[0]
+                    for suffix in ("-writer", ""):
+                        candidate = f"{cluster_name}{suffix}"
+                        test = collect_cloudwatch_cpu(candidate, region=region, hours=24)
+                        if test:
+                            rds_id = candidate
+                            cloudwatch_cpu = test
+                            break
+                if rds_id and not cloudwatch_cpu:
+                    cloudwatch_cpu = collect_cloudwatch_cpu(rds_id, region=region, hours=24)
+            except Exception:
+                pass
+
+        _progress("Collecting health data...")
+        # Collect §3-§6, §8 health data (Gautam v3 sections). Best-effort.
+        health_report: dict[str, Any] | None = None
+        try:
+            from features.audit.health import collect_health_report
+            from features.fleet.pricing import get_instance_info
+
+            ram_gb: float | None = None
+            vcpus: int | None = None
+            if instance_class:
+                info = get_instance_info(instance_class)
+                if info:
+                    ram_gb = float(info.get("memory_gb") or 0) or None
+                    vcpus = int(info.get("vcpu") or 0) or None
+
+            hr = collect_health_report(
+                target_config, engine, instance_ram_gb=ram_gb, instance_vcpus=vcpus,
+            )
+            health_report = asdict(hr)
+        except Exception as exc:
+            health_report = {"collection_error": str(exc)}
+
+        # Health LLM deferred — CLI runs it in parallel with duration capture.
+        health_analysis: dict[str, Any] | None = None
+
         return AuditResult(
             target_name=target_name,
             engine=engine,
@@ -191,7 +252,43 @@ class AuditService:
             cache_opportunity=cache_opportunity,
             top_queries=top_queries,
             audited_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            cloudwatch_cpu=cloudwatch_cpu,
+            health_report=health_report,
+            health_analysis=health_analysis,
         )
+
+    @staticmethod
+    def run_health_llm(audit_result_dict: dict[str, Any]) -> dict[str, Any] | None:
+        """Run the health LLM analysis. Thread-safe — no shared state.
+
+        Takes a dict (asdict of AuditResult) and returns health_analysis dict.
+        Designed to run in a background thread while duration capture is in
+        progress, since it only needs metrics/health data (no captured queries).
+        """
+        try:
+            from features.audit.health_prompt import build_health_analysis_prompt
+            from shared.llm_manager.llm_manager import LLMManager
+            from shared.json_parse import parse_llm_json
+
+            prompt = build_health_analysis_prompt(
+                target_name=audit_result_dict.get("target_name", ""),
+                engine=audit_result_dict.get("engine", ""),
+                instance_class=audit_result_dict.get("instance_class"),
+                health_report=audit_result_dict.get("health_report") or {},
+                metrics=audit_result_dict.get("metrics") or {},
+                sizing=audit_result_dict.get("sizing") or {},
+                cloudwatch_cpu=audit_result_dict.get("cloudwatch_cpu"),
+                top_queries=audit_result_dict.get("top_queries") or [],
+            )
+            llm = LLMManager()
+            llm_result = llm.generate_response(prompt, max_tokens=4096, temperature=0.0)
+            raw_text = llm_result.get("response", "")
+            ha = parse_llm_json(raw_text) or {}
+            ha["model_used"] = llm_result.get("model", "unknown")
+            ha["raw_response"] = raw_text
+            return ha
+        except Exception as exc:
+            return {"error": str(exc)}
 
     def _collect_top_queries(
         self,
@@ -240,8 +337,30 @@ class AuditService:
                 if not text.strip():
                     continue
 
+                # Filter system/internal queries — these are RDST's own queries
+                # or database internals, not user application queries.
+                lower = text.lower()
+                if any(s in lower for s in [
+                    "pg_stat_", "pg_settings", "pg_indexes", "pg_catalog",
+                    "pg_database_size", "pg_backend_pid", "pg_stat_statements",
+                    "information_schema", "pg_replication",
+                    "performance_schema", "@@",
+                    "mysql.", "sys.",
+                ]):
+                    continue
+
+                # Only SELECT queries belong in reports — filter SHOW, SET,
+                # EXPLAIN, INSERT, UPDATE, DELETE, and other non-SELECT commands.
+                first_word = lower.lstrip().split()[0] if lower.strip() else ""
+                if first_word not in ("select", "with"):
+                    continue
+
                 normalized = literal_re.sub("?", text).strip()
-                query_hash = hashlib.md5(normalized.encode()).hexdigest()[:12]
+                try:
+                    from shared.query_registry import hash_sql
+                    query_hash = hash_sql(text)[:12]
+                except Exception:
+                    query_hash = hashlib.md5(normalized.encode()).hexdigest()[:12]
                 pct = round((total_ms / total_time) * 100, 1) if total_time > 0 else 0
                 queries.append(
                     {

@@ -1413,6 +1413,10 @@ Examples:
                     "no_save": {
                         "type": "boolean",
                         "description": "Don't save queries to registry"
+                    },
+                    "verbose": {
+                        "type": "boolean",
+                        "description": "Print the full report directly to the terminal instead of emailing the hosted link. Default behavior emails the report after a one-time email verification."
                     }
                 },
                 "required": ["target"]
@@ -1580,6 +1584,10 @@ Examples:
                     "no_save": {
                         "type": "boolean",
                         "description": "Don't auto-save snapshot"
+                    },
+                    "verbose": {
+                        "type": "boolean",
+                        "description": "Print the full fleet report directly to the terminal instead of emailing the hosted link. Default behavior emails the report after a one-time email verification."
                     }
                 },
                 "required": []
@@ -2139,6 +2147,8 @@ Cache created. Next steps:
             args.append("--no-insights")
         if arguments.get("no_save"):
             args.append("--no-save")
+        if arguments.get("verbose"):
+            args.append("-v")
         return run_rdst_command(args)
 
     elif name == "rdst_audit_show":
@@ -2185,6 +2195,8 @@ Cache created. Next steps:
             args.extend(["--save", arguments["save"]])
         if arguments.get("no_save"):
             args.append("--no-save")
+        if arguments.get("verbose"):
+            args.append("-v")
         return run_rdst_command(args)
 
     elif name == "rdst_fleet_snapshots":

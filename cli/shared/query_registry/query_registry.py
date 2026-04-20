@@ -758,14 +758,18 @@ class QueryRegistry:
                 f"({MAX_QUERY_LENGTH // 1024}KB)."
             )
 
-        is_valid, parse_error = verify_query_completeness(canonical_sql, dialect)
-        if not is_valid:
-            raise ValueError(
-                f"Query appears truncated. {parse_error}\n"
-                "Queries >1KB may be truncated by database settings.\n"
-                "For MySQL: set performance_schema_max_digest_length = 16384 and max_digest_length = 16384\n"
-                "Or provide the full query with: rdst analyze -q '<full query>'"
-            )
+        if not skip_param_extraction:
+            # Only validate syntax for user-provided queries. Audit-captured
+            # queries come directly from the database and are known-complete;
+            # their MySQL DIGEST_TEXT formatting may trip SQLGlot's parser.
+            is_valid, parse_error = verify_query_completeness(canonical_sql, dialect)
+            if not is_valid:
+                raise ValueError(
+                    f"Query appears truncated. {parse_error}\n"
+                    "Queries >1KB may be truncated by database settings.\n"
+                    "For MySQL: set performance_schema_max_digest_length = 16384 and max_digest_length = 16384\n"
+                    "Or provide the full query with: rdst analyze -q '<full query>'"
+                )
 
         # Use SQLGlot for robust normalization and parameter extraction
         if skip_param_extraction:

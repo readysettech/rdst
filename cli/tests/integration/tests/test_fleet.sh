@@ -111,20 +111,20 @@ EOF
   # --------------------------------------------------------------------------
 
   run_cmd "Audit: single target ${DB_ENGINE} human" "${RDST_CMD[@]}" audit \
-    --target "fleet-${DB_ENGINE}" --no-insights
-  assert_contains "Audit:" "audit human has header"
+    --target "fleet-${DB_ENGINE}" --no-insights -v
+  assert_contains "RDST Audit Report" "audit human has header"
   assert_contains "Sizing:" "audit human has sizing"
-  assert_contains "Cache Opportunity:" "audit human has cache opportunity"
   echo "PASS: Single-target audit human-readable"
 
   # --------------------------------------------------------------------------
-  # Test 10: Audit with insights (default on, requires ANTHROPIC_API_KEY)
+  # Test 10: Audit with LLM insights + health score (requires ANTHROPIC_API_KEY)
   # --------------------------------------------------------------------------
 
   if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
     run_cmd "Audit: with LLM insights" "${RDST_CMD[@]}" audit \
-      --target "fleet-${DB_ENGINE}"
-    assert_contains "Health Assessment" "audit insights has health assessment"
+      --target "fleet-${DB_ENGINE}" -v
+    assert_contains "Health Score" "audit insights has health score"
+    assert_contains "Next Steps" "audit insights has next steps"
     echo "PASS: Audit with LLM insights"
   else
     echo "SKIP: Audit with LLM insights (no ANTHROPIC_API_KEY)"
@@ -198,7 +198,7 @@ EOF
   # --------------------------------------------------------------------------
 
   run_cmd "Audit: save result" "${RDST_CMD[@]}" audit \
-    --target "fleet-${DB_ENGINE}" --no-insights --save "single-baseline"
+    --target "fleet-${DB_ENGINE}" --no-insights --save "single-baseline" -v
   assert_contains "Audit" "audit save completes"
   echo "PASS: Audit with --save"
 
@@ -269,6 +269,77 @@ EOF
     fi
   else
     echo "SKIP: Query run --file with --analyze (no ANTHROPIC_API_KEY)"
+  fi
+
+  # ==========================================================================
+  # Test 23: Audit with --duration + ReadySet cache testing (verbose)
+  # RS cache was deployed by test_cache_commands earlier in the suite.
+  # Verifies: captured queries, RS speedup data, health score, no pricing.
+  # ==========================================================================
+
+  if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" && -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    echo ""
+    echo "=== TEST 23: Audit with duration + RS cache + verbose (${DB_ENGINE}) ==="
+
+    run_cmd "Audit: duration + RS verbose" "${RDST_CMD[@]}" audit \
+      --target "${TARGET_NAME}" --duration 15s -v -y
+    assert_contains "RDST Audit Report" "audit+RS has header"
+    assert_contains "Health Score" "audit+RS has health score"
+    assert_contains "Captured Queries" "audit+RS has captured queries table"
+    assert_contains "Index Recommendations" "audit+RS has index recs"
+    assert_contains "Next Steps" "audit+RS has next steps"
+    assert_contains "rdst analyze" "audit+RS has command hints"
+    # No AWS = no pricing section
+    assert_not_contains "Sizing & Savings" "audit+RS has no pricing section (non-AWS)"
+    echo "PASS: Audit with duration + RS cache + verbose"
+
+    # JSON output: verify new fields + RS results
+    run_cmd "Audit: duration + RS JSON" "${RDST_CMD[@]}" audit \
+      --target "${TARGET_NAME}" --duration 15s --json
+    assert_json "audit+RS json valid"
+    assert_contains "\"health_report\"" "audit+RS json has health_report"
+    assert_contains "\"health_analysis\"" "audit+RS json has health_analysis"
+    assert_contains "\"health_score\"" "audit+RS json has health_score in analysis"
+    # RS cache was deployed → readyset_results should have entries with speedup > 1
+    if echo "$LAST_OUTPUT" | grep -q '"readyset_results".*\[{'; then
+      # At least one query must show speedup > 1.0 (RS faster than DB)
+      if echo "$LAST_OUTPUT" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+rs = d.get('readyset_results') or []
+fast = [r for r in rs if (r.get('speedup') or 0) > 1.0]
+sys.exit(0 if fast else 1)
+" 2>/dev/null; then
+        echo "PASS: At least one query shows RS speedup > 1.0x"
+      else
+        echo "FAIL: readyset_results present but no query shows speedup > 1.0x"
+        exit 1
+      fi
+    else
+      echo "INFO: readyset_results empty — RS cache may not have benchmarked queries"
+    fi
+    echo "PASS: Audit with duration + RS JSON output"
+  else
+    echo "SKIP: Audit duration + RS tests (SKIP_READYSET_CACHE_TESTS=true or no ANTHROPIC_API_KEY)"
+  fi
+
+  # ==========================================================================
+  # Test 24: Fleet audit with --duration + verbose
+  # ==========================================================================
+
+  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    echo ""
+    echo "=== TEST 24: Fleet audit + duration + verbose (${DB_ENGINE}) ==="
+
+    run_cmd "Fleet: audit duration verbose" "${RDST_CMD[@]}" fleet audit \
+      --group integration-group --duration 15s -v -y
+    assert_contains "Fleet Health" "fleet+duration has fleet health"
+    assert_contains "Top Findings" "fleet+duration has top findings"
+    assert_contains "Next Steps" "fleet+duration has next steps"
+    assert_contains "Individual Target" "fleet+duration has individual links"
+    echo "PASS: Fleet audit with duration + verbose"
+  else
+    echo "SKIP: Fleet audit duration + verbose (no ANTHROPIC_API_KEY)"
   fi
 
   echo ""

@@ -1,5 +1,7 @@
 """Audit command — single-target deep health audit."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
@@ -36,45 +38,108 @@ class AuditCommand:
         save_name = getattr(args, "save_name", None)
         insights = not getattr(args, "no_insights", False)
         no_save = getattr(args, "no_save", False)
+        verbose = getattr(args, "verbose", False)
+        auto_yes = getattr(args, "auto_yes", False)
+        # --verbose is the only way to opt out of email — terminal-only mode.
+        # No standalone --no-email flag exists.
+        no_email = verbose
 
         service = AuditService()
         console = get_console()
 
+        # Validate target exists before expensive LLM checks so
+        # "not found" errors surface immediately.
+        from shared.config.targets import TargetsConfig as _TC
+        _cfg = _TC(); _cfg.load()
+        target_config = _cfg.get(target)
+        if not target_config:
+            return RdstResult(False, f"Target '{target}' not found")
+
         if insights:
             if not has_anthropic_api_key():
-                insights = False
-                if not output_json:
-                    console.print(
-                        "[yellow]Warning: No LLM API key found. Skipping insights.\n"
-                        "Set with: export ANTHROPIC_API_KEY='your-key' or run: rdst init[/yellow]\n"
+                console.print(
+                    "[yellow]No LLM API key configured. The audit report requires AI analysis.[/yellow]\n"
+                    "[dim]Set up your LLM provider now:[/dim]\n"
+                )
+                try:
+                    from features.configure.cli.wizard import ConfigurationWizard
+                    wizard = ConfigurationWizard()
+                    from shared.config.targets import TargetsConfig as _TC
+                    _cfg = _TC(); _cfg.load()
+                    wizard.configure_llm(_cfg, {})
+                    _cfg.save()
+                    # Re-check after configure
+                    if not has_anthropic_api_key():
+                        return RdstResult(False, "LLM key still not set. Run: rdst configure llm")
+                except (EOFError, KeyboardInterrupt):
+                    return RdstResult(False, "LLM setup cancelled. Run: rdst configure llm")
+                except Exception as e:
+                    return RdstResult(
+                        False,
+                        f"Could not launch LLM setup: {e}\n"
+                        "Run manually: rdst configure llm",
                     )
-        final_result = {}
+            try:
+                from shared.llm_manager import LLMManager
+                llm = LLMManager()
+                llm.generate_response("Say OK", max_tokens=1, temperature=0.0)
+            except Exception as e:
+                return RdstResult(
+                    False,
+                    f"ANTHROPIC_API_KEY is invalid or the API is unreachable: {e}\n"
+                    "Fix the key and re-run.",
+                )
+        # Run audit_target directly with a spinner callback for live progress.
+        from dataclasses import asdict as _asdict
 
-        async def _run():
-            nonlocal final_result
-            async for event in service.audit_single(target):
-                if event.type == "status":
-                    if not output_json:
-                        console.print(f"[dim]{event.message}[/dim]")
-                elif event.type == "target_complete":
-                    final_result = event.result
-                elif event.type == "target_error":
-                    if not output_json:
-                        console.print(f"[red]Error: {event.error}[/red]")
-                elif event.type == "error":
-                    if not output_json:
-                        console.print(f"[red]{event.message}[/red]")
-                    return
+        if not output_json:
+            console.print(f"[dim]Auditing {target}...[/dim]")
 
-        asyncio.run(_run())
+        _audit_spinner = [None]  # mutable so callback can replace it
+
+        def _on_progress(msg):
+            if output_json:
+                return
+            if _audit_spinner[0]:
+                _audit_spinner[0].stop()
+            _audit_spinner[0] = Status(
+                ElapsedMessage(msg, time.monotonic()),
+                spinner="dots",
+                console=console,
+            )
+            _audit_spinner[0].start()
+
+        result = service.audit_target(target, target_config, on_progress=_on_progress)
+        if _audit_spinner[0]:
+            _audit_spinner[0].stop()
+
+        if result.error:
+            if not output_json:
+                console.print(f"[red]Error: {result.error}[/red]")
+            return RdstResult(False, result.error)
+
+        final_result = _asdict(result)
 
         if not final_result:
             return RdstResult(False, "Audit failed")
 
-        # Live workload capture if --duration was provided (run before rendering/JSON)
+        # Live workload capture if --duration was provided
         duration_str = getattr(args, "duration", None)
         workload_result = None
         if duration_str and final_result:
+            # Two parallel flows:
+            #   Thread 1 (background): health LLM — uses metrics/health data already collected
+            #   Main thread: duration capture + workload LLM — runs the 30s window
+            # Health LLM overlaps with the capture window for free.
+            import threading
+            health_llm_result: list = [None]  # mutable container for thread result
+
+            def _run_health_llm():
+                health_llm_result[0] = service.run_health_llm(final_result)
+
+            health_thread = threading.Thread(target=_run_health_llm, daemon=True)
+            health_thread.start()
+
             workload_result = self._run_workload_capture(
                 console=console,
                 target=target,
@@ -87,15 +152,29 @@ class AuditCommand:
                 cumulative_top_queries=final_result.get("top_queries"),
                 audit_result=final_result,
             )
+
+            # Wait for health LLM to finish (should be done by now — capture takes 30s)
+            health_thread.join(timeout=30)
+            if health_llm_result[0]:
+                final_result["health_analysis"] = health_llm_result[0]
+
             if workload_result:
                 final_result["workload"] = workload_result
 
-                # Merge full audit data (metrics, sizing, etc.) into the saved capture file
-                # so that 'audit show' renders the complete report
                 if not getattr(args, "no_save", False):
                     self._merge_audit_into_capture(
                         target, workload_result.get("run_id", ""), final_result
                     )
+        else:
+            # No duration — run health LLM synchronously
+            if not output_json:
+                _on_progress("Analyzing health data...")
+            ha = service.run_health_llm(final_result)
+            if ha:
+                final_result["health_analysis"] = ha
+            if _audit_spinner[0]:
+                _audit_spinner[0].stop()
+                _audit_spinner[0] = None
 
         # Save discovered queries to registry
         top_queries = final_result.get("top_queries", [])
@@ -123,24 +202,58 @@ class AuditCommand:
             except Exception:
                 pass
 
+        # Run Readyset cache testing on captured queries (PLG Advanced Flow)
+        rs_results = None
+        if workload_result and workload_result.get("queries"):
+            try:
+                rs_results = self._run_readyset_testing(
+                    console, target, workload_result.get("queries") or [],
+                    auto_yes=auto_yes,
+                )
+                if rs_results:
+                    final_result["readyset_results"] = rs_results
+            except Exception:
+                pass
+
+        # Re-compute sizing with workload intensity data (if capture was run)
+        if workload_result:
+            try:
+                from features.audit.scoring import compute_sizing_verdict
+                from features.audit.models import AuditMetrics
+                metrics_obj = final_result.get("metrics") or {}
+                if metrics_obj:
+                    # Rebuild AuditMetrics from dict
+                    am = AuditMetrics(**{
+                        k: v for k, v in metrics_obj.items()
+                        if k in AuditMetrics.__dataclass_fields__
+                    })
+                    new_sizing = compute_sizing_verdict(
+                        am,
+                        instance_class=final_result.get("instance_class"),
+                        workload_total_time_ms=workload_result.get("total_query_time_ms"),
+                        workload_duration_seconds=workload_result.get("duration_seconds"),
+                    )
+                    from dataclasses import asdict as _asdict
+                    final_result["sizing"] = _asdict(new_sizing)
+            except Exception:
+                pass
+
         if output_json:
             print(json.dumps(final_result, indent=2, default=str))
             return RdstResult(True, message="")
 
-        # Render the audit result (metrics, sizing, top queries)
-        self._render_result(console, final_result)
+        # Verbose: print full terminal report. Default: print compact summary
+        # (the full report goes via email).
+        if verbose:
+            self._render_terminal_report(console, target, final_result, workload_result, rs_results)
+        else:
+            self._render_summary(
+                console, target, final_result,
+                workload_result,
+                (workload_result or {}).get("analysis"),
+            )
 
-        # Render workload capture data below audit metrics (if --duration was used)
-        if workload_result:
-            run_id = workload_result.get("run_id", "")
-            if run_id:
-                self._render_workload_queries(console, run_id, target)
-            workload_analysis = workload_result.get("analysis")
-            if workload_analysis:
-                self._render_workload_analysis(console, workload_analysis, target_name=target)
-            if run_id:
-                console.print(f"\n[dim]View again: rdst audit show {run_id}[/dim]")
-
+        # Verbose mode already printed everything via _render_terminal_report.
         # Always save audit result (unless --no-save)
         if not no_save and final_result:
             import datetime as _dt
@@ -148,13 +261,13 @@ class AuditCommand:
             store = SnapshotStore()
             path = store.save_raw(auto_name, final_result)
             if not output_json:
-                console.print(f"\n[dim]Audit saved. View past audits: rdst audit list[/dim]")
+                console.print(f"\n[dim]View locally: rdst audit show {auto_name}[/dim]")
+                console.print(f"[dim]View past audits: rdst audit list[/dim]")
 
-        # LLM insights for this single target
-        # If workload analysis already ran (--duration), skip — already rendered above.
-        # If no duration, make one LLM call with metrics + top queries.
+        # LLM insights for non-verbose, no-duration case (legacy single-target prompt).
+        # Verbose mode already showed everything via _render_terminal_report.
         has_workload_analysis = workload_result and workload_result.get("analysis")
-        if insights and final_result and not has_workload_analysis:
+        if insights and final_result and not has_workload_analysis and not verbose:
             spinner = Status(
                 ElapsedMessage(f"Generating insights for {target}...", time.monotonic()),
                 spinner="dots",
@@ -174,7 +287,211 @@ class AuditCommand:
                 spinner.stop()
                 console.print(f"[red]LLM insights failed: {e}[/red]")
 
+        # Default flow: generate HTML, save locally, email. Skipped under --verbose.
+        # Also skipped when the per-target health LLM errored — the report would
+        # be missing its core narrative, score, and findings, so we don't ship it.
+        ha = final_result.get("health_analysis") or {}
+        llm_failed = bool(ha.get("error")) or (insights and not ha.get("health_score"))
+        if llm_failed and not output_json:
+            console.print(
+                "[yellow]Skipping report generation — health analysis LLM did not return usable output.\n"
+                "Audit data still saved; re-run with a working LLM key to generate the report.[/yellow]"
+            )
+        if not verbose and not llm_failed:
+            insights_data = (workload_result or {}).get("analysis")
+            html_content = self._generate_html_report(
+                final_result,
+                insights_data=insights_data,
+                workload=workload_result,
+                rs_results=rs_results,
+            )
+            if html_content and final_result:
+                import datetime as _dt
+                snapshot_id = save_name or f"audit_{target}_{_dt.datetime.now():%Y%m%d_%H%M%S}"
+                self._save_report_locally(snapshot_id, html_content)
+                try:
+                    self._email_report(console, html_content, target, snapshot_id=snapshot_id)
+                except Exception as e:
+                    console.print(f"  [yellow]Email delivery failed: {e}[/yellow]")
+                    console.print(f"  [dim]View locally: rdst audit show {snapshot_id}[/dim]")
+                try:
+                    self._track_audit_report(target, final_result, insights_data, workload_result)
+                except Exception:
+                    pass
+
         return RdstResult(True, message="")
+
+    def _render_terminal_report(
+        self,
+        console,
+        target: str,
+        result: dict,
+        workload_result: dict | None,
+        rs_results: list | None,
+    ) -> None:
+        """Verbose terminal report — full details, no email needed.
+
+        Mirrors the 3-section HTML layout but uses Rich panels and inline
+        command hints (rdst analyze --hash X / rdst query show X / rdst cache
+        deploy --target X) since users see them right here.
+        """
+        from shared.ui import StyledPanel, DataTable
+
+        m = result.get("metrics") or {}
+        sizing = result.get("sizing") or {}
+        cache_opp = result.get("cache_opportunity") or {}
+        ha = result.get("health_analysis") or {}
+        wl = workload_result or {}
+        captured = wl.get("queries") or []
+
+        # ── Hero block ─────────────────────────────────────────────────
+        console.print()
+        console.print(f"[bold]RDST Audit Report[/bold]  ·  [bold cyan]{target}[/bold cyan]")
+        engine = result.get("engine", "unknown")
+        version = (m.get("server_version") or "").split(",")[0]
+        cls = result.get("instance_class") or "—"
+        region = result.get("region") or "—"
+        console.print(f"[dim]{engine} · {version} · {cls} · {region}[/dim]")
+
+        score = ha.get("health_score")
+        label = (ha.get("health_label") or "").upper()
+        if score is not None:
+            try:
+                s = int(score)
+                col = "green" if s >= 75 else ("cyan" if s >= 60 else ("yellow" if s >= 40 else "red"))
+                console.print(f"\n[bold]Health Score:[/bold] [{col}]{s}/100 {label}[/{col}]")
+                if ha.get("health_score_rationale"):
+                    console.print(f"  [dim]{ha.get('health_score_rationale')}[/dim]")
+            except (TypeError, ValueError):
+                pass
+
+        # Key stats row
+        size_mb = m.get("database_size_mb") or 0
+        size_str = f"{size_mb/1024:.1f} GB" if size_mb >= 1024 else f"{int(size_mb)} MB"
+        cache_hit = m.get("cache_hit_rate") or 0
+        rw = f"{int(m.get('read_pct') or 0)}% reads / {int(m.get('write_pct') or 0)}% writes"
+        captured_calls = sum(int(q.get("calls") or 0) for q in captured)
+        dur = wl.get("duration_seconds") or 0
+        qps = (captured_calls / dur) if dur else 0
+        console.print(
+            f"\n[dim]Size:[/dim] {size_str}  |  "
+            f"[dim]Cache Hit:[/dim] {cache_hit:.1f}%  |  "
+            f"[dim]R/W:[/dim] {rw}"
+        )
+        if dur:
+            qps_str = f"{qps:.1f}" if qps < 10 else f"{qps:.0f}"
+            console.print(
+                f"[dim]Captured:[/dim] {captured_calls:,} executions across "
+                f"{len(captured)} unique queries  |  [dim]QPS:[/dim] {qps_str}"
+            )
+
+        # Sizing + savings
+        verdict = (sizing.get("verdict") or "unknown").replace("_", " ").upper()
+        cost = sizing.get("current_monthly_cost_usd")
+        rs_cost = sizing.get("readyset_projected_cost_usd")
+        rs_save = sizing.get("readyset_projected_savings_usd")
+        if cost:
+            console.print(f"[dim]Sizing:[/dim] [bold]{verdict}[/bold]  ·  ${int(cost):,}/mo current")
+            if rs_save and rs_save > 0 and rs_cost:
+                pct = int(rs_save / cost * 100) if cost else 0
+                console.print(
+                    f"[dim]Estimated Savings:[/dim] [green]${int(rs_save):,}/mo[/green] "
+                    f"({pct}% reduction with caching → {sizing.get('readyset_projected_class','—')})"
+                )
+
+        # ── Top findings ───────────────────────────────────────────────
+        sev_color = {"crit": "red", "warn": "yellow", "info": "cyan", "ok": "green"}
+        top_findings = ha.get("top_findings") or []
+        if top_findings:
+            console.print("\n[bold]Top Findings[/bold]")
+            for f in top_findings[:3]:
+                sev = (f.get("severity") or "info").lower()
+                col = sev_color.get(sev, "dim")
+                console.print(f"  [{col}]●[/{col}] [bold]{f.get('title','')}[/bold]")
+                if f.get("body"):
+                    console.print(f"    [dim]{f.get('body')}[/dim]")
+
+        # ── Detailed findings ──────────────────────────────────────────
+        findings = ha.get("findings") or []
+        if findings:
+            console.print("\n[bold]Findings[/bold]")
+            for f in findings:
+                sev = (f.get("severity") or "info").lower()
+                col = sev_color.get(sev, "dim")
+                console.print(f"  [{col}]●[/{col}] [bold]{f.get('title','')}.[/bold] {f.get('body','')}")
+
+        # ── Captured query table ───────────────────────────────────────
+        if captured:
+            rs_by_hash = {}
+            for r in (rs_results or []):
+                h = r.get("query_hash") or r.get("hash")
+                if h:
+                    rs_by_hash[h[:12]] = r
+            has_rs = any(rs_by_hash.values())
+
+            cols = ["#", "Hash", "Calls", "Avg", "Load %"]
+            if has_rs:
+                cols += ["Cached", "Speedup"]
+            rows = []
+            for i, q in enumerate(captured[:15], 1):
+                qhash = (q.get("query_hash") or "")[:12]
+                avg = q.get("avg_time_ms") or 0
+                pct = q.get("pct_total_time") or 0
+                rs = rs_by_hash.get(qhash) or {}
+                row = [
+                    str(i),
+                    qhash[:8],
+                    f"{int(q.get('calls') or 0):,}",
+                    f"{avg:.1f}ms",
+                    f"{pct:.1f}%",
+                ]
+                if has_rs:
+                    rs_avg = rs.get("readyset_ms") or rs.get("avg_rs_ms")
+                    speedup = rs.get("speedup") or rs.get("speedup_x") or 0
+                    row.append(f"{rs_avg:.1f}ms" if rs_avg else "—")
+                    row.append(f"{float(speedup):.1f}x" if speedup else "—")
+                rows.append(tuple(row))
+            console.print()
+            console.print(DataTable(title="Captured Queries", columns=cols, rows=rows))
+
+            console.print("\n[dim]Inspect any query:[/dim]")
+            for q in captured[:5]:
+                qhash = (q.get("query_hash") or "")[:12]
+                console.print(f"  [dim]rdst query show {qhash}[/dim]")
+                console.print(f"  [dim]rdst analyze --target {target} --hash {qhash[:8]}[/dim]")
+
+        # ── Index recommendations ──────────────────────────────────────
+        wa = wl.get("analysis") or {}
+        idx_recs = (wa.get("index_recommendations") or []) or (ha.get("index_suggestions") or [])
+        if idx_recs:
+            console.print("\n[bold]Index Recommendations[/bold]")
+            for rec in idx_recs[:6]:
+                table = rec.get("table") or ""
+                cols_list = rec.get("columns") or []
+                title = f"{table} ({', '.join(cols_list)})" if table and cols_list else (rec.get("sql") or "")
+                console.print(f"  [bold]{title}[/bold]")
+                if rec.get("reason"):
+                    console.print(f"    [dim]{rec.get('reason')}[/dim]")
+                sql = rec.get("create_index_sql") or rec.get("sql") or ""
+                if sql:
+                    console.print(f"    [cyan]{sql}[/cyan]")
+
+        # ── Next steps ─────────────────────────────────────────────────
+        next_steps = ha.get("recommended_actions") or []
+        if next_steps:
+            console.print("\n[bold]Next Steps[/bold]")
+            for i, step in enumerate(next_steps, 1):
+                rank = step.get("rank") or i
+                console.print(f"  [bold cyan]{rank}.[/bold cyan] [bold]{step.get('title','')}.[/bold] {step.get('body','')}")
+                for cmd in (step.get("commands") or [])[:4]:
+                    console.print(f"     [white]{cmd}[/white]")
+
+        # Cache deploy hint if a strong candidate
+        opp_score = int(cache_opp.get("score") or 0)
+        if opp_score >= 70:
+            console.print()
+            console.print(f"[bold green]Strong candidate for Readyset caching.[/bold green]")
+            console.print(f"  [dim]rdst cache deploy --target {target}[/dim]")
 
     def _render_audit_insights(self, console, raw_text: str) -> None:
         """Parse structured JSON insights and render with Rich."""
@@ -225,6 +542,657 @@ class AuditCommand:
         if concerns and concerns != ["None"]:
             concerns_text = "\n".join(f"  {c}" for c in concerns)
             console.print(StyledPanel(concerns_text, title="Concerns"))
+
+    @staticmethod
+    def _substitute_params(sql):
+        """Replace $1, $2, etc. with sample values so parameterized queries can be executed.
+
+        Returns the substituted SQL, or the original if no params found.
+        Returns None if the query is a system/internal query that shouldn't be benchmarked.
+        """
+        import re
+
+        # Skip system/internal queries (PG + MySQL)
+        lower = sql.lower()
+        if any(s in lower for s in [
+            # PostgreSQL system
+            "pg_stat_", "pg_settings", "pg_indexes", "information_schema",
+            "pg_catalog", "pg_database_size", "pg_backend_pid",
+            # MySQL system
+            "performance_schema", "@@",
+            "mysql.", "sys.",
+        ]):
+            return None
+
+        # MySQL DIGEST_TEXT adds spaces around function parens and dot notation
+        # that break execution: "SUM ( x )" → "SUM(x)", "`u` . `name`" → "`u`.`name`"
+        # Fix these before param substitution.
+        result_sql = sql
+        result_sql = re.sub(r'(\w)\s+\(', r'\1(', result_sql)      # SUM ( → SUM(
+        result_sql = re.sub(r'`\s+\.\s+`', '`.`', result_sql)       # ` . ` → `.`
+
+        if "$" not in result_sql and "?" not in result_sql:
+            return result_sql
+
+        # Replace $N parameters with sample values based on context
+        def _replace_param(match):
+            # Look at surrounding context to guess a reasonable value
+            pos = match.start()
+            before = sql[max(0, pos - 40):pos].lower()
+            if any(k in before for k in ["limit", "offset"]):
+                return "10"
+            if any(k in before for k in [">", "<", ">=", "<="]):
+                return "100"
+            if any(k in before for k in ["= '", "like", "ilike"]):
+                return "'sample'"
+            if "in (" in before:
+                return "1"
+            if "between" in before:
+                return "'2026-01-01'"
+            return "1"
+
+        result = re.sub(r'\$\d+', _replace_param, result_sql)
+        result = result.replace("?", "1")
+        # Replace :p1, :p2 style params too
+        result = re.sub(r':p\d+', '1', result)
+        return result
+
+    def _run_readyset_testing(self, console, target, queries, max_queries=20, auto_yes=False):
+        """Test audit queries against a local Readyset cache.
+
+        Returns list of {query_hash, query_text, cacheable, not_cacheable_reason,
+        baseline_ms, readyset_ms, speedup} or None if RS not available.
+        """
+        try:
+            from features.cache.service import CacheService
+            from features.cache.models import CacheInput, CacheOptions
+        except ImportError:
+            return None
+
+        service = CacheService()
+        results = []
+
+        # Step 1: Check if Readyset is deployed for this target
+        cache_status = None
+        try:
+            async def _check():
+                nonlocal cache_status
+                async for event in service.get_status(CacheInput(target=target)):
+                    if event.type == "cache_status":
+                        cache_status = event
+            import asyncio
+            asyncio.run(_check())
+        except Exception:
+            return None
+
+        if cache_status and cache_status.deployed and not getattr(cache_status, 'running', False):
+            # Deployed but not running — offer to restart
+            import shutil
+            import sys
+            if not shutil.which("docker"):
+                console.print("[dim]  Skipping Readyset cache testing (Docker not installed)[/dim]")
+                return None
+            if not auto_yes and not sys.stdin.isatty():
+                return None
+            if auto_yes:
+                restart = "y"
+                console.print("[dim]  Auto-starting Readyset cache (-y)[/dim]")
+            else:
+                from shared.ui import Prompt
+                console.print()
+                console.print(
+                    "[dim]  Readyset can benchmark your captured queries to show how much"
+                    "\n  faster they'd run with caching. Your local cache container is"
+                    "\n  stopped — we can restart it to run the test.[/dim]"
+                )
+                try:
+                    restart = Prompt.ask(
+                        "  Start Readyset cache to test query performance?",
+                        choices=["y", "n"], default="y"
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    restart = "n"
+            if restart.lower() != "y":
+                return None
+            container = getattr(cache_status, 'container_name', None) or f"rdst-readyset-{target}"
+            console.print(f"[dim]  Starting {container}...[/dim]")
+            import subprocess
+            start_result = subprocess.run(
+                ["docker", "start", container], capture_output=True, text=True, timeout=30,
+            )
+            if start_result.returncode != 0:
+                # Container was removed — fall through to fresh deploy
+                console.print(f"[dim]  Container not found, deploying fresh...[/dim]")
+                try:
+                    async def _deploy():
+                        async for event in service.deploy(
+                            CacheInput(target=target),
+                            CacheOptions(mode="docker"),
+                        ):
+                            if event.type == "deploy_complete":
+                                if not event.success:
+                                    console.print(f"[red]  Deploy failed: {getattr(event, 'error', 'unknown')}[/red]")
+                                    return False
+                                return True
+                        return False
+                    deploy_ok = asyncio.run(_deploy())
+                    if not deploy_ok:
+                        return None
+                except Exception as e:
+                    console.print(f"[yellow]  Could not deploy Readyset: {e}[/yellow]")
+                    return None
+            else:
+                # Container started — wait for it to accept connections
+                import time as _t
+                _ready = False
+                for _attempt in range(15):
+                    _t.sleep(1)
+                    try:
+                        _resolved = service._resolve_cache_target(target)
+                        if _resolved and service._check_cache_reachable(_resolved[1]):
+                            _ready = True
+                            break
+                    except Exception:
+                        pass
+                if not _ready:
+                    console.print("[yellow]  Readyset started but not accepting connections — skipping benchmark[/yellow]")
+                    return None
+
+        elif not cache_status or not cache_status.deployed:
+            # Check if Docker is available before prompting
+            import shutil
+            if not shutil.which("docker"):
+                console.print("[dim]  Skipping Readyset cache testing (Docker not installed)[/dim]")
+                return None
+
+            import sys
+            if not auto_yes and not sys.stdin.isatty():
+                return None
+
+            if auto_yes:
+                deploy = "y"
+                console.print("[dim]  Auto-deploying Readyset cache (-y)[/dim]")
+            else:
+                from shared.ui import Prompt
+                console.print()
+                console.print(
+                    "[dim]  Readyset can benchmark your captured queries to show how much"
+                    "\n  faster they'd run with caching. This deploys a local Docker"
+                    "\n  container that proxies your database.[/dim]"
+                )
+                try:
+                    deploy = Prompt.ask(
+                        "  Deploy Readyset to test query performance?",
+                        choices=["y", "n"], default="y"
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    deploy = "n"
+
+            if deploy.lower() != "y":
+                return None
+
+            # Deploy
+            console.print("[dim]  Deploying Readyset container...[/dim]")
+            try:
+                async def _deploy():
+                    async for event in service.deploy(
+                        CacheInput(target=target),
+                        CacheOptions(mode="docker"),
+                    ):
+                        if event.type == "deploy_complete":
+                            if not event.success:
+                                console.print(f"[red]  Deploy failed: {getattr(event, 'error', 'unknown')}[/red]")
+                                return False
+                            return True
+                    return False
+                deploy_ok = asyncio.run(_deploy())
+                if not deploy_ok:
+                    return None
+            except Exception as e:
+                console.print(f"[yellow]  Could not deploy Readyset: {e}[/yellow]")
+                return None
+
+        # Wait for Readyset to be ready and verify connection
+        import time as _t
+        _resolved = service._resolve_cache_target(target)
+        if not _resolved:
+            console.print("[yellow]  Cache target not found after deploy[/yellow]")
+            return None
+        _cache_name, _cache_cfg = _resolved
+        console.print("[dim]  Waiting for Readyset to be ready...[/dim]")
+        _ready = False
+        _last_err = None
+        for _attempt in range(20):
+            _t.sleep(1)
+            try:
+                from shared.db_connection import create_direct_connection
+                _test_conn = create_direct_connection(_cache_cfg)
+                _test_conn.close()
+                _ready = True
+                break
+            except Exception as e:
+                _last_err = e
+        if not _ready:
+            err_str = str(_last_err)
+            if "Access denied" in err_str or "password" in err_str.lower():
+                _pw_env = _cache_cfg.get("password_env", "")
+                console.print(
+                    f"[yellow]  Cannot connect to Readyset cache: {_pw_env} is not set.[/yellow]\n"
+                    f"[yellow]  Export it first: export {_pw_env}=\"your_password\"[/yellow]"
+                )
+            else:
+                console.print(f"[yellow]  Readyset not ready after 20s: {_last_err}[/yellow]")
+            return None
+
+        # Step 2: Record pre-existing caches
+        pre_existing_ids = set()
+        try:
+            async def _list_caches():
+                async for event in service.list_caches(CacheInput(target=target)):
+                    if event.type == "cache_list":
+                        for c in (event.caches or []):
+                            pre_existing_ids.add(c.get("query_id", c.get("id", "")))
+            asyncio.run(_list_caches())
+        except Exception:
+            pass
+
+        # Step 3: Create caches and benchmark
+        created_ids = set()
+        console.print(f"\n[dim]  Testing {min(len(queries), max_queries)} queries against Readyset...[/dim]")
+
+        for q in queries[:max_queries]:
+            sql = q.get("query_text") or q.get("normalized_query", "")
+            q_hash = q.get("query_hash", q.get("hash", ""))[:12]
+            baseline_ms = q.get("avg_time_ms", 0.0)
+
+            if not sql.strip():
+                continue
+
+            # Check cacheability
+            try:
+                from features.cache.readyset_cacheability import check_readyset_cacheability
+                check = check_readyset_cacheability(query=sql)
+                if not check.get("cacheable", False):
+                    results.append({
+                        "query_hash": q_hash,
+                        "query_text": sql[:200],
+                        "cacheable": False,
+                        "not_cacheable_reason": "; ".join(check.get("issues", ["Unknown"])),
+                        "baseline_ms": baseline_ms,
+                        "readyset_ms": 0,
+                        "speedup": 0,
+                    })
+                    continue
+            except Exception:
+                pass
+
+            # Create shallow cache
+            cache_id = None
+            try:
+                async def _add_cache():
+                    nonlocal cache_id
+                    async for event in service.add_cache(
+                        CacheInput(target=target, query=sql),
+                        CacheOptions(),
+                    ):
+                        if event.type == "cache_add":
+                            if event.success:
+                                cache_id = getattr(event, "cache_id", None) or q_hash
+                                if cache_id not in pre_existing_ids:
+                                    created_ids.add(cache_id)
+                asyncio.run(_add_cache())
+            except Exception:
+                pass
+
+            # Benchmark against Readyset (3 runs: 1 warmup + 2 measured)
+            # For parameterized queries, substitute sample values so we can execute them
+            readyset_ms = 0.0
+            bench_sql = self._substitute_params(sql)
+            if not bench_sql:
+                # Query was filtered (system query or truncated) — skip with reason
+                reason = "system query" if any(s in sql.lower() for s in [
+                    "pg_stat_", "performance_schema", "@@", "information_schema",
+                ]) else "truncated query"
+                results.append({
+                    "query_hash": q_hash,
+                    "query_text": sql[:200],
+                    "cacheable": False,
+                    "not_cacheable_reason": reason,
+                    "baseline_ms": baseline_ms,
+                    "readyset_ms": 0,
+                    "speedup": 0,
+                })
+                continue
+            if bench_sql:
+                try:
+                    cache_target = service._resolve_cache_target(target)
+                    if cache_target:
+                        cache_name, cache_config = cache_target
+                        from shared.db_connection import create_direct_connection
+                        conn = create_direct_connection(cache_config)
+                        times = []
+                        for i in range(3):
+                            start = time.perf_counter()
+                            try:
+                                cursor = conn.cursor()
+                                cursor.execute(bench_sql)
+                                cursor.fetchall()
+                                cursor.close()
+                            except Exception:
+                                break
+                            elapsed_ms = (time.perf_counter() - start) * 1000
+                            if i > 0:  # Skip warmup
+                                times.append(elapsed_ms)
+                        conn.close()
+                        if times:
+                            readyset_ms = sum(times) / len(times)
+                except Exception as e:
+                    if not getattr(self, '_rs_conn_error_shown', False):
+                        console.print(f"[yellow]  Could not connect to Readyset cache: {e}[/yellow]")
+                        self._rs_conn_error_shown = True
+                    return None
+
+            speedup = baseline_ms / readyset_ms if readyset_ms > 0 and baseline_ms > 0 else 0.0
+
+            results.append({
+                "query_hash": q_hash,
+                "query_text": sql[:200],
+                "cacheable": True,
+                "not_cacheable_reason": "",
+                "baseline_ms": baseline_ms,
+                "readyset_ms": round(readyset_ms, 3),
+                "speedup": round(speedup, 1),
+            })
+
+        # Step 4: Cleanup — drop only caches we created
+        if created_ids:
+            for cid in created_ids:
+                try:
+                    async def _delete(cache_id=cid):
+                        async for event in service.delete_cache(CacheInput(target=target, cache_id=cache_id)):
+                            pass
+                    asyncio.run(_delete())
+                except Exception:
+                    pass
+
+        cached_count = sum(1 for r in results if r["cacheable"])
+        if cached_count > 0:
+            speedups = [r["speedup"] for r in results if r["cacheable"] and r["speedup"] > 0]
+            avg = sum(speedups) / len(speedups) if speedups else 0
+            console.print(f"  [green]{cached_count} queries cached, avg speedup {avg:.1f}x[/green]")
+        else:
+            console.print(f"  [dim]No queries cacheable[/dim]")
+
+        return results if results else None
+
+    # =========================================================================
+    # Summary Mode (default UX)
+    # =========================================================================
+
+    def _render_summary(self, console, target, result, workload_result, insights_data):
+        """Render slim CLI summary — the default audit output."""
+        metrics = result.get("metrics") or {}
+        sizing = result.get("sizing") or {}
+        cache_opp = result.get("cache_opportunity") or {}
+        top_queries = result.get("top_queries") or []
+
+        engine = result.get("engine", "?")
+        host = result.get("host", "?")
+        version = metrics.get("server_version", "?")
+        engine_display = f"{engine}, {version}" if version != "?" else engine
+
+        console.print(f"\n  [bold]Audit: {target}[/bold] ({engine_display})")
+        console.print(f"  {'─' * 60}")
+
+        # Core metrics
+        size = metrics.get("database_size_mb", 0)
+        size_str = f"{size / 1024:.1f} GB" if size >= 1024 else f"{size:.0f} MB"
+        conn_str = f"{metrics.get('active_connections', 0)}/{metrics.get('max_connections', 0)} ({metrics.get('connection_utilization_pct', 0):.0f}%)"
+        console.print(f"  [dim]Size:[/dim] {size_str}  |  [dim]Connections:[/dim] {conn_str}  |  [dim]Cache Hit:[/dim] {metrics.get('cache_hit_rate', 0):.1f}%")
+
+        # Sizing verdict
+        verdict = sizing.get("verdict", "unknown").replace("_", " ").upper()
+        cost = sizing.get("current_monthly_cost_usd")
+        savings = sizing.get("potential_savings_usd")
+        sizing_str = f"  [dim]Sizing:[/dim] [bold]{verdict}[/bold]"
+        if cost and savings and savings > 0:
+            pct = (savings / cost) * 100
+            sizing_str += f" (caching can save up to {pct:.0f}%)"
+        console.print(sizing_str)
+
+        # Cache opportunity
+        score = cache_opp.get("score", 0)
+        level = cache_opp.get("level", "low")
+        console.print(f"  [dim]Cache Opportunity:[/dim] {score}/100 ({level})")
+
+        # R/W ratio
+        console.print(f"  [dim]Read/Write:[/dim] {metrics.get('read_pct', 0):.0f}% reads / {metrics.get('write_pct', 0):.0f}% writes")
+
+        # Query count
+        console.print(f"  [dim]Top Queries:[/dim] {len(top_queries)} tracked")
+
+        # Readyset verdict (from insights)
+        if insights_data and isinstance(insights_data, dict):
+            rs_verdict = insights_data.get("readyset_verdict", "")
+            if rs_verdict:
+                verdict_display = rs_verdict.replace("_", " ").upper()
+                console.print(f"\n  [bold]Readyset Verdict:[/bold]   {verdict_display}")
+            rs_summary = insights_data.get("readyset_summary", "")
+            if rs_summary:
+                console.print(f"  {rs_summary}")
+            # CLI summary uses percentages per Tanmay's request ($ amounts in the full report only)
+            if savings and cost and savings > 0:
+                pct = (savings / cost) * 100
+                console.print(f"  [bold]Potential Savings:[/bold]  up to {pct:.0f}% with Readyset + rightsizing")
+
+        console.print()
+
+    # =========================================================================
+    # HTML Report Generation + Email + Local Save
+    # =========================================================================
+
+    def _generate_html_report(self, audit_result, insights_data=None, workload=None, rs_results=None):
+        """Generate unified 3-section HTML report for a single target."""
+        try:
+            from features.audit.report.report import render_report_html
+
+            if hasattr(audit_result, "__dataclass_fields__"):
+                from dataclasses import asdict
+                audit_result = asdict(audit_result)
+            r = dict(audit_result)
+            if workload is not None:
+                r["workload"] = workload
+            if rs_results is not None:
+                r["readyset_results"] = rs_results
+            return render_report_html([r], fleet_insights=None, title=r.get("target_name"))
+        except Exception:
+            return None
+
+    def _save_report_locally(self, snapshot_id, html_content):
+        """Save HTML report to ~/.rdst/reports/."""
+        try:
+            from pathlib import Path
+            reports_dir = Path.home() / ".rdst" / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            report_path = reports_dir / f"{snapshot_id}.html"
+            report_path.write_text(html_content)
+        except Exception:
+            pass
+
+    def _email_report(self, console, html_content, target, snapshot_id=None):
+        """Prompt for email and send the HTML report with verified delivery."""
+        from shared.config.targets import TargetsConfig
+
+        cfg = TargetsConfig()
+        cfg.load()
+        email = cfg.get_email()
+        report_token = cfg._data.get("report_token")
+
+        import re
+        from shared.ui import Prompt
+        _email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+        if email and _email_re.match(email):
+            # Existing valid email — confirm or let them change it
+            console.print(f"\n  Sending report to [bold]{email}[/bold]")
+            try:
+                alt = (Prompt.ask("  Press Enter to continue or type a different email", default="", show_default=False) or "").strip()
+            except (EOFError, KeyboardInterrupt):
+                show_cmd = f"rdst audit show {snapshot_id}" if snapshot_id else "rdst audit list"
+                console.print(f"\n  [dim]Skipped. View locally: {show_cmd}[/dim]")
+                return
+            if alt:
+                if _email_re.match(alt):
+                    email = alt
+                    cfg.set_email(email)
+                    cfg.save()
+                else:
+                    console.print("  [yellow]Invalid email address. Sending to the original.[/yellow]")
+        else:
+            # No email on file — prompt for one with retry loop
+            console.print(
+                "\n  Enter your email to receive the full performance report."
+                "\n  Press Ctrl+C to skip.\n"
+            )
+            while True:
+                try:
+                    email = (Prompt.ask("  Email", default="", show_default=False) or "").strip()
+                except (EOFError, KeyboardInterrupt):
+                    email = ""
+                    break
+                if not email:
+                    break
+                if _email_re.match(email):
+                    break
+                console.print("  [yellow]Invalid email address. Try again or press Ctrl+C to skip.[/yellow]")
+
+            if email and _email_re.match(email):
+                cfg.set_email(email)
+                cfg.save()
+            else:
+                show_cmd = f"rdst audit show {snapshot_id}" if snapshot_id else "rdst audit list"
+                console.print(f"  [dim]Skipped. View locally: {show_cmd}[/dim]")
+                return
+
+        # Send via hosted link (mode="link") — keyservice stores the HTML,
+        # emails a "View Full Report" button that opens in browser.
+        try:
+            from features.audit.email_service import EmailService
+            svc = EmailService()
+            subject = f"RDST Audit Report: {target}"
+
+            # Build email summary block (score + savings + top finding)
+            ha = {}
+            try:
+                import json as _json
+                # html_content is already rendered — pull summary from the audit data
+                # that was passed to _generate_html_report earlier. We re-derive from config.
+                pass
+            except Exception:
+                pass
+
+            # Use spinner during verification polling
+            spinner = None
+
+            def _on_status(msg):
+                nonlocal spinner
+                spinner = Status(
+                    ElapsedMessage(msg, time.monotonic()),
+                    spinner="dots",
+                    console=console,
+                )
+                spinner.start()
+
+            send_spinner = Status(
+                ElapsedMessage("Sending report...", time.monotonic()),
+                spinner="dots",
+                console=console,
+            )
+            send_spinner.start()
+
+            result = svc.send_report_with_verification(
+                email=email,
+                html_body=html_content,
+                subject=subject,
+                report_token=report_token,
+                on_status=_on_status,
+                mode="link",
+            )
+
+            send_spinner.stop()
+            if spinner:
+                spinner.stop()
+
+            if result.get("success"):
+                new_token = result.get("report_token")
+                if new_token and new_token != report_token:
+                    cfg._data["report_token"] = new_token
+                    cfg.save()
+                console.print(f"  [green]Report link sent to {email}[/green]")
+            else:
+                error = result.get("error", "unknown error")
+                console.print(f"  [yellow]{error}[/yellow]")
+                show_cmd = f"rdst audit show {snapshot_id}" if snapshot_id else "rdst audit list"
+                console.print(f"  [dim]View locally: {show_cmd}[/dim]")
+        except Exception as e:
+            console.print(f"  [yellow]Email delivery unavailable: {e}[/yellow]")
+            show_cmd = f"rdst audit show {snapshot_id}" if snapshot_id else "rdst audit list"
+            console.print(f"  [dim]View locally: {show_cmd}[/dim]")
+
+    def _track_audit_report(self, target, result, insights_data, workload_result):
+        """Send PostHog events for audit report completion."""
+        try:
+            from shared.telemetry import telemetry
+            from shared.config.targets import TargetsConfig
+
+            cfg = TargetsConfig()
+            cfg.load()
+            email = cfg.get_email() or "unknown"
+
+            m = (result or {}).get("metrics") or {}
+            sizing = (result or {}).get("sizing") or {}
+            ha = (result or {}).get("health_analysis") or {}
+            wl = workload_result or {}
+            captured = len(wl.get("queries") or [])
+
+            properties = {
+                "target": target,
+                "engine": (result or {}).get("engine", "unknown"),
+                "instance_class": (result or {}).get("instance_class"),
+                "region": (result or {}).get("region"),
+                "email": email,
+                "health_score": ha.get("health_score"),
+                "health_label": ha.get("health_label"),
+                "sizing_verdict": sizing.get("verdict"),
+                "current_cost_usd": sizing.get("current_monthly_cost_usd"),
+                "potential_savings_usd": sizing.get("readyset_projected_savings_usd") or sizing.get("potential_savings_usd"),
+                "cache_opportunity_score": ((result or {}).get("cache_opportunity") or {}).get("score"),
+                "captured_queries": captured,
+                "has_duration": bool(wl.get("duration_seconds")),
+                "has_readyset_testing": bool((result or {}).get("readyset_results")),
+                "report_delivery": "link",
+                "flow_stage": "advanced",
+            }
+
+            # Always fire to PostHog for analytics
+            telemetry.track("audit_report_generated", properties)
+
+            # Fire first_audit only once per device (triggers Slack).
+            # Include display_name/auth_type/source/email_tier so the Slack
+            # template renders consistently with trial events.
+            stats = telemetry._get_stats()
+            if not stats.get("first_audit_fired"):
+                slack_props = {
+                    **properties,
+                    "display_name": f"First Audit: {target}",
+                    "auth_type": "own_key",
+                    "source": "audit",
+                    "email_tier": "—",
+                }
+                telemetry.track("first_audit", slack_props)
+                telemetry._increment_stat("first_audit_fired", 1)
+        except Exception:
+            pass
 
     def execute_subcommand(self, subcommand: str, args: argparse.Namespace) -> RdstResult:
         """Route to audit subcommands (list, show)."""
@@ -299,7 +1267,11 @@ class AuditCommand:
             rows=rows,
         )
         console.print(table)
-        console.print(f"\n[dim]View details: rdst audit show <run_id>[/dim]")
+        if runs:
+            example_id = runs[0]["run_id"]
+            console.print(f"\n[dim]View details: rdst audit show {example_id}[/dim]")
+        if len(runs) >= 50:
+            console.print(f"[dim]Filter by target: rdst audit list --target <name>[/dim]")
         return RdstResult(True, message=f"{len(runs)} runs")
 
     def _handle_show(self, args: argparse.Namespace) -> RdstResult:
@@ -423,7 +1395,8 @@ class AuditCommand:
         analysis = data.get("analysis") or wl.get("analysis")
         if analysis:
             show_target = data.get("target_name", "")
-            self._render_workload_analysis(console, analysis, target_name=show_target)
+            show_queries = data.get("queries") or wl.get("queries") or []
+            self._render_workload_analysis(console, analysis, target_name=show_target, queries=show_queries)
 
         return RdstResult(True, message="")
 
@@ -656,6 +1629,8 @@ class AuditCommand:
                     elif event.type == "error":
                         _stop_spinner()
                         console.print(f"[red]Error ({event.phase}): {event.message}[/red]")
+                        if getattr(event, 'phase', '') == 'preflight':
+                            return None  # Abort — no point continuing
 
             asyncio.run(_run())
 
@@ -805,20 +1780,16 @@ class AuditCommand:
         except Exception:
             pass  # Non-critical — don't break the audit flow
 
-    def _render_workload_analysis(self, console, analysis: dict, target_name: str = "") -> None:
+    def _render_workload_analysis(self, console, analysis: dict, target_name: str = "", queries: list = None) -> None:
         """Render LLM workload analysis to the console."""
         from shared.ui import DataTable
 
         char = analysis.get("workload_characterization", "")
-        score = analysis.get("health_score", 0)
         rw = analysis.get("read_write_ratio", "")
-
-        score_color = "green" if score >= 70 else "yellow" if score >= 40 else "red"
 
         console.print()
         console.print(f"[bold]Workload Analysis[/bold]")
         console.print(f"  Characterization: [bold]{char}[/bold]")
-        console.print(f"  Health Score: [{score_color}]{score}/100[/{score_color}]")
         if rw:
             console.print(f"  Read/Write: {rw}")
 
@@ -956,14 +1927,22 @@ class AuditCommand:
                 lines.append("")
             console.print(StyledPanel("\n".join(lines), title="Optimization Priorities"))
 
-        # Analyze breadcrumb at the end
+        # Analyze breadcrumb at the end — use hashes from the queries list
+        # (registry hashes), NOT from LLM output (which may have stale hashes).
         if target_name:
-            # Collect top query hashes from caching candidates (most impactful)
             top_hashes = []
-            for c in analysis.get("caching_candidates", []):
-                h = c.get("query_hash", "")
-                if h and h not in top_hashes:
-                    top_hashes.append(h)
+            if queries:
+                # Use the actual query objects (registry hashes)
+                for q in queries[:5]:
+                    h = q.get("query_hash", "") if isinstance(q, dict) else getattr(q, "query_hash", "")
+                    if h and h not in top_hashes:
+                        top_hashes.append(h)
+            if not top_hashes:
+                # Fallback to LLM caching candidates if no queries passed
+                for c in analysis.get("caching_candidates", []):
+                    h = c.get("query_hash", "")
+                    if h and h not in top_hashes:
+                        top_hashes.append(h)
             if top_hashes:
                 console.print(f"\n[dim]Analyze top queries in depth:[/dim]")
                 for h in top_hashes[:3]:

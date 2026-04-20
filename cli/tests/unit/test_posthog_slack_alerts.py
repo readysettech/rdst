@@ -187,14 +187,15 @@ class TestEmailPersistence:
         cfg.set_email("user@example.com")
         assert cfg.get_email() == "user@example.com"
 
-    def test_does_not_overwrite_existing(self):
+    def test_overwrites_existing(self):
+        """set_email always overwrites — users can change their report email."""
         from shared.config.targets import TargetsConfig
         cfg = TargetsConfig.__new__(TargetsConfig)
         cfg._data = {"email": "first@example.com"}
         cfg._path = None
 
         cfg.set_email("second@example.com")
-        assert cfg.get_email() == "first@example.com"
+        assert cfg.get_email() == "second@example.com"
 
     def test_ignores_empty_string(self):
         from shared.config.targets import TargetsConfig

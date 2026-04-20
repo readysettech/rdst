@@ -82,6 +82,10 @@ class FleetAuditSnapshot:
     total_monthly_cost_usd: float | None = None
     potential_savings_usd: float | None = None
     avg_cache_opportunity: float | None = None
+    # Parsed fleet LLM output (health_score, top_findings, fleet_findings,
+    # next_steps, executive_summary). Persisted so `rdst audit show` against
+    # a fleet snapshot can regenerate the report without a fresh LLM call.
+    fleet_insights: dict[str, Any] | None = None
 
 
 @dataclass

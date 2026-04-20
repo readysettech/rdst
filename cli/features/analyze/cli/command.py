@@ -168,8 +168,17 @@ class AnalyzeCommand:
             raise AnalyzeInputError(f"Failed to resolve input: {e}")
 
     def _resolve_by_hash(self, hash: str, save_as: str) -> AnalyzeInput:
-        """Resolve query by hash from registry."""
+        """Resolve query by hash from registry.
+
+        Also checks audit tags (audit_<hash>) so that hashes shown in
+        ``rdst audit`` output work directly with ``rdst analyze --hash``.
+        """
         entry = self.registry.get_query(hash)
+        if not entry:
+            # Fall back to audit tag lookup — audit saves queries with
+            # tag "audit_<pg_stat_hash>" but the registry assigns its
+            # own hash, so the pg_stat hash won't match directly.
+            entry = self.registry.get_query_by_tag(f"audit_{hash}")
         if not entry:
             raise AnalyzeInputError(
                 f"Query hash '{hash}' not found in registry. Run 'rdst query list' to see available queries."

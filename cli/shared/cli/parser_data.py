@@ -4,6 +4,7 @@ RDST CLI Definitions - Command structure, arguments, and help text.
 Single source of truth for all CLI commands.
 """
 
+import argparse
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, Tuple, Union
 
@@ -1355,6 +1356,8 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
                     ArgDef("--diff", dest="diff_baseline", help="Compare against saved snapshot"),
                     ArgDef("--no-insights", action="store_true", help="Skip LLM fleet insights"),
                     ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
+                    ArgDef("--verbose", short="-v", action="store_true", dest="verbose", help=argparse.SUPPRESS),
+                    ArgDef("--yes", short="-y", action="store_true", dest="auto_yes", help="Auto-accept Readyset cache deployment (no prompt)"),
                 ],
             ),
             SubcommandDef(
@@ -1417,6 +1420,8 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
             ArgDef("--export-top-queries", action="store_true", dest="export_top_queries", help="Export cumulative top queries from stats"),
             ArgDef("--export-captured-queries", action="store_true", dest="export_captured_queries", help="Export queries captured during --duration window"),
             ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
+            ArgDef("--verbose", short="-v", action="store_true", dest="verbose", help=argparse.SUPPRESS),
+            ArgDef("--yes", short="-y", action="store_true", dest="auto_yes", help="Auto-accept Readyset cache deployment (no prompt)"),
         ],
         subcommands=[
             ("list", "List past audit runs"),

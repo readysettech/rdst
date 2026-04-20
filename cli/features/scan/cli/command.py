@@ -388,8 +388,16 @@ class ScanCommand:
             ]
 
             _start = _t.time()
-            # Run from rdst's own directory (where rdst.py lives)
-            rdst_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            # Run from rdst's own directory (where rdst.py lives).
+            # __file__ is at features/scan/cli/command.py so we need 4
+            # dirnames to climb to the rdst root (post-Farouk layout).
+            rdst_dir = os.path.dirname(
+                os.path.dirname(
+                    os.path.dirname(
+                        os.path.dirname(os.path.abspath(__file__))
+                    )
+                )
+            )
             proc = subprocess.run(
                 cmd,
                 capture_output=True,

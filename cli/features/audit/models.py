@@ -50,6 +50,14 @@ class SizingAssessment:
     suggested_instance_class: str | None = None
     suggested_monthly_cost_usd: float | None = None
     potential_savings_usd: float | None = None
+    # Readyset projected savings (populated when instance pricing is available)
+    readyset_projected_class: str | None = None
+    readyset_projected_cost_usd: float | None = None
+    readyset_projected_savings_usd: float | None = None
+    readyset_offload_pct: float | None = None
+    # Workload intensity (from capture data, when available)
+    concurrent_query_load: float | None = None
+    estimated_cpu_pct: float | None = None
 
 
 @dataclass
@@ -67,6 +75,10 @@ class AuditResult:
     top_queries: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     audited_at: str | None = None
+    # PLG v3 additions
+    cloudwatch_cpu: dict[str, Any] | None = None
+    health_report: dict[str, Any] | None = None
+    health_analysis: dict[str, Any] | None = None
 
 
 @dataclass

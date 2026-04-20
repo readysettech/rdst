@@ -57,6 +57,20 @@ def _find_available_port(engine: str, deploy_host: str = "localhost") -> int:
                 continue
             used_ports.add(int(config.get("port", 0)))
 
+        # Also check actually-bound Docker ports.
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["docker", "ps", "--format", "{{.Ports}}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                import re
+                for match in re.findall(r"0\.0\.0\.0:(\d+)->", result.stdout):
+                    used_ports.add(int(match))
+        except Exception:
+            pass
+
         port = default_port
         while port in used_ports:
             port += 1
@@ -82,6 +96,21 @@ def _find_available_metrics_port(deploy_host: str = "localhost") -> int:
             metrics_port = config.get("metrics_port")
             if metrics_port:
                 used_ports.add(int(metrics_port))
+
+        # Also check actually-bound Docker ports to catch containers
+        # that exist but aren't in the config (or config was stale).
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["docker", "ps", "--format", "{{.Ports}}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                import re
+                for match in re.findall(r"0\.0\.0\.0:(\d+)->", result.stdout):
+                    used_ports.add(int(match))
+        except Exception:
+            pass
 
         port = DEFAULT_METRICS_PORT
         while port in used_ports:

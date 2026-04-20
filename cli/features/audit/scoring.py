@@ -9,19 +9,30 @@ from .models import (
     CacheOpportunityScore,
     SizingAssessment,
 )
-from features.fleet.pricing import monthly_cost, suggest_downsize
+from features.fleet.pricing import (
+    get_instance_info,
+    monthly_cost,
+    suggest_downsize,
+    suggest_downsize_with_readyset,
+)
 
 
 def compute_sizing_verdict(
     metrics: AuditMetrics,
     instance_class: str | None = None,
+    workload_total_time_ms: float | None = None,
+    workload_duration_seconds: float | None = None,
 ) -> SizingAssessment:
     """Compute sizing verdict from collected metrics.
 
-    Rules (per Gotham's design):
+    Base rules:
     - UNDER_PROVISIONED: connection_utilization > 80% OR cache_hit_rate < 95%
     - OVERSIZED: connection_utilization < 20% AND cache_hit_rate > 99%
     - RIGHT_SIZED: everything else
+
+    When workload capture data + instance class are available, also estimates
+    CPU utilization from concurrent query load vs vCPU count. This can override
+    the base verdict (e.g., low connections but CPU-bound → under-provisioned).
     """
     conn_util = metrics.connection_utilization_pct
     cache_hit = metrics.cache_hit_rate
@@ -47,7 +58,45 @@ def compute_sizing_verdict(
             f"cache hit rate {cache_hit:.1f}%"
         )
 
-    assessment = SizingAssessment(verdict=verdict, explanation=explanation)
+    # Override with workload intensity when capture data + instance class are present
+    estimated_cpu_pct: float | None = None
+    concurrent_load: float | None = None
+    if (
+        workload_total_time_ms
+        and workload_duration_seconds
+        and workload_duration_seconds > 0
+    ):
+        concurrent_load = workload_total_time_ms / (workload_duration_seconds * 1000)
+        if instance_class:
+            try:
+                info = get_instance_info(instance_class)
+                vcpus = (info or {}).get("vcpu") or (info or {}).get("vcpus")
+                if vcpus:
+                    estimated_cpu_pct = (concurrent_load / vcpus) * 100
+                    if estimated_cpu_pct > 80:
+                        verdict = SizingVerdict.UNDER_PROVISIONED
+                        explanation = (
+                            f"Under-provisioned: high workload intensity during capture "
+                            f"(est. {estimated_cpu_pct:.0f}% CPU on {vcpus} vCPUs, "
+                            f"{concurrent_load:.1f}x concurrent query load). "
+                            f"A caching layer could reduce CPU pressure without scaling up."
+                        )
+                    elif estimated_cpu_pct > 30 and verdict == SizingVerdict.OVERSIZED:
+                        verdict = SizingVerdict.RIGHT_SIZED
+                        explanation = (
+                            f"Right-sized: connection utilization is low ({conn_util:.1f}%) but "
+                            f"workload intensity shows est. {estimated_cpu_pct:.0f}% CPU "
+                            f"({concurrent_load:.1f}x concurrent load on {vcpus} vCPUs)."
+                        )
+            except Exception:
+                pass
+
+    assessment = SizingAssessment(
+        verdict=verdict,
+        explanation=explanation,
+        concurrent_query_load=round(concurrent_load, 1) if concurrent_load else None,
+        estimated_cpu_pct=round(estimated_cpu_pct, 0) if estimated_cpu_pct else None,
+    )
 
     # Add pricing if instance class is known
     if instance_class:
@@ -56,14 +105,33 @@ def compute_sizing_verdict(
             if current_cost is not None:
                 assessment.current_monthly_cost_usd = current_cost
 
-            if verdict == SizingVerdict.OVERSIZED:
-                suggestion = suggest_downsize(instance_class)
-                if suggestion:
-                    assessment.suggested_instance_class = suggestion["instance_class"]
-                    assessment.suggested_monthly_cost_usd = suggestion["monthly_cost"]
-                    assessment.potential_savings_usd = round(
-                        current_cost - suggestion["monthly_cost"], 2
-                    ) if current_cost else None
+            # Always compute downsize suggestion — needed even when verdict is RIGHT_SIZED
+            suggestion = suggest_downsize(instance_class)
+            if suggestion:
+                assessment.suggested_instance_class = suggestion["instance_class"]
+                assessment.suggested_monthly_cost_usd = suggestion["monthly_cost"]
+                assessment.potential_savings_usd = (
+                    round(current_cost - suggestion["monthly_cost"], 2)
+                    if current_cost
+                    else None
+                )
+
+            # Always compute "with Readyset" projected savings
+            cacheable_pct = (
+                min(metrics.read_pct, 100.0) if metrics.read_pct > 0 else 75.0
+            )
+            rs_suggestion = suggest_downsize_with_readyset(
+                instance_class,
+                cacheable_read_pct=cacheable_pct,
+                current_utilization_pct=metrics.connection_utilization_pct,
+            )
+            if rs_suggestion and current_cost:
+                assessment.readyset_projected_class = rs_suggestion["instance_class"]
+                assessment.readyset_projected_cost_usd = rs_suggestion["monthly_cost"]
+                assessment.readyset_projected_savings_usd = round(
+                    current_cost - rs_suggestion["monthly_cost"], 2
+                )
+                assessment.readyset_offload_pct = rs_suggestion["offload_pct"]
         except Exception:
             pass
 

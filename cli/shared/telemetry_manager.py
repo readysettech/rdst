@@ -340,6 +340,17 @@ class TelemetryManager:
             # Fire and forget in background thread
             def send():
                 try:
+                    # If email is in properties, identify the user so PostHog
+                    # links this device to the email across sessions/devices.
+                    email = all_props.get("email")
+                    if email and email != "unknown":
+                        try:
+                            posthog.identify(
+                                distinct_id=self.device_id,
+                                properties={"email": email},
+                            )
+                        except Exception:
+                            pass
                     posthog.capture(
                         distinct_id=self.device_id,
                         event=event,
@@ -757,6 +768,46 @@ class TelemetryManager:
         }
 
         self.track("llm_usage", properties)
+
+    def track_audit_report(
+        self,
+        target: str,
+        engine: str = "unknown",
+        has_email: bool = False,
+        has_readyset_testing: bool = False,
+        queries_cached: int = 0,
+        avg_speedup: float = 0.0,
+    ):
+        """Track audit report generation (PLG Advanced Flow completion signal)."""
+        self._increment_stat("total_audit_reports", 1)
+        properties = {
+            "target": target,
+            "engine": engine,
+            "email_collected": has_email,
+            "readyset_tested": has_readyset_testing,
+            "queries_cached": queries_cached,
+            "avg_speedup": round(avg_speedup, 1),
+            "report_format": "html",
+            "flow_stage": "advanced",
+        }
+        self.track_with_stats("audit_report_generated", properties)
+
+    def track_advanced_flow_complete(
+        self,
+        target: str,
+        engine: str = "unknown",
+        report_sent: bool = False,
+        readyset_tested: bool = False,
+    ):
+        """Track completion of the PLG Advanced Flow."""
+        properties = {
+            "target": target,
+            "engine": engine,
+            "report_sent": report_sent,
+            "readyset_tested": readyset_tested,
+            "flow_stage": "advanced",
+        }
+        self.track("advanced_flow_complete", properties)
 
     def _persist_token_usage(self, model: str, tokens_in: int, tokens_out: int):
         """Persist cumulative token usage to local stats.json."""

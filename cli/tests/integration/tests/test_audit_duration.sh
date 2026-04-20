@@ -112,14 +112,9 @@ PYEOF
   # ============================================================================
 
   run_cmd "Audit: human-readable" "${RDST_CMD[@]}" audit \
-    --target "${AUDIT_TARGET}" --no-insights
-  assert_contains "Audit:" "audit human has header"
+    --target "${AUDIT_TARGET}" --no-insights -v
+  assert_contains "RDST Audit Report" "audit human has header"
   assert_contains "Sizing:" "audit human has sizing"
-  assert_contains "Cache Opportunity:" "audit human has cache opportunity"
-  # Top queries table appears when pg_stat_statements/performance_schema has data
-  if [[ "$DB_ENGINE" == "postgresql" ]]; then
-    assert_contains "Top Queries" "audit human has top queries table"
-  fi
   echo "PASS: Audit human-readable output"
 
   # ============================================================================
@@ -271,6 +266,65 @@ for i, line in enumerate(lines):
     fi
   else
     echo "SKIP: Audit duration with LLM insights (no ANTHROPIC_API_KEY)"
+  fi
+
+  # ==========================================================================
+  # Test 10: Audit with --duration + RS cache benchmarking
+  # RS cache was deployed by test_cache_commands. This test verifies that
+  # captured queries get benchmarked against the cache and speedup data
+  # appears in the JSON output.
+  # ==========================================================================
+
+  if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" && -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    echo ""
+    echo "=== TEST 10: Audit duration + RS cache benchmarking (${DB_ENGINE}) ==="
+
+    # Verbose output: verify RS data renders
+    run_cmd "Audit: duration+RS verbose" "${RDST_CMD[@]}" audit \
+      --target "${AUDIT_TARGET}" --duration 15s -v
+    assert_contains "RDST Audit Report" "audit+RS verbose has header"
+    assert_contains "Captured Queries" "audit+RS verbose has query table"
+    assert_contains "Health Score" "audit+RS verbose has health score"
+    echo "PASS: Audit duration + RS verbose output"
+
+    # JSON output: verify readyset_results field populated
+    run_cmd "Audit: duration+RS JSON" "${RDST_CMD[@]}" audit \
+      --target "${AUDIT_TARGET}" --duration 15s --json
+    assert_json "audit+RS json valid"
+    assert_contains "\"health_report\"" "audit+RS has health_report"
+    assert_contains "\"health_analysis\"" "audit+RS has health_analysis"
+    if echo "$LAST_OUTPUT" | grep -q '"readyset_results".*\[{'; then
+      # Assert at least one query is faster via RS (speedup > 1.0)
+      if echo "$LAST_OUTPUT" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+rs = d.get('readyset_results') or []
+fast = [r for r in rs if (r.get('speedup') or 0) > 1.0]
+sys.exit(0 if fast else 1)
+" 2>/dev/null; then
+        echo "PASS: At least one query shows RS speedup > 1.0x"
+      else
+        echo "FAIL: readyset_results present but no query shows speedup > 1.0x"
+        exit 1
+      fi
+    else
+      echo "INFO: readyset_results empty — RS may not have benchmarked queries"
+    fi
+
+    # Verify local report was saved
+    REPORTS_DIR="${HOME}/.rdst/reports"
+    if ls "${REPORTS_DIR}"/audit_${AUDIT_TARGET}_*.html >/dev/null 2>&1; then
+      LATEST_REPORT=$(ls -t "${REPORTS_DIR}"/audit_${AUDIT_TARGET}_*.html | head -1)
+      if grep -q "RDST Audit Report" "$LATEST_REPORT"; then
+        echo "PASS: Local HTML report saved and contains RDST Audit Report header"
+      else
+        echo "FAIL: Local HTML report saved but missing header"
+      fi
+    else
+      echo "INFO: No local HTML report found (may have been skipped)"
+    fi
+  else
+    echo "SKIP: Audit duration + RS cache tests (SKIP_READYSET_CACHE_TESTS=true or no ANTHROPIC_API_KEY)"
   fi
 
   echo ""

@@ -35,11 +35,22 @@ _LITERAL_RE = re.compile(r"'[^']*'|\b\d+\.?\d*\b")
 
 
 def _normalize(sql: str) -> str:
+    """Normalize for display/comparison. For hashing, use the registry's
+    normalize_sql + hash_sql so hashes match the query registry."""
     return _LITERAL_RE.sub("?", sql).strip()
 
 
-def _hash_sql(normalized: str) -> str:
-    return hashlib.md5(normalized.encode()).hexdigest()[:12]
+def _hash_sql(sql_text: str) -> str:
+    """Hash using the registry's normalizer so the hash matches what
+    add_query() produces. This means `rdst analyze --hash <X>` works
+    directly without tag fallbacks."""
+    try:
+        from shared.query_registry import hash_sql
+        return hash_sql(sql_text)[:12]
+    except Exception:
+        # Fallback if registry import fails
+        normalized = _LITERAL_RE.sub("?", sql_text).strip()
+        return hashlib.md5(normalized.encode()).hexdigest()[:12]
 
 
 def _parse_duration(duration_str: str) -> int:
@@ -109,6 +120,49 @@ class CaptureService:
         except Exception as exc:
             yield WorkloadErrorEvent(type="error", message=str(exc), phase="connect")
             return
+
+        # Preflight: verify query tracking is enabled before spending time on capture.
+        # pg_stat_statements (PG) or performance_schema (MySQL) must be ON.
+        if duration_seconds and not snapshot_only:
+            try:
+                _pfcur = connection.cursor()
+                if db_engine == "postgresql":
+                    _pfcur.execute("SELECT 1 FROM pg_stat_statements LIMIT 1")
+                elif db_engine == "mysql":
+                    _pfcur.execute("SHOW VARIABLES LIKE 'performance_schema'")
+                    _pf_row = _pfcur.fetchone()
+                    # pymysql returns tuple or dict depending on cursor type
+                    _pf_val = _pf_row.get("Value", "") if isinstance(_pf_row, dict) else (_pf_row[1] if _pf_row else "")
+                    if str(_pf_val).upper() != "ON":
+                        _pfcur.close()
+                        yield WorkloadErrorEvent(
+                            type="error",
+                            message=(
+                                "MySQL performance_schema is OFF. Query capture requires it to be enabled.\n"
+                                "Fix: create a custom RDS parameter group with performance_schema=ON, "
+                                "attach it to the instance, and reboot.\n"
+                                "For non-RDS: add performance_schema=ON to my.cnf and restart MySQL."
+                            ),
+                            phase="preflight",
+                        )
+                        connection.close()
+                        return
+                _pfcur.close()
+            except Exception as _pf_exc:
+                err_str = str(_pf_exc)
+                if db_engine == "postgresql" and "pg_stat_statements" in err_str.lower():
+                    yield WorkloadErrorEvent(
+                        type="error",
+                        message=(
+                            "pg_stat_statements extension is not installed. Query capture requires it.\n"
+                            "Fix: CREATE EXTENSION pg_stat_statements;\n"
+                            "For RDS: add pg_stat_statements to shared_preload_libraries in the parameter group."
+                        ),
+                        phase="preflight",
+                    )
+                    connection.close()
+                    return
+                # Other errors — let the capture proceed and handle downstream
 
         yield WorkloadConnectedEvent(
             type="connected",
@@ -320,7 +374,7 @@ class CaptureService:
                 except Exception as exc:
                     logger.debug("Schema collection skipped: %s", exc)
 
-                yield WorkloadStatusEvent(type="status", phase="analysis", message="Running LLM analysis...")
+                yield WorkloadStatusEvent(type="status", phase="analysis", message="Running final analysis...")
                 try:
                     from shared.llm_manager import LLMManager
                     from shared.json_parse import parse_llm_json
@@ -359,11 +413,11 @@ class CaptureService:
                         type="analysis_progress", message="Analysis complete", percent=100
                     )
                 except Exception as exc:
-                    logger.warning("LLM analysis failed: %s", exc)
+                    logger.warning("Analysis failed: %s", exc)
                     yield WorkloadStatusEvent(
                         type="status",
                         phase="analysis",
-                        message=f"LLM analysis failed: {exc}",
+                        message=f"Analysis failed: {exc}",
                     )
 
             number_to_save = save_top_queries if save_top_queries is not None else len(queries)
@@ -376,12 +430,22 @@ class CaptureService:
                     registry.load()
                     for query in queries[:number_to_save]:
                         try:
-                            registry.add_query(
-                                sql=query.query_text,
-                                tag=f"capture_{run_id[:8]}",
+                            # Normalize MySQL DIGEST_TEXT spacing before saving.
+                            save_sql = query.query_text
+                            if db_engine == "mysql":
+                                save_sql = re.sub(r'(\w)\s+\(', r'\1(', save_sql)
+                                save_sql = re.sub(r'`\s+\.\s+`', '`.`', save_sql)
+
+                            # Save and get the REGISTRY hash back — this is
+                            # the single source of truth. Update the query's
+                            # hash to match so breadcrumbs resolve directly.
+                            reg_hash, _ = registry.add_query(
+                                sql=save_sql,
                                 target=target_name,
+                                skip_param_extraction=True,
                             )
-                            saved_hashes.append(query.query_hash)
+                            query.query_hash = reg_hash
+                            saved_hashes.append(reg_hash)
                         except Exception:
                             continue
                     if saved_hashes:
@@ -574,8 +638,25 @@ class CaptureService:
                 blocks_read = None
                 rows = int(row.get("rows_sent") or row.get("SUM_ROWS_SENT") or 0)
 
+            # Filter system/internal queries at the source — these are RDST's
+            # own monitoring queries or database internals, not user queries.
+            lower = text.lower()
+            if any(s in lower for s in [
+                "pg_stat_", "pg_settings", "pg_indexes", "pg_catalog",
+                "pg_database_size", "pg_backend_pid", "pg_stat_statements",
+                "information_schema", "pg_replication",
+                "performance_schema", "@@",
+                "mysql.", "sys.",
+            ]):
+                continue
+
+            # Only SELECT/WITH queries belong in reports
+            first_word = lower.lstrip().split()[0] if lower.strip() else ""
+            if first_word not in ("select", "with"):
+                continue
+
             normalized = _normalize(text)
-            query_hash = _hash_sql(normalized)
+            query_hash = _hash_sql(text)  # hash from raw text, matches registry
             pct = round((total_ms / total_time) * 100, 1) if total_time > 0 else 0
 
             queries.append(
@@ -625,6 +706,23 @@ class CaptureService:
                 time_delta = float(row.get("total_time_ms", 0)) - float(base.get("total_time_ms", 0))
 
             if calls_delta <= 0:
+                continue
+
+            # Filter system queries at delta level too
+            text = str(
+                row.get("query") or row.get("DIGEST_TEXT") or row.get("digest_text") or ""
+            ).lower()
+            if any(s in text for s in [
+                "pg_stat_", "pg_settings", "pg_catalog", "pg_database_size",
+                "pg_backend_pid", "pg_stat_statements", "information_schema",
+                "pg_replication", "performance_schema", "@@",
+                "mysql.", "sys.",
+            ]):
+                continue
+
+            # Only SELECT/WITH queries
+            first_word = text.lstrip().split()[0] if text.strip() else ""
+            if first_word not in ("select", "with"):
                 continue
 
             row_copy = dict(row)

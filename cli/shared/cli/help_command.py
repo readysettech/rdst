@@ -681,6 +681,34 @@ rdst audit show <run_id> --export-captured-queries
 - `--export-top-queries`: Export cumulative top queries only
 - `--export-captured-queries`: Export duration-captured queries only
 - `--json`: JSON output
+- `--verbose` / `-v`: Print the full report directly to the terminal (skips email)
+
+#### Output modes
+
+By default, `rdst audit` shows a **compact summary in the terminal** and
+emails the full report. The first time you run an audit you'll be prompted
+for an email address and asked to click a verification link; after that
+every subsequent run sends the report automatically to the verified email.
+Use `--verbose` (or `-v`) to **skip the email entirely** and print the full
+report directly to the terminal — useful for CI or when you don't want
+email at all.
+
+#### HTML report delivery
+
+Every audit generates an HTML report saved locally to `~/.rdst/reports/`.
+In default mode it's also hosted on the RDST keyservice and a "View Full
+Report" link is sent to the verified email. The report has three sections:
+Overview (topology + sizing & caching candidates), Detailed Analysis (per
+target deep dive with captured queries, index recommendations, and
+optimization priorities), and Next Steps (numbered actions with runnable
+`rdst` commands and inline savings estimates).
+
+#### ReadySet cache testing
+
+When a ReadySet cache target is deployed for the audited database
+and `--duration` is used, queries captured during the window are
+automatically tested against the cache. Speedup measurements for
+each query are included in the report.
 
 ### rdst fleet
 Manage and audit multiple database targets as a fleet.
@@ -822,6 +850,17 @@ results include the same depth of analysis as `rdst audit --duration`
 (health score, bottlenecks, index recommendations, caching
 candidates). Without `--duration`, uses cumulative stats from
 pg_stat_statements / performance_schema.
+
+By default, `rdst fleet audit` shows a compact summary in the terminal
+and emails a hosted **combined HTML report** to your verified email
+covering all audited targets. The report has three sections: Overview
+(fleet topology + per-target sizing & caching candidates), Detailed
+Analysis (per-target deep dives — collapsible), and Next Steps with
+runnable commands.
+
+Use `--verbose` (or `-v`) to print the full fleet report directly to
+the terminal and skip the email. Per-target reports are also saved
+locally to `~/.rdst/reports/` regardless of which mode you used.
 
 #### fleet snapshots
 List all saved fleet audit snapshots.
