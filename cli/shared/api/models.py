@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class AnalyzeRequest(BaseModel):
     query: str
+    target: Optional[str] = None
     fast: bool = False
     skip_rewrites: bool = False
     skip_readyset: bool = False

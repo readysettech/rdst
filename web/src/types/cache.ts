@@ -1,65 +1,28 @@
 // Cache Management Types
 // ---------------------------------------------------------------------------
+//
+// REST-backed shapes are re-exported from the generated OpenAPI types so the
+// frontend stays pinned to what the backend actually returns. SSE event
+// payloads (CacheRunResult, CacheRunStats) are still hand-written because
+// sse_starlette responses aren't in the OpenAPI schema yet.
 
-export interface CacheStatusResponse {
-  deployed: boolean;
-  running: boolean;
-  endpoint?: string;
-  cache_target?: string;
-  container_name?: string;
-}
+import type { components } from '../lib/api.generated';
 
-export interface CacheDeployRequest {
-  target: string;
-  mode: 'docker' | 'kubernetes' | 'systemd';
-  port?: number;
-  namespace?: string;
-  host?: string;
-  ssh_user?: string;
-}
+export type CacheStatusResponse = components['schemas']['CacheStatusResponse'];
+export type CacheDeployRequest = components['schemas']['CacheDeployRequest'];
+export type CacheAddRequest = components['schemas']['CacheAddRequest'];
+export type CacheAddResponse = components['schemas']['CacheAddResponse'];
+export type CacheEntry = components['schemas']['CacheEntryResponse'];
+export type CacheListResponse = components['schemas']['CacheListResponse'];
+export type CacheRunRequest = components['schemas']['CacheRunRequest'];
 
-export interface CacheAddRequest {
-  query: string;
-  target: string;
-  tag?: string;
-  dry_run?: boolean;
-}
-
-export interface CacheAddResponse {
-  success: boolean;
-  supported: boolean;
-  query: string;
-  query_hash?: string;
-  detail?: string;
-  error?: string;
-}
-
-export interface CacheEntry {
-  cache_id: string;
-  cache_name: string;
-  query: string;
-  type: 'shallow' | 'full';
-  ttl: string;
-  registry_hash?: string;
-}
-
-export interface CacheListResponse {
-  success: boolean;
-  caches: CacheEntry[];
-  count: number;
-}
-
+// UI state machines — not part of the API contract.
 export type CacheDeployState = 'idle' | 'deploying' | 'complete' | 'error';
+export type CacheRunState = 'idle' | 'running' | 'complete' | 'error';
 
-// Performance comparison (cache run)
-
-export interface CacheRunRequest {
-  query: string;
-  target: string;
-  iterations?: number;
-  warmup?: number;
-}
-
+// Cache performance comparison — consumed from the /api/cache/run SSE stream,
+// not from any REST endpoint, so still hand-typed until SSE payloads make it
+// into OpenAPI components.
 export interface CacheRunStats {
   mean: number;
   median: number;
@@ -82,5 +45,3 @@ export interface CacheRunResult {
   improvement_pct: number;
   winner: 'readyset' | 'origin';
 }
-
-export type CacheRunState = 'idle' | 'running' | 'complete' | 'error';

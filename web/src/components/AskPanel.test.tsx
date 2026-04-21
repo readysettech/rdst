@@ -74,6 +74,7 @@ describe("AskPanel", () => {
       ...baseUseAskState,
       state: "complete",
       result: {
+        type: 'result',
         success: true,
         sql: 'SELECT name, count FROM users',
         columns: ['name', 'count'],
@@ -82,6 +83,8 @@ describe("AskPanel", () => {
         execution_time_ms: 12.3,
         llm_calls: 1,
         total_tokens: 42,
+        query_hash: '',
+        query_tag: '',
       } satisfies AskResultEvent,
     });
 

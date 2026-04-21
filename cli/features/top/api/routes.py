@@ -5,9 +5,10 @@ for monitoring top slow queries from database telemetry.
 """
 
 import json
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, Union
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from shared.api.target_guard import TargetGuard, require_target
@@ -30,6 +31,38 @@ from ..models import (
 )
 
 router = APIRouter()
+
+
+class TopQueryResponseItem(BaseModel):
+    query_hash: str
+    query_text: str
+    normalized_query: str
+    freq: int
+    total_time: str
+    avg_time: str
+    pct_load: str
+    qps: Optional[float] = None
+    max_duration_ms: Optional[float] = None
+    current_instances_running: Optional[int] = None
+    observation_count: Optional[int] = None
+
+
+class TopDbLimitWarning(BaseModel):
+    db_limit_bytes: int
+    recommended_bytes: int
+    setting_name: str
+    db_engine: str
+
+
+class TopHistoricalResponse(BaseModel):
+    success: bool
+    target: Optional[str] = None
+    engine: Optional[str] = None
+    source: Optional[str] = None
+    queries: list[TopQueryResponseItem] = []
+    newly_saved: int = 0
+    db_limit_warning: Optional[TopDbLimitWarning] = None
+    error: Optional[str] = None
 
 
 def _serialize_query_data(query: TopQueryData) -> dict:
@@ -190,7 +223,7 @@ async def _historical_generator(
         yield {"event": "error", "data": json.dumps({"message": str(e)})}
 
 
-@router.get("/top")
+@router.get("/top", response_model=TopHistoricalResponse)
 async def get_top_queries(
     guard: TargetGuard = Depends(require_target),
     limit: int = Query(10, description="Number of top queries to return"),
@@ -206,7 +239,7 @@ async def get_top_queries(
     min_total_time_s: float = Query(0.0, ge=0.0, description="Minimum total time in seconds"),
     auto_save: bool = Query(True, description="Auto-save queries to registry"),
     stream: bool = Query(False, description="Return SSE stream instead of JSON (alias for realtime)"),
-):
+) -> Union[TopHistoricalResponse, EventSourceResponse]:
     """Get top queries from database telemetry.
 
     Two modes available:
@@ -294,33 +327,29 @@ async def get_top_queries(
             break
 
     if error_message:
-        return {
-            "success": False,
-            "error": error_message,
-        }
+        return TopHistoricalResponse(success=False, error=error_message)
 
     if result is None:
-        return {
-            "success": False,
-            "error": "No results collected",
-        }
+        return TopHistoricalResponse(success=False, error="No results collected")
 
-    response = {
-        "success": True,
-        "target": target_name,
-        "engine": db_engine,
-        "source": actual_source,
-        "queries": [_serialize_query_data(q) for q in result.queries],
-        "newly_saved": result.newly_saved,
-    }
-    if db_limit_warning:
-        response["db_limit_warning"] = {
-            "db_limit_bytes": db_limit_warning.db_limit_bytes,
-            "recommended_bytes": db_limit_warning.recommended_bytes,
-            "setting_name": db_limit_warning.setting_name,
-            "db_engine": db_limit_warning.db_engine,
-        }
-    return response
+    return TopHistoricalResponse(
+        success=True,
+        target=target_name,
+        engine=db_engine,
+        source=actual_source,
+        queries=[TopQueryResponseItem(**_serialize_query_data(q)) for q in result.queries],
+        newly_saved=result.newly_saved,
+        db_limit_warning=(
+            TopDbLimitWarning(
+                db_limit_bytes=db_limit_warning.db_limit_bytes,
+                recommended_bytes=db_limit_warning.recommended_bytes,
+                setting_name=db_limit_warning.setting_name,
+                db_engine=db_limit_warning.db_engine,
+            )
+            if db_limit_warning
+            else None
+        ),
+    )
 
 
 @router.get("/top/realtime")

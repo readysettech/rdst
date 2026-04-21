@@ -11,6 +11,7 @@ import { ConfigureTargetList } from "../configure/ConfigureTargetList";
 import { ConfigureConnectionTest } from "../configure/ConfigureConnectionTest";
 import type {
   ConfigureTarget,
+  ConfigureTargetDetail,
   ConfigureFormData,
   ConfigureConnectionStatus,
 } from "../../types/configure";
@@ -19,8 +20,9 @@ import type { ConfigureState } from "../../types/configure";
 interface TargetsStepProps {
   targets: ConfigureTarget[];
   defaultTarget: string | null;
+  onGetTarget: (name: string) => Promise<ConfigureTargetDetail | null>;
   onAddTarget: (data: ConfigureFormData) => Promise<void>;
-  onUpdateTarget: (name: string, data: Partial<ConfigureFormData>) => Promise<void>;
+  onUpdateTarget: (name: string, data: ConfigureFormData) => Promise<void>;
   onRemoveTarget: (name: string) => Promise<void>;
   onSetDefault: (name: string) => Promise<void>;
   onTestConnection: (name: string) => void;
@@ -34,6 +36,7 @@ interface TargetsStepProps {
 export function TargetsStep({
   targets,
   defaultTarget,
+  onGetTarget,
   onAddTarget,
   onUpdateTarget,
   onRemoveTarget,
@@ -46,15 +49,19 @@ export function TargetsStep({
   isLoading,
 }: TargetsStepProps) {
   const [showForm, setShowForm] = useState(false);
-  const [editingTarget, setEditingTarget] = useState<ConfigureTarget | null>(null);
+  const [editingTarget, setEditingTarget] = useState<ConfigureTargetDetail | null>(null);
 
   const handleAddClick = () => {
     setEditingTarget(null);
     setShowForm(true);
   };
 
-  const handleEditClick = (target: ConfigureTarget) => {
-    setEditingTarget(target);
+  const handleEditClick = async (target: ConfigureTarget) => {
+    const targetDetail = await onGetTarget(target.name);
+    if (!targetDetail) {
+      return;
+    }
+    setEditingTarget(targetDetail);
     setShowForm(true);
   };
 
@@ -168,6 +175,13 @@ export function TargetsStep({
                       ? {
                           name: editingTarget.name,
                           engine: editingTarget.engine,
+                          host: editingTarget.host,
+                          port: editingTarget.port,
+                          database: editingTarget.database,
+                          user: editingTarget.user,
+                          password_env: editingTarget.password_env,
+                          tls: editingTarget.tls,
+                          read_only: editingTarget.read_only,
                         }
                       : undefined
                   }
@@ -239,12 +253,12 @@ export function TargetsStep({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
           >
-            <ConfigureTargetList
-              targets={targets}
-              onEdit={handleEditClick}
-              onTest={onTestConnection}
-              onDelete={handleDelete}
-              onSetDefault={onSetDefault}
+                        <ConfigureTargetList
+                          targets={targets}
+                          onEdit={(target) => void handleEditClick(target)}
+                          onTest={onTestConnection}
+                          onDelete={handleDelete}
+                          onSetDefault={onSetDefault}
               isLoading={isLoading}
             />
           </m.div>

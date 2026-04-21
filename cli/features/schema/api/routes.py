@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,7 +16,7 @@ router = APIRouter()
 
 class SchemaResponse(BaseModel):
     tables: dict[str, list[str]]
-    dialect: str
+    dialect: Literal["postgresql", "mysql"]
     error: Optional[str] = None
 
 
@@ -34,9 +34,13 @@ async def get_schema(
                 error=result.get("error", "Failed to collect schema"),
             )
 
+        engine = guard.target_config.get("engine", "postgresql")
+        dialect: Literal["postgresql", "mysql"] = (
+            "mysql" if engine == "mysql" else "postgresql"
+        )
         return SchemaResponse(
             tables=result.get("tables", {}),
-            dialect=guard.target_config.get("engine", "postgresql"),
+            dialect=dialect,
         )
     except HTTPException:
         raise

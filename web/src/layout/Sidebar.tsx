@@ -3,11 +3,10 @@ import { tv } from "@rs/tailwind-base";
 import { Icon } from "@rs/ui-new/icon";
 import { Text } from "@rs/ui-new/text";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { TargetDropdown } from "../components/TargetDropdown";
 import { ReportDialog } from "../components/ReportDialog";
 import { useTarget } from "../hooks/useTarget";
-import { fetchStatus } from "../lib/api";
+import { useSystemStatus } from "../lib/useSystemStatus";
 import { TrialBalanceBadge } from "../components/TrialBalanceBadge";
 
 const sidebarStyles = tv({
@@ -77,11 +76,7 @@ export function Sidebar() {
   const { target: selectedTarget, setTarget: setSelectedTarget } = useTarget();
   const [reportOpen, setReportOpen] = useState(false);
 
-  const { data: status } = useQuery({
-    queryKey: ["status"],
-    queryFn: fetchStatus,
-    staleTime: 60000,
-  });
+  const { data: status } = useSystemStatus();
 
   return (
     <aside className={sidebarStyles()}>

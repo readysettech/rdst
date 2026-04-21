@@ -1,15 +1,21 @@
-"""Analyze feature events."""
-
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from shared.service_events import ErrorEvent, ProgressEvent
 
+from .event_payloads import (
+    ExplainResults,
+    FormattedAnalysis,
+    LLMAnalysis,
+    ReadysetCacheability,
+    RewritePerformance,
+    RewriteTesting,
+    TestedRewrite,
+)
+
 
 @dataclass
 class ExplainCompleteEvent:
-    """EXPLAIN ANALYZE execution completed."""
-
     type: Literal["explain_complete"]
     success: bool
     database_engine: str
@@ -24,21 +30,17 @@ class ExplainCompleteEvent:
 
 @dataclass
 class RewritesTestedEvent:
-    """Query rewrites have been tested."""
-
     type: Literal["rewrites_tested"]
     tested: bool
     skipped_reason: Optional[str] = None
     message: Optional[str] = None
-    original_performance: Optional[Dict[str, Any]] = None
-    rewrite_results: Optional[List[Dict[str, Any]]] = None
-    best_rewrite: Optional[Dict[str, Any]] = None
+    original_performance: Optional[RewritePerformance] = None
+    rewrite_results: Optional[List[TestedRewrite]] = None
+    best_rewrite: Optional[TestedRewrite] = None
 
 
 @dataclass
 class ReadysetCheckedEvent:
-    """ReadySet cacheability check completed."""
-
     type: Literal["readyset_checked"]
     checked: bool
     cacheable: Optional[bool] = None
@@ -51,17 +53,15 @@ class ReadysetCheckedEvent:
 
 @dataclass
 class CompleteEvent:
-    """Analysis completed successfully."""
-
     type: Literal["complete"]
     success: bool
     analysis_id: Optional[str] = None
     query_hash: Optional[str] = None
-    explain_results: Optional[Dict[str, Any]] = None
-    llm_analysis: Optional[Dict[str, Any]] = None
-    rewrite_testing: Optional[Dict[str, Any]] = None
-    readyset_cacheability: Optional[Dict[str, Any]] = None
-    formatted: Optional[Dict[str, Any]] = None
+    explain_results: Optional[ExplainResults] = None
+    llm_analysis: Optional[LLMAnalysis] = None
+    rewrite_testing: Optional[RewriteTesting] = None
+    readyset_cacheability: Optional[ReadysetCacheability] = None
+    formatted: Optional[FormattedAnalysis] = None
 
 
 AnalyzeEvent = Union[

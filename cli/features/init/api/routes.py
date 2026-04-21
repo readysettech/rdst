@@ -23,9 +23,16 @@ from features.init.service import InitService
 router = APIRouter()
 
 
+class InitTargetInfo(BaseModel):
+    name: str
+    engine: str
+    has_password: bool
+    is_default: bool
+
+
 class InitStatusResponse(BaseModel):
     initialized: bool
-    targets: list[dict[str, Any]]
+    targets: list[InitTargetInfo]
     default_target: str | None = None
     llm_configured: bool
 
@@ -34,9 +41,22 @@ class InitValidateRequest(BaseModel):
     targets: list[str] | None = None
 
 
+class TargetValidationResult(BaseModel):
+    name: str
+    success: bool
+    error: str | None = None
+    version: str | None = None
+
+
+class LlmValidationResult(BaseModel):
+    success: bool
+    error: str | None = None
+    model: str | None = None
+
+
 class InitValidateResponse(BaseModel):
-    target_results: list[dict[str, Any]]
-    llm_result: dict[str, Any]
+    target_results: list[TargetValidationResult]
+    llm_result: LlmValidationResult
 
 
 class InitCompleteResponse(BaseModel):

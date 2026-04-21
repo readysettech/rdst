@@ -3,12 +3,19 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, TypeAdapter
 
 from shared.api.docker_prepull import start_prepull
+
+
+class HealthResponse(BaseModel):
+    status: str
 
 
 @asynccontextmanager
@@ -43,6 +50,109 @@ def _resolve_static_dist_dir(static_dist_dir: str | None) -> Path | None:
         return None
 
     return dist_dir
+
+
+def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
+    """Map SSE event-union schema name → (TypeAdapter-compatible union, route paths).
+
+    Route paths are the OpenAPI paths (including `/api` prefix) that emit the
+    union as an SSE stream. They get a `text/event-stream` 200 response added
+    to their operation, pointing at the union schema.
+    """
+    from features.analyze.events import AnalyzeEvent
+    from features.ask.events import AskEvent
+    from features.cache.readyset_events import (
+        ReadysetCacheEvent,
+        ReadysetExplainEvent,
+        ReadysetSetupEvent,
+    )
+    from features.query_registry.events import QueryBenchmarkEvent
+    from features.scan.events import ScanEvent
+    from features.top.events import TopEvent
+
+    return {
+        "AnalyzeEvent": (AnalyzeEvent, ["/api/analyze", "/api/analyze/quick"]),
+        "AskEvent": (AskEvent, ["/api/ask"]),
+        "QueryBenchmarkEvent": (
+            QueryBenchmarkEvent,
+            ["/api/query-registry/benchmark"],
+        ),
+        "ReadysetCacheEvent": (ReadysetCacheEvent, ["/api/readyset/cache"]),
+        "ReadysetExplainEvent": (ReadysetExplainEvent, ["/api/readyset/explain"]),
+        "ReadysetSetupEvent": (ReadysetSetupEvent, ["/api/readyset/setup"]),
+        "ScanEvent": (ScanEvent, ["/api/scan"]),
+        "TopEvent": (TopEvent, ["/api/top/realtime"]),
+    }
+
+
+def _relax_defaulted_required(openapi: dict[str, Any]) -> dict[str, Any]:
+    """Remove fields with defaults from `required` in every object schema.
+
+    Pydantic v2 emits default-valued fields as `required` with a `default`
+    keyword alongside. openapi-typescript reads `required` and emits the
+    field as non-optional TS — forcing every caller to pass optional flags.
+    Stripping defaulted fields from `required` yields the optionality the
+    Python signature actually implies.
+    """
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            required = node.get("required")
+            if isinstance(properties, dict) and isinstance(required, list):
+                defaulted = {
+                    name
+                    for name, prop in properties.items()
+                    if isinstance(prop, dict) and "default" in prop
+                }
+                if defaulted:
+                    node["required"] = [r for r in required if r not in defaulted]
+                    if not node["required"]:
+                        node.pop("required")
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(openapi.get("components", {}).get("schemas", {}))
+    return openapi
+
+
+def _inject_sse_schemas(openapi: dict[str, Any]) -> dict[str, Any]:
+    """Inject SSE event union schemas into components.schemas and add
+    text/event-stream responses to the corresponding SSE routes.
+    """
+    components = openapi.setdefault("components", {})
+    schemas = components.setdefault("schemas", {})
+
+    for union_name, (union_type, route_paths) in _sse_event_unions().items():
+        adapter = TypeAdapter(union_type)
+        union_schema = adapter.json_schema(
+            mode="serialization",
+            ref_template="#/components/schemas/{model}",
+        )
+        defs = union_schema.pop("$defs", {})
+        for def_name, def_schema in defs.items():
+            schemas.setdefault(def_name, def_schema)
+        schemas[union_name] = union_schema
+
+        for path in route_paths:
+            path_item = openapi.get("paths", {}).get(path)
+            if not path_item:
+                continue
+            for method in ("get", "post", "put", "patch", "delete"):
+                operation = path_item.get(method)
+                if not operation:
+                    continue
+                responses = operation.setdefault("responses", {})
+                ok = responses.setdefault("200", {"description": "SSE stream"})
+                content = ok.setdefault("content", {})
+                content["text/event-stream"] = {
+                    "schema": {"$ref": f"#/components/schemas/{union_name}"},
+                }
+
+    return openapi
 
 
 def create_app(static_dist_dir: str | None = None) -> FastAPI:
@@ -96,8 +206,8 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(dev.router, prefix="/api", tags=["dev"])
 
     @app.get("/health")
-    async def health_check():
-        return {"status": "ok"}
+    async def health_check() -> HealthResponse:
+        return HealthResponse(status="ok")
 
     dist_dir = _resolve_static_dist_dir(static_dist_dir)
     if dist_dir:
@@ -117,5 +227,21 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
                 return FileResponse(str(resolved_path))
 
             return FileResponse(str(index_file))
+
+    def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        _inject_sse_schemas(schema)
+        _relax_defaulted_required(schema)
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
 
     return app

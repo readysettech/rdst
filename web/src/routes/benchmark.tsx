@@ -18,10 +18,10 @@ import { useTarget } from "../hooks/useTarget";
 import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
 import { useBenchmark } from "../lib/sse";
 import { hasParameters, detectParameters, substituteParameters, resolveInitialValue } from "../lib/sqlParameters";
-import type { Parameter } from "../lib/sqlParameters";
 import { SQLDisplay } from "../components/SQLDisplay";
 import type { BenchmarkMode, QueryBenchmarkStats, BenchmarkQueryInput, TargetInfo } from "../lib/api";
-import { fetchStatus, fetchSchema } from "../lib/api";
+import { fetchSchema } from "../lib/api";
+import { useSystemStatus } from "../lib/useSystemStatus";
 
 export const Route = createFileRoute("/benchmark")({
   component: BenchmarkPage,
@@ -117,11 +117,7 @@ function MetricCard({ label, value, variant = "default" }: { label: string; valu
 export function BenchmarkPage() {
   const { queries, isLoading: registryLoading } = useQueryRegistry();
   const { target } = useTarget();
-  const { data: status } = useQuery({
-    queryKey: ["status"],
-    queryFn: fetchStatus,
-    staleTime: 30000,
-  });
+  const { data: status } = useSystemStatus();
   const availableTargets = status?.targets ?? [];
   const [destinationTarget, setDestinationTarget] = useState<string | null>(target);
   const userOverrodeDestination = useRef(false);

@@ -28,6 +28,7 @@ class ConfigureTargetDetailEvent:
     user: str
     has_password: bool
     is_default: bool
+    password_env: Optional[str] = None
     tls: bool = False
     read_only: bool = False
 
@@ -76,4 +77,3 @@ ConfigureEvent = Union[
     ConfigureErrorEvent,
     ConfigureInputNeededEvent,
 ]
-

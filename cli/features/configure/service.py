@@ -99,6 +99,7 @@ class ConfigureService:
                 port=target_data.get("port", 5432),
                 database=target_data.get("database", ""),
                 user=target_data.get("user", ""),
+                password_env=target_data.get("password_env"),
                 has_password=resolve_password(target_data).available,
                 is_default=name == default_target,
                 tls=target_data.get("tls", False),

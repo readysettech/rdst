@@ -61,7 +61,7 @@ function DbLimitWarning({ warning: w }: { warning: TopDbLimitWarningEventData })
               {sql}{isPostgres ? '\n-- Then restart PostgreSQL' : ''}
             </pre>
             <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <CopyButton value={sql} />
+              <CopyButton text={sql} />
             </div>
           </div>
         </VStack>
@@ -91,14 +91,16 @@ export function TopPage() {
   const [filterPattern, setFilterPattern] = useState('');
   const [duration, setDuration] = useState(0);
   const [autoSave, setAutoSave] = useState(true);
+  const [minFreq, setMinFreq] = useState(0);
+  const [minLoadPct, setMinLoadPct] = useState(0);
 
   // Parameter dialog state
   const [paramDialogQuery, setParamDialogQuery] = useState<string | null>(null);
-  const [paramDialogStoredParams, setParamDialogStoredParams] = useState<Record<string, string | number> | undefined>(undefined);
+  const [paramDialogStoredParams, setParamDialogStoredParams] = useState<Record<string, unknown> | undefined>(undefined);
 
   // Build a lookup from query hash to registry entry for stored params
   const registryParamsByHash = useMemo(() => {
-    const map = new Map<string, Record<string, string | number>>();
+    const map = new Map<string, Record<string, unknown>>();
     for (const entry of registryQueries) {
       if (entry.most_recent_params && Object.keys(entry.most_recent_params).length > 0) {
         map.set(entry.hash, entry.most_recent_params);
@@ -265,6 +267,10 @@ export function TopPage() {
         setDuration={setDuration}
         autoSave={autoSave}
         setAutoSave={setAutoSave}
+        minFreq={minFreq}
+        setMinFreq={setMinFreq}
+        minLoadPct={minLoadPct}
+        setMinLoadPct={setMinLoadPct}
         state={state}
         onStart={handleStart}
         onStop={handleStop}

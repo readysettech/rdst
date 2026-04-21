@@ -198,6 +198,7 @@ class BenchmarkRequest(BaseModel):
     queries: list[
         Union[str, BenchmarkQueryInput]
     ]  # Query names/hashes OR BenchmarkQueryInput objects
+    target: Optional[str] = None
     mode: Literal["interval", "concurrency"] = "interval"
     interval_ms: Optional[int] = 100  # For interval mode
     concurrency: Optional[int] = 1  # For concurrency mode
@@ -243,13 +244,14 @@ def _progress_to_sse(progress: Any) -> dict:
     - 'complete' for successful completion
     - 'error' for failures
     """
-    # Map progress.type to SSE event name (same pattern as analyze.py)
     event_name = progress.type
     if event_name not in ("progress", "complete", "error"):
         event_name = "unknown"
 
     if isinstance(progress, BaseModel):
         payload = progress.model_dump_json()
+    elif event_name == "error":
+        payload = json.dumps({"type": "error", "error": progress.error})
     else:
         payload = json.dumps(
             {
@@ -260,7 +262,6 @@ def _progress_to_sse(progress: Any) -> dict:
                 "total_failures": progress.total_failures,
                 "qps": progress.qps,
                 "queries": [q.__dict__ for q in progress.queries],
-                "error": progress.error,
             }
         )
     return {

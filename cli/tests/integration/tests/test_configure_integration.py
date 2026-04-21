@@ -601,6 +601,7 @@ class TestConfigureAPIIntegration:
                 assert data["port"] == 5432
                 assert data["database"] == "testdb"
                 assert data["user"] == "testuser"
+                assert data["password_env"] == "TEST_DB_PASSWORD"
                 assert data["is_default"] is True
 
     @pytest.mark.asyncio

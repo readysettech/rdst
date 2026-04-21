@@ -297,10 +297,10 @@ function TestPage() {
         ParameterDialog
       </Text>
 
-      <VStack gap="lg">
+      <VStack className="gap-6">
         {/* Small query - few params */}
         <div className="border border-border-layout-1 rounded-lg p-4 space-y-3">
-          <Text level="label-base" className="text-content-layout-1">
+          <Text level="label-medium" className="text-content-layout-1">
             Small query (3 params) — should use base modal, single column
           </Text>
           <Button
@@ -322,7 +322,7 @@ function TestPage() {
 
         {/* Medium query - 5 params */}
         <div className="border border-border-layout-1 rounded-lg p-4 space-y-3">
-          <Text level="label-base" className="text-content-layout-1">
+          <Text level="label-medium" className="text-content-layout-1">
             Medium query (5 params) — should use base modal, single column
           </Text>
           <Button
@@ -344,7 +344,7 @@ function TestPage() {
 
         {/* Large query - 23 params */}
         <div className="border border-border-layout-1 rounded-lg p-4 space-y-3">
-          <Text level="label-base" className="text-content-layout-1">
+          <Text level="label-medium" className="text-content-layout-1">
             Large query (23 params) — should use extra-large modal, 2-column grid, expand/collapse
           </Text>
           <Button
@@ -367,7 +367,7 @@ function TestPage() {
 
         {/* Large query with initial values pre-filled */}
         <div className="border border-border-layout-1 rounded-lg p-4 space-y-3">
-          <Text level="label-base" className="text-content-layout-1">
+          <Text level="label-medium" className="text-content-layout-1">
             Large query with pre-filled values — verify initial values populate
           </Text>
           <Button

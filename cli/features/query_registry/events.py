@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Union
 
 from .models import QueryBenchmarkStats
 
@@ -35,17 +35,41 @@ class QueryErrorEvent:
 
 @dataclass
 class QueryBenchmarkProgressEvent:
-    """Benchmark progress update."""
+    """Benchmark progress tick."""
 
-    type: Literal["progress", "complete", "error"]
+    type: Literal["progress"]
     elapsed_seconds: float
     total_executions: int
     total_successes: int
     total_failures: int
     qps: float
     queries: list[QueryBenchmarkStats]
-    error: Optional[str] = None
+
+
+@dataclass
+class QueryBenchmarkCompleteEvent:
+    """Benchmark finished; carries the final tally."""
+
+    type: Literal["complete"]
+    elapsed_seconds: float
+    total_executions: int
+    total_successes: int
+    total_failures: int
+    qps: float
+    queries: list[QueryBenchmarkStats]
+
+
+@dataclass
+class QueryBenchmarkErrorEvent:
+    """Benchmark failed before completion."""
+
+    type: Literal["error"]
+    error: str
 
 
 QueryEvent = Union[QueryStatusEvent, QueryCompleteEvent, QueryErrorEvent]
-QueryBenchmarkEvent = QueryBenchmarkProgressEvent
+QueryBenchmarkEvent = Union[
+    QueryBenchmarkProgressEvent,
+    QueryBenchmarkCompleteEvent,
+    QueryBenchmarkErrorEvent,
+]

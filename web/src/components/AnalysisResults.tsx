@@ -396,8 +396,8 @@ export function AnalysisResults({
       llm_analysis?.performance_assessment || formatted?.analysis_summary;
     const testing = resolveRewriteTesting(
       rewriteTesting,
-      results.rewrite_testing,
-      formatted?.rewrite_testing
+      results.rewrite_testing ?? undefined,
+      formatted?.rewrite_testing ?? undefined
     );
     const cacheability =
       readysetCacheability ||
@@ -422,7 +422,7 @@ export function AnalysisResults({
         {perf && (
           <PerformanceSummarySection
             perf={perf}
-            explainResults={explain_results}
+            explainResults={explain_results ?? undefined}
           />
         )}
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Text } from "@rs/ui-new/text";
 import { Button } from "@rs/ui-new/button";
 import { Icon } from "@rs/ui-new/icon";
@@ -10,7 +10,8 @@ import { m, AnimatePresence } from "@rs/ui-new/motion";
 import type { ValidationResult } from "../../types/onboarding";
 import { EnvSecretsDialog } from "../EnvSecretsDialog";
 import { TrialRegistrationDialog } from "../TrialRegistrationDialog";
-import { fetchEnvRequirements, type EnvRequirement } from "../../lib/api";
+import { type EnvRequirement } from "../../lib/api";
+import { useEnvRequirements } from "../../lib/useEnvRequirements";
 import { invalidateTrialRelatedQueries } from "../../lib/trialQueries";
 
 interface ValidateStepProps {
@@ -35,12 +36,7 @@ export function ValidateStep({
   const [showTrialDialog, setShowTrialDialog] = useState(false);
   const [dialogRequirements, setDialogRequirements] = useState<EnvRequirement[]>([]);
 
-  const { data: envRequirements } = useQuery({
-    queryKey: ["env-requirements"],
-    queryFn: fetchEnvRequirements,
-    staleTime: 30000,
-    retry: 1,
-  });
+  const { data: envRequirements } = useEnvRequirements();
 
   const missingAnthropicRequirements =
     envRequirements?.requirements.filter(

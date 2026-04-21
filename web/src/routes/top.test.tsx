@@ -13,6 +13,8 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQuery: () => ({ data: undefined, isLoading: false, isFetching: false, error: null }),
+  useMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, isError: false, isSuccess: false, data: undefined, error: null, reset: vi.fn() }),
 }));
 
 vi.mock("../lib/useQueryRegistry", () => ({
@@ -69,6 +71,15 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
     } as any,
     removeQuery: vi.fn(),
     updateTag: vi.fn(),
+    isFetching: false,
+    total: 0,
+    limit: 50,
+    offset: 0,
+    setLimit: vi.fn(),
+    setOffset: vi.fn(),
+    nextPage: vi.fn(),
+    prevPage: vi.fn(),
+    resetPagination: vi.fn(),
   });
 
   vi.mocked(useTargetPasswordLock).mockReturnValue({

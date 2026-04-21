@@ -114,41 +114,7 @@ export interface ScanAnalyzedQuery {
   raw_analysis?: ScanRawAnalysis;
 }
 
-// SSE Event Data Types
-export interface ScanStatusEventData {
-  phase: ScanPhase;
-  message: string;
-}
-
-export interface ScanFilesFoundEventData {
-  files: ScanFile[];
-  total: number;
-}
-
-export interface ScanProgressEventData {
-  phase: ScanPhase;
-  current: number;
-  total: number;
-  message: string;
-}
-
-export interface ScanQueryResultEventData {
-  query: ScanQuery;
-}
-
-export interface ScanRegistryEventData {
-  new_queries: number;
-  updated_queries: number;
-  total_queries: number;
-  skipped: boolean;
-}
-
-export interface ScanCompleteEventData {
-  success: boolean;
-  summary: ScanSummary;
-}
-
-export interface ScanErrorEventData {
-  message: string;
-  phase?: ScanPhase;
-}
+// SSE event payload types are generated from the backend OpenAPI schema;
+// consume them via `components['schemas']['ScanEvent']` in `lib/api.generated`.
+// The rich payload types above (ScanFile, ScanQuery, ScanSummary) refine the
+// generated `{[key: string]: unknown}` fields at the consumer site.

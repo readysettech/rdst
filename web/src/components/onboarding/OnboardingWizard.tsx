@@ -42,6 +42,7 @@ export function OnboardingWizard() {
 
   const {
     listTargets,
+    getTarget,
     addTarget,
     updateTarget,
     removeTarget,
@@ -272,6 +273,7 @@ export function OnboardingWizard() {
                 <TargetsStep
                   targets={targets}
                   defaultTarget={defaultTarget}
+                  onGetTarget={getTarget}
                   onAddTarget={addTarget}
                   onUpdateTarget={updateTarget}
                   onRemoveTarget={removeTarget}

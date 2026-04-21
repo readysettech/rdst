@@ -4,20 +4,28 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { useTargetSwitchLock } from './targetSwitchLock';
+import type { components } from './api.generated';
 import type {
   TopQuery,
   TopState,
   TopConnectionInfo,
   TopSourceFallback,
-  TopConnectedEventData,
   TopDbLimitWarningEventData,
-  TopSourceFallbackEventData,
-  TopQueriesEventData,
-  TopQuerySavedEventData,
-  TopCompleteEventData,
-  TopErrorEventData,
   TopHistoricalResponse,
 } from '../types/top';
+
+// SSE event types are derived from the backend-generated discriminated union.
+// Backend source of truth: rdst/features/top/events.py (TopEvent).
+type TopEvent = components['schemas']['TopEvent'];
+export type TopEventType = TopEvent['type'];
+
+type TopConnectedEvent = Extract<TopEvent, { type: 'connected' }>;
+type TopSourceFallbackEvent = Extract<TopEvent, { type: 'source_fallback' }>;
+type TopDbLimitWarningEvent = Extract<TopEvent, { type: 'db_limit_warning' }>;
+type TopQueriesEvent = Extract<TopEvent, { type: 'queries' }>;
+type TopQuerySavedEvent = Extract<TopEvent, { type: 'query_saved' }>;
+type TopCompleteEvent = Extract<TopEvent, { type: 'complete' }>;
+type TopErrorEvent = Extract<TopEvent, { type: 'error' }>;
 
 interface UseTopOptions {
   limit?: number;
@@ -254,13 +262,14 @@ export function useTop(): UseTopReturn {
               try {
                 const data = JSON.parse(dataStr);
 
-                switch (currentEvent) {
+                const eventType = currentEvent as TopEventType;
+                switch (eventType) {
                   case 'status':
                     // Status messages - could log or update UI
                     break;
 
                   case 'connected': {
-                    const connData = data as TopConnectedEventData;
+                    const connData = data as TopConnectedEvent;
                     setConnectionInfo({
                       target: connData.target_name,
                       engine: connData.db_engine,
@@ -270,7 +279,7 @@ export function useTop(): UseTopReturn {
                   }
 
                   case 'source_fallback': {
-                    const fallbackData = data as TopSourceFallbackEventData;
+                    const fallbackData = data as TopSourceFallbackEvent;
                     setSourceFallback({
                       from_source: fallbackData.from_source,
                       to_source: fallbackData.to_source,
@@ -280,54 +289,64 @@ export function useTop(): UseTopReturn {
                   }
 
                   case 'db_limit_warning': {
-                    const warningData = data as TopDbLimitWarningEventData;
-                    setDbLimitWarning(warningData);
+                    const warningData = data as TopDbLimitWarningEvent;
+                    // Strip the discriminant before storing.
+                    const { type: _t, ...payload } = warningData;
+                    void _t;
+                    setDbLimitWarning(payload);
                     break;
                   }
 
                   case 'queries': {
-                    const queriesData = data as TopQueriesEventData;
-                    setQueries(queriesData.queries);
-                    if (queriesData.runtime_seconds !== undefined) {
+                    const queriesData = data as TopQueriesEvent;
+                    // Backend TopQueryData differs slightly from the UI TopQuery
+                    // shape (e.g., `current_instances` vs `current_instances_running`);
+                    // cast via unknown — pre-existing field-name divergence.
+                    setQueries(queriesData.queries as unknown as TopQuery[]);
+                    if (queriesData.runtime_seconds != null) {
                       setRuntimeSeconds(queriesData.runtime_seconds);
                     }
-                    if (queriesData.total_tracked !== undefined) {
+                    if (queriesData.total_tracked != null) {
                       setTotalTracked(queriesData.total_tracked);
                     }
                     break;
                   }
 
                   case 'query_saved': {
-                    const savedData = data as TopQuerySavedEventData;
+                    const savedData = data as TopQuerySavedEvent;
                     if (savedData.is_new) {
                       setNewlySaved((prev) => prev + 1);
-                      setSavedHashes((prev) => new Set(prev).add(savedData.query_hash));
+                      setSavedHashes((prev) => {
+                        if (prev.has(savedData.query_hash)) return prev;
+                        return new Set(prev).add(savedData.query_hash);
+                      });
                     }
                     break;
                   }
 
                   case 'complete': {
-                    const completeData = data as TopCompleteEventData;
-                    setQueries(completeData.queries);
+                    const completeData = data as TopCompleteEvent;
+                    setQueries(completeData.queries as unknown as TopQuery[]);
                     setNewlySaved(completeData.newly_saved);
                     setState('complete');
                     break;
                   }
 
                   case 'error': {
-                    const errorData = data as TopErrorEventData;
+                    const errorData = data as TopErrorEvent;
                     setError(errorData.message);
                     setState('error');
                     break;
                   }
 
-                  case 'unknown':
-                    console.warn('[Top SSE] Unknown event payload (ignored):', data);
-                    break;
-
-                  default:
+                  default: {
+                    // Exhaustiveness guard: adding a variant to TopEventType
+                    // without handling it here fails tsc. Do NOT use `as never`.
+                    const _exhaustive: never = eventType;
                     console.warn('[Top SSE] Unknown event type (ignored):', currentEvent, data);
+                    void _exhaustive;
                     break;
+                  }
                 }
               } catch (e) {
                 console.error('[SSE] Failed to parse JSON:', e);

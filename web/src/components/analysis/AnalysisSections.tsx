@@ -732,7 +732,7 @@ export function TestedOptimizationsSection({
 export function IndexRecommendationsSection({
   recommendations,
 }: {
-  recommendations: CompleteEvent["llm_analysis"]["index_recommendations"];
+  recommendations: NonNullable<CompleteEvent["llm_analysis"]>["index_recommendations"];
 }) {
   if (!recommendations || recommendations.length === 0) return null;
 
@@ -848,7 +848,7 @@ export function IndexRecommendationsSection({
 export function AdditionalRecommendationsSection({
   opportunities,
 }: {
-  opportunities: CompleteEvent["llm_analysis"]["optimization_opportunities"];
+  opportunities: NonNullable<CompleteEvent["llm_analysis"]>["optimization_opportunities"];
 }) {
   if (!opportunities || opportunities.length === 0) return null;
 

@@ -1,5 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
-import type { InitStatus, ValidationResult, OnboardingStep } from '../types/onboarding';
+import { api } from './client';
+import type { components } from './api.generated';
+import type { OnboardingStep } from '../types/onboarding';
+
+type InitStatus = components['schemas']['InitStatusResponse'];
+type ValidationResult = components['schemas']['InitValidateResponse'];
 
 interface UseOnboardingReturn {
   step: OnboardingStep;
@@ -13,118 +18,97 @@ interface UseOnboardingReturn {
   completeInit: () => Promise<boolean>;
 }
 
+// Routes have no error responses declared, so openapi-fetch's error branch
+// types as `never` and narrowing on `!data` collapses to an unreachable case.
+// Reading `response.ok` directly off the result keeps `Response` in scope.
+async function throwIfNotOk(response: Response): Promise<void> {
+  if (response.ok) return;
+  const body = await response.text().catch(() => '');
+  throw new Error(`HTTP error! status: ${response.status}, body: ${body}`);
+}
+
 export function useOnboarding(): UseOnboardingReturn {
   const [step, setStep] = useState<OnboardingStep>('welcome');
   const [status, setStatus] = useState<InitStatus | null>(null);
   const [validationResults, setValidationResults] = useState<ValidationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Wizard operations cancel each other — reuse a single AbortController so
+  // e.g. switching steps mid-validation drops the stale request.
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const checkStatus = useCallback(async () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+  const newController = () => {
+    abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    return controller;
+  };
+
+  const finish = (controller: AbortController) => {
+    if (abortControllerRef.current === controller) {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const checkStatus = useCallback(async () => {
+    const controller = newController();
     setLoading(true);
     setError(null);
-
     try {
-      const response = await fetch('/api/init/status', { signal: controller.signal });
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-      }
-      const data: InitStatus = await response.json();
-      setStatus(data);
-      return data;
+      const result = await api.GET('/api/init/status', { signal: controller.signal });
+      await throwIfNotOk(result.response);
+      if (!result.data) throw new Error('Missing response body');
+      setStatus(result.data);
+      return result.data;
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return null;
-      }
+      if (err instanceof Error && err.name === 'AbortError') return null;
       setError(err instanceof Error ? err.message : 'Failed to load init status');
       return null;
     } finally {
-      if (abortControllerRef.current === controller) {
-        setLoading(false);
-        abortControllerRef.current = null;
-      }
+      finish(controller);
     }
   }, []);
 
   const runValidation = useCallback(async (targetNames?: string[]) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = newController();
     setLoading(true);
     setError(null);
-
     try {
-      const response = await fetch('/api/init/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets: targetNames }),
+      const result = await api.POST('/api/init/validate', {
+        body: { targets: targetNames ?? null },
         signal: controller.signal,
       });
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-      }
-      const data: ValidationResult = await response.json();
-      setValidationResults(data);
-      return data;
+      await throwIfNotOk(result.response);
+      if (!result.data) throw new Error('Missing response body');
+      setValidationResults(result.data);
+      return result.data;
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return null;
-      }
+      if (err instanceof Error && err.name === 'AbortError') return null;
       setError(err instanceof Error ? err.message : 'Validation failed');
       return null;
     } finally {
-      if (abortControllerRef.current === controller) {
-        setLoading(false);
-        abortControllerRef.current = null;
-      }
+      finish(controller);
     }
   }, []);
 
   const completeInit = useCallback(async () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = newController();
     setLoading(true);
     setError(null);
-
     try {
-      const response = await fetch('/api/init/complete', {
-        method: 'POST',
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-      }
-      const data: { success: boolean } = await response.json();
-      const ok = Boolean(data.success);
-      if (!ok) {
-        setError('Failed to complete init');
-      }
+      const result = await api.POST('/api/init/complete', { signal: controller.signal });
+      await throwIfNotOk(result.response);
+      if (!result.data) throw new Error('Missing response body');
+      const ok = Boolean(result.data.success);
+      if (!ok) setError('Failed to complete init');
       return ok;
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return false;
-      }
+      if (err instanceof Error && err.name === 'AbortError') return false;
       setError(err instanceof Error ? err.message : 'Failed to complete init');
       return false;
     } finally {
-      if (abortControllerRef.current === controller) {
-        setLoading(false);
-        abortControllerRef.current = null;
-      }
+      finish(controller);
     }
   }, []);
 

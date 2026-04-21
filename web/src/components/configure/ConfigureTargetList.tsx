@@ -82,7 +82,7 @@ export function ConfigureTargetList({
                   <div className="w-10 h-10 rounded-xl bg-surface-layout-2 flex items-center justify-center shrink-0">
                     <Icon
                       name="database"
-                      label={target.engine}
+                      label={target.engine ?? ''}
                       className="w-5 h-5 text-content-layout-2"
                     />
                   </div>
@@ -103,7 +103,7 @@ export function ConfigureTargetList({
                         size="small"
                         variant="informative"
                         modifier="ghost"
-                        label={target.engine}
+                        label={target.engine ?? ''}
                       />
                     </HStack>
                     <HStack className="gap-4 items-center">

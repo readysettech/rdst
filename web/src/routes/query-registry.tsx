@@ -115,7 +115,7 @@ function QueryRegistryPage() {
     );
   };
 
-  const handleAnalyze = (sql: string, target?: string, mostRecentParams?: Record<string, string | number>) => {
+  const handleAnalyze = (sql: string, target?: string, mostRecentParams?: Record<string, unknown>) => {
     navigate({
       to: "/results",
       search: {

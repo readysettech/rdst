@@ -620,7 +620,7 @@ function CachePage() {
       return next;
     });
     resetRun();
-    runComparison({ query: sql, target });
+    runComparison({ query: sql, target, iterations: 15, warmup: 5 });
   };
 
   const handleRun = (cacheId: string, query: string) => {
@@ -665,8 +665,13 @@ function CachePage() {
 
   // Dry-run check mutation — auto-creates cache if supported
   const checkMutation = useMutation({
-    mutationFn: (query: string) =>
-      addCacheQuery({ query, target: target!, dry_run: true }),
+    mutationFn: async (query: string): Promise<CacheAddResponse> => {
+      const result = await addCacheQuery({ query, target: target!, dry_run: true });
+      if ('error' in result) {
+        throw new Error(result.error);
+      }
+      return result;
+    },
     onSuccess: (data) => {
       setDryRunResult(data);
       if (data.supported) {
@@ -680,8 +685,13 @@ function CachePage() {
 
   // Create cache mutation
   const createMutation = useMutation({
-    mutationFn: (query: string) =>
-      addCacheQuery({ query, target: target!, dry_run: false }),
+    mutationFn: async (query: string): Promise<CacheAddResponse> => {
+      const result = await addCacheQuery({ query, target: target!, dry_run: false });
+      if ('error' in result) {
+        throw new Error(result.error);
+      }
+      return result;
+    },
     onSuccess: () => {
       setAddQuery('');
       setDryRunResult(null);
@@ -735,6 +745,10 @@ function CachePage() {
       const timer = setTimeout(async () => {
         try {
           const check = await addCacheQuery({ query: pendingQuery, target, dry_run: true });
+          if ('error' in check) {
+            // Silently fail — user can still manually cache
+            return;
+          }
           if (check.supported) {
             await addCacheQuery({ query: pendingQuery, target, dry_run: false });
             queryClient.invalidateQueries({ queryKey: ['cache-list', target] });

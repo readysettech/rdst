@@ -354,7 +354,13 @@ function LoadingState({
 }
 
 // SQL Result Card Component
-function SQLResultCard({ sql, explanation }: { sql: string; explanation?: string }) {
+function SQLResultCard({
+  sql,
+  explanation,
+}: {
+  sql: string;
+  explanation?: string | null;
+}) {
   return (
     <Card className="w-full overflow-hidden">
       <Card.Header className="border-b border-border-layout-1">
@@ -513,7 +519,7 @@ function ErrorState({
   error,
   onRetry,
 }: {
-  error: { message: string; phase?: string };
+  error: { message: string; phase?: string | null };
   onRetry: () => void;
 }) {
   return (

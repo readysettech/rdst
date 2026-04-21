@@ -7,7 +7,7 @@ via Server-Sent Events.
 from __future__ import annotations
 
 import json
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional, Union
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -59,6 +59,18 @@ class ScanRequest(BaseModel):
             file_pattern=self.file_pattern,
             nosave=self.nosave,
         )
+
+
+class ScanJsonSuccess(BaseModel):
+    success: bool
+    files: list[dict[str, Any]]
+    queries: list[dict[str, Any]]
+    summary: dict[str, Any]
+
+
+class ScanJsonError(BaseModel):
+    success: bool
+    error: str
 
 
 def _event_to_sse(event: ScanEvent) -> dict:
@@ -162,7 +174,7 @@ async def scan_directory(
 async def scan_directory_json(
     request: ScanRequest,
     guard: TargetGuard = Depends(require_target_body),
-):
+) -> Union[ScanJsonSuccess, ScanJsonError]:
     """Scan a directory and return JSON response (non-streaming).
 
     Collects all events and returns the final summary.

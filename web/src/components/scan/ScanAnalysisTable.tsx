@@ -66,7 +66,7 @@ function getRichAnalysis(raw: ScanRawAnalysis | undefined) {
     raw?.rewrite_test_results,
     raw?.rewrite_testing,
     nestedAnalysis?.rewrite_testing,
-    raw?.formatted?.rewrite_testing
+    raw?.formatted?.rewrite_testing ?? undefined
   );
   const cacheability =
     raw?.readyset_cacheability ??

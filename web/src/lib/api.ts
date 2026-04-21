@@ -1,223 +1,34 @@
-export interface AnalyzeRequest {
-  query: string;
-  target?: string;
-  fast?: boolean;
-  skip_rewrites?: boolean;
-  skip_readyset?: boolean;
-  skip_storage?: boolean;
-  model?: string;
+import type { components as apiComponents } from './api.generated';
+import { api as typedClient } from './client';
+
+async function throwIfNotOk(response: Response, ctx: string): Promise<void> {
+  if (response.ok) return;
+  const body = await response.text().catch(() => '');
+  throw new Error(body || `${ctx}: ${response.status}`);
 }
 
-export interface ProgressEvent {
-  stage: string;
-  percent: number;
-  message?: string;
-}
+export type AnalyzeRequest = apiComponents['schemas']['AnalyzeRequest'];
 
-export interface ExplainResults {
-  success: boolean;
-  database_engine: string;
-  execution_time_ms: number;
-  rows_examined: number;
-  rows_returned: number;
-  cost_estimate: number;
-  explain_plan?: unknown;
-}
+export type ProgressEvent = apiComponents['schemas']['ProgressEvent'];
 
-export interface PerformanceAssessment {
-  overall_rating: 'excellent' | 'good' | 'fair' | 'poor';
-  efficiency_score: number;
-  execution_time_rating?: string;
-  primary_concerns: string[];
-}
+export type ExplainResults = apiComponents['schemas']['ExplainResults'];
+export type PerformanceAssessment = apiComponents['schemas']['PerformanceAssessment'];
+export type RewriteSuggestion = apiComponents['schemas']['RewriteSuggestion'];
+export type IndexRecommendation = apiComponents['schemas']['IndexRecommendation'];
+export type OptimizationOpportunity = apiComponents['schemas']['OptimizationOpportunity'];
+export type LLMAnalysis = apiComponents['schemas']['LLMAnalysis'];
+export type TestedRewrite = apiComponents['schemas']['TestedRewrite'];
+export type RewriteTesting = apiComponents['schemas']['RewriteTesting'];
+export type ReadysetCacheability = apiComponents['schemas']['ReadysetCacheability'];
 
-export interface RewriteSuggestion {
-  rewritten_sql: string;
-  explanation: string;
-  expected_improvement: string;
-  priority: 'high' | 'medium' | 'low';
-  optimization_type: string;
-}
+export type AnalysisSummary = apiComponents['schemas']['AnalysisSummary'];
 
-export interface IndexRecommendation {
-  sql: string;
-  table: string;
-  columns: string[];
-  index_type: string;
-  rationale: string;
-  estimated_impact: 'high' | 'medium' | 'low';
-  caveats?: string[];
-}
+export type InitTargetInfo = apiComponents['schemas']['InitTargetInfo'];
+export type InitStatusResponse = apiComponents['schemas']['InitStatusResponse'];
 
-export interface OptimizationOpportunity {
-  priority: 'high' | 'medium' | 'low';
-  description: string;
-  type: string;
-}
-
-export interface LLMAnalysis {
-  success?: boolean;
-  performance_assessment?: PerformanceAssessment;
-  execution_analysis?: {
-    bottlenecks: string[];
-    scan_efficiency: string;
-  };
-  rewrite_suggestions?: RewriteSuggestion[];
-  index_recommendations?: IndexRecommendation[];
-  optimization_opportunities?: OptimizationOpportunity[];
-  llm_model?: string;
-  token_usage?: {
-    input: number;
-    output: number;
-    total: number;
-    estimated_cost_usd: number;
-  };
-}
-
-export interface TestedRewrite {
-  success: boolean;
-  sql: string;
-  performance: {
-    execution_time_ms: number;
-    rows_returned?: number;
-    rows_examined?: number;
-    cost_estimate?: number;
-  };
-  improvement: {
-    overall: {
-      improvement_pct: number;
-    };
-  };
-  suggestion_metadata: {
-    explanation: string;
-  };
-}
-
-export interface RewriteTesting {
-  tested: boolean;
-  skipped_reason?: string;
-  message?: string;
-  original_performance?: {
-    execution_time_ms: number;
-    rows_returned?: number;
-    rows_examined?: number;
-    cost_estimate?: number;
-  };
-  rewrite_results?: TestedRewrite[];
-  best_rewrite?: TestedRewrite;
-}
-
-export interface ReadysetCacheability {
-  checked: boolean;
-  cacheable?: boolean;
-  confidence?: 'high' | 'medium' | 'low' | 'unknown';
-  method?: string;
-  explanation?: string;
-  issues?: string[];
-  warnings?: string[];
-}
-
-export interface AnalysisSummary {
-  overall_rating: string;
-  efficiency_score: number;
-  execution_time_ms: number;
-  execution_time_rating?: string;
-  rows_processed: {
-    examined: number;
-    returned: number;
-  };
-  cost_estimate: number;
-  primary_concerns: string[];
-  explain_analyze_skipped?: boolean;
-}
-
-export interface InitStatusResponse {
-  initialized: boolean;
-  targets: Array<{
-    name: string;
-    has_password: boolean;
-    is_default: boolean;
-    engine?: string;
-  }>;
-  default_target: string | null;
-  llm_configured: boolean;
-}
-
-export interface AnalysisMetadata {
-  query: string;
-  normalized_query?: string;
-  parameterized_sql?: string;
-  target: string;
-  analysis_id: string;
-  database_engine: string;
-  analyzed_at?: string;
-  llm_info?: {
-    model: string;
-    tokens: number;
-    cost: number;
-  };
-}
-
-export interface FormattedAnalysis {
-  success: boolean;
-  message?: string;
-  analysis_summary: AnalysisSummary;
-  performance_metrics: {
-    execution_metrics: {
-      total_time_ms: number;
-      planning_time_ms?: number;
-      actual_time_ms?: number;
-      rows_examined: number;
-      rows_returned: number;
-      cost_estimate: number;
-    };
-    database_engine: string;
-    explain_available: boolean;
-  };
-  optimization_insights: {
-    available: boolean;
-    error?: string;
-    explanation?: string;
-    optimization_opportunities: OptimizationOpportunity[];
-  };
-  recommendations: {
-    available: boolean;
-    query_rewrites: Array<{
-      id?: string;
-      type: string;
-      priority: string;
-      confidence?: string;
-      sql: string;
-      explanation: string;
-      expected_improvement: string;
-      trade_offs?: string;
-    }>;
-    index_suggestions: Array<{
-      id?: string;
-      table: string;
-      type: string;
-      columns: string[];
-      sql_statement: string;
-      expected_benefit: string;
-      rationale: string;
-      storage_impact?: string;
-    }>;
-  };
-  rewrite_testing?: RewriteTesting;
-  readyset_cacheability?: ReadysetCacheability;
-  metadata: AnalysisMetadata;
-}
-
-export interface CompleteEvent {
-  success: boolean;
-  analysis_id?: string;
-  query_hash?: string;
-  explain_results: ExplainResults;
-  llm_analysis: LLMAnalysis;
-  rewrite_testing?: RewriteTesting;
-  readyset_cacheability?: ReadysetCacheability;
-  formatted?: FormattedAnalysis;
-}
+export type AnalysisMetadata = apiComponents['schemas']['AnalysisMetadata'];
+export type FormattedAnalysis = apiComponents['schemas']['FormattedAnalysis'];
+export type CompleteEvent = apiComponents['schemas']['CompleteEvent'];
 
 export async function fetchInitStatus(): Promise<InitStatusResponse> {
   const response = await fetch('/api/init/status');
@@ -227,31 +38,13 @@ export async function fetchInitStatus(): Promise<InitStatusResponse> {
   return response.json();
 }
 
-export interface ErrorEvent {
-  message: string;
-  stage?: string;
-  partial_results?: {
-    explain_results?: ExplainResults;
-    llm_analysis?: LLMAnalysis;
-  };
-}
+export type ErrorEvent = apiComponents['schemas']['ErrorEvent'];
 
 export type AnalysisState = 'idle' | 'analyzing' | 'complete' | 'error';
 
-export interface TargetInfo {
-  name: string;
-  has_password: boolean;
-  is_default: boolean;
-}
+export type TargetInfo = apiComponents['schemas']['TargetInfo'];
 
-export interface StatusResponse {
-  configured: boolean;
-  default_target: string | null;
-  targets: TargetInfo[];
-  version: string | null;
-  data_directory?: string | null;
-  error: string | null;
-}
+export type StatusResponse = apiComponents['schemas']['StatusResponse'];
 
 export async function fetchStatus(): Promise<StatusResponse> {
   const response = await fetch('/api/status');
@@ -261,35 +54,13 @@ export async function fetchStatus(): Promise<StatusResponse> {
   return response.json();
 }
 
-export type EnvRequirementKind = 'target_password' | 'anthropic_api_key';
-export type EnvRequirementSource = 'config' | 'process_env' | 'secure_store' | 'trial' | 'trial_exhausted' | 'missing';
+export type EnvRequirement = apiComponents['schemas']['EnvRequirement'];
+export type EnvRequirementKind = EnvRequirement['kind'];
+export type EnvRequirementSource = EnvRequirement['source'];
+export type EnvRequirementsResponse = apiComponents['schemas']['EnvRequirementsResponse'];
 
-export interface EnvRequirement {
-  kind: EnvRequirementKind;
-  accepted_names: string[];
-  target: string | null;
-  satisfied: boolean;
-  source: EnvRequirementSource;
-}
-
-export interface EnvRequirementsResponse {
-  keyring_available: boolean;
-  requirements: EnvRequirement[];
-}
-
-export interface SetEnvSecretRequest {
-  name: string;
-  value: string;
-  persist?: boolean;
-}
-
-export interface SetEnvSecretResponse {
-  success: boolean;
-  name: string;
-  persisted: boolean;
-  session_only: boolean;
-  message?: string;
-}
+export type SetEnvSecretRequest = apiComponents['schemas']['EnvSetRequest'];
+export type SetEnvSecretResponse = apiComponents['schemas']['EnvSetResponse'];
 
 export async function fetchEnvRequirements(): Promise<EnvRequirementsResponse> {
   const response = await fetch('/api/env/requirements');
@@ -315,134 +86,63 @@ export async function setEnvSecret(payload: SetEnvSecretRequest): Promise<SetEnv
   return response.json();
 }
 
-export interface SchemaResponse {
-  tables: Record<string, string[]>;
-  dialect: 'postgresql' | 'mysql';
-  error?: string | null;
-}
+export type SchemaResponse = apiComponents['schemas']['SchemaResponse'];
 
 export async function fetchSchema(target?: string): Promise<SchemaResponse> {
-  const url = target ? `/api/schema?target=${encodeURIComponent(target)}` : '/api/schema';
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch schema: ${response.status}`);
-  }
-  return response.json();
+  const { data, response } = await typedClient.GET('/api/schema', {
+    params: { query: { target: target ?? null } },
+  });
+  await throwIfNotOk(response, 'Failed to fetch schema');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
-export interface QueryRegistryEntry {
-  sql: string;
-  hash: string;
-  tag: string;
-  last_analyzed: string;
-  target: string;
-  frequency: number;
-  source: string;
-  most_recent_params?: Record<string, string | number>;
-  first_analyzed?: string;
-  last_target?: string;
-  max_duration_ms?: number;
-  avg_duration_ms?: number;
-  observation_count?: number;
-}
-
-export interface QueryRegistryResponse {
-  queries: QueryRegistryEntry[];
-  total: number;
-  limit?: number | null;
-  offset: number;
-  error?: string | null;
-}
+export type QueryRegistryEntry = apiComponents['schemas']['QueryRegistryEntry'];
+export type QueryRegistryResponse = apiComponents['schemas']['QueryRegistryResponse'];
 
 export async function fetchQueryRegistry(limit?: number, offset = 0): Promise<QueryRegistryResponse> {
-  const params = new URLSearchParams();
-  if (limit !== undefined) {
-    params.set("limit", String(limit));
-  }
-  if (offset > 0) {
-    params.set("offset", String(offset));
-  }
-  const response = await fetch(`/api/query-registry?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch registry: ${response.status}`);
-  }
-  return response.json();
-}
-
-export async function addQueryToRegistry(sql: string, target?: string): Promise<{ success: boolean; hash?: string; error?: string }> {
-  const response = await fetch('/api/query-registry', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql, target }),
+  const { data, response } = await typedClient.GET('/api/query-registry', {
+    params: { query: { limit: limit ?? null, offset } },
   });
-  if (!response.ok) {
-    throw new Error(`Failed to add query: ${response.status}`);
-  }
-  return response.json();
+  await throwIfNotOk(response, 'Failed to fetch registry');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
-export async function removeQueryFromRegistry(hash: string): Promise<{ success: boolean; error?: string }> {
-  const response = await fetch(`/api/query-registry/${hash}`, { method: 'DELETE' });
-  if (!response.ok) {
-    throw new Error(`Failed to remove query: ${response.status}`);
-  }
-  return response.json();
-}
-
-export async function updateQueryTag(hash: string, tag: string): Promise<{ success: boolean; error?: string }> {
-  const response = await fetch(`/api/query-registry/${hash}/tag`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tag }),
+export async function addQueryToRegistry(sql: string, target?: string): Promise<{ success: boolean; hash?: string | null; error?: string | null }> {
+  const { data, response } = await typedClient.POST('/api/query-registry', {
+    body: { sql, target },
   });
-  if (!response.ok) {
-    throw new Error(`Failed to update tag: ${response.status}`);
-  }
-  return response.json();
+  await throwIfNotOk(response, 'Failed to add query');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
-export interface ReadysetContainerStatus {
-  running: boolean;
-  test_db_running: boolean;
-  readyset_running: boolean;
-  readyset_port: number | null;
-  test_db_port: number | null;
-  target: string | null;
+export async function removeQueryFromRegistry(hash: string): Promise<{ success: boolean; error?: string | null }> {
+  const { data, response } = await typedClient.DELETE('/api/query-registry/{query_hash}', {
+    params: { path: { query_hash: hash } },
+  });
+  await throwIfNotOk(response, 'Failed to remove query');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
-export interface ReadysetSetupRequest {
-  target?: string;
+export async function updateQueryTag(hash: string, tag: string): Promise<{ success: boolean; error?: string | null }> {
+  const { data, response } = await typedClient.PATCH('/api/query-registry/{query_hash}/tag', {
+    params: { path: { query_hash: hash } },
+    body: { tag },
+  });
+  await throwIfNotOk(response, 'Failed to update tag');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
-export interface ReadysetCacheRequest {
-  query: string;
-  target?: string;
-}
-
-export interface ReadysetSetupResult {
-  success: boolean;
-  readyset_port?: number;
-  test_db_port?: number;
-  already_running?: boolean;
-}
-
-export interface ReadysetExplainResult {
-  success: boolean;
-  cacheable: boolean;
-  confidence: 'high' | 'medium' | 'low' | 'unknown';
-  explanation: string;
-  issues: string[];
-  readyset_port?: number;
-}
-
-export interface ReadysetCreateCacheResult {
-  success: boolean;
-  cached: boolean;
-  cache_id: string | null;
-  message: string;
-  error?: string;
-  readyset_port?: number;
-}
+export type ReadysetContainerStatus = apiComponents['schemas']['ContainerStatus'];
+export type ReadysetSetupRequest = apiComponents['schemas']['SetupRequest'];
+export type ReadysetCacheRequest = apiComponents['schemas']['CacheRequest'];
+export type ReadysetSetupResult = apiComponents['schemas']['ReadysetSetupCompleteEvent'];
+export type ReadysetExplainResult = apiComponents['schemas']['ReadysetExplainCompleteEvent'];
+export type ReadysetCreateCacheResult = apiComponents['schemas']['ReadysetCacheCompleteEvent'];
 
 export type ReadysetOperationState = 'idle' | 'running' | 'complete' | 'error';
 
@@ -461,41 +161,17 @@ export async function fetchReadysetStatus(target?: string): Promise<ReadysetCont
 
 export type InteractiveState = 'idle' | 'sending' | 'receiving' | 'error';
 
-export interface ConversationStatus {
-  exists: boolean;
-  message_count?: number;
-  started_at?: string;
-}
+export type ConversationStatus = apiComponents['schemas']['ConversationStatusResponse'];
 
-export interface Message {
-  role: string;
-  content: string;
-  timestamp: string;
-}
+export type Message = apiComponents['schemas']['MessageResponse'];
 
-export interface InteractiveMessageRequest {
-  message: string;
-  continue_existing?: boolean;
-  analysis_results?: any;
-}
+export type InteractiveMessageRequest = apiComponents['schemas']['InteractiveMessageRequest'];
 
 // Report/Feedback Types
 
-export type ReportSentiment = 'positive' | 'negative' | 'neutral';
-
-export interface ReportRequest {
-  reason: string;
-  sentiment: ReportSentiment;
-  query_hash?: string;
-  email?: string;
-  include_query?: boolean;
-  include_plan?: boolean;
-}
-
-export interface ReportResponse {
-  success: boolean;
-  error?: string;
-}
+export type ReportRequest = apiComponents['schemas']['ReportRequest'];
+export type ReportSentiment = NonNullable<ReportRequest['sentiment']>;
+export type ReportResponse = apiComponents['schemas']['ReportResponse'];
 
 export async function submitReport(request: ReportRequest): Promise<ReportResponse> {
   const response = await fetch('/api/report', {
@@ -511,128 +187,51 @@ export async function submitReport(request: ReportRequest): Promise<ReportRespon
 
 // Benchmark Types
 
-export type BenchmarkMode = 'interval' | 'concurrency';
+export type BenchmarkRequest = apiComponents['schemas']['BenchmarkRequest'];
+export type BenchmarkQueryInput = apiComponents['schemas']['BenchmarkQueryInput'];
+export type BenchmarkMode = BenchmarkRequest['mode'];
 
-export interface BenchmarkQueryInput {
-  identifier?: string;
-  sql?: string;
-}
-
-export interface BenchmarkRequest {
-  queries: (string | BenchmarkQueryInput)[];
-  target?: string;
-  mode: BenchmarkMode;
-  interval_ms?: number;
-  concurrency?: number;
-  duration_seconds?: number;
-  max_count?: number;
-}
-
-export interface QueryBenchmarkStats {
-  query_name: string;
-  query_hash: string;
-  executions: number;
-  successes: number;
-  failures: number;
-  min_ms: number;
-  avg_ms: number;
-  p50_ms: number;
-  p95_ms: number;
-  p99_ms: number;
-  max_ms: number;
-  last_error?: string;
-}
-
-export interface BenchmarkProgress {
-  type: 'progress' | 'complete' | 'error';
-  elapsed_seconds: number;
-  total_executions: number;
-  total_successes: number;
-  total_failures: number;
-  qps: number;
-  queries: QueryBenchmarkStats[];
-  error?: string;
-}
+// QueryBenchmarkStats comes from the generated schema; re-exported for consumers.
+export type QueryBenchmarkStats = apiComponents['schemas']['QueryBenchmarkStats'];
 
 export type BenchmarkState = 'idle' | 'running' | 'complete' | 'error';
 
-// Trial Types
+// Trial Types (re-exports from generated)
 
-export interface TrialRegisterResponse {
-  success: boolean;
-  limit_display?: string;
-  email_tier?: string;
-  error_code?: string;
-  detail?: string;
-  did_you_mean?: string;
-  status_code: number;
-}
-
-export interface TrialActivateResponse {
-  success: boolean;
-  message?: string;
-}
-
-export interface TrialStatusResponse {
-  active: boolean;
-  email?: string;
-  status?: string;
-  remaining_cents?: number;
-  limit_cents?: number;
-  remaining_tokens_display?: string;
-  limit_tokens_display?: string;
-  percent_remaining?: number;
-}
-
-export interface TrialSimulationResponse {
-  success: boolean;
-  message?: string;
-}
+export type TrialRegisterResponse = apiComponents['schemas']['TrialRegisterResponse'];
+export type TrialActivateResponse = apiComponents['schemas']['TrialActivateResponse'];
+export type TrialStatusResponse = apiComponents['schemas']['TrialStatusResponse'];
+export type TrialSimulationResponse = apiComponents['schemas']['TrialSimulationResponse'];
 
 export async function registerTrial(email: string): Promise<TrialRegisterResponse> {
-  const response = await fetch('/api/trial/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+  const { data, response } = await typedClient.POST('/api/trial/register', {
+    body: { email },
   });
-  if (!response.ok) {
-    throw new Error(`Failed to register trial: ${response.status}`);
-  }
-  return response.json();
+  await throwIfNotOk(response, 'Failed to register trial');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
 export async function activateTrial(token: string, email: string, emailTier?: string): Promise<TrialActivateResponse> {
-  const response = await fetch('/api/trial/activate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, email, email_tier: emailTier }),
+  const { data, response } = await typedClient.POST('/api/trial/activate', {
+    body: { token, email, email_tier: emailTier ?? null },
   });
-  if (!response.ok) {
-    throw new Error(`Failed to activate trial: ${response.status}`);
-  }
-  return response.json();
+  await throwIfNotOk(response, 'Failed to activate trial');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
 export async function fetchTrialStatus(): Promise<TrialStatusResponse> {
-  const response = await fetch('/api/trial/status');
-  if (!response.ok) {
-    throw new Error(`Failed to fetch trial status: ${response.status}`);
-  }
-  return response.json();
+  const { data, response } = await typedClient.GET('/api/trial/status', {});
+  await throwIfNotOk(response, 'Failed to fetch trial status');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
 // Browse (directory picker)
 
-export interface BrowseDirectoryEntry {
-  name: string;
-  path: string;
-}
-
-export interface BrowseResponse {
-  current: string;
-  parent: string | null;
-  directories: BrowseDirectoryEntry[];
-}
+export type BrowseDirectoryEntry = apiComponents['schemas']['DirectoryEntry'];
+export type BrowseResponse = apiComponents['schemas']['BrowseResponse'];
 
 export async function fetchBrowse(path?: string): Promise<BrowseResponse> {
   const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : '/api/browse';
@@ -644,25 +243,16 @@ export async function fetchBrowse(path?: string): Promise<BrowseResponse> {
 }
 
 export async function simulateTrialExhausted(): Promise<TrialSimulationResponse> {
-  const response = await fetch('/api/trial/simulate/exhaust', {
-    method: 'POST',
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to simulate trial exhaustion: ${response.status}`);
-  }
-  return response.json();
+  const { data, response } = await typedClient.POST('/api/trial/simulate/exhaust', {});
+  await throwIfNotOk(response, 'Failed to simulate trial exhaustion');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
-export interface ClearKeyringResponse {
-  success: boolean;
-  cleared: string[];
-  missing: string[];
-  errors: string[];
-  message?: string;
-}
+export type ClearKeyringResponse = apiComponents['schemas']['ClearKeyringResponse'];
 
 type ClearKeyringErrorPayload = {
-  message?: string;
+  message?: string | null;
   errors?: string[];
   detail?: string | { msg?: string }[];
 };

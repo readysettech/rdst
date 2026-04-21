@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 from features.query_registry.service import QueryService
 from features.query_registry.events import (
+    QueryBenchmarkCompleteEvent,
     QueryBenchmarkProgressEvent,
     QueryCompleteEvent,
     QueryErrorEvent,
@@ -72,7 +73,7 @@ async def test_stream_benchmark_yields_progress_then_complete():
             )
         )
         queue.put_nowait(
-            QueryBenchmarkProgressEvent(
+            QueryBenchmarkCompleteEvent(
                 type="complete",
                 elapsed_seconds=2.0,
                 total_executions=20,

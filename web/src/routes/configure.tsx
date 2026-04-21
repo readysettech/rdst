@@ -4,7 +4,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useMemo } from "react";
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Text } from "@rs/ui-new/text";
 import { Button } from "@rs/ui-new/button";
 import { Icon } from "@rs/ui-new/icon";
@@ -16,13 +16,13 @@ import { m } from "@rs/ui-new/motion";
 import { useConfigure } from "../lib/useConfigure";
 import { EnvSecretsDialog } from "../components/EnvSecretsDialog";
 import type { EnvRequirement } from "../lib/api";
-import { fetchStatus } from "../lib/api";
+import { useSystemStatus } from "../lib/useSystemStatus";
 import {
   ConfigureForm,
   ConfigureTargetList,
   ConfigureConnectionTest,
 } from "../components/configure";
-import type { ConfigureTarget, ConfigureFormData } from "../types/configure";
+import type { ConfigureFormData, ConfigureTargetDetail } from "../types/configure";
 import { invalidateTrialRelatedQueries, useTrialSource } from "../lib/trialQueries";
 
 export const Route = createFileRoute("/configure")({
@@ -32,11 +32,12 @@ export const Route = createFileRoute("/configure")({
 function ConfigurePage() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
-  const [editingTarget, setEditingTarget] = useState<ConfigureTarget | null>(null);
+  const [editingTarget, setEditingTarget] = useState<ConfigureTargetDetail | null>(null);
   const [showAnthropicDialog, setShowAnthropicDialog] = useState(false);
 
   const {
     listTargets,
+    getTarget,
     addTarget,
     updateTarget,
     removeTarget,
@@ -49,11 +50,7 @@ function ConfigurePage() {
     loading,
   } = useConfigure();
 
-  const { data: statusData } = useQuery({
-    queryKey: ["status"],
-    queryFn: fetchStatus,
-    staleTime: 60_000,
-  });
+  const { data: statusData } = useSystemStatus();
   const dataDirectory = statusData?.data_directory ?? null;
 
   const { envRequirements, anthropicRequirement, anthropicSource, isTrialSource: trialSourceDetected, trialStatus } = useTrialSource();
@@ -89,7 +86,11 @@ function ConfigurePage() {
     setShowForm(true);
   };
 
-  const handleEditClick = (target: ConfigureTarget) => {
+  const handleEditClick = async (targetName: string) => {
+    const target = await getTarget(targetName);
+    if (!target) {
+      return;
+    }
     setEditingTarget(target);
     setShowForm(true);
   };
@@ -316,7 +317,7 @@ function ConfigurePage() {
         >
           <ConfigureTargetList
             targets={targets}
-            onEdit={handleEditClick}
+            onEdit={(target) => void handleEditClick(target.name)}
             onTest={handleTest}
             onDelete={handleDelete}
             onSetDefault={handleSetDefault}

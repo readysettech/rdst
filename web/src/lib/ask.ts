@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { useTargetSwitchLock } from './targetSwitchLock';
+import type { components } from './api.generated';
 
 // Ask API types
 export interface AskRequest {
@@ -14,56 +15,28 @@ export interface AskRequest {
   clarification_answers?: Record<string, string>;
 }
 
-export interface AskInterpretation {
-  id: number;
-  description: string;
-  likelihood: number;
-  assumptions: string[];
-}
+// SSE event types are derived from the backend-generated discriminated union.
+// Backend source of truth: rdst/features/ask/events.py (AskEvent).
+type AskEvent = components['schemas']['AskEvent'];
+export type AskEventType = AskEvent['type'];
 
-export interface AskClarificationQuestion {
-  id: string;
-  question: string;
-  options: string[];
-}
+export type AskInterpretation = components['schemas']['AskInterpretation'];
+export type AskClarificationQuestion =
+  components['schemas']['AskClarificationQuestion'];
 
-export interface AskStatusEvent {
-  phase: string;
-  message: string;
-}
-
-export interface AskSchemaLoadedEvent {
-  source: string;
-  table_count: number;
-  tables: string[];
-}
-
-export interface AskClarificationNeededEvent {
-  session_id: string;
-  interpretations: AskInterpretation[];
-  questions: AskClarificationQuestion[];
-}
-
-export interface AskSqlGeneratedEvent {
-  sql: string;
-  explanation?: string;
-}
-
-export interface AskResultEvent {
-  success: boolean;
-  sql: string;
-  rows: any[][];
-  columns: string[];
-  row_count: number;
-  execution_time_ms: number;
-  llm_calls: number;
-  total_tokens: number;
-}
-
-export interface AskErrorEvent {
-  message: string;
-  phase?: string;
-}
+export type AskStatusEvent = Extract<AskEvent, { type: 'status' }>;
+export type AskSchemaLoadedEvent = Extract<AskEvent, { type: 'schema_loaded' }>;
+export type AskClarificationNeededEvent = Extract<
+  AskEvent,
+  { type: 'clarification_needed' }
+>;
+export type AskSqlGeneratedEvent = Extract<AskEvent, { type: 'sql_generated' }>;
+// Backend emits `rows: list` (untyped); refine to row arrays for consumers.
+export type AskResultEvent = Omit<
+  Extract<AskEvent, { type: 'result' }>,
+  'rows'
+> & { rows: unknown[][] };
+export type AskErrorEvent = Extract<AskEvent, { type: 'error' }>;
 
 export type AskState =
   | 'idle'
@@ -185,7 +158,8 @@ export function useAsk(): UseAskReturn {
             try {
               const data = JSON.parse(dataStr);
 
-              switch (currentEvent) {
+              const eventType = currentEvent as AskEventType;
+              switch (eventType) {
                 case 'status':
                   setStatus(data as AskStatusEvent);
                   if (data.phase === 'generate') {
@@ -216,13 +190,17 @@ export function useAsk(): UseAskReturn {
                   setState('error');
                   break;
 
-                case 'unknown':
-                  console.warn('[Ask SSE] Unknown event payload (ignored):', data);
-                  break;
-
-                default:
+                default: {
+                  // Exhaustiveness guard: if AskEventType gains a variant that
+                  // isn't handled above, `eventType` narrows to that literal
+                  // inside this branch and the assignment to `never` fails
+                  // tsc. Do NOT replace with `as never` — that defeats the
+                  // check.
+                  const _exhaustive: never = eventType;
                   console.warn('[Ask SSE] Unknown event type (ignored):', currentEvent, data);
+                  void _exhaustive;
                   break;
+                }
               }
             } catch (e) {
               console.error('[Ask SSE] Failed to parse JSON:', e);
@@ -235,7 +213,7 @@ export function useAsk(): UseAskReturn {
         return;
       }
       const errorMessage = err instanceof Error ? err.message : 'An error occurred';
-      setError({ message: errorMessage });
+      setError({ type: 'error', message: errorMessage, phase: null });
       setState('error');
     } finally {
       abortControllerRef.current = null;

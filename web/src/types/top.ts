@@ -43,54 +43,15 @@ export interface TopSourceFallback {
   reason: string;
 }
 
-// SSE Event Data Types
-export interface TopStatusEventData {
-  message: string;
-}
-
-export interface TopConnectedEventData {
-  target_name: string;
-  db_engine: string;
-  source: string;
-}
-
-export interface TopSourceFallbackEventData {
-  from_source: string;
-  to_source: string;
-  reason: string;
-}
-
-export interface TopQueriesEventData {
-  queries: TopQuery[];
-  source: string;
-  target_name: string;
-  db_engine: string;
-  runtime_seconds?: number;
-  total_tracked?: number;
-}
-
-export interface TopQuerySavedEventData {
-  query_hash: string;
-  is_new: boolean;
-}
-
-export interface TopCompleteEventData {
-  success: boolean;
-  queries: TopQuery[];
-  source: string;
-  newly_saved: number;
-}
-
+// SSE event payload types are generated from the backend OpenAPI schema;
+// consume them via `components['schemas']['TopEvent']` in `lib/api.generated`.
+// The DB limit warning payload is also returned (sans discriminator) from the
+// historical JSON endpoint, so we keep its local alias.
 export interface TopDbLimitWarningEventData {
   db_limit_bytes: number;
   recommended_bytes: number;
   setting_name: string;
   db_engine: string;
-}
-
-export interface TopErrorEventData {
-  message: string;
-  stage?: string;
 }
 
 // Historical JSON Response

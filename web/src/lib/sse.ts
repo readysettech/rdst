@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { useTargetSwitchLock } from './targetSwitchLock';
+import type { components } from './api.generated';
 import {
   AnalyzeRequest,
   AnalysisState,
@@ -8,9 +9,24 @@ import {
   RewriteTesting,
   ReadysetCacheability,
   BenchmarkRequest,
-  BenchmarkProgress,
   BenchmarkState,
 } from './api';
+
+// Benchmark SSE event types are derived from the backend-generated discriminated union.
+// Backend source of truth: rdst/features/query_registry/events.py (QueryBenchmarkEvent).
+type QueryBenchmarkEvent = components['schemas']['QueryBenchmarkEvent'];
+type QueryBenchmarkProgressEvent = Extract<QueryBenchmarkEvent, { type: 'progress' }>;
+type QueryBenchmarkCompleteEvent = Extract<QueryBenchmarkEvent, { type: 'complete' }>;
+type QueryBenchmarkErrorEvent = Extract<QueryBenchmarkEvent, { type: 'error' }>;
+// Progress state stores only counter-bearing variants; errors go to the `error` field.
+export type BenchmarkProgress = QueryBenchmarkProgressEvent | QueryBenchmarkCompleteEvent;
+
+// SSE event types are derived from the backend-generated discriminated union.
+// Backend source of truth: rdst/features/analyze/events.py (AnalyzeEvent).
+// The `CompleteEvent`/`ProgressEvent` shapes in api.ts refine the generated
+// `{[key: string]: unknown}` payloads for downstream consumers.
+type AnalyzeEvent = components['schemas']['AnalyzeEvent'];
+export type AnalyzeEventType = AnalyzeEvent['type'];
 
 interface UseAnalyzeReturn {
   analyze: (request: AnalyzeRequest) => Promise<void>;
@@ -158,25 +174,26 @@ export function useAnalyze(): UseAnalyzeReturn {
             try {
               const data = JSON.parse(dataStr);
               
-              switch (currentEvent) {
+              const eventType = currentEvent as AnalyzeEventType;
+              switch (eventType) {
                 case 'progress':
                   setProgress(data as ProgressEvent);
                   break;
-                  
+
                 case 'explain_complete':
                   console.log('[SSE] EXPLAIN complete:', data);
                   break;
-                  
+
                 case 'rewrites_tested':
                   console.log('[SSE] Rewrites tested:', data);
                   setRewriteTesting(normalizeRewriteTesting(data));
                   break;
-                  
+
                 case 'readyset_checked':
                   console.log('[SSE] Readyset checked:', data);
                   setReadysetCacheability(data as ReadysetCacheability);
                   break;
-                  
+
                 case 'complete':
                   console.log('[SSE] Analysis complete:', data);
                   setResults(data as CompleteEvent);
@@ -189,19 +206,21 @@ export function useAnalyze(): UseAnalyzeReturn {
                   }
                   setState('complete');
                   break;
-                  
+
                 case 'error':
                   console.log('[SSE] Error:', data.message);
                   setError(data.message);
                   setState('error');
                   break;
 
-                case 'unknown':
-                  console.warn('[SSE] Unknown event payload (ignored):', data);
-                  break;
-                    
-                default:
+                default: {
+                  // Exhaustiveness guard: adding a variant to AnalyzeEventType
+                  // without handling it here fails tsc. Do NOT use `as never`.
+                  const _exhaustive: never = eventType;
                   console.warn('[SSE] Unknown event type (ignored):', currentEvent, data);
+                  void _exhaustive;
+                  break;
+                }
               }
             } catch (e) {
               console.error('[SSE] Failed to parse JSON:', e);
@@ -351,22 +370,37 @@ export function useBenchmark(): UseBenchmarkReturn {
             const dataStr = trimmed.substring(5).trim();
             
             try {
-              const data = JSON.parse(dataStr) as BenchmarkProgress;
-              console.log('[Benchmark SSE] Data:', data.type, 'executions:', data.total_executions);
-              
-              setProgress(data);
+              const data = JSON.parse(dataStr) as QueryBenchmarkEvent;
+              console.log('[Benchmark SSE] Data:', data.type);
 
-              if (data.type === 'complete') {
-                console.log('[Benchmark SSE] Benchmark complete');
-                setState('complete');
-              } else if (data.type === 'error') {
-                console.log('[Benchmark SSE] Error:', data.error);
-                setError(data.error || 'Unknown error');
-                setState('error');
-              } else if (currentEvent === 'unknown') {
-                console.warn('[Benchmark SSE] Unknown event payload (ignored):', data);
-              } else if (data.type !== 'progress') {
-                console.warn('[Benchmark SSE] Unknown benchmark data type (ignored):', data.type, data);
+              switch (data.type) {
+                case 'progress':
+                  setProgress(data);
+                  break;
+
+                case 'complete':
+                  console.log('[Benchmark SSE] Benchmark complete');
+                  setProgress(data);
+                  setState('complete');
+                  break;
+
+                case 'error': {
+                  const errEvt = data as QueryBenchmarkErrorEvent;
+                  console.log('[Benchmark SSE] Error:', errEvt.error);
+                  setError(errEvt.error || 'Unknown error');
+                  setState('error');
+                  break;
+                }
+
+                default: {
+                  // Exhaustiveness guard: adding a variant to
+                  // QueryBenchmarkEvent['type'] without handling it here
+                  // fails tsc.
+                  const _exhaustive: never = data;
+                  console.warn('[Benchmark SSE] Unknown benchmark event (ignored):', data);
+                  void _exhaustive;
+                  break;
+                }
               }
             } catch (e) {
               console.error('[Benchmark SSE] Failed to parse JSON:', e);

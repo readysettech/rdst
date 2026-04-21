@@ -1,11 +1,8 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
 
-import {
-  fetchEnvRequirements,
-  fetchStatus,
-  type EnvRequirement,
-} from "./api";
+import { type EnvRequirement } from "./api";
+import { useEnvRequirements } from "./useEnvRequirements";
+import { useSystemStatus } from "./useSystemStatus";
 
 export interface TargetPasswordLockState {
   isLocked: boolean;
@@ -18,19 +15,8 @@ export interface TargetPasswordLockState {
 export function useTargetPasswordLock(
   selectedTarget?: string | null,
 ): TargetPasswordLockState {
-  const { data: status } = useQuery({
-    queryKey: ["status"],
-    queryFn: fetchStatus,
-    staleTime: 30000,
-    retry: 1,
-  });
-
-  const { data: envRequirements } = useQuery({
-    queryKey: ["env-requirements"],
-    queryFn: fetchEnvRequirements,
-    staleTime: 30000,
-    retry: 1,
-  });
+  const { data: status } = useSystemStatus();
+  const { data: envRequirements } = useEnvRequirements();
 
   return useMemo(() => {
     const targets = status?.targets ?? [];

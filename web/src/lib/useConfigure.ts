@@ -4,18 +4,27 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { api } from './client';
 import type {
   ConfigureTarget,
+  ConfigureTargetDetail,
   ConfigureFormData,
   ConfigureState,
   ConfigureConnectionStatus,
 } from '../types/configure';
 
+async function throwIfNotOk(response: Response, ctx: string): Promise<void> {
+  if (response.ok) return;
+  const body = await response.text().catch(() => '');
+  throw new Error(body || `${ctx}: ${response.status}`);
+}
+
 interface UseConfigureReturn {
   // Actions
   listTargets: () => Promise<void>;
+  getTarget: (name: string) => Promise<ConfigureTargetDetail | null>;
   addTarget: (data: ConfigureFormData) => Promise<void>;
-  updateTarget: (name: string, data: Partial<ConfigureFormData>) => Promise<void>;
+  updateTarget: (name: string, data: ConfigureFormData) => Promise<void>;
   removeTarget: (name: string) => Promise<void>;
   setDefaultTarget: (name: string) => Promise<void>;
   testConnection: (name: string) => void;
@@ -60,19 +69,16 @@ export function useConfigure(): UseConfigureReturn {
     setError(null);
 
     try {
-      const response = await fetch('/api/configure/targets', {
-        method: 'GET',
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+      const result = await api.GET('/api/configure/targets', { signal: controller.signal });
+      await throwIfNotOk(result.response, 'Failed to list targets');
+      const data = result.data;
+      if (!data) throw new Error('Missing response body');
+      // Union narrow: ErrorResponse has `message`; TargetListResponse has `targets`.
+      if (!('targets' in data)) {
+        throw new Error(data.message);
       }
-
-      const data = await response.json();
-      setTargets(data.targets || []);
-      setDefaultTargetState(data.default_target || null);
+      setTargets(data.targets);
+      setDefaultTargetState(data.default_target ?? null);
       setState('success');
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
@@ -81,6 +87,59 @@ export function useConfigure(): UseConfigureReturn {
       const errorMessage = err instanceof Error ? err.message : 'Failed to list targets';
       setError(errorMessage);
       setState('error');
+    } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+  }, []);
+
+  const getTarget = useCallback(async (name: string) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setState('loading');
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await api.GET('/api/configure/targets/{name}', {
+        params: { path: { name } },
+        signal: controller.signal,
+      });
+      await throwIfNotOk(result.response, 'Failed to load target');
+      const data = result.data;
+      if (!data) throw new Error('Missing response body');
+      if (!('target_name' in data)) {
+        throw new Error(data.message);
+      }
+      const detail = data as typeof data & { password_env?: string | null };
+
+      setState('success');
+      return {
+        name: detail.target_name,
+        engine: detail.engine,
+        host: detail.host,
+        port: detail.port,
+        database: detail.database,
+        user: detail.user,
+        password_env: detail.password_env ?? undefined,
+        tls: detail.tls ?? false,
+        read_only: detail.read_only ?? false,
+        has_password: detail.has_password,
+        is_default: detail.is_default,
+      };
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        return null;
+      }
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load target';
+      setError(errorMessage);
+      setState('error');
+      return null;
     } finally {
       setLoading(false);
       abortControllerRef.current = null;
@@ -101,12 +160,8 @@ export function useConfigure(): UseConfigureReturn {
     setError(null);
 
     try {
-      const response = await fetch('/api/configure/targets', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const result = await api.POST('/api/configure/targets', {
+        body: {
           name: data.name,
           target: {
             engine: data.engine,
@@ -118,18 +173,13 @@ export function useConfigure(): UseConfigureReturn {
             tls: data.tls ?? false,
             read_only: data.read_only ?? false,
           },
-        }),
+        },
         signal: controller.signal,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to add target');
+      await throwIfNotOk(result.response, 'Failed to add target');
+      if (!result.data) throw new Error('Missing response body');
+      if (!result.data.success) {
+        throw new Error(result.data.message || 'Failed to add target');
       }
 
       setState('success');
@@ -150,7 +200,7 @@ export function useConfigure(): UseConfigureReturn {
   }, [listTargets, invalidateStatus]);
 
   // Update existing target
-  const updateTarget = useCallback(async (name: string, data: Partial<ConfigureFormData>) => {
+  const updateTarget = useCallback(async (name: string, data: ConfigureFormData) => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -163,12 +213,9 @@ export function useConfigure(): UseConfigureReturn {
     setError(null);
 
     try {
-      const response = await fetch(`/api/configure/targets/${name}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const result = await api.PUT('/api/configure/targets/{name}', {
+        params: { path: { name } },
+        body: {
           target: {
             engine: data.engine,
             host: data.host,
@@ -176,21 +223,16 @@ export function useConfigure(): UseConfigureReturn {
             database: data.database,
             user: data.user,
             password_env: data.password_env,
-            tls: data.tls ?? false,
-            read_only: data.read_only ?? false,
+            tls: data.tls,
+            read_only: data.read_only,
           },
-        }),
+        },
         signal: controller.signal,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to update target');
+      await throwIfNotOk(result.response, 'Failed to update target');
+      if (!result.data) throw new Error('Missing response body');
+      if (!result.data.success) {
+        throw new Error(result.data.message || 'Failed to update target');
       }
 
       setState('success');
@@ -223,19 +265,14 @@ export function useConfigure(): UseConfigureReturn {
     setError(null);
 
     try {
-      const response = await fetch(`/api/configure/targets/${name}`, {
-        method: 'DELETE',
+      const result = await api.DELETE('/api/configure/targets/{name}', {
+        params: { path: { name } },
         signal: controller.signal,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to remove target');
+      await throwIfNotOk(result.response, 'Failed to remove target');
+      if (!result.data) throw new Error('Missing response body');
+      if (!result.data.success) {
+        throw new Error(result.data.message || 'Failed to remove target');
       }
 
       setState('success');
@@ -269,23 +306,14 @@ export function useConfigure(): UseConfigureReturn {
     setError(null);
 
     try {
-      const response = await fetch('/api/configure/default', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name }),
+      const result = await api.PUT('/api/configure/default', {
+        body: { name },
         signal: controller.signal,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to set default target');
+      await throwIfNotOk(result.response, 'Failed to set default target');
+      if (!result.data) throw new Error('Missing response body');
+      if (!result.data.success) {
+        throw new Error(result.data.message || 'Failed to set default target');
       }
 
       setState('success');
@@ -442,6 +470,7 @@ export function useConfigure(): UseConfigureReturn {
   return {
     // Actions
     listTargets,
+    getTarget,
     addTarget,
     updateTarget,
     removeTarget,

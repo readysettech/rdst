@@ -1,6 +1,8 @@
 """Query registry feature slice."""
 
 from .events import (
+    QueryBenchmarkCompleteEvent,
+    QueryBenchmarkErrorEvent,
     QueryBenchmarkEvent,
     QueryBenchmarkProgressEvent,
     QueryCompleteEvent,
@@ -12,6 +14,8 @@ from .models import QueryBenchmarkStats, QueryCommandInput
 from .service import QueryService
 
 __all__ = [
+    "QueryBenchmarkCompleteEvent",
+    "QueryBenchmarkErrorEvent",
     "QueryBenchmarkEvent",
     "QueryBenchmarkProgressEvent",
     "QueryBenchmarkStats",

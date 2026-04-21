@@ -4,19 +4,26 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { useTargetSwitchLock } from './targetSwitchLock';
+import type { components } from './api.generated';
 import type {
   ScanState,
   ScanPhase,
   ScanFile,
   ScanQuery,
   ScanSummary,
-  ScanStatusEventData,
-  ScanFilesFoundEventData,
-  ScanProgressEventData,
-  ScanQueryResultEventData,
-  ScanCompleteEventData,
-  ScanErrorEventData,
 } from '../types/scan';
+
+// SSE event types are derived from the backend-generated discriminated union.
+// Backend source of truth: rdst/features/scan/events.py (ScanEvent).
+type ScanEvent = components['schemas']['ScanEvent'];
+export type ScanEventType = ScanEvent['type'];
+
+type ScanStatusEvent = Extract<ScanEvent, { type: 'status' }>;
+type ScanFilesFoundEvent = Extract<ScanEvent, { type: 'files_found' }>;
+type ScanProgressEvent = Extract<ScanEvent, { type: 'progress' }>;
+type ScanQueryResultEvent = Extract<ScanEvent, { type: 'query_result' }>;
+type ScanCompleteEvent = Extract<ScanEvent, { type: 'complete' }>;
+type ScanErrorEvent = Extract<ScanEvent, { type: 'error' }>;
 
 export interface UseScanOptions {
   analyze?: boolean;
@@ -191,24 +198,27 @@ export function useScan(): UseScanReturn {
                 try {
                   const data = JSON.parse(dataStr);
 
-                  switch (currentEvent) {
+                  const eventType = currentEvent as ScanEventType;
+                  switch (eventType) {
                     case 'status': {
-                      const statusData = data as ScanStatusEventData;
-                      setPhase(statusData.phase);
+                      const statusData = data as ScanStatusEvent;
+                      setPhase(statusData.phase as ScanPhase);
                       setStatusMessage(statusData.message);
                       setPhaseProgress(null);
                       break;
                     }
 
                     case 'files_found': {
-                      const filesData = data as ScanFilesFoundEventData;
-                      setFiles(filesData.files);
+                      const filesData = data as ScanFilesFoundEvent;
+                      // Generated type is `{[key: string]: unknown}[]`; backend
+                      // actually emits the ScanFile shape.
+                      setFiles(filesData.files as unknown as ScanFile[]);
                       break;
                     }
 
                     case 'progress': {
-                      const progressData = data as ScanProgressEventData;
-                      setPhase(progressData.phase);
+                      const progressData = data as ScanProgressEvent;
+                      setPhase(progressData.phase as ScanPhase);
                       setPhaseProgress({
                         current: progressData.current,
                         total: progressData.total,
@@ -218,8 +228,10 @@ export function useScan(): UseScanReturn {
                     }
 
                     case 'query_result': {
-                      const queryData = data as ScanQueryResultEventData;
-                      queryBufferRef.current.push(queryData.query);
+                      const queryData = data as ScanQueryResultEvent;
+                      queryBufferRef.current.push(
+                        queryData.query as unknown as ScanQuery,
+                      );
                       if (!flushTimerRef.current) {
                         flushTimerRef.current = setTimeout(flushQueryBuffer, 50);
                       }
@@ -232,7 +244,7 @@ export function useScan(): UseScanReturn {
                     }
 
                     case 'complete': {
-                      const completeData = data as ScanCompleteEventData;
+                      const completeData = data as ScanCompleteEvent;
                       // Flush any buffered queries before completing
                       if (flushTimerRef.current) {
                         clearTimeout(flushTimerRef.current);
@@ -243,25 +255,33 @@ export function useScan(): UseScanReturn {
                         queryBufferRef.current = [];
                         setQueries((prev) => [...prev, ...remaining]);
                       }
-                      setSummary(completeData.summary);
+                      setSummary(completeData.summary as unknown as ScanSummary);
                       setState('complete');
                       break;
                     }
 
                     case 'error': {
-                      const errorData = data as ScanErrorEventData;
+                      const errorData = data as ScanErrorEvent;
                       setError(errorData.message);
                       setState('error');
                       break;
                     }
 
-                    default:
+                    default: {
+                      // Exhaustiveness guard: if ScanEventType gains a variant
+                      // that isn't handled above, `eventType` narrows to that
+                      // literal inside this branch and the assignment to
+                      // `never` fails tsc. Do NOT use `as never` — that
+                      // defeats the check.
+                      const _exhaustive: never = eventType;
                       console.warn(
                         '[Scan SSE] Unknown event type:',
                         currentEvent,
                         data
                       );
+                      void _exhaustive;
                       break;
+                    }
                   }
                 } catch (e) {
                   console.error('[Scan SSE] Failed to parse JSON:', e);

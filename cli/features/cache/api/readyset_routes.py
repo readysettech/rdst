@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends
@@ -16,6 +15,14 @@ from shared.api.target_guard import (
     require_target_optional,
 )
 from shared.password_resolver import resolve_password_value
+from ..readyset_events import (
+    ReadysetCacheCompleteEvent,
+    ReadysetErrorEvent,
+    ReadysetExplainCompleteEvent,
+    ReadysetProgressEvent,
+    ReadysetSetupCompleteEvent,
+    event_to_sse,
+)
 from ..readyset_explain_cache import (
     create_cache_readyset,
     explain_create_cache_readyset,
@@ -43,81 +50,59 @@ class ContainerStatus(BaseModel):
     target: Optional[str] = None
 
 
+def _docker_ps(name: str) -> bool:
+    import subprocess
+
+    result = subprocess.run(
+        ["docker", "ps", "--filter", f"name={name}", "--format", "{{.Names}}"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    return result.returncode == 0 and name in result.stdout
+
+
+def _docker_port(name: str) -> Optional[int]:
+    import subprocess
+
+    result = subprocess.run(
+        ["docker", "port", name],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.strip().split("\n"):
+        if "->" in line:
+            return int(line.split(":")[-1])
+    return None
+
+
 @router.get("/status")
 async def get_status(
     guard: TargetGuard = Depends(require_target_optional),
 ) -> ContainerStatus:
-    import subprocess
-
     target_name, target_config = guard
 
     engine = target_config.get("engine", "postgresql").lower()
     container_name = f"rdst-test-{'mysql' if engine == 'mysql' else 'psql'}-{target_name}"
     readyset_container_name = f"rdst-readyset-{target_name}"
 
-    test_db_status = subprocess.run(
-        [
-            "docker",
-            "ps",
-            "--filter",
-            f"name={container_name}",
-            "--format",
-            "{{.Names}}",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    test_db_running = (
-        test_db_status.returncode == 0 and container_name in test_db_status.stdout
+    test_db_running, readyset_running = await asyncio.gather(
+        asyncio.to_thread(_docker_ps, container_name),
+        asyncio.to_thread(_docker_ps, readyset_container_name),
     )
 
-    readyset_status = subprocess.run(
-        [
-            "docker",
-            "ps",
-            "--filter",
-            f"name={readyset_container_name}",
-            "--format",
-            "{{.Names}}",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=5,
+    async def _port_or_none(name: str, running: bool) -> Optional[int]:
+        if not running:
+            return None
+        return await asyncio.to_thread(_docker_port, name)
+
+    test_db_port, readyset_port = await asyncio.gather(
+        _port_or_none(container_name, test_db_running),
+        _port_or_none(readyset_container_name, readyset_running),
     )
-    readyset_running = (
-        readyset_status.returncode == 0
-        and readyset_container_name in readyset_status.stdout
-    )
-
-    test_db_port = None
-    readyset_port = None
-
-    if test_db_running:
-        port_result = subprocess.run(
-            ["docker", "port", container_name],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if port_result.returncode == 0:
-            for line in port_result.stdout.strip().split("\n"):
-                if "->" in line:
-                    test_db_port = int(line.split(":")[-1])
-                    break
-
-    if readyset_running:
-        port_result = subprocess.run(
-            ["docker", "port", readyset_container_name],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if port_result.returncode == 0:
-            for line in port_result.stdout.strip().split("\n"):
-                if "->" in line:
-                    readyset_port = int(line.split(":")[-1])
-                    break
 
     return ContainerStatus(
         running=test_db_running and readyset_running,
@@ -132,12 +117,13 @@ async def get_status(
 async def _setup_generator(
     target_name: str, target_config: dict
 ) -> AsyncGenerator[dict, None]:
-    yield {
-        "event": "progress",
-        "data": json.dumps(
-            {"stage": "starting", "message": "Setting up Readyset containers..."}
-        ),
-    }
+    yield event_to_sse(
+        ReadysetProgressEvent(
+            type="progress",
+            stage="starting",
+            message="Setting up Readyset containers...",
+        )
+    )
 
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
@@ -151,23 +137,20 @@ async def _setup_generator(
     )
 
     if not result.get("success"):
-        yield {
-            "event": "error",
-            "data": json.dumps({"message": result.get("error", "Setup failed")}),
-        }
+        yield event_to_sse(
+            ReadysetErrorEvent(type="error", message=result.get("error", "Setup failed"))
+        )
         return
 
-    yield {
-        "event": "complete",
-        "data": json.dumps(
-            {
-                "success": True,
-                "readyset_port": result.get("readyset_port"),
-                "test_db_port": result.get("test_port"),
-                "already_running": result.get("already_running", False),
-            }
-        ),
-    }
+    yield event_to_sse(
+        ReadysetSetupCompleteEvent(
+            type="complete",
+            success=True,
+            readyset_port=result.get("readyset_port"),
+            test_db_port=result.get("test_port"),
+            already_running=result.get("already_running", False),
+        )
+    )
 
 
 @router.post("/setup")
@@ -180,12 +163,13 @@ async def setup_containers(
 async def _explain_generator(
     query: str, target_name: str, target_config: dict
 ) -> AsyncGenerator[dict, None]:
-    yield {
-        "event": "progress",
-        "data": json.dumps(
-            {"stage": "setup", "message": "Checking Readyset containers..."}
-        ),
-    }
+    yield event_to_sse(
+        ReadysetProgressEvent(
+            type="progress",
+            stage="setup",
+            message="Checking Readyset containers...",
+        )
+    )
 
     loop = asyncio.get_event_loop()
     setup_result = await loop.run_in_executor(
@@ -199,12 +183,12 @@ async def _explain_generator(
     )
 
     if not setup_result.get("success"):
-        yield {
-            "event": "error",
-            "data": json.dumps(
-                {"message": setup_result.get("error", "Container setup failed")}
-            ),
-        }
+        yield event_to_sse(
+            ReadysetErrorEvent(
+                type="error",
+                message=setup_result.get("error", "Container setup failed"),
+            )
+        )
         return
 
     readyset_port = setup_result.get("readyset_port")
@@ -214,12 +198,13 @@ async def _explain_generator(
     if not test_db_config.get("password"):
         test_db_config["password"] = password
 
-    yield {
-        "event": "progress",
-        "data": json.dumps(
-            {"stage": "explaining", "message": "Running EXPLAIN CREATE CACHE..."}
-        ),
-    }
+    yield event_to_sse(
+        ReadysetProgressEvent(
+            type="progress",
+            stage="explaining",
+            message="Running EXPLAIN CREATE CACHE...",
+        )
+    )
 
     explain_result = await loop.run_in_executor(
         None,
@@ -230,19 +215,17 @@ async def _explain_generator(
         ),
     )
 
-    yield {
-        "event": "complete",
-        "data": json.dumps(
-            {
-                "success": explain_result.get("success", False),
-                "cacheable": explain_result.get("cacheable", False),
-                "confidence": explain_result.get("confidence", "unknown"),
-                "explanation": explain_result.get("explanation", ""),
-                "issues": explain_result.get("issues", []),
-                "readyset_port": readyset_port,
-            }
-        ),
-    }
+    yield event_to_sse(
+        ReadysetExplainCompleteEvent(
+            type="complete",
+            success=explain_result.get("success", False),
+            cacheable=explain_result.get("cacheable", False),
+            confidence=explain_result.get("confidence", "unknown"),
+            explanation=explain_result.get("explanation", ""),
+            issues=explain_result.get("issues", []),
+            readyset_port=readyset_port,
+        )
+    )
 
 
 @router.post("/explain")
@@ -257,12 +240,13 @@ async def explain_cache(
 async def _create_cache_generator(
     query: str, target_name: str, target_config: dict
 ) -> AsyncGenerator[dict, None]:
-    yield {
-        "event": "progress",
-        "data": json.dumps(
-            {"stage": "setup", "message": "Checking Readyset containers..."}
-        ),
-    }
+    yield event_to_sse(
+        ReadysetProgressEvent(
+            type="progress",
+            stage="setup",
+            message="Checking Readyset containers...",
+        )
+    )
 
     loop = asyncio.get_event_loop()
     setup_result = await loop.run_in_executor(
@@ -276,12 +260,12 @@ async def _create_cache_generator(
     )
 
     if not setup_result.get("success"):
-        yield {
-            "event": "error",
-            "data": json.dumps(
-                {"message": setup_result.get("error", "Container setup failed")}
-            ),
-        }
+        yield event_to_sse(
+            ReadysetErrorEvent(
+                type="error",
+                message=setup_result.get("error", "Container setup failed"),
+            )
+        )
         return
 
     readyset_port = setup_result.get("readyset_port")
@@ -291,12 +275,13 @@ async def _create_cache_generator(
     if not test_db_config.get("password"):
         test_db_config["password"] = password
 
-    yield {
-        "event": "progress",
-        "data": json.dumps(
-            {"stage": "creating", "message": "Creating cache in Readyset..."}
-        ),
-    }
+    yield event_to_sse(
+        ReadysetProgressEvent(
+            type="progress",
+            stage="creating",
+            message="Creating cache in Readyset...",
+        )
+    )
 
     create_result = await loop.run_in_executor(
         None,
@@ -314,19 +299,17 @@ async def _create_cache_generator(
             lambda: get_cache_id_for_query(query, readyset_port, test_db_config),
         )
 
-    yield {
-        "event": "complete",
-        "data": json.dumps(
-            {
-                "success": create_result.get("success", False),
-                "cached": create_result.get("cached", False),
-                "cache_id": cache_id,
-                "message": create_result.get("message", ""),
-                "error": create_result.get("error"),
-                "readyset_port": readyset_port,
-            }
-        ),
-    }
+    yield event_to_sse(
+        ReadysetCacheCompleteEvent(
+            type="complete",
+            success=create_result.get("success", False),
+            cached=create_result.get("cached", False),
+            cache_id=cache_id,
+            message=create_result.get("message", ""),
+            error=create_result.get("error"),
+            readyset_port=readyset_port,
+        )
+    )
 
 
 @router.post("/cache")

@@ -13,6 +13,12 @@ vi.mock("@tanstack/react-router", async () => {
   };
 });
 
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
+  useQuery: () => ({ data: undefined, isLoading: false, isFetching: false, error: null }),
+  useMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, isError: false, isSuccess: false, data: undefined, error: null, reset: vi.fn() }),
+}));
+
 vi.mock("../lib/sse", () => ({
   useAnalyze: vi.fn(),
 }));

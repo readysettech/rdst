@@ -28,7 +28,7 @@ interface ParameterDialogProps {
   onClose: () => void
   onSubmit: (substitutedQuery: string) => void
   query: string
-  initialValues?: Record<string, string | number>
+  initialValues?: Record<string, unknown>
   submitLabel?: string
   submitIcon?: 'speedometer' | 'play' | 'tick'
 }

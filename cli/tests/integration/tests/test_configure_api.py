@@ -145,6 +145,7 @@ async def test_get_target_exists(app):
                 port=5432,
                 database="myapp",
                 user="admin",
+                password_env="PROD_DB_PASSWORD",
                 has_password=True,
                 is_default=True,
                 tls=True,
@@ -164,6 +165,7 @@ async def test_get_target_exists(app):
         assert data["port"] == 5432
         assert data["database"] == "myapp"
         assert data["user"] == "admin"
+        assert data["password_env"] == "PROD_DB_PASSWORD"
         assert data["has_password"] is True
         assert data["is_default"] is True
         assert data["tls"] is True

@@ -2,6 +2,8 @@ import { useState, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTargetSwitchLock } from './targetSwitchLock';
 import type { ProgressEvent } from './api';
+import { api } from './client';
+import type { components } from './api.generated';
 import type {
   CacheDeployState,
   CacheDeployRequest,
@@ -14,70 +16,71 @@ import type {
   CacheRunState,
 } from '../types/cache';
 
+type CacheErrorResponse = components['schemas']['CacheErrorResponse'];
+export type CacheAddResult = CacheAddResponse | CacheErrorResponse;
+
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
 
+async function throwIfNotOk(response: Response, ctx: string): Promise<void> {
+  if (response.ok) return;
+  const body = await response.text().catch(() => '');
+  throw new Error(body || `${ctx}: ${response.status}`);
+}
+
 export async function fetchCacheStatus(target: string): Promise<CacheStatusResponse> {
-  const response = await fetch(`/api/cache/status?target=${encodeURIComponent(target)}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch cache status: ${response.status}`);
-  }
-  return response.json();
+  const { data, response } = await api.GET('/api/cache/status', { params: { query: { target } } });
+  await throwIfNotOk(response, 'Failed to fetch cache status');
+  if (!data) throw new Error('Missing response body');
+  // CacheErrorResponse omits CacheStatusResponse's fields; treat as failure.
+  if ('error' in data) throw new Error(data.error);
+  return data;
 }
 
 export async function fetchCacheList(target: string): Promise<CacheListResponse> {
-  const response = await fetch(`/api/cache/list?target=${encodeURIComponent(target)}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch cache list: ${response.status}`);
-  }
-  return response.json();
+  const { data, response } = await api.GET('/api/cache/list', { params: { query: { target } } });
+  await throwIfNotOk(response, 'Failed to fetch cache list');
+  if (!data) throw new Error('Missing response body');
+  if ('error' in data) throw new Error(data.error);
+  return data;
 }
 
-export async function addCacheQuery(request: CacheAddRequest): Promise<CacheAddResponse> {
-  const response = await fetch('/api/cache/add', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Failed to add cache: ${response.status}`);
-  }
-  return response.json();
+// Returns the raw union. Callers narrow via `'error' in result` to tell a
+// transient backend failure (CacheErrorResponse) apart from a structured
+// "unsupported query" response (CacheAddResponse with supported: false).
+export async function addCacheQuery(request: CacheAddRequest): Promise<CacheAddResult> {
+  const { data, response } = await api.POST('/api/cache/add', { body: request });
+  await throwIfNotOk(response, 'Failed to add cache');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
 export async function deleteCacheQuery(cacheId: string, target: string): Promise<{ success: boolean }> {
-  const response = await fetch(
-    `/api/cache/${encodeURIComponent(cacheId)}?target=${encodeURIComponent(target)}`,
-    { method: 'DELETE' },
-  );
-  if (!response.ok) {
-    throw new Error(`Failed to delete cache: ${response.status}`);
-  }
-  return response.json();
+  const { data, response } = await api.DELETE('/api/cache/{cache_id}', {
+    params: { path: { cache_id: cacheId }, query: { target } },
+  });
+  await throwIfNotOk(response, 'Failed to delete cache');
+  if (!data) throw new Error('Missing response body');
+  return { success: data.success };
 }
 
 export async function removeCacheTarget(target: string): Promise<{ success: boolean }> {
-  const response = await fetch(
-    `/api/cache/remove?target=${encodeURIComponent(target)}`,
-    { method: 'DELETE' },
-  );
-  if (!response.ok) {
-    throw new Error(`Failed to remove cache: ${response.status}`);
-  }
-  return response.json();
+  const { data, response } = await api.DELETE('/api/cache/remove', {
+    params: { query: { target } },
+  });
+  await throwIfNotOk(response, 'Failed to remove cache');
+  if (!data) throw new Error('Missing response body');
+  return { success: data.success };
 }
 
 export async function dropAllCacheQueries(target: string): Promise<{ success: boolean }> {
-  const response = await fetch(
-    `/api/cache/drop-all?target=${encodeURIComponent(target)}`,
-    { method: 'DELETE' },
-  );
-  if (!response.ok) {
-    throw new Error(`Failed to drop all caches: ${response.status}`);
-  }
-  return response.json();
+  const { data, response } = await api.DELETE('/api/cache/drop-all', {
+    params: { query: { target } },
+  });
+  await throwIfNotOk(response, 'Failed to drop all caches');
+  if (!data) throw new Error('Missing response body');
+  return { success: data.success };
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +119,7 @@ export async function deployAndCache(
     try {
       const check = await addCacheQuery({ query, target, dry_run: true });
       // Distinguish "not supported" (permanent) from connection/server errors (transient)
-      if (!check.success && check.error) {
+      if ('error' in check) {
         // Server/connection error — retriable
         throw new Error(check.error);
       }
@@ -125,8 +128,10 @@ export async function deployAndCache(
         throw new _PermanentError(check.detail || 'Query cannot be cached by ReadySet');
       }
       const result = await addCacheQuery({ query, target, dry_run: false });
+      if ('error' in result) {
+        throw new Error(result.error);
+      }
       if (!result.success) {
-        if (result.error) throw new Error(result.error);
         throw new Error(result.detail || 'Failed to create cache');
       }
       return { cached: true, deployed: freshDeploy };

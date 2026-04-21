@@ -1,24 +1,9 @@
-import type { ConfigureTarget } from './configure';
-
-export interface InitStatus {
-  initialized: boolean;
-  targets: ConfigureTarget[];
-  default_target: string | null;
-  llm_configured: boolean;
-}
-
-export interface ValidationResult {
-  target_results: Array<{
-    name: string;
-    success: boolean;
-    error?: string;
-    version?: string;
-  }>;
-  llm_result: {
-    success: boolean;
-    error?: string;
-    model?: string;
-  };
-}
-
+// Onboarding step names are UI-only (not in the backend API).
 export type OnboardingStep = 'welcome' | 'targets' | 'validate' | 'complete';
+
+// Backend-generated types, re-exported under their historical names so
+// existing consumers don't have to change their import path.
+import type { components } from '../lib/api.generated';
+
+export type InitStatus = components['schemas']['InitStatusResponse'];
+export type ValidationResult = components['schemas']['InitValidateResponse'];

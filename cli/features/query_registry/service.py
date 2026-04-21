@@ -10,9 +10,12 @@ import time
 from dataclasses import dataclass, field
 from queue import Empty, Queue
 from threading import Lock
-from typing import Any, AsyncGenerator, List, Optional
+from typing import Any, AsyncGenerator, List, Literal, Optional
 
 from .events import (
+    QueryBenchmarkCompleteEvent,
+    QueryBenchmarkErrorEvent,
+    QueryBenchmarkEvent,
     QueryBenchmarkProgressEvent,
     QueryCompleteEvent,
     QueryErrorEvent,
@@ -64,7 +67,7 @@ class QueryService:
         concurrency: int,
         duration_seconds: int,
         max_count: Optional[int],
-    ) -> AsyncGenerator[QueryBenchmarkProgressEvent, None]:
+    ) -> AsyncGenerator[QueryBenchmarkEvent, None]:
         """Stream benchmark progress events from a background worker."""
         progress_queue: Queue = Queue(maxsize=100)
         stop_event = threading.Event()
@@ -290,21 +293,34 @@ class QueryService:
                         if error_msg:
                             stats.last_error = error_msg
 
-            def _progress(event_type: str) -> QueryBenchmarkProgressEvent:
+            def _progress(
+                event_type: Literal["progress", "complete"],
+            ) -> QueryBenchmarkProgressEvent | QueryBenchmarkCompleteEvent:
                 with stats_lock:
                     elapsed = time.perf_counter() - start_time
                     total_exec = sum(s.executions for s in query_stats.values())
                     total_succ = sum(s.successes for s in query_stats.values())
                     total_fail = sum(s.failures for s in query_stats.values())
                     qps = total_exec / elapsed if elapsed > 0 else 0
+                    queries_list = [s.to_model() for s in query_stats.values()]
+                    if event_type == "complete":
+                        return QueryBenchmarkCompleteEvent(
+                            type="complete",
+                            elapsed_seconds=elapsed,
+                            total_executions=total_exec,
+                            total_successes=total_succ,
+                            total_failures=total_fail,
+                            qps=qps,
+                            queries=queries_list,
+                        )
                     return QueryBenchmarkProgressEvent(
-                        type=event_type,
+                        type="progress",
                         elapsed_seconds=elapsed,
                         total_executions=total_exec,
                         total_successes=total_succ,
                         total_failures=total_fail,
                         qps=qps,
-                        queries=[s.to_model() for s in query_stats.values()],
+                        queries=queries_list,
                     )
 
             conn = create_direct_connection(target_config)
@@ -366,14 +382,8 @@ class QueryService:
             except Exception:
                 pass
         except Exception as e:
-            error_progress = QueryBenchmarkProgressEvent(
+            error_progress = QueryBenchmarkErrorEvent(
                 type="error",
-                elapsed_seconds=0,
-                total_executions=0,
-                total_successes=0,
-                total_failures=0,
-                qps=0,
-                queries=[],
                 error=str(e),
             )
             try:

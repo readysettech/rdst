@@ -1,5 +1,6 @@
-import { QueryClient, useQuery } from '@tanstack/react-query';
-import { fetchEnvRequirements, fetchTrialStatus } from './api';
+import { QueryClient } from '@tanstack/react-query';
+import { useEnvRequirements } from './useEnvRequirements';
+import { useTrialStatus } from './useTrialStatus';
 
 export async function invalidateTrialRelatedQueries(queryClient: QueryClient) {
   const options = { refetchType: 'all' as const };
@@ -16,26 +17,15 @@ export function isTrialBasedSource(source: string | undefined): boolean {
 }
 
 export function useTrialSource() {
-  const { data: envRequirements } = useQuery({
-    queryKey: ['env-requirements'],
-    queryFn: fetchEnvRequirements,
-    staleTime: 30000,
-    retry: 1,
-  });
+  const { data: envRequirements } = useEnvRequirements();
 
   const anthropicRequirement = envRequirements?.requirements.find(
     (r) => r.kind === 'anthropic_api_key',
   );
   const anthropicSource = anthropicRequirement?.source;
-  const isTrialSource = isTrialBasedSource(anthropicSource);
+  const isTrialSource = isTrialBasedSource(anthropicSource ?? undefined);
 
-  const { data: trialStatus } = useQuery({
-    queryKey: ['trial-status'],
-    queryFn: fetchTrialStatus,
-    staleTime: 30000,
-    retry: 1,
-    enabled: isTrialSource,
-  });
+  const { data: trialStatus } = useTrialStatus({ enabled: isTrialSource });
 
   return {
     envRequirements,

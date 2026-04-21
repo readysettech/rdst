@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
@@ -9,11 +9,9 @@ import { HStack, VStack } from '@rs/ui-new/stack';
 import { Button } from '@rs/ui-new/button';
 import { CopyButton } from '@rs/ui-new/copy-button';
 import { EnvSecretsDialog } from './EnvSecretsDialog';
-import {
-  type EnvRequirement,
-  fetchInitStatus,
-  fetchStatus,
-} from '../lib/api';
+import { type EnvRequirement } from '../lib/api';
+import { useInitStatus } from '../lib/useInitStatus';
+import { useSystemStatus } from '../lib/useSystemStatus';
 import { TrialRegistrationDialog } from './TrialRegistrationDialog';
 import { invalidateTrialRelatedQueries, useTrialSource } from '../lib/trialQueries';
 
@@ -227,18 +225,8 @@ export function ConfigWarning() {
   const [showSecretsDialog, setShowSecretsDialog] = useState(false);
   const [showTrialDialog, setShowTrialDialog] = useState(false);
 
-  const { data: status, isLoading, error } = useQuery({
-    queryKey: ['status'],
-    queryFn: fetchStatus,
-    staleTime: 30000,
-    retry: 1,
-  });
-  const { data: initStatus, isLoading: initLoading } = useQuery({
-    queryKey: ['init-status'],
-    queryFn: fetchInitStatus,
-    staleTime: 30000,
-    retry: 1,
-  });
+  const { data: status, isLoading, error } = useSystemStatus();
+  const { data: initStatus, isLoading: initLoading } = useInitStatus();
   const { envRequirements, isTrialSource, trialStatus } = useTrialSource();
 
   const missingAnthropicRequirements =

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Dropdown } from '@rs/ui-new/dropdown';
 import { Icon } from '@rs/ui-new/icon';
 import { Text } from '@rs/ui-new/text';
 import { Skeleton } from '@rs/ui-new/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@rs/ui-new/tooltip';
-import { fetchStatus, type TargetInfo } from '../lib/api';
+import { type TargetInfo } from '../lib/api';
+import { useSystemStatus } from '../lib/useSystemStatus';
 import { useTargetSwitchLockState } from '../lib/targetSwitchLock';
 
 interface TargetDropdownProps {
@@ -17,11 +17,7 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
   const [open, setOpen] = useState(false);
   const { isLocked, message: lockMessage } = useTargetSwitchLockState();
 
-  const { data: status, isLoading, error } = useQuery({
-    queryKey: ['status'],
-    queryFn: fetchStatus,
-    staleTime: 30000,
-  });
+  const { data: status, isLoading, error } = useSystemStatus();
 
   const targets = status?.targets || [];
   const normalizedSelectedTarget = selectedTarget?.trim() || null;

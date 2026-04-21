@@ -7,7 +7,7 @@ the corresponding cache target internally via CacheService.
 from __future__ import annotations
 
 import json
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, Union
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -64,6 +64,56 @@ class CacheRunRequest(BaseModel):
     target: Optional[str] = None
     iterations: int = 15
     warmup: int = 5
+
+
+# Response shapes returned by non-SSE endpoints. These mirror `_event_to_dict`
+# below — FastAPI infers the OpenAPI schema from the `->` return annotation on
+# each route and validates the response dict against it.
+
+class CacheErrorResponse(BaseModel):
+    success: bool
+    error: str
+
+
+class CacheStatusResponse(BaseModel):
+    deployed: bool
+    running: bool
+    endpoint: Optional[str] = None
+    cache_target: Optional[str] = None
+    container_name: Optional[str] = None
+
+
+class CacheEntryResponse(BaseModel):
+    cache_id: str
+    cache_name: str
+    query: str
+    type: str
+    ttl: str
+    registry_hash: Optional[str] = None
+
+
+class CacheListResponse(BaseModel):
+    success: bool
+    caches: list[CacheEntryResponse]
+    count: int
+
+
+class CacheAddResponse(BaseModel):
+    success: bool
+    supported: bool
+    query: str
+    query_hash: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class CacheDeleteResponse(BaseModel):
+    success: bool
+    cache_id: str
+
+
+class CacheDropAllResponse(BaseModel):
+    success: bool
+    count: int
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +233,7 @@ def _event_to_dict(event: CacheEvent) -> dict:
 @router.get("/status")
 async def get_cache_status(
     guard: TargetGuard = Depends(require_target),
-):
+) -> Union[CacheStatusResponse, CacheErrorResponse]:
     """Check cache deployment status for a database target."""
     service = CacheService()
     event = await _collect_final(
@@ -216,7 +266,7 @@ async def deploy_cache(
 @router.get("/list")
 async def list_caches(
     guard: TargetGuard = Depends(require_target),
-):
+) -> Union[CacheListResponse, CacheErrorResponse]:
     """List cached queries for a database target."""
     service = CacheService()
     event = await _collect_final(
@@ -229,7 +279,7 @@ async def list_caches(
 async def add_cache(
     request: CacheAddRequest,
     guard: TargetGuard = Depends(require_target_body),
-):
+) -> Union[CacheAddResponse, CacheErrorResponse]:
     """Create a cache or dry-run check."""
     service = CacheService()
     input_data = CacheInput(
@@ -249,7 +299,7 @@ async def add_cache(
 async def register_cache_target(
     request: CacheRegisterRequest,
     guard: TargetGuard = Depends(require_target_body),
-):
+) -> Union[CacheStatusResponse, CacheErrorResponse]:
     """Register a cache target with a user-provided endpoint (for non-local deploys)."""
     service = CacheService()
     event = await _collect_final(
@@ -265,7 +315,7 @@ async def register_cache_target(
 @router.delete("/remove")
 async def remove_cache(
     guard: TargetGuard = Depends(require_target),
-):
+) -> Union[CacheDeleteResponse, CacheErrorResponse]:
     """Remove cache target and stop container."""
     service = CacheService()
     event = await _collect_final(
@@ -277,7 +327,7 @@ async def remove_cache(
 @router.delete("/drop-all")
 async def drop_all_caches(
     guard: TargetGuard = Depends(require_target),
-):
+) -> Union[CacheDropAllResponse, CacheErrorResponse]:
     """Delete all caches."""
     service = CacheService()
     event = await _collect_final(
@@ -308,7 +358,7 @@ async def run_cache_comparison(
 async def delete_cache(
     cache_id: str,
     guard: TargetGuard = Depends(require_target),
-):
+) -> Union[CacheDeleteResponse, CacheErrorResponse]:
     """Delete a single cache by ID."""
     service = CacheService()
     event = await _collect_final(

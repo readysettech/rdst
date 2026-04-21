@@ -7,16 +7,18 @@ Feedback is sent to PostHog for analytics and Slack for immediate visibility.
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 
 router = APIRouter()
+
+ReportSentiment = Literal["positive", "negative", "neutral"]
 
 
 class ReportRequest(BaseModel):
     """Request body for submitting feedback."""
 
     reason: str  # Required - feedback text
-    sentiment: str = "neutral"  # "positive" | "negative" | "neutral"
+    sentiment: ReportSentiment = "neutral"
     query_hash: Optional[str] = None  # Optional - reference a specific query
     email: Optional[str] = None  # Optional - for follow-up
     include_query: bool = False  # Whether to include raw SQL

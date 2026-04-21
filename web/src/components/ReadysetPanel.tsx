@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Button } from "@rs/ui-new/button";
 import { Spinner } from "@rs/ui-new/spinner";
 import { Tag } from "@rs/ui-new/tag";
 import { Text } from "@rs/ui-new/text";
 import { SQLInput } from "./SQLInput";
 import { SQLDisplay } from "./SQLDisplay";
-import { fetchReadysetStatus, ReadysetContainerStatus } from "../lib/api";
+import { ReadysetContainerStatus, ReadysetCreateCacheResult, ReadysetExplainResult } from "../lib/api";
 import { useReadyset } from "../lib/useReadyset";
+import { useReadysetStatus } from "../lib/useReadysetStatus";
 
 interface ReadysetPanelProps {
   target?: string | null;
@@ -82,7 +82,7 @@ function ContainerStatusCard({
 function ExplainResultCard({
   result,
 }: {
-  result: { cacheable: boolean; confidence: string; explanation: string; issues: string[] };
+  result: ReadysetExplainResult;
 }) {
   const isCacheable = result.cacheable;
 
@@ -126,7 +126,7 @@ function ExplainResultCard({
 function CacheResultCard({
   result,
 }: {
-  result: { cached: boolean; cache_id: string | null; message: string; error?: string };
+  result: ReadysetCreateCacheResult;
 }) {
   const success = result.cached;
 
@@ -164,13 +164,7 @@ export function ReadysetPanel({ target, disabled = false }: ReadysetPanelProps) 
     data: containerStatus,
     isLoading: isLoadingStatus,
     refetch: refetchStatus,
-  } = useQuery({
-    queryKey: ["readyset-status", target],
-    queryFn: () => fetchReadysetStatus(target || undefined),
-    staleTime: 30 * 1000,
-    refetchInterval: 60 * 1000,
-    enabled: !disabled,
-  });
+  } = useReadysetStatus(target, { enabled: !disabled });
 
   const {
     setupContainers,

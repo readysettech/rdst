@@ -131,7 +131,7 @@ export function substituteParameters(
  */
 export function resolveInitialValue(
   param: Parameter,
-  storedParams: Record<string, string | number> | undefined
+  storedParams: Record<string, unknown> | undefined
 ): string {
   if (!storedParams) return ''
   let backendKey: string

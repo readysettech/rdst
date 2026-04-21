@@ -107,7 +107,7 @@ describe('ConfigWarning env secret flow', () => {
     });
     vi.mocked(fetchInitStatus).mockResolvedValue({
       initialized: true,
-      targets: [{ name: 'prod', has_password: true, is_default: true }],
+      targets: [{ name: 'prod', engine: 'postgresql', has_password: true, is_default: true }],
       default_target: 'prod',
       llm_configured: false,
     });

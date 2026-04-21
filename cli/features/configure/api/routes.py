@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional, Union
+from typing import Optional, Union
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -69,10 +69,25 @@ class TargetResponse(BaseModel):
     target_name: Optional[str] = None
 
 
+class TargetSummaryResponse(BaseModel):
+    """Summary fields for a target in the list view."""
+
+    name: str
+    engine: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[Union[int, str]] = None
+    database: Optional[str] = None
+    proxy: Optional[str] = None
+    endpoint_verified: Optional[bool] = None
+    verified: Optional[bool] = None
+    has_password: bool = False
+    is_default: bool = False
+
+
 class TargetListResponse(BaseModel):
     """Response for list targets."""
 
-    targets: list[Dict[str, Any]]
+    targets: list[TargetSummaryResponse]
     default_target: Optional[str] = None
 
 
@@ -85,6 +100,7 @@ class TargetDetailResponse(BaseModel):
     port: int
     database: str
     user: str
+    password_env: Optional[str] = None
     has_password: bool
     is_default: bool
     tls: bool = False
@@ -131,6 +147,7 @@ def _event_to_sse(event: ConfigureEvent) -> dict:
                     "port": event.port,
                     "database": event.database,
                     "user": event.user,
+                    "password_env": event.password_env,
                     "has_password": event.has_password,
                     "is_default": event.is_default,
                     "tls": event.tls,
@@ -234,6 +251,7 @@ async def get_target(name: str) -> Union[TargetDetailResponse, ErrorResponse]:
             port=result.port,
             database=result.database,
             user=result.user,
+            password_env=result.password_env,
             has_password=result.has_password,
             is_default=result.is_default,
             tls=result.tls,

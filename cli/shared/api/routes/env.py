@@ -1,11 +1,21 @@
 """API routes for secure environment variable handling."""
 
 from __future__ import annotations
-from typing import List, Optional
+from typing import List, Literal, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, SecretStr
+
+EnvRequirementKind = Literal["target_password", "anthropic_api_key"]
+EnvRequirementSource = Literal[
+    "config",
+    "process_env",
+    "secure_store",
+    "trial",
+    "trial_exhausted",
+    "missing",
+]
 
 from shared.env_requirements_service import EnvRequirementsService
 
@@ -15,11 +25,11 @@ _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 class EnvRequirement(BaseModel):
-    kind: str
+    kind: EnvRequirementKind
     accepted_names: List[str]
     target: Optional[str] = None
     satisfied: bool
-    source: str
+    source: EnvRequirementSource
 
 
 class EnvRequirementsResponse(BaseModel):
