@@ -1583,6 +1583,11 @@ class FleetCommand:
                     self._track_fleet_audit_report(successful, fleet_insights_data)
                 except Exception:
                     pass
+        elif successful:
+            try:
+                self._track_fleet_audit_report(successful, fleet_insights_data)
+            except Exception:
+                pass
 
         return RdstResult(True, message="")
 

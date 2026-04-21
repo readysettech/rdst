@@ -318,6 +318,12 @@ class AuditCommand:
                     self._track_audit_report(target, final_result, insights_data, workload_result)
                 except Exception:
                     pass
+        else:
+            try:
+                insights_data = (workload_result or {}).get("analysis")
+                self._track_audit_report(target, final_result, insights_data, workload_result)
+            except Exception:
+                pass
 
         return RdstResult(True, message="")
 
