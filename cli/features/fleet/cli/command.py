@@ -1172,11 +1172,47 @@ class FleetCommand:
         if duration_str:
             duration_seconds = _parse_duration(duration_str)
 
+        # Pre-flight: connectivity check — skip targets we can't reach
+        if not output_json:
+            console.print(f"[dim]Checking connectivity for {len(targets)} targets...[/dim]")
+        reachable = []
+        unreachable = []
+        for target_name in targets:
+            tc = cfg.get(target_name)
+            if not tc:
+                unreachable.append((target_name, "Target config not found"))
+                continue
+            try:
+                from shared.db_connection import create_direct_connection
+                conn = create_direct_connection(tc, connect_timeout=5)
+                conn.close()
+                reachable.append(target_name)
+                if not output_json:
+                    console.print(f"  [green]✓[/green] {target_name}")
+            except Exception as e:
+                err = str(e)
+                if "Password not available" in err:
+                    pw_env = tc.get("password_env", "?")
+                    reason = f"{pw_env} not set"
+                elif "Access denied" in err or "Authentication failed" in err:
+                    reason = "wrong password or username"
+                else:
+                    reason = err[:80]
+                unreachable.append((target_name, reason))
+                if not output_json:
+                    console.print(f"  [red]✗[/red] {target_name}: {reason}")
+
+        if unreachable and not output_json:
+            console.print(f"\n[yellow]{len(unreachable)} target(s) unreachable — skipping them.[/yellow]")
+        if not reachable:
+            return RdstResult(False, "No targets reachable. Check passwords and connectivity.")
+        targets = reachable
+
         # Pre-flight display
         n = len(targets)
         if not output_json:
             estimate = "quick audit" if not duration_seconds else f"~{duration_seconds}s capture per target"
-            console.print(f"[bold]Auditing {n} targets...[/bold] ({estimate})")
+            console.print(f"\n[bold]Auditing {n} targets...[/bold] ({estimate})")
 
         # Pre-flight: check/deploy Readyset caches for all targets (one prompt)
         caches_available = False
@@ -1445,14 +1481,14 @@ class FleetCommand:
                 # Make common errors more actionable
                 if "Password not available" in error_msg:
                     target_name = r.get("target_name", "?")
-                    target_cfg = cfg.get_target(target_name) or {}
+                    target_cfg = cfg.get(target_name) or {}
                     pw_env = target_cfg.get("password_env", "FLEET_DB_PASS")
                     console.print(f"  [red]{target_name}[/red]: password not set — export {pw_env}=\"your-password\"")
                 elif "Authentication failed" in error_msg:
                     console.print(f"  [red]{r.get('target_name', '?')}[/red]: wrong password or username")
                 elif "Unable to locate credentials" in error_msg:
                     target_name = r.get("target_name", "?")
-                    target_cfg = cfg.get_target(target_name) or {}
+                    target_cfg = cfg.get(target_name) or {}
                     if target_cfg.get("password_secret_arn"):
                         console.print(f"  [red]{target_name}[/red]: AWS credentials not found — run: aws sso login")
                     else:
