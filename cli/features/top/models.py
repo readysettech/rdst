@@ -21,6 +21,15 @@ class TopSortField(str, Enum):
     LOAD = "load"
 
 
+# Human-readable labels for sort fields, used in headers/titles.
+SORT_FIELD_LABELS: dict[str, str] = {
+    "total_time": "Total Time",
+    "freq": "Frequency",
+    "avg_time": "Avg Duration",
+    "load": "Load",
+}
+
+
 @dataclass
 class TopInput:
     """Input for top service."""

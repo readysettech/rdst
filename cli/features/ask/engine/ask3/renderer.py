@@ -144,10 +144,15 @@ class AskRenderer:
         self.cleanup()  # Stop spinner
 
         if not event.rows:
-            self._console.print(
-                f"[{StyleTokens.MUTED}]No results returned "
-                f"(0 rows in {event.execution_time_ms:.1f}ms)[/{StyleTokens.MUTED}]"
-            )
+            if event.execution_time_ms == 0.0 and not event.columns:
+                self._console.print(
+                    f"[{StyleTokens.MUTED}]Dry run — SQL generated but not executed[/{StyleTokens.MUTED}]"
+                )
+            else:
+                self._console.print(
+                    f"[{StyleTokens.MUTED}]No results returned "
+                    f"(0 rows in {event.execution_time_ms:.1f}ms)[/{StyleTokens.MUTED}]"
+                )
             if event.query_hash:
                 short_hash = event.query_hash[:8]
                 self._console.print(
@@ -174,15 +179,29 @@ class AskRenderer:
                 f"rdst analyze --hash {short_hash}[/{StyleTokens.MUTED}]"
             )
 
+    # Map internal phase names to user-friendly error prefixes
+    _PHASE_ERROR_PREFIX: dict[str, str] = {
+        "schema": "Error loading schema:",
+        "filter": "Error filtering schema:",
+        "clarify": "Error analyzing question:",
+        "generate": "Error generating SQL:",
+        "validate": "Error validating SQL:",
+        "execute": "Error executing query:",
+        "config": "Error loading configuration:",
+    }
+
     def _render_error(self, event: "AskErrorEvent") -> None:
         """Render error event."""
         self.cleanup()  # Stop spinner
 
         from shared.ui import create_console
         stderr_console = create_console(stderr=True)
-        phase_info = f" (during {event.phase})" if event.phase else ""
+
+        # Map phase enum to user-friendly prefix
+        phase_key = event.phase.value if hasattr(event.phase, "value") else event.phase
+        error_prefix = self._PHASE_ERROR_PREFIX.get(phase_key, "Error:") if phase_key else "Error:"
         stderr_console.print(
-            f"\n[{StyleTokens.STATUS_ERROR}]Error{phase_info}:[/{StyleTokens.STATUS_ERROR}] "
+            f"\n[{StyleTokens.STATUS_ERROR}]{error_prefix}[/{StyleTokens.STATUS_ERROR}] "
             f"{event.message}"
         )
 

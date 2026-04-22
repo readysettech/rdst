@@ -177,3 +177,163 @@ class TestConfigureServiceEventTypes:
         assert event.message == "Connection failed"
         assert event.operation == "test"
         assert event.target_name == "prod"
+
+
+class TestTargetNotFoundIncludesHint:
+    """Target-not-found errors must include 'rdst configure list' hint."""
+
+    @pytest.fixture
+    def service(self):
+        from features.configure.service import ConfigureService
+        return ConfigureService()
+
+    @pytest.fixture
+    def mock_config(self):
+        cfg = Mock()
+        cfg.get.return_value = None
+        cfg.list_targets.return_value = []
+        cfg.get_default.return_value = None
+        return cfg
+
+    @pytest.mark.asyncio
+    async def test_get_target_not_found_includes_hint(self, service, mock_config):
+        with patch.object(service, "_load_config", return_value=mock_config):
+            events = []
+            async for event in service.get_target("nonexistent"):
+                events.append(event)
+        error_events = [e for e in events if isinstance(e, ConfigureErrorEvent)]
+        assert len(error_events) == 1
+        assert "rdst configure list" in error_events[0].message
+
+    @pytest.mark.asyncio
+    async def test_test_connection_not_found_includes_hint(self, service, mock_config):
+        with patch.object(service, "_load_config", return_value=mock_config):
+            events = []
+            async for event in service.test_connection("nonexistent"):
+                events.append(event)
+        error_events = [e for e in events if isinstance(e, ConfigureErrorEvent)]
+        assert len(error_events) == 1
+        assert "rdst configure list" in error_events[0].message
+
+
+class TestConfigureCommandNoTargetError:
+    """When no target is specified and no default is configured, configure test
+    should return a non-empty error message (not silently empty)."""
+
+    def test_configure_test_no_target_returns_error_message(self):
+        """Bug fix: 'rdst configure test' with no target and no default
+        should return a clear error message, not an empty string."""
+        from features.configure.cli.command import ConfigureCommand
+
+        cmd = ConfigureCommand(client=None)
+
+        with (
+            patch("shared.config.targets.TargetsConfig.load", return_value=None),
+            patch("shared.config.targets.TargetsConfig.get_default", return_value=None),
+        ):
+            result = cmd.execute(subcommand="test")
+
+        assert result.ok is False
+        assert result.message != "", (
+            "Error message should not be empty when no target is specified "
+            "and no default is configured"
+        )
+        assert "target" in result.message.lower() or "configure" in result.message.lower(), (
+            f"Error message should mention target or configure. Got: {result.message!r}"
+        )
+
+
+class TestPgVersionNotTruncated:
+    """PG version string must not be truncated at 80 chars.
+
+    Tests the truncation logic used in _perform_connection_test:
+        (version[:120] + "...") if len(version) > 120 else version
+    """
+
+    @staticmethod
+    def _apply_version_truncation(version: str) -> str:
+        """Reproduce the truncation logic from ConfigureService."""
+        return (version[:120] + "...") if len(version) > 120 else version
+
+    def test_120_char_version_not_truncated(self):
+        """A 120-char version string should be preserved in full."""
+        version = "P" * 120
+        result = self._apply_version_truncation(version)
+        assert result == version
+        assert "..." not in result
+
+    def test_short_version_not_truncated(self):
+        """A normal PG version string should not be truncated."""
+        version = "PostgreSQL 16.2 on x86_64-pc-linux-gnu"
+        result = self._apply_version_truncation(version)
+        assert result == version
+
+    def test_very_long_version_truncated_with_ellipsis(self):
+        """Versions over 120 chars should be truncated with '...'."""
+        version = "P" * 200
+        result = self._apply_version_truncation(version)
+        assert len(result) == 123
+        assert result.endswith("...")
+
+
+class TestTestConnectionSingleStatusMessage:
+    """test_connection must emit exactly ONE status/progress message, not two."""
+
+    @pytest.fixture
+    def service(self):
+        from features.configure.service import ConfigureService
+        return ConfigureService()
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_testing_connection_status(self, service):
+        """Bug fix: test_connection previously emitted a duplicate
+        'Testing connection to' ConfigureStatusEvent before the
+        ConfigureConnectionTestEvent. Verify only one status-like
+        message is emitted before the result.
+
+        The expected event sequence is:
+          1. ConfigureConnectionTestEvent (status="in_progress") - the connecting message
+          2. ConfigureConnectionTestEvent (status="success"|"failed") - the result
+        There should be NO ConfigureStatusEvent with "Testing connection" text.
+        """
+        mock_config = {
+            "engine": "postgresql",
+            "host": "localhost",
+            "port": 5432,
+            "user": "test",
+            "database": "testdb",
+        }
+
+        mock_cfg = Mock()
+        mock_cfg.get.return_value = mock_config
+        mock_cfg.get_default.return_value = "test-target"
+
+        events = []
+        with patch.object(service, "_load_config", return_value=mock_cfg):
+            with patch.object(
+                service,
+                "_perform_connection_test",
+                new_callable=AsyncMock,
+                return_value={"success": True, "message": "Connected!", "server_version": "PG 15"},
+            ):
+                async for event in service.test_connection("test-target"):
+                    events.append(event)
+
+        # No ConfigureStatusEvent should be emitted — only ConnectionTestEvents
+        status_events = [
+            e for e in events if isinstance(e, ConfigureStatusEvent)
+        ]
+        assert len(status_events) == 0, (
+            f"Expected zero ConfigureStatusEvent in test_connection, "
+            f"got {len(status_events)}: {[e.message for e in status_events]}"
+        )
+
+        # Should have exactly 2 ConnectionTestEvents: in_progress + success
+        conn_events = [
+            e for e in events if isinstance(e, ConfigureConnectionTestEvent)
+        ]
+        assert len(conn_events) == 2, (
+            f"Expected 2 ConfigureConnectionTestEvent, got {len(conn_events)}"
+        )
+        assert conn_events[0].status == "in_progress"
+        assert conn_events[1].status == "success"

@@ -544,13 +544,16 @@ class AnalyzeCommand:
                     )
 
                     while True:
-                        choice = (
-                            input(
-                                "\nContinue existing conversation or start new? [c/n]: "
+                        try:
+                            choice = (
+                                input(
+                                    "\nContinue existing conversation or start new? [c/n]: "
+                                )
+                                .strip()
+                                .lower()
                             )
-                            .strip()
-                            .lower()
-                        )
+                        except EOFError:
+                            return RdstResult(True, "")
                         if choice in ["c", "continue"]:
                             # Load conversation and enter interactive mode directly
                             conversation = conv_registry.load_conversation(
@@ -734,6 +737,7 @@ class AnalyzeCommand:
                 result_data = dict(workflow_result)
                 # Remove internal/sensitive keys from JSON output
                 result_data.pop("target_config", None)
+                result_data.pop("FormatFinalResults", None)
                 return RdstResult(
                     True,
                     json.dumps(result_data, indent=2, default=str),

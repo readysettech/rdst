@@ -62,7 +62,7 @@ class AskService:
             if target_config is None:
                 yield AskErrorEvent(
                     type="error",
-                    message=f"Target '{target_name}' not found",
+                    message=f"Target '{target_name}' not found. Run 'rdst configure list' to see available targets",
                 )
                 return
 
@@ -234,7 +234,6 @@ class AskService:
             return
 
         if ctx.dry_run:
-            qhash, qtag = self._auto_save_query(ctx)
             yield AskResultEvent(
                 type="result",
                 success=True,
@@ -245,8 +244,8 @@ class AskService:
                 execution_time_ms=0.0,
                 llm_calls=len(ctx.llm_calls),
                 total_tokens=ctx.total_tokens,
-                query_hash=qhash,
-                query_tag=qtag,
+                query_hash="",
+                query_tag="",
             )
             return
 

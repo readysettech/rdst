@@ -793,8 +793,14 @@ class QueryRegistry:
             entry = self._queries[query_hash]
             entry.last_analyzed = now
             entry.frequency = frequency if frequency > 0 else entry.frequency
+            if tag and entry.tag and entry.tag != tag:
+                logger.info(
+                    "Query hash %s already exists with tag '%s'. Overwriting to '%s'.",
+                    query_hash[:8], entry.tag, tag,
+                )
             if tag:
                 entry.tag = tag
+                entry.source = source
             if target:  # Update last target used
                 entry.last_target = target
 

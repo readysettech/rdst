@@ -394,7 +394,7 @@ class Ask3Engine:
         if self._agent is None:
             # Ensure LLM manager is initialized
             if self.llm_manager is None:
-                from ...llm_manager import LLMManager
+                from shared.llm_manager import LLMManager
                 self.llm_manager = LLMManager()
 
             self._agent = Ask3Agent(

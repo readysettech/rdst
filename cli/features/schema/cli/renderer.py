@@ -78,10 +78,7 @@ class SchemaRenderer:
         )
 
         if details.tables:
-            self._console.print(
-                f"\n[{StyleTokens.HEADER}]Tables:[/{StyleTokens.HEADER}]"
-            )
-            tree = SimpleTree(f"[bold]Tables ({len(details.tables)})[/bold]")
+            tree = SimpleTree(f"\n[bold]Tables ({len(details.tables)})[/bold]")
 
             for table in details.tables:
                 table_node = tree.add(

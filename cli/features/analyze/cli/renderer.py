@@ -123,14 +123,24 @@ class AnalyzeRenderer:
             self.cleanup()
 
     def _render_explain_complete(self, event: "ExplainCompleteEvent") -> None:
-        """Render EXPLAIN ANALYZE completion."""
+        """Render EXPLAIN / EXPLAIN ANALYZE completion."""
         if not event.success:
+            self.cleanup()
+            if event.error:
+                self._console.print(
+                    StatusLine(
+                        "FAILED",
+                        event.error,
+                        style=StyleTokens.STATUS_ERROR,
+                    )
+                )
             return
 
         self.cleanup()
+        header = "EXPLAIN" if event.explain_analyze_skipped else "EXPLAIN ANALYZE"
         self._console.print(
             StatusLine(
-                "EXPLAIN ANALYZE",
+                header,
                 f"{event.execution_time_ms:.1f}ms, {event.rows_examined:,} rows examined",
                 style=StyleTokens.SUCCESS,
             )

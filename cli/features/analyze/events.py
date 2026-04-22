@@ -18,6 +18,8 @@ class ExplainCompleteEvent:
     rows_returned: int
     cost_estimate: float
     explain_plan: Optional[Dict[str, Any]] = None
+    explain_analyze_skipped: bool = False
+    error: Optional[str] = None
 
 
 @dataclass

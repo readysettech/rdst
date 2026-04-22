@@ -604,7 +604,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                     ArgDef(
                         "queries",
                         nargs="*",
-                        help="Query names, hashes, or inline SQL to run (round-robin if multiple)",
+                        help="Query names or hashes to run (round-robin if multiple)",
                     ),
                     ArgDef(
                         "--file",
@@ -667,7 +667,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                     ArgDef(
                         "queries",
                         nargs="*",
-                        help="Query names, hashes, or inline SQL to compare",
+                        help="Query names or hashes to compare",
                     ),
                     ArgDef(
                         "--target",

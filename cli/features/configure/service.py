@@ -85,7 +85,7 @@ class ConfigureService:
             if target_data is None:
                 yield ConfigureErrorEvent(
                     type="error",
-                    message=f"Target '{name}' not found",
+                    message=f"Target '{name}' not found. Run 'rdst configure list' to see available targets",
                     operation=operation_name("get"),
                     target_name=name,
                 )
@@ -201,7 +201,7 @@ class ConfigureService:
             if existing is None:
                 yield ConfigureErrorEvent(
                     type="error",
-                    message=f"Target '{name}' not found",
+                    message=f"Target '{name}' not found. Run 'rdst configure list' to see available targets",
                     operation=operation_name("update"),
                     target_name=name,
                 )
@@ -239,7 +239,7 @@ class ConfigureService:
             if cfg.get(name) is None:
                 yield ConfigureErrorEvent(
                     type="error",
-                    message=f"Target '{name}' not found",
+                    message=f"Target '{name}' not found. Run 'rdst configure list' to see available targets",
                     operation=operation_name("remove"),
                     target_name=name,
                 )
@@ -272,7 +272,7 @@ class ConfigureService:
             if cfg.get(name) is None:
                 yield ConfigureErrorEvent(
                     type="error",
-                    message=f"Target '{name}' not found",
+                    message=f"Target '{name}' not found. Run 'rdst configure list' to see available targets",
                     operation=operation_name("set_default"),
                     target_name=name,
                 )
@@ -301,17 +301,13 @@ class ConfigureService:
         name: str,
     ) -> AsyncGenerator[ConfigureEvent, None]:
         try:
-            yield ConfigureStatusEvent(
-                type="status", message=f"Testing connection to '{name}'..."
-            )
-
             cfg = self._load_config()
             target_config = cfg.get(name)
 
             if target_config is None:
                 yield ConfigureErrorEvent(
                     type="error",
-                    message=f"Target '{name}' not found",
+                    message=f"Target '{name}' not found. Run 'rdst configure list' to see available targets",
                     operation=operation_name("test"),
                     target_name=name,
                 )
@@ -392,7 +388,7 @@ class ConfigureService:
                 return {
                     "success": True,
                     "message": "Connected successfully!",
-                    "server_version": version[:80] if len(version) > 80 else version,
+                    "server_version": (version[:120] + "...") if len(version) > 120 else version,
                 }
 
             if engine == "mysql":

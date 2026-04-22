@@ -82,7 +82,8 @@ class ConfigureCommand:
                                 "ErrorEvent",
                                 (),
                                 {
-                                    "message": "No target specified and no default target configured"
+                                    "type": "error",
+                                    "message": "No target specified and no default target configured. Run 'rdst configure list' to see available targets.",
                                 },
                             )()
                             return
@@ -206,6 +207,10 @@ class ConfigureCommand:
                 # the renderer already printed the error to the console.
                 # Return empty message to avoid a duplicate print in rdst.py main().
                 if subcmd in ("test", "remove", "default", "edit"):
+                    # For errors created locally (not rendered by the renderer),
+                    # return the message so rdst.py main() can print it.
+                    if type(error).__name__ == "ErrorEvent":
+                        return RdstResult(False, error.message)
                     return RdstResult(False, "")
                 return RdstResult(False, getattr(error, "message", str(error)))
             return RdstResult(True, "Operation completed")

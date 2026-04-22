@@ -8,6 +8,7 @@ Uses the RDST UI theme system for consistent styling across all output.
 """
 
 from typing import Dict, Any, List, Optional
+import json
 import textwrap
 
 from shared.ui import (
@@ -26,6 +27,20 @@ from shared.ui import (
     NextStepsBuilder,
 )
 from shared.ui.theme import duration_style, impact_style
+
+
+def _ensure_dict(value: Any) -> Dict[str, Any]:
+    """Parse a value into a dict, handling JSON strings from the workflow engine."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
 
 
 def _generate_db_test_command(
@@ -306,15 +321,15 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
     lines = []
 
     target = workflow_result.get("target", "unknown")
-    explain_results = workflow_result.get("explain_results") or {}
-    target_config = workflow_result.get("target_config") or {}
+    explain_results = _ensure_dict(workflow_result.get("explain_results") or {})
+    target_config = _ensure_dict(workflow_result.get("target_config") or {})
     db_engine = _resolve_db_engine(explain_results, target_config)
-    storage_result = workflow_result.get("storage_result") or {}
+    storage_result = _ensure_dict(workflow_result.get("storage_result") or {})
     analysis_id = (
         (storage_result.get("analysis_id") or "")[:12] if storage_result else ""
     )
 
-    llm_analysis = workflow_result.get("llm_analysis") or {}
+    llm_analysis = _ensure_dict(workflow_result.get("llm_analysis") or {})
     llm_info = None
     token_usage = llm_analysis.get("token_usage")
     if token_usage:
@@ -347,7 +362,7 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
         lines.append(_divider())
 
     if explain_results and explain_results.get("success"):
-        llm_analysis = workflow_result.get("llm_analysis") or {}
+        llm_analysis = _ensure_dict(workflow_result.get("llm_analysis") or {})
         lines.extend(
             _format_performance_summary_from_workflow(explain_results, llm_analysis)
         )
@@ -390,7 +405,7 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
     lines.append("")
     lines.append(_divider())
 
-    llm_analysis = workflow_result.get("llm_analysis") or {}
+    llm_analysis = _ensure_dict(workflow_result.get("llm_analysis") or {})
     explain_failed = not explain_results.get("success", False)
     if (
         llm_analysis
@@ -930,7 +945,7 @@ def _format_index_recommendations(recommendations: Dict[str, Any]) -> List[str]:
     for i, idx in enumerate(index_suggestions[:5], 1):
         idx_type = idx.get("type", "Unknown")
         table = idx.get("table", "")
-        expected_benefit = idx.get("expected_benefit", "UNKNOWN").upper()
+        expected_benefit = (idx.get("expected_benefit", "") or idx.get("estimated_impact", "") or "UNKNOWN").upper()
 
         # Color code impact
         impact_color = impact_style(expected_benefit)

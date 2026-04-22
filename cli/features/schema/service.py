@@ -191,7 +191,7 @@ class SchemaService:
                 columns=0,
                 relationships=0,
                 enum_columns=[],
-                error=f"Semantic layer already exists for '{target}'. Use force=True to overwrite.",
+                error=f"Semantic layer already exists for '{target}'. Use --force to overwrite.",
             )
 
         try:
@@ -544,11 +544,16 @@ class SchemaService:
             yield SchemaStatusEvent(type="status", operation="show", message=msg)
             details = self.get_schema(target, table_name)
             if details is None:
+                if not self._manager.exists(target):
+                    msg = f"No semantic layer found for target '{target}'"
+                elif table_name:
+                    msg = f"Table '{table_name}' not found in semantic layer for '{target}'"
+                else:
+                    msg = f"No semantic layer found for target '{target}'"
                 yield SchemaErrorEvent(
                     type="error",
                     operation="show",
-                    message=f"No semantic layer found for target '{target}'"
-                    + (f" or table '{table_name}' not found" if table_name else ""),
+                    message=msg,
                 )
                 return
 

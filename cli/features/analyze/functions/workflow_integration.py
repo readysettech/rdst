@@ -5,10 +5,33 @@ Additional workflow functions for storing analysis results and formatting output
 These functions bridge between the workflow execution and the query registry systems.
 """
 
+import json
 import time
 from typing import Dict, Any, Optional
 from shared.query_registry import QueryRegistry, hash_sql
 from .validation import validate_recommendations, reorder_index_columns
+
+
+def _ensure_dict(value: Any) -> Dict[str, Any]:
+    """Parse a value into a dict, handling JSON strings from the workflow engine.
+
+    The WorkflowManager template engine stringifies dict values via json.dumps
+    when interpolating ``{{placeholder}}`` references.  This means downstream
+    functions may receive a JSON *string* instead of the original dict.  Calling
+    ``.get()`` on such a string raises ``AttributeError``.
+
+    Returns the parsed dict, or an empty dict on failure.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
 
 
 def store_analysis_results(**kwargs) -> Dict[str, Any]:
@@ -79,26 +102,41 @@ def format_analysis_output(**kwargs) -> Dict[str, Any]:
         Dict containing formatted output for the user
     """
     try:
-        # Extract key results
-        explain_results = kwargs.get("explain_results", {})
-        llm_analysis = kwargs.get("llm_analysis", {})
-        optimization_suggestions = kwargs.get("optimization_suggestions", {})
+        # Extract key results — values may arrive as JSON strings from the
+        # workflow template engine, so coerce them to dicts first.
+        explain_results = _ensure_dict(kwargs.get("explain_results", {}))
+        llm_analysis = _ensure_dict(kwargs.get("llm_analysis", {}))
+        optimization_suggestions = _ensure_dict(kwargs.get("optimization_suggestions", {}))
         rewrite_test_results = kwargs.get("rewrite_test_results")
-        readyset_cacheability = kwargs.get("readyset_cacheability", {})
-        readyset_explain_cache = kwargs.get("readyset_explain_cache", {})
-        query_metrics = kwargs.get("query_metrics", {})
+        if isinstance(rewrite_test_results, str):
+            rewrite_test_results = _ensure_dict(rewrite_test_results) or None
+        readyset_cacheability = _ensure_dict(kwargs.get("readyset_cacheability", {}))
+        readyset_explain_cache = _ensure_dict(kwargs.get("readyset_explain_cache", {}))
+        query_metrics = _ensure_dict(kwargs.get("query_metrics", {}))
         query = kwargs.get("query", "")
         target = kwargs.get("target", "")
         analysis_id = kwargs.get("analysis_id", "")
 
         # Validate recommendations to detect hallucination
-        schema_collection = kwargs.get("schema_collection", {})
+        schema_collection = _ensure_dict(kwargs.get("schema_collection", {}))
         schema_info = schema_collection.get("schema_info", "")
         validation_results = validate_recommendations(llm_analysis, schema_info)
 
         # Enforce EQR column ordering in index recommendations
         if query and llm_analysis.get("index_recommendations"):
             reorder_index_columns(llm_analysis["index_recommendations"], query)
+
+        # The workflow does not pass optimization_suggestions as a separate
+        # parameter — rewrite suggestions and index recommendations live inside
+        # llm_analysis.  Populate optimization_suggestions from llm_analysis so
+        # that _format_recommendations can find them.
+        if not optimization_suggestions.get("success") and llm_analysis.get("success"):
+            optimization_suggestions = {
+                "success": True,
+                "rewrite_suggestions": llm_analysis.get("rewrite_suggestions", []),
+                "index_suggestions": llm_analysis.get("index_recommendations", []),
+                "caching_recommendations": llm_analysis.get("caching_recommendations", {}),
+            }
 
         # Build the formatted output
         output = {
@@ -284,7 +322,7 @@ def _format_index_suggestions(indexes: list) -> list:
             "type": index.get("index_type", ""),
             "columns": index.get("columns", []),
             "sql_statement": index.get("sql_statement", ""),
-            "expected_benefit": index.get("estimated_benefit", ""),
+            "expected_benefit": index.get("estimated_impact", "") or index.get("estimated_benefit", ""),
             "rationale": index.get("rationale", ""),
             "maintenance_cost": index.get("maintenance_cost", ""),
             "storage_impact": index.get("storage_impact", ""),

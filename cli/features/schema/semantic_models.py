@@ -85,9 +85,9 @@ class ColumnAnnotation:
         # Column statistics under a separate 'stats' sub-key
         stats = {}
         if self.null_fraction is not None:
-            stats['null_fraction'] = round(self.null_fraction, 4)
+            stats['null_fraction'] = round(float(self.null_fraction), 4)
         if self.distinct_count is not None:
-            stats['distinct_count'] = self.distinct_count
+            stats['distinct_count'] = int(self.distinct_count)
         if self.top_values:
             stats['top_values'] = self.top_values
         if self.stats_profiled_at:
@@ -217,19 +217,19 @@ class TableAnnotation:
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
 
-        self.row_count = profile.row_estimate
+        self.row_count = int(profile.row_estimate) if profile.row_estimate is not None else None
         self.profiled_at = now
 
         for col_name, cp in profile.columns.items():
             if col_name not in self.columns:
                 continue
             col = self.columns[col_name]
-            col.null_fraction = cp.null_fraction
-            col.distinct_count = cp.distinct_count
+            col.null_fraction = float(cp.null_fraction) if cp.null_fraction is not None else None
+            col.distinct_count = int(cp.distinct_count) if cp.distinct_count is not None else None
             col.stats_profiled_at = now
 
             if cp.top_values and cp.distinct_count <= max_cardinality:
-                col.top_values = [[v, c] for v, c in cp.top_values.items()]
+                col.top_values = [[str(v), int(c)] for v, c in cp.top_values.items()]
             else:
                 col.top_values = None
 

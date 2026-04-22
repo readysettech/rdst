@@ -914,3 +914,264 @@ class TestAskServiceNetworkFailures:
         assert len(schema_events) == 1
         # Last event should be error
         assert events[-1].type == "error"
+
+
+class TestAskServiceDryRunNoSave:
+    """Tests that dry-run does NOT auto-save queries to the registry."""
+
+    @pytest.fixture
+    def service(self):
+        return AskService()
+
+    @pytest.fixture
+    def input_data(self):
+        return AskInput(question="How many users?", target="test-target", source="cli")
+
+    @pytest.fixture
+    def dry_run_options(self):
+        return AskOptions(dry_run=True, timeout_seconds=30, verbose=False)
+
+    @pytest.mark.asyncio
+    async def test_dry_run_does_not_call_auto_save(self, service, input_data, dry_run_options):
+        """dry_run=True should NOT call _auto_save_query — query is never executed."""
+        events = []
+
+        async def mock_load_config(target):
+            return ("test-target", {"engine": "postgresql", "host": "localhost"})
+
+        def fake_load(ctx, p, s):
+            from features.ask.engine.ask3.types import SchemaInfo, SchemaSource
+            ctx.schema_info = SchemaInfo(
+                target="test-target",
+                db_type="postgresql",
+                source=SchemaSource.DATABASE,
+            )
+            ctx.schema_info.tables = {"users": Mock()}
+            ctx.schema_formatted = "users table"
+            return ctx
+
+        def fake_filter(ctx, p, s):
+            return ctx
+
+        def fake_gen(ctx, p, s):
+            ctx.sql = "SELECT COUNT(*) FROM users"
+            ctx.sql_explanation = "Counts users"
+            return ctx
+
+        def fake_val(ctx, p):
+            ctx.validation_errors = []
+            return ctx
+
+        with patch.object(service, "_load_config", side_effect=mock_load_config), \
+             patch("features.ask.service.load_schema", side_effect=fake_load), \
+             patch("features.ask.service.filter_schema", side_effect=fake_filter), \
+             patch("features.ask.service.generate_sql", side_effect=fake_gen), \
+             patch("features.ask.service.validate_sql", side_effect=fake_val), \
+             patch.object(service, "_auto_save_query") as mock_save:
+
+            async for event in service.ask(input_data, dry_run_options):
+                events.append(event)
+
+            # _auto_save_query must NOT be called in dry-run mode
+            mock_save.assert_not_called()
+
+        # Verify we still got a result event
+        result_events = [e for e in events if isinstance(e, AskResultEvent)]
+        assert len(result_events) == 1
+        assert result_events[0].rows == []
+        assert result_events[0].execution_time_ms == 0.0
+
+
+class TestAskServiceTargetNotFoundHint:
+    """Tests that target-not-found error includes a helpful hint."""
+
+    @pytest.fixture
+    def service(self):
+        return AskService()
+
+    @pytest.fixture
+    def options(self):
+        return AskOptions(dry_run=False, timeout_seconds=30, verbose=False)
+
+    @pytest.mark.asyncio
+    async def test_target_not_found_includes_configure_list_hint(self, service, options):
+        """Error for nonexistent target should include 'rdst configure list' hint."""
+        events = []
+
+        input_data = AskInput(
+            question="How many orders?",
+            target="nonexistent-target",
+            source="cli",
+        )
+
+        async def mock_load_config(target):
+            return ("nonexistent-target", None)
+
+        with patch.object(service, "_load_config", side_effect=mock_load_config):
+            async for event in service.ask(input_data, options):
+                events.append(event)
+
+        error_events = [e for e in events if isinstance(e, AskErrorEvent)]
+        assert len(error_events) == 1
+        assert "nonexistent-target" in error_events[0].message
+        assert "rdst configure list" in error_events[0].message
+
+
+class TestAskRendererDryRunMessage:
+    """Tests that the renderer shows 'Dry run' for dry-run results."""
+
+    def test_dry_run_result_shows_dry_run_message(self):
+        """When result has execution_time_ms=0.0 and empty columns, show 'Dry run' message."""
+        from features.ask.engine.ask3.renderer import AskRenderer
+        from io import StringIO
+
+        # Create a dry-run result event
+        event = AskResultEvent(
+            type="result",
+            success=True,
+            sql="SELECT COUNT(*) FROM users",
+            rows=[],
+            columns=[],
+            row_count=0,
+            execution_time_ms=0.0,
+            llm_calls=2,
+            total_tokens=500,
+            query_hash="",
+            query_tag="",
+        )
+
+        renderer = AskRenderer(verbose=False)
+
+        # Capture console output
+        output = StringIO()
+        with patch.object(renderer, "_console") as mock_console:
+            printed_texts = []
+
+            def capture_print(*args, **kwargs):
+                for arg in args:
+                    printed_texts.append(str(arg))
+
+            mock_console.print = capture_print
+            renderer.render(event)
+
+        combined = " ".join(printed_texts)
+        assert "Dry run" in combined, (
+            f"Expected 'Dry run' in output, got: {combined!r}"
+        )
+        assert "No results returned" not in combined, (
+            f"'No results returned' should NOT appear for dry-run, got: {combined!r}"
+        )
+
+    def test_empty_result_with_execution_time_shows_no_results(self):
+        """Non-dry-run empty result (execution_time > 0) should show 'No results returned'."""
+        from features.ask.engine.ask3.renderer import AskRenderer
+
+        event = AskResultEvent(
+            type="result",
+            success=True,
+            sql="SELECT * FROM users WHERE id = -1",
+            rows=[],
+            columns=["id", "name"],
+            row_count=0,
+            execution_time_ms=12.5,
+            llm_calls=1,
+            total_tokens=200,
+            query_hash="",
+            query_tag="",
+        )
+
+        renderer = AskRenderer(verbose=False)
+
+        printed_texts = []
+
+        def capture_print(*args, **kwargs):
+            for arg in args:
+                printed_texts.append(str(arg))
+
+        with patch.object(renderer, "_console") as mock_console:
+            mock_console.print = capture_print
+            renderer.render(event)
+
+        combined = " ".join(printed_texts)
+        assert "No results returned" in combined, (
+            f"Expected 'No results returned' for real empty result, got: {combined!r}"
+        )
+        assert "Dry run" not in combined
+
+
+class TestAskDryRunMetadataSuppressed:
+    """Tests that dry-run mode does NOT print Rows: or Execution time: metadata."""
+
+    def test_dry_run_message_excludes_rows_and_execution_time(self):
+        """Bug fix: when dry_run=True, the CLI result message built in
+        RdstCLI.ask() should NOT contain 'Rows:' or 'Execution time:'.
+
+        These metadata lines are only meaningful when the query is actually
+        executed.
+        """
+        from shared.cli.rdst_cli import RdstCLI
+        from features.ask.events import AskResultEvent
+        from unittest.mock import patch, MagicMock
+
+        result_event = AskResultEvent(
+            type="result",
+            success=True,
+            sql="SELECT COUNT(*) FROM users",
+            columns=[],
+            rows=[],
+            row_count=0,
+            execution_time_ms=0.0,
+            llm_calls=2,
+            total_tokens=500,
+            query_hash="",
+            query_tag="",
+        )
+
+        cli = RdstCLI()
+
+        # Mock the service to yield our result event
+        async def fake_ask_gen(*args, **kwargs):
+            yield result_event
+
+        with patch("features.ask.service.AskService") as MockAskService, \
+             patch("features.ask.engine.ask3.renderer.AskRenderer") as MockRenderer:
+            mock_service_instance = MockAskService.return_value
+            mock_service_instance.ask = fake_ask_gen
+            MockRenderer.return_value.render = MagicMock()
+
+            result = cli.ask(
+                question="How many users?",
+                target="test",
+                dry_run=True,
+            )
+
+        assert result.ok is True
+        assert "Rows:" not in result.message, (
+            f"Dry-run message should NOT contain 'Rows:'. Got: {result.message!r}"
+        )
+        assert "Execution time:" not in result.message, (
+            f"Dry-run message should NOT contain 'Execution time:'. Got: {result.message!r}"
+        )
+        # SQL should still be present
+        assert "SELECT COUNT(*) FROM users" in result.message
+
+
+class TestAskEngineImports:
+    """Tests that ask engine imports resolve correctly after broken import fix."""
+
+    def test_ask3_engine_imports_successfully(self):
+        """Bug fix: importing Ask3Engine from the engine module should not
+        raise ModuleNotFoundError. Previously broken imports prevented
+        the ask engine from loading.
+        """
+        from features.ask.engine.ask3.engine import Ask3Engine
+
+        assert Ask3Engine is not None
+
+    def test_filter_schema_imports_successfully(self):
+        """Bug fix: importing filter_schema from the filter phase module
+        should not raise ModuleNotFoundError.
+        """
+        from features.ask.engine.ask3.phases.filter import filter_schema
+
+        assert callable(filter_schema)

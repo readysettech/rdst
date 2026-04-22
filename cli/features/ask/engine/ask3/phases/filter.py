@@ -200,7 +200,7 @@ def filter_schema(
 
     # Initialize LLM manager for semantic extraction
     if llm_manager is None:
-        from ....llm_manager import LLMManager
+        from shared.llm_manager import LLMManager
         llm_manager = LLMManager()
 
     # Step 1: Semantic concept extraction (Haiku) - runs FIRST

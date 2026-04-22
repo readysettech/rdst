@@ -37,7 +37,7 @@ You are a diff analyzer for the rdst CLI tool. Your job is to read a git diff an
 - `rdst.py`, `shared/cli/rdst_cli.py`, `shared/cli/parser_data.py`, `features/interactive/` → `help-system`, `command-help-pages`, `interactive-menu`, `error-handling-bad-args`
 - `shared/cli/help_command.py` → `help-system`
 - `shared/cli/report_command.py`, `shared/api/routes/report.py` → `report-command`
-- `features/init/`, `features/demo/`, `features/audit/`, `features/fleet/` → `help-system`, `command-help-pages`, `error-handling-bad-args`
+- `features/init/`, `features/demo/`, `features/audit/`, `features/fleet/`, `features/trial/` → `help-system`, `command-help-pages`, `error-handling-bad-args`
 - `features/analyze/`, `shared/workflows/analyze_workflow*.json`, `shared/workflows/shallow_analyze_workflow.json` → `analyze-quality-simple`, `analyze-quality-complex`
 - `features/top/` → `top-command`
 - `features/configure/`, `shared/config/`, `shared/db_config_check.py`, `shared/db_connection.py`, `shared/password_resolver.py` → `configure-list`, `configure-test`, `error-handling-no-target`

@@ -92,12 +92,69 @@ class TopCommand:
         --duration N: Run real-time Top for N seconds then output results (snapshot mode)
         """
         try:
+            # Validate source against target engine early, before routing.
+            # Sources like 'slowlog' and 'digest' are MySQL-only.
+            if source not in ("auto", "activity"):
+                try:
+                    from shared.config.targets import TargetsConfig, normalize_db_type
+
+                    cfg = TargetsConfig()
+                    cfg.load()
+                    resolved_target = target or cfg.get_default()
+                    if resolved_target:
+                        target_config = cfg.get(resolved_target)
+                        if target_config:
+                            db_engine = normalize_db_type(
+                                target_config.get("engine")
+                            )
+                            mysql_only_sources = {"slowlog", "digest"}
+                            pg_only_sources = {"pg_stat"}
+                            if (
+                                source in mysql_only_sources
+                                and db_engine == "postgresql"
+                            ):
+                                return RdstResult(
+                                    False,
+                                    f"Source '{source}' is MySQL-only and cannot be used with PostgreSQL target '{resolved_target}'. "
+                                    f"Valid sources for PostgreSQL: auto, pg_stat, activity",
+                                )
+                            if (
+                                source in pg_only_sources
+                                and db_engine == "mysql"
+                            ):
+                                return RdstResult(
+                                    False,
+                                    f"Source '{source}' is PostgreSQL-only and cannot be used with MySQL target '{resolved_target}'. "
+                                    f"Valid sources for MySQL: auto, digest, slowlog, activity",
+                                )
+                except Exception:
+                    pass  # If config resolution fails, let downstream handle it
+
             # Route based on mode
             if not historical:
+                # Warn if pg_stat source was requested in realtime/snapshot mode,
+                # since realtime always uses activity (pg_stat_activity / PROCESSLIST).
+                if source == "pg_stat" and duration is not None:
+                    stderr_console = create_console(stderr=True)
+                    from shared.ui import NoticePanel
+
+                    stderr_console.print(
+                        NoticePanel(
+                            title="pg_stat not available in snapshot mode",
+                            description="Snapshot mode monitors live activity (pg_stat_activity), not historical statistics.",
+                            variant="warning",
+                            bullets=[
+                                "Use --historical --source pg_stat to query pg_stat_statements instead.",
+                                "Falling back to live activity monitoring for this run.",
+                            ],
+                        )
+                    )
+
                 # DEFAULT: Real-time monitoring using TopService
                 return self._run_realtime_with_service(
                     target=target,
                     limit=limit,
+                    sort=sort,
                     json_output=json,
                     duration=duration,
                     no_color=no_color,
@@ -149,6 +206,7 @@ class TopCommand:
         self,
         target: Optional[str],
         limit: int,
+        sort: str,
         json_output: bool,
         duration: Optional[int],
         no_color: bool,
@@ -164,7 +222,7 @@ class TopCommand:
 
         service = TopService()
         input_data = TopInput(target=target, source="activity")
-        options = TopOptions(limit=limit, poll_interval_ms=200, auto_save_registry=True)
+        options = TopOptions(sort=sort, limit=limit, poll_interval_ms=200, auto_save_registry=True)
 
         # For snapshot mode (duration specified or json), collect and return
         if duration:
@@ -491,7 +549,10 @@ class TopCommand:
                 elif isinstance(event, TopErrorEvent):
                     return RdstResult(False, event.message)
 
-        asyncio.run(run_async())
+        async_result = asyncio.run(run_async())
+
+        if isinstance(async_result, RdstResult) and not async_result.ok:
+            return async_result
 
         if result_data is None:
             return RdstResult(False, "No results collected")
@@ -515,8 +576,10 @@ class TopCommand:
                 f"Runtime: {duration}s | Total Queries Tracked: {len(result_data.queries)}"
             )
             lines.append("")
+            from features.top.models import SORT_FIELD_LABELS
+            sort_label = SORT_FIELD_LABELS.get(options.sort, "Total Time")
             lines.append(
-                "Top {} Slowest Queries (by Max Duration):".format(options.limit)
+                "Top {} Slowest Queries (by {}):".format(options.limit, sort_label)
             )
             lines.append("-" * 120)
             lines.append(

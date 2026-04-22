@@ -15,6 +15,11 @@ from sqlglot.generator import Generator as _BaseGenerator
 
 logger = logging.getLogger(__name__)
 
+# Suppress sqlglot parser warnings about unsupported syntax (e.g. EXPLAIN
+# statements).  These are noisy and harmless -- sqlglot falls back to parsing
+# the statement as a Command, which is fine for our normalisation purposes.
+logging.getLogger("sqlglot").setLevel(logging.ERROR)
+
 
 class _ReadysetCompatGenerator(_BaseGenerator):
     """Custom SQL generator that omits AS for table aliases.

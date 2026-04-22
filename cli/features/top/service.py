@@ -203,7 +203,7 @@ class TopService:
             )
 
         except Exception as e:
-            logger.exception("Error in get_top_queries")
+            logger.debug("Error in get_top_queries", exc_info=True)
             yield TopErrorEvent(
                 type="error",
                 message=str(e),
@@ -383,7 +383,7 @@ class TopService:
                 )
 
         except Exception as e:
-            logger.exception("Error in stream_realtime")
+            logger.debug("Error in stream_realtime", exc_info=True)
             yield TopErrorEvent(
                 type="error",
                 message=str(e),

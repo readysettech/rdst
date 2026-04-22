@@ -383,10 +383,15 @@ async def get_schema(
     details = service.get_schema(guard.target_name, table)
 
     if details is None:
+        from features.schema.semantic_layer import SemanticLayerManager
+
+        if table and SemanticLayerManager().exists(guard.target_name):
+            detail_msg = f"Table '{table}' not found in semantic layer for '{guard.target_name}'"
+        else:
+            detail_msg = f"No semantic layer found for target '{guard.target_name}'"
         raise HTTPException(
             status_code=404,
-            detail=f"No semantic layer found for target '{guard.target_name}'"
-            + (f" or table '{table}' not found" if table else ""),
+            detail=detail_msg,
         )
 
     return _details_to_response(details)

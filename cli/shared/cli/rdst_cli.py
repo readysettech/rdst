@@ -704,6 +704,13 @@ class RdstCLI:
 
         # Interactive prompt if no question provided
         if not question:
+            if no_interactive:
+                return RdstResult(
+                    False,
+                    'ask requires a question in --no-interactive mode. '
+                    'Example: rdst ask "How many users are there?" --no-interactive',
+                )
+
             import sys
 
             if not sys.stdin.isatty():
@@ -793,8 +800,9 @@ class RdstCLI:
             # Build result from final events
             if result_event:
                 message = f"\nSQL: {result_event.sql}\n"
-                message += f"Rows: {result_event.row_count}\n"
-                message += f"Execution time: {result_event.execution_time_ms:.1f}ms\n"
+                if not dry_run:
+                    message += f"Rows: {result_event.row_count}\n"
+                    message += f"Execution time: {result_event.execution_time_ms:.1f}ms\n"
                 message += f"LLM calls: {result_event.llm_calls}\n"
                 message += f"Total tokens: {result_event.total_tokens}\n"
 
@@ -1089,10 +1097,17 @@ class RdstCLI:
             if subcommand == "export" and complete_event.export_result:
                 return RdstResult(True, complete_event.export_result.content)
             if subcommand == "list" and complete_event.target_list:
-                msg = (
-                    f"Found {len(complete_event.target_list.targets)} semantic layer(s)"
-                )
-                return RdstResult(True, msg)
+                targets = complete_event.target_list.targets
+                if not targets:
+                    return RdstResult(True, "No semantic layers found")
+                lines = [f"Found {len(targets)} semantic layer(s):\n"]
+                for t in targets:
+                    updated = t.updated_at or "unknown"
+                    lines.append(
+                        f"  {t.name:<20s}  {t.tables} table(s), "
+                        f"{t.terminology} term(s), updated {updated}"
+                    )
+                return RdstResult(True, "\n".join(lines))
             if subcommand == "show":
                 return RdstResult(True, "")
             if subcommand == "init" and complete_event.init_result:
@@ -1103,7 +1118,9 @@ class RdstCLI:
                     else (complete_event.init_result.error or ""),
                 )
             if subcommand == "delete" and complete_event.delete_result:
-                return RdstResult(bool(complete_event.delete_result.success), "")
+                if complete_event.delete_result.success:
+                    return RdstResult(True, f"Deleted semantic layer for '{complete_event.delete_result.target}'")
+                return RdstResult(False, complete_event.delete_result.error or "Delete failed")
             return RdstResult(True, "")
         except Exception as e:
             return RdstResult(False, f"schema command failed: {e}")

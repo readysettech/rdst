@@ -267,6 +267,21 @@ class QueryCommand:
                 )
             source = "manual"
 
+        # Check for hash collision with a different tag
+        from shared.query_registry.query_registry import canonicalize_sql, hash_sql
+
+        candidate_hash = hash_sql(canonicalize_sql(sql))
+        existing_entry = self.registry.get_query(candidate_hash)
+        if existing_entry and existing_entry.tag and existing_entry.tag != name:
+            self.console.print(
+                MessagePanel(
+                    f"This query normalizes to the same hash as existing query "
+                    f"'{existing_entry.tag}' (hash: {candidate_hash[:8]}). "
+                    f"The tag will be overwritten from '{existing_entry.tag}' to '{name}'.",
+                    variant="warning",
+                )
+            )
+
         # Add to registry
         try:
             query_hash, is_new = self.registry.add_query(
@@ -1572,9 +1587,10 @@ class QueryCommand:
 
         # Add warm-up slots: one per unique query (first execution of each is excluded)
         num_queries = len(resolved_queries)
+        user_count = count  # preserve original user-specified count for display
         if count is not None:
             count += num_queries
-        else:
+        elif duration is None:
             count = num_queries + 1  # singleton: 1 measured + 1 warmup per query
 
         # Get target configuration
@@ -1604,7 +1620,7 @@ class QueryCommand:
         # Warn about running queries against production
         if not skip_warning and not quiet and sys.stdout.isatty():
             from shared.ui import Confirm, MessagePanel
-            desc = f"{count} times" if count else f"continuously"
+            desc = f"{user_count} times" if user_count is not None else "continuously"
             if duration:
                 desc += f" for up to {duration}s"
             self.console.print(
@@ -1660,8 +1676,8 @@ class QueryCommand:
                     summary["Concurrency"] = f"{concurrency}"
                 if duration:
                     summary["Duration limit"] = f"{duration}s"
-                if count:
-                    summary["Count limit"] = f"{count}"
+                if user_count is not None:
+                    summary["Count limit"] = f"{user_count}"
                 self.console.print(
                     SectionBox("Query run", content=KeyValueTable(summary))
                 )
@@ -1857,7 +1873,7 @@ class QueryCommand:
         and cache, showing a side-by-side comparison. Temporary caches are
         dropped after comparison — use 'cache add' to persist.
 
-        Accepts query names, hashes, or inline SQL (auto-added to registry).
+        Accepts query names or hashes from the registry.
         """
         from shared.cli.types import RdstResult
         from shared.config.targets import create_targets_config
@@ -2302,10 +2318,9 @@ class QueryCommand:
                 if stop_event.is_set():
                     break
 
-                query_name = entry.hash[:8]
+                query_id = entry.tag or entry.hash[:8]
                 sql_preview = (entry.sql or sql or "")[:40].replace("\n", " ")
-                if sql_preview:
-                    query_name = f"{entry.hash[:8]} {sql_preview}"
+                query_name = f"{query_id} {sql_preview}" if sql_preview else query_id
                 if not quiet:
                     self.console.print(StatusLine("Executing", query_name))
 
@@ -2376,10 +2391,9 @@ class QueryCommand:
 
                 entry, sql = queries[query_index]
                 query_index = (query_index + 1) % len(queries)
-                query_name = entry.hash[:8]
+                query_id = entry.tag or entry.hash[:8]
                 sql_preview = (entry.sql or sql or "")[:40].replace("\n", " ")
-                if sql_preview:
-                    query_name = f"{entry.hash[:8]} {sql_preview}"
+                query_name = f"{query_id} {sql_preview}" if sql_preview else query_id
 
                 start = time.perf_counter()
                 results, exc = self._execute_with_cancellation(
@@ -2459,6 +2473,10 @@ class QueryCommand:
         last_display_update = [0]  # Mutable for closure
         display_interval = 0.25
 
+        # Atomic counter to prevent exceeding max_count under concurrency
+        count_lock = threading.Lock()
+        reserved_count = [0]  # Number of executions reserved by workers
+
         def get_next_query() -> tuple[Any, str]:
             with index_lock:
                 entry, sql = queries[query_index[0]]
@@ -2477,8 +2495,11 @@ class QueryCommand:
                 return False
             if max_duration and stats.elapsed_seconds >= max_duration:
                 return False
-            if max_count and stats.total_executions >= max_count:
-                return False
+            if max_count:
+                with count_lock:
+                    if reserved_count[0] >= max_count:
+                        return False
+                    reserved_count[0] += 1
 
             try:
                 conn = connections.get(timeout=1.0)
@@ -2487,10 +2508,9 @@ class QueryCommand:
 
             try:
                 entry, sql = get_next_query()
-                query_name = entry.hash[:8]
+                query_id = entry.tag or entry.hash[:8]
                 sql_preview = (entry.sql or sql or "")[:40].replace("\n", " ")
-                if sql_preview:
-                    query_name = f"{entry.hash[:8]} {sql_preview}"
+                query_name = f"{query_id} {sql_preview}" if sql_preview else query_id
 
                 # Track this connection as active
                 with active_lock:
@@ -2536,7 +2556,7 @@ class QueryCommand:
                     # Check stop conditions
                     if max_duration and stats.elapsed_seconds >= max_duration:
                         break
-                    if max_count and stats.total_executions >= max_count:
+                    if max_count and reserved_count[0] >= max_count:
                         break
 
                     # Update live display periodically
@@ -2559,7 +2579,7 @@ class QueryCommand:
                             should_continue = future.result()
                             if should_continue and not stop_event.is_set():
                                 if not (
-                                    max_count and stats.total_executions >= max_count
+                                    max_count and reserved_count[0] >= max_count
                                 ):
                                     futures.add(executor.submit(execute_query))
                         except Exception:
@@ -2619,10 +2639,11 @@ class QueryCommand:
         # Summary line (use measured count, excluding warm-up)
         elapsed = stats.elapsed_seconds
         total_measured = sum(len(s.timings_ms) for s in stats.query_stats.values())
+        total_completed = total_measured + stats.total_failures
         qps = total_measured / elapsed if elapsed > 0 else 0
         error_rate = (
-            (stats.total_failures / max(total_measured, 1) * 100)
-            if total_measured > 0
+            (stats.total_failures / max(total_completed, 1) * 100)
+            if total_completed > 0
             else 0
         )
 

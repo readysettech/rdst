@@ -653,3 +653,279 @@ class TestSchemaServiceEventTypes:
         assert result.success is True
         assert result.tables == 5
         assert "status" in result.enum_columns
+
+
+class TestDecimalSanitizedBeforeYaml:
+    """apply_profile() must convert Decimal to float/int for YAML safety."""
+
+    def _make_table_with_column(self, col_name: str) -> "TableAnnotation":
+        from features.schema.semantic_models import ColumnAnnotation, TableAnnotation
+        col = ColumnAnnotation(name=col_name)
+        return TableAnnotation(name="test_table", columns={col_name: col})
+
+    def _make_profile(self, col_name, null_fraction, distinct_count, top_values=None):
+        col_profile = Mock()
+        col_profile.null_fraction = null_fraction
+        col_profile.distinct_count = distinct_count
+        col_profile.top_values = top_values
+        profile = Mock()
+        profile.row_estimate = 100
+        profile.columns = {col_name: col_profile}
+        return profile
+
+    def test_decimal_null_fraction_converted_to_float(self):
+        import decimal
+        table = self._make_table_with_column("status")
+        profile = self._make_profile("status", decimal.Decimal("0.1234"), decimal.Decimal("5"))
+        table.apply_profile(profile)
+        col = table.columns["status"]
+        assert isinstance(col.null_fraction, float)
+        assert not isinstance(col.null_fraction, decimal.Decimal)
+
+    def test_decimal_distinct_count_converted_to_int(self):
+        import decimal
+        table = self._make_table_with_column("status")
+        profile = self._make_profile("status", decimal.Decimal("0.0"), decimal.Decimal("42"))
+        table.apply_profile(profile)
+        col = table.columns["status"]
+        assert isinstance(col.distinct_count, int)
+        assert not isinstance(col.distinct_count, decimal.Decimal)
+
+    def test_decimal_row_estimate_converted_to_int(self):
+        import decimal
+        table = self._make_table_with_column("id")
+        profile = self._make_profile("id", None, decimal.Decimal("100"))
+        profile.row_estimate = decimal.Decimal("5000")
+        table.apply_profile(profile)
+        assert isinstance(table.row_count, int)
+        assert table.row_count == 5000
+
+    def test_to_dict_produces_yaml_safe_types(self):
+        import decimal
+        table = self._make_table_with_column("amount")
+        profile = self._make_profile(
+            "amount", decimal.Decimal("0.05"), decimal.Decimal("10"),
+            top_values={"high": decimal.Decimal("3"), "low": decimal.Decimal("7")},
+        )
+        table.apply_profile(profile)
+        result = table.to_dict()
+        stats = result["columns"]["amount"]["stats"]
+        assert isinstance(stats["null_fraction"], float)
+        assert isinstance(stats["distinct_count"], int)
+
+
+class TestSchemaInitForceErrorMessage:
+    """Schema init error must say '--force' not 'force=True'."""
+
+    @pytest.fixture
+    def service(self):
+        with patch("features.schema.service.SemanticLayerManager") as MockManager:
+            MockManager.return_value.exists.return_value = True
+            svc = SchemaService()
+            return svc
+
+    def test_error_message_contains_force_flag(self, service):
+        result = service.init("my-target", {"engine": "postgresql"}, SchemaInitOptions(force=False))
+        assert result.success is False
+        assert "--force" in result.error
+
+    def test_error_message_does_not_contain_force_equals_true(self, service):
+        result = service.init("my-target", {"engine": "postgresql"}, SchemaInitOptions(force=False))
+        assert "force=True" not in (result.error or "")
+
+
+class TestSchemaListShowsTargetDetails:
+    """schema list output should include target names and table counts."""
+
+    def test_schema_list_output_includes_target_names(self):
+        """Bug fix: 'rdst schema list' should print target names and table
+        counts, not just 'Found N semantic layer(s)'."""
+        from shared.cli.rdst_cli import RdstCLI
+        from features.schema.events import SchemaCompleteEvent
+        from features.schema.models import SchemaTargetList, SchemaTargetSummary
+
+        cli = RdstCLI()
+
+        complete_event = SchemaCompleteEvent(
+            type="complete",
+            operation="list",
+            success=True,
+            target_list=SchemaTargetList(
+                targets=[
+                    SchemaTargetSummary(
+                        name="prod-db",
+                        tables=12,
+                        terminology=5,
+                        updated_at="2024-06-01",
+                    ),
+                    SchemaTargetSummary(
+                        name="staging",
+                        tables=8,
+                        terminology=3,
+                        updated_at="2024-05-15",
+                    ),
+                ]
+            ),
+        )
+
+        async def fake_list_events():
+            yield complete_event
+
+        with patch("features.schema.service.SemanticLayerManager"):
+            with patch("features.schema.service.SchemaService.list_targets_events", return_value=fake_list_events()):
+                with patch("features.schema.cli.renderer.SchemaRenderer.render"):
+                    result = cli.schema(subcommand="list")
+
+        assert result.ok is True
+        assert "prod-db" in result.message, (
+            f"Expected target name 'prod-db' in list output. Got: {result.message!r}"
+        )
+        assert "staging" in result.message, (
+            f"Expected target name 'staging' in list output. Got: {result.message!r}"
+        )
+        assert "12 table" in result.message, (
+            f"Expected table count in list output. Got: {result.message!r}"
+        )
+
+
+class TestSchemaRendererNoStandaloneTablesHeader:
+    """schema show output should NOT contain a standalone 'Tables:' line
+    before the tree (the tree already has its own header)."""
+
+    def test_schema_show_no_standalone_tables_header(self):
+        """Bug fix: the standalone 'Tables:' print was removed from the
+        renderer because the SimpleTree already includes 'Tables (N)' as
+        its root label. Verify 'Tables:' does not appear as a standalone
+        line."""
+        from features.schema.cli.renderer import SchemaRenderer
+        from features.schema.events import SchemaCompleteEvent
+        from features.schema.models import SchemaDetails, SchemaTable, SchemaTableColumn
+        from io import StringIO
+        from rich.console import Console
+
+        renderer = SchemaRenderer()
+
+        # Capture all console output
+        buf = StringIO()
+        capture_console = Console(file=buf, force_terminal=True, width=120)
+        renderer._console = capture_console
+
+        event = SchemaCompleteEvent(
+            type="complete",
+            operation="show",
+            success=True,
+            details=SchemaDetails(
+                target="test-target",
+                tables=[
+                    SchemaTable(
+                        name="users",
+                        description="User accounts",
+                        business_context="",
+                        row_estimate="",
+                        columns=[
+                            SchemaTableColumn(
+                                name="id",
+                                data_type="integer",
+                                description="Primary key",
+                            )
+                        ],
+                        relationships=[],
+                    )
+                ],
+                terminology=[],
+                extensions=[],
+                custom_types=[],
+                metrics=[],
+            ),
+        )
+
+        renderer.render(event)
+
+        output = buf.getvalue()
+        # Split into lines and check no line is exactly "Tables:" (with optional whitespace)
+        lines = output.split("\n")
+        standalone_tables_lines = [
+            line for line in lines
+            if line.strip() == "Tables:" or line.strip() == "Tables"
+        ]
+        assert len(standalone_tables_lines) == 0, (
+            f"Found standalone 'Tables:' header line(s) in schema show output. "
+            f"Lines: {standalone_tables_lines}"
+        )
+        # The tree root should include the count, e.g., "Tables (1)"
+        assert "Tables" in output, "Expected 'Tables' to appear in the tree header"
+
+
+class TestSchemaTableNotFoundErrorSplit:
+    """Error message when table not found must be specific, not ambiguous."""
+
+    @pytest.fixture
+    def mock_manager(self):
+        manager = Mock()
+        return manager
+
+    @pytest.fixture
+    def service(self, mock_manager):
+        with patch(
+            "features.schema.service.SemanticLayerManager",
+            return_value=mock_manager,
+        ):
+            svc = SchemaService()
+            return svc
+
+    @pytest.mark.asyncio
+    async def test_table_not_found_but_layer_exists_no_or(self, service):
+        """Bug fix: when a table doesn't exist but the semantic layer does,
+        the error should say 'Table X not found in semantic layer' without
+        an ambiguous 'or' that conflates two different error conditions.
+
+        Previously the error message was a single ambiguous sentence covering
+        both 'no semantic layer' and 'table not in layer'. Now these are
+        split into two distinct cases.
+        """
+        service._manager.exists.return_value = True
+
+        # Mock load to return a layer with no matching table
+        mock_layer = Mock()
+        mock_layer.tables = {"users": Mock()}
+        mock_layer.terminology = {}
+        mock_layer.metrics = {}
+        mock_layer.extensions = {}
+        mock_layer.custom_types = {}
+        service._manager.load.return_value = mock_layer
+
+        events = []
+        async for event in service.get_schema_events("test-target", table_name="nonexistent_table"):
+            events.append(event)
+
+        from features.schema.events import SchemaErrorEvent
+
+        error_events = [e for e in events if isinstance(e, SchemaErrorEvent)]
+        assert len(error_events) == 1
+
+        msg = error_events[0].message
+        assert "nonexistent_table" in msg, f"Error should mention the table name, got: {msg!r}"
+        assert " or " not in msg, (
+            f"Error should NOT contain 'or' when table doesn't exist but layer does. Got: {msg!r}"
+        )
+        assert "not found" in msg.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_layer_error_is_distinct(self, service):
+        """When the semantic layer itself doesn't exist, the error should say
+        'No semantic layer found' without mentioning a specific table.
+        """
+        service._manager.exists.return_value = False
+
+        events = []
+        async for event in service.get_schema_events("test-target", table_name="users"):
+            events.append(event)
+
+        from features.schema.events import SchemaErrorEvent
+
+        error_events = [e for e in events if isinstance(e, SchemaErrorEvent)]
+        assert len(error_events) == 1
+
+        msg = error_events[0].message
+        assert "No semantic layer found" in msg
+        assert " or " not in msg

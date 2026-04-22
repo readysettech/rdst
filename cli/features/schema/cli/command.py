@@ -68,10 +68,7 @@ class SchemaCommand:
             {single_table: layer.tables[single_table]} if single_table else layer.tables
         )
         if tables_to_show:
-            self.console.print(
-                f"\n[{StyleTokens.HEADER}]Tables:[/{StyleTokens.HEADER}]"
-            )
-            tree = SimpleTree(f"[bold]Tables ({len(tables_to_show)})[/bold]")
+            tree = SimpleTree(f"\n[bold]Tables ({len(tables_to_show)})[/bold]")
 
             for name, table in tables_to_show.items():
                 table_node = tree.add(
@@ -242,10 +239,15 @@ class SchemaCommand:
         }
 
     def edit(self, target: str, table_name: Optional[str] = None) -> dict:
-        layer = self.manager.load_or_create(target)
+        if not self.manager.exists(target):
+            return {
+                "ok": False,
+                "message": f"No semantic layer found for target '{target}'",
+                "data": None,
+            }
+
+        layer = self.manager.load(target)
         path = self.manager.get_path(target)
-        if not path.exists():
-            self.manager.save(layer)
 
         editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "vim"))
         try:

@@ -692,10 +692,7 @@ class AnnotateWizard:
 
         # Tables
         if layer.tables:
-            self.console.print(
-                f"\n[{StyleTokens.HEADER}]Tables:[/{StyleTokens.HEADER}]"
-            )
-            tree = Tree(f"[bold]Tables ({len(layer.tables)})[/bold]")
+            tree = Tree(f"\n[bold]Tables ({len(layer.tables)})[/bold]")
             for name, table in layer.tables.items():
                 table_node = tree.add(
                     f"[{StyleTokens.HEADER}]{name}[/{StyleTokens.HEADER}]"

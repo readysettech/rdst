@@ -584,6 +584,20 @@ class AnalyzeService:
 
         # Yield ExplainCompleteEvent if explain results available
         explain_results = context.get("explain_results", {})
+        if not explain_results.get("success") and explain_results.get("error"):
+            error_msg = explain_results["error"]
+            yield ExplainCompleteEvent(
+                type="explain_complete",
+                success=False,
+                database_engine=explain_results.get("database_engine", "unknown"),
+                execution_time_ms=0.0,
+                rows_examined=0,
+                rows_returned=0,
+                cost_estimate=0.0,
+                explain_plan=None,
+                explain_analyze_skipped=False,
+                error=error_msg,
+            )
         if explain_results.get("success"):
             yield ExplainCompleteEvent(
                 type="explain_complete",
@@ -594,6 +608,7 @@ class AnalyzeService:
                 rows_returned=explain_results.get("rows_returned", 0),
                 cost_estimate=explain_results.get("cost_estimate", 0.0),
                 explain_plan=explain_results.get("explain_plan"),
+                explain_analyze_skipped=bool(explain_results.get("explain_analyze_skipped", False)),
             )
 
         # Yield RewritesTestedEvent if rewrite results available

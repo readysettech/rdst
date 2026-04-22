@@ -31,6 +31,7 @@ fi
 MODEL="${RELENTLESS_MODEL:-opus}"
 BUDGET="${RELENTLESS_BUDGET:-5}"
 MAX_TOTAL_BUDGET="${RELENTLESS_MAX_BUDGET:-0}"  # 0 = no limit
+AREA_TIMEOUT="${RELENTLESS_AREA_TIMEOUT:-20}"  # minutes per area
 DRY_RUN=false
 MANUAL_AREAS=""
 DIFF_REF=""
@@ -406,6 +407,25 @@ get_start_time() {
     echo "$(date +%s)"
 }
 
+# Kill agents that exceed the per-area timeout
+check_area_timeouts() {
+    local timeout_secs=$((AREA_TIMEOUT * 60))
+    local now
+    now=$(date +%s)
+    for i in "${!PIDS[@]}"; do
+        local start
+        start=$(get_start_time "${AREA_MAP[$i]}")
+        local elapsed=$((now - start))
+        if [[ $elapsed -ge $timeout_secs ]]; then
+            log "TIMEOUT: ${AREA_MAP[$i]} exceeded ${AREA_TIMEOUT}m — killing"
+            kill "${PIDS[$i]}" 2>/dev/null || true
+            sleep 2
+            kill -9 "${PIDS[$i]}" 2>/dev/null || true
+            echo "{\"area\": \"${AREA_MAP[$i]}\", \"status\": \"timeout\", \"bugs_filed\": 0, \"tests_run\": 0, \"tests_failed\": 0, \"summary\": \"killed after ${AREA_TIMEOUT}m timeout\"}" > "$RUN_DIR/${AREA_MAP[$i]}.json"
+        fi
+    done
+}
+
 for area in "${AREAS[@]}"; do
     # Throttle parallel launches
     HEARTBEAT=0
@@ -422,9 +442,10 @@ for area in "${AREAS[@]}"; do
             fi
         done
         # Re-index arrays
-        PIDS=("${PIDS[@]}")
-        AREA_MAP=("${AREA_MAP[@]}")
+        PIDS=("${PIDS[@]+"${PIDS[@]}"}")
+        AREA_MAP=("${AREA_MAP[@]+"${AREA_MAP[@]}"}")
         sleep 5
+        check_area_timeouts
         HEARTBEAT=$((HEARTBEAT + 5))
         if [[ $HEARTBEAT -ge 60 ]]; then
             HEARTBEAT=0
@@ -469,10 +490,11 @@ while [[ ${#PIDS[@]} -gt 0 ]]; do
             unset 'AREA_MAP[i]'
         fi
     done
-    PIDS=("${PIDS[@]}")
-    AREA_MAP=("${AREA_MAP[@]}")
+    PIDS=("${PIDS[@]+"${PIDS[@]}"}")
+    AREA_MAP=("${AREA_MAP[@]+"${AREA_MAP[@]}"}")
     if [[ ${#PIDS[@]} -gt 0 ]]; then
         sleep 5
+        check_area_timeouts
         HEARTBEAT=$((HEARTBEAT + 5))
         if [[ $HEARTBEAT -ge 60 ]]; then
             HEARTBEAT=0
