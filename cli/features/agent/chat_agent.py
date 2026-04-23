@@ -319,8 +319,8 @@ class ChatAgent:
         # Route based on key type (direct vs trial proxy)
         kwargs = {"api_key": api_key}
         if hasattr(self, "_key_resolution") and self._key_resolution.is_trial:
-            from shared.llm_manager.key_resolution import TRIAL_PROXY_BASE
-            kwargs["base_url"] = TRIAL_PROXY_BASE
+            from shared.llm_manager.key_resolution import _trial_proxy_base
+            kwargs["base_url"] = _trial_proxy_base()
             kwargs["default_headers"] = self._key_resolution.extra_headers
 
         client = anthropic.Anthropic(**kwargs)

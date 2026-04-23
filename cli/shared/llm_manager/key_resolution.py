@@ -21,13 +21,32 @@ import time
 from shared.keyservice import keyservice_base_url, keyservice_url
 
 
+# Backwards-compatible module-level constants — evaluated at import time,
+# so they reflect the env var at process start. Prefer keyservice_url() /
+# keyservice_base_url() directly when you need runtime-fresh values.
 TRIAL_PROXY_URL = keyservice_url("/v1/messages")
 TRIAL_PROXY_BASE = keyservice_base_url()
 # Client attestation value for HMAC signing — the proxy checks that requests
 # come from the RDST CLI, not arbitrary HTTP clients reusing a trial token.
 # This is defense-in-depth, not cryptographic security — the $5 per-user cap
-# is the real protection. The proxy-side value lives in Wrangler secrets.
-CLIENT_ATTESTATION = "rdst-trial-v1-e913cc8943ce5eca323eb31e6c109b65bf0f39b136f03f566e214269d147f363"
+# is the real protection. The proxy-side value lives in Wrangler secrets
+# (`ATTESTATION_SECRET` per env). Prod's secret MUST equal the constant
+# below so shipped CLIs in the wild keep validating.
+#
+# To test against a non-prod env (staging, per-CL preview, personal dev
+# env), set RDST_ATTESTATION_SECRET to that env's value, paired with
+# RDST_KEYSERVICE_URL pointing at the matching Worker.
+_DEFAULT_CLIENT_ATTESTATION = (
+    "rdst-trial-v1-e913cc8943ce5eca323eb31e6c109b65bf0f39b136f03f566e214269d147f363"
+)
+
+
+def _client_attestation() -> str:
+    """Return the HMAC secret, honoring RDST_ATTESTATION_SECRET override."""
+    return os.getenv("RDST_ATTESTATION_SECRET") or _DEFAULT_CLIENT_ATTESTATION
+
+
+CLIENT_ATTESTATION = _client_attestation()
 
 
 @dataclass
@@ -49,7 +68,7 @@ def _make_attestation_headers(trial_token: str) -> dict[str, str]:
     timestamp = str(int(time.time()))
     message = f"{timestamp}.{trial_token}"
     sig = hmac.new(
-        CLIENT_ATTESTATION.encode(), message.encode(), hashlib.sha256
+        _client_attestation().encode(), message.encode(), hashlib.sha256
     ).hexdigest()[:32]
     return {
         "X-RDST-Client": "rdst",
