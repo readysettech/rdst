@@ -207,8 +207,13 @@ def setup_readyset_containers(
             **READYSET_FUNCTIONS,
         }
 
+        # __file__ is rdst/features/cache/readyset_setup.py, so .parent.parent.parent
+        # is rdst/. The workflow JSON moved to shared/workflows/ during the
+        # lib/ → features/+shared/ refactor (commit kvwuyrzr) but this path
+        # was left behind, breaking /api/readyset/setup.
         workflow_path = (
-            Path(__file__).resolve().parent
+            Path(__file__).resolve().parent.parent.parent
+            / "shared"
             / "workflows"
             / "install_readyset_for_target.json"
         )

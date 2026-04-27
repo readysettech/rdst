@@ -1,6 +1,9 @@
-# RDST CLI Integration Tests
+# RDST Integration Tests
 
-End-to-end integration tests for the RDST CLI tool, testing configuration, analysis, caching, query registry, and error handling against both PostgreSQL and MySQL databases.
+End-to-end integration tests for RDST. Two suites live here:
+
+- **CLI suite** (`test_*.sh`) — drives the `rdst` CLI against PostgreSQL and MySQL containers. See [Quick Start](#quick-start).
+- **API suite** (`test_*_api.py`) — drives the FastAPI app via httpx. The legacy tests mock the service layer; new tests marked `@pytest.mark.realdb` hit the same containers as the CLI suite. See [API realdb tests](#api-realdb-tests).
 
 ## Quick Start
 
@@ -67,6 +70,62 @@ export PSQL_CONNECTION_STRING="postgresql://testuser:testpassword@localhost:1543
 # Clean up
 docker compose down -v
 ```
+
+## API realdb tests
+
+API tests marked `@pytest.mark.realdb` drive the FastAPI app through `httpx.AsyncClient` (in-process via `ASGITransport`) but route every call to the same Postgres/MySQL containers used by the CLI suite. The service layer is **not** mocked — these are the regression net for `features/`.
+
+Run locally:
+
+```bash
+cd rdst/tests/integration
+docker compose up -d postgres        # or: mysql
+
+export RDST_TEST_PASSWORD=testpassword
+export RDST_TEST_ENGINE=postgresql   # or: mysql
+pytest tests/test_*_api.py -v -m realdb
+
+docker compose down -v
+```
+
+In CI, `.buildkite/run_api_integration_tests.sh postgresql` does the container management for you. Only PostgreSQL runs in CI for the API suite — dialect divergence is already covered by the CLI suite running against both engines. The `mysql` runner mode remains runnable locally for parity testing.
+
+The in-process API tests still run, gated by `-m "not realdb"` from the same runner script (no-arg mode). They drive the FastAPI app end-to-end too — they just don't require a DB container, and use real services against an isolated `~/.rdst/` (per-test tmp dir).
+
+### Realdb files
+
+- `test_realdb_configure_api.py` — real driver `/configure/.../test`, update/remove round-trips, default-target fallback through `/api/analyze`.
+- `test_realdb_configure_analyze_api.py` — configure → analyze flow, full SSE stream against the live DB.
+- `test_realdb_top_api.py` — historical `/api/top` reads back a seeded query from `pg_stat_statements` (PG only; MySQL skip — `testuser` lacks `performance_schema` grants), realtime SSE stream pinned via `duration=1`.
+- `test_realdb_schema_api.py` — `/api/schema` introspects the live DB and returns `title_basics` / `title_ratings` with their columns; covers PG vs MySQL `information_schema` dialect divergence.
+- `test_realdb_query_registry_api.py` — register a query, run `/query-registry/benchmark` for 1s against the DB, assert non-zero successes and per-query timing.
+- `test_realdb_init_api.py` — `/init/validate` for the live target reports `success=True` (LLM result not pinned).
+- `test_realdb_cache_api.py` — full `/cache` lifecycle (deploy → status → add → run → list → remove) against a real Readyset container. Skipped when `SKIP_READYSET_CACHE_TESTS=true` (default in CI; unset locally to run).
+- `test_realdb_readyset_api.py` — `/api/readyset/setup` SSE stream reaches `complete` with `readyset_port` populated. Same skip gate as the cache lifecycle.
+
+The Readyset-gated tests above skip via `SKIP_READYSET_CACHE_TESTS` because the Buildkite agent's docker socket / sibling-container networking can't reach the upstream DB across the compose network in our current shape. They remain runnable locally on demand.
+
+Shared SSE collector is exposed as the `collect_sse_events` fixture in `tests/conftest.py`.
+
+### In-process API files
+
+These are the `-m "not realdb"` tests: real services, real `~/.rdst/`
+under `tmp_rdst_home`, no DB container required. Anything pulling on a
+system boundary uses a per-test fixture (`inmemory_keyring` for the OS
+keychain) — never a service-layer mock.
+
+- `test_configure_api.py` — full configure CRUD + default-target round-trips on disk.
+- `test_target_lock_api.py` — `target_guard` lock/unlock behavior.
+- `test_query_registry_api.py` — register/list/delete/pagination/dedup.
+- `test_init_api.py` — init status/complete on disk; validate-with-targets is realdb (slice 4).
+- `test_env_api.py` — env requirements + secret set with the in-memory keyring backend.
+- `test_dev_api.py` — clear-keyring path with the in-memory keyring backend.
+- `test_ask_api.py` — guard + service error paths; happy path is realdb.
+- `test_scan_api.py` — scan against `fixtures/scan/` with `dry_run=true` (no LLM).
+- `test_interactive_api.py` — read/delete surface for ConversationRegistry.
+- `test_trial_api.py` — status + simulate-exhaust against on-disk trial config.
+- `test_status_api.py` — `/api/status` against seeded targets.
+- `test_cache_api_inproc.py` — config-only cache paths; deploy/run/remove is realdb (slice 5).
 
 ## Test Structure
 

@@ -63,6 +63,7 @@ def check_readyset_cacheability(query: str = None, sql: str = None, **kwargs) ->
 
         if not query_text or not query_text.strip():
             return {
+                "checked": True,
                 "cacheable": False,
                 "confidence": "high",
                 "issues": ["Empty query provided"],
@@ -77,6 +78,7 @@ def check_readyset_cacheability(query: str = None, sql: str = None, **kwargs) ->
         # Check if it's a SELECT query
         if not _is_select_query(normalized):
             return {
+                "checked": True,
                 "cacheable": False,
                 "confidence": "high",
                 "issues": ["Only SELECT queries can be cached by Readyset"],
@@ -104,6 +106,11 @@ def check_readyset_cacheability(query: str = None, sql: str = None, **kwargs) ->
         explanation = _generate_explanation(is_cacheable, issues, warnings, confidence)
 
         return {
+            # `checked` lets `features/analyze/service.py` distinguish a
+            # static cacheability verdict (this function always produces one)
+            # from the runtime EXPLAIN CREATE CACHE check. The analyze SSE
+            # stream emits a `readyset_checked` event whenever this is True.
+            "checked": True,
             "cacheable": is_cacheable,
             "confidence": confidence,
             "issues": issues,
@@ -116,6 +123,7 @@ def check_readyset_cacheability(query: str = None, sql: str = None, **kwargs) ->
 
     except Exception as e:
         return {
+            "checked": True,
             "cacheable": False,
             "confidence": "low",
             "issues": [f"Analysis error: {str(e)}"],

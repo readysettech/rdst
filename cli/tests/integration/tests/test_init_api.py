@@ -1,123 +1,82 @@
-#!/usr/bin/env python3
-"""Integration tests for Init API endpoints."""
+"""Integration tests for Init API endpoints.
 
-import pytest
-from httpx import ASGITransport, AsyncClient
-from unittest.mock import patch
+These drive the real `InitService` end-to-end against an isolated
+`~/.rdst/` (per-test tmp dir via the `tmp_rdst_home` fixture). No
+service-layer mocks — config is read from / written to a real on-disk
+TOML file.
 
-from shared.api.app import create_app
-from features.init.events import InitCompleteEvent
-from features.init.models import InitStatus, InitValidationResult
+The validate-with-targets case requires live DB connectivity and lives
+in `test_realdb_init_api.py` (slice 4).
+"""
 
+from __future__ import annotations
 
-@pytest.fixture
-def app():
-    """Create FastAPI app for testing."""
-    return create_app()
+from shared.config.targets import TargetsConfig
 
 
-async def _events(*items):
-    for item in items:
-        yield item
+async def test_init_status_endpoint_empty_state(client, tmp_rdst_home, monkeypatch):
+    """GET /api/init/status on a fresh ~/.rdst/ reports an uninitialized
+    workspace with no targets and no LLM."""
+    # CI may have ANTHROPIC_API_KEY set (pulled from Secrets Manager); strip
+    # it so this test's "no LLM" branch is exercised regardless.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
+    response = await client.get("/api/init/status")
+    assert response.status_code == 200, response.text
 
-@pytest.mark.asyncio
-async def test_init_status_endpoint(app):
-    """GET /api/init/status returns onboarding state."""
-    with patch("features.init.api.routes.InitService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-        status = InitStatus(
-            initialized=False,
-            targets=[
-                {
-                    "name": "prod",
-                    "engine": "postgresql",
-                    "has_password": True,
-                    "is_default": True,
-                }
-            ],
-            default_target="prod",
-            llm_configured=True,
-        )
-        mock_service.get_status_events.return_value = _events(
-            InitCompleteEvent(type="complete", success=True, status=status)
-        )
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/init/status")
-
-    assert response.status_code == 200
     payload = response.json()
     assert payload["initialized"] is False
+    assert payload["targets"] == []
+    assert payload["default_target"] is None
+    assert payload["llm_configured"] is False
+
+
+async def test_init_status_endpoint_reports_configured_targets(client, tmp_rdst_home):
+    """GET /api/init/status reflects targets persisted in the real config."""
+    cfg = TargetsConfig()
+    cfg.load()
+    cfg.upsert(
+        "prod",
+        {
+            "engine": "postgresql",
+            "host": "db.example.com",
+            "port": 5432,
+            "database": "appdb",
+            "user": "appuser",
+            "password_env": "PROD_PASSWORD",
+        },
+    )
+    cfg.set_default("prod")
+    cfg.save()
+
+    response = await client.get("/api/init/status")
+    assert response.status_code == 200, response.text
+
+    payload = response.json()
     assert payload["default_target"] == "prod"
-    assert payload["llm_configured"] is True
     assert len(payload["targets"]) == 1
-    assert payload["targets"][0]["name"] == "prod"
+    target = payload["targets"][0]
+    assert target["name"] == "prod"
+    assert target["engine"] == "postgresql"
+    assert target["is_default"] is True
 
 
-@pytest.mark.asyncio
-async def test_init_validate_endpoint_with_specific_targets(app):
-    """POST /api/init/validate validates specific target subset."""
-    with patch("features.init.api.routes.InitService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-        validation = InitValidationResult(
-            target_results=[
-                {
-                    "name": "prod",
-                    "success": True,
-                    "message": "Connected",
-                }
-            ],
-            llm_result={"success": True, "model": "claude-sonnet"},
-        )
-        mock_service.validate_all_events.return_value = _events(
-            InitCompleteEvent(type="complete", success=True, validation=validation)
-        )
+async def test_init_complete_endpoint_marks_init_done_on_disk(client, tmp_rdst_home):
+    """POST /api/init/complete flips the persisted init state."""
+    response = await client.post("/api/init/complete")
+    assert response.status_code == 200, response.text
+    assert response.json()["success"] is True
 
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(
-                "/api/init/validate",
-                json={"targets": ["prod"]},
-            )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert len(payload["target_results"]) == 1
-    assert payload["target_results"][0]["name"] == "prod"
-    assert payload["target_results"][0]["success"] is True
-    assert payload["llm_result"]["success"] is True
-    mock_service.validate_all_events.assert_called_once_with(["prod"])
+    # Reload from disk and verify the bit is set.
+    cfg = TargetsConfig()
+    cfg.load()
+    assert cfg.is_init_completed() is True
 
 
-@pytest.mark.asyncio
-async def test_init_complete_endpoint(app):
-    """POST /api/init/complete marks init completed."""
-    with patch("features.init.api.routes.InitService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-        mock_service.mark_complete_events.return_value = _events(
-            InitCompleteEvent(type="complete", success=True)
-        )
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post("/api/init/complete")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    mock_service.mark_complete_events.assert_called_once_with()
-
-
-@pytest.mark.asyncio
-async def test_init_validate_rejects_invalid_payload(app):
-    """POST /api/init/validate enforces request validation."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post(
-            "/api/init/validate",
-            json={"targets": "prod"},
-        )
-
+async def test_init_validate_rejects_invalid_payload(client, tmp_rdst_home):
+    """POST /api/init/validate enforces request-shape validation."""
+    response = await client.post(
+        "/api/init/validate",
+        json={"targets": "prod"},  # str, not list
+    )
     assert response.status_code == 422

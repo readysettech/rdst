@@ -3,6 +3,7 @@ pytest>=7.0.0
 pytest-cov>=4.0.0
 pytest-xdist>=3.0.0  # Parallel test execution
 pytest-asyncio>=0.21.0
+httpx>=0.28.0  # AsyncClient + ASGITransport for API integration tests
 pandas>=1.5.0
 toml>=0.10.0
 

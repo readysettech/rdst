@@ -1,151 +1,156 @@
-#!/usr/bin/env python3
-"""Integration tests for env API endpoints."""
+"""Integration tests for the env API endpoints.
+
+Drives the real `EnvRequirementsService` and `SecretStoreService` against
+an isolated `~/.rdst/` (per-test tmp dir) and an in-memory keyring backend.
+The OS keychain is the only system boundary mocked here — everything else
+runs end-to-end.
+"""
+
+from __future__ import annotations
+
+import os
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from unittest.mock import Mock, patch
 
-from shared.api.app import create_app
-
-
-@pytest.fixture
-def app():
-    return create_app()
+from shared.config.targets import TargetsConfig
 
 
-@pytest.mark.asyncio
-async def test_get_env_requirements_returns_contract(app):
-    mock_service = Mock()
-    mock_service.secret_store.is_available.return_value = True
-    mock_service.get_requirements.return_value = [
+@pytest.fixture(autouse=True)
+def _isolate_anthropic_env(monkeypatch):
+    """Strip ANTHROPIC_API_KEY / RDST_TRIAL_TOKEN so requirement reporting
+    is deterministic. Tests that want them set should re-add explicitly."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+
+
+def _seed_target_with_password_env(env_name: str, target: str = "prod") -> None:
+    cfg = TargetsConfig()
+    cfg.load()
+    cfg.upsert(
+        target,
         {
-            "kind": "target_password",
-            "accepted_names": ["PROD_DB_PASSWORD"],
-            "target": "prod",
-            "satisfied": False,
-            "source": "missing",
+            "engine": "postgresql",
+            "host": "db.example.com",
+            "port": 5432,
+            "database": "appdb",
+            "user": "appuser",
+            "password_env": env_name,
         },
-        {
-            "kind": "anthropic_api_key",
-            "accepted_names": ["ANTHROPIC_API_KEY", "RDST_TRIAL_TOKEN"],
-            "target": None,
-            "satisfied": True,
-            "source": "process_env",
-        },
-    ]
+    )
+    cfg.save()
 
-    with patch(
-        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/env/requirements")
 
-    assert response.status_code == 200
+async def test_get_env_requirements_lists_seeded_target_password(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    """Seeded target with `password_env` shows up as an unsatisfied
+    `target_password` requirement; missing Anthropic key shows up too."""
+    _seed_target_with_password_env("PROD_DB_PASSWORD", target="prod")
+
+    response = await client.get("/api/env/requirements")
+    assert response.status_code == 200, response.text
+
     payload = response.json()
     assert payload["keyring_available"] is True
-    assert len(payload["requirements"]) == 2
-    assert payload["requirements"][0]["kind"] == "target_password"
+
+    by_kind = {req["kind"]: req for req in payload["requirements"]}
+    assert "target_password" in by_kind
+    assert by_kind["target_password"]["accepted_names"] == ["PROD_DB_PASSWORD"]
+    assert by_kind["target_password"]["target"] == "prod"
+    assert by_kind["target_password"]["satisfied"] is False
+    assert by_kind["target_password"]["source"] == "missing"
+
+    assert "anthropic_api_key" in by_kind
+    assert by_kind["anthropic_api_key"]["satisfied"] is False
+    assert by_kind["anthropic_api_key"]["source"] == "missing"
 
 
-@pytest.mark.asyncio
-async def test_set_env_secret_persisted_success(app):
-    mock_service = Mock()
-    mock_service.get_allowed_secret_names.return_value = ["PROD_DB_PASSWORD"]
-    mock_service.secret_store.set_secret.return_value = {
-        "persisted": True,
-        "session_only": False,
-        "message": "Saved",
-    }
+async def test_set_env_secret_persists_to_keyring(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    """`POST /api/env/set` with an allow-listed name and `persist=True`
+    actually writes to the keyring backend (in-memory here) and updates
+    `os.environ` as a side effect."""
+    _seed_target_with_password_env("PROD_DB_PASSWORD")
+    monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
 
-    with patch(
-        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(
-                "/api/env/set",
-                json={"name": "PROD_DB_PASSWORD", "value": "secret", "persist": True},
-            )
+    response = await client.post(
+        "/api/env/set",
+        json={"name": "PROD_DB_PASSWORD", "value": "s3cret", "persist": True},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["success"] is True
+    assert body["persisted"] is True
+    assert body["session_only"] is False
 
+    # Side effects landed where we expect.
+    assert os.environ["PROD_DB_PASSWORD"] == "s3cret"
+    assert (
+        inmemory_keyring.get_password("rdst-web", "PROD_DB_PASSWORD") == "s3cret"
+    )
+
+
+async def test_set_env_secret_session_only_when_persist_false(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    """`persist=False` should set the env var but skip keyring writes."""
+    _seed_target_with_password_env("PROD_DB_PASSWORD")
+    monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
+
+    response = await client.post(
+        "/api/env/set",
+        json={"name": "PROD_DB_PASSWORD", "value": "transient", "persist": False},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["success"] is True
+    assert body["persisted"] is False
+    assert body["session_only"] is True
+
+    assert os.environ["PROD_DB_PASSWORD"] == "transient"
+    # Persisted=False must mean: did NOT touch the keyring.
+    assert (
+        inmemory_keyring.get_password("rdst-web", "PROD_DB_PASSWORD") is None
+    )
+
+
+async def test_set_env_secret_rejects_non_allowlisted_name(
+    client, tmp_rdst_home, inmemory_keyring
+):
+    """An env name that is not derivable from any target's `password_env`
+    nor in the Anthropic accepted set must be refused with success=False."""
+    response = await client.post(
+        "/api/env/set",
+        json={"name": "NOT_ALLOWED", "value": "x", "persist": True},
+    )
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    assert payload["persisted"] is True
-    assert payload["session_only"] is False
+    body = response.json()
+    assert body["success"] is False
+    assert "not allowed" in (body.get("message") or "").lower()
 
 
-@pytest.mark.asyncio
-async def test_set_env_secret_session_only_fallback(app):
-    mock_service = Mock()
-    mock_service.get_allowed_secret_names.return_value = ["PROD_DB_PASSWORD"]
-    mock_service.secret_store.set_secret.return_value = {
-        "persisted": False,
-        "session_only": True,
-        "message": "Session only",
-    }
-
-    with patch(
-        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(
-                "/api/env/set",
-                json={"name": "PROD_DB_PASSWORD", "value": "secret", "persist": True},
-            )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    assert payload["persisted"] is False
-    assert payload["session_only"] is True
-
-
-@pytest.mark.asyncio
-async def test_set_env_secret_rejects_non_allowlisted_name(app):
-    mock_service = Mock()
-    mock_service.get_allowed_secret_names.return_value = ["PROD_DB_PASSWORD"]
-
-    with patch(
-        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(
-                "/api/env/set",
-                json={"name": "NOT_ALLOWED", "value": "secret", "persist": True},
-            )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is False
-    assert "not allowed" in (payload.get("message") or "").lower()
-
-
-@pytest.mark.asyncio
-async def test_set_env_secret_rejects_mismatched_origin(app):
-    mock_service = Mock()
-    mock_service.get_allowed_secret_names.return_value = ["PROD_DB_PASSWORD"]
-
-    with patch(
-        "shared.api.routes.env.EnvRequirementsService", return_value=mock_service
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8787") as client:
-            response = await client.post(
-                "/api/env/set",
-                headers={"origin": "http://localhost:8787"},
-                json={"name": "PROD_DB_PASSWORD", "value": "secret", "persist": True},
-            )
-
+async def test_set_env_secret_rejects_mismatched_origin(
+    app, tmp_rdst_home, inmemory_keyring
+):
+    """Loopback request whose `Origin` header points at a different
+    loopback alias must be 403'd by the same-host check."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://127.0.0.1:8787"
+    ) as c:
+        response = await c.post(
+            "/api/env/set",
+            headers={"origin": "http://localhost:8787"},
+            json={"name": "PROD_DB_PASSWORD", "value": "x", "persist": True},
+        )
     assert response.status_code == 403
 
 
-@pytest.mark.asyncio
-async def test_env_routes_reject_non_loopback_client(app):
+async def test_env_routes_reject_non_loopback_client(app, tmp_rdst_home):
+    """Non-loopback peer is forbidden even before request parsing."""
     transport = ASGITransport(app=app, client=("203.0.113.10", 50000))
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/env/requirements")
-
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        response = await c.get("/api/env/requirements")
     assert response.status_code == 403

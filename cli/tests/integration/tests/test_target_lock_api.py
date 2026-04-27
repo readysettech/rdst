@@ -1,38 +1,41 @@
-#!/usr/bin/env python3
-"""Integration tests for target password lock API behavior."""
+"""Integration tests for the target/password guard.
 
-from unittest.mock import Mock, patch
+The guard refuses to serve target-bound routes when the configured
+`password_env` is unset (HTTP 423). When the env var is set, the same
+routes pass the guard — the underlying handler may still 4xx for unrelated
+reasons (e.g. invalid SQL, missing target connectivity), but the guard
+itself must not block.
+
+These tests use the real `TargetsConfig` against the disk under
+`tmp_rdst_home` — no service-layer mocks.
+"""
+
+from __future__ import annotations
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from shared.api.app import create_app
 from shared.api.target_guard import TARGET_PASSWORD_REQUIRED_CODE
+from shared.config.targets import TargetsConfig
 
 
-@pytest.fixture
-def app():
-    return create_app()
-
-
-def _mock_config():
-    cfg = Mock()
-    cfg.load.return_value = None
-    cfg.get_default.return_value = "prod"
-    cfg.get.side_effect = lambda name: {
-        "prod": {
+def _seed_prod_target() -> None:
+    cfg = TargetsConfig()
+    cfg.load()
+    cfg.upsert(
+        "prod",
+        {
             "engine": "postgresql",
             "host": "localhost",
             "port": 5432,
             "database": "app",
             "user": "app",
             "password_env": "PROD_DB_PASSWORD",
-        }
-    }.get(name)
-    return cfg
+        },
+    )
+    cfg.set_default("prod")
+    cfg.save()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("method", "url", "payload"),
     [
@@ -49,17 +52,39 @@ def _mock_config():
     ],
 )
 async def test_target_bound_endpoints_return_423_when_password_missing(
-    app, method, url, payload, monkeypatch
+    client, method, url, payload, monkeypatch
 ):
     monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
+    _seed_prod_target()
 
-    with patch("shared.api.target_guard.TargetsConfig", return_value=_mock_config()):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.request(method, url, json=payload)
+    response = await client.request(method, url, json=payload)
 
     assert response.status_code == 423
     detail = response.json().get("detail", {})
     assert detail.get("code") == TARGET_PASSWORD_REQUIRED_CODE
     assert detail.get("target") == "prod"
     assert detail.get("password_env") == "PROD_DB_PASSWORD"
+
+
+async def test_target_bound_endpoint_returns_unlocked_guard_when_password_present(
+    client, monkeypatch
+):
+    """Happy path: with the env var set, the guard returns a TargetGuard
+    instead of raising 423. The downstream route can still fail (e.g.
+    EXPLAIN against a fake host) — what matters here is that the response
+    is *not* the 423 lock and the guard's detail shape is gone.
+    """
+    monkeypatch.setenv("PROD_DB_PASSWORD", "secret")
+    _seed_prod_target()
+
+    response = await client.get("/api/schema?target=prod")
+
+    assert response.status_code != 423, response.text
+    detail = response.json() if response.headers.get(
+        "content-type", ""
+    ).startswith("application/json") else {}
+    # Whatever the downstream returns, it must not be the lock guard payload.
+    assert (
+        not isinstance(detail, dict)
+        or detail.get("detail", {}).get("code") != TARGET_PASSWORD_REQUIRED_CODE
+    )

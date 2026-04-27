@@ -1,771 +1,346 @@
-#!/usr/bin/env python3
+"""Integration tests for the Configure API — no service-layer mocks.
+
+The real `ConfigureService` runs end-to-end, reading and writing the actual
+TOML file under `~/.rdst/config.toml`. The `tmp_rdst_home` fixture (in
+`conftest.py`) relocates HOME and `shared.constants.RDST_DATA_DIR` to a
+fresh tmp dir per test, so each test starts with an empty config.
+
+Connection-test cases live in `test_realdb_configure_api.py` — without a
+live DB they just re-test mock plumbing.
 """
-Integration tests for Configure API endpoints.
 
-Tests all configure API endpoints with mocked ConfigureService.
-Uses httpx AsyncClient for async API testing.
-"""
+from __future__ import annotations
 
-import json
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from httpx import AsyncClient, ASGITransport
-
-from shared.api.app import create_app
-from features.configure.events import (
-    ConfigureTargetListEvent,
-    ConfigureTargetDetailEvent,
-    ConfigureSuccessEvent,
-    ConfigureErrorEvent,
-    ConfigureStatusEvent,
-    ConfigureConnectionTestEvent,
-)
+from shared.config.targets import TargetsConfig
 
 
-@pytest.fixture
-def app():
-    """Create FastAPI app for testing."""
-    return create_app()
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
-# ============================================================================
-# GET /api/configure/targets - List Targets
-# ============================================================================
+def _write_target(name: str, data: dict, default: bool = False) -> None:
+    """Persist a target straight to disk via TargetsConfig.
+
+    Bypasses the API so we can pre-seed state for tests that exercise
+    list/get/update/remove/set-default flows without re-testing add.
+    """
+    cfg = TargetsConfig()
+    cfg.load()
+    cfg.upsert(name, data)
+    if default:
+        cfg.set_default(name)
+    cfg.save()
 
 
-@pytest.mark.asyncio
-async def test_list_targets_empty(app):
-    """Test listing targets when none configured."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_list_targets(*args, **kwargs):
-            yield ConfigureTargetListEvent(
-                type="target_list",
-                targets=[],
-                default_target=None,
-            )
-
-        mock_service.list_targets = mock_list_targets
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/configure/targets")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "targets" in data
-        assert data["targets"] == []
-        assert data["default_target"] is None
-
-
-@pytest.mark.asyncio
-async def test_list_targets_with_targets(app):
-    """Test listing targets when targets exist."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_list_targets(*args, **kwargs):
-            yield ConfigureTargetListEvent(
-                type="target_list",
-                targets=[
-                    {
-                        "name": "prod",
-                        "engine": "postgresql",
-                        "has_password": True,
-                        "is_default": True,
-                    },
-                    {
-                        "name": "staging",
-                        "engine": "mysql",
-                        "has_password": False,
-                        "is_default": False,
-                    },
-                ],
-                default_target="prod",
-            )
-
-        mock_service.list_targets = mock_list_targets
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/configure/targets")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["targets"]) == 2
-        assert data["targets"][0]["name"] == "prod"
-        assert data["targets"][0]["is_default"] is True
-        assert data["targets"][1]["name"] == "staging"
-        assert data["default_target"] == "prod"
-
-
-@pytest.mark.asyncio
-async def test_list_targets_error(app):
-    """Test listing targets when service returns error."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_list_targets(*args, **kwargs):
-            yield ConfigureErrorEvent(
-                type="error",
-                message="Failed to load config file",
-                operation="list",
-            )
-
-        mock_service.list_targets = mock_list_targets
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/configure/targets")
-
-        assert response.status_code == 200  # API returns 200 with error in body
-        data = response.json()
-        assert data["success"] is False
-        assert "Failed to load config file" in data["message"]
+def _sample_target(**overrides) -> dict:
+    base = {
+        "engine": "postgresql",
+        "host": "db.example.com",
+        "port": 5432,
+        "database": "myapp",
+        "user": "admin",
+        "password_env": "PROD_DB_PASSWORD",
+        "tls": False,
+        "read_only": False,
+    }
+    base.update(overrides)
+    return base
 
 
 # ============================================================================
-# GET /api/configure/targets/{name} - Get Target
+# GET /api/configure/targets — list
 # ============================================================================
 
 
-@pytest.mark.asyncio
-async def test_get_target_exists(app):
-    """Test getting a target that exists."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_get_target(name):
-            yield ConfigureTargetDetailEvent(
-                type="target_detail",
-                target_name="prod",
-                engine="postgresql",
-                host="db.example.com",
-                port=5432,
-                database="myapp",
-                user="admin",
-                password_env="PROD_DB_PASSWORD",
-                has_password=True,
-                is_default=True,
-                tls=True,
-            )
-
-        mock_service.get_target = mock_get_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/configure/targets/prod")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["target_name"] == "prod"
-        assert data["engine"] == "postgresql"
-        assert data["host"] == "db.example.com"
-        assert data["port"] == 5432
-        assert data["database"] == "myapp"
-        assert data["user"] == "admin"
-        assert data["password_env"] == "PROD_DB_PASSWORD"
-        assert data["has_password"] is True
-        assert data["is_default"] is True
-        assert data["tls"] is True
+async def test_list_targets_empty(client):
+    response = await client.get("/api/configure/targets")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["targets"] == []
+    assert data["default_target"] is None
 
 
-@pytest.mark.asyncio
-async def test_get_target_not_found(app):
-    """Test getting a target that doesn't exist."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_list_targets_with_targets(client):
+    _write_target("prod", _sample_target(), default=True)
+    _write_target("staging", _sample_target(engine="mysql", port=3306))
 
-        async def mock_get_target(name):
-            yield ConfigureErrorEvent(
-                type="error",
-                message=f"Target '{name}' not found",
-                operation="get",
-                target_name=name,
-            )
+    response = await client.get("/api/configure/targets")
+    assert response.status_code == 200, response.text
 
-        mock_service.get_target = mock_get_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/configure/targets/nonexistent")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert "not found" in data["message"]
+    data = response.json()
+    assert len(data["targets"]) == 2
+    by_name = {t["name"]: t for t in data["targets"]}
+    assert by_name["prod"]["is_default"] is True
+    assert by_name["prod"]["engine"] == "postgresql"
+    assert by_name["staging"]["is_default"] is False
+    assert by_name["staging"]["engine"] == "mysql"
+    assert data["default_target"] == "prod"
 
 
 # ============================================================================
-# POST /api/configure/targets - Add Target
+# GET /api/configure/targets/{name} — get
 # ============================================================================
 
 
-@pytest.mark.asyncio
-async def test_add_target_success(app):
-    """Test adding a new target successfully."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_get_target_exists(client, monkeypatch):
+    # Set the password env so `has_password` reflects a realistic happy path.
+    monkeypatch.setenv("PROD_DB_PASSWORD", "secret")
+    _write_target("prod", _sample_target(tls=True), default=True)
 
-        async def mock_add_target(*args, **kwargs):
-            yield ConfigureSuccessEvent(
-                type="success",
-                operation="add",
-                target_name="new_db",
-                message="Target 'new_db' added successfully",
-            )
+    response = await client.get("/api/configure/targets/prod")
+    assert response.status_code == 200, response.text
 
-        mock_service.add_target = mock_add_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(
-                "/api/configure/targets",
-                json={
-                    "name": "new_db",
-                    "target": {
-                        "engine": "postgresql",
-                        "host": "localhost",
-                        "port": 5432,
-                        "database": "testdb",
-                        "user": "testuser",
-                        "password_env": "TEST_DB_PASSWORD",
-                        "tls": False,
-                    },
-                },
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["target_name"] == "new_db"
-        assert "added successfully" in data["message"]
+    data = response.json()
+    assert data["target_name"] == "prod"
+    assert data["engine"] == "postgresql"
+    assert data["host"] == "db.example.com"
+    assert data["port"] == 5432
+    assert data["database"] == "myapp"
+    assert data["user"] == "admin"
+    assert data["password_env"] == "PROD_DB_PASSWORD"
+    assert data["has_password"] is True
+    assert data["is_default"] is True
+    assert data["tls"] is True
 
 
-@pytest.mark.asyncio
-async def test_add_target_duplicate(app):
-    """Test adding a target that already exists."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_add_target(*args, **kwargs):
-            yield ConfigureErrorEvent(
-                type="error",
-                message="Target 'existing' already exists. Use update to modify.",
-                operation="add",
-                target_name="existing",
-            )
-
-        mock_service.add_target = mock_add_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(
-                "/api/configure/targets",
-                json={
-                    "name": "existing",
-                    "target": {
-                        "engine": "postgresql",
-                        "host": "localhost",
-                        "port": 5432,
-                        "database": "testdb",
-                        "user": "testuser",
-                    },
-                },
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert "already exists" in data["message"]
+async def test_get_target_not_found(client):
+    response = await client.get("/api/configure/targets/nonexistent")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert "not found" in data["message"]
 
 
-@pytest.mark.asyncio
-async def test_add_target_validation_error(app):
-    """Test adding a target with missing required fields."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Missing required 'host' field
-        response = await client.post(
-            "/api/configure/targets",
-            json={
-                "name": "bad_target",
-                "target": {
-                    "engine": "postgresql",
-                    # host is missing
-                    "port": 5432,
-                    "database": "testdb",
-                    "user": "testuser",
-                },
+# ============================================================================
+# POST /api/configure/targets — add
+# ============================================================================
+
+
+async def test_add_target_success(client):
+    response = await client.post(
+        "/api/configure/targets",
+        json={
+            "name": "new_db",
+            "target": {
+                "engine": "postgresql",
+                "host": "localhost",
+                "port": 5432,
+                "database": "testdb",
+                "user": "testuser",
+                "password_env": "TEST_DB_PASSWORD",
+                "tls": False,
             },
-        )
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["success"] is True
+    assert data["target_name"] == "new_db"
 
-    assert response.status_code == 422  # Validation error
-
-
-# ============================================================================
-# PUT /api/configure/targets/{name} - Update Target
-# ============================================================================
-
-
-@pytest.mark.asyncio
-async def test_update_target_success(app):
-    """Test updating an existing target."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_update_target(*args, **kwargs):
-            yield ConfigureSuccessEvent(
-                type="success",
-                operation="update",
-                target_name="prod",
-                message="Target 'prod' updated successfully",
-            )
-
-        mock_service.update_target = mock_update_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put(
-                "/api/configure/targets/prod",
-                json={
-                    "target": {
-                        "engine": "postgresql",
-                        "host": "new-host.example.com",
-                        "port": 5433,
-                        "database": "myapp",
-                        "user": "admin",
-                        "tls": True,
-                    },
-                },
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["target_name"] == "prod"
-        assert "updated successfully" in data["message"]
+    # Round-trip: the target survives reload from disk.
+    cfg = TargetsConfig()
+    cfg.load()
+    assert cfg.get("new_db") is not None
+    assert cfg.get("new_db")["host"] == "localhost"
 
 
-@pytest.mark.asyncio
-async def test_update_target_not_found(app):
-    """Test updating a target that doesn't exist."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_add_target_duplicate(client):
+    _write_target("existing", _sample_target())
 
-        async def mock_update_target(*args, **kwargs):
-            yield ConfigureErrorEvent(
-                type="error",
-                message="Target 'nonexistent' not found",
-                operation="update",
-                target_name="nonexistent",
-            )
-
-        mock_service.update_target = mock_update_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put(
-                "/api/configure/targets/nonexistent",
-                json={
-                    "target": {
-                        "engine": "postgresql",
-                        "host": "localhost",
-                        "port": 5432,
-                        "database": "testdb",
-                        "user": "testuser",
-                    },
-                },
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert "not found" in data["message"]
+    response = await client.post(
+        "/api/configure/targets",
+        json={
+            "name": "existing",
+            "target": {
+                "engine": "postgresql",
+                "host": "localhost",
+                "port": 5432,
+                "database": "testdb",
+                "user": "testuser",
+            },
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert "already exists" in data["message"]
 
 
-# ============================================================================
-# DELETE /api/configure/targets/{name} - Remove Target
-# ============================================================================
+async def test_add_target_validation_error(client):
+    # Missing required `host` field — pydantic should 422 before ever
+    # reaching the service.
+    response = await client.post(
+        "/api/configure/targets",
+        json={
+            "name": "bad_target",
+            "target": {
+                "engine": "postgresql",
+                "port": 5432,
+                "database": "testdb",
+                "user": "testuser",
+            },
+        },
+    )
+    assert response.status_code == 422
 
 
-@pytest.mark.asyncio
-async def test_remove_target_success(app):
-    """Test removing an existing target."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_add_target_with_mysql_engine(client):
+    response = await client.post(
+        "/api/configure/targets",
+        json={
+            "name": "mysql_db",
+            "target": {
+                "engine": "mysql",
+                "host": "mysql.example.com",
+                "port": 3306,
+                "database": "myapp",
+                "user": "root",
+                "password_env": "MYSQL_PASSWORD",
+                "tls": True,
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
 
-        async def mock_remove_target(name):
-            yield ConfigureSuccessEvent(
-                type="success",
-                operation="remove",
-                target_name=name,
-                message=f"Target '{name}' removed successfully",
-            )
-
-        mock_service.remove_target = mock_remove_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.delete("/api/configure/targets/old_db")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["target_name"] == "old_db"
-        assert "removed successfully" in data["message"]
+    cfg = TargetsConfig()
+    cfg.load()
+    saved = cfg.get("mysql_db")
+    assert saved["engine"] == "mysql"
+    assert saved["port"] == 3306
+    assert saved["tls"] is True
 
 
-@pytest.mark.asyncio
-async def test_remove_target_not_found(app):
-    """Test removing a target that doesn't exist."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_add_target_minimal_fields(client):
+    """Only required fields supplied — defaults from TargetData should apply."""
+    response = await client.post(
+        "/api/configure/targets",
+        json={
+            "name": "minimal",
+            "target": {
+                "host": "localhost",
+                "database": "testdb",
+                "user": "testuser",
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
 
-        async def mock_remove_target(name):
-            yield ConfigureErrorEvent(
-                type="error",
-                message=f"Target '{name}' not found",
-                operation="remove",
-                target_name=name,
-            )
-
-        mock_service.remove_target = mock_remove_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.delete("/api/configure/targets/nonexistent")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert "not found" in data["message"]
+    cfg = TargetsConfig()
+    cfg.load()
+    saved = cfg.get("minimal")
+    # Pydantic defaults fill in engine/port.
+    assert saved["engine"] == "postgresql"
+    assert saved["port"] == 5432
 
 
 # ============================================================================
-# PUT /api/configure/default - Set Default Target
+# PUT /api/configure/targets/{name} — update
 # ============================================================================
 
 
-@pytest.mark.asyncio
-async def test_set_default_success(app):
-    """Test setting a target as default."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_update_target_success(client):
+    _write_target("prod", _sample_target())
 
-        async def mock_set_default(name):
-            yield ConfigureSuccessEvent(
-                type="success",
-                operation="set_default",
-                target_name=name,
-                message=f"Target '{name}' set as default",
-            )
+    response = await client.put(
+        "/api/configure/targets/prod",
+        json={
+            "target": {
+                "engine": "postgresql",
+                "host": "new-host.example.com",
+                "port": 5433,
+                "database": "myapp",
+                "user": "admin",
+                "tls": True,
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["success"] is True
+    assert data["target_name"] == "prod"
 
-        mock_service.set_default = mock_set_default
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put(
-                "/api/configure/default",
-                json={"name": "prod"},
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["target_name"] == "prod"
-        assert "set as default" in data["message"]
+    cfg = TargetsConfig()
+    cfg.load()
+    saved = cfg.get("prod")
+    assert saved["host"] == "new-host.example.com"
+    assert saved["port"] == 5433
+    assert saved["tls"] is True
 
 
-@pytest.mark.asyncio
-async def test_set_default_not_found(app):
-    """Test setting default to a target that doesn't exist."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_set_default(name):
-            yield ConfigureErrorEvent(
-                type="error",
-                message=f"Target '{name}' not found",
-                operation="set_default",
-                target_name=name,
-            )
-
-        mock_service.set_default = mock_set_default
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.put(
-                "/api/configure/default",
-                json={"name": "nonexistent"},
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert "not found" in data["message"]
+async def test_update_target_not_found(client):
+    response = await client.put(
+        "/api/configure/targets/nonexistent",
+        json={
+            "target": {
+                "engine": "postgresql",
+                "host": "localhost",
+                "port": 5432,
+                "database": "testdb",
+                "user": "testuser",
+            },
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert "not found" in data["message"]
 
 
 # ============================================================================
-# POST /api/configure/targets/{name}/test - Test Connection (SSE)
+# DELETE /api/configure/targets/{name} — remove
 # ============================================================================
 
 
-@pytest.mark.asyncio
-async def test_connection_success(app):
-    """Test connection test endpoint with successful connection."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_remove_target_success(client):
+    _write_target("old_db", _sample_target())
 
-        async def mock_test_connection(name):
-            yield ConfigureStatusEvent(
-                type="status",
-                message=f"Testing connection to '{name}'...",
-            )
-            yield ConfigureConnectionTestEvent(
-                type="connection_test",
-                target_name=name,
-                status="in_progress",
-                message="Connecting...",
-            )
-            yield ConfigureConnectionTestEvent(
-                type="connection_test",
-                target_name=name,
-                status="success",
-                message="Connected successfully!",
-                server_version="PostgreSQL 15.2",
-            )
+    response = await client.delete("/api/configure/targets/old_db")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["success"] is True
+    assert data["target_name"] == "old_db"
 
-        mock_service.test_connection = mock_test_connection
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post("/api/configure/targets/prod/test")
-
-        # SSE response - check content type
-        assert response.status_code == 200
-        assert "text/event-stream" in response.headers.get("content-type", "")
-
-        # Parse SSE events from response body
-        body = response.text
-        events = []
-        for line in body.split("\n"):
-            if line.startswith("data:"):
-                data = line[5:].strip()
-                if data:
-                    events.append(json.loads(data))
-
-        # Verify we got the expected events
-        assert len(events) >= 2
-        # Find the success event
-        success_events = [e for e in events if e.get("status") == "success"]
-        assert len(success_events) == 1
-        assert success_events[0]["server_version"] == "PostgreSQL 15.2"
+    cfg = TargetsConfig()
+    cfg.load()
+    assert cfg.get("old_db") is None
 
 
-@pytest.mark.asyncio
-async def test_connection_failure(app):
-    """Test connection test endpoint with failed connection."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_test_connection(name):
-            yield ConfigureStatusEvent(
-                type="status",
-                message=f"Testing connection to '{name}'...",
-            )
-            yield ConfigureConnectionTestEvent(
-                type="connection_test",
-                target_name=name,
-                status="in_progress",
-                message="Connecting...",
-            )
-            yield ConfigureConnectionTestEvent(
-                type="connection_test",
-                target_name=name,
-                status="failed",
-                message="Connection refused: Cannot reach localhost:5432",
-            )
-
-        mock_service.test_connection = mock_test_connection
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post("/api/configure/targets/prod/test")
-
-        assert response.status_code == 200
-        assert "text/event-stream" in response.headers.get("content-type", "")
-
-        body = response.text
-        events = []
-        for line in body.split("\n"):
-            if line.startswith("data:"):
-                data = line[5:].strip()
-                if data:
-                    events.append(json.loads(data))
-
-        # Find the failed event
-        failed_events = [e for e in events if e.get("status") == "failed"]
-        assert len(failed_events) == 1
-        assert "Connection refused" in failed_events[0]["message"]
-
-
-@pytest.mark.asyncio
-async def test_connection_target_not_found(app):
-    """Test connection test endpoint with nonexistent target."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_test_connection(name):
-            yield ConfigureErrorEvent(
-                type="error",
-                message=f"Target '{name}' not found",
-                operation="test",
-                target_name=name,
-            )
-
-        mock_service.test_connection = mock_test_connection
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post("/api/configure/targets/nonexistent/test")
-
-        assert response.status_code == 200
-        assert "text/event-stream" in response.headers.get("content-type", "")
-
-        body = response.text
-        events = []
-        for line in body.split("\n"):
-            if line.startswith("data:"):
-                data = line[5:].strip()
-                if data:
-                    events.append(json.loads(data))
-
-        # Find the error event
-        error_events = [e for e in events if "not found" in e.get("message", "")]
-        assert len(error_events) == 1
+async def test_remove_target_not_found(client):
+    response = await client.delete("/api/configure/targets/nonexistent")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert "not found" in data["message"]
 
 
 # ============================================================================
-# Edge Cases
+# PUT /api/configure/default — set default
 # ============================================================================
 
 
-@pytest.mark.asyncio
-async def test_add_target_with_mysql_engine(app):
-    """Test adding a MySQL target."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_set_default_success(client):
+    _write_target("prod", _sample_target())
+    _write_target("staging", _sample_target(host="staging.example.com"))
 
-        async def mock_add_target(*args, **kwargs):
-            yield ConfigureSuccessEvent(
-                type="success",
-                operation="add",
-                target_name="mysql_db",
-                message="Target 'mysql_db' added successfully",
-            )
+    response = await client.put("/api/configure/default", json={"name": "prod"})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["success"] is True
+    assert data["target_name"] == "prod"
 
-        mock_service.add_target = mock_add_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(
-                "/api/configure/targets",
-                json={
-                    "name": "mysql_db",
-                    "target": {
-                        "engine": "mysql",
-                        "host": "mysql.example.com",
-                        "port": 3306,
-                        "database": "myapp",
-                        "user": "root",
-                        "password_env": "MYSQL_PASSWORD",
-                        "tls": True,
-                    },
-                },
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
+    cfg = TargetsConfig()
+    cfg.load()
+    assert cfg.get_default() == "prod"
 
 
-@pytest.mark.asyncio
-async def test_add_target_minimal_fields(app):
-    """Test adding a target with only required fields."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_add_target(*args, **kwargs):
-            yield ConfigureSuccessEvent(
-                type="success",
-                operation="add",
-                target_name="minimal",
-                message="Target 'minimal' added successfully",
-            )
-
-        mock_service.add_target = mock_add_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.post(
-                "/api/configure/targets",
-                json={
-                    "name": "minimal",
-                    "target": {
-                        "host": "localhost",
-                        "database": "testdb",
-                        "user": "testuser",
-                    },
-                },
-            )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-
-
-@pytest.mark.asyncio
-async def test_list_targets_no_response(app):
-    """Test list targets when service yields no events."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_list_targets(*args, **kwargs):
-            # Empty generator - no events yielded
-            return
-            yield  # Make it a generator
-
-        mock_service.list_targets = mock_list_targets
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/configure/targets")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert "No response from service" in data["message"]
-
-
-@pytest.mark.asyncio
-async def test_get_target_no_response(app):
-    """Test get target when service yields no events."""
-    with patch("features.configure.api.routes.ConfigureService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_get_target(name):
-            return
-            yield
-
-        mock_service.get_target = mock_get_target
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            response = await client.get("/api/configure/targets/test")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert "No response from service" in data["message"]
+async def test_set_default_not_found(client):
+    response = await client.put(
+        "/api/configure/default", json={"name": "nonexistent"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert "not found" in data["message"]

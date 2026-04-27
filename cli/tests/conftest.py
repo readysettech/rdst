@@ -3,6 +3,15 @@ Common pytest fixtures and configuration for RDST tests.
 """
 
 import os
+
+# Disable telemetry for ALL tests before anything else imports
+# `shared.telemetry_manager`. The `tmp_rdst_home` fixture gives each test
+# a fresh empty `~/.rdst/`, so without this gate every test that touches
+# `device_id` would generate a new UUID and fire a PostHog `installation`
+# event (and a Slack install webhook if configured). The CLI shell suite
+# already does this via `tests/integration/lib/setup.sh`.
+os.environ.setdefault("RDST_TESTING", "true")
+
 import sys
 import tempfile
 from pathlib import Path
@@ -52,6 +61,11 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers", "asyncio: mark test to run in asyncio event loop"
+    )
+    config.addinivalue_line(
+        "markers",
+        "realdb: API integration tests that require a real database container "
+        "(managed by .buildkite/run_api_integration_tests.sh)",
     )
 
 

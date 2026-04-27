@@ -1,230 +1,146 @@
-#!/usr/bin/env python3
-"""Integration tests for Ask API endpoint."""
+"""Integration tests for the ask API endpoint.
+
+In-process: drives the real `AskService` end-to-end against an isolated
+`~/.rdst/`. Happy-path NL→SQL flow lives in the realdb suite — without a
+live DB and a real LLM, an in-process happy-path test would only verify
+SSE marshaling. What we cover here:
+
+- The `Depends(require_target_body)` guard (locked / unknown target).
+- `service.resume(session_id=...)` is wired up and reports a missing
+  session as an `error` event (proves the route routes to resume,
+  not ask, when `session_id` is present).
+- Generator-level error events are propagated as SSE `error` frames.
+"""
+
+from __future__ import annotations
 
 import json
-from unittest.mock import patch
+import os
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from shared.api.app import create_app
-from shared.api.target_guard import TargetGuard
-from features.ask.events import (
-    AskClarificationNeededEvent,
-    AskErrorEvent,
-    AskResultEvent,
-    AskSchemaLoadedEvent,
-    AskSqlGeneratedEvent,
-    AskStatusEvent,
-)
-from features.ask.models import AskClarificationQuestion, AskInterpretation
-
-
-@pytest.fixture
-def app():
-    """Create FastAPI app for testing."""
-    return create_app()
+from shared.config.targets import TargetsConfig
 
 
 @pytest.fixture(autouse=True)
-def _allow_target_password(monkeypatch):
-    monkeypatch.setattr(
-        "shared.api.target_guard.ensure_target_password",
-        lambda target=None: TargetGuard(
-            target or "prod",
-            {"engine": "postgresql", "password": "test-password"},
-        ),
+def _isolate_anthropic_env(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("RDST_TRIAL_TOKEN", raising=False)
+
+
+def _seed_target(
+    name: str = "prod",
+    password_env: str = "PROD_DB_PASSWORD",
+    engine: str = "postgresql",
+) -> None:
+    cfg = TargetsConfig()
+    cfg.load()
+    cfg.upsert(
+        name,
+        {
+            "engine": engine,
+            "host": "127.0.0.1",
+            "port": 1,  # Unreachable on purpose; schema load will fail.
+            "database": "appdb",
+            "user": "appuser",
+            "password_env": password_env,
+        },
     )
+    cfg.set_default(name)
+    cfg.save()
 
 
-async def _collect_sse_events(response):
-    """Collect SSE events as {event, data} dicts."""
-    events = []
-    current_event = None
-
-    async for line in response.aiter_lines():
-        if line.startswith("event:"):
-            current_event = line[6:].strip()
-        elif line.startswith("data:"):
-            payload = line[5:].strip()
-            if payload:
-                events.append({"event": current_event, "data": json.loads(payload)})
-
+async def _stream_events(client, body: dict) -> list[dict]:
+    events: list[dict] = []
+    async with client.stream("POST", "/api/ask", json=body) as response:
+        if response.status_code != 200:
+            return [{"_status": response.status_code, "_body": await response.aread()}]
+        current: dict = {}
+        async for line in response.aiter_lines():
+            if not line:
+                if current:
+                    events.append(current)
+                    current = {}
+                continue
+            if line.startswith("event:"):
+                current["event"] = line[len("event:") :].strip()
+            elif line.startswith("data:"):
+                payload = line[len("data:") :].strip()
+                try:
+                    current["data"] = json.loads(payload)
+                except json.JSONDecodeError:
+                    current["data"] = payload
+        if current:
+            events.append(current)
     return events
 
 
-@pytest.mark.asyncio
-async def test_ask_streams_nl_to_sql_flow(app):
-    """Ask endpoint streams status -> sql -> result for NL question."""
-    with patch("features.ask.api.routes.AskService") as mock_service_class:
-        mock_service = mock_service_class.return_value
-
-        async def mock_ask(input_data, options_data):
-            yield AskStatusEvent(
-                type="status", phase="schema", message="Loading schema"
-            )
-            yield AskSchemaLoadedEvent(
-                type="schema_loaded",
-                source="semantic",
-                table_count=2,
-                tables=["users", "orders"],
-            )
-            yield AskSqlGeneratedEvent(
-                type="sql_generated",
-                sql="SELECT COUNT(*) AS total_users FROM users",
-                explanation="Counts users",
-            )
-            yield AskResultEvent(
-                type="result",
-                success=True,
-                sql="SELECT COUNT(*) AS total_users FROM users",
-                rows=[[42]],
-                columns=["total_users"],
-                row_count=1,
-                execution_time_ms=12.5,
-                llm_calls=2,
-                total_tokens=180,
-            )
-
-        mock_service.ask = mock_ask
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            async with client.stream(
-                "POST",
-                "/api/ask",
-                json={"question": "How many users do we have?", "target": "prod"},
-            ) as response:
-                assert response.status_code == 200
-                assert "text/event-stream" in response.headers.get("content-type", "")
-                events = await _collect_sse_events(response)
-
-    assert any(e["event"] == "status" for e in events)
-    assert any(e["event"] == "schema_loaded" for e in events)
-
-    sql_events = [e for e in events if e["event"] == "sql_generated"]
-    assert len(sql_events) == 1
-    assert "SELECT COUNT(*)" in sql_events[0]["data"]["sql"]
-
-    result_events = [e for e in events if e["event"] == "result"]
-    assert len(result_events) == 1
-    assert result_events[0]["data"]["success"] is True
-    assert result_events[0]["data"]["rows"] == [[42]]
-    assert result_events[0]["data"]["columns"] == ["total_users"]
+async def test_ask_returns_404_for_unknown_target(client, tmp_rdst_home):
+    """Unknown target name fails at the guard before any service work."""
+    response = await client.post(
+        "/api/ask",
+        json={"question": "anything", "target": "does-not-exist"},
+    )
+    assert response.status_code == 404, response.text
 
 
-@pytest.mark.asyncio
-async def test_ask_streams_clarification_needed(app):
-    """Ask endpoint returns clarification_needed event when ambiguous."""
-    with patch("features.ask.api.routes.AskService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_ask_returns_423_when_target_password_env_missing(
+    client, tmp_rdst_home, monkeypatch
+):
+    """Target exists but `password_env` not set in process env → guard 423s
+    with the TARGET_PASSWORD_REQUIRED code."""
+    _seed_target(password_env="PROD_DB_PASSWORD")
+    monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
 
-        async def mock_ask(input_data, options_data):
-            yield AskClarificationNeededEvent(
-                type="clarification_needed",
-                session_id="sess_123",
-                interpretations=[
-                    AskInterpretation(
-                        id=1,
-                        description="Count total users",
-                        likelihood=0.7,
-                        assumptions=["all rows"],
-                    )
-                ],
-                questions=[
-                    AskClarificationQuestion(
-                        id="time_range",
-                        question="Which period?",
-                        options=["all time", "last 30 days"],
-                    )
-                ],
-            )
-
-        mock_service.ask = mock_ask
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            async with client.stream(
-                "POST",
-                "/api/ask",
-                json={"question": "How many users?"},
-            ) as response:
-                events = await _collect_sse_events(response)
-
-    clarify_events = [e for e in events if e["event"] == "clarification_needed"]
-    assert len(clarify_events) == 1
-    payload = clarify_events[0]["data"]
-    assert payload["session_id"] == "sess_123"
-    assert payload["interpretations"][0]["description"] == "Count total users"
-    assert payload["questions"][0]["id"] == "time_range"
+    response = await client.post(
+        "/api/ask",
+        json={"question": "anything", "target": "prod"},
+    )
+    assert response.status_code == 423, response.text
+    detail = response.json().get("detail") or {}
+    assert detail.get("code") == "TARGET_PASSWORD_REQUIRED"
+    assert detail.get("target") == "prod"
 
 
-@pytest.mark.asyncio
-async def test_ask_resume_uses_resume_path(app):
-    """Ask endpoint uses service.resume when session_id is provided."""
-    with patch("features.ask.api.routes.AskService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_ask_resume_with_unknown_session_id_streams_error(
+    client, tmp_rdst_home, monkeypatch
+):
+    """`session_id` present in the body must take the resume path; with an
+    unknown id the real `service.resume` yields an error event."""
+    _seed_target(password_env="PROD_DB_PASSWORD")
+    monkeypatch.setenv("PROD_DB_PASSWORD", "irrelevant")
 
-        async def mock_resume(session_id, clarification_answers):
-            assert session_id == "sess_123"
-            assert clarification_answers == {"time_range": "last 30 days"}
-            yield AskSqlGeneratedEvent(
-                type="sql_generated",
-                sql="SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '30 days'",
-                explanation="Filtered to last 30 days",
-            )
-
-        async def mock_ask(input_data, options_data):
-            raise AssertionError("ask() should not be called for resume requests")
-            yield
-
-        mock_service.resume = mock_resume
-        mock_service.ask = mock_ask
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            async with client.stream(
-                "POST",
-                "/api/ask",
-                json={
-                    "question": "ignored by resume path",
-                    "session_id": "sess_123",
-                    "clarification_answers": {"time_range": "last 30 days"},
-                },
-            ) as response:
-                events = await _collect_sse_events(response)
-
-    sql_events = [e for e in events if e["event"] == "sql_generated"]
-    assert len(sql_events) == 1
-    assert "INTERVAL '30 days'" in sql_events[0]["data"]["sql"]
+    events = await _stream_events(
+        client,
+        {
+            "question": "ignored on resume path",
+            "target": "prod",
+            "session_id": "does-not-exist",
+            "clarification_answers": {"x": "y"},
+        },
+    )
+    error_events = [e for e in events if e.get("event") == "error"]
+    assert error_events, f"expected error event; got {events}"
+    msg = error_events[0]["data"].get("message", "")
+    assert "does-not-exist" in msg
+    assert "not found" in msg or "expired" in msg
 
 
-@pytest.mark.asyncio
-async def test_ask_streams_error_event(app):
-    """Ask endpoint streams error event when service returns AskErrorEvent."""
-    with patch("features.ask.api.routes.AskService") as mock_service_class:
-        mock_service = mock_service_class.return_value
+async def test_ask_streams_error_when_schema_load_fails(
+    client, tmp_rdst_home, monkeypatch
+):
+    """No DB reachable → real `load_schema` errors → service yields
+    `AskErrorEvent`, route marshals it as an `error` SSE frame.
 
-        async def mock_ask(input_data, options_data):
-            yield AskErrorEvent(
-                type="error",
-                message="Could not generate SQL",
-                phase="generate",
-            )
+    This exercises the real route → service → schema-phase pipeline
+    end-to-end without needing an LLM or a live DB.
+    """
+    _seed_target(password_env="PROD_DB_PASSWORD")
+    monkeypatch.setenv("PROD_DB_PASSWORD", "irrelevant")
 
-        mock_service.ask = mock_ask
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            async with client.stream(
-                "POST",
-                "/api/ask",
-                json={"question": "bad input"},
-            ) as response:
-                events = await _collect_sse_events(response)
-
-    error_events = [e for e in events if e["event"] == "error"]
-    assert len(error_events) == 1
-    payload = error_events[0]["data"]
-    assert payload["message"] == "Could not generate SQL"
-    assert payload["phase"] == "generate"
+    events = await _stream_events(
+        client,
+        {"question": "How many users?", "target": "prod"},
+    )
+    error_events = [e for e in events if e.get("event") == "error"]
+    assert error_events, f"expected error event; got {events}"

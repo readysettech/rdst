@@ -1,0 +1,96 @@
+"""Integration tests for the trial API endpoints.
+
+Drives the real `TrialService` against an isolated `~/.rdst/`. The
+`register` and `activate` paths make external HTTPS calls to the
+key-service worker — they're better covered by a future test that
+mocks `httpx`. What we cover here is everything that operates purely
+on the on-disk trial config.
+"""
+
+from __future__ import annotations
+
+from shared.config.targets import TargetsConfig
+
+
+def _seed_active_trial() -> None:
+    cfg = TargetsConfig()
+    cfg.load()
+    cfg.set_trial_config(
+        {
+            "token": "trial-token-abc",
+            "email": "user@example.com",
+            "status": "active",
+            "remaining_cents": 350,
+            "limit_cents": 500,
+        }
+    )
+    cfg.save()
+
+
+async def test_status_initial_state_returns_inactive(client, tmp_rdst_home):
+    """Fresh `~/.rdst/` with no trial config → `active=false`, all
+    optional fields None."""
+    response = await client.get("/api/trial/status")
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+    assert body["active"] is False
+    assert body["email"] is None
+    assert body["status"] is None
+    assert body["remaining_cents"] is None
+
+
+async def test_status_reads_seeded_trial_from_disk(client, tmp_rdst_home):
+    """An on-disk trial block is reflected in `GET /api/trial/status`."""
+    _seed_active_trial()
+
+    response = await client.get("/api/trial/status")
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+    assert body["active"] is True
+    assert body["email"] == "user@example.com"
+    assert body["status"] == "active"
+    assert body["remaining_cents"] == 350
+    assert body["limit_cents"] == 500
+
+
+async def test_simulate_exhaust_flips_status_and_zeros_remaining(
+    client, tmp_rdst_home
+):
+    """`/trial/simulate/exhaust` should set status=exhausted and zero
+    remaining; the change must persist to disk."""
+    _seed_active_trial()
+
+    # No `Origin` header → same-host check is a no-op; loopback peer
+    # check is satisfied by ASGITransport's default 127.0.0.1 client.
+    sim = await client.post("/api/trial/simulate/exhaust")
+    assert sim.status_code == 200, sim.text
+    assert sim.json()["success"] is True
+
+    # Re-read status from the API; both the API and the on-disk config
+    # should reflect the simulated exhaustion.
+    status = await client.get("/api/trial/status")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["active"] is False
+    assert body["status"] == "exhausted"
+    assert body["remaining_cents"] == 0
+    assert body["limit_cents"] == 500
+
+    cfg = TargetsConfig()
+    cfg.load()
+    persisted = cfg.get_trial_config()
+    assert persisted["status"] == "exhausted"
+    assert persisted["remaining_cents"] == 0
+
+
+async def test_simulate_exhaust_with_no_active_trial_returns_no_op(
+    client, tmp_rdst_home
+):
+    """No trial token on disk → simulate is a no-op with success=false."""
+    response = await client.post("/api/trial/simulate/exhaust")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["success"] is False
+    assert "No active trial" in (body.get("message") or "")
