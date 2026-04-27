@@ -421,56 +421,56 @@ class TestShortHelpImperativeStyle:
             )
 
 
-class TestReadySetBranding:
-    """User-facing strings must use 'ReadySet' (capital S), not 'Readyset'."""
+class TestReadysetBranding:
+    """User-facing strings must use 'Readyset', not 'ReadySet'."""
 
     def test_rdst_cli_help_banner_uses_correct_branding(self):
-        """help() banner must use 'ReadySet', not 'Readyset'."""
+        """help() banner must use 'Readyset', not 'ReadySet'."""
         cli = RdstCLI.__new__(RdstCLI)
         result = cli.help()
-        assert "Readyset" not in result.message, (
-            "help() banner still uses 'Readyset' instead of 'ReadySet'."
+        assert "ReadySet" not in result.message, (
+            "help() banner uses 'ReadySet' instead of 'Readyset'."
         )
-        assert "ReadySet" in result.message, (
-            "help() banner should contain 'ReadySet'."
+        assert "Readyset" in result.message, (
+            "help() banner should contain 'Readyset'."
         )
 
     def test_rdst_cli_version_uses_correct_branding(self):
-        """version() output must use 'ReadySet', not 'Readyset'."""
+        """version() output must use 'Readyset', not 'ReadySet'."""
         cli = RdstCLI.__new__(RdstCLI)
         result = cli.version()
         assert result.ok
-        assert "Readyset" not in result.message, (
-            "version() output uses 'Readyset' instead of 'ReadySet'."
+        assert "ReadySet" not in result.message, (
+            "version() output uses 'ReadySet' instead of 'Readyset'."
         )
-        assert "ReadySet" in result.message
+        assert "Readyset" in result.message
 
     def test_analyze_description_uses_correct_branding(self):
-        """analyze command description must use 'ReadySet', not 'Readyset'."""
+        """analyze command description must use 'Readyset', not 'ReadySet'."""
         cmd = COMMANDS["analyze"]
-        assert "Readyset" not in cmd.description, (
-            "analyze command description uses 'Readyset' instead of 'ReadySet'."
+        assert "ReadySet" not in cmd.description, (
+            "analyze command description uses 'ReadySet' instead of 'Readyset'."
         )
 
     def test_cache_compare_help_uses_correct_branding(self):
-        """cache-compare subcommand help must use 'ReadySet', not 'Readyset'."""
+        """cache-compare subcommand help must use 'Readyset', not 'ReadySet'."""
         query_cmd = COMMANDS["query"]
         cache_compare = next(
             (s for s in query_cmd.subcommand_defs if s.name == "cache-compare"), None
         )
         assert cache_compare is not None
-        assert "Readyset" not in cache_compare.help, (
-            "cache-compare subcommand help uses 'Readyset' instead of 'ReadySet'."
+        assert "ReadySet" not in cache_compare.help, (
+            "cache-compare subcommand help uses 'ReadySet' instead of 'Readyset'."
         )
 
     def test_no_readyset_lowercase_s_in_parser_data_user_strings(self):
-        """No command short_help or description should use 'Readyset'."""
+        """No command short_help or description should use 'ReadySet'."""
         for name, cmd in COMMANDS.items():
-            assert "Readyset" not in cmd.short_help, (
-                f"Command '{name}' short_help uses 'Readyset' (should be 'ReadySet')."
+            assert "ReadySet" not in cmd.short_help, (
+                f"Command '{name}' short_help uses 'ReadySet' (should be 'Readyset')."
             )
-            assert "Readyset" not in cmd.description, (
-                f"Command '{name}' description uses 'Readyset' (should be 'ReadySet')."
+            assert "ReadySet" not in cmd.description, (
+                f"Command '{name}' description uses 'ReadySet' (should be 'Readyset')."
             )
 
 
@@ -479,7 +479,7 @@ class TestSectionHeaderArgumentOrder:
 
     def test_section_header_title_only_renders_correctly(self):
         """SectionHeader with title only renders the title."""
-        header = SectionHeader("ReadySet Data and SQL Toolkit")
+        header = SectionHeader("Readyset Data and SQL Toolkit")
         assert "READYSET DATA AND SQL TOOLKIT" in header.plain.upper()
 
     def test_section_header_with_icon_puts_icon_before_title(self):
@@ -491,16 +491,16 @@ class TestSectionHeaderArgumentOrder:
 
     def test_section_header_with_toolkit_name_as_title(self):
         """SectionHeader renders toolkit name correctly."""
-        header = SectionHeader("ReadySet Data and SQL Toolkit")
+        header = SectionHeader("Readyset Data and SQL Toolkit")
         plain = header.plain
         assert "READYSET DATA AND SQL TOOLKIT" in plain.upper()
         assert plain.count(" ") > 0
 
     def test_swapped_args_would_render_wrongly(self):
         """Swapping title and icon arguments produces incorrect rendering."""
-        bad_header = SectionHeader("rdst", "ReadySet Data and SQL Toolkit")
+        bad_header = SectionHeader("rdst", "Readyset Data and SQL Toolkit")
         plain = bad_header.plain
-        assert plain.startswith("ReadySet Data and SQL Toolkit ")
+        assert plain.startswith("Readyset Data and SQL Toolkit ")
         assert plain.endswith("RDST")
 
 

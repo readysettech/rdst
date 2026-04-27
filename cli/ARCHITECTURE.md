@@ -99,7 +99,7 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 - `analyze`: query analysis, explain flows, rewrite evaluation, analysis rendering
 - `ask`: natural-language-to-SQL, Ask engine, validation, Ask prompts, Ask debug tooling
 - `audit`: audit workflows, capture, storage, scoring, audit prompts
-- `cache`: ReadySet setup, cacheability, deployment, cache command flows
+- `cache`: Readyset setup, cacheability, deployment, cache command flows
 - `configure`: target configuration, connection profiles, setup wizard, config API
 - `demo`: demo setup and sample data loading
 - `fleet`: fleet discovery, fleet modeling, fleet snapshots, pricing/scoring support

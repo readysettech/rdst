@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-rdst - ReadySet Data and SQL Toolkit
+rdst - Readyset Data and SQL Toolkit
 
 A command-line interface for diagnostics, query analysis, performance tuning,
-and caching with ReadySet.
+and caching with Readyset.
 """
 
 from __future__ import annotations
@@ -137,7 +137,7 @@ def print_rich_help():
 
     # Header
     console.print()
-    console.print(SectionHeader("ReadySet Data and SQL Toolkit"))
+    console.print(SectionHeader("Readyset Data and SQL Toolkit"))
     console.print(
         f"[{StyleTokens.MUTED}]Troubleshoot latency, analyze queries, and get tuning insights.[/{StyleTokens.MUTED}]"
     )
@@ -175,7 +175,7 @@ def parse_arguments() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         prog="rdst",
-        description="ReadySet Data and SQL Toolkit - Diagnose, analyze, and optimize SQL performance",
+        description="Readyset Data and SQL Toolkit - Diagnose, analyze, and optimize SQL performance",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
@@ -216,7 +216,7 @@ Examples:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"ReadySet Data and SQL Toolkit (rdst) version {_pkg_version}",
+        version=f"Readyset Data and SQL Toolkit (rdst) version {_pkg_version}",
         help="Show version information and exit",
     )
 
@@ -580,7 +580,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             # Install the /rdst slash command globally
             slash_cmd_content = """# RDST Mode Activated
 
-You have RDST (ReadySet Data and SQL Toolkit) tools available.
+You have RDST (Readyset Data and SQL Toolkit) tools available.
 
 **First, call the `rdst_help` tool to check the user's setup.**
 
@@ -919,7 +919,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
 
         # Header
         console.print()
-        console.print(SectionHeader("ReadySet Data and SQL Toolkit"))
+        console.print(SectionHeader("Readyset Data and SQL Toolkit"))
         console.print(
             f"[{StyleTokens.MUTED}]Troubleshoot latency, analyze queries, and get tuning insights.[/{StyleTokens.MUTED}]"
         )

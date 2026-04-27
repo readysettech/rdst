@@ -28,7 +28,7 @@ def deploy_kubernetes(
     namespace: str = "readyset",
     kubeconfig: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Deploy ReadySet to Kubernetes via kubectl.
+    """Deploy Readyset to Kubernetes via kubectl.
 
     Steps:
     1. Check kubectl is available
@@ -295,7 +295,7 @@ def _wait_for_rollout(
             if "CrashLoopBackOff" in pod_status or "Error" in pod_status:
                 print(f"\nPod is crash-looping. Check logs:")
                 print(f"  kubectl logs deployment/{deployment_name} -n {namespace}")
-                print(f"  (Common cause: ReadySet can't reach the upstream database from inside the cluster)")
+                print(f"  (Common cause: Readyset can't reach the upstream database from inside the cluster)")
 
         return {"ready": result.returncode == 0}
 

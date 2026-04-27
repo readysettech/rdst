@@ -5,7 +5,7 @@
 ## Prerequisites
 - `claude` CLI installed and authenticated (OAuth is used because the script unsets `ANTHROPIC_API_KEY`).
 - A checkout of the `skills/relentless-tester` repo, or a `RELENTLESS_SKILL` env var pointing at its `SKILL.md`.
-- ReadySet repo with git metadata available (the script shells out to `git diff`).
+- Readyset repo with git metadata available (the script shells out to `git diff`).
 
 ## Basic Usage
 ```bash

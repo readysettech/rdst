@@ -72,7 +72,7 @@ def _mock_audit_result(**overrides):
 
 
 def _mock_rs_results():
-    """Mock ReadySet test results."""
+    """Mock Readyset test results."""
     return [
         {
             "query_hash": "a3f2c1b8d9e1",
@@ -110,7 +110,7 @@ def _mock_insights():
         "optimization_priorities": [
             {
                 "priority": 1,
-                "action": "Deploy ReadySet",
+                "action": "Deploy Readyset",
                 "category": "Caching",
                 "effort": "low",
                 "impact": "high",
@@ -197,7 +197,7 @@ class TestBuildFleetReport:
         fleet_insights = {
             "fleet_health_summary": "Fleet is healthy.",
             "fleet_readyset_summary": "Good caching opportunity.",
-            "immediate_actions": ["Deploy ReadySet"],
+            "immediate_actions": ["Deploy Readyset"],
             "estimated_monthly_savings_usd": 450,
             "per_target": [
                 {"target_name": "test-db", "readyset_verdict": "strong_candidate", "readyset_summary": "Great.", "estimated_cacheable_pct": 80, "key_findings": ["High read"]},
@@ -250,7 +250,7 @@ class TestRenderSingleTargetHtml:
         from features.audit.report.html_report import render_single_target_html
         report = build_single_report(_mock_audit_result())
         html = render_single_target_html(report)
-        assert "ReadySet Performance" not in html
+        assert "Readyset Performance" not in html
 
     def test_cover_has_kpis(self):
         from features.audit.report.report_data import build_single_report

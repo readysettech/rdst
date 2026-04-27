@@ -4,7 +4,7 @@ This document explains what is published to the public GitHub repository at [git
 
 ## Overview
 
-RDST (Readyset Data and SQL Toolkit) is published as an open-source MIT-licensed CLI tool for database diagnostics, query analysis, and caching optimization with Readyset.
+RDST (Readyset Data and SQL Toolkit) is a source-available CLI tool for database diagnostics, query analysis, and caching optimization with Readyset. It is released under the BSL 1.1 license.
 
 **Public Repository**: https://github.com/readysettech/rdst
 
@@ -148,6 +148,6 @@ git status --ignored
 
 ## License
 
-RDST is released under the MIT License. See [LICENSE](../LICENSE) for details.
+RDST is released under the BSL 1.1 license. See [LICENSE](../LICENSE) for details.
 
-Copyright (c) 2024-2025 ReadySet Technology, Inc.
+Copyright (c) 2024-2025 Readyset Technology, Inc.

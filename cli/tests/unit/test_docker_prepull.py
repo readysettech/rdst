@@ -42,7 +42,7 @@ class TestPullImage:
         assert prepull._pull_status["error"] is None
 
         captured = capsys.readouterr()
-        assert "Pre-pulled ReadySet image" in captured.out
+        assert "Pre-pulled Readyset image" in captured.out
 
     def test_failed_pull_with_stderr(self, capsys):
         import shared.api.docker_prepull as prepull
@@ -191,7 +191,7 @@ class TestStartPrepull:
         assert prepull._pull_status["started"] is True
 
         captured = capsys.readouterr()
-        assert "Pre-pulling ReadySet Docker image" in captured.out
+        assert "Pre-pulling Readyset Docker image" in captured.out
 
 
 class TestGetPrepullStatus:

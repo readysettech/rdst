@@ -740,7 +740,7 @@ def _parse_container_crash_logs(logs: str) -> Dict[str, str] | None:
     if "unsupported" in logs_lower and "version" in logs_lower:
         return {
             "message": "Unsupported database version",
-            "remediation": "Check ReadySet documentation for supported database versions"
+            "remediation": "Check Readyset documentation for supported database versions"
         }
     if "replication" in logs_lower and ("failed" in logs_lower or "error" in logs_lower):
         return {

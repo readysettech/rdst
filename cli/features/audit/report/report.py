@@ -1293,7 +1293,7 @@ def _build_hero_stats(
     }
     cache_tile = {
         "value": f"{sum(cache_hits) / len(cache_hits):.0f}%" if cache_hits else "—",
-        "label": "Cache Hit Rate",
+        "label": "Buffer Cache Hit Rate",
         "detail": "Data fits in memory" if cache_hits and sum(cache_hits) / len(cache_hits) >= 99 else "",
     }
 

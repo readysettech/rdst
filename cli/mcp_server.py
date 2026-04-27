@@ -1168,7 +1168,7 @@ Examples:
         },
         {
             "name": "rdst_cache_deploy",
-            "description": """Deploy ReadySet shallow cache permanently to local, remote, or Kubernetes environments.
+            "description": """Deploy Readyset shallow cache permanently to local, remote, or Kubernetes environments.
 
 Modes:
 - docker: Docker container with restart policy
@@ -1179,7 +1179,7 @@ For remote deployment, specify host to deploy via SSH.
 Use script_only to generate the deployment script without executing.
 
 After deployment, shows the connection endpoint to point your application to.
-Auto-registers a ReadySet target (e.g., mydb-cache) for use with cache add/show/delete.
+Auto-registers a Readyset target (e.g., mydb-cache) for use with cache add/show/delete.
 
 Examples:
   rdst_cache_deploy(target="mydb", mode="docker")  # Local Docker deploy
@@ -1214,7 +1214,7 @@ Examples:
                     },
                     "port": {
                         "type": "integer",
-                        "description": "ReadySet listen port"
+                        "description": "Readyset listen port"
                     },
                     "namespace": {
                         "type": "string",
@@ -1238,15 +1238,15 @@ Examples:
         },
         {
             "name": "rdst_cache_add",
-            "description": """Create a shallow cache for a query in a deployed ReadySet instance.
+            "description": """Create a shallow cache for a query in a deployed Readyset instance.
 
-Shallow caching stores query results in ReadySet's in-memory cache with a TTL
+Shallow caching stores query results in Readyset's in-memory cache with a TTL
 (time-to-live). Queries are served from cache until the TTL expires, then
 refreshed from the upstream database. This provides dramatic latency improvements
 (often 10-100x) for read-heavy workloads without requiring full materialized views.
 
-IMPORTANT: The target must be a ReadySet target (target_type=readyset), not a
-database target. Deploy ReadySet first with rdst_cache_deploy(), which auto-registers
+IMPORTANT: The target must be a Readyset target (target_type=readyset), not a
+database target. Deploy Readyset first with rdst_cache_deploy(), which auto-registers
 a cache target named "{original_target}-cache".
 
 The query can be:
@@ -1254,7 +1254,7 @@ The query can be:
 - Registry hash: A 4-12 character hex hash from rdst query list
 
 After caching, use rdst query run to benchmark performance against both the
-ReadySet target and the upstream database target.
+Readyset target and the upstream database target.
 
 Examples:
   rdst_cache_add(query="SELECT * FROM orders WHERE id = 1", target="mydb-cache")
@@ -1270,7 +1270,7 @@ Examples:
                     },
                     "target": {
                         "type": "string",
-                        "description": "ReadySet target name (target_type=readyset, e.g., mydb-cache)"
+                        "description": "Readyset target name (target_type=readyset, e.g., mydb-cache)"
                     },
                     "tag": {
                         "type": "string",
@@ -1286,12 +1286,12 @@ Examples:
         },
         {
             "name": "rdst_cache_show",
-            "description": """List all cached queries in a deployed ReadySet instance.
+            "description": """List all cached queries in a deployed Readyset instance.
 
 Shows a table of all shallow caches with columns: Cache Name, Query, Type, TTL.
 The cache name/ID is used with rdst_cache_delete to remove specific caches.
 
-IMPORTANT: The target must be a ReadySet target (target_type=readyset).
+IMPORTANT: The target must be a Readyset target (target_type=readyset).
 
 Examples:
   rdst_cache_show(target="mydb-cache")
@@ -1302,7 +1302,7 @@ Examples:
                 "properties": {
                     "target": {
                         "type": "string",
-                        "description": "ReadySet target name (target_type=readyset)"
+                        "description": "Readyset target name (target_type=readyset)"
                     },
                     "output_json": {
                         "type": "boolean",
@@ -1314,11 +1314,11 @@ Examples:
         },
         {
             "name": "rdst_cache_delete",
-            "description": """Remove a specific cache from a deployed ReadySet instance.
+            "description": """Remove a specific cache from a deployed Readyset instance.
 
 Use rdst_cache_show to get the cache ID/name, then pass it here to remove.
 
-IMPORTANT: The target must be a ReadySet target (target_type=readyset).
+IMPORTANT: The target must be a Readyset target (target_type=readyset).
 
 Examples:
   rdst_cache_delete(cache_id="q_54fc6da6d5703402", target="mydb-cache")
@@ -1332,7 +1332,7 @@ Examples:
                     },
                     "target": {
                         "type": "string",
-                        "description": "ReadySet target name (target_type=readyset)"
+                        "description": "Readyset target name (target_type=readyset)"
                     },
                     "output_json": {
                         "type": "boolean",
@@ -1344,12 +1344,12 @@ Examples:
         },
         {
             "name": "rdst_cache_drop_all",
-            "description": """Remove ALL caches from a deployed ReadySet instance.
+            "description": """Remove ALL caches from a deployed Readyset instance.
 
-Runs DROP ALL CACHES against ReadySet. This removes every cached query.
+Runs DROP ALL CACHES against Readyset. This removes every cached query.
 Use with caution — there is no undo.
 
-IMPORTANT: The target must be a ReadySet target (target_type=readyset).
+IMPORTANT: The target must be a Readyset target (target_type=readyset).
 
 Examples:
   rdst_cache_drop_all(target="mydb-cache")
@@ -1359,7 +1359,7 @@ Examples:
                 "properties": {
                     "target": {
                         "type": "string",
-                        "description": "ReadySet target name (target_type=readyset)"
+                        "description": "Readyset target name (target_type=readyset)"
                     },
                     "output_json": {
                         "type": "boolean",
@@ -2065,7 +2065,7 @@ Just describe your database and we'll get connected!
         return run_rdst_command(args)
 
     elif name == "rdst_cache_deploy":
-        # Deploy ReadySet shallow cache
+        # Deploy Readyset shallow cache
         args = ["cache", "deploy"]
 
         args.extend(["--target", arguments["target"]])

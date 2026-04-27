@@ -141,7 +141,7 @@ def compute_sizing_verdict(
 def compute_cache_opportunity(
     metrics: AuditMetrics,
 ) -> CacheOpportunityScore:
-    """Compute ReadySet cache opportunity score (0-100).
+    """Compute Readyset cache opportunity score (0-100).
 
     Factors:
     - +50 if read_pct > 90%, +30 if > 70%

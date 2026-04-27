@@ -1,10 +1,4 @@
-"""Email service — verified report delivery via the RDST keyservice.
-
-Flow:
-  1. register_email() → sends verification email, returns immediately
-  2. poll_verification() → CLI polls until user clicks link in email
-  3. send_report() → sends HTML report using the verified report_token
-"""
+"""Verified report delivery via the RDST keyservice."""
 
 from __future__ import annotations
 
@@ -12,36 +6,55 @@ import asyncio
 import time
 from typing import Any, Dict, Optional
 
-KEYSERVICE_URL = "https://rdst-keyservice.readysetio.workers.dev"
+from shared.keyservice import (
+    DEFAULT_KEYSERVICE_URL,
+    keyservice_base_url,
+)
+
+KEYSERVICE_URL = keyservice_base_url()
 
 
 class EmailService:
-    """Handles report email registration, verification polling, and delivery."""
+    def __init__(self, keyservice_url: Optional[str] = None):
+        self._url = (keyservice_url or keyservice_base_url()).rstrip("/")
 
-    def __init__(self, keyservice_url: str = KEYSERVICE_URL):
-        self._url = keyservice_url
+    def register_email(
+        self,
+        email: str,
+        html: Optional[str] = None,
+        subject: Optional[str] = None,
+        summary: Optional[Dict[str, Any]] = None,
+        ttl_days: int = 30,
+        mode: str = "link",
+    ) -> Dict[str, Any]:
+        """Register an email for report delivery. If html/subject are
+        supplied, the keyservice queues the report and delivers it on the
+        verify-link click. Returns the keyservice JSON response."""
+        return self._sync(self._register(email, html, subject, summary, ttl_days, mode))
 
-    # ------------------------------------------------------------------
-    # Step 1: Register email (sends verification link)
-    # ------------------------------------------------------------------
-
-    def register_email(self, email: str) -> Dict[str, Any]:
-        """Register an email for report delivery.
-
-        Returns:
-            {"success": True, "verified": True, "report_token": "..."} if already verified
-            {"success": True, "verified": False} if verification email sent
-            {"success": False, "error": "..."} on failure
-        """
-        return self._sync(self._register(email))
-
-    async def _register(self, email: str) -> Dict[str, Any]:
+    async def _register(
+        self,
+        email: str,
+        html: Optional[str],
+        subject: Optional[str],
+        summary: Optional[Dict[str, Any]],
+        ttl_days: int,
+        mode: str,
+    ) -> Dict[str, Any]:
         import httpx
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
+            payload: Dict[str, Any] = {"email": email}
+            if html:
+                payload["html"] = html
+                payload["subject"] = subject or "RDST Report"
+                payload["mode"] = mode
+                payload["ttl_days"] = ttl_days
+                if summary:
+                    payload["summary"] = summary
+            async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
                     f"{self._url}/register-report",
-                    json={"email": email},
+                    json=payload,
                 )
                 data = resp.json()
                 if resp.status_code in (200, 201):
@@ -50,17 +63,10 @@ class EmailService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    # ------------------------------------------------------------------
-    # Step 2: Poll for verification (user clicks link in email)
-    # ------------------------------------------------------------------
-
-    def poll_verification(self, email: str, timeout_seconds: int = 90, interval: float = 3.0) -> Dict[str, Any]:
-        """Poll keyservice until the email is verified or timeout.
-
-        Returns:
-            {"verified": True, "report_token": "..."} on success
-            {"verified": False, "timed_out": True} on timeout
-        """
+    def poll_verification(
+        self, email: str, timeout_seconds: int = 300, interval: float = 3.0
+    ) -> Dict[str, Any]:
+        """Poll until the email is verified or timeout."""
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             result = self._sync(self._check_status(email))
@@ -83,10 +89,6 @@ class EmailService:
         except Exception:
             return {"verified": False}
 
-    # ------------------------------------------------------------------
-    # Step 3: Send report (requires verified report_token)
-    # ------------------------------------------------------------------
-
     def send_report(
         self,
         report_token: str,
@@ -98,22 +100,9 @@ class EmailService:
         ttl_days: int = 30,
         summary: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Send an HTML report email using a verified report token.
-
-        mode:
-            - "inline" (default): embed HTML in the email body. Best for short
-              reports that don't rely on much CSS — Gmail will strip most
-              styles, so layout suffers for CSS-heavy reports.
-            - "link": host the HTML on the keyservice and email a polished
-              "View Full Report" button. Recipient opens the link in their
-              browser and sees the report at full fidelity. Recommended for
-              CSS-heavy reports. Hosted reports auto-expire after ttl_days
-              (default 30).
-
-        as_attachment is a back-compat path that attaches the HTML as a .html
-        file. Mostly superseded by mode="link" since Gmail's HTML attachment
-        preview is broken.
-        """
+        """Send a report using a verified report token. mode='link' hosts
+        the HTML and emails a View button (best for CSS-heavy reports);
+        mode='inline' embeds the HTML directly."""
         return self._sync(self._send(report_token, html_body, subject, as_attachment, attachment_name, mode, ttl_days, summary))
 
     async def _send(
@@ -157,10 +146,6 @@ class EmailService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    # ------------------------------------------------------------------
-    # Convenience: full flow (register + poll + send) in one call
-    # ------------------------------------------------------------------
-
     def send_report_with_verification(
         self,
         email: str,
@@ -172,22 +157,13 @@ class EmailService:
         ttl_days: int = 30,
         summary: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Full flow: register if needed, poll for verification, then send.
+        """Send a report, registering + verifying the email if needed.
 
-        Args:
-            email: Recipient email address
-            html_body: HTML report content
-            subject: Email subject line
-            report_token: Existing verified token (skip registration if provided)
-            on_status: Callback(message: str) for status updates
-            mode: "link" (default) hosts the HTML and emails a View button.
-                  "inline" embeds HTML in the email body (Gmail strips CSS).
-            ttl_days: How long hosted reports are kept (default 30).
-            summary: Optional summary dict for email preview tiles.
+        Caller must pass a `report_token` that belongs to `email` — passing
+        another email's token is rejected upstream.
 
-        Returns:
-            {"success": True, "report_token": "..."} on success
-            {"success": False, "error": "..."} on failure
+        On a stale token the result includes `stale_token=True` so the
+        caller can drop the entry from local config.
         """
         def _send_with_mode(token):
             return self.send_report(
@@ -195,43 +171,64 @@ class EmailService:
                 mode=mode, ttl_days=ttl_days, summary=summary,
             )
 
-        # If we have a token, try sending directly
         if report_token:
             result = _send_with_mode(report_token)
             if result.get("success"):
                 return {**result, "report_token": report_token}
-            # Token might be invalid — fall through to re-register
+            err = (result.get("error") or "").lower()
+            if "invalid" in err or "not yet verified" in err or "unverified" in err:
+                stale_result = {**result, "stale_token": True}
+            else:
+                return {**result, "report_token": report_token}
 
-        # Register (may return already-verified)
-        reg = self.register_email(email)
+        reg = self.register_email(
+            email,
+            html=html_body,
+            subject=subject,
+            summary=summary,
+            ttl_days=ttl_days,
+            mode=mode,
+        )
         if not reg.get("success"):
             return {"success": False, "error": reg.get("error", "Registration failed")}
 
         if reg.get("verified"):
-            # Already verified — send immediately
-            token = reg["report_token"]
-            result = _send_with_mode(token)
-            return {**result, "report_token": token}
+            token = reg.get("report_token")
+            if reg.get("report_sent"):
+                return {"success": True, "report_token": token, "queued": False}
+            if token:
+                result = _send_with_mode(token)
+                return {**result, "report_token": token}
+            return {"success": False, "error": "Keyservice returned verified=true with no token"}
 
-        # Not verified — poll until they click the link
+        report_queued = bool(reg.get("report_queued"))
         if on_status:
-            on_status("Verification email sent — click the link in your inbox...")
+            if report_queued:
+                on_status("Verification email sent — click the link in your inbox to release your report...")
+            else:
+                on_status("Verification email sent — click the link in your inbox...")
 
         poll_result = self.poll_verification(email)
         if not poll_result.get("verified"):
+            if report_queued:
+                return {
+                    "success": True,
+                    "queued": True,
+                    "message": (
+                        "Verification still pending — your report will be sent automatically "
+                        "as soon as you click the verify link."
+                    ),
+                }
             return {"success": False, "error": "Verification timed out — check your email and try again"}
 
         token = poll_result["report_token"]
+        if report_queued:
+            return {"success": True, "report_token": token, "queued": False}
         result = _send_with_mode(token)
         return {**result, "report_token": token}
 
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _sync(coro):
-        """Run an async coroutine synchronously."""
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():

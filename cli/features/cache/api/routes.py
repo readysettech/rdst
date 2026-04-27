@@ -247,7 +247,7 @@ async def deploy_cache(
     request: CacheDeployRequest,
     guard: TargetGuard = Depends(require_target_body),
 ):
-    """Deploy ReadySet cache (SSE stream)."""
+    """Deploy Readyset cache (SSE stream)."""
     service = CacheService()
     input_data = CacheInput(target=guard.target_name)
     options = CacheOptions(
@@ -341,7 +341,7 @@ async def run_cache_comparison(
     request: CacheRunRequest,
     guard: TargetGuard = Depends(require_target_body),
 ):
-    """Run a query against both origin DB and ReadySet cache, stream comparison results (SSE)."""
+    """Run a query against both origin DB and Readyset cache, stream comparison results (SSE)."""
     service = CacheService()
     input_data = CacheInput(target=guard.target_name, query=request.query)
 

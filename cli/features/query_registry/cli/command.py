@@ -2012,7 +2012,7 @@ class QueryCommand:
             "password": cache_password,
         }
 
-        # Open a persistent connection to ReadySet for cache management.
+        # Open a persistent connection to Readyset for cache management.
         # This also serves as the connectivity test — no separate test_conn needed.
         if not quiet:
             self.console.print("[dim]Preparing cache for comparison...[/dim]")

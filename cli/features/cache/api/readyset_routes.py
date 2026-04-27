@@ -1,4 +1,4 @@
-"""API routes for ReadySet container setup and cache operations."""
+"""API routes for Readyset container setup and cache operations."""
 
 from __future__ import annotations
 

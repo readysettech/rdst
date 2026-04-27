@@ -35,7 +35,7 @@ class TestVersionSubcommand:
         from shared.cli import RdstCLI
         cli = RdstCLI()
         result = cli.version()
-        assert "ReadySet" in result.message
+        assert "Readyset" in result.message
 
     def test_version_message_format(self):
         """version() message matches expected prefix format."""
@@ -43,7 +43,7 @@ class TestVersionSubcommand:
         cli = RdstCLI()
         result = cli.version()
         assert result.message.startswith(
-            "ReadySet Data and SQL Toolkit (rdst) version "
+            "Readyset Data and SQL Toolkit (rdst) version "
         )
 
     def test_version_message_has_version_string(self):
@@ -51,7 +51,7 @@ class TestVersionSubcommand:
         from shared.cli import RdstCLI
         cli = RdstCLI()
         result = cli.version()
-        prefix = "ReadySet Data and SQL Toolkit (rdst) version "
+        prefix = "Readyset Data and SQL Toolkit (rdst) version "
         version_part = result.message[len(prefix):]
         assert len(version_part) > 0
 
@@ -65,7 +65,7 @@ class TestVersionSubcommand:
         result = rdst_module.execute_command(cli, args)
 
         assert result.ok is True
-        assert "ReadySet Data and SQL Toolkit (rdst) version" in result.message
+        assert "Readyset Data and SQL Toolkit (rdst) version" in result.message
 
     def test_version_fallback_when_metadata_unavailable(self):
         """version() gracefully falls back to 'unknown' when metadata missing."""
@@ -88,7 +88,7 @@ class TestVersionSubcommand:
 
         assert result.ok is True
         # Message should still be well-formed
-        assert "ReadySet Data and SQL Toolkit (rdst) version" in result.message
+        assert "Readyset Data and SQL Toolkit (rdst) version" in result.message
 
 
 class TestVersionFlag:
@@ -133,7 +133,7 @@ class TestVersionFlag:
 
         captured = capsys.readouterr()
         output = captured.out + captured.err
-        assert "ReadySet Data and SQL Toolkit (rdst) version" in output
+        assert "Readyset Data and SQL Toolkit (rdst) version" in output
 
     def test_version_flag_exits(self):
         """--version causes argparse to call sys.exit(0)."""
@@ -168,11 +168,11 @@ class TestVersionFlag:
                     flag_output = mock_stdout.getvalue() + mock_stderr.getvalue()
 
         # Both should contain the same version string
-        assert "ReadySet Data and SQL Toolkit (rdst) version" in flag_output
-        assert "ReadySet Data and SQL Toolkit (rdst) version" in subcommand_version
+        assert "Readyset Data and SQL Toolkit (rdst) version" in flag_output
+        assert "Readyset Data and SQL Toolkit (rdst) version" in subcommand_version
 
         # Extract version numbers and compare
-        prefix = "ReadySet Data and SQL Toolkit (rdst) version "
+        prefix = "Readyset Data and SQL Toolkit (rdst) version "
         flag_version = flag_output.strip().replace(prefix, "")
         sub_version = subcommand_version.replace(prefix, "")
         assert flag_version == sub_version
@@ -186,7 +186,7 @@ class TestVersionConsistency:
         from shared.cli import RdstCLI
         cli = RdstCLI()
         result = cli.version()
-        prefix = "ReadySet Data and SQL Toolkit (rdst) version "
+        prefix = "Readyset Data and SQL Toolkit (rdst) version "
         version_str = result.message[len(prefix):]
         assert version_str.strip() != ""
 

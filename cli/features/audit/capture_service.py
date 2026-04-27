@@ -25,6 +25,7 @@ from .events import (
     WorkloadSnapshotEvent,
     WorkloadStatusEvent,
 )
+from .index_dedupe import filter_existing_indexes
 from .models import WorkloadAnalysis, WorkloadQuery, WorkloadRun
 from .prompts import build_audit_capture_prompt
 from .storage import AuditStorage
@@ -396,13 +397,18 @@ class CaptureService:
                     analysis_dict["raw_response"] = raw_text
                     if schema_context:
                         analysis_dict["schema_context"] = schema_context
+                    deduped_index_recs = filter_existing_indexes(
+                        analysis_dict.get("index_recommendations") or [],
+                        schema_context or "",
+                    )
+                    analysis_dict["index_recommendations"] = deduped_index_recs
                     run.analysis = WorkloadAnalysis(
                         model_used=used_model,
                         workload_characterization=analysis_dict.get("workload_characterization", ""),
                         health_score=analysis_dict.get("health_score", 0),
                         read_write_ratio=analysis_dict.get("read_write_ratio", ""),
                         top_bottlenecks=analysis_dict.get("top_bottlenecks", []),
-                        index_recommendations=analysis_dict.get("index_recommendations", []),
+                        index_recommendations=deduped_index_recs,
                         caching_candidates=analysis_dict.get("caching_candidates", []),
                         capacity_insights=analysis_dict.get("capacity_insights", []),
                         optimization_priorities=analysis_dict.get("optimization_priorities", []),

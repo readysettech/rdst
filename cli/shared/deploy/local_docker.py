@@ -12,7 +12,7 @@ def deploy_local_docker(
     variables: Dict[str, str],
     password: str,
 ) -> Dict[str, Any]:
-    """Deploy ReadySet locally via Docker.
+    """Deploy Readyset locally via Docker.
 
     Two paths:
     1. Container exists from prior analyze → promote to permanent
@@ -29,7 +29,7 @@ def deploy_local_docker(
 
 
 def _find_existing_container(target_name: str) -> Optional[Dict[str, Any]]:
-    """Check for existing ReadySet container for this target."""
+    """Check for existing Readyset container for this target."""
     name = f"rdst-readyset-{target_name}"
     try:
         result = subprocess.run(
@@ -122,7 +122,7 @@ def _create_container(
     variables: Dict[str, str],
     password: str,
 ) -> Dict[str, Any]:
-    """Create a new persistent ReadySet container."""
+    """Create a new persistent Readyset container."""
     engine = variables["db_engine"]
     db_host = variables["db_host"]
     db_port = variables["db_port"]
@@ -190,7 +190,7 @@ def _create_container(
     ]
 
     try:
-        print("Pulling and starting ReadySet container (this may take a while)...")
+        print("Pulling and starting Readyset container (this may take a while)...")
         result = subprocess.run(
             docker_cmd,
             capture_output=True,
@@ -242,7 +242,7 @@ def _format_docker_error(error_msg: str) -> str:
 
     if "no such image" in lower or "unable to find image" in lower:
         return (
-            f"ReadySet image not found.\n\n"
+            f"Readyset image not found.\n\n"
             f"Check your network connection and try again.\n\n"
             f"Original error: {error_msg}"
         )

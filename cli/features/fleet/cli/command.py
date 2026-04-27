@@ -867,28 +867,32 @@ class FleetCommand:
         """Prompt for email confirmation and send the fleet report via hosted link."""
         import re
         from shared.config.targets import TargetsConfig
-        from shared.ui import Prompt
+        from shared.ui import Prompt, Confirm
 
         cfg = TargetsConfig()
         cfg.load()
-        email = cfg.get_email()
-        report_token = cfg._data.get("report_token")
+        primary_email = cfg.get_email()
         _email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-        if email and _email_re.match(email):
-            console.print(f"\n  Sending report to [bold]{email}[/bold]")
+        recipient = None
+        if primary_email and _email_re.match(primary_email):
+            console.print(f"\n  Sending report to [bold]{primary_email}[/bold]")
             try:
-                alt = (Prompt.ask("  Press Enter to continue or type a different email", default="", show_default=False) or "").strip()
+                alt = (Prompt.ask(
+                    "  Press Enter to continue or type a different email",
+                    default="", show_default=False,
+                ) or "").strip()
             except (EOFError, KeyboardInterrupt):
                 console.print(f"\n  [dim]Skipped. View locally: rdst fleet snapshots[/dim]")
                 return
             if alt:
                 if _email_re.match(alt):
-                    email = alt
-                    cfg.set_email(email)
-                    cfg.save()
+                    recipient = alt
                 else:
                     console.print("  [yellow]Invalid email address. Sending to the original.[/yellow]")
+                    recipient = primary_email
+            else:
+                recipient = primary_email
         else:
             console.print(
                 "\n  Enter your email to receive the full fleet report."
@@ -896,22 +900,25 @@ class FleetCommand:
             )
             while True:
                 try:
-                    email = (Prompt.ask("  Email", default="", show_default=False) or "").strip()
+                    typed = (Prompt.ask("  Email", default="", show_default=False) or "").strip()
                 except (EOFError, KeyboardInterrupt):
-                    email = ""
+                    typed = ""
                     break
-                if not email:
+                if not typed:
                     break
-                if _email_re.match(email):
+                if _email_re.match(typed):
+                    recipient = typed
                     break
                 console.print("  [yellow]Invalid email address. Try again or press Ctrl+C to skip.[/yellow]")
 
-            if email and _email_re.match(email):
-                cfg.set_email(email)
-                cfg.save()
-            else:
+            if not recipient:
                 console.print(f"  [dim]Skipped. View locally: rdst fleet snapshots[/dim]")
                 return
+
+        report_token = cfg.get_token_for_email(recipient)
+        if not cfg.get_email():
+            cfg.set_email(recipient)
+            cfg.save()
 
         try:
             from features.audit.email_service import EmailService
@@ -937,7 +944,7 @@ class FleetCommand:
                 spinner.start()
 
             result = svc.send_report_with_verification(
-                email=email,
+                email=recipient,
                 html_body=html_content,
                 subject=subject,
                 report_token=report_token,
@@ -949,12 +956,33 @@ class FleetCommand:
             if spinner:
                 spinner.stop()
 
+            if result.get("stale_token"):
+                cfg.remove_email(recipient)
+                cfg.save()
+
             if result.get("success"):
                 new_token = result.get("report_token")
-                if new_token and new_token != report_token:
-                    cfg._data["report_token"] = new_token
-                    cfg.save()
-                console.print(f"  [green]Report link sent to {email}[/green]")
+                if new_token:
+                    cfg.add_verified_email(recipient, new_token)
+                current_primary = cfg.get_email()
+                if recipient and recipient != current_primary and current_primary:
+                    try:
+                        make_default = Confirm.ask(
+                            f"  Make [bold]{recipient}[/bold] your default for future audits?",
+                            default=False,
+                        )
+                    except (EOFError, KeyboardInterrupt):
+                        make_default = False
+                    if make_default:
+                        cfg.set_primary_email(recipient)
+                cfg.save()
+                if result.get("queued"):
+                    console.print(
+                        f"  [green]Verification email sent to {recipient}[/green]\n"
+                        f"  [dim]Click the link in your inbox — your report will arrive automatically.[/dim]"
+                    )
+                else:
+                    console.print(f"  [green]Report link sent to {recipient}[/green]")
             else:
                 error = result.get("error", "unknown error")
                 console.print(f"  [yellow]{error}[/yellow]")

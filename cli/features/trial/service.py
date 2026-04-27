@@ -6,13 +6,12 @@ import os
 from typing import Any
 
 from shared.config.targets import TargetsConfig
+from shared.keyservice import keyservice_url
 from shared.llm import cents_to_tokens, format_tokens
 from shared.secret_store_service import SecretStoreService
 from shared.telemetry import telemetry
 
 from .models import TrialActivateResult, TrialRegisterResult, TrialStatusResult
-
-REGISTER_URL = "https://rdst-keyservice.readysetio.workers.dev/register"
 
 
 class TrialService:
@@ -40,7 +39,7 @@ class TrialService:
 
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.post(REGISTER_URL, json={"email": email})
+                resp = await client.post(keyservice_url("/register"), json={"email": email})
         except Exception:
             return TrialRegisterResult(
                 success=False,

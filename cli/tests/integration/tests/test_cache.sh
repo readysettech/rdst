@@ -7,7 +7,7 @@ test_cache_commands() {
   # No --readyset-cache flag needed. We need a deployed cache first.
   local simple_query="SELECT * FROM title_basics WHERE tconst = 'tt0000001'"
 
-  # Deploy ReadySet cache if not already deployed
+  # Deploy Readyset cache if not already deployed
   CACHE_TARGET_NAME="${TARGET_NAME}-cache"
   run_cmd "Deploy Readyset cache for tests" \
     "${RDST_CMD[@]}" cache deploy --target "$TARGET_NAME" --mode docker

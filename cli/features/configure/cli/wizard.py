@@ -1213,18 +1213,7 @@ class ConfigurationWizard:
         if choice == 1:
             trial_success = self._run_trial_registration(cfg)
         elif choice == 2:
-            self.console.print(
-                MessagePanel(
-                    "Set the environment variable:\n"
-                    '  export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
-                    "Get a key at: https://console.anthropic.com/\n\n"
-                    "For persistence, add to ~/.bashrc or ~/.zshrc:\n"
-                    '  echo \'export ANTHROPIC_API_KEY="your-key"\' >> ~/.bashrc\n'
-                    "  source ~/.bashrc",
-                    variant="info",
-                    title="API Key Setup",
-                )
-            )
+            self._capture_user_anthropic_key()
 
         cfg._data.setdefault("llm", {})
         cfg._data["llm"]["provider"] = "claude"
@@ -1242,7 +1231,9 @@ class ConfigurationWizard:
         """Run the trial registration flow with email validation retry loop."""
         import requests as req
 
-        register_url = "https://rdst-keyservice.readysetio.workers.dev/register"
+        from shared.keyservice import keyservice_url
+
+        register_url = keyservice_url("/register")
 
         max_attempts = 3
         for attempt in range(max_attempts):
@@ -1435,14 +1426,19 @@ class ConfigurationWizard:
             self.console.print(MessagePanel("Invalid token", variant="error"))
             return False
 
+        token = token.strip()
         cfg.set_trial_config(
             {
-                "token": token.strip(),
+                "token": token,
                 "email": email,
                 "status": "active",
             }
         )
         cfg.save()
+
+        self._persist_secret_to_keyring(
+            "RDST_TRIAL_TOKEN", token, label="Trial token"
+        )
 
         try:
             telemetry.track(
@@ -1467,4 +1463,84 @@ class ConfigurationWizard:
                 title="Trial Active",
             )
         )
+        return True
+
+    def _persist_secret_to_keyring(
+        self, name: str, value: str, label: str = "Secret"
+    ) -> bool:
+        """Save `value` to the OS keyring under `name`. Returns True on
+        keyring persistence, False if only the process env was set."""
+        import os
+
+        from shared.secret_store_service import SecretStoreService
+
+        os.environ[name] = value
+        try:
+            store = SecretStoreService()
+            result = store.set_secret(name=name, value=value, persist=True)
+        except Exception:
+            return False
+
+        if result.get("persisted"):
+            self.console.print(
+                MessagePanel(
+                    f"{label} saved securely to your OS keychain. Future RDST "
+                    f"sessions will pick it up automatically — no `export` needed.",
+                    variant="success",
+                    title="Saved Securely",
+                )
+            )
+            return True
+
+        self.console.print(
+            MessagePanel(
+                f"{label} applied for this session only. Your OS keychain "
+                f"isn't available — to make this persist across shells, "
+                f"add `export {name}=\"...\"` to ~/.bashrc or ~/.zshrc.",
+                variant="warning",
+                title="Session Only",
+            )
+        )
+        return False
+
+    def _capture_user_anthropic_key(self) -> bool:
+        """Prompt for ANTHROPIC_API_KEY and persist to keyring/env."""
+        self.console.print(
+            MessagePanel(
+                "Paste your Anthropic API key — we'll save it securely to "
+                "your OS keychain (if available) so you don't need to "
+                "manually export it on every shell.\n\n"
+                "Get a key at: https://console.anthropic.com/\n\n"
+                "Press Enter on a blank line to skip.",
+                variant="info",
+                title="Anthropic API Key",
+            )
+        )
+        try:
+            key = (Prompt.ask("ANTHROPIC_API_KEY", default="", show_default=False) or "").strip()
+        except (EOFError, KeyboardInterrupt):
+            key = ""
+
+        if not key:
+            self.console.print(
+                MessagePanel(
+                    "Skipped. Set the env var when ready:\n"
+                    '  export ANTHROPIC_API_KEY="sk-ant-..."',
+                    variant="info",
+                    title="No Key Provided",
+                )
+            )
+            return False
+
+        if not key.startswith("sk-ant-"):
+            self.console.print(
+                MessagePanel(
+                    "That doesn't look like an Anthropic key (expected prefix "
+                    "`sk-ant-`). Saving anyway, but double-check the value.",
+                    variant="warning",
+                    title="Unexpected Key Format",
+                )
+            )
+
+        self._persist_secret_to_keyring("ANTHROPIC_API_KEY", key, label="Anthropic API key")
         return True

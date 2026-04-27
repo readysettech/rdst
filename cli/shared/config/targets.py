@@ -221,22 +221,154 @@ class TargetsConfig:
         if model:
             self._data["llm"]["model"] = model
 
+    # ------------------------------------------------------------------
+    # Email + verified-delivery storage.
+    #
+    # On disk:
+    #
+    #   [[emails]]
+    #   email = "user@example.com"
+    #   primary = true
+    #   verified = true
+    #   report_token = "..."
+    #   verified_at = "2026-..."
+    #
+    # Exactly one entry is `primary = true`. That entry's email is the user's
+    # identity for telemetry and the default report recipient.
+    # ------------------------------------------------------------------
+
+    def _emails_list(self) -> List[Dict[str, Any]]:
+        emails = self._data.get("emails")
+        if not isinstance(emails, list):
+            self._data["emails"] = []
+            return self._data["emails"]
+        return emails
+
     def get_email(self) -> Optional[str]:
-        return self._data.get("email")
+        """Primary email — telemetry identity AND default report recipient."""
+        emails = self._emails_list()
+        for entry in emails:
+            if entry.get("primary") and entry.get("email"):
+                return entry["email"]
+        if emails:
+            return emails[0].get("email")
+        return None
 
     def set_email(self, email: str) -> None:
-        """Store or update user email (always overwrites — used by report flow)."""
-        if email:
-            self._data["email"] = email
+        """Promote `email` to primary. Add as an unverified entry if missing.
+        Does NOT mark verified — verification happens via add_verified_email."""
+        if not email:
+            return
+        emails = self._emails_list()
+        found = False
+        for entry in emails:
+            if entry.get("email") == email:
+                entry["primary"] = True
+                found = True
+            else:
+                entry.pop("primary", None)
+        if not found:
+            emails.append({"email": email, "primary": True, "verified": False})
+
+    def set_primary_email(self, email: str) -> bool:
+        """Mark an existing entry as primary. Returns False if not found."""
+        emails = self._emails_list()
+        found = False
+        for entry in emails:
+            if entry.get("email") == email:
+                entry["primary"] = True
+                found = True
+            else:
+                entry.pop("primary", None)
+        return found
+
+    def add_verified_email(self, email: str, report_token: str) -> None:
+        """Mark `email` as verified with a report_token. Adds the entry if
+        missing. Does not change which entry is primary unless this is the
+        very first email."""
+        if not email or not report_token:
+            return
+        import datetime
+
+        now_iso = (
+            datetime.datetime.now(datetime.timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        emails = self._emails_list()
+        for entry in emails:
+            if entry.get("email") == email:
+                entry["verified"] = True
+                entry["report_token"] = report_token
+                entry.setdefault("verified_at", now_iso)
+                return
+        new_entry: Dict[str, Any] = {
+            "email": email,
+            "verified": True,
+            "report_token": report_token,
+            "verified_at": now_iso,
+        }
+        if not any(e.get("primary") for e in emails):
+            new_entry["primary"] = True
+        emails.append(new_entry)
+
+    def get_token_for_email(self, email: str) -> Optional[str]:
+        """Token for `email` if it has a verified entry. Else None."""
+        if not email:
+            return None
+        for entry in self._emails_list():
+            if (
+                entry.get("email") == email
+                and entry.get("verified")
+                and entry.get("report_token")
+            ):
+                return entry.get("report_token")
+        return None
+
+    def has_verified_email(self, email: str) -> bool:
+        return self.get_token_for_email(email) is not None
+
+    def list_verified_emails(self) -> List[str]:
+        """Verified email addresses, primary first, then in file order."""
+        verified: List[str] = []
+        primary: Optional[str] = None
+        for entry in self._emails_list():
+            if not (entry.get("verified") and entry.get("report_token")):
+                continue
+            addr = entry.get("email")
+            if not addr:
+                continue
+            if entry.get("primary"):
+                primary = addr
+            else:
+                verified.append(addr)
+        return ([primary] if primary else []) + verified
+
+    def remove_email(self, email: str) -> bool:
+        """Drop an entry — used to recover from stale/invalid tokens. If the
+        primary is removed, promotes the next remaining entry."""
+        if not email:
+            return False
+        emails = self._emails_list()
+        new_emails = [e for e in emails if e.get("email") != email]
+        if len(new_emails) == len(emails):
+            return False
+        if not any(e.get("primary") for e in new_emails) and new_emails:
+            new_emails[0]["primary"] = True
+        self._data["emails"] = new_emails
+        return True
+
+    # Backward-compat shims. Old callers asked for "the" report token. Now
+    # tokens are per-email, so these resolve against the primary entry.
 
     def get_report_token(self) -> Optional[str]:
-        """Get the verified report delivery token (keyservice)."""
-        return self._data.get("report_token")
+        primary = self.get_email()
+        return self.get_token_for_email(primary) if primary else None
 
     def set_report_token(self, token: str) -> None:
-        """Store a verified report_token returned by the keyservice."""
-        if token:
-            self._data["report_token"] = token
+        primary = self.get_email()
+        if primary and token:
+            self.add_verified_email(primary, token)
 
     def get_trial_config(self) -> Dict[str, Any]:
         return self._data.get("trial", {})

@@ -25,7 +25,7 @@ class _ReadysetCompatGenerator(_BaseGenerator):
     """Custom SQL generator that omits AS for table aliases.
 
     sqlglot's default generator produces 'FROM table AS alias' but
-    ReadySet's query ID hashing treats 'FROM table alias' (no AS) as
+    Readyset's query ID hashing treats 'FROM table alias' (no AS) as
     a different query. Since the wire protocol sends queries without AS,
     we must generate SQL without AS to ensure cache ID consistency.
     """

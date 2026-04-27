@@ -1,4 +1,4 @@
-"""Shared ReadySet container setup utilities."""
+"""Shared Readyset container setup utilities."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def setup_readyset_containers(
     test_data_rows: int = 100,
     llm_model: str | None = None,
 ) -> Dict[str, Any]:
-    """Set up test database and ReadySet containers for a target database."""
+    """Set up test database and Readyset containers for a target database."""
     try:
         workflow_manager_class, default_functions, _ = get_workflow_components()
 
@@ -259,7 +259,7 @@ def setup_readyset_containers(
 
 
 def get_container_ports(engine: str, find_available: bool = False) -> tuple[int, int]:
-    """Get the test database and ReadySet ports for a database engine."""
+    """Get the test database and Readyset ports for a database engine."""
     if engine.lower() == "mysql":
         default_test, default_readyset = 3308, 3307
     else:
@@ -271,7 +271,7 @@ def get_container_ports(engine: str, find_available: bool = False) -> tuple[int,
 
 
 def get_container_names(target_name: str, engine: str) -> tuple[str, str]:
-    """Get the test database and ReadySet container names for a target."""
+    """Get the test database and Readyset container names for a target."""
     if engine.lower() == "mysql":
         container_name = f"rdst-test-mysql-{target_name}"
     else:

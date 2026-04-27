@@ -206,6 +206,11 @@ Each target has a name, connection details, and an environment variable for the 
                     ArgDef("--target", aliases=["--name"], help="Target name"),
                 ],
             ),
+            SubcommandDef(
+                name="llm",
+                help="Configure LLM (trial signup or your own Anthropic key)",
+                args=[],
+            ),
         ],
         subcommands=[
             ("add", "Add a new database target"),
@@ -214,6 +219,7 @@ Each target has a name, connection details, and an environment variable for the 
             ("remove", "Remove a target"),
             ("default", "Set the default target"),
             ("test", "Test connection to a target"),
+            ("llm", "Configure LLM (trial signup or your own Anthropic key)"),
         ],
         examples=[
             (
@@ -317,7 +323,7 @@ MySQL Slow Log Setup:
         description="""Analyze a SQL query for performance issues and get optimization recommendations.
 
 Runs EXPLAIN ANALYZE and uses AI to provide index recommendations, query rewrites,
-and ReadySet caching opportunities.""",
+and Readyset caching opportunities.""",
         args=[
             MutuallyExclusiveGroup(
                 args=[
@@ -390,7 +396,7 @@ and ReadySet caching opportunities.""",
             ("rdst analyze -f query.sql --target mydb", "Analyze query from file"),
             (
                 'rdst analyze -q "SELECT ..." --target mydb',
-                "Analyze with automatic ReadySet performance test",
+                "Analyze with automatic Readyset performance test",
             ),
         ],
     ),
@@ -662,7 +668,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
             ),
             SubcommandDef(
                 name="cache-compare",
-                help="Compare query performance: upstream vs ReadySet cache",
+                help="Compare query performance: upstream vs Readyset cache",
                 args=[
                     ArgDef(
                         "queries",
@@ -722,7 +728,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
             ("delete", "Delete a query by name or hash"),
             ("import", "Import multiple queries from a SQL file"),
             ("run", "Run saved queries for benchmarking/load generation"),
-            ("cache-compare", "Compare query performance: upstream vs ReadySet cache"),
+            ("cache-compare", "Compare query performance: upstream vs Readyset cache"),
         ],
         examples=[
             ('rdst query add my-query -q "SELECT * FROM users"', "Add a query"),
@@ -1326,17 +1332,17 @@ Modes:
     ),
     "cache": CommandDef(
         name="cache",
-        short_help="Deploy and manage ReadySet shallow caches",
-        description="""Deploy ReadySet and manage shallow caches.
+        short_help="Deploy and manage Readyset shallow caches",
+        description="""Deploy Readyset and manage shallow caches.
 
-Use 'cache deploy' to deploy a ReadySet instance, then 'cache add/show/delete'
-to manage cached queries. After deploying, a ReadySet target is automatically
+Use 'cache deploy' to deploy a Readyset instance, then 'cache add/show/delete'
+to manage cached queries. After deploying, a Readyset target is automatically
 registered (e.g., mydb-cache). Use that target name with cache commands.""",
         subcommand_dest="cache_subcommand",
         subcommand_defs=[
             SubcommandDef(
                 name="deploy",
-                help="Deploy ReadySet cache to local or remote environment",
+                help="Deploy Readyset cache to local or remote environment",
                 args=[
                     ArgDef("--target", required=True, help="Database target to deploy for"),
                     ArgDef(
@@ -1355,7 +1361,7 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
                     ArgDef("--host", help="Remote host for SSH deployment (omit for local)"),
                     ArgDef("--ssh-key", help="SSH private key path"),
                     ArgDef("--ssh-user", default="root", help="SSH username (default: root)"),
-                    ArgDef("--port", type=int, help="ReadySet listen port"),
+                    ArgDef("--port", type=int, help="Readyset listen port"),
                     ArgDef("--namespace", default="readyset", help="Kubernetes namespace"),
                     ArgDef("--kubeconfig", help="Path to kubeconfig file for Kubernetes deployment"),
                     ArgDef(
@@ -1371,7 +1377,7 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
                 help="Create a shallow cache for a query",
                 args=[
                     ArgDef("query", nargs="?", help="SQL query or registry hash_id (12 hex chars)"),
-                    ArgDef("--target", required=True, help="ReadySet target name"),
+                    ArgDef("--target", required=True, help="Readyset target name"),
                     ArgDef("--tag", help="Tag for query in registry"),
                     ArgDef("--dry-run", action="store_true", help="Check if query is cacheable without creating it"),
                     ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
@@ -1379,26 +1385,26 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
             ),
             SubcommandDef(
                 name="show",
-                help="List cached queries in ReadySet",
+                help="List cached queries in Readyset",
                 args=[
-                    ArgDef("--target", required=True, help="ReadySet target name"),
+                    ArgDef("--target", required=True, help="Readyset target name"),
                     ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
                 ],
             ),
             SubcommandDef(
                 name="delete",
-                help="Remove a cache from ReadySet by cache ID",
+                help="Remove a cache from Readyset by cache ID",
                 args=[
                     ArgDef("cache_id", help="Cache ID (from 'rdst cache show')"),
-                    ArgDef("--target", required=True, help="ReadySet target name"),
+                    ArgDef("--target", required=True, help="Readyset target name"),
                     ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
                 ],
             ),
             SubcommandDef(
                 name="drop-all",
-                help="Remove all caches from ReadySet",
+                help="Remove all caches from Readyset",
                 args=[
-                    ArgDef("--target", required=True, help="ReadySet target name"),
+                    ArgDef("--target", required=True, help="Readyset target name"),
                     ArgDef("--yes", short="-y", action="store_true", help="Skip confirmation prompt"),
                     ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
                 ],
@@ -1414,7 +1420,7 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
             ),
         ],
         subcommands=[
-            ("deploy", "Deploy ReadySet cache"),
+            ("deploy", "Deploy Readyset cache"),
             ("add", "Create a shallow cache for a query"),
             ("show", "List all cached queries"),
             ("delete", "Remove a cache by ID"),
@@ -1658,7 +1664,7 @@ def get_main_examples() -> List[Tuple[str, str]]:
         ("rdst init", "First-time setup wizard"),
         ("rdst top --target mydb", "Monitor slow queries"),
         ('rdst analyze -q "SELECT * FROM users" --target mydb', "Analyze a query"),
-        ('rdst query cache-compare my-query --target mydb', "Compare upstream vs ReadySet cache performance"),
+        ('rdst query cache-compare my-query --target mydb', "Compare upstream vs Readyset cache performance"),
         ('rdst help "how do I find slow queries?"', "Quick docs lookup"),
     ]
 

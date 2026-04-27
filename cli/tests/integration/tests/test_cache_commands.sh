@@ -3,17 +3,17 @@
 # =============================================================================
 # Integration tests for rdst cache deploy/add/show/delete/drop-all
 #
-# These tests exercise the cache subcommands against a real ReadySet
+# These tests exercise the cache subcommands against a real Readyset
 # instance deployed via `rdst cache deploy`. They run AFTER
-# test_cache_commands_setup has deployed ReadySet and registered the cache target.
+# test_cache_commands_setup has deployed Readyset and registered the cache target.
 #
 # Prerequisites:
 #   - Upstream database target is configured (from test_config_commands)
-#   - ReadySet Docker image is pullable (public registry)
+#   - Readyset Docker image is pullable (public registry)
 #   - Docker is available on the test runner
 #
 # Flow:
-#   1. Deploy ReadySet for the target → auto-registers {target}-cache
+#   1. Deploy Readyset for the target → auto-registers {target}-cache
 #   2. Verify cache target was registered
 #   3. cache show → empty (no caches yet)
 #   4. cache add (direct SQL) → creates shallow cache
@@ -29,11 +29,11 @@
 CACHE_TEST_QUERY="SELECT * FROM title_basics WHERE tconst = 'tt0000001'"
 
 test_cache_commands_setup() {
-  log_section "Cache Commands Setup: Deploy ReadySet (${DB_ENGINE})"
+  log_section "Cache Commands Setup: Deploy Readyset (${DB_ENGINE})"
 
-  # Deploy ReadySet for the upstream target
+  # Deploy Readyset for the upstream target
   # This pulls the Docker image and creates a container
-  run_cmd "Deploy ReadySet for ${TARGET_NAME}" \
+  run_cmd "Deploy Readyset for ${TARGET_NAME}" \
     "${RDST_CMD[@]}" cache deploy --target "$TARGET_NAME" --mode docker
   assert_contains "${CACHE_TARGET_NAME}" "deploy should register cache target"
 
@@ -196,7 +196,7 @@ test_cache_drop_all() {
 test_cache_error_wrong_target() {
   log_section "Cache Commands: Error - Wrong Target Type (${DB_ENGINE})"
 
-  # Try cache command against database target (not ReadySet)
+  # Try cache command against database target (not Readyset)
   run_expect_fail "Cache show on database target" \
     "${RDST_CMD[@]}" cache show --target "$TARGET_NAME"
   assert_contains "database target" "should explain target type issue"

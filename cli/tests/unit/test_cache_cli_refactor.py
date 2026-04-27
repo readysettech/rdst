@@ -193,7 +193,7 @@ class TestDeployDelegation:
         cmd = DeployCommand()
         progress = ProgressEvent(
             type="progress", stage="deploying", percent=30,
-            message="Deploying ReadySet (kubernetes)...",
+            message="Deploying Readyset (kubernetes)...",
         )
         complete = CacheDeployCompleteEvent(
             type="deploy_complete", success=True, deployed=True, running=True,

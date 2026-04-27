@@ -101,7 +101,7 @@ test_readyset_flag() {
   log_section "4. Analyze Auto-Readyset (${DB_ENGINE})"
 
   # Readyset analysis runs automatically when a cache target exists.
-  # No --readyset flag needed. Cache tests should have deployed ReadySet already.
+  # No --readyset flag needed. Cache tests should have deployed Readyset already.
 
   local simple_query="SELECT * FROM title_basics WHERE tconst = 'tt0000005'"
 

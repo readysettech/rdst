@@ -19,7 +19,7 @@ def deploy_local_systemd(
     variables: Dict[str, str],
     password: str,
 ) -> Dict[str, Any]:
-    """Deploy ReadySet locally as a systemd service.
+    """Deploy Readyset locally as a systemd service.
 
     Generates the systemd deployment script from template, writes to a
     temp file, and executes it. The script handles everything: binary

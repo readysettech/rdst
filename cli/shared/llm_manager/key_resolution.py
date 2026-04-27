@@ -2,7 +2,9 @@
 
 RDST routes LLM requests based on key type:
   - Own Anthropic key (env var) -> direct to api.anthropic.com
-  - Trial token (config.toml)  -> route to rdst-keyservice.readysetio.workers.dev proxy
+  - Trial token (config.toml)  -> route to the keyservice proxy
+    (defaults to prod; overridable via RDST_KEYSERVICE_URL — see
+    shared.keyservice).
 
 Trial requests include HMAC attestation headers to prevent
 trial tokens from being used outside RDST.
@@ -16,11 +18,11 @@ import hmac
 import os
 import time
 
+from shared.keyservice import keyservice_base_url, keyservice_url
 
-# Hardcoded proxy endpoint - only changes on redeploy
-TRIAL_PROXY_URL = "https://rdst-keyservice.readysetio.workers.dev/v1/messages"
-# SDK version (without /v1/messages path, used by Anthropic SDK)
-TRIAL_PROXY_BASE = "https://rdst-keyservice.readysetio.workers.dev"
+
+TRIAL_PROXY_URL = keyservice_url("/v1/messages")
+TRIAL_PROXY_BASE = keyservice_base_url()
 # Client attestation value for HMAC signing — the proxy checks that requests
 # come from the RDST CLI, not arbitrary HTTP clients reusing a trial token.
 # This is defense-in-depth, not cryptographic security — the $5 per-user cap
@@ -88,7 +90,7 @@ def resolve_api_key() -> KeyResolution:
         return KeyResolution(
             api_key=trial_env,
             is_trial=True,
-            proxy_url=TRIAL_PROXY_URL,
+            proxy_url=keyservice_url("/v1/messages"),
             extra_headers=_make_attestation_headers(trial_env),
         )
 
@@ -121,7 +123,7 @@ def resolve_api_key() -> KeyResolution:
         return KeyResolution(
             api_key=trial_config_token,
             is_trial=True,
-            proxy_url=TRIAL_PROXY_URL,
+            proxy_url=keyservice_url("/v1/messages"),
             extra_headers=_make_attestation_headers(trial_config_token),
         )
 
@@ -141,7 +143,7 @@ def resolve_api_key() -> KeyResolution:
             return KeyResolution(
                 api_key=keyring_trial,
                 is_trial=True,
-                proxy_url=TRIAL_PROXY_URL,
+                proxy_url=keyservice_url("/v1/messages"),
                 extra_headers=_make_attestation_headers(keyring_trial),
             )
     except Exception:

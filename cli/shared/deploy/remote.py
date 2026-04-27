@@ -25,7 +25,7 @@ def deploy_remote(
     ssh_key: Optional[str] = None,
     ssh_user: str = "root",
 ) -> Dict[str, Any]:
-    """Deploy ReadySet to a remote host via SSH.
+    """Deploy Readyset to a remote host via SSH.
 
     Steps:
     1. Generate deployment script from template

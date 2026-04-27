@@ -1,4 +1,4 @@
-"""Shared ReadySet workflow function registry."""
+"""Shared Readyset workflow function registry."""
 
 from __future__ import annotations
 

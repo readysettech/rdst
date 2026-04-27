@@ -1,5 +1,5 @@
 """
-ReadySet CLI stubs (programmatic surface)
+Readyset CLI stubs (programmatic surface)
 
 This module defines a small, modern-feeling programmatic interface for a future
 `rdst` CLI. Each method returns a structured result and serves as a stub where
@@ -568,7 +568,7 @@ class RdstCLI:
         banner = (
             "\n"
             "==============================================\n"
-            "  ReadySet Data and SQL Toolkit (rdst)\n"
+            "  Readyset Data and SQL Toolkit (rdst)\n"
             "==============================================\n"
         )
         intro = (
@@ -583,7 +583,7 @@ class RdstCLI:
             "  - rdst agent            Manage and run data agents with safety policies\n"
             "  - rdst query            Manage saved queries (add/list/delete)\n"
             "  - rdst schema           Manage semantic layer for your database\n"
-            "  - rdst cache            Deploy and manage ReadySet shallow caches\n"
+            "  - rdst cache            Deploy and manage Readyset shallow caches\n"
             "  - rdst fleet            Manage and audit database fleets\n"
             "  - rdst audit            Run a deep health audit of a database target\n"
             "  - rdst guard            Manage reusable safety policies\n"
@@ -615,7 +615,7 @@ class RdstCLI:
                 pkg_version = "unknown"
 
         return RdstResult(
-            True, f"ReadySet Data and SQL Toolkit (rdst) version {pkg_version}"
+            True, f"Readyset Data and SQL Toolkit (rdst) version {pkg_version}"
         )
 
     # rdst report

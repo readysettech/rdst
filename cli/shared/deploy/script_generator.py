@@ -13,7 +13,7 @@ from typing import Dict
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
-# Default ReadySet ports by engine
+# Default Readyset ports by engine
 DEFAULT_PORTS = {
     "postgresql": 5433,
     "mysql": 3307,
@@ -36,7 +36,7 @@ def _normalize_host(host: str) -> str:
 
 
 def _find_available_port(engine: str, deploy_host: str = "localhost") -> int:
-    """Find a ReadySet port that doesn't conflict with existing cache targets on the same host.
+    """Find a Readyset port that doesn't conflict with existing cache targets on the same host.
 
     Only matters when deploying to the same host (e.g., multiple local Docker caches).
     Remote hosts on different IPs can share the same port number.

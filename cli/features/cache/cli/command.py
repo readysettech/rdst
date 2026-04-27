@@ -1,4 +1,4 @@
-"""RDST Cache commands — manage shallow caches in a deployed ReadySet instance.
+"""RDST Cache commands — manage shallow caches in a deployed Readyset instance.
 
 Delegates all business logic to CacheService; this module handles CLI
 rendering (Rich console output) and RdstResult conversion.
@@ -42,7 +42,7 @@ from shared.service_events import ErrorEvent, ProgressEvent
 
 
 class CacheCommands:
-    """Manage shallow caches on a deployed ReadySet instance."""
+    """Manage shallow caches on a deployed Readyset instance."""
 
     def __init__(self):
         self._console = get_console()
@@ -61,7 +61,7 @@ class CacheCommands:
         target_config: Optional[Dict[str, Any]] = None,
         json_output: bool = False,
     ) -> RdstResult:
-        """List cached queries in ReadySet."""
+        """List cached queries in Readyset."""
         if not target:
             return self._error("Target is required.", hint="rdst cache show --target <name>")
 
@@ -160,7 +160,7 @@ class CacheCommands:
         dry_run: bool = False,
         json_output: bool = False,
     ) -> RdstResult:
-        """Create a shallow cache for a query in ReadySet."""
+        """Create a shallow cache for a query in Readyset."""
         if not query:
             return self._error("Missing query argument.", hint="rdst cache add <query-or-hash> --target <name>")
         if not target:
@@ -198,7 +198,7 @@ class CacheCommands:
                     hint="Use a SELECT query, a query name, or a registry hash.",
                 )
 
-        # Before creating cache from SQL text, check if ReadySet already has
+        # Before creating cache from SQL text, check if Readyset already has
         # this query as a proxied query. Using the proxied query ID ensures
         # the cache matches how the wire protocol sees the query, avoiding
         # normalization mismatches (e.g., sqlglot adds AS to table aliases).
@@ -319,14 +319,14 @@ class CacheCommands:
                 else:
                     if last_event.supported:
                         self._console.print(StyledPanel(
-                            f"Query is supported for caching by ReadySet.\n\n"
+                            f"Query is supported for caching by Readyset.\n\n"
                             f"  Query: {str(InlineSQL(last_event.query, max_length=80))}\n\n"
                             f"  Run without --dry-run to create the cache.",
                             title="Dry Run — Supported", variant="success",
                         ))
                     else:
                         self._console.print(StyledPanel(
-                            f"Query is NOT supported for caching by ReadySet.\n\n"
+                            f"Query is NOT supported for caching by Readyset.\n\n"
                             f"  Query:  {str(InlineSQL(last_event.query, max_length=80))}\n"
                             f"  Detail: {last_event.detail or ''}\n",
                             title="Dry Run — Not Supported", variant="error",
@@ -369,7 +369,7 @@ class CacheCommands:
         target_config: Optional[Dict[str, Any]] = None,
         json_output: bool = False,
     ) -> RdstResult:
-        """Remove a cache from ReadySet by cache ID."""
+        """Remove a cache from Readyset by cache ID."""
         if not cache_id:
             return self._error("Missing cache ID.", hint="rdst cache delete <cache_id> --target <name>")
         if not target:
@@ -417,7 +417,7 @@ class CacheCommands:
         json_output: bool = False,
         yes: bool = False,
     ) -> RdstResult:
-        """Remove all caches from ReadySet."""
+        """Remove all caches from Readyset."""
         if not target:
             return self._error("Target is required.", hint="rdst cache drop-all --target <name>")
 

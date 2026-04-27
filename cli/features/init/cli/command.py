@@ -49,7 +49,7 @@ class InitCommand:
         except Exception:
             init_completed = False
 
-        if interactive is None:
+        if not interactive:
             interactive = self._is_tty()
 
         if init_completed and not force:
@@ -72,15 +72,11 @@ class InitCommand:
             )
 
         if not interactive:
-            has_existing_config = bool(cfg.list_targets())
-            if has_existing_config and force:
-                return RdstResult(
-                    False,
-                    "Interactive mode is required when using --force. Run: rdst init --interactive --force",
-                )
+            # Truly non-interactive — likely piped or running under CI without a TTY.
             return RdstResult(
                 False,
-                "Interactive mode is required for first-time setup. Run: rdst init --interactive",
+                "rdst init needs an interactive terminal to walk through setup. "
+                "Re-run from an interactive shell, or pre-populate ~/.rdst/config.toml.",
             )
 
         self._welcome()
@@ -262,6 +258,23 @@ class InitCommand:
             except Exception:
                 pass
         steps = []
+
+        seen_password_envs: set[str] = set()
+        for r in fails:
+            target_cfg = cfg.get(r.name) or {}
+            password_env = target_cfg.get("password_env")
+            if not password_env or password_env in seen_password_envs:
+                continue
+            if os.environ.get(password_env):
+                continue
+            seen_password_envs.add(password_env)
+            steps.append(
+                (
+                    f'[{StyleTokens.WARNING}]export[/{StyleTokens.WARNING}] {password_env}=[{StyleTokens.ACCENT}]"your-password"[/{StyleTokens.ACCENT}]',
+                    f"Required for target {r.name}",
+                )
+            )
+
         if not has_api_key:
             steps.append(
                 (

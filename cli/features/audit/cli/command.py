@@ -264,6 +264,14 @@ class AuditCommand:
                 console.print(f"\n[dim]View locally: rdst audit show {auto_name}[/dim]")
                 console.print(f"[dim]View past audits: rdst audit list[/dim]")
 
+                if rs_results:
+                    container_name = f"rdst-readyset-{target}"
+                    console.print(
+                        f"\n[dim]Readyset cache container [bold]{container_name}[/bold] is still running.\n"
+                        f"  Stop it with: docker stop {container_name}\n"
+                        f"  Or remove via: rdst cache remove --target {target}[/dim]"
+                    )
+
         # LLM insights for non-verbose, no-duration case (legacy single-target prompt).
         # Verbose mode already showed everything via _render_terminal_report.
         has_workload_analysis = workload_result and workload_result.get("analysis")
@@ -381,7 +389,7 @@ class AuditCommand:
         qps = (captured_calls / dur) if dur else 0
         console.print(
             f"\n[dim]Size:[/dim] {size_str}  |  "
-            f"[dim]Cache Hit:[/dim] {cache_hit:.1f}%  |  "
+            f"[dim]Buffer Cache Hit:[/dim] {cache_hit:.1f}%  |  "
             f"[dim]R/W:[/dim] {rw}"
         )
         if dur:
@@ -641,10 +649,10 @@ class AuditCommand:
             if not auto_yes and not sys.stdin.isatty():
                 return None
             if auto_yes:
-                restart = "y"
+                restart_yes = True
                 console.print("[dim]  Auto-starting Readyset cache (-y)[/dim]")
             else:
-                from shared.ui import Prompt
+                from shared.ui import Confirm
                 console.print()
                 console.print(
                     "[dim]  Readyset can benchmark your captured queries to show how much"
@@ -652,13 +660,13 @@ class AuditCommand:
                     "\n  stopped — we can restart it to run the test.[/dim]"
                 )
                 try:
-                    restart = Prompt.ask(
+                    restart_yes = Confirm.ask(
                         "  Start Readyset cache to test query performance?",
-                        choices=["y", "n"], default="y"
+                        default=True,
                     )
                 except (EOFError, KeyboardInterrupt):
-                    restart = "n"
-            if restart.lower() != "y":
+                    restart_yes = False
+            if not restart_yes:
                 return None
             container = getattr(cache_status, 'container_name', None) or f"rdst-readyset-{target}"
             console.print(f"[dim]  Starting {container}...[/dim]")
@@ -716,10 +724,10 @@ class AuditCommand:
                 return None
 
             if auto_yes:
-                deploy = "y"
+                deploy_yes = True
                 console.print("[dim]  Auto-deploying Readyset cache (-y)[/dim]")
             else:
-                from shared.ui import Prompt
+                from shared.ui import Confirm
                 console.print()
                 console.print(
                     "[dim]  Readyset can benchmark your captured queries to show how much"
@@ -727,14 +735,14 @@ class AuditCommand:
                     "\n  container that proxies your database.[/dim]"
                 )
                 try:
-                    deploy = Prompt.ask(
+                    deploy_yes = Confirm.ask(
                         "  Deploy Readyset to test query performance?",
-                        choices=["y", "n"], default="y"
+                        default=True,
                     )
                 except (EOFError, KeyboardInterrupt):
-                    deploy = "n"
+                    deploy_yes = False
 
-            if deploy.lower() != "y":
+            if not deploy_yes:
                 return None
 
             # Deploy
@@ -832,11 +840,11 @@ class AuditCommand:
             except Exception:
                 pass
 
-            # Create shallow cache
             cache_id = None
+            cache_create_error = None
             try:
                 async def _add_cache():
-                    nonlocal cache_id
+                    nonlocal cache_id, cache_create_error
                     async for event in service.add_cache(
                         CacheInput(target=target, query=sql),
                         CacheOptions(),
@@ -846,9 +854,27 @@ class AuditCommand:
                                 cache_id = getattr(event, "cache_id", None) or q_hash
                                 if cache_id not in pre_existing_ids:
                                     created_ids.add(cache_id)
+                            else:
+                                cache_create_error = (
+                                    getattr(event, "error", None)
+                                    or getattr(event, "message", None)
+                                    or "CREATE CACHE failed"
+                                )
                 asyncio.run(_add_cache())
-            except Exception:
-                pass
+            except Exception as exc:
+                cache_create_error = f"CREATE CACHE raised: {exc}"
+
+            if cache_create_error and cache_id is None:
+                results.append({
+                    "query_hash": q_hash,
+                    "query_text": sql[:200],
+                    "cacheable": False,
+                    "not_cacheable_reason": cache_create_error,
+                    "baseline_ms": baseline_ms,
+                    "readyset_ms": 0,
+                    "speedup": 0,
+                })
+                continue
 
             # Benchmark against Readyset (3 runs: 1 warmup + 2 measured)
             # For parameterized queries, substitute sample values so we can execute them
@@ -910,7 +936,8 @@ class AuditCommand:
                 "speedup": round(speedup, 1),
             })
 
-        # Step 4: Cleanup — drop only caches we created
+        # CLD-1754: created_ids holds RDST hashes, not Readyset's
+        # q_<hash> cache names — DROP fails silently here. Tracked.
         if created_ids:
             for cid in created_ids:
                 try:
@@ -954,7 +981,7 @@ class AuditCommand:
         size = metrics.get("database_size_mb", 0)
         size_str = f"{size / 1024:.1f} GB" if size >= 1024 else f"{size:.0f} MB"
         conn_str = f"{metrics.get('active_connections', 0)}/{metrics.get('max_connections', 0)} ({metrics.get('connection_utilization_pct', 0):.0f}%)"
-        console.print(f"  [dim]Size:[/dim] {size_str}  |  [dim]Connections:[/dim] {conn_str}  |  [dim]Cache Hit:[/dim] {metrics.get('cache_hit_rate', 0):.1f}%")
+        console.print(f"  [dim]Size:[/dim] {size_str}  |  [dim]Connections:[/dim] {conn_str}  |  [dim]Buffer Cache Hit:[/dim] {metrics.get('cache_hit_rate', 0):.1f}%")
 
         # Sizing verdict
         verdict = sizing.get("verdict", "unknown").replace("_", " ").upper()
@@ -1031,73 +1058,66 @@ class AuditCommand:
 
         cfg = TargetsConfig()
         cfg.load()
-        email = cfg.get_email()
-        report_token = cfg._data.get("report_token")
+        primary_email = cfg.get_email()
 
         import re
-        from shared.ui import Prompt
+        from shared.ui import Prompt, Confirm
         _email_re = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-        if email and _email_re.match(email):
-            # Existing valid email — confirm or let them change it
-            console.print(f"\n  Sending report to [bold]{email}[/bold]")
+        recipient = None
+        if primary_email and _email_re.match(primary_email):
+            console.print(f"\n  Sending report to [bold]{primary_email}[/bold]")
             try:
-                alt = (Prompt.ask("  Press Enter to continue or type a different email", default="", show_default=False) or "").strip()
+                alt = (Prompt.ask(
+                    "  Press Enter to continue or type a different email",
+                    default="", show_default=False,
+                ) or "").strip()
             except (EOFError, KeyboardInterrupt):
                 show_cmd = f"rdst audit show {snapshot_id}" if snapshot_id else "rdst audit list"
                 console.print(f"\n  [dim]Skipped. View locally: {show_cmd}[/dim]")
                 return
             if alt:
                 if _email_re.match(alt):
-                    email = alt
-                    cfg.set_email(email)
-                    cfg.save()
+                    recipient = alt
                 else:
                     console.print("  [yellow]Invalid email address. Sending to the original.[/yellow]")
+                    recipient = primary_email
+            else:
+                recipient = primary_email
         else:
-            # No email on file — prompt for one with retry loop
             console.print(
                 "\n  Enter your email to receive the full performance report."
                 "\n  Press Ctrl+C to skip.\n"
             )
             while True:
                 try:
-                    email = (Prompt.ask("  Email", default="", show_default=False) or "").strip()
+                    typed = (Prompt.ask("  Email", default="", show_default=False) or "").strip()
                 except (EOFError, KeyboardInterrupt):
-                    email = ""
+                    typed = ""
                     break
-                if not email:
+                if not typed:
                     break
-                if _email_re.match(email):
+                if _email_re.match(typed):
+                    recipient = typed
                     break
                 console.print("  [yellow]Invalid email address. Try again or press Ctrl+C to skip.[/yellow]")
 
-            if email and _email_re.match(email):
-                cfg.set_email(email)
-                cfg.save()
-            else:
+            if not recipient:
                 show_cmd = f"rdst audit show {snapshot_id}" if snapshot_id else "rdst audit list"
                 console.print(f"  [dim]Skipped. View locally: {show_cmd}[/dim]")
                 return
 
-        # Send via hosted link (mode="link") — keyservice stores the HTML,
-        # emails a "View Full Report" button that opens in browser.
+        report_token = cfg.get_token_for_email(recipient)
+
+        if not cfg.get_email():
+            cfg.set_email(recipient)
+            cfg.save()
+
         try:
             from features.audit.email_service import EmailService
             svc = EmailService()
             subject = f"RDST Audit Report: {target}"
 
-            # Build email summary block (score + savings + top finding)
-            ha = {}
-            try:
-                import json as _json
-                # html_content is already rendered — pull summary from the audit data
-                # that was passed to _generate_html_report earlier. We re-derive from config.
-                pass
-            except Exception:
-                pass
-
-            # Use spinner during verification polling
             spinner = None
 
             def _on_status(msg):
@@ -1117,7 +1137,7 @@ class AuditCommand:
             send_spinner.start()
 
             result = svc.send_report_with_verification(
-                email=email,
+                email=recipient,
                 html_body=html_content,
                 subject=subject,
                 report_token=report_token,
@@ -1129,12 +1149,33 @@ class AuditCommand:
             if spinner:
                 spinner.stop()
 
+            if result.get("stale_token"):
+                cfg.remove_email(recipient)
+                cfg.save()
+
             if result.get("success"):
                 new_token = result.get("report_token")
-                if new_token and new_token != report_token:
-                    cfg._data["report_token"] = new_token
-                    cfg.save()
-                console.print(f"  [green]Report link sent to {email}[/green]")
+                if new_token:
+                    cfg.add_verified_email(recipient, new_token)
+                current_primary = cfg.get_email()
+                if recipient and recipient != current_primary and current_primary:
+                    try:
+                        make_default = Confirm.ask(
+                            f"  Make [bold]{recipient}[/bold] your default for future audits?",
+                            default=False,
+                        )
+                    except (EOFError, KeyboardInterrupt):
+                        make_default = False
+                    if make_default:
+                        cfg.set_primary_email(recipient)
+                cfg.save()
+                if result.get("queued"):
+                    console.print(
+                        f"  [green]Verification email sent to {recipient}[/green]\n"
+                        f"  [dim]Click the link in your inbox — your report will arrive automatically.[/dim]"
+                    )
+                else:
+                    console.print(f"  [green]Report link sent to {recipient}[/green]")
             else:
                 error = result.get("error", "unknown error")
                 console.print(f"  [yellow]{error}[/yellow]")
@@ -1600,7 +1641,7 @@ class AuditCommand:
                         hit = event.cache_hit_ratio or 0
                         console.print(
                             f"  {event.when.capitalize()} snapshot: "
-                            f"cache hit {hit:.1f}%, "
+                            f"buffer cache hit {hit:.1f}%, "
                             f"{event.active_connections} active connections"
                         )
                     elif event.type == "capture_progress":
@@ -1611,7 +1652,7 @@ class AuditCommand:
                             hit = event.cache_hit_ratio or 0
                             stats_msg = (
                                 f"Capturing...{time_str} | "
-                                f"cache: {hit:.1f}%, conns: {event.active_connections}, "
+                                f"buffer cache: {hit:.1f}%, conns: {event.active_connections}, "
                                 f"tps: {event.tps:.1f}"
                             )
                             spinner.update(stats_msg)
@@ -1698,65 +1739,12 @@ class AuditCommand:
 
     @staticmethod
     def _filter_existing_indexes(index_recs: list, analysis: dict) -> list:
-        """Remove index recommendations where the column set already exists as an index.
-
-        Uses the schema_context string that was passed to the LLM prompt (stored in
-        analysis dict) to deterministically identify existing indexes. This is more
-        reliable than trusting the LLM to avoid duplicates.
+        """Wrapper around features.audit.index_dedupe.filter_existing_indexes
+        that pulls schema_context out of the analysis dict for back-compat
+        with existing call sites.
         """
-        schema_text = analysis.get("schema_context", "")
-        if not schema_text:
-            return index_recs
-
-        # Parse existing indexes from schema context format:
-        #   table_name:
-        #     Indexes: idx_name(col1, col2), other_idx(col3)
-        existing_indexes: dict[str, set[tuple[str, ...]]] = {}
-        current_table = None
-        for line in schema_text.split("\n"):
-            stripped = line.strip()
-            # Table header line: "orders:" (not indented field labels)
-            if (stripped.endswith(":")
-                    and not stripped.startswith("Columns")
-                    and not stripped.startswith("Indexes")
-                    and not stripped.startswith("Foreign")
-                    and not stripped.startswith("NOTE")
-                    and not stripped.startswith("==")):
-                current_table = stripped[:-1].strip().lower()
-            elif stripped.startswith("Indexes:") and current_table:
-                idx_text = stripped[len("Indexes:"):].strip()
-                # Split on "), " to separate indexes like "idx_a(col1, col2), idx_b(col3)"
-                for part in idx_text.split("),"):
-                    part = part.strip()
-                    paren_start = part.find("(")
-                    if paren_start == -1:
-                        continue
-                    cols_str = part[paren_start + 1:].rstrip(")")
-                    cols = tuple(c.strip().lower() for c in cols_str.split(",") if c.strip())
-                    if cols:
-                        existing_indexes.setdefault(current_table, set()).add(cols)
-                        # Composite index prefixes: (a,b,c) covers (a) and (a,b)
-                        for prefix_len in range(1, len(cols)):
-                            existing_indexes[current_table].add(cols[:prefix_len])
-
-        if not existing_indexes:
-            return index_recs
-
-        filtered = []
-        for rec in index_recs:
-            table = rec.get("table", "").lower()
-            rec_cols = tuple(c.strip().lower() for c in rec.get("columns", []))
-            if not rec_cols:
-                filtered.append(rec)
-                continue
-            table_indexes = existing_indexes.get(table, set())
-            # Skip if exact column set (or reversed) already indexed
-            if rec_cols in table_indexes:
-                continue
-            if tuple(reversed(rec_cols)) in table_indexes:
-                continue
-            filtered.append(rec)
-        return filtered
+        from features.audit.index_dedupe import filter_existing_indexes
+        return filter_existing_indexes(index_recs, analysis.get("schema_context", ""))
 
     @staticmethod
     def _merge_audit_into_capture(target: str, run_id: str, audit_result: dict) -> None:

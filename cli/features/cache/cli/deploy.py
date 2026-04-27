@@ -1,4 +1,4 @@
-"""RDST Deploy command — deploy ReadySet cache.
+"""RDST Deploy command — deploy Readyset cache.
 
 Delegates deployment logic to CacheService; this module handles CLI
 rendering (Rich panels) and RdstResult conversion.
@@ -22,7 +22,7 @@ from shared.service_events import ErrorEvent, ProgressEvent
 
 
 class DeployCommand:
-    """Deploy ReadySet shallow cache permanently."""
+    """Deploy Readyset shallow cache permanently."""
 
     def execute(
         self,
@@ -100,7 +100,7 @@ class DeployCommand:
                     else ""
                 )
                 console.print(StyledPanel(
-                    f"ReadySet deployed successfully\n\n"
+                    f"Readyset deployed successfully\n\n"
                     f"  {Icons.SUCCESS} Connection endpoint:\n"
                     f"    {last_event.endpoint}\n\n"
                     f"{host_note}"
@@ -124,7 +124,7 @@ class DeployCommand:
                     else ""
                 )
                 console.print(StyledPanel(
-                    f"ReadySet deployed to Kubernetes\n\n"
+                    f"Readyset deployed to Kubernetes\n\n"
                     f"{endpoint_block}"
                     f"  To use rdst cache commands from your machine, expose the service:\n"
                     f"    kubectl port-forward svc/{service_name} {port}:{port} -n {namespace}\n\n"
@@ -137,10 +137,10 @@ class DeployCommand:
                 ))
             else:
                 console.print(StyledPanel(
-                    f"ReadySet deployed successfully via {options.mode}.\n\n"
+                    f"Readyset deployed successfully via {options.mode}.\n\n"
                     f"  To use RDST with this deployment, add a cache target:\n"
                     f"    rdst configure add\n\n"
-                    f"  You'll need the ReadySet connection endpoint (host:port)\n"
+                    f"  You'll need the Readyset connection endpoint (host:port)\n"
                     f"  from your {options.mode} deployment.\n",
                     title="Deploy Complete",
                     variant="success",
@@ -186,7 +186,7 @@ class DeployCommand:
         return RdstResult(True, "")
 
     def _build_endpoint(self, variables: dict, host: str = "localhost") -> str:
-        """Build the ReadySet connection endpoint string."""
+        """Build the Readyset connection endpoint string."""
         engine = variables["db_engine"]
         port = variables["readyset_port"]
         user = variables["db_user"]

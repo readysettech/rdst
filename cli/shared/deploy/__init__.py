@@ -1,4 +1,4 @@
-"""RDST Deploy — shared ReadySet deployment helpers."""
+"""RDST Deploy — shared Readyset deployment helpers."""
 
 READYSET_IMAGE = "docker.io/readysettech/readyset:latest"
 

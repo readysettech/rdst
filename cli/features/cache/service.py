@@ -1,4 +1,4 @@
-"""Cache service — manages ReadySet cache deployment and query caching.
+"""Cache service — manages Readyset cache deployment and query caching.
 
 Provides async generator methods consumed by both CLI and web API.
 """
@@ -28,7 +28,7 @@ from .models import CacheInput, CacheOptions
 
 
 def _normalize_for_match(sql: str) -> str:
-    """Normalize SQL for matching ReadySet queries against registry entries."""
+    """Normalize SQL for matching Readyset queries against registry entries."""
     s = sql.strip()
     s = re.sub(r'\$(\d+)', r':p\1', s)
     s = re.sub(r'\?', ':p', s)
@@ -83,7 +83,7 @@ def _parse_fallback(fallback: str) -> Tuple[str, str]:
 
 
 class CacheService:
-    """Manages ReadySet cache deployment and query caching."""
+    """Manages Readyset cache deployment and query caching."""
 
     # ------------------------------------------------------------------
     # Target resolution
@@ -159,7 +159,7 @@ class CacheService:
         database: str,
         password: str,
     ) -> Dict[str, Any]:
-        """Execute SQL against a ReadySet instance. Synchronous."""
+        """Execute SQL against a Readyset instance. Synchronous."""
         conn = None
         try:
             if engine == "mysql":
@@ -362,7 +362,7 @@ class CacheService:
     def _lookup_registry_hash(
         query_text: str, registry_map: Dict[str, str]
     ) -> Optional[str]:
-        """Look up a ReadySet cache query in the registry."""
+        """Look up a Readyset cache query in the registry."""
         if not query_text or not registry_map:
             return None
         try:
@@ -667,7 +667,7 @@ class CacheService:
     async def deploy(
         self, input_data: CacheInput, options: CacheOptions
     ) -> AsyncGenerator[CacheEvent, None]:
-        """Deploy ReadySet cache for a database target.
+        """Deploy Readyset cache for a database target.
 
         Yields: ProgressEvent → CacheDeployCompleteEvent or ErrorEvent
         """
@@ -707,7 +707,7 @@ class CacheService:
 
             yield ProgressEvent(
                 type="progress", stage="deploying", percent=30,
-                message=f"Deploying ReadySet ({options.mode})...",
+                message=f"Deploying Readyset ({options.mode})...",
             )
 
             if options.mode == "kubernetes":
@@ -876,7 +876,7 @@ class CacheService:
         variables: Dict[str, Any],
         host: str = "127.0.0.1",
     ) -> Optional[str]:
-        """Auto-register the deployed ReadySet instance as a new target."""
+        """Auto-register the deployed Readyset instance as a new target."""
         cache_target_name = f"{original_target}-cache"
         try:
             config = TargetsConfig()
@@ -913,7 +913,7 @@ class CacheService:
         iterations: int = 5,
         warmup: int = 2,
     ) -> AsyncGenerator[CacheEvent, None]:
-        """Run query against origin DB and ReadySet cache, compare latency.
+        """Run query against origin DB and Readyset cache, compare latency.
 
         Yields: ProgressEvent -> CacheRunCompleteEvent or ErrorEvent
         """
