@@ -114,7 +114,7 @@ def _execute_postgres(sql: str, config: Dict[str, Any], timeout_seconds: int) ->
     """Execute query against PostgreSQL."""
     try:
         import psycopg2
-        from ....db_connection import resolve_connection_params
+        from shared.db_connection import resolve_connection_params
 
         params = resolve_connection_params(target_config=config)
 
@@ -181,7 +181,7 @@ def _execute_mysql(sql: str, config: Dict[str, Any], timeout_seconds: int) -> Di
     """Execute query against MySQL."""
     try:
         import pymysql
-        from ....db_connection import resolve_connection_params
+        from shared.db_connection import resolve_connection_params
 
         params = resolve_connection_params(target_config=config)
 

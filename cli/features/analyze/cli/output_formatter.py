@@ -781,12 +781,22 @@ def _format_tested_optimizations(
 
     if not successful_rewrites:
         if not baseline_skipped:
-            content_parts.append(
-                MessagePanel(
-                    "No rewrite opportunities identified — query structure is already optimal",
-                    variant="info",
+            # Check if rewrites were suggested but not tested (e.g., --fast mode)
+            suggested = rewrite_testing.get("rewrite_results") or rewrite_testing.get("suggested_rewrites") or []
+            if not rewrite_testing.get("tested") and suggested:
+                content_parts.append(
+                    MessagePanel(
+                        "Rewrite testing skipped in fast mode. LLM suggested rewrites — run without --fast to test them.",
+                        variant="info",
+                    )
                 )
-            )
+            else:
+                content_parts.append(
+                    MessagePanel(
+                        "No rewrite opportunities identified — query structure is already optimal",
+                        variant="info",
+                    )
+                )
     else:
         for i, rewrite in enumerate(successful_rewrites[:3], 1):
             metadata = rewrite.get("suggestion_metadata") or {}

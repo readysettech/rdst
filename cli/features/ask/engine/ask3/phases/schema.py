@@ -212,7 +212,7 @@ def _collect_postgres_schema(config: dict, target: str) -> tuple[Optional[Schema
     """Collect schema from PostgreSQL database."""
     try:
         import psycopg2
-        from ....db_connection import resolve_connection_params
+        from shared.db_connection import resolve_connection_params
 
         params = resolve_connection_params(target_config=config)
 
@@ -284,7 +284,7 @@ def _collect_mysql_schema(config: dict, target: str) -> tuple[Optional[SchemaInf
     """Collect schema from MySQL database."""
     try:
         import pymysql
-        from ....db_connection import resolve_connection_params
+        from shared.db_connection import resolve_connection_params
 
         params = resolve_connection_params(target_config=config)
 
