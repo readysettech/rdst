@@ -232,7 +232,7 @@ Session name is always `ux`. Working directory defaults to `src/`.
 
 ### Harness Quick Reference
 
-All commands run from the shadow workspace root (`/home/gautam/readyset/hacks/gautam/rdst/`):
+All commands run from the rdst project root:
 
 | Action | Command |
 |--------|---------|

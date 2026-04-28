@@ -2,7 +2,7 @@
 
 ## Phase 4: Safety Enhancement (Next Up)
 
-See [PRD](../aidoc/projects/rdst-cli/prd/rdst-guard-prd.md) for full design.
+See the guard feature design doc for full design.
 
 ### `rdst guard` Command
 - [ ] `lib/guard/config.py` - GuardConfig dataclass

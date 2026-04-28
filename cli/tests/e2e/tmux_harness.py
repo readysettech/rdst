@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 import time
 
 SESSION_PREFIX = "rdst-harness-"
-DEFAULT_CWD = "/home/gautam/readyset/hacks/gautam/rdst/src"
+DEFAULT_CWD = os.getcwd()
 DEFAULT_WIDTH = 200
 DEFAULT_HEIGHT = 50
 

@@ -6,7 +6,7 @@
 
 **Entry point**: `rdst.py` - main CLI
 
-**Architecture**: See [ARCHITECTURE.md](/Users/faruk/Developer/readyset/rdst/ARCHITECTURE.md) for the current `features/` + `shared/` ownership model.
+**Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md) for the current `features/` + `shared/` ownership model.
 
 ## Running RDST
 
@@ -188,7 +188,7 @@ rdst scan ./backend --schema mydb --nosave
 - No database connection needed (uses semantic layer schema)
 - Risk scores (0-100) for CI pass/fail decisions
 
-**Full documentation**: See `aidoc/projects/rdst-cli/design/rdst-scan.md`
+**Full documentation**: See `rdst scan --help` for all options and examples.
 
 ## Semantic Layer (rdst schema)
 
