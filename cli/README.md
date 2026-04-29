@@ -81,15 +81,33 @@ pip install rdst
    # Or: uvx rdst top
    ```
 
+5. **Audit your fleet:**
+   ```bash
+   # Snapshot all ReadySet clusters and audit their health
+   rdst fleet audit --target prod
+
+   # Import clusters from your infrastructure
+   rdst fleet import --target prod
+   ```
+
+   Fleet audit checks cache utilization, query support, and configuration
+   across your ReadySet deployments. See the
+   [fleet audit docs](https://readyset.io/docs/rdst/fleet-and-audit/fleet-audit)
+   for more.
+
 ## Commands
 
 All commands can be run with `rdst` (if installed) or `uvx rdst` (no installation):
 
-- `rdst configure` - Manage database targets and connection profiles
 - `rdst analyze` - Analyze SQL queries and evaluate caching opportunities
 - `rdst top` - Live view of slow queries
-- `rdst tune` - Get query optimization suggestions
+- `rdst ask` - Natural language to SQL queries
+- `rdst scan` - Scan codebases for ORM queries and analyze performance
+- `rdst fleet audit` - Audit ReadySet cluster health and cache utilization
+- `rdst fleet import` - Import ReadySet clusters from your infrastructure
+- `rdst schema` - Manage the semantic layer for better query generation
 - `rdst query` - Manage query registry
+- `rdst configure` - Manage database targets and connection profiles
 - `rdst init` - First-time setup wizard
 - `rdst version` - Show version information
 
