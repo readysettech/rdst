@@ -269,13 +269,15 @@ def _collect_mysql_metrics(target_config: Dict[str, Any]) -> AuditMetrics:
         except Exception:
             pass
 
-        # Database size
+        # Database size — sum across all non-system schemas the user can see.
+        # information_schema.TABLES is privilege-filtered automatically: a tenant
+        # user only sees their own schema; an admin/monitoring user sees all.
         try:
-            db_name = target_config.get("database", "")
             cur.execute(
                 "SELECT SUM(DATA_LENGTH + INDEX_LENGTH) "
-                "FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s",
-                (db_name,),
+                "FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA NOT IN ('mysql','information_schema',"
+                "'performance_schema','sys')"
             )
             row = cur.fetchone()
             v = _val(row)

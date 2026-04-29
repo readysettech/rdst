@@ -360,20 +360,18 @@ def _collect_mysql_snapshot(connection, timestamp: str) -> DatabaseSnapshot:
     except Exception:
         pass
 
+    # Sum across all non-system schemas the user can see (privilege-filtered).
     try:
-        db_name = connection.db if hasattr(connection, 'db') else None
-        if db_name:
-            if isinstance(db_name, bytes):
-                db_name = db_name.decode()
-            cur.execute(
-                "SELECT SUM(DATA_LENGTH + INDEX_LENGTH) "
-                "FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s",
-                (db_name,),
-            )
-            row = cur.fetchone()
-            v = _val(row)
-            if v and v[0]:
-                snap.database_size_mb = round(float(v[0]) / (1024 * 1024), 1)
+        cur.execute(
+            "SELECT SUM(DATA_LENGTH + INDEX_LENGTH) "
+            "FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA NOT IN ('mysql','information_schema',"
+            "'performance_schema','sys')"
+        )
+        row = cur.fetchone()
+        v = _val(row)
+        if v and v[0]:
+            snap.database_size_mb = round(float(v[0]) / (1024 * 1024), 1)
     except Exception:
         pass
 
