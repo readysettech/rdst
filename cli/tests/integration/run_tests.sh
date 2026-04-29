@@ -8,6 +8,10 @@
 #     ./run_tests.sh postgresql
 #     ./run_tests.sh mysql
 #
+#   Run only specific areas (comma-separated):
+#     ./run_tests.sh postgresql --areas analyze,top
+#     ./run_tests.sh mysql --areas fleet,audit
+#
 #   With connection strings (skip container creation):
 #     PSQL_CONNECTION_STRING="postgresql://user:pass@host:port/db" ./run_tests.sh postgresql
 #     MYSQL_CONNECTION_STRING="mysql://user:pass@host:port/db" ./run_tests.sh mysql
@@ -15,25 +19,45 @@
 set -euo pipefail
 
 # Determine test scope from arguments
-if [[ $# -eq 0 ]]; then
+TEST_AREAS=""
+DB_ARG="${1:-}"
+shift || true
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --areas) TEST_AREAS="$2"; shift 2 ;;
+    *) echo "Unknown flag: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$DB_ARG" ]]; then
   TEST_POSTGRESQL=true
   TEST_MYSQL=true
-elif [[ "$1" == "postgresql" ]]; then
+elif [[ "$DB_ARG" == "postgresql" ]]; then
   TEST_POSTGRESQL=true
   TEST_MYSQL=false
-elif [[ "$1" == "mysql" ]]; then
+elif [[ "$DB_ARG" == "mysql" ]]; then
   TEST_POSTGRESQL=false
   TEST_MYSQL=true
 else
-  echo "Usage: $0 [postgresql|mysql]" >&2
-  echo "  No args: test both databases" >&2
-  echo "  postgresql: test PostgreSQL only" >&2
-  echo "  mysql: test MySQL only" >&2
+  echo "Usage: $0 [postgresql|mysql] [--areas area1,area2,...]" >&2
   exit 1
 fi
 
 export TEST_POSTGRESQL
 export TEST_MYSQL
+
+# Area-based test selection. If TEST_AREAS is empty or "ALL", run everything.
+should_run_area() {
+  local area="$1"
+  [[ -z "$TEST_AREAS" || "$TEST_AREAS" == "ALL" ]] && return 0
+  echo ",$TEST_AREAS," | grep -q ",$area," && return 0
+  return 1
+}
+
+if [[ -n "$TEST_AREAS" && "$TEST_AREAS" != "ALL" ]]; then
+  echo "=== Running selective integration tests: $TEST_AREAS ==="
+fi
 
 # Suppress interactive prompts (telemetry feedback, NPS) during tests
 export RDST_NON_INTERACTIVE=1
@@ -72,51 +96,53 @@ run_test_suite() {
   # Run test suite
   local suite_failed=0
   (
-    # Basic tests (no Readyset required)
+    # Config setup always runs (other tests depend on it)
     test_config_commands
     test_config_connection_string
     test_config_connection_string_override
     test_config_connection_string_no_password
-    test_analyze_inputs
-    # TEMPORARILY DISABLED: test_analyze_interactive_flag (LMStudio not running)
-    test_list_command
-    test_top_command
 
-    # Interactive test (optional - may skip if TTY unavailable)
-    test_top_interactive_flow
-
-    # Cache tests (require Readyset containers)
-    if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" ]]; then
-      test_cache_commands
-
-      # Cache subcommand tests (deploy Readyset + cache add/show/delete/drop-all)
-      test_cache_subcommands
-
-      # Readyset analysis tests (use containers from cache tests)
-      test_readyset_flag
-    else
-      echo ""
-      echo "=== SKIPPING: Cache tests (SKIP_READYSET_CACHE_TESTS=true) ==="
-      echo "  Readyset containers cannot connect to databases inside Docker Compose."
-      echo "  To run cache tests, use a database accessible from the host network."
-      echo ""
-    fi
-
-    # Query command tests
-    test_query_commands
-
-    # Registry and error tests
-    test_registry_and_files
+    # Error handling always runs (fast, catches CLI regressions)
     test_error_handling
 
-    # Scan command tests (all 4 ORMs, shallow + deep analysis)
-    test_scan_commands
+    if should_run_area "analyze"; then
+      test_analyze_inputs
+    fi
 
-    # Fleet & Audit tests (import, list, status, audit, snapshots, diff)
-    test_fleet_commands
+    if should_run_area "top"; then
+      test_list_command
+      test_top_command
+      test_top_interactive_flow
+    fi
 
-    # Audit duration tests (duration, list, show, query run --file)
-    test_audit_duration_commands
+    if should_run_area "cache"; then
+      if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" ]]; then
+        test_cache_commands
+        test_cache_subcommands
+        test_readyset_flag
+      else
+        echo ""
+        echo "=== SKIPPING: Cache tests (SKIP_READYSET_CACHE_TESTS=true) ==="
+        echo ""
+      fi
+    fi
+
+    if should_run_area "query"; then
+      test_query_commands
+      test_registry_and_files
+    fi
+
+    if should_run_area "scan"; then
+      test_scan_commands
+    fi
+
+    if should_run_area "fleet"; then
+      test_fleet_commands
+    fi
+
+    if should_run_area "audit"; then
+      test_audit_duration_commands
+    fi
   ) || suite_failed=1
 
   if [[ $suite_failed -eq 1 ]]; then
