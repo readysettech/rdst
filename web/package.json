@@ -31,7 +31,7 @@
     "openapi-fetch": "^0.17.0",
     "react": "catalog:react19",
     "react-dom": "catalog:react19",
-    "sql-formatter": "15.6.12"
+    "sql-formatter": "catalog:common"
   },
   "devDependencies": {
     "@rs/typescript-config": "workspace:*",
@@ -39,12 +39,12 @@
     "@tanstack/react-query-devtools": "catalog:tanstack",
     "@tanstack/react-router-devtools": "catalog:tanstack",
     "@tanstack/router-plugin": "catalog:tanstack",
-    "@testing-library/react": "^16.2.0",
+    "@testing-library/react": "catalog:react19",
     "@types/node": "catalog:common",
     "@types/react": "catalog:react19",
     "@types/react-dom": "catalog:react19",
     "@vitejs/plugin-react": "^5.1.0",
-    "babel-plugin-react-compiler": "^1.0.0",
+    "babel-plugin-react-compiler": "catalog:react19",
     "jsdom": "^26.1.0",
     "openapi-typescript": "^7.13.0",
     "tailwindcss": "catalog:tailwind4",
