@@ -16,6 +16,7 @@ TARGET_PASSWORD_REQUIRED_CODE = "TARGET_PASSWORD_REQUIRED"
 class TargetGuard(NamedTuple):
     target_name: str
     target_config: Dict[str, Any]
+    target_engine: str
 
 
 def _to_target_dict(target_config: Any) -> Dict[str, Any]:
@@ -50,7 +51,8 @@ def ensure_target_password(target: Optional[str] = None) -> TargetGuard:
     target_name, target_config = resolve_target_config(target)
 
     if resolve_password(target_config).available:
-        return TargetGuard(target_name, target_config)
+        target_engine = target_config.get("engine", "unknown") or "unknown"
+        return TargetGuard(target_name, target_config, target_engine)
 
     password_env = target_config.get("password_env")
     if password_env:

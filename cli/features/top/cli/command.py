@@ -85,6 +85,90 @@ class TopCommand:
         duration: int = None,
         **kwargs,
     ):
+        """Telemetry wrapper around `_execute_impl`.
+
+        Owns the `command_run_sync` CM at the per-feature CLI layer (mirrors
+        `features/top/api/routes.py` on the web side). Splits the event
+        name the same way the web routes do: `top` for historical mode,
+        `top_realtime` for realtime — different success semantics, but
+        both share the `total_top_runs` counter via `_COMMAND_STAT_KEYS`.
+        """
+        from shared.telemetry import telemetry
+
+        target_engine = "unknown"
+        if target:
+            try:
+                from shared.config.targets import TargetsConfig
+
+                cfg = TargetsConfig()
+                cfg.load()
+                tc = cfg.get(target)
+                if tc:
+                    target_engine = tc.get("engine", "unknown")
+            except Exception:
+                pass
+
+        cm_name = "top" if historical else "top_realtime"
+
+        result: RdstResult
+        with telemetry.command_run_sync(
+            cm_name,
+            source="cli",
+            target_engine=target_engine,
+            limit=limit,
+        ) as run:
+            try:
+                result = self._execute_impl(
+                    target=target,
+                    source=source,
+                    limit=limit,
+                    sort=sort,
+                    filter=filter,
+                    json=json,
+                    watch=watch,
+                    no_color=no_color,
+                    interactive=interactive,
+                    historical=historical,
+                    duration=duration,
+                    **kwargs,
+                )
+                if result.data:
+                    qf = result.data.get(
+                        "queries_found",
+                        result.data.get("total_queries_tracked", 0),
+                    )
+                    if qf:
+                        run.extra["queries_found"] = qf
+                run.success = result.ok
+                if not result.ok and run.error_type is None:
+                    run.error_type = "command_unsuccessful"
+            except Exception as e:
+                run.error(e)
+                try:
+                    telemetry.report_crash(
+                        e, context={"command": "top", "target": target}
+                    )
+                except Exception:
+                    pass
+                result = RdstResult(False, f"top failed: {e}")
+
+        return result
+
+    def _execute_impl(
+        self,
+        target: str = None,
+        source: str = "auto",
+        limit: int = 10,
+        sort: str = "total_time",
+        filter: str = None,
+        json: bool = False,
+        watch: bool = False,
+        no_color: bool = False,
+        interactive: bool = False,
+        historical: bool = False,
+        duration: int = None,
+        **kwargs,
+    ):
         """Live view of top slow queries from database telemetry.
 
         Default: Real-time monitoring polling pg_stat_activity/PROCESSLIST every 200ms

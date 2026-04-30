@@ -15,9 +15,12 @@ import os
 import platform
 import sys
 import threading
+import time
 import uuid
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from shared.constants import rdst_data_dir
 
@@ -60,6 +63,83 @@ def _get_requests():
     return _requests if _requests else None
 
 
+@dataclass
+class TerminalState:
+    """Outcome captured from a terminal SSE event by a `TerminalDetector`.
+
+    `extra` carries command-specific properties (e.g. `query_hash` for
+    analyze, `row_count` for ask) that flow into the PostHog event.
+    """
+
+    success: bool
+    error_type: Optional[str] = None
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+
+# A detector inspects a single SSE event and returns a `TerminalState` if the
+# event marks the end of the run, or `None` for progress/intermediate events.
+# Each feature provides its own detector, using `isinstance` checks against
+# its own event dataclasses — no magic-string `event.type` matching.
+TerminalDetector = Callable[[Any], Optional[TerminalState]]
+
+
+@dataclass
+class CommandRun:
+    """Mutable state captured during an SSE command run.
+
+    Use via `TelemetryManager.command_run` (async) or `command_run_sync`. The
+    caller mutates fields as the run progresses (or sets `success`/`extra`
+    explicitly); on exit, the context manager emits the `<name>_run`
+    PostHog event (and, for `analyze`, the `first_analyze` event on first
+    success).
+
+    `observe(event)` is a convenience for SSE generators: it delegates to
+    the per-command `TerminalDetector` provided at construction. If no
+    detector is configured, `observe` is a no-op — set fields directly.
+    """
+
+    name: str
+    source: str
+    target_engine: str = "unknown"
+    mode: Optional[str] = None
+    success: Optional[bool] = None
+    error_type: Optional[str] = None
+    extra: Dict[str, Any] = field(default_factory=dict)
+    _start: float = field(default_factory=time.time)
+    _detector: Optional[TerminalDetector] = None
+
+    @property
+    def duration_ms(self) -> int:
+        return int((time.time() - self._start) * 1000)
+
+    def observe(self, event: Any) -> None:
+        """Apply the configured detector to a streaming event.
+
+        Non-terminal events are ignored. Terminal failures override prior
+        success state; `error_type` and `extra` only fill if not already set
+        by the caller, so explicit assignments win.
+        """
+        if self._detector is None:
+            return
+        state = self._detector(event)
+        if state is None:
+            return
+        # Failure dominates: a later success cannot overwrite an earlier failure.
+        if self.success is None or state.success is False:
+            self.success = state.success
+        if state.error_type and self.error_type is None:
+            self.error_type = state.error_type
+        for key, value in state.extra.items():
+            if value is not None and self.extra.get(key) is None:
+                self.extra[key] = value
+
+    def error(self, exc: BaseException) -> None:
+        """Mark this run as failed due to an exception, tagging the type."""
+        self.success = False
+        if self.error_type is None:
+            self.error_type = type(exc).__name__
+
+
 class TelemetryManager:
     """
     Manages all telemetry for RDST.
@@ -92,6 +172,12 @@ class TelemetryManager:
         self._stats: Optional[Dict[str, int]] = None
         self._rdst_dir = rdst_data_dir()
         self._lock = threading.Lock()
+        # Per-command finalizer dispatch table. Bound methods, so they
+        # close over `self` correctly. Features can extend via
+        # `register_command_finalizer`.
+        self._command_finalizers: Dict[str, Callable[["CommandRun"], None]] = {
+            "analyze": self._analyze_finalizer,
+        }
 
     def _ensure_initialized(self):
         """Lazy initialization to avoid startup cost."""
@@ -626,6 +712,7 @@ class TelemetryManager:
         success: bool = True,
         error_type: Optional[str] = None,
         target_engine: str = "unknown",
+        source: str = "cli",  # cli, web
     ):
         """Track an analyze command.
 
@@ -650,6 +737,7 @@ class TelemetryManager:
             "tokens_out": tokens_out,
             "success": success,
             "target_engine": target_engine,
+            "source": source,
         }
         if error_type:
             properties["error_type"] = error_type
@@ -662,6 +750,7 @@ class TelemetryManager:
                 "display_name": "RDST First Analyze",
                 "target_engine": target_engine,
                 "duration_ms": duration_ms,
+                "source": source,
             }
             # Include email if available (from trial signup, feedback, etc.)
             try:
@@ -681,24 +770,147 @@ class TelemetryManager:
             self.track("first_analyze", first_analyze_props)
             self._slack_notify_first_analyze(target_engine, duration_ms)
 
-    def track_top(
-        self,
-        mode: str = "snapshot",  # snapshot, interactive
-        duration_seconds: int = 0,
-        queries_found: int = 0,
-        target_engine: str = "unknown",
-    ):
-        """Track a top command."""
-        self._increment_stat("total_top_runs", 1)
+    # Per-command stat keys (incremented by `_generic_finalizer`).
+    # Commands with bespoke finalizers manage their own counters.
+    # Note: `top` and `top_realtime` share `total_top_runs` so the NPS
+    # prompt pacing reflects all top usage; their PostHog events stay
+    # separate (`top_run` vs `top_realtime_run`) since they have different
+    # success semantics and lifecycles.
+    _COMMAND_STAT_KEYS: Dict[str, str] = {
+        "ask": "total_asks",
+        "scan": "total_scans",
+        "top": "total_top_runs",
+        "top_realtime": "total_top_runs",
+    }
 
-        properties = {
-            "mode": mode,
-            "duration_seconds": duration_seconds,
-            "queries_found": queries_found,
-            "target_engine": target_engine,
+    def _analyze_finalizer(self, run: "CommandRun") -> None:
+        """Bespoke finalizer for analyze.
+
+        Routes through `track_analyze` to preserve `first_analyze` PostHog
+        event, the Slack alert on first success, and `successful_analyzes`
+        bookkeeping.
+        """
+        self.track_analyze(
+            query_hash=str(run.extra.get("query_hash") or "unknown"),
+            mode=run.mode or "standard",
+            duration_ms=run.duration_ms,
+            success=bool(run.success),
+            error_type=run.error_type,
+            target_engine=run.target_engine,
+            source=run.source,
+        )
+
+    def _generic_finalizer(self, run: "CommandRun") -> None:
+        """Default finalizer: increment `_COMMAND_STAT_KEYS[name]` (if any)
+        and emit `<name>_run` via `track_with_stats`. Used for ask/scan/top
+        and any command that registers no bespoke finalizer."""
+        stat_key = self._COMMAND_STAT_KEYS.get(run.name)
+        if stat_key:
+            self._increment_stat(stat_key, 1)
+
+        properties: Dict[str, Any] = {
+            "source": run.source,
+            "target_engine": run.target_engine,
+            "duration_ms": run.duration_ms,
+            "success": bool(run.success),
         }
+        if run.mode:
+            properties["mode"] = run.mode
+        if run.error_type:
+            properties["error_type"] = run.error_type
+        for key, value in run.extra.items():
+            if value is not None:
+                properties[key] = value
 
-        self.track_with_stats("top_run", properties)
+        self.track_with_stats(f"{run.name}_run", properties)
+
+    def register_command_finalizer(
+        self,
+        name: str,
+        finalizer: Callable[["CommandRun"], None],
+    ) -> None:
+        """Register a bespoke finalizer for a command.
+
+        Useful when a command has side events beyond the generic
+        `<name>_run` event (e.g. analyze's `first_analyze`). Most commands
+        do not need this — they fall through to `_generic_finalizer`.
+        """
+        self._command_finalizers[name] = finalizer
+
+    def _finalize_command_run(self, run: "CommandRun") -> None:
+        """Dispatch to the registered finalizer for `run.name`, falling
+        back to `_generic_finalizer`. Telemetry never breaks the caller —
+        all errors here are swallowed.
+        """
+        try:
+            finalizer = self._command_finalizers.get(run.name, self._generic_finalizer)
+            finalizer(run)
+        except Exception:
+            pass
+
+    @contextmanager
+    def command_run_sync(
+        self,
+        name: str,
+        *,
+        source: str,
+        target_engine: str = "unknown",
+        mode: Optional[str] = None,
+        terminal_detector: Optional[TerminalDetector] = None,
+        **extra: Any,
+    ):
+        """Sync context manager for tracking an SSE-style command (CLI side).
+
+        Inside the `with` block, the caller can either mutate `run.success`/
+        `run.error_type`/`run.extra` directly, or call `run.observe(event)`
+        with a `terminal_detector` configured. On exit (clean or via
+        exception), `<name>_run` is emitted via `_finalize_command_run`.
+        Unhandled exceptions set `success=False` and `error_type` to the
+        exception class name, then re-raise.
+        """
+        run = CommandRun(
+            name=name,
+            source=source,
+            target_engine=target_engine,
+            mode=mode,
+            extra=dict(extra),
+            _detector=terminal_detector,
+        )
+        try:
+            yield run
+        except BaseException as e:
+            run.error(e)
+            raise
+        finally:
+            self._finalize_command_run(run)
+
+    @asynccontextmanager
+    async def command_run(
+        self,
+        name: str,
+        *,
+        source: str,
+        target_engine: str = "unknown",
+        mode: Optional[str] = None,
+        terminal_detector: Optional[TerminalDetector] = None,
+        **extra: Any,
+    ):
+        """Async sibling of `command_run_sync` for SSE/streaming endpoints."""
+        run = CommandRun(
+            name=name,
+            source=source,
+            target_engine=target_engine,
+            mode=mode,
+            extra=dict(extra),
+            _detector=terminal_detector,
+        )
+        try:
+            yield run
+        except BaseException as e:
+            run.error(e)
+            raise
+        finally:
+            self._finalize_command_run(run)
 
     def track_cache(
         self,

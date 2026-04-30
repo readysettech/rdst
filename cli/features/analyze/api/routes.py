@@ -17,6 +17,7 @@ from ..events import (
     ReadysetCheckedEvent,
     RewritesTestedEvent,
 )
+from ..telemetry import analyze_terminal_detector
 from ..models import AnalyzeInput, AnalyzeOptions
 from ..service import AnalyzeService
 
@@ -131,32 +132,34 @@ def _event_to_sse(event: AnalyzeEvent) -> dict:
 
 
 async def _analyze_generator(
-    input_data: AnalyzeInput, options: AnalyzeOptions
+    input_data: AnalyzeInput,
+    options: AnalyzeOptions,
+    target_engine: str,
 ) -> AsyncGenerator[dict, None]:
-    try:
-        telemetry.track("analyze_run", {
-            "source": "web",
-            "target": options.target,
-            "fast": options.fast,
-            "readyset_cache": options.readyset_cache,
-            "test_rewrites": options.test_rewrites,
-        })
-    except Exception:
-        pass
-
-    try:
-        service = AnalyzeService()
-        async for event in service.analyze(input_data, options):
-            yield _event_to_sse(event)
-    except Exception as e:
-        yield {"event": "error", "data": json.dumps({"message": str(e)})}
+    mode = "fast" if options.fast else "standard"
+    async with telemetry.command_run(
+        "analyze",
+        source="web",
+        target_engine=target_engine,
+        mode=mode,
+        terminal_detector=analyze_terminal_detector,
+    ) as run:
+        try:
+            async for event in AnalyzeService().analyze(input_data, options):
+                run.observe(event)
+                yield _event_to_sse(event)
+        except Exception as e:
+            run.error(e)
+            yield {"event": "error", "data": json.dumps({"message": str(e)})}
 
 
 async def _quick_analyze_generator(
-    input_data: AnalyzeInput, options: AnalyzeOptions
+    input_data: AnalyzeInput,
+    options: AnalyzeOptions,
+    target_engine: str,
 ) -> AsyncGenerator[dict, None]:
     options.test_rewrites = False
-    async for event in _analyze_generator(input_data, options):
+    async for event in _analyze_generator(input_data, options, target_engine):
         yield event
 
 
@@ -170,7 +173,7 @@ async def analyze(request: AnalyzeRequest, guard: TargetGuard = Depends(require_
         test_rewrites=not request.skip_rewrites,
         model=request.model,
     )
-    return EventSourceResponse(_analyze_generator(input_data, options))
+    return EventSourceResponse(_analyze_generator(input_data, options, guard.target_engine))
 
 
 @router.post("/analyze/quick")
@@ -182,4 +185,4 @@ async def analyze_quick(request: AnalyzeRequest, guard: TargetGuard = Depends(re
         readyset_cache=getattr(request, "readyset_cache", False),
         model=request.model,
     )
-    return EventSourceResponse(_quick_analyze_generator(input_data, options))
+    return EventSourceResponse(_quick_analyze_generator(input_data, options, guard.target_engine))

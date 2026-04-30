@@ -465,7 +465,119 @@ class AnalyzeCommand:
         except (KeyboardInterrupt, EOFError):
             raise AnalyzeInputError("Query selection cancelled by user")
 
+    def resolve_target(
+        self,
+        target: Optional[str],
+        resolved_input: AnalyzeInput,
+    ) -> Optional[str]:
+        """Resolve which target to analyze against.
+
+        Precedence: explicit `--target` > registry's `last_target` (set
+        when the query was loaded by hash/name) > config default. Owned
+        here so every caller — `rdst analyze`, `rdst top → analyze`,
+        `rdst query → analyze` — applies the same fallback chain.
+        """
+        from shared.config.targets import TargetsConfig
+
+        if target:
+            return target
+        if resolved_input.registry_target:
+            return resolved_input.registry_target
+        cfg = TargetsConfig()
+        cfg.load()
+        return cfg.get_default()
+
     def execute_analyze(
+        self,
+        resolved_input: AnalyzeInput,
+        target: Optional[str] = None,
+        fast: bool = False,
+        interactive: bool = False,
+        review: bool = False,
+        output_json: bool = False,
+        skip_warning: bool = False,
+        **kwargs,
+    ) -> RdstResult:
+        """Telemetry wrapper around `_execute_analyze_impl`.
+
+        Owns the `command_run_sync` CM so every caller — direct `rdst
+        analyze`, `rdst top → analyze`, `rdst query → analyze` — emits
+        a uniform `analyze_run` event with `source="cli"`. The CM lives
+        here (per-feature CLI layer) to mirror the web side, where the
+        CM lives in `features/analyze/api/routes.py` rather than in a
+        shared dispatcher. Keeping it out of `shared/cli/rdst_cli.py`
+        avoids the asymmetry where one CLI command (analyze) was
+        wrapped at the dispatcher and others weren't.
+
+        On first successful analyze (across the lifetime of the
+        installation, gated by the persisted stats counter), prompts
+        for micro-feedback. The prompt fires from any caller path so
+        `top → analyze` and `query → analyze` count too.
+        """
+        from shared.cli.types import RdstResult
+        from shared.config.targets import TargetsConfig
+        from shared.telemetry import telemetry
+
+        mode = "interactive" if interactive else ("fast" if fast else "standard")
+        target_engine = "unknown"
+        if target:
+            try:
+                cfg = TargetsConfig()
+                cfg.load()
+                tc = cfg.get(target)
+                if tc:
+                    target_engine = tc.get("engine", "unknown")
+            except Exception:
+                pass
+
+        result: RdstResult
+        with telemetry.command_run_sync(
+            "analyze",
+            source="cli",
+            mode=mode,
+            target_engine=target_engine,
+        ) as run:
+            try:
+                result = self._execute_analyze_impl(
+                    resolved_input,
+                    target=target,
+                    fast=fast,
+                    interactive=interactive,
+                    review=review,
+                    output_json=output_json,
+                    skip_warning=skip_warning,
+                    **kwargs,
+                )
+                if result.data:
+                    qh = result.data.get("query_hash") or result.data.get("hash")
+                    if qh:
+                        run.extra["query_hash"] = qh
+                run.success = result.ok
+                if not result.ok and run.error_type is None:
+                    run.error_type = "command_unsuccessful"
+            except Exception as e:
+                run.error(e)
+                try:
+                    telemetry.report_crash(
+                        e, context={"command": "analyze", "target": target}
+                    )
+                except Exception:
+                    pass
+                result = RdstResult(False, f"analyze failed: {e}")
+
+        # Run the first-analyze feedback prompt outside the CM so the
+        # finalizer has already incremented `successful_analyzes` and
+        # `is_first_successful_analyze` reads the post-run state.
+        if result.ok:
+            try:
+                if telemetry.is_first_successful_analyze():
+                    telemetry.show_first_analyze_feedback()
+            except Exception:
+                pass
+
+        return result
+
+    def _execute_analyze_impl(
         self,
         resolved_input: AnalyzeInput,
         target: Optional[str] = None,

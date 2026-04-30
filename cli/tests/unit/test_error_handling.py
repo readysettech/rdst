@@ -39,6 +39,7 @@ ANALYZE_SERVICE_PATH = RDST_ROOT / "features" / "analyze" / "service.py"
 QUERY_COMMAND_PATH = RDST_ROOT / "features" / "query_registry" / "cli" / "command.py"
 QUERY_SERVICE_PATH = RDST_ROOT / "features" / "query_registry" / "service.py"
 ASK_RENDERER_PATH = RDST_ROOT / "features" / "ask" / "engine" / "ask3" / "renderer.py"
+ASK_COMMAND_PATH = RDST_ROOT / "features" / "ask" / "cli" / "command.py"
 
 STANDARD_FORMAT = "not found. Run 'rdst configure add' to set one up."
 
@@ -57,8 +58,12 @@ class TestNoDuplicateErrorOutputAsk:
         """
         When ask returns an error event that was already rendered,
         RdstResult.message must be empty so rdst.py does not print it again.
+
+        The ask flow lives in `features/ask/cli/command.py:AskCommand`
+        (per-feature CLI layer); the dispatcher in `rdst_cli.py` is a
+        thin pass-through.
         """
-        source = RDST_CLI_PATH.read_text()
+        source = ASK_COMMAND_PATH.read_text()
 
         assert 'message=error_event.message' not in source, (
             "ask error handler returns error_event.message directly in RdstResult, "
@@ -71,7 +76,7 @@ class TestNoDuplicateErrorOutputAsk:
         Verify the ask error path returns an empty message string.
         Inspects the AST to confirm the pattern used.
         """
-        source = RDST_CLI_PATH.read_text()
+        source = ASK_COMMAND_PATH.read_text()
         tree = ast.parse(source)
 
         found_empty_on_error = False
@@ -210,11 +215,14 @@ class TestAskImportErrorUserFriendly:
         """
         The ask() source code must have an explicit ImportError catch to provide
         user-friendly messages when modules are unavailable.
+
+        Source lives in `features/ask/cli/command.py:AskCommand` after
+        the per-feature CLI layer extraction.
         """
-        source = RDST_CLI_PATH.read_text()
+        source = ASK_COMMAND_PATH.read_text()
 
         assert "ImportError" in source, (
-            "ask() must catch ImportError to give users a friendly message when "
+            "AskCommand must catch ImportError to give users a friendly message when "
             "required modules (like features.ask.semantic_layer) are not available."
         )
 

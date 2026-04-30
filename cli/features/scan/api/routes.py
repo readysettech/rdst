@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from shared.api.target_guard import TargetGuard, require_target_body
+from shared.telemetry import telemetry
 
 from ..events import (
     ScanCompleteEvent,
@@ -25,6 +26,7 @@ from ..events import (
     ScanRegistryEvent,
     ScanStatusEvent,
 )
+from ..telemetry import scan_terminal_detector
 from ..models import ScanInput, ScanOptions
 from ..service import ScanService
 
@@ -136,17 +138,28 @@ def _event_to_sse(event: ScanEvent) -> dict:
 async def _scan_generator(
     directory: str,
     target: str,
+    target_engine: str,
     options: ScanOptions,
 ) -> AsyncGenerator[dict, None]:
     """Generate SSE events for scan streaming."""
-    service = ScanService()
-    input_data = ScanInput(directory=directory, target=target, source="web")
-
-    try:
-        async for event in service.scan_directory(input_data, options):
-            yield _event_to_sse(event)
-    except Exception as e:
-        yield {"event": "error", "data": json.dumps({"message": str(e)})}
+    async with telemetry.command_run(
+        "scan",
+        source="web",
+        target_engine=target_engine,
+        terminal_detector=scan_terminal_detector,
+        analyze=options.analyze,
+        shallow=options.shallow,
+        dry_run=options.dry_run,
+    ) as run:
+        service = ScanService()
+        input_data = ScanInput(directory=directory, target=target, source="web")
+        try:
+            async for event in service.scan_directory(input_data, options):
+                run.observe(event)
+                yield _event_to_sse(event)
+        except Exception as e:
+            run.error(e)
+            yield {"event": "error", "data": json.dumps({"message": str(e)})}
 
 
 @router.post("/scan")
@@ -166,7 +179,12 @@ async def scan_directory(
     - `error`: Error occurred
     """
     return EventSourceResponse(
-        _scan_generator(request.directory, guard.target_name, request.to_scan_options())
+        _scan_generator(
+            request.directory,
+            guard.target_name,
+            guard.target_engine,
+            request.to_scan_options(),
+        )
     )
 
 

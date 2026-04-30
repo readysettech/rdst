@@ -69,18 +69,20 @@ def test_resolve_target_config_raises_404_when_target_not_found():
 def test_ensure_target_password_allows_direct_password():
     cfg = _mock_config()
     with patch("shared.api.target_guard.TargetsConfig", return_value=cfg):
-        target_name, _ = ensure_target_password("staging")
+        guard = ensure_target_password("staging")
 
-    assert target_name == "staging"
+    assert guard.target_name == "staging"
+    assert guard.target_engine == "postgresql"
 
 
 def test_ensure_target_password_allows_password_env(monkeypatch):
     monkeypatch.setenv("PROD_DB_PASSWORD", "from-env")
     cfg = _mock_config()
     with patch("shared.api.target_guard.TargetsConfig", return_value=cfg):
-        target_name, _ = ensure_target_password("prod")
+        guard = ensure_target_password("prod")
 
-    assert target_name == "prod"
+    assert guard.target_name == "prod"
+    assert guard.target_engine == "postgresql"
 
 
 def test_ensure_target_password_raises_423_with_structured_detail(monkeypatch):
@@ -108,6 +110,6 @@ def test_ensure_target_password_allows_keychain_password(monkeypatch):
             return_value=PasswordResolution(available=True, source="secure_store"),
         ),
     ):
-        target_name, _ = ensure_target_password("prod")
+        guard = ensure_target_password("prod")
 
-    assert target_name == "prod"
+    assert guard.target_name == "prod"

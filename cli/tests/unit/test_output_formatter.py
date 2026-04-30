@@ -84,6 +84,10 @@ class TestJsonOutputKeys:
         from features.analyze.cli import command as analyze_command
         import inspect
 
-        source = inspect.getsource(analyze_command.AnalyzeCommand.execute_analyze)
+        # The body lives in `_execute_analyze_impl`; `execute_analyze`
+        # is a thin telemetry wrapper.
+        source = inspect.getsource(
+            analyze_command.AnalyzeCommand._execute_analyze_impl
+        )
 
         assert 'pop("target_config"' in source

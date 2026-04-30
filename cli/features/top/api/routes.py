@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from shared.api.target_guard import TargetGuard, require_target
+from shared.telemetry import telemetry
 from ..service import TopService
 from ..events import (
     TopCompleteEvent,
@@ -24,6 +25,7 @@ from ..events import (
     TopSourceFallbackEvent,
     TopStatusEvent,
 )
+from ..telemetry import top_terminal_detector
 from ..models import (
     TopInput,
     TopOptions,
@@ -181,46 +183,74 @@ def _event_to_sse(event: TopEvent) -> dict:
 
 async def _realtime_generator(
     target: str,
+    target_engine: str,
     options: TopOptions,
     duration: Optional[int],
 ) -> AsyncGenerator[dict, None]:
-    """Generate SSE events for realtime streaming."""
-    try:
-        from shared.telemetry import telemetry
-        telemetry.track("top_run", {
-            "source": "web",
-            "target": target,
-            "mode": "realtime",
-            "limit": options.limit,
-            "duration": duration,
-        })
-    except Exception:
-        pass
+    """Generate SSE events for realtime streaming.
 
-    service = TopService()
-    input_data = TopInput(target=target, source="activity")
-
-    try:
-        async for event in service.stream_realtime(input_data, options, duration):
-            yield _event_to_sse(event)
-    except Exception as e:
-        yield {"event": "error", "data": json.dumps({"message": str(e)})}
+    Emits `top_realtime_run` (not `top_run`) because the success semantics
+    differ: realtime streams typically end via client disconnect, so
+    `success` here means "no error during the stream", and `duration_ms`
+    captures how long the user actually watched.
+    """
+    async with telemetry.command_run(
+        "top_realtime",
+        source="web",
+        target_engine=target_engine,
+        terminal_detector=top_terminal_detector,
+        limit=options.limit,
+        duration=duration,
+    ) as run:
+        service = TopService()
+        input_data = TopInput(target=target, source="activity")
+        try:
+            async for event in service.stream_realtime(input_data, options, duration):
+                # Capture the connected engine when announced — more accurate
+                # than the configured engine.
+                if isinstance(event, TopConnectedEvent) and event.db_engine:
+                    run.target_engine = event.db_engine
+                run.observe(event)
+                yield _event_to_sse(event)
+            # Clean stream exit (client disconnected or `duration` elapsed):
+            # treat as success unless an error event already marked failure.
+            if run.success is None:
+                run.success = True
+        except Exception as e:
+            run.error(e)
+            yield {"event": "error", "data": json.dumps({"message": str(e)})}
 
 
 async def _historical_generator(
     target: str,
+    target_engine: str,
     source: str,
     options: TopOptions,
 ) -> AsyncGenerator[dict, None]:
-    """Generate SSE events for historical one-shot."""
-    service = TopService()
-    input_data = TopInput(target=target, source=source)
+    """Generate SSE events for historical one-shot.
 
-    try:
-        async for event in service.get_top_queries(input_data, options):
-            yield _event_to_sse(event)
-    except Exception as e:
-        yield {"event": "error", "data": json.dumps({"message": str(e)})}
+    Emits `top_run`. `success` here has a real answer: did the engine
+    return queries without error?
+    """
+    async with telemetry.command_run(
+        "top",
+        source="web",
+        target_engine=target_engine,
+        terminal_detector=top_terminal_detector,
+        limit=options.limit,
+        data_source=source,
+    ) as run:
+        service = TopService()
+        input_data = TopInput(target=target, source=source)
+        try:
+            async for event in service.get_top_queries(input_data, options):
+                if isinstance(event, TopConnectedEvent) and event.db_engine:
+                    run.target_engine = event.db_engine
+                run.observe(event)
+                yield _event_to_sse(event)
+        except Exception as e:
+            run.error(e)
+            yield {"event": "error", "data": json.dumps({"message": str(e)})}
 
 
 @router.get("/top", response_model=TopHistoricalResponse)
@@ -282,25 +312,13 @@ async def get_top_queries(
 
     if realtime:
         return EventSourceResponse(
-            _realtime_generator(guard.target_name, options, duration)
+            _realtime_generator(guard.target_name, guard.target_engine, options, duration)
         )
 
     if stream:
         return EventSourceResponse(
-            _historical_generator(guard.target_name, source, options)
+            _historical_generator(guard.target_name, guard.target_engine, source, options)
         )
-
-    try:
-        from shared.telemetry import telemetry
-        telemetry.track("top_run", {
-            "source": "web",
-            "target": guard.target_name,
-            "mode": "historical",
-            "limit": limit,
-            "data_source": source,
-        })
-    except Exception:
-        pass
 
     # Historical one-shot - collect all events and return JSON
     service = TopService()
@@ -313,18 +331,33 @@ async def get_top_queries(
     error_message = None
     db_limit_warning = None
 
-    async for event in service.get_top_queries(input_data, options):
-        if isinstance(event, TopConnectedEvent):
-            target_name = event.target_name
-            db_engine = event.db_engine
-            actual_source = event.source
-        elif isinstance(event, TopDbLimitWarningEvent):
-            db_limit_warning = event
-        elif isinstance(event, TopCompleteEvent):
-            result = event
-        elif isinstance(event, TopErrorEvent):
-            error_message = event.message
-            break
+    async with telemetry.command_run(
+        "top",
+        source="web",
+        target_engine=guard.target_engine,
+        terminal_detector=top_terminal_detector,
+        limit=limit,
+        data_source=source,
+    ) as run:
+        try:
+            async for event in service.get_top_queries(input_data, options):
+                if isinstance(event, TopConnectedEvent):
+                    target_name = event.target_name
+                    db_engine = event.db_engine
+                    actual_source = event.source
+                    if event.db_engine:
+                        run.target_engine = event.db_engine
+                elif isinstance(event, TopDbLimitWarningEvent):
+                    db_limit_warning = event
+                elif isinstance(event, TopCompleteEvent):
+                    result = event
+                elif isinstance(event, TopErrorEvent):
+                    error_message = event.message
+                    break
+                run.observe(event)
+        except Exception as e:
+            run.error(e)
+            raise
 
     if error_message:
         return TopHistoricalResponse(success=False, error=error_message)
@@ -399,5 +432,5 @@ async def get_top_queries_realtime(
         min_total_time_s=min_total_time_s,
     )
     return EventSourceResponse(
-        _realtime_generator(guard.target_name, options, duration)
+        _realtime_generator(guard.target_name, guard.target_engine, options, duration)
     )

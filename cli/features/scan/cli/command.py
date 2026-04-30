@@ -120,17 +120,64 @@ class ScanCommand:
         Analysis modes (when --analyze is set):
             Default (deep): Requires DB connection, runs EXPLAIN ANALYZE
             --shallow: Uses schema YAML only, no DB connection needed
+
+        Telemetry: only the actual scan path (subcommand=="scan") is
+        wrapped in `command_run_sync`. `list` and `check` are read-only
+        registry helpers that don't fit the SSE-shaped run model — the
+        web side doesn't expose them as SSE routes either.
         """
         if subcommand == "list":
             return self._list_queries(with_issues, file_pattern, output_json)
-        elif subcommand == "check":
+        if subcommand == "check":
             return self._check_queries(directory, diff, target, output_json)
-        else:  # Default: scan
-            return self._scan_directory(
-                directory, dry_run, analyze, target, output_json,
-                shallow=shallow, warn_threshold=warn_threshold, fail_threshold=fail_threshold,
-                diff=diff, nosave=nosave, file_pattern=file_pattern, sequential=sequential
-            )
+
+        # Default: scan — wrap with telemetry CM (mirrors features/scan/api/routes.py).
+        from shared.telemetry import telemetry
+
+        target_engine = "unknown"
+        if target:
+            try:
+                from shared.config.targets import TargetsConfig
+
+                cfg = TargetsConfig()
+                cfg.load()
+                tc = cfg.get(target)
+                if tc:
+                    target_engine = tc.get("engine", "unknown")
+            except Exception:
+                pass
+
+        result: RdstResult
+        with telemetry.command_run_sync(
+            "scan",
+            source="cli",
+            target_engine=target_engine,
+            analyze=analyze,
+            shallow=shallow,
+            dry_run=dry_run,
+        ) as run:
+            try:
+                result = self._scan_directory(
+                    directory, dry_run, analyze, target, output_json,
+                    shallow=shallow, warn_threshold=warn_threshold,
+                    fail_threshold=fail_threshold,
+                    diff=diff, nosave=nosave, file_pattern=file_pattern,
+                    sequential=sequential,
+                )
+                run.success = result.ok
+                if not result.ok and run.error_type is None:
+                    run.error_type = "command_unsuccessful"
+            except Exception as e:
+                run.error(e)
+                try:
+                    telemetry.report_crash(
+                        e, context={"command": "scan", "target": target}
+                    )
+                except Exception:
+                    pass
+                result = RdstResult(False, f"scan failed: {e}")
+
+        return result
 
     def _scan_directory(
         self,

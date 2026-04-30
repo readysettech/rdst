@@ -251,64 +251,19 @@ class RdstCLI:
         no_color: bool = False,
         **kwargs,
     ) -> RdstResult:
-        """Live view of top slow queries from database telemetry."""
+        """Live view of top slow queries from database telemetry.
+
+        Telemetry: `command_run_sync` lives inside `TopCommand.execute`
+        (per-feature CLI layer) so the event-name split between
+        historical (`top_run`) and realtime (`top_realtime_run`) mirrors
+        the web side without leaking into this dispatcher.
+        """
         from features.top.cli.command import TopCommand
-        import time
 
-        start_time = time.time()
-        target_engine = "unknown"
-        queries_found = 0
-
-        try:
-            # Get target engine for telemetry
-            if target:
-                try:
-                    cfg = TargetsConfig()
-                    cfg.load()
-                    target_config = cfg.get(target)
-                    if target_config:
-                        target_engine = target_config.get("engine", "unknown")
-                except Exception:
-                    pass
-
-            top_command = TopCommand(client=self.client)
-            result = top_command.execute(
-                target, source, limit, sort, filter, json, watch, no_color, **kwargs
-            )
-
-            # Extract queries found from result
-            if result.data:
-                queries_found = result.data.get(
-                    "queries_found", result.data.get("total_queries_tracked", 0)
-                )
-
-            # Track telemetry
-            duration_seconds = int(time.time() - start_time)
-            mode = "interactive" if kwargs.get("interactive") else "snapshot"
-
-            try:
-                from shared.telemetry import telemetry
-
-                telemetry.track_top(
-                    mode=mode,
-                    duration_seconds=duration_seconds,
-                    queries_found=queries_found,
-                    target_engine=target_engine,
-                )
-            except Exception:
-                pass
-
-            return result
-
-        except Exception as e:
-            # Track crash
-            try:
-                from shared.telemetry import telemetry
-
-                telemetry.report_crash(e, context={"command": "top", "target": target})
-            except Exception:
-                pass
-            return RdstResult(False, f"top failed: {e}")
+        top_command = TopCommand(client=self.client)
+        return top_command.execute(
+            target, source, limit, sort, filter, json, watch, no_color, **kwargs
+        )
 
     # rdst analyze
     def analyze(
@@ -357,20 +312,15 @@ class RdstCLI:
         Returns:
             RdstResult with analysis results
         """
+        # Thin dispatcher. Telemetry CM, target fallback, and the
+        # first-analyze feedback prompt all live inside
+        # `AnalyzeCommand.execute_analyze`, so every caller — direct
+        # `rdst analyze`, `rdst top → analyze`, `rdst query → analyze` —
+        # gets identical behavior.
         from features.analyze.cli.command import AnalyzeCommand, AnalyzeInputError
-        import time
 
-        # Track timing for telemetry
-        start_time = time.time()
-        query_hash = None
-        target_engine = "unknown"
-        error_type = None
-        resolved_input = None
-
+        analyze_cmd = AnalyzeCommand(client=self.client)
         try:
-            analyze_cmd = AnalyzeCommand(client=self.client)
-
-            # Resolve input using precedence rules
             resolved_input = analyze_cmd.resolve_input(
                 hash=hash,
                 inline_query=query,
@@ -380,114 +330,18 @@ class RdstCLI:
                 positional_query=positional_query,
                 save_as=save_as,
             )
-
-            # Use explicit --target, then registry target (from --hash/--name
-            # lookup), then config default
-            target_db = target
-            cfg = TargetsConfig()
-            cfg.load()
-            if not target_db and resolved_input.registry_target:
-                target_db = resolved_input.registry_target
-            if not target_db:
-                target_db = cfg.get_default()
-
-            # Get target engine for telemetry
-            if target_db:
-                try:
-                    target_config = cfg.get(target_db)
-                    if target_config:
-                        target_engine = target_config.get("engine", "unknown")
-                except Exception:
-                    pass
-
-            # Execute analysis
-            result = analyze_cmd.execute_analyze(
-                resolved_input,
-                target=target_db,
-                fast=fast,
-                interactive=interactive,
-                review=review,
-                output_json=output_json,
-                skip_warning=skip_warning,
-            )
-
-            # Extract query hash from result for telemetry
-            if result.data:
-                query_hash = result.data.get("query_hash") or result.data.get("hash")
-
-            # Track telemetry
-            duration_ms = int((time.time() - start_time) * 1000)
-            mode = (
-                "interactive"
-                if interactive
-                else (
-                    "fast"
-                    if fast
-                    else "standard"
-                )
-            )
-
-            try:
-                from shared.telemetry import telemetry
-
-                telemetry.track_analyze(
-                    query_hash=query_hash or "unknown",
-                    mode=mode,
-                    duration_ms=duration_ms,
-                    success=result.ok,
-                    target_engine=target_engine,
-                )
-
-                # First successful analyze — ask for micro-feedback
-                if result.ok and telemetry.is_first_successful_analyze():
-                    try:
-                        telemetry.show_first_analyze_feedback()
-                    except Exception:
-                        pass
-            except Exception:
-                pass  # Don't fail analyze if telemetry fails
-
-            return result
-
         except AnalyzeInputError as e:
-            error_type = "input_error"
-            # Track failed analysis
-            try:
-                from shared.telemetry import telemetry
-
-                duration_ms = int((time.time() - start_time) * 1000)
-                telemetry.track_analyze(
-                    query_hash="unknown",
-                    mode="standard",
-                    duration_ms=duration_ms,
-                    success=False,
-                    error_type=error_type,
-                    target_engine=target_engine,
-                )
-            except Exception:
-                pass
             return RdstResult(False, str(e))
-        except Exception as e:
-            error_type = type(e).__name__
-            # Track crash and report to Sentry
-            try:
-                from shared.telemetry import telemetry
 
-                duration_ms = int((time.time() - start_time) * 1000)
-                telemetry.track_analyze(
-                    query_hash=query_hash or "unknown",
-                    mode="standard",
-                    duration_ms=duration_ms,
-                    success=False,
-                    error_type=error_type,
-                    target_engine=target_engine,
-                )
-                telemetry.report_crash(
-                    e, context={"command": "analyze", "target": target_db}
-                )
-            except Exception:
-                pass
-            return RdstResult(False, f"analyze failed: {e}")
+        return analyze_cmd.execute_analyze(
+            resolved_input,
+            target=analyze_cmd.resolve_target(target, resolved_input),
+            fast=fast,
+            interactive=interactive,
+            review=review,
+            output_json=output_json,
+            skip_warning=skip_warning,
+        )
 
     # rdst init
     def init(self, **kwargs) -> RdstResult:
@@ -679,20 +533,16 @@ class RdstCLI:
             # Verbose output
             rdst ask "Show slow queries" --verbose
         """
-        import asyncio
+        # Thin dispatcher — input resolution, telemetry CM, and the
+        # ask service plumbing all live in
+        # `features/ask/cli/command.py:AskCommand`, mirroring
+        # analyze/top/scan and the web side at
+        # `features/ask/api/routes.py`. The import itself is wrapped to
+        # catch ImportError at the dispatcher boundary so an unavailable
+        # ask feature surfaces a friendly message rather than a raw
+        # traceback.
         try:
-            from features.ask.engine.ask3.input_handler import (
-                AskInputHandler,
-                NonInteractiveInputHandler,
-            )
-            from features.ask.engine.ask3.renderer import AskRenderer
-            from features.ask.events import (
-                AskClarificationNeededEvent,
-                AskResultEvent,
-                AskErrorEvent,
-            )
-            from features.ask.models import AskInput, AskOptions
-            from features.ask.service import AskService
+            from features.ask.cli.command import AskCommand
         except ImportError as import_err:
             return RdstResult(
                 False,
@@ -702,144 +552,16 @@ class RdstCLI:
                 f"(detail: {import_err})",
             )
 
-        # Interactive prompt if no question provided
-        if not question:
-            if no_interactive:
-                return RdstResult(
-                    False,
-                    'ask requires a question in --no-interactive mode. '
-                    'Example: rdst ask "How many users are there?" --no-interactive',
-                )
-
-            import sys
-
-            if not sys.stdin.isatty():
-                return RdstResult(
-                    False,
-                    'ask requires a question. Example: rdst ask "How many users are there?"',
-                )
-            try:
-                question = input("Question: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                return RdstResult(False, "Cancelled")
-            if not question:
-                return RdstResult(False, "ask requires a question")
-
-        try:
-            # Validate question is provided
-            if not question:
-                return RdstResult(
-                    False,
-                    'Question required. Usage: rdst ask "your question here" --target <target>',
-                )
-
-            # Create renderer and input handler
-            renderer = AskRenderer(verbose=verbose)
-            input_handler = (
-                NonInteractiveInputHandler() if no_interactive else AskInputHandler()
-            )
-
-            # Create service (no callbacks - fully event-driven)
-            service = AskService()
-
-            # Build input
-            input_data = AskInput(
-                question=question,
-                target=target,
-                source="cli",
-            )
-            options_data = AskOptions(
-                dry_run=dry_run,
-                timeout_seconds=timeout,
-                verbose=verbose,
-                agent_mode=agent_mode,
-                no_interactive=no_interactive,
-            )
-
-            # Run async service with sync bridge, handling events
-            result_event = None
-            error_event = None
-
-            async def _run_ask():
-                nonlocal result_event, error_event
-
-                async for event in service.ask(input_data, options_data):
-                    # Render the event
-                    renderer.render(event)
-
-                    # Handle clarification - collect input and resume
-                    if isinstance(event, AskClarificationNeededEvent):
-                        try:
-                            answers = input_handler.collect_clarifications(event)
-                            # Resume with answers
-                            async for resume_event in service.resume(
-                                event.session_id, answers
-                            ):
-                                renderer.render(resume_event)
-                                if isinstance(resume_event, AskResultEvent):
-                                    result_event = resume_event
-                                elif isinstance(resume_event, AskErrorEvent):
-                                    error_event = resume_event
-                        except (EOFError, KeyboardInterrupt):
-                            error_event = AskErrorEvent(
-                                type="error",
-                                message="Cancelled by user",
-                                phase="clarify",
-                            )
-                            renderer.render(error_event)
-                            return
-
-                    elif isinstance(event, AskResultEvent):
-                        result_event = event
-
-                    elif isinstance(event, AskErrorEvent):
-                        error_event = event
-
-            asyncio.run(_run_ask())
-
-            # Build result from final events
-            if result_event:
-                message = f"\nSQL: {result_event.sql}\n"
-                if not dry_run:
-                    message += f"Rows: {result_event.row_count}\n"
-                    message += f"Execution time: {result_event.execution_time_ms:.1f}ms\n"
-                message += f"LLM calls: {result_event.llm_calls}\n"
-                message += f"Total tokens: {result_event.total_tokens}\n"
-
-                return RdstResult(
-                    ok=True,
-                    message=message,
-                    data={
-                        "sql": result_event.sql,
-                        "rows": result_event.rows,
-                        "columns": result_event.columns,
-                        "row_count": result_event.row_count,
-                        "execution_time_ms": result_event.execution_time_ms,
-                        "llm_calls": result_event.llm_calls,
-                        "total_tokens": result_event.total_tokens,
-                        "status": "success",
-                    },
-                )
-
-            elif error_event:
-                if "cancelled" in error_event.message.lower():
-                    return RdstResult(ok=False, message="Operation cancelled by user")
-                # The renderer already displayed the error to the console, so return
-                # an empty message to avoid a duplicate print in rdst.py main().
-                return RdstResult(
-                    ok=False,
-                    message="",
-                    data={"phase": error_event.phase} if error_event.phase else {},
-                )
-
-            else:
-                return RdstResult(False, "Ask command failed unexpectedly")
-
-        except Exception as e:
-            import traceback
-
-            traceback.print_exc()
-            return RdstResult(False, f"ask command failed: {e}")
+        return AskCommand().execute(
+            question=question,
+            target=target,
+            dry_run=dry_run,
+            timeout=timeout,
+            verbose=verbose,
+            agent_mode=agent_mode,
+            no_interactive=no_interactive,
+            **kwargs,
+        )
 
     # ============================================================================
     # RDST SCHEMA - Semantic layer management

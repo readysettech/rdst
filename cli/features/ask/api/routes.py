@@ -22,8 +22,10 @@ from features.ask.events import (
 )
 from features.ask.models import AskInput, AskOptions
 from features.ask.service import AskService
+from features.ask.telemetry import ask_terminal_detector
 from shared.api.models import AskRequest
 from shared.api.target_guard import TargetGuard, require_target_body
+from shared.telemetry import telemetry
 
 router = APIRouter()
 
@@ -130,39 +132,39 @@ def _event_to_sse(event: AskEvent) -> dict:
 async def _ask_generator(
     input_data: AskInput | None,
     options: AskOptions | None,
+    target_engine: str = "unknown",
     session_id: str | None = None,
     clarification_answers: dict | None = None,
 ) -> AsyncGenerator[dict, None]:
-    try:
-        from shared.telemetry import telemetry
+    extra: dict = {
+        "is_resume": bool(session_id),
+        "agent_mode": options.agent_mode if options else False,
+        "dry_run": options.dry_run if options else False,
+    }
+    async with telemetry.command_run(
+        "ask",
+        source="web",
+        target_engine=target_engine,
+        terminal_detector=ask_terminal_detector,
+        **extra,
+    ) as run:
+        try:
+            service = AskService()
+            if session_id:
+                async for event in service.resume(
+                    session_id=session_id,
+                    clarification_answers=clarification_answers,
+                ):
+                    run.observe(event)
+                    yield _event_to_sse(event)
+                return
 
-        telemetry.track(
-            "ask_run",
-            {
-                "source": "web",
-                "target": input_data.target if input_data else None,
-                "is_resume": bool(session_id),
-                "agent_mode": options.agent_mode if options else False,
-                "dry_run": options.dry_run if options else False,
-            },
-        )
-    except Exception:
-        pass
-
-    try:
-        service = AskService()
-        if session_id:
-            async for event in service.resume(
-                session_id=session_id,
-                clarification_answers=clarification_answers,
-            ):
+            async for event in service.ask(input_data, options):
+                run.observe(event)
                 yield _event_to_sse(event)
-            return
-
-        async for event in service.ask(input_data, options):
-            yield _event_to_sse(event)
-    except Exception as exc:
-        yield {"event": "error", "data": json.dumps({"message": str(exc)})}
+        except Exception as exc:
+            run.error(exc)
+            yield {"event": "error", "data": json.dumps({"message": str(exc)})}
 
 
 @router.post("/ask")
@@ -172,6 +174,7 @@ async def ask(request: AskRequest, guard: TargetGuard = Depends(require_target_b
             _ask_generator(
                 None,
                 None,
+                target_engine=guard.target_engine,
                 session_id=request.session_id,
                 clarification_answers=request.clarification_answers,
             )
@@ -185,4 +188,6 @@ async def ask(request: AskRequest, guard: TargetGuard = Depends(require_target_b
         agent_mode=request.agent_mode,
         no_interactive=False,
     )
-    return EventSourceResponse(_ask_generator(input_data, options))
+    return EventSourceResponse(
+        _ask_generator(input_data, options, target_engine=guard.target_engine)
+    )
