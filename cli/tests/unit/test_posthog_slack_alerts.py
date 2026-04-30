@@ -294,3 +294,67 @@ class TestTrialServiceDisplayName:
                     "source": "cli",
                 },
             )
+
+
+class TestTrackFirstEventOnce:
+    """Helper used by audit/fleet to gate Slack alerts on a stats flag."""
+
+    def _make_tm(self, temp_rdst_dir, stats=None):
+        from shared.telemetry_manager import TelemetryManager
+
+        stats = stats or {}
+        (temp_rdst_dir / "stats.json").write_text(json.dumps(stats))
+
+        tm = TelemetryManager()
+        tm._rdst_dir = temp_rdst_dir
+        tm._enabled = True
+        tm._initialized = True
+        tm._device_id = "test-device-id"
+        tm._stats = dict(stats)
+        return tm
+
+    def test_fires_when_flag_unset(self, temp_rdst_dir):
+        tm = self._make_tm(temp_rdst_dir)
+
+        with patch.object(tm, "track") as mock_track:
+            fired = tm.track_first_event_once(
+                "first_audit",
+                flag="first_audit_fired",
+                properties={"display_name": "First Audit: tpch"},
+            )
+
+        assert fired is True
+        mock_track.assert_called_once_with(
+            "first_audit", {"display_name": "First Audit: tpch"}
+        )
+        assert tm._get_stats().get("first_audit_fired") == 1
+
+    def test_does_not_fire_when_flag_set(self, temp_rdst_dir):
+        tm = self._make_tm(temp_rdst_dir, stats={"first_audit_fired": 1})
+
+        with patch.object(tm, "track") as mock_track:
+            fired = tm.track_first_event_once(
+                "first_audit",
+                flag="first_audit_fired",
+                properties={"display_name": "First Audit: tpch"},
+            )
+
+        assert fired is False
+        mock_track.assert_not_called()
+
+    def test_increments_only_on_first_fire(self, temp_rdst_dir):
+        tm = self._make_tm(temp_rdst_dir)
+
+        with patch.object(tm, "track"):
+            tm.track_first_event_once(
+                "first_fleet_audit",
+                flag="first_fleet_audit_fired",
+                properties={"foo": "bar"},
+            )
+            tm.track_first_event_once(
+                "first_fleet_audit",
+                flag="first_fleet_audit_fired",
+                properties={"foo": "bar"},
+            )
+
+        assert tm._get_stats().get("first_fleet_audit_fired") == 1

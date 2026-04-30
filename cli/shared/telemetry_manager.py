@@ -460,6 +460,28 @@ class TelemetryManager:
 
         self.track(event, all_props)
 
+    def track_first_event_once(
+        self,
+        event: str,
+        flag: str,
+        properties: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Fire `event` exactly once per device, gated by stats `flag`.
+
+        Used for "first X" Slack alerts (first_audit, first_fleet_audit,
+        etc.) where the per-device gate is a boolean flag in stats.json
+        rather than a counter check. Returns True if the event was
+        fired, False if it had already fired previously.
+
+        The `first_analyze` event uses a different gate (counter equals
+        one) and stays inside `track_analyze`.
+        """
+        if self._get_stats().get(flag):
+            return False
+        self.track(event, properties)
+        self._increment_stat(flag, 1)
+        return True
+
     # =========================================================================
     # NPS Prompt (periodic feedback)
     # =========================================================================

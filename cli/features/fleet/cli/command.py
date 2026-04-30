@@ -1025,17 +1025,17 @@ class FleetCommand:
             telemetry.track("fleet_audit_report_generated", properties)
 
             # Fire first_fleet_audit only once per device (triggers Slack).
-            stats = telemetry._get_stats()
-            if not stats.get("first_fleet_audit_fired"):
-                slack_props = {
+            telemetry.track_first_event_once(
+                "first_fleet_audit",
+                flag="first_fleet_audit_fired",
+                properties={
                     **properties,
                     "display_name": f"First Fleet Audit: {len(successful)} targets",
                     "auth_type": "own_key",
                     "source": "fleet_audit",
                     "email_tier": "—",
-                }
-                telemetry.track("first_fleet_audit", slack_props)
-                telemetry._increment_stat("first_fleet_audit_fired", 1)
+                },
+            )
         except Exception:
             pass
 

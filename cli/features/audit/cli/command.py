@@ -1227,17 +1227,17 @@ class AuditCommand:
             # Fire first_audit only once per device (triggers Slack).
             # Include display_name/auth_type/source/email_tier so the Slack
             # template renders consistently with trial events.
-            stats = telemetry._get_stats()
-            if not stats.get("first_audit_fired"):
-                slack_props = {
+            telemetry.track_first_event_once(
+                "first_audit",
+                flag="first_audit_fired",
+                properties={
                     **properties,
                     "display_name": f"First Audit: {target}",
                     "auth_type": "own_key",
                     "source": "audit",
                     "email_tier": "—",
-                }
-                telemetry.track("first_audit", slack_props)
-                telemetry._increment_stat("first_audit_fired", 1)
+                },
+            )
         except Exception:
             pass
 
