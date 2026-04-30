@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from shared.constants import RDST_DATA_DIR
+from shared.constants import rdst_data_dir
 
 from .formatters import Formatter as F
 
@@ -33,7 +33,7 @@ class SessionInspector:
         sessions_root: Optional[Path] = None,
     ) -> "SessionInspector":
         if sessions_root is None:
-            sessions_root = RDST_DATA_DIR / "sessions"
+            sessions_root = rdst_data_dir() / "sessions"
         for session_dir in sessions_root.iterdir():
             if session_dir.is_dir() and session_dir.name.startswith(session_id):
                 return cls(session_dir)

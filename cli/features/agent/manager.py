@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .config import AgentConfig, SafetyConfig, RestrictionsConfig, AGENTS_DIR
+from .config import AgentConfig, SafetyConfig, RestrictionsConfig, agents_dir
 from shared.config.targets import create_targets_config
 
 from features.guard import GuardManager, GuardNotFoundError
@@ -89,7 +89,7 @@ class AgentManager:
             base_dir: Base directory for agent files.
                       Defaults to ~/.rdst/agents/
         """
-        self.base_dir = base_dir if base_dir else AGENTS_DIR
+        self.base_dir = base_dir if base_dir else agents_dir()
 
     def _get_path(self, name: str) -> Path:
         """Get the file path for an agent."""

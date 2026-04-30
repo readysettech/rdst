@@ -94,7 +94,7 @@ class AnalysisResultsRegistry:
         if registry_path:
             self.registry_path = Path(registry_path)
         else:
-            self.registry_path = shared_constants.RDST_DATA_DIR / "analysis_results.toml"
+            self.registry_path = shared_constants.rdst_data_dir() / "analysis_results.toml"
 
         # In-memory cache of analysis results
         self._results: Dict[str, Dict[str, AnalysisResult]] = {}  # {query_hash: {analysis_id: result}}

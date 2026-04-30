@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 
-from shared.constants import RDST_DATA_DIR
+from shared.constants import rdst_data_dir
 
 
 def _utcnow_iso() -> str:
@@ -21,7 +21,9 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-AGENTS_DIR = RDST_DATA_DIR / "agents"
+def agents_dir() -> Path:
+    """Return the agents directory (``~/.rdst/agents``)."""
+    return rdst_data_dir() / "agents"
 
 
 @dataclass
@@ -157,7 +159,7 @@ class AgentConfig:
     def save(self, path: Path | None = None) -> Path:
         """Save agent config to a YAML file."""
         if path is None:
-            path = AGENTS_DIR / f"{self.name}.yaml"
+            path = agents_dir() / f"{self.name}.yaml"
 
         path.parent.mkdir(parents=True, exist_ok=True)
 

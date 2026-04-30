@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from shared.constants import RDST_DATA_DIR
+from shared.constants import rdst_data_dir
 
 from features.ask.debug import (
     Formatter as F,
@@ -20,7 +20,7 @@ class RdstDbgCommand:
     """Debug command for analyzing ask3 sessions."""
 
     def __init__(self, sessions_root: Optional[Path] = None):
-        self.sessions_root = sessions_root or RDST_DATA_DIR / "sessions"
+        self.sessions_root = sessions_root or rdst_data_dir() / "sessions"
 
     def find_session_dir(self, session_id: str) -> Optional[Path]:
         if not self.sessions_root.exists():

@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from shared.constants import RDST_DATA_DIR
+from shared.constants import rdst_data_dir
 
 # Will be lazy-imported to avoid startup cost
 _posthog = None
@@ -90,7 +90,7 @@ class TelemetryManager:
         self._enabled: Optional[bool] = None
         self._initialized = False
         self._stats: Optional[Dict[str, int]] = None
-        self._rdst_dir = RDST_DATA_DIR
+        self._rdst_dir = rdst_data_dir()
         self._lock = threading.Lock()
 
     def _ensure_initialized(self):

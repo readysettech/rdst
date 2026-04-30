@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 
-from shared.constants import RDST_DATA_DIR
+from shared.constants import rdst_data_dir
 from shared.password_resolver import resolve_password
 from shared.config.targets import TargetsConfig
 
@@ -65,7 +65,7 @@ async def get_status() -> StatusResponse:
                 )
 
         configured = len(targets_list) > 0 and any(t.has_password for t in targets_list)
-        data_dir = str(RDST_DATA_DIR)
+        data_dir = str(rdst_data_dir())
 
         return StatusResponse(
             configured=configured,

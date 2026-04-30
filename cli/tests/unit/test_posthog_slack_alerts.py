@@ -58,23 +58,22 @@ def _run_wizard_registration(mock_telemetry, email="user@example.com", token="va
 
 class TestInstallationDisplayName:
     def test_includes_display_name(self, temp_rdst_dir):
-        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
-            from shared.telemetry_manager import TelemetryManager
+        from shared.telemetry_manager import TelemetryManager
 
-            tm = TelemetryManager()
-            tm._rdst_dir = temp_rdst_dir
-            tm._enabled = True
-            tm._initialized = True
-            tm._device_id = "test-device-id"
+        tm = TelemetryManager()
+        tm._rdst_dir = temp_rdst_dir
+        tm._enabled = True
+        tm._initialized = True
+        tm._device_id = "test-device-id"
 
-            with patch.object(tm, "track_with_stats") as mock_track:
-                tm.track_installation(install_method="pip")
+        with patch.object(tm, "track_with_stats") as mock_track:
+            tm.track_installation(install_method="pip")
 
-                mock_track.assert_called_once()
-                event_name, props = mock_track.call_args[0]
-                assert event_name == "installation"
-                assert props["display_name"] == "RDST Installed"
-                assert props["install_method"] == "pip"
+            mock_track.assert_called_once()
+            event_name, props = mock_track.call_args[0]
+            assert event_name == "installation"
+            assert props["display_name"] == "RDST Installed"
+            assert props["install_method"] == "pip"
 
 
 class TestWizardTrialEvents:
@@ -135,46 +134,43 @@ class TestFirstAnalyze:
         mock_cfg.get_email.return_value = "john@xyzcompany.com"
         mock_cfg.get_trial_config.return_value = {"email": "john@xyzcompany.com"}
 
-        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
-            tm = self._make_tm(temp_rdst_dir)
+        tm = self._make_tm(temp_rdst_dir)
 
-            with (
-                patch.object(tm, "track") as mock_track,
-                patch("shared.config.targets.create_targets_config") as mock_cfg_factory,
-            ):
-                mock_cfg_factory.return_value = mock_cfg
-                tm.track_analyze(query_hash="abc123", success=True, target_engine="postgresql", duration_ms=500)
+        with (
+            patch.object(tm, "track") as mock_track,
+            patch("shared.config.targets.create_targets_config") as mock_cfg_factory,
+        ):
+            mock_cfg_factory.return_value = mock_cfg
+            tm.track_analyze(query_hash="abc123", success=True, target_engine="postgresql", duration_ms=500)
 
-                calls = [c for c in mock_track.call_args_list if c[0][0] == "first_analyze"]
-                assert len(calls) == 1
-                props = calls[0][0][1]
-                assert props["display_name"] == "RDST First Analyze"
-                assert props["email"] == "john@xyzcompany.com"
-                assert props["email_domain"] == "xyzcompany.com"
+            calls = [c for c in mock_track.call_args_list if c[0][0] == "first_analyze"]
+            assert len(calls) == 1
+            props = calls[0][0][1]
+            assert props["display_name"] == "RDST First Analyze"
+            assert props["email"] == "john@xyzcompany.com"
+            assert props["email_domain"] == "xyzcompany.com"
 
     def test_omits_email_when_not_in_config(self, temp_rdst_dir):
         config_file = temp_rdst_dir / "config.toml"
         config_file.write_text("")
 
-        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
-            tm = self._make_tm(temp_rdst_dir)
+        tm = self._make_tm(temp_rdst_dir)
 
-            with patch.object(tm, "track") as mock_track:
-                tm.track_analyze(query_hash="abc123", success=True, target_engine="postgresql", duration_ms=500)
+        with patch.object(tm, "track") as mock_track:
+            tm.track_analyze(query_hash="abc123", success=True, target_engine="postgresql", duration_ms=500)
 
-                calls = [c for c in mock_track.call_args_list if c[0][0] == "first_analyze"]
-                assert len(calls) == 1
-                assert "email" not in calls[0][0][1]
+            calls = [c for c in mock_track.call_args_list if c[0][0] == "first_analyze"]
+            assert len(calls) == 1
+            assert "email" not in calls[0][0][1]
 
     def test_does_not_fire_on_subsequent_runs(self, temp_rdst_dir):
-        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
-            tm = self._make_tm(temp_rdst_dir, successful_analyzes=5)
+        tm = self._make_tm(temp_rdst_dir, successful_analyzes=5)
 
-            with patch.object(tm, "track") as mock_track:
-                tm.track_analyze(query_hash="abc123", success=True, target_engine="postgresql", duration_ms=500)
+        with patch.object(tm, "track") as mock_track:
+            tm.track_analyze(query_hash="abc123", success=True, target_engine="postgresql", duration_ms=500)
 
-                calls = [c for c in mock_track.call_args_list if c[0][0] == "first_analyze"]
-                assert len(calls) == 0
+            calls = [c for c in mock_track.call_args_list if c[0][0] == "first_analyze"]
+            assert len(calls) == 0
 
 
 class TestEmailPersistence:
@@ -207,28 +203,27 @@ class TestEmailPersistence:
         assert cfg.get_email() is None
 
     def test_feedback_saves_email(self, temp_rdst_dir):
-        with patch("shared.telemetry_manager.RDST_DATA_DIR", temp_rdst_dir):
-            from shared.telemetry_manager import TelemetryManager
+        from shared.telemetry_manager import TelemetryManager
 
-            tm = TelemetryManager()
-            tm._rdst_dir = temp_rdst_dir
-            tm._enabled = True
-            tm._initialized = True
-            tm._device_id = "test-device-id"
+        tm = TelemetryManager()
+        tm._rdst_dir = temp_rdst_dir
+        tm._enabled = True
+        tm._initialized = True
+        tm._device_id = "test-device-id"
 
-            mock_cfg = MagicMock()
-            mock_cfg.get_email.return_value = None  # no existing email
+        mock_cfg = MagicMock()
+        mock_cfg.get_email.return_value = None  # no existing email
 
-            with (
-                patch.object(tm, "track_with_stats"),
-                patch.object(tm, "_slack_notify_feedback"),
-                patch("shared.config.targets.create_targets_config") as mock_cfg_factory,
-            ):
-                mock_cfg_factory.return_value = mock_cfg
-                tm.submit_feedback(reason="Great tool!", sentiment="positive", email="feedback@example.com")
+        with (
+            patch.object(tm, "track_with_stats"),
+            patch.object(tm, "_slack_notify_feedback"),
+            patch("shared.config.targets.create_targets_config") as mock_cfg_factory,
+        ):
+            mock_cfg_factory.return_value = mock_cfg
+            tm.submit_feedback(reason="Great tool!", sentiment="positive", email="feedback@example.com")
 
-                mock_cfg.set_email.assert_called_once_with("feedback@example.com")
-                mock_cfg.save.assert_called_once()
+            mock_cfg.set_email.assert_called_once_with("feedback@example.com")
+            mock_cfg.save.assert_called_once()
 
 
 class TestTrialServiceDisplayName:

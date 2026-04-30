@@ -645,7 +645,7 @@ class QueryRegistry:
         if registry_path:
             self.registry_path = Path(registry_path)
         else:
-            self.registry_path = shared_constants.RDST_DATA_DIR / "queries.toml"
+            self.registry_path = shared_constants.rdst_data_dir() / "queries.toml"
 
         # In-memory cache of queries
         self._queries: Dict[str, QueryEntry] = {}

@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from shared.constants import RDST_SEMANTIC_LAYER_DIR
+from shared.constants import rdst_semantic_layer_dir
 
 from .events import (
     ScanCompleteEvent,
@@ -85,7 +85,7 @@ class ScanService:
             return
 
         # Check schema exists
-        schema_file = RDST_SEMANTIC_LAYER_DIR / f"{target}.yaml"
+        schema_file = rdst_semantic_layer_dir() / f"{target}.yaml"
         if not schema_file.exists():
             yield ScanErrorEvent(
                 type="error",
@@ -615,7 +615,7 @@ class ScanService:
         """Load schema from semantic-layer YAML."""
         if not target:
             return ""
-        schema_file = RDST_SEMANTIC_LAYER_DIR / f"{target}.yaml"
+        schema_file = rdst_semantic_layer_dir() / f"{target}.yaml"
         if not schema_file.exists():
             return ""
 
@@ -637,7 +637,7 @@ class ScanService:
         """Detect SQL dialect from target's semantic layer YAML."""
         if not target:
             return "PostgreSQL"
-        schema_file = RDST_SEMANTIC_LAYER_DIR / f"{target}.yaml"
+        schema_file = rdst_semantic_layer_dir() / f"{target}.yaml"
         if schema_file.exists():
             try:
                 content = schema_file.read_text()

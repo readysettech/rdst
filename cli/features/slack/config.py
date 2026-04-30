@@ -18,12 +18,24 @@ try:
 except ImportError:
     tomli_w = None
 
-from shared.constants import RDST_DATA_DIR
+from pathlib import Path
+
+from shared.constants import rdst_data_dir
 
 
-SLACK_CONFIG_DIR = RDST_DATA_DIR / "slack"
-CREDENTIALS_FILE = SLACK_CONFIG_DIR / "credentials.json"
-AGENTS_DIR = SLACK_CONFIG_DIR / "agents"
+def slack_config_dir() -> Path:
+    """Return the Slack config directory (``~/.rdst/slack``)."""
+    return rdst_data_dir() / "slack"
+
+
+def credentials_file() -> Path:
+    """Return the Slack credentials file (``~/.rdst/slack/credentials.json``)."""
+    return slack_config_dir() / "credentials.json"
+
+
+def slack_agents_dir() -> Path:
+    """Return the Slack agents directory (``~/.rdst/slack/agents``)."""
+    return slack_config_dir() / "agents"
 
 
 @dataclass
@@ -90,8 +102,8 @@ class SlackCredentials:
 
 def ensure_slack_dirs() -> None:
     """Create Slack config directories if they don't exist."""
-    SLACK_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    AGENTS_DIR.mkdir(parents=True, exist_ok=True)
+    slack_config_dir().mkdir(parents=True, exist_ok=True)
+    slack_agents_dir().mkdir(parents=True, exist_ok=True)
 
 
 def load_credentials(workspace_id: Optional[str] = None) -> dict[str, SlackCredentials]:
@@ -104,10 +116,11 @@ def load_credentials(workspace_id: Optional[str] = None) -> dict[str, SlackCrede
     Returns:
         Dict mapping workspace_id to SlackCredentials.
     """
-    if not CREDENTIALS_FILE.exists():
+    creds_file = credentials_file()
+    if not creds_file.exists():
         return {}
 
-    with open(CREDENTIALS_FILE, "r") as f:
+    with open(creds_file, "r") as f:
         data = json.load(f)
 
     credentials = {}
@@ -128,21 +141,23 @@ def save_credentials(credentials: SlackCredentials) -> None:
     """
     ensure_slack_dirs()
 
+    creds_file = credentials_file()
+
     # Load existing credentials
     existing = {}
-    if CREDENTIALS_FILE.exists():
-        with open(CREDENTIALS_FILE, "r") as f:
+    if creds_file.exists():
+        with open(creds_file, "r") as f:
             existing = json.load(f)
 
     # Update with new credentials
     existing[credentials.workspace_id] = credentials.to_dict()
 
     # Save back
-    with open(CREDENTIALS_FILE, "w") as f:
+    with open(creds_file, "w") as f:
         json.dump(existing, f, indent=2)
 
     # Set restrictive permissions (owner read/write only)
-    os.chmod(CREDENTIALS_FILE, 0o600)
+    os.chmod(creds_file, 0o600)
 
 
 def load_agent_config(agent_name: str) -> Optional[AgentConfig]:
@@ -155,7 +170,7 @@ def load_agent_config(agent_name: str) -> Optional[AgentConfig]:
     Returns:
         AgentConfig if found, None otherwise.
     """
-    agent_file = AGENTS_DIR / f"{agent_name}.toml"
+    agent_file = slack_agents_dir() / f"{agent_name}.toml"
     if not agent_file.exists():
         return None
 
@@ -174,7 +189,7 @@ def save_agent_config(config: AgentConfig) -> None:
     """
     ensure_slack_dirs()
 
-    agent_file = AGENTS_DIR / f"{config.name}.toml"
+    agent_file = slack_agents_dir() / f"{config.name}.toml"
 
     if tomli_w is None:
         # Fallback: write TOML manually
@@ -200,11 +215,12 @@ def list_agents() -> list[AgentConfig]:
     Returns:
         List of AgentConfig objects.
     """
-    if not AGENTS_DIR.exists():
+    agents_dir = slack_agents_dir()
+    if not agents_dir.exists():
         return []
 
     agents = []
-    for agent_file in AGENTS_DIR.glob("*.toml"):
+    for agent_file in agents_dir.glob("*.toml"):
         agent_name = agent_file.stem
         config = load_agent_config(agent_name)
         if config:
@@ -223,7 +239,7 @@ def delete_agent(agent_name: str) -> bool:
     Returns:
         True if deleted, False if not found.
     """
-    agent_file = AGENTS_DIR / f"{agent_name}.toml"
+    agent_file = slack_agents_dir() / f"{agent_name}.toml"
     if agent_file.exists():
         agent_file.unlink()
         return True

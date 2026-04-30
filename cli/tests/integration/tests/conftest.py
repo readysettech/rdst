@@ -70,44 +70,19 @@ def collect_sse_events():
 
 @pytest.fixture
 def tmp_rdst_home(monkeypatch, tmp_path: Path) -> Path:
-    """Relocate `~/.rdst/` to a fresh tmp dir for the duration of one test.
+    """Relocate ``~/.rdst/`` to a fresh tmp dir for the duration of one test.
 
-    Coverage is *partial* — beware before adding tests for new surfaces.
-
-    Covered:
-    - `Path.home()` callsites (e.g. `shared/config/targets.py:119`,
-      `features/audit/storage.py:20`, `features/fleet/snapshot_store.py:18`)
-      — these resolve at call time, so setting HOME isolates them.
-    - Modules that read `shared.constants.RDST_DATA_DIR` *through* the
-      `shared.constants` namespace at call time — the monkeypatch on the
-      attribute reaches them.
-
-    NOT covered (will silently read/write the developer's real `~/.rdst/`):
-    - Modules that did `from shared.constants import RDST_DATA_DIR` at
-      import time — they captured the original `Path` object before the
-      monkeypatch ran. Examples:
-      `shared/api/routes/status.py:5`, `features/ask/history/ask_history.py:13`,
-      `shared/telemetry_manager.py:22`.
-    - Modules that derive a *module-scope* path from `RDST_DATA_DIR` at
-      import time — those paths are frozen for the process lifetime
-      regardless of monkeypatch. Examples:
-      `features/agent/config.py:24` (`AGENTS_DIR`),
-      `features/slack/config.py:24`, `features/guard/config.py:24`,
-      `features/scan/cli/scan_corpus.py:41`,
-      `features/scan/cli/snippet_cache.py:39`.
-
-    Realdb tests today don't exercise any of those surfaces, which is why
-    this fixture is sufficient now. Before adding a realdb test for
-    /api/agent, /api/slack, /api/guard, /api/scan/*, or anything that
-    reads `status.data_directory`, either patch each module's *local*
-    `RDST_DATA_DIR` binding too or route all access through a getter.
+    Setting ``HOME`` is sufficient because every callsite resolves the
+    data directory at *call* time (via ``shared.constants.rdst_data_dir()``
+    or ``Path.home()``), not at module import. Per-feature paths
+    (agents, guards, slack, scan corpus/snippets, semantic-layer) are
+    likewise functions, so they pick up the new HOME on first use.
     """
     rdst_home = tmp_path / "home"
     rdst_data_dir = rdst_home / ".rdst"
     rdst_data_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setenv("HOME", str(rdst_home))
-    monkeypatch.setattr("shared.constants.RDST_DATA_DIR", rdst_data_dir)
 
     return rdst_data_dir
 

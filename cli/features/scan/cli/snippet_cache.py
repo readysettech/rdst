@@ -20,7 +20,7 @@ import hashlib
 from datetime import datetime
 from typing import Dict, Optional, Any
 
-from shared.constants import RDST_DATA_DIR
+from shared.constants import rdst_data_dir
 
 
 class SnippetCache:
@@ -36,7 +36,7 @@ class SnippetCache:
 
     def __init__(self, project_name: str = "default"):
         self.project_name = project_name
-        self.cache_dir = RDST_DATA_DIR / "cache" / "scan-snippets"
+        self.cache_dir = rdst_data_dir() / "cache" / "scan-snippets"
         self.cache_file = self.cache_dir / f"{project_name}.json"
         self.cache: Dict[str, Dict[str, Any]] = {}
         self._load()

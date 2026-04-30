@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 import os
 
-from shared.constants import RDST_SEMANTIC_LAYER_DIR
+from shared.constants import rdst_semantic_layer_dir
 
 from features.schema.semantic_models import (
     SemanticLayer,
@@ -41,7 +41,7 @@ class SemanticLayerManager:
                       Defaults to ~/.rdst/semantic-layer/
         """
         if base_dir is None:
-            base_dir = RDST_SEMANTIC_LAYER_DIR
+            base_dir = rdst_semantic_layer_dir()
 
         self.base_dir = Path(base_dir)
         self._cache: dict[str, SemanticLayer] = {}

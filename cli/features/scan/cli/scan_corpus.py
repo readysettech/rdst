@@ -16,7 +16,7 @@ import json
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 
-from shared.constants import RDST_DATA_DIR
+from shared.constants import rdst_data_dir
 
 # Import deep normalization from query_registry for cross-source matching
 from shared.query_registry import hash_sql_deep, normalize_sql_deep
@@ -38,7 +38,7 @@ class QueryCorpus:
 
     def __init__(self, project_name: str = "default"):
         self.project_name = project_name
-        self.corpus_dir = RDST_DATA_DIR / "corpus"
+        self.corpus_dir = rdst_data_dir() / "corpus"
         self.corpus_file = self.corpus_dir / f"{project_name}.yaml"
         self.queries: Dict[str, Dict] = {}  # hash -> query data
         self.metadata: Dict[str, Any] = {}

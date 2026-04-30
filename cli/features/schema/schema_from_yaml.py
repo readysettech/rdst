@@ -8,7 +8,7 @@ connection is not available at scan time.
 
 from typing import Any, Dict
 
-from shared.constants import RDST_SEMANTIC_LAYER_DIR
+from shared.constants import rdst_semantic_layer_dir
 
 from .semantic_models import SemanticLayer
 
@@ -43,7 +43,7 @@ def collect_schema_from_yaml(target: str = None, **kwargs) -> Dict[str, Any]:
         }
 
     # Check if semantic layer YAML exists
-    schema_path = RDST_SEMANTIC_LAYER_DIR / f"{target}.yaml"
+    schema_path = rdst_semantic_layer_dir() / f"{target}.yaml"
 
     if not schema_path.exists():
         return {

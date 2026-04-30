@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 import yaml
 
-from shared.constants import RDST_DATA_DIR
+from shared.constants import rdst_data_dir
 
 
 def _utcnow_iso() -> str:
@@ -21,7 +21,9 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-GUARDS_DIR = RDST_DATA_DIR / "guards"
+def guards_dir() -> Path:
+    """Return the guards directory (``~/.rdst/guards``)."""
+    return rdst_data_dir() / "guards"
 
 
 @dataclass
@@ -248,7 +250,7 @@ class GuardConfig:
     def save(self, path: Path | None = None) -> Path:
         """Save guard config to a YAML file."""
         if path is None:
-            path = GUARDS_DIR / f"{self.name}.yaml"
+            path = guards_dir() / f"{self.name}.yaml"
 
         path.parent.mkdir(parents=True, exist_ok=True)
 

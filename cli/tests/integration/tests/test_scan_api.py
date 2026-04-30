@@ -52,12 +52,6 @@ def _seed_target_and_schema(rdst_data_dir: Path, monkeypatch) -> None:
         encoding="utf-8",
     )
 
-    # `features.scan.service` captured RDST_SEMANTIC_LAYER_DIR at import
-    # time, so monkeypatching `shared.constants` isn't enough.
-    monkeypatch.setattr(
-        "features.scan.service.RDST_SEMANTIC_LAYER_DIR", semantic_dir
-    )
-
 
 async def test_scan_json_endpoint_returns_extracted_queries(
     client, tmp_rdst_home, monkeypatch

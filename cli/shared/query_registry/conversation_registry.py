@@ -141,7 +141,7 @@ class ConversationRegistry:
         if conversations_dir:
             self.conversations_dir = Path(conversations_dir)
         else:
-            self.conversations_dir = shared_constants.RDST_DATA_DIR / "conversations"
+            self.conversations_dir = shared_constants.rdst_data_dir() / "conversations"
 
         self._ensure_directory()
 

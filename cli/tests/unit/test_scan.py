@@ -803,10 +803,12 @@ class TestSpinnerShowsFilePath:
 
         async def collect():
             service = ScanService()
-            with patch("features.scan.service.RDST_SEMANTIC_LAYER_DIR") as mock_dir:
+            with patch("features.scan.service.rdst_semantic_layer_dir") as mock_dir_fn:
                 mock_schema = MagicMock()
                 mock_schema.exists.return_value = True
-                mock_dir.__truediv__ = lambda self_inner, other: mock_schema
+                fake_dir = MagicMock()
+                fake_dir.__truediv__ = lambda self_inner, other: mock_schema
+                mock_dir_fn.return_value = fake_dir
 
                 with patch.object(service, "_find_orm_files", return_value=[]):
                     async for event in service.scan_directory(input_data, options):
@@ -840,10 +842,12 @@ class TestSpinnerShowsFilePath:
 
         async def collect():
             service = ScanService()
-            with patch("features.scan.service.RDST_SEMANTIC_LAYER_DIR") as mock_dir:
+            with patch("features.scan.service.rdst_semantic_layer_dir") as mock_dir_fn:
                 mock_schema = MagicMock()
                 mock_schema.exists.return_value = True
-                mock_dir.__truediv__ = lambda self_inner, other: mock_schema
+                fake_dir = MagicMock()
+                fake_dir.__truediv__ = lambda self_inner, other: mock_schema
+                mock_dir_fn.return_value = fake_dir
 
                 with patch.object(service, "_find_orm_files", return_value=[]):
                     async for event in service.scan_directory(input_data, options):
@@ -873,10 +877,12 @@ class TestSpinnerShowsFilePath:
 
         async def collect():
             service = ScanService()
-            with patch("features.scan.service.RDST_SEMANTIC_LAYER_DIR") as mock_dir:
+            with patch("features.scan.service.rdst_semantic_layer_dir") as mock_dir_fn:
                 mock_schema = MagicMock()
                 mock_schema.exists.return_value = True
-                mock_dir.__truediv__ = lambda self_inner, other: mock_schema
+                fake_dir = MagicMock()
+                fake_dir.__truediv__ = lambda self_inner, other: mock_schema
+                mock_dir_fn.return_value = fake_dir
 
                 with patch.object(service, "_find_orm_files", return_value=[]):
                     async for event in service.scan_directory(input_data, options):

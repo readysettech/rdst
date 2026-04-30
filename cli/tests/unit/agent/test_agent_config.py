@@ -13,7 +13,6 @@ from features.agent.config import (
     AgentConfig,
     SafetyConfig,
     RestrictionsConfig,
-    AGENTS_DIR,
 )
 
 

@@ -10,7 +10,8 @@ import re
 from pathlib import Path
 from typing import Iterator
 
-from .config import GuardConfig, GUARDS_DIR
+from . import config as _config
+from .config import GuardConfig
 
 # Guard names must start with a letter or underscore and contain only
 # letters, digits, underscores, and hyphens. Slashes, dots, and other
@@ -68,7 +69,7 @@ class GuardManager:
         Args:
             guards_dir: Directory to store guards. Defaults to ~/.rdst/guards/
         """
-        self.guards_dir = guards_dir or GUARDS_DIR
+        self.guards_dir = guards_dir or _config.guards_dir()
 
     def _guard_path(self, name: str) -> Path:
         """Get the path for a guard file."""

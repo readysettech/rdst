@@ -2,8 +2,8 @@
 
 The real `ConfigureService` runs end-to-end, reading and writing the actual
 TOML file under `~/.rdst/config.toml`. The `tmp_rdst_home` fixture (in
-`conftest.py`) relocates HOME and `shared.constants.RDST_DATA_DIR` to a
-fresh tmp dir per test, so each test starts with an empty config.
+`conftest.py`) relocates HOME to a fresh tmp dir per test, so each test
+starts with an empty config.
 
 Connection-test cases live in `test_realdb_configure_api.py` — without a
 live DB they just re-test mock plumbing.
