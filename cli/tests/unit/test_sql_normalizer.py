@@ -10,6 +10,9 @@ from shared.query_registry.sql_normalizer import (
     normalize_and_extract,
     reconstruct_sql,
     get_placeholder_names,
+    denormalize_for_readyset,
+    parse_query_id_from_explain,
+    parse_supported_from_explain,
 )
 
 
@@ -330,3 +333,151 @@ class TestFallbackBehavior:
         # Test with explicit dialect
         normalized, params = normalize_and_extract(sql, dialect='postgres')
         assert len(params) == 1
+
+
+# =============================================================================
+# denormalize_for_readyset — engine-aware conversion of :pN placeholders
+# =============================================================================
+
+class TestDenormalizeForReadyset:
+    """ReadySet uses engine-specific placeholders ($N for Postgres, ? for MySQL).
+
+    Empirically verified against readysettech/readyset:latest on Postgres mode
+    that `IN (?)` produces a syntax error but `IN ($1)`, `IN ($1, $2, $3)`, and
+    `IN ('a','b','c')` all canonicalize to the same cache. So we don't collapse
+    IN — we just match placeholder syntax.
+    """
+
+    def test_postgres_simple_placeholder(self):
+        assert denormalize_for_readyset("SELECT * FROM users WHERE id = :p1", engine="postgresql") == \
+            "SELECT * FROM users WHERE id = $1"
+
+    def test_postgres_in_list_keeps_indexed_placeholders(self):
+        assert denormalize_for_readyset("SELECT * FROM foo WHERE a IN (:p1, :p2, :p3)", engine="postgresql") == \
+            "SELECT * FROM foo WHERE a IN ($1, $2, $3)"
+
+    def test_postgres_not_in_list(self):
+        assert denormalize_for_readyset("SELECT * FROM foo WHERE a NOT IN (:p1, :p2, :p3)", engine="postgresql") == \
+            "SELECT * FROM foo WHERE a NOT IN ($1, $2, $3)"
+
+    def test_postgres_literal_in_list_passthrough(self):
+        sql = "SELECT * FROM foo WHERE a IN (1, 2, 3)"
+        assert denormalize_for_readyset(sql, engine="postgresql") == sql
+
+    def test_postgres_mixed_predicate(self):
+        assert denormalize_for_readyset(
+            "SELECT * FROM foo WHERE x = :p1 AND y IN (:p2, :p3, :p4)", engine="postgresql"
+        ) == "SELECT * FROM foo WHERE x = $1 AND y IN ($2, $3, $4)"
+
+    def test_postgres_subquery_in_clause_unchanged(self):
+        sql = "SELECT * FROM foo WHERE a IN (SELECT id FROM bar)"
+        assert denormalize_for_readyset(sql, engine="postgresql") == sql
+
+    def test_postgres_subquery_inner_placeholder_converted(self):
+        sql = "SELECT * FROM foo WHERE a IN (SELECT id FROM bar WHERE x = :p1)"
+        assert denormalize_for_readyset(sql, engine="postgresql") == \
+            "SELECT * FROM foo WHERE a IN (SELECT id FROM bar WHERE x = $1)"
+
+    def test_postgres_high_numbered_placeholders(self):
+        sql = "SELECT * FROM foo WHERE a = :p10 AND b = :p100"
+        assert denormalize_for_readyset(sql, engine="postgresql") == \
+            "SELECT * FROM foo WHERE a = $10 AND b = $100"
+
+    def test_mysql_simple_placeholder(self):
+        assert denormalize_for_readyset("SELECT * FROM users WHERE id = :p1", engine="mysql") == \
+            "SELECT * FROM users WHERE id = ?"
+
+    def test_mysql_in_list_collapses(self):
+        assert denormalize_for_readyset("SELECT * FROM foo WHERE a IN (:p1, :p2, :p3)", engine="mysql") == \
+            "SELECT * FROM foo WHERE a IN (?)"
+
+    def test_mysql_mixed_predicate(self):
+        assert denormalize_for_readyset(
+            "SELECT * FROM foo WHERE x = :p1 AND y IN (:p2, :p3, :p4)", engine="mysql"
+        ) == "SELECT * FROM foo WHERE x = ? AND y IN (?)"
+
+    def test_default_engine_is_postgres(self):
+        assert denormalize_for_readyset("WHERE id = :p1") == "WHERE id = $1"
+
+    def test_empty_input(self):
+        assert denormalize_for_readyset("", engine="postgresql") == ""
+        assert denormalize_for_readyset("", engine="mysql") == ""
+
+    def test_none_input(self):
+        assert denormalize_for_readyset(None, engine="postgresql") is None
+
+    def test_no_placeholders_passthrough(self):
+        sql = "SELECT * FROM users LIMIT 10"
+        assert denormalize_for_readyset(sql, engine="postgresql") == sql
+        assert denormalize_for_readyset(sql, engine="mysql") == sql
+
+    def test_unknown_engine_passthrough(self):
+        sql = "SELECT * FROM users WHERE id = :p1"
+        assert denormalize_for_readyset(sql, engine="quantum") == sql
+
+
+# =============================================================================
+# parse_query_id_from_explain / parse_supported_from_explain
+# =============================================================================
+
+class TestParseQueryIdFromExplain:
+
+    def test_pipe_delimited_output(self):
+        output = (
+            "query id    | q_13b0714e3f57aa57\n"
+            "query       | SELECT * FROM users WHERE id = ?\n"
+            "readyset supported | yes"
+        )
+        assert parse_query_id_from_explain(output) == "q_13b0714e3f57aa57"
+
+    def test_tab_delimited_output(self):
+        output = "query id\tq_abc123def456789a\nquery\tSELECT 1\nsupported\tyes"
+        assert parse_query_id_from_explain(output) == "q_abc123def456789a"
+
+    def test_short_hex_id(self):
+        output = "query id | q_abc12345"
+        assert parse_query_id_from_explain(output) == "q_abc12345"
+
+    def test_uppercase_hex(self):
+        output = "query id | q_ABCDEF1234567890"
+        assert parse_query_id_from_explain(output) == "q_ABCDEF1234567890"
+
+    def test_no_match_returns_none(self):
+        assert parse_query_id_from_explain("just some text without query id") is None
+
+    def test_empty_string_returns_none(self):
+        assert parse_query_id_from_explain("") is None
+
+    def test_none_input_returns_none(self):
+        assert parse_query_id_from_explain(None) is None
+
+    def test_q_prefix_in_other_word_doesnt_match(self):
+        assert parse_query_id_from_explain("query: select 1") is None
+
+
+class TestParseSupportedFromExplain:
+
+    def test_yes(self):
+        output = "query id | q_abc12345\nreadyset supported | yes"
+        assert parse_supported_from_explain(output) == "yes"
+
+    def test_pending(self):
+        output = "readyset supported | pending"
+        assert parse_supported_from_explain(output) == "pending"
+
+    def test_unsupported_with_reason(self):
+        output = "readyset supported | unsupported: aggregation not supported"
+        assert parse_supported_from_explain(output) == "unsupported: aggregation not supported"
+
+    def test_tab_delimited(self):
+        output = "readyset supported\tyes"
+        assert parse_supported_from_explain(output) == "yes"
+
+    def test_empty_returns_empty(self):
+        assert parse_supported_from_explain("") == ""
+
+    def test_none_returns_empty(self):
+        assert parse_supported_from_explain(None) == ""
+
+    def test_no_supported_line(self):
+        assert parse_supported_from_explain("just q_abc123") == ""

@@ -794,3 +794,47 @@ class TestCacheOptionsExtended:
         assert opts.host == "10.0.0.5"
         assert opts.ssh_key == "/home/user/.ssh/id_rsa"
         assert opts.ssh_user == "deploy"
+
+
+class TestResolveCacheIdForDrop:
+    """CacheService._resolve_cache_id_for_drop translates RDST registry hashes
+    to ReadySet's q_<hash> format so DROP CACHE targets the correct cache.
+    Fixes CLD-1754 (DROP CACHE was passing the registry hash to ReadySet,
+    which doesn't recognize it).
+    """
+
+    def test_q_prefix_returned_as_is(self):
+        from features.cache.service import CacheService
+        assert CacheService._resolve_cache_id_for_drop("q_abc123def456") == "q_abc123def456"
+
+    def test_long_q_prefix(self):
+        from features.cache.service import CacheService
+        assert CacheService._resolve_cache_id_for_drop("q_13b0714e3f57aa57") == "q_13b0714e3f57aa57"
+
+    def test_invalid_format_returns_none(self):
+        from features.cache.service import CacheService
+        assert CacheService._resolve_cache_id_for_drop("garbage_123") is None
+        assert CacheService._resolve_cache_id_for_drop("foo bar") is None
+
+    def test_empty_returns_none(self):
+        from features.cache.service import CacheService
+        assert CacheService._resolve_cache_id_for_drop("") is None
+        assert CacheService._resolve_cache_id_for_drop(None) is None
+
+    def test_unknown_hex_returns_none(self):
+        from features.cache.service import CacheService
+        # Looks like our hash, but not in registry
+        assert CacheService._resolve_cache_id_for_drop("a1b2c3d4") is None
+
+    def test_known_hex_translated_to_q_id(self, tmp_path, monkeypatch):
+        from features.cache.service import CacheService
+        from shared.query_registry.query_registry import QueryRegistry
+        registry_path = tmp_path / "queries.toml"
+        reg = QueryRegistry(registry_path=str(registry_path))
+        reg.load()
+        h, _ = reg.add_query(sql="SELECT 1", source="manual", target="db1")
+        reg.update_readyset_identity(query_hash=h, readyset_query_id="q_translated")
+        import shared.constants
+        monkeypatch.setattr(shared.constants, "RDST_DATA_DIR", tmp_path)
+        result = CacheService._resolve_cache_id_for_drop(h)
+        assert result == "q_translated"

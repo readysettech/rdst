@@ -71,6 +71,24 @@ test_cache_add_sql() {
   assert_contains "cache-compare" "should show compare hint"
 }
 
+test_cache_add_in_clause() {
+  # CLD-1748: cache add must succeed on queries with IN(...) lists.
+  # Verifies engine-aware placeholder denormalization (Postgres → $N,
+  # MySQL → ? + IN-list collapse) and that we capture ReadySet's q_<hash>.
+  log_section "Cache Commands: Add IN clause (CLD-1748) (${DB_ENGINE})"
+
+  local IN_QUERY
+  if [[ "$DB_ENGINE" == "postgresql" ]]; then
+    IN_QUERY="SELECT * FROM title_basics WHERE titletype IN ('movie', 'short', 'tvSeries')"
+  else
+    IN_QUERY="SELECT * FROM title_basics WHERE titleType IN ('movie', 'short', 'tvSeries')"
+  fi
+
+  run_cmd "Cache add (IN clause)" \
+    "${RDST_CMD[@]}" cache add "$IN_QUERY" --target "$CACHE_TARGET_NAME"
+  assert_contains "Cache Created" "IN-clause cache add should succeed"
+}
+
 test_cache_show_populated() {
   log_section "Cache Commands: Show Populated (${DB_ENGINE})"
 
@@ -305,6 +323,7 @@ test_cache_subcommands() {
   test_cache_show_json
   test_cache_add_by_hash
   test_cache_delete
+  test_cache_add_in_clause
   test_cache_drop_all
   test_cache_error_wrong_target
   test_cache_error_unsupported_query

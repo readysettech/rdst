@@ -105,6 +105,89 @@ def reconstruct_sql(normalized_sql: str, params: Dict[str, dict], dialect: str =
     return _ReadysetCompatGenerator().generate(tree)
 
 
+def denormalize_for_readyset(sql: str, engine: str = "postgresql") -> str:
+    """Convert RDST's `:pN`-style placeholders to ReadySet-compatible form.
+
+    ReadySet uses Postgres/MySQL parsers under the hood, so the placeholder
+    syntax must match the upstream engine:
+      - PostgreSQL: `$1, $2, ...` (positional, indexed)
+      - MySQL:      `?` (anonymous)
+
+    Verified empirically (2026-04-28) against `readysettech/readyset:latest`
+    on Postgres mode:
+      - `EXPLAIN CREATE CACHE FROM ... WHERE x IN ($1, $2, $3)` → q_<hash>, yes
+      - `EXPLAIN CREATE CACHE FROM ... WHERE x IN ($1)`         → same q_<hash>, yes
+      - `EXPLAIN CREATE CACHE FROM ... WHERE x IN ('a','b','c')`→ same q_<hash>, yes
+      - `EXPLAIN CREATE CACHE FROM ... WHERE x IN (?)`          → SYNTAX ERROR (Postgres rejects `?`)
+
+    So for IN lists we don't need to collapse — ReadySet does it. We just need
+    to use the right placeholder syntax for the engine.
+
+    Fixes CLD-1748: previously we sent `IN (?)` to Postgres-mode ReadySet which
+    failed parsing.
+    """
+    if not sql:
+        return sql
+    eng = (engine or "postgresql").lower()
+    if eng in ("postgresql", "postgres", "pg"):
+        # `:pN` → `$N` (preserves index, so multiple placeholders stay distinct)
+        return re.sub(r":p(\d+)", r"$\1", sql)
+    if eng == "mysql":
+        # MySQL uses anonymous `?`. Collapse multi-placeholder IN lists since
+        # MySQL doesn't accept `IN (?)` for variable-length lists either way —
+        # users typically send literals there. For our :pN form, single `?` is
+        # the safest equivalent.
+        in_placeholder_list = re.compile(
+            r'(\bIN\s*\(\s*)((?::p\d+)(?:\s*,\s*:p\d+)+)(\s*\))',
+            re.IGNORECASE,
+        )
+        sql = in_placeholder_list.sub(r"\1?\3", sql)
+        return re.sub(r":p\d+", "?", sql)
+    # Unknown engine — pass through unchanged
+    return sql
+
+
+_READYSET_QUERY_ID_RE = re.compile(r"q_[0-9a-f]{8,}", re.IGNORECASE)
+
+
+def parse_query_id_from_explain(output: str) -> Optional[str]:
+    """Extract `q_<hash>` from `EXPLAIN CREATE CACHE FROM <sql>` output.
+
+    ReadySet returns rows like:
+        query id    | q_13b0714e3f57aa57
+        query       | <normalized SQL>
+        readyset supported | yes
+
+    We scan the output for the first `q_<hex>` token. Returns None if absent.
+    """
+    if not output:
+        return None
+    m = _READYSET_QUERY_ID_RE.search(output)
+    return m.group(0) if m else None
+
+
+def parse_supported_from_explain(output: str) -> str:
+    """Extract the `readyset supported` value from EXPLAIN output.
+
+    Returns one of "yes" | "pending" | "unsupported: <reason>" | "" (if not parseable).
+    """
+    if not output:
+        return ""
+    for line in output.splitlines():
+        if "readyset supported" in line.lower() or "supported" in line.lower():
+            # Line like: "readyset supported | yes"  or  "supported     | unsupported: ..."
+            parts = re.split(r"[|\t]", line, maxsplit=1)
+            if len(parts) == 2:
+                value = parts[1].strip().lower()
+                if value.startswith("yes"):
+                    return "yes"
+                if value.startswith("pending"):
+                    return "pending"
+                if value.startswith("unsupported"):
+                    return value
+    return ""
+
+
 def get_placeholder_names(normalized_sql: str, dialect: str = None) -> Set[str]:
     """
     Get all placeholder names (:p1, :p2, etc.) in normalized SQL.

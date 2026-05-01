@@ -742,3 +742,133 @@ class TestVerifyQueryCompleteness:
         assert entry is not None
         assert entry.sql == "SELECT * FROM users WHERE id = :p1"
         assert "look up one user" not in entry.sql.lower()
+
+
+# =============================================================================
+# QueryEntry — readyset_query_id and friends (CLD-1754 surface)
+# =============================================================================
+
+class TestQueryEntryReadysetFields:
+
+    def test_default_values_empty_strings(self):
+        entry = QueryEntry(sql="SELECT 1", hash="abc123")
+        assert entry.readyset_query_id == ""
+        assert entry.readyset_supported == ""
+        assert entry.last_cache_target == ""
+        assert entry.readyset_last_observed_at == ""
+
+    def test_from_dict_backward_compat_no_new_fields(self):
+        old_data = {
+            "sql": "SELECT 1",
+            "hash": "abc123",
+            "tag": "",
+            "first_analyzed": "",
+            "last_analyzed": "",
+            "frequency": 0,
+            "source": "manual",
+        }
+        entry = QueryEntry.from_dict(old_data)
+        assert entry.sql == "SELECT 1"
+        assert entry.readyset_query_id == ""
+        assert entry.readyset_supported == ""
+
+    def test_from_dict_with_new_fields(self):
+        data = {
+            "sql": "SELECT 1",
+            "hash": "abc123",
+            "readyset_query_id": "q_abc123def456",
+            "readyset_supported": "yes",
+            "last_cache_target": "mydb-cache",
+            "readyset_last_observed_at": "2026-04-28T15:30:00+00:00",
+        }
+        entry = QueryEntry.from_dict(data)
+        assert entry.readyset_query_id == "q_abc123def456"
+        assert entry.readyset_supported == "yes"
+        assert entry.last_cache_target == "mydb-cache"
+
+    def test_to_dict_includes_new_fields(self):
+        entry = QueryEntry(
+            sql="SELECT 1", hash="abc123",
+            readyset_query_id="q_xyz", readyset_supported="yes",
+        )
+        d = entry.to_dict()
+        assert d["readyset_query_id"] == "q_xyz"
+        assert d["readyset_supported"] == "yes"
+
+
+class TestQueryRegistryUpdateReadysetIdentity:
+
+    def _make_registry(self, tmp_path: Path) -> QueryRegistry:
+        reg = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        reg.load()
+        return reg
+
+    def test_update_existing_query(self, tmp_path):
+        reg = self._make_registry(tmp_path)
+        h, _ = reg.add_query(sql="SELECT * FROM users WHERE id = 1", source="manual", target="db1")
+        ok = reg.update_readyset_identity(
+            query_hash=h, readyset_query_id="q_abc123def456",
+            readyset_supported="yes", cache_target="db1-cache",
+        )
+        assert ok is True
+        entry = reg._queries[h]
+        assert entry.readyset_query_id == "q_abc123def456"
+        assert entry.readyset_supported == "yes"
+        assert entry.last_cache_target == "db1-cache"
+        assert entry.readyset_last_observed_at  # non-empty
+
+    def test_update_nonexistent_query_returns_false(self, tmp_path):
+        reg = self._make_registry(tmp_path)
+        ok = reg.update_readyset_identity(
+            query_hash="nonexistent_hash", readyset_query_id="q_xyz",
+        )
+        assert ok is False
+
+    def test_update_persists_across_reload(self, tmp_path):
+        reg = self._make_registry(tmp_path)
+        h, _ = reg.add_query(sql="SELECT 1", source="manual", target="db1")
+        reg.update_readyset_identity(
+            query_hash=h, readyset_query_id="q_persist123",
+            readyset_supported="yes", cache_target="db1-cache",
+        )
+        reg2 = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        reg2.load()
+        assert reg2._queries[h].readyset_query_id == "q_persist123"
+        assert reg2._queries[h].last_cache_target == "db1-cache"
+
+    def test_update_without_optional_fields(self, tmp_path):
+        reg = self._make_registry(tmp_path)
+        h, _ = reg.add_query(sql="SELECT 1", source="manual", target="db1")
+        reg.update_readyset_identity(query_hash=h, readyset_query_id="q_only")
+        entry = reg._queries[h]
+        assert entry.readyset_query_id == "q_only"
+        assert entry.readyset_supported == ""
+        assert entry.last_cache_target == ""
+
+    def test_update_observed_at_changes_on_subsequent_call(self, tmp_path):
+        import time
+        reg = self._make_registry(tmp_path)
+        h, _ = reg.add_query(sql="SELECT 1", source="manual", target="db1")
+        reg.update_readyset_identity(query_hash=h, readyset_query_id="q_v1")
+        first_ts = reg._queries[h].readyset_last_observed_at
+        time.sleep(0.01)
+        reg.update_readyset_identity(query_hash=h, readyset_query_id="q_v2")
+        second_ts = reg._queries[h].readyset_last_observed_at
+        assert second_ts >= first_ts
+
+    def test_find_by_readyset_query_id_match(self, tmp_path):
+        reg = self._make_registry(tmp_path)
+        h, _ = reg.add_query(sql="SELECT 1", source="manual", target="db1")
+        reg.update_readyset_identity(query_hash=h, readyset_query_id="q_findme")
+        entry = reg.find_by_readyset_query_id("q_findme")
+        assert entry is not None
+        assert entry.hash == h
+
+    def test_find_by_readyset_query_id_no_match(self, tmp_path):
+        reg = self._make_registry(tmp_path)
+        reg.add_query(sql="SELECT 1", source="manual", target="db1")
+        assert reg.find_by_readyset_query_id("q_nope") is None
+
+    def test_find_by_readyset_query_id_empty_registry(self, tmp_path):
+        reg = self._make_registry(tmp_path)
+        assert reg.find_by_readyset_query_id("q_anything") is None

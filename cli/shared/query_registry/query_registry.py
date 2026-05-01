@@ -591,6 +591,12 @@ class QueryEntry:
     max_duration_ms: float = 0.0
     avg_duration_ms: float = 0.0
     observation_count: int = 0
+    # ReadySet-side identity (sparse, populated on cache interaction).
+    # Source of truth for cache lifecycle ops (DROP CACHE etc.) — fixes CLD-1748/1754.
+    readyset_query_id: str = ""           # e.g. "q_13b0714e3f57aa57"
+    readyset_supported: str = ""          # "yes" | "pending" | "unsupported: <reason>"
+    last_cache_target: str = ""           # cache target where readyset_query_id was last observed
+    readyset_last_observed_at: str = ""   # ISO 8601 timestamp
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for TOML serialization."""
@@ -613,6 +619,11 @@ class QueryEntry:
             data["avg_duration_ms"] = 0.0
         if "observation_count" not in data:
             data["observation_count"] = 0
+        # ReadySet identity fields (added in in-request-path branch)
+        for key in ("readyset_query_id", "readyset_supported", "last_cache_target",
+                    "readyset_last_observed_at"):
+            if key not in data:
+                data[key] = ""
 
         # Remove deprecated parameter_history if present in old data
         data.pop("parameter_history", None)
@@ -938,6 +949,46 @@ class QueryRegistry:
             return True
 
         return False
+
+    def update_readyset_identity(
+        self,
+        query_hash: str,
+        readyset_query_id: str,
+        readyset_supported: str = "",
+        cache_target: str = "",
+    ) -> bool:
+        """Store the canonical ReadySet query_id (q_<hash>) on a registry row.
+
+        Populated whenever RDST has interacted with a ReadySet container for
+        this query (cache add, analyze ephemeral, audit ephemeral, cache compare).
+        Used as the source-of-truth ID for DROP CACHE and other cache lifecycle ops
+        — fixes CLD-1748 / CLD-1754 where we erroneously used our client-side
+        hash with DROP CACHE.
+
+        Returns True if the query was found and updated.
+        """
+        if not self._loaded:
+            self.load()
+        if query_hash not in self._queries:
+            return False
+        entry = self._queries[query_hash]
+        entry.readyset_query_id = readyset_query_id
+        if readyset_supported:
+            entry.readyset_supported = readyset_supported
+        if cache_target:
+            entry.last_cache_target = cache_target
+        entry.readyset_last_observed_at = datetime.now(timezone.utc).isoformat()
+        self.save()
+        return True
+
+    def find_by_readyset_query_id(self, readyset_query_id: str) -> Optional["QueryEntry"]:
+        """Reverse lookup: find a registry entry by its ReadySet q_<hash> id."""
+        if not self._loaded:
+            self.load()
+        for entry in self._queries.values():
+            if entry.readyset_query_id == readyset_query_id:
+                return entry
+        return None
 
     def update_query_tag(self, query_hash: str, tag: str) -> bool:
         """

@@ -222,6 +222,61 @@ class CacheService:
         except Exception:
             return None
 
+    def _update_registry_readyset_identity(
+        self,
+        query_hash: str,
+        readyset_query_id: str,
+        readyset_supported: str,
+        cache_target: str,
+    ) -> None:
+        """Persist ReadySet's canonical q_<hash> on the registry row.
+
+        Sparse update — only called when we've interacted with a ReadySet container
+        and have an authoritative ID. Used as the source-of-truth ID for DROP CACHE
+        and other cache lifecycle ops.
+        """
+        try:
+            from shared.query_registry import QueryRegistry
+
+            registry = QueryRegistry()
+            registry.load()
+            registry.update_readyset_identity(
+                query_hash=query_hash,
+                readyset_query_id=readyset_query_id,
+                readyset_supported=readyset_supported,
+                cache_target=cache_target,
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _resolve_cache_id_for_drop(cache_id: str) -> Optional[str]:
+        """Translate a user-supplied cache identifier to ReadySet's `q_<hash>` form.
+
+        Accepts:
+          - `q_<hex>` (ReadySet's canonical id) → returned as-is
+          - `<8-16 hex>` (RDST's client-side query hash) → looked up in registry
+            for the stored `readyset_query_id`. Fixes CLD-1754 where DROP CACHE
+            was called with our hash and silently failed.
+
+        Returns the resolved ReadySet id, or None if no mapping is known.
+        """
+        if not cache_id:
+            return None
+        if cache_id.startswith("q_"):
+            return cache_id
+        if re.fullmatch(r"[0-9a-fA-F]{8,16}", cache_id):
+            try:
+                from shared.query_registry import QueryRegistry
+                registry = QueryRegistry()
+                registry.load()
+                entry = registry._queries.get(cache_id)
+                if entry and entry.readyset_query_id:
+                    return entry.readyset_query_id
+            except Exception:
+                return None
+        return None
+
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
@@ -328,11 +383,19 @@ class CacheService:
 
             caches = _parse_show_caches(result.get("output", ""))
 
-            # Correlate with registry
-            registry_map = await asyncio.to_thread(self._build_registry_map)
+            # Correlate with registry. Two-key match:
+            #   1. by ReadySet's `q_<hash>` (precise, populated when we cache through `cache add`)
+            #   2. by normalized SQL text (fallback for legacy entries / orphan caches)
+            registry_map_by_qid, registry_map_by_sql = await asyncio.to_thread(
+                self._build_registry_maps
+            )
             for cache in caches:
+                qid = cache.get("query_id", "") or cache.get("id", "")
                 query_text = cache.get("query", "")
-                registry_hash = self._lookup_registry_hash(query_text, registry_map)
+                registry_hash = (
+                    registry_map_by_qid.get(qid)
+                    or self._lookup_registry_hash(query_text, registry_map_by_sql)
+                )
                 cache["registry_hash"] = registry_hash or ""
 
             yield CacheListEvent(
@@ -342,21 +405,34 @@ class CacheService:
             yield ErrorEvent(type="error", message=str(e), stage="list")
 
     @staticmethod
-    def _build_registry_map() -> Dict[str, str]:
-        """Build normalized SQL → registry hash map."""
+    def _build_registry_maps() -> Tuple[Dict[str, str], Dict[str, str]]:
+        """Build two registry lookup maps:
+          - readyset_query_id → registry hash (precise, sparsely populated)
+          - normalized SQL    → registry hash (fallback, always populated)
+        Returns (by_qid, by_sql).
+        """
         try:
             from shared.query_registry import QueryRegistry
 
             registry = QueryRegistry()
             registry.load()
-            result = {}
+            by_qid: Dict[str, str] = {}
+            by_sql: Dict[str, str] = {}
             for entry in registry.list_queries():
+                if entry.readyset_query_id:
+                    by_qid[entry.readyset_query_id] = entry.hash
                 key = _normalize_for_match(entry.sql)
                 if key:
-                    result[key] = entry.hash
-            return result
+                    by_sql[key] = entry.hash
+            return by_qid, by_sql
         except Exception:
-            return {}
+            return {}, {}
+
+    # Legacy single-map builder kept for any external callers.
+    @staticmethod
+    def _build_registry_map() -> Dict[str, str]:
+        """DEPRECATED: use _build_registry_maps. Returns the SQL-keyed map only."""
+        return CacheService._build_registry_maps()[1]
 
     @staticmethod
     def _lookup_registry_hash(
@@ -418,10 +494,22 @@ class CacheService:
                 message="Testing query cacheability...",
             )
 
-            # EXPLAIN CREATE CACHE
+            # Convert :pN placeholders to engine-specific ReadySet form
+            # ($N for Postgres, ? for MySQL). Fixes CLD-1748: previously we
+            # sent `IN (?)` which Postgres-mode ReadySet rejects.
+            from shared.query_registry.sql_normalizer import (
+                denormalize_for_readyset,
+                parse_query_id_from_explain,
+                parse_supported_from_explain,
+            )
+            engine = (cache_config or {}).get("engine", "postgresql")
+            readyset_query = denormalize_for_readyset(query, engine=engine)
+
+            # EXPLAIN CREATE CACHE — also returns the canonical `q_<hash>`
+            # query_id (fixes CLD-1754: stop using our own hash for DROP CACHE).
             explain_result = await asyncio.to_thread(
                 self._run_readyset_sql,
-                f"EXPLAIN CREATE CACHE FROM {query}",
+                f"EXPLAIN CREATE CACHE FROM {readyset_query}",
                 **conn,
             )
             if not explain_result["success"]:
@@ -433,8 +521,12 @@ class CacheService:
                 return
 
             output = explain_result.get("output", "")
-            first_line = output.strip().split("\n")[0].lower()
-            is_unsupported = "unsupported" in first_line or re.search(r'\bno\b', first_line)
+            readyset_query_id = parse_query_id_from_explain(output) or ""
+            supported_status = parse_supported_from_explain(output)
+            is_unsupported = supported_status.startswith("unsupported") if supported_status else (
+                # Fallback: scan first line for "unsupported"
+                "unsupported" in output.strip().split("\n")[0].lower()
+            )
 
             if options.dry_run:
                 yield CacheAddEvent(
@@ -464,7 +556,7 @@ class CacheService:
 
             create_result = await asyncio.to_thread(
                 self._run_readyset_sql,
-                f"CREATE SHALLOW CACHE FROM {query}",
+                f"CREATE SHALLOW CACHE FROM {readyset_query}",
                 **conn,
             )
             if not create_result["success"]:
@@ -475,10 +567,16 @@ class CacheService:
                 )
                 return
 
-            # Save to registry
+            # Save to registry, then attach the canonical ReadySet query_id
             saved_hash = await asyncio.to_thread(
                 self._save_to_registry, query, input_data.tag, input_data.target,
             )
+            if readyset_query_id:
+                await asyncio.to_thread(
+                    self._update_registry_readyset_identity,
+                    saved_hash, readyset_query_id, supported_status or "yes",
+                    cache_name,
+                )
 
             yield CacheAddEvent(
                 type="cache_add",
@@ -515,6 +613,23 @@ class CacheService:
                     stage="delete",
                 )
                 return
+
+            # Translate our 8-16 hex query_hash → ReadySet's q_<hash> via registry.
+            # Fixes CLD-1754: previously we ran DROP CACHE with our own hash, which
+            # ReadySet doesn't recognize. Now we resolve the canonical id first.
+            resolved_id = self._resolve_cache_id_for_drop(cache_id)
+            if resolved_id is None:
+                yield ErrorEvent(
+                    type="error",
+                    message=(
+                        f"Cannot resolve cache ID '{cache_id}' to a ReadySet query_id. "
+                        f"Pass a `q_<hash>` from `rdst cache show`, or use a registry hash "
+                        f"that has been cached at least once."
+                    ),
+                    stage="delete",
+                )
+                return
+            cache_id = resolved_id
 
             resolved = self._resolve_cache_target(input_data.target)
             if resolved is None:
@@ -703,6 +818,9 @@ class CacheService:
                 port=options.port,
                 deploy_config=options.deploy_config,
                 namespace=options.namespace or "readyset",
+                no_request_path=options.no_request_path,
+                memory_bytes=options.memory_bytes,
+                cpus=options.cpus or "2",
             )
 
             yield ProgressEvent(
