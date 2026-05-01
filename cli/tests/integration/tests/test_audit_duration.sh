@@ -327,6 +327,39 @@ sys.exit(0 if fast else 1)
     echo "SKIP: Audit duration + RS cache tests (SKIP_READYSET_CACHE_TESTS=true or no ANTHROPIC_API_KEY)"
   fi
 
+  # ==========================================================================
+  # Test 11: Audit -y ephemeral lifecycle — auto-deploy + auto-teardown
+  # When no cache is deployed beforehand, audit -y should silently deploy
+  # a Readyset container, run the benchmark, and tear it down on exit.
+  # Validates fix for CLD-1750 (containers leaking after audit).
+  # ==========================================================================
+
+  if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" ]]; then
+    echo ""
+    echo "=== TEST 11: Audit ephemeral lifecycle (${DB_ENGINE}) ==="
+
+    local CONTAINER_NAME="rdst-readyset-${AUDIT_TARGET}"
+
+    # Tear down any existing cache so audit must auto-deploy
+    "${RDST_CMD[@]}" cache remove --target "${AUDIT_TARGET}" --yes >/dev/null 2>&1 || true
+    docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
+    if docker ps -a --filter "name=$CONTAINER_NAME" -q | grep -q .; then
+      echo "FAIL: pre-condition — container still exists, can't test ephemeral path"
+    else
+      run_cmd "Audit: -y auto-deploys ephemeral cache" "${RDST_CMD[@]}" audit \
+        --target "${AUDIT_TARGET}" --duration 10s --no-insights -y --json
+
+      # After audit completes: container should be gone
+      if docker ps -a --filter "name=$CONTAINER_NAME" -q | grep -q .; then
+        echo "FAIL: ephemeral container not torn down after audit"
+        docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+        exit 1
+      fi
+      echo "PASS: Audit ephemeral lifecycle (deploy + teardown clean)"
+    fi
+  fi
+
   echo ""
   echo "=== All Audit Duration & Query Run Tests PASSED (${DB_ENGINE}) ==="
 }

@@ -264,13 +264,29 @@ class AuditCommand:
                 console.print(f"\n[dim]View locally: rdst audit show {auto_name}[/dim]")
                 console.print(f"[dim]View past audits: rdst audit list[/dim]")
 
+                # Note: ephemeral_lifecycle in _run_readyset_testing has already
+                # torn down any container we deployed for this audit. Containers
+                # that pre-existed the audit are left running. So we no longer
+                # tell the user "container is still running" — the answer
+                # depends on whether they had one before, which is fine.
                 if rs_results:
+                    import subprocess
                     container_name = f"rdst-readyset-{target}"
-                    console.print(
-                        f"\n[dim]Readyset cache container [bold]{container_name}[/bold] is still running.\n"
-                        f"  Stop it with: docker stop {container_name}\n"
-                        f"  Or remove via: rdst cache remove --target {target}[/dim]"
-                    )
+                    try:
+                        r = subprocess.run(
+                            ["docker", "inspect", "--format", "{{.State.Running}}", container_name],
+                            capture_output=True, text=True, timeout=3,
+                        )
+                        still_running = r.returncode == 0 and r.stdout.strip().lower() == "true"
+                    except Exception:
+                        still_running = False
+                    if still_running:
+                        # Container survived audit — it was pre-existing.
+                        console.print(
+                            f"\n[dim]Readyset cache for [bold]{target}[/bold] was already deployed and is still running.\n"
+                            f"  Stop it with:  rdst cache stop --target {target}\n"
+                            f"  Remove fully:  rdst cache remove --target {target}[/dim]"
+                        )
 
         # LLM insights for non-verbose, no-duration case (legacy single-target prompt).
         # Verbose mode already showed everything via _render_terminal_report.
@@ -614,157 +630,105 @@ class AuditCommand:
     def _run_readyset_testing(self, console, target, queries, max_queries=20, auto_yes=False):
         """Test audit queries against a local Readyset cache.
 
+        Uses ephemeral_lifecycle: if no cache is deployed (or one is stopped),
+        prompts the user; on yes, deploys/starts an ephemeral container, runs
+        benchmarks, and tears down to original state. Pre-existing running
+        caches are reused and left untouched.
+
         Returns list of {query_hash, query_text, cacheable, not_cacheable_reason,
         baseline_ms, readyset_ms, speedup} or None if RS not available.
         """
         try:
             from features.cache.service import CacheService
             from features.cache.models import CacheInput, CacheOptions
+            from shared.deploy.lifecycle import probe, ProbeState, ephemeral_lifecycle
         except ImportError:
             return None
 
-        service = CacheService()
-        results = []
+        import asyncio
+        import shutil
+        import sys
 
-        # Step 1: Check if Readyset is deployed for this target
-        cache_status = None
-        try:
-            async def _check():
-                nonlocal cache_status
-                async for event in service.get_status(CacheInput(target=target)):
-                    if event.type == "cache_status":
-                        cache_status = event
-            import asyncio
-            asyncio.run(_check())
-        except Exception:
+        if not shutil.which("docker"):
+            console.print("[dim]  Skipping Readyset cache testing (Docker not installed)[/dim]")
             return None
 
-        if cache_status and cache_status.deployed and not getattr(cache_status, 'running', False):
-            # Deployed but not running — offer to restart
-            import shutil
-            import sys
-            if not shutil.which("docker"):
-                console.print("[dim]  Skipping Readyset cache testing (Docker not installed)[/dim]")
-                return None
+        # Probe first: only prompt the user if we'll actually need to deploy/start.
+        pre = probe(target, mode="docker")
+
+        if pre.state == ProbeState.NOT_DEPLOYED:
             if not auto_yes and not sys.stdin.isatty():
                 return None
             if auto_yes:
-                restart_yes = True
-                console.print("[dim]  Auto-starting Readyset cache (-y)[/dim]")
+                console.print("[dim]  Auto-deploying ephemeral Readyset cache (-y)[/dim]")
+                consent = True
             else:
                 from shared.ui import Confirm
                 console.print()
                 console.print(
                     "[dim]  Readyset can benchmark your captured queries to show how much"
-                    "\n  faster they'd run with caching. Your local cache container is"
-                    "\n  stopped — we can restart it to run the test.[/dim]"
+                    "\n  faster they'd run with caching. We'll deploy a local Docker"
+                    "\n  container, run the benchmark, and tear it down when done.[/dim]"
                 )
                 try:
-                    restart_yes = Confirm.ask(
+                    consent = Confirm.ask(
+                        "  Deploy Readyset (ephemeral) to test query performance?",
+                        default=True,
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    consent = False
+            if not consent:
+                return None
+        elif pre.state == ProbeState.DEPLOYED_STOPPED:
+            if not auto_yes and not sys.stdin.isatty():
+                return None
+            if auto_yes:
+                console.print("[dim]  Auto-starting cache for ephemeral benchmark (-y)[/dim]")
+                consent = True
+            else:
+                from shared.ui import Confirm
+                console.print()
+                console.print(
+                    "[dim]  Readyset can benchmark your captured queries to show how much"
+                    "\n  faster they'd run with caching. The local cache container is"
+                    "\n  stopped — we'll start it for the benchmark and stop it again."
+                    "[/dim]"
+                )
+                try:
+                    consent = Confirm.ask(
                         "  Start Readyset cache to test query performance?",
                         default=True,
                     )
                 except (EOFError, KeyboardInterrupt):
-                    restart_yes = False
-            if not restart_yes:
+                    consent = False
+            if not consent:
                 return None
-            container = getattr(cache_status, 'container_name', None) or f"rdst-readyset-{target}"
-            console.print(f"[dim]  Starting {container}...[/dim]")
-            import subprocess
-            start_result = subprocess.run(
-                ["docker", "start", container], capture_output=True, text=True, timeout=30,
+        elif pre.state == ProbeState.DEPLOYED_RUNNING:
+            # No prompt needed — reuse existing container, leave it alone after.
+            pass
+        else:
+            console.print(f"[yellow]  Cache probe inconclusive ({pre.state.value}). Skipping benchmark.[/yellow]")
+            return None
+
+        # Single ephemeral_lifecycle wrapping the benchmark. Handles deploy/start
+        # entry, wait-for-ready, and full teardown to original state on exit.
+        with ephemeral_lifecycle(target, mode="docker") as outcome:
+            if outcome.error:
+                console.print(f"[yellow]  {outcome.error}[/yellow]")
+                return None
+            service = CacheService()
+            results = self._run_readyset_testing_inner(
+                console, target, queries, max_queries, service,
+                CacheInput, CacheOptions, asyncio,
             )
-            if start_result.returncode != 0:
-                # Container was removed — fall through to fresh deploy
-                console.print(f"[dim]  Container not found, deploying fresh...[/dim]")
-                try:
-                    async def _deploy():
-                        async for event in service.deploy(
-                            CacheInput(target=target),
-                            CacheOptions(mode="docker"),
-                        ):
-                            if event.type == "deploy_complete":
-                                if not event.success:
-                                    console.print(f"[red]  Deploy failed: {getattr(event, 'error', 'unknown')}[/red]")
-                                    return False
-                                return True
-                        return False
-                    deploy_ok = asyncio.run(_deploy())
-                    if not deploy_ok:
-                        return None
-                except Exception as e:
-                    console.print(f"[yellow]  Could not deploy Readyset: {e}[/yellow]")
-                    return None
-            else:
-                # Container started — wait for it to accept connections
-                import time as _t
-                _ready = False
-                for _attempt in range(15):
-                    _t.sleep(1)
-                    try:
-                        _resolved = service._resolve_cache_target(target)
-                        if _resolved and service._check_cache_reachable(_resolved[1]):
-                            _ready = True
-                            break
-                    except Exception:
-                        pass
-                if not _ready:
-                    console.print("[yellow]  Readyset started but not accepting connections — skipping benchmark[/yellow]")
-                    return None
+            return results
 
-        elif not cache_status or not cache_status.deployed:
-            # Check if Docker is available before prompting
-            import shutil
-            if not shutil.which("docker"):
-                console.print("[dim]  Skipping Readyset cache testing (Docker not installed)[/dim]")
-                return None
-
-            import sys
-            if not auto_yes and not sys.stdin.isatty():
-                return None
-
-            if auto_yes:
-                deploy_yes = True
-                console.print("[dim]  Auto-deploying Readyset cache (-y)[/dim]")
-            else:
-                from shared.ui import Confirm
-                console.print()
-                console.print(
-                    "[dim]  Readyset can benchmark your captured queries to show how much"
-                    "\n  faster they'd run with caching. This deploys a local Docker"
-                    "\n  container that proxies your database.[/dim]"
-                )
-                try:
-                    deploy_yes = Confirm.ask(
-                        "  Deploy Readyset to test query performance?",
-                        default=True,
-                    )
-                except (EOFError, KeyboardInterrupt):
-                    deploy_yes = False
-
-            if not deploy_yes:
-                return None
-
-            # Deploy
-            console.print("[dim]  Deploying Readyset container...[/dim]")
-            try:
-                async def _deploy():
-                    async for event in service.deploy(
-                        CacheInput(target=target),
-                        CacheOptions(mode="docker"),
-                    ):
-                        if event.type == "deploy_complete":
-                            if not event.success:
-                                console.print(f"[red]  Deploy failed: {getattr(event, 'error', 'unknown')}[/red]")
-                                return False
-                            return True
-                    return False
-                deploy_ok = asyncio.run(_deploy())
-                if not deploy_ok:
-                    return None
-            except Exception as e:
-                console.print(f"[yellow]  Could not deploy Readyset: {e}[/yellow]")
-                return None
+    def _run_readyset_testing_inner(
+        self, console, target, queries, max_queries, service,
+        CacheInput, CacheOptions, asyncio,
+    ):
+        """Inner benchmark loop — caller manages container lifecycle."""
+        results = []
 
         # Wait for Readyset to be ready and verify connection
         import time as _t
@@ -1953,8 +1917,14 @@ class AuditCommand:
         sizing = result.get("sizing") or {}
         cache_opp = result.get("cache_opportunity") or {}
 
-        # Header
-        console.print(f"\n[bold]Audit: {target}[/bold] ({engine}, {host})")
+        # Header — show "AUDIT SHOW <run_id>" breadcrumb when rendering a stored
+        # run, since the user invoked `rdst audit show <id>`. Falls back to the
+        # legacy "Audit: <target>" format if no run_id is present (live audit).
+        run_id = result.get("run_id") or result.get("snapshot_id") or ""
+        if run_id:
+            console.print(f"\n[bold]AUDIT SHOW {run_id}[/bold]  ({target}, {engine})")
+        else:
+            console.print(f"\n[bold]Audit: {target}[/bold] ({engine}, {host})")
 
         # Metrics table
         metric_rows = []

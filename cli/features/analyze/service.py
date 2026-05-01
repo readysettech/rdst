@@ -398,59 +398,98 @@ class AnalyzeService:
     ) -> Dict[str, Any]:
         """Synchronous readyset analysis (runs in thread).
 
-        Checks for an existing cache target (local Docker, remote EC2, etc.)
-        and uses it if connectable. Does NOT spin up ephemeral containers.
+        Uses an existing cache container if one is deployed and running.
+        Otherwise spins up an *ephemeral* container for the duration of the
+        analysis (deploy → run → tear down). If the container existed but was
+        stopped, starts it for the run and stops it again afterwards.
 
         Flow:
-        1. Look for a cache target configured for this upstream
-        2. If found and connectable → test cacheability, warm, measure, drop
-        3. If found but not connectable → error with hint
-        4. If not found → tell user to deploy with rdst cache deploy
-
-        Args:
-            input: Analysis input with query
-            target_name: Target database name
-            target_config: Target configuration
-
-        Returns:
-            Readyset analysis result dict
+        1. Find a cache target name for this upstream (config or convention)
+        2. ephemeral_lifecycle context manager ensures it's running
+        3. Test cacheability, warm, measure, drop the cache (analysis is ephemeral
+           regardless of whether the *container* was ephemeral or not)
+        4. ephemeral_lifecycle restores original container state on exit
         """
-        try:
-            # Find a cache target for this upstream
-            cfg = TargetsConfig()
-            cfg.load()
+        from shared.deploy.lifecycle import ephemeral_lifecycle, ProbeState
 
-            cache_target_name = None
-            cache_config = None
+        cfg = TargetsConfig()
+        cfg.load()
 
-            # Search all targets for one that references this upstream
-            for name, config in cfg._data.get("targets", {}).items():
-                if (
-                    config.get("target_type") == "readyset"
-                    and config.get("upstream_target") == target_name
-                ):
-                    cache_target_name = name
-                    cache_config = config
-                    break
+        cache_target_name = None
+        cache_config = None
+        for name, config in cfg._data.get("targets", {}).items():
+            if (
+                config.get("target_type") == "readyset"
+                and config.get("upstream_target") == target_name
+            ):
+                cache_target_name = name
+                cache_config = config
+                break
+        if not cache_config:
+            conventional = f"{target_name}-cache"
+            check = cfg.get(conventional)
+            if check and check.get("target_type") == "readyset":
+                cache_target_name = conventional
+                cache_config = check
 
-            # Also check the conventional name {target}-cache
-            if not cache_config:
-                conventional = f"{target_name}-cache"
-                check = cfg.get(conventional)
-                if check and check.get("target_type") == "readyset":
-                    cache_target_name = conventional
-                    cache_config = check
-
-            if not cache_config:
+        # Ephemeral lifecycle around the readyset run. If no cache target is
+        # configured at all, this will deploy one with the conventional name
+        # and tear it down at the end. If it's stopped, start + stop. If
+        # running, leave it alone.
+        with ephemeral_lifecycle(target_name, mode="docker") as outcome:
+            if outcome.error:
+                # Could not bring up a container — surface the original
+                # remediation message so the user gets actionable guidance.
                 return {
                     "success": False,
                     "no_cache_target": True,
-                    "error": "No Readyset cache target configured.",
+                    "error": outcome.error,
                     "remediation": (
                         f"Deploy a cache to see Readyset performance:\n"
                         f"  rdst cache deploy --target {target_name} --mode docker"
                     ),
                 }
+
+            # If we just deployed, the cache target row was created during deploy.
+            # Reload config to pick it up.
+            if outcome.we_deployed and not cache_config:
+                cfg.load()
+                conventional = f"{target_name}-cache"
+                cache_config = cfg.get(conventional)
+                if cache_config:
+                    cache_target_name = conventional
+
+            if not cache_config:
+                return {
+                    "success": False,
+                    "no_cache_target": True,
+                    "error": "No Readyset cache target configured after deploy.",
+                    "remediation": (
+                        f"  rdst cache deploy --target {target_name} --mode docker"
+                    ),
+                }
+
+            return self._run_readyset_analysis_inner(
+                input=input, target_name=target_name, target_config=target_config,
+                cache_target_name=cache_target_name, cache_config=cache_config,
+                ephemeral_outcome=outcome,
+            )
+
+    def _run_readyset_analysis_inner(
+        self,
+        input: AnalyzeInput,
+        target_name: str,
+        target_config: Dict[str, Any],
+        cache_target_name: str,
+        cache_config: Dict[str, Any],
+        ephemeral_outcome=None,
+    ) -> Dict[str, Any]:
+        """Runs the actual readyset cacheability test + measure flow.
+
+        Caller is responsible for cache container lifecycle (see
+        _run_readyset_analysis_sync).
+        """
+        try:
 
             # Cache target exists — try to connect
             engine = cache_config.get("engine", target_config.get("engine", "postgresql"))

@@ -1242,10 +1242,12 @@ class FleetCommand:
             estimate = "quick audit" if not duration_seconds else f"~{duration_seconds}s capture per target"
             console.print(f"\n[bold]Auditing {n} targets...[/bold] ({estimate})")
 
-        # Pre-flight: check/deploy Readyset caches for all targets (one prompt)
-        caches_available = False
-        if duration_seconds and not output_json:
-            caches_available = self._preflight_cache_check(console, cfg, targets, auto_yes=auto_yes)
+        # Pre-flight cache deployment removed: each per-target audit now manages
+        # its own ephemeral cache lifecycle via _run_readyset_testing. Pre-deploying
+        # was the source of CLD-1750 (containers leaking after fleet audit).
+        # caches_available is a legacy bool downstream readyset gating could use;
+        # leave as None so the per-target path takes over.
+        caches_available = None
 
         # Run audits concurrently
         max_workers = min(n, 10)
