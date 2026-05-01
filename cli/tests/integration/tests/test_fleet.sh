@@ -7,6 +7,16 @@
 test_fleet_commands() {
   log_section "Fleet & Audit Integration Tests (${DB_ENGINE})"
 
+  # --------------------------------------------------------------------------
+  # Test 0: Fleet discover --default-database flag is plumbed through
+  # The flag overrides RDS-reported DBName when it's missing or = cluster ID.
+  # We don't have AWS creds in CI, so only verify the help text exposes it.
+  # --------------------------------------------------------------------------
+
+  run_cmd "Fleet: discover --help" "${RDST_CMD[@]}" fleet discover --help
+  assert_contains "--default-database" "discover --help should expose flag"
+  echo "PASS: Fleet discover --default-database flag plumbed"
+
   # ============================================================================
   # Setup: Create CSV for fleet import (single engine — CI runs per-engine)
   # ============================================================================

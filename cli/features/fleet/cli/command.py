@@ -400,6 +400,7 @@ class FleetCommand:
         password_env = getattr(args, "password_env", "FLEET_PASS")
         default_user = getattr(args, "user", None)
         default_group = getattr(args, "group", None)
+        default_database = getattr(args, "default_database", None)
         dry_run = getattr(args, "dry_run", False)
 
         # Check AWS credentials first
@@ -434,6 +435,7 @@ class FleetCommand:
                 password_env=password_env,
                 default_user=default_user,
                 default_group=default_group,
+                default_database=default_database,
             ):
                 # Check by name OR by hostname
                 existing = cfg.get(member.name)

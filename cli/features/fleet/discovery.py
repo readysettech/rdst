@@ -39,6 +39,7 @@ def discover_rds_instances(
     password_env: str = "FLEET_PASS",
     default_user: str | None = None,
     default_group: str | None = None,
+    default_database: str | None = None,
 ):
     """Discover RDS instances across regions using botocore."""
     for region in regions:
@@ -59,6 +60,7 @@ def discover_rds_instances(
                             name_pattern=name_pattern,
                             password_env=password_env,
                             default_user=default_user,
+                            default_database=default_database,
                         )
                         if cluster_members:
                             aurora_cluster_ids.add(cluster.get("DBClusterIdentifier", ""))
@@ -81,6 +83,7 @@ def discover_rds_instances(
                         password_env=password_env,
                         default_user=default_user,
                         default_group=default_group,
+                        default_database=default_database,
                     )
                     if member is not None:
                         yield member
@@ -106,6 +109,7 @@ def discover_aurora_cluster(
     name_pattern: str | None,
     password_env: str,
     default_user: str | None,
+    default_database: str | None = None,
 ) -> list[FleetMember]:
     """Parse an Aurora cluster into multiple FleetMembers."""
     aws_engine = cluster.get("Engine", "")
@@ -124,7 +128,9 @@ def discover_aurora_cluster(
 
     writer_host = cluster.get("Endpoint", "")
     port = cluster.get("Port", 5432 if rdst_engine == "postgresql" else 3306)
-    database = cluster.get("DatabaseName") or cluster_id
+    # CLI override > RDS-reported DBName > cluster ID (last is usually wrong;
+    # cluster IDs aren't valid DB names — pass --default-database to fix).
+    database = default_database or cluster.get("DatabaseName") or cluster_id
     user = default_user or cluster.get(
         "MasterUsername", "postgres" if rdst_engine == "postgresql" else "admin"
     )
@@ -191,6 +197,7 @@ def _parse_instance(
     password_env: str,
     default_user: str | None,
     default_group: str | None,
+    default_database: str | None = None,
 ) -> FleetMember | None:
     """Parse an RDS instance into a FleetMember."""
     aws_engine = instance.get("Engine", "")
@@ -218,7 +225,7 @@ def _parse_instance(
     if not host:
         return None
 
-    database = instance.get("DBName") or db_id
+    database = default_database or instance.get("DBName") or db_id
     user = default_user or instance.get(
         "MasterUsername", "postgres" if rdst_engine == "postgresql" else "admin"
     )
