@@ -475,6 +475,132 @@ class CacheCommands:
     # rdst cache remove
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # rdst cache start / stop / restart
+    # ------------------------------------------------------------------
+
+    def _resolve_cache_target(
+        self,
+        target: Optional[str],
+        target_config: Optional[Dict[str, Any]],
+    ) -> tuple[Optional[str], Optional[Dict[str, Any]], Optional[RdstResult]]:
+        """Find the cache target matching `target` (which may be an upstream or cache name).
+
+        Returns (cache_target_name, cache_target_config, error_result_or_None).
+        """
+        from shared.config.targets import TargetsConfig
+        if not target:
+            cfg = TargetsConfig()
+            cfg.load()
+            target = cfg.get_default()
+            if target:
+                target_config = cfg.get(target)
+        if not target:
+            return None, None, self._error("No target specified and no default configured.",
+                                           hint="rdst cache <command> --target <name>")
+        if not target_config:
+            return None, None, self._error(f"Target '{target}' not found in configuration.")
+        if target_config.get("target_type") == "readyset":
+            return target, target_config, None
+        # Resolve upstream → cache target
+        cfg = TargetsConfig()
+        cfg.load()
+        for name, config in cfg._data.get("targets", {}).items():
+            if config.get("target_type") == "readyset" and config.get("upstream_target") == target:
+                return name, config, None
+        conventional = f"{target}-cache"
+        check = cfg.get(conventional)
+        if check and check.get("target_type") == "readyset":
+            return conventional, check, None
+        return None, None, self._error(
+            f"No cache target found for '{target}'.",
+            hint=f"Deploy first: rdst cache deploy --target {target} --mode docker",
+        )
+
+    def _lifecycle_op(
+        self,
+        op_name: str,
+        target: Optional[str],
+        target_config: Optional[Dict[str, Any]],
+        json_output: bool,
+    ) -> RdstResult:
+        """Dispatch start/stop/restart through shared.deploy.lifecycle."""
+        from shared.deploy import lifecycle
+        cache_target, cache_config, err = self._resolve_cache_target(target, target_config)
+        if err:
+            return err
+        deploy_mode = (cache_config or {}).get("deploy_mode") or "docker"
+        upstream = (cache_config or {}).get("upstream_target", cache_target)
+
+        op_fn = getattr(lifecycle, op_name)
+        result = op_fn(
+            upstream,
+            mode=deploy_mode,
+            host=(cache_config or {}).get("host"),
+            namespace=(cache_config or {}).get("namespace"),
+            ssh_key=(cache_config or {}).get("ssh_key"),
+            ssh_user=(cache_config or {}).get("ssh_user"),
+        )
+        if json_output:
+            print(json.dumps({
+                "success": result.success,
+                "state_after": result.state_after.value if result.state_after else None,
+                "detail": result.detail,
+                "error": result.error,
+            }, indent=2))
+            return RdstResult(result.success, result.detail or result.error or "")
+
+        if result.success:
+            # Match the StyledPanel(title="...", variant=...) presentation used
+            # by `cache add` / `cache remove` so lifecycle commands feel the same.
+            titles = {
+                "start":   "Cache Started",
+                "stop":    "Cache Stopped",
+                "restart": "Cache Restarted",
+            }
+            hints = {
+                "start":   f"  View caches:  rdst cache show --target {cache_target}\n"
+                           f"  Stop again:   rdst cache stop --target {upstream}",
+                "stop":    f"  Start again:  rdst cache start --target {upstream}\n"
+                           f"  Remove fully: rdst cache remove --target {upstream}",
+                "restart": f"  View caches:  rdst cache show --target {cache_target}",
+            }
+            body = f"{result.detail}\n\n{hints.get(op_name, '')}".rstrip()
+            self._console.print(StyledPanel(
+                body,
+                title=titles.get(op_name, f"Cache {op_name.capitalize()}"),
+                variant="success",
+            ))
+            return RdstResult(True, " ")
+        return self._error(result.error or f"cache {op_name} failed")
+
+    def start(
+        self,
+        target: Optional[str] = None,
+        target_config: Optional[Dict[str, Any]] = None,
+        json_output: bool = False,
+    ) -> RdstResult:
+        """Start a stopped cache container without redeploying."""
+        return self._lifecycle_op("start", target, target_config, json_output)
+
+    def stop(
+        self,
+        target: Optional[str] = None,
+        target_config: Optional[Dict[str, Any]] = None,
+        json_output: bool = False,
+    ) -> RdstResult:
+        """Stop a running cache without removing it."""
+        return self._lifecycle_op("stop", target, target_config, json_output)
+
+    def restart(
+        self,
+        target: Optional[str] = None,
+        target_config: Optional[Dict[str, Any]] = None,
+        json_output: bool = False,
+    ) -> RdstResult:
+        """Restart a deployed cache (preserves config)."""
+        return self._lifecycle_op("restart", target, target_config, json_output)
+
     def remove(
         self,
         target: Optional[str] = None,
@@ -498,7 +624,31 @@ class CacheCommands:
         if not target:
             return self._error("No target specified and no default configured.", hint="rdst cache remove --target <name>")
         if not target_config:
-            return self._error(f"Target '{target}' not found in configuration.")
+            # Target name doesn't exist as a config row at all. Could still be
+            # an orphan container the user wants removed. Idempotent path: try
+            # to clean any container matching the conventional name and report.
+            import subprocess
+            container_name = f"rdst-readyset-{target}"
+            try:
+                r = subprocess.run(
+                    ["docker", "rm", "-f", container_name],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if r.returncode == 0:
+                    self._console.print(MessagePanel(
+                        f"No config row for '{target}'. Removed orphan container "
+                        f"'{container_name}'.",
+                        variant="success",
+                    ))
+                    return RdstResult(True, " ")
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                pass
+            self._console.print(MessagePanel(
+                f"No cache target '{target}' in config and no container to remove. "
+                f"Already cleaned up.",
+                variant="info",
+            ))
+            return RdstResult(True, " ")
 
         # If they passed an upstream target, find its cache target
         if target_config.get("target_type") != "readyset":
@@ -518,10 +668,42 @@ class CacheCommands:
                     cache_target = conventional
                     cache_config = check
             if not cache_config:
-                return self._error(
-                    f"No cache found for target '{target}'.",
-                    hint=f"Nothing to remove. Deploy first with:\n  rdst cache deploy --target {target} --mode docker",
-                )
+                # Idempotent remove: if there's nothing to clean up, that's a
+                # successful no-op (matches rm -f semantics). Also probe Docker
+                # in case there's an orphan container we should still flag.
+                import subprocess
+                container_name = f"rdst-readyset-{target}"
+                container_exists = False
+                try:
+                    r = subprocess.run(
+                        ["docker", "inspect", container_name],
+                        capture_output=True, timeout=5,
+                    )
+                    container_exists = r.returncode == 0
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    pass
+
+                if container_exists:
+                    # Config row gone but container still around — clean it up.
+                    try:
+                        subprocess.run(
+                            ["docker", "rm", "-f", container_name],
+                            capture_output=True, timeout=15,
+                        )
+                    except Exception:
+                        pass
+                    self._console.print(MessagePanel(
+                        f"No cache config for '{target}' but container "
+                        f"'{container_name}' was orphaned — removed it.",
+                        variant="success",
+                    ))
+                else:
+                    self._console.print(MessagePanel(
+                        f"Nothing to remove for '{target}' (no cache target config "
+                        f"and no container). Already cleaned up — this is fine.",
+                        variant="info",
+                    ))
+                return RdstResult(True, " ")
             target = cache_target
             target_config = cache_config
 

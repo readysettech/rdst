@@ -1369,6 +1369,41 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
                         action="store_true",
                         help="Generate deployment script without executing",
                     ),
+                    ArgDef(
+                        "--no-request-path",
+                        action="store_true",
+                        dest="no_request_path",
+                        help=(
+                            "Deploy with explicit-only caching (QUERY_CACHING=explicit). "
+                            "Default is in-request-path mode where every SELECT auto-caches."
+                        ),
+                    ),
+                    ArgDef(
+                        "--force",
+                        action="store_true",
+                        dest="force",
+                        help=(
+                            "Tear down any existing container + cache config row for this target, "
+                            "then deploy fresh. Equivalent to `cache remove --yes` followed by "
+                            "`cache deploy`. Useful when the existing container is broken or you "
+                            "want to apply new flags (e.g. --memory) without manual cleanup."
+                        ),
+                    ),
+                    ArgDef(
+                        "--memory",
+                        dest="memory",
+                        help=(
+                            "Cache memory limit (e.g. '4g', '512m', '1073741824'). "
+                            "Sets both Docker --memory and ReadySet's READYSET_MEMORY_LIMIT. "
+                            "ReadySet evicts shallow cache entries (LRU) when this is reached. "
+                            "Default: 4g"
+                        ),
+                    ),
+                    ArgDef(
+                        "--cpus",
+                        dest="cpus",
+                        help="Cache CPU limit (Docker --cpus value). Default: 2",
+                    ),
                     ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
                 ],
             ),
@@ -1410,6 +1445,30 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
                 ],
             ),
             SubcommandDef(
+                name="start",
+                help="Start a stopped cache container (preserves config)",
+                args=[
+                    ArgDef("--target", help="Target (upstream or cache name, defaults to default target)"),
+                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="stop",
+                help="Stop a running cache without removing it",
+                args=[
+                    ArgDef("--target", help="Target (upstream or cache name, defaults to default target)"),
+                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
+                name="restart",
+                help="Restart a deployed cache (preserves config)",
+                args=[
+                    ArgDef("--target", help="Target (upstream or cache name, defaults to default target)"),
+                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
+                ],
+            ),
+            SubcommandDef(
                 name="remove",
                 help="Remove cache deployment (stops local Docker container and removes target)",
                 args=[
@@ -1421,6 +1480,9 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
         ],
         subcommands=[
             ("deploy", "Deploy Readyset cache"),
+            ("start", "Start a stopped cache container"),
+            ("stop", "Stop a running cache without removing"),
+            ("restart", "Restart a deployed cache"),
             ("add", "Create a shallow cache for a query"),
             ("show", "List all cached queries"),
             ("delete", "Remove a cache by ID"),

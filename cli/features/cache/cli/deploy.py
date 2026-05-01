@@ -21,6 +21,21 @@ from ..service import CacheService
 from shared.service_events import ErrorEvent, ProgressEvent
 
 
+def _parse_memory(value: str) -> int:
+    """Parse a memory spec like '4g', '512m', '1g', or raw bytes int.
+
+    Returns bytes. Raises ValueError on invalid input.
+    """
+    if not value:
+        raise ValueError("Empty memory value")
+    s = str(value).strip().lower()
+    multipliers = {"k": 1024, "m": 1024**2, "g": 1024**3}
+    if s and s[-1] in multipliers:
+        return int(float(s[:-1]) * multipliers[s[-1]])
+    # Plain integer = bytes
+    return int(s)
+
+
 class DeployCommand:
     """Deploy Readyset shallow cache permanently."""
 
@@ -38,19 +53,64 @@ class DeployCommand:
         script_only: bool = False,
         output_json: bool = False,
         quiet: bool = False,
+        no_request_path: bool = False,
+        memory: Optional[str] = None,
+        cpus: Optional[str] = None,
+        force: bool = False,
     ) -> RdstResult:
         if not target:
             return RdstResult(False, "Target is required. Use: rdst cache deploy --target <name> --mode <mode>")
 
         # Script-only mode stays in CLI (no service needed)
         if script_only:
-            return self._handle_script_only(target, mode, deploy_config, port, namespace, output_json)
+            return self._handle_script_only(target, mode, deploy_config, port, namespace, output_json, no_request_path)
+
+        # Probe existing state before deploy. For modes with a real probe,
+        # refuse to deploy over a running or stopped container — unless --force
+        # is set, in which case we tear it down first and proceed.
+        from shared.deploy import lifecycle
+        probe = lifecycle.probe(target, mode=mode, host=host, ssh_key=ssh_key,
+                                ssh_user=ssh_user, namespace=namespace)
+        existing = probe.state in (
+            lifecycle.ProbeState.DEPLOYED_RUNNING,
+            lifecycle.ProbeState.DEPLOYED_STOPPED,
+            lifecycle.ProbeState.DEPLOYED_UNREACHABLE,
+        )
+        if existing and force:
+            # Tear down the existing deployment then continue with a fresh
+            # deploy. Uses the same code path as ephemeral_lifecycle cleanup
+            # (silent, idempotent — drops container + cache target row).
+            from shared.deploy.lifecycle import _cleanup_ephemeral_deploy
+            if not quiet:
+                console = get_console()
+                console.print(f"  [dim]--force: tearing down existing deployment for '{target}'...[/dim]")
+            _cleanup_ephemeral_deploy(target, mode=mode)
+        elif probe.state == lifecycle.ProbeState.DEPLOYED_RUNNING:
+            return RdstResult(
+                False,
+                f"Cache is already deployed and running for '{target}'.\n"
+                f"  • To recreate from scratch: rdst cache deploy --target {target} --mode {mode} --force\n"
+                f"  • To restart the existing container: rdst cache restart --target {target}",
+            )
+        elif probe.state == lifecycle.ProbeState.DEPLOYED_STOPPED:
+            return RdstResult(
+                False,
+                f"Cache container exists for '{target}' but is stopped.\n"
+                f"  • To start it: rdst cache start --target {target}\n"
+                f"  • To recreate from scratch: rdst cache deploy --target {target} --mode {mode} --force",
+            )
+
+        # Parse memory string ('4g', '512m', or raw bytes) → bytes
+        memory_bytes = _parse_memory(memory) if memory else None
 
         input_data = CacheInput(target=target)
         options = CacheOptions(
             mode=mode, port=port, deploy_config=deploy_config,
             namespace=namespace, kubeconfig=kubeconfig,
             host=host, ssh_key=ssh_key, ssh_user=ssh_user,
+            no_request_path=no_request_path,
+            memory_bytes=memory_bytes,
+            cpus=cpus,
         )
         success, data, error_msg = asyncio.run(
             self._execute_deploy(input_data, options, output_json, quiet=quiet)
@@ -152,6 +212,7 @@ class DeployCommand:
     def _handle_script_only(
         self, target: str, mode: str, deploy_config: str,
         port: Optional[int], namespace: str, output_json: bool,
+        no_request_path: bool = False,
     ) -> RdstResult:
         """Generate deploy script without executing."""
         from shared.config.targets import TargetsConfig
@@ -168,6 +229,7 @@ class DeployCommand:
             target_name=target, target_config=target_config,
             password=password, port=port,
             deploy_config=deploy_config, namespace=namespace,
+            no_request_path=no_request_path,
         )
 
         try:

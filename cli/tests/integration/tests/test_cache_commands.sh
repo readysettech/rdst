@@ -31,10 +31,13 @@ CACHE_TEST_QUERY="SELECT * FROM title_basics WHERE tconst = 'tt0000001'"
 test_cache_commands_setup() {
   log_section "Cache Commands Setup: Deploy Readyset (${DB_ENGINE})"
 
-  # Deploy Readyset for the upstream target
-  # This pulls the Docker image and creates a container
+  # Deploy Readyset for the upstream target. --force tears down any
+  # leftover container from prior test modules (test_cache_commands runs
+  # before this and ends with a deployed cache); without --force the new
+  # stricter deploy gate would refuse with "already running" instead of
+  # producing a fresh container.
   run_cmd "Deploy Readyset for ${TARGET_NAME}" \
-    "${RDST_CMD[@]}" cache deploy --target "$TARGET_NAME" --mode docker
+    "${RDST_CMD[@]}" cache deploy --target "$TARGET_NAME" --mode docker --force
   assert_contains "${CACHE_TARGET_NAME}" "deploy should register cache target"
 
   # Verify the cache target was registered
@@ -221,10 +224,18 @@ test_cache_error_unsupported_query() {
 test_cache_deploy_script_only() {
   log_section "Cache Commands: Deploy Script-Only (${DB_ENGINE})"
 
-  # Docker script generation
+  # Docker script generation — defaults to in-request-path
   run_cmd "Deploy script-only (docker)" \
     "${RDST_CMD[@]}" cache deploy --target "$TARGET_NAME" --mode docker --script-only
   assert_contains "docker" "docker script should reference docker"
+  assert_contains "in-request-path" "docker script should default to in-request-path"
+
+  # --no-request-path opt-out switches to legacy explicit mode
+  run_cmd "Deploy script-only (docker, --no-request-path)" \
+    "${RDST_CMD[@]}" cache deploy --target "$TARGET_NAME" --mode docker \
+    --no-request-path --script-only
+  assert_contains "explicit" "no-request-path script should use explicit mode"
+  assert_not_contains "in-request-path" "no-request-path script should NOT enable in-request-path"
 
   # Systemd script generation
   run_cmd "Deploy script-only (systemd)" \
@@ -240,6 +251,45 @@ test_cache_deploy_script_only() {
   run_cmd "Deploy script-only (remote docker)" \
     "${RDST_CMD[@]}" cache deploy --target "$TARGET_NAME" --mode docker --host 10.0.1.50 --script-only
   assert_contains "docker" "remote docker script should reference docker"
+}
+
+test_cache_lifecycle_commands() {
+  log_section "Cache Commands: Lifecycle start/stop/restart (${DB_ENGINE})"
+
+  # Container is running from test_cache_commands_setup. Stop it.
+  run_cmd "cache stop" "${RDST_CMD[@]}" cache stop --target "$TARGET_NAME"
+
+  # Verify the container is actually stopped
+  if docker inspect "rdst-readyset-${TARGET_NAME}" --format '{{.State.Running}}' 2>/dev/null | grep -q '^false$'; then
+    echo "PASS: container is stopped after cache stop"
+  else
+    echo "FAIL: container did not stop"
+    return 1
+  fi
+
+  # Start it back up
+  run_cmd "cache start" "${RDST_CMD[@]}" cache start --target "$TARGET_NAME"
+  sleep 4
+  if docker inspect "rdst-readyset-${TARGET_NAME}" --format '{{.State.Running}}' 2>/dev/null | grep -q '^true$'; then
+    echo "PASS: container is running after cache start"
+  else
+    echo "FAIL: container did not start"
+    return 1
+  fi
+
+  # cache start is idempotent on a running container
+  run_cmd "cache start (idempotent)" "${RDST_CMD[@]}" cache start --target "$TARGET_NAME"
+  assert_contains "already running" "second cache start should be idempotent"
+
+  # cache restart works
+  run_cmd "cache restart" "${RDST_CMD[@]}" cache restart --target "$TARGET_NAME"
+  sleep 5
+  if docker inspect "rdst-readyset-${TARGET_NAME}" --format '{{.State.Running}}' 2>/dev/null | grep -q '^true$'; then
+    echo "PASS: container is running after cache restart"
+  else
+    echo "FAIL: container is not running after restart"
+    return 1
+  fi
 }
 
 # Master function that runs all cache command tests
@@ -258,4 +308,5 @@ test_cache_subcommands() {
   test_cache_drop_all
   test_cache_error_wrong_target
   test_cache_error_unsupported_query
+  test_cache_lifecycle_commands
 }

@@ -14,6 +14,19 @@ from typing import Any, Dict
 from .script_generator import generate_script
 
 
+def probe_local_systemd(target_name: str) -> "ProbeResult":
+    """Probe stub — full systemd lifecycle support tracked separately."""
+    from .lifecycle import ProbeResult, ProbeState
+    return ProbeResult(
+        state=ProbeState.UNKNOWN,
+        mode="systemd",
+        detail=(
+            "Systemd probe not yet implemented. Check manually: "
+            "systemctl status readyset"
+        ),
+    )
+
+
 def deploy_local_systemd(
     target_name: str,
     variables: Dict[str, str],

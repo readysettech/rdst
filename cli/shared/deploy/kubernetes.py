@@ -12,6 +12,20 @@ from urllib.parse import quote as urlquote
 from .script_generator import generate_k8s_apply_manifests
 
 
+def probe_kubernetes(target_name: str, namespace: Optional[str] = None) -> "ProbeResult":
+    """Probe stub — full kubernetes lifecycle support tracked separately."""
+    from .lifecycle import ProbeResult, ProbeState
+    ns = namespace or "readyset"
+    return ProbeResult(
+        state=ProbeState.UNKNOWN,
+        mode="kubernetes",
+        detail=(
+            f"Kubernetes probe not yet implemented. Check manually: "
+            f"kubectl get deploy/readyset -n {ns}"
+        ),
+    )
+
+
 def _kubectl_cmd(args: list[str], kubeconfig: Optional[str] = None) -> list[str]:
     """Build a kubectl command, prepending --kubeconfig when provided."""
     cmd = ["kubectl"]

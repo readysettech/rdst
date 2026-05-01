@@ -13,6 +13,21 @@ import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404
 import tempfile
 from typing import Any, Dict, Optional
 
+
+def probe_remote(target_name: str, host: Optional[str] = None,
+                 ssh_key: Optional[str] = None,
+                 ssh_user: Optional[str] = None) -> "ProbeResult":
+    """Probe stub — full remote lifecycle support tracked separately."""
+    from .lifecycle import ProbeResult, ProbeState
+    return ProbeResult(
+        state=ProbeState.UNKNOWN,
+        mode="remote",
+        detail=(
+            "Remote probe not yet implemented. Check manually via SSH "
+            "(e.g., 'docker ps' or 'systemctl status readyset' on the host)"
+        ),
+    )
+
 from .script_generator import generate_script
 
 

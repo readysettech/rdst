@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404
 from typing import Any, Dict, Optional
 from urllib.parse import quote as urlquote
@@ -131,6 +132,16 @@ def _create_container(
     readyset_port = variables["readyset_port"]
     container_name = variables["container_name"]
     image = variables["readyset_image"]
+    # In-request-path is the new default: queries flowing through ReadySet
+    # auto-create caches without requiring explicit CREATE CACHE statements.
+    # Caller (DeployCommand) sets this to "explicit" via --no-request-path.
+    # Note: clap-side value parser expects kebab-case "in-request-path".
+    query_caching_mode = variables.get("query_caching", "in-request-path")
+    # Resource limits — defaults match Tanmay/Gautam's spec (4 GB, 2 CPU).
+    # Memory limit in bytes is what ReadySet's READYSET_MEMORY_LIMIT expects.
+    memory_bytes = variables.get("memory_bytes", 4 * 1024 * 1024 * 1024)  # 4 GiB
+    cpus = variables.get("cpus", "2")
+    docker_memory = variables.get("docker_memory", "4g")
 
     # For local deployment, use host.docker.internal to reach the host DB
     if db_host in ("localhost", "127.0.0.1", "::1"):
@@ -169,18 +180,27 @@ def _create_container(
             ),
         }
 
-    # Build docker run command
+    # Build docker run command. In-request-path defaults: every SELECT through
+    # ReadySet auto-caches; SHALLOW_MEMORY_PERCENT=100 + READYSET_MEMORY_LIMIT
+    # together enable LRU eviction at the configured cap. Docker --memory and
+    # --cpus enforce host-level resource limits (Tanmay/Gautam: 2c/4GB).
     docker_cmd = [
         "docker", "run",
         "-d",
         "--restart=unless-stopped",
         "--name", container_name,
+        f"--memory={docker_memory}",
+        f"--cpus={cpus}",
         "-e", f"UPSTREAM_DB_URL={db_url}",
         "-e", f"DATABASE_TYPE={db_type}",
         "-e", f"LISTEN_ADDRESS=0.0.0.0:{readyset_port}",
         "-e", f"DEPLOYMENT_MODE=standalone",
-        "-e", f"QUERY_CACHING=explicit",
+        "-e", f"QUERY_CACHING={query_caching_mode}",
+        "-e", "QUERY_LOG_MODE=enabled",
+        "-e", "PROMETHEUS_METRICS=true",
         "-e", f"CACHE_MODE=shallow",
+        "-e", f"SHALLOW_MEMORY_PERCENT=100",
+        "-e", f"READYSET_MEMORY_LIMIT={memory_bytes}",
         "-e", "DEFAULT_TTL_MS=600000",
         "-e", f"METRICS_ADDRESS=0.0.0.0:{variables.get('metrics_port', '6034')}",
         "-p", f"{readyset_port}:{readyset_port}",
@@ -219,6 +239,215 @@ def _create_container(
             "success": False,
             "error": "Container creation timed out (5 min). Check your network connection.",
         }
+
+
+def _container_name(target_name: str) -> str:
+    return f"rdst-readyset-{target_name}"
+
+
+def _docker_inspect_state(name: str) -> Optional[Dict[str, Any]]:
+    """Return docker inspect state for a container, or None if it doesn't exist.
+
+    Result keys: status (running|exited|created|paused|restarting|...), running (bool),
+    started_at, exit_code.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Status}}|{{.State.Running}}|{{.State.ExitCode}}", name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    parts = result.stdout.strip().split("|")
+    if len(parts) < 3:
+        return None
+    return {
+        "status": parts[0],
+        "running": parts[1].lower() == "true",
+        "exit_code": parts[2],
+    }
+
+
+def _docker_inspect_port(name: str, container_port: int) -> Optional[int]:
+    """Look up the host port mapped to a container port, or None."""
+    try:
+        result = subprocess.run(
+            ["docker", "port", name, f"{container_port}/tcp"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    # Output like "0.0.0.0:5433" — take the part after the last colon
+    line = result.stdout.strip().splitlines()[0]
+    try:
+        return int(line.rsplit(":", 1)[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+def _docker_list_tcp_ports(name: str) -> list[int]:
+    """List all TCP host ports mapped from a container.
+
+    `docker port <name>` returns lines like:
+        5436/tcp -> 0.0.0.0:5436
+        6037/tcp -> 0.0.0.0:6037
+
+    We exclude well-known metrics-ish ports (6033-6099) and return SQL-listener
+    candidates. Falls back to empty list on failure.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "port", name],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return []
+    if result.returncode != 0 or not result.stdout.strip():
+        return []
+    ports: list[int] = []
+    for line in result.stdout.strip().splitlines():
+        # "<container_port>/tcp -> <host>:<host_port>"
+        parts = line.split("->")
+        if len(parts) != 2:
+            continue
+        container_part = parts[0].strip()
+        host_part = parts[1].strip()
+        if "/tcp" not in container_part:
+            continue
+        try:
+            container_port = int(container_part.split("/")[0])
+            host_port = int(host_part.rsplit(":", 1)[-1])
+        except (ValueError, IndexError):
+            continue
+        # Skip metrics/prometheus range — keep SQL listener candidates only
+        if 6033 <= container_port <= 6099:
+            continue
+        ports.append(host_port)
+    return ports
+
+
+def _tcp_reachable(host: str, port: int, timeout: float = 1.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, socket.timeout):
+        return False
+
+
+def probe_local_docker(target_name: str) -> "ProbeResult":
+    """Detect current state of the cache container for this target."""
+    from .lifecycle import ProbeResult, ProbeState
+    name = _container_name(target_name)
+    state = _docker_inspect_state(name)
+    if state is None:
+        return ProbeResult(state=ProbeState.NOT_DEPLOYED, mode="docker", container_id=name,
+                           detail="No container found")
+    if not state["running"]:
+        return ProbeResult(state=ProbeState.DEPLOYED_STOPPED, mode="docker", container_id=name,
+                           detail=f"Container exists, status={state['status']}, exit_code={state['exit_code']}")
+
+    # Running per docker — that's the authoritative signal. TCP probe is best-effort
+    # and runs across ALL exposed SQL ports (Readyset binds to varying ports per
+    # target, e.g. 5433/5434/5435/5436/3307/3308 etc., not a fixed pair). A TCP
+    # failure does not flip us to UNREACHABLE — Readyset can be mid-startup, behind
+    # a slow `docker run`, or use a custom port the user picked.
+    sql_ports = _docker_list_tcp_ports(name)
+    reachable_port = next((p for p in sql_ports if _tcp_reachable("127.0.0.1", p, timeout=1.0)), None)
+    if reachable_port:
+        return ProbeResult(state=ProbeState.DEPLOYED_RUNNING, mode="docker", container_id=name,
+                           detail=f"Container running, port {reachable_port} reachable")
+    return ProbeResult(state=ProbeState.DEPLOYED_RUNNING, mode="docker", container_id=name,
+                       detail=f"Container running ({len(sql_ports)} SQL port(s) exposed; TCP probe inconclusive)")
+
+
+def start_local_docker(target_name: str) -> "LifecycleResult":
+    """Start a stopped container (docker start)."""
+    from .lifecycle import LifecycleResult, ProbeState
+    name = _container_name(target_name)
+    state = _docker_inspect_state(name)
+    if state is None:
+        return LifecycleResult(
+            success=False,
+            error=f"No container '{name}' to start. Use 'rdst cache deploy' to create one.",
+        )
+    if state["running"]:
+        return LifecycleResult(
+            success=True, state_after=ProbeState.DEPLOYED_RUNNING,
+            detail=f"Container '{name}' is already running",
+        )
+    try:
+        result = subprocess.run(
+            ["docker", "start", name], capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        return LifecycleResult(success=False, error=f"Failed to start: {e}")
+    if result.returncode != 0:
+        return LifecycleResult(success=False, error=result.stderr.strip() or "docker start failed")
+    return LifecycleResult(
+        success=True, state_after=ProbeState.DEPLOYED_RUNNING,
+        detail=f"Started container '{name}'",
+    )
+
+
+def stop_local_docker(target_name: str) -> "LifecycleResult":
+    """Stop a running container without removing it (docker stop)."""
+    from .lifecycle import LifecycleResult, ProbeState
+    name = _container_name(target_name)
+    state = _docker_inspect_state(name)
+    if state is None:
+        return LifecycleResult(
+            success=False,
+            error=f"No container '{name}' found.",
+        )
+    if not state["running"]:
+        return LifecycleResult(
+            success=True, state_after=ProbeState.DEPLOYED_STOPPED,
+            detail=f"Container '{name}' is already stopped",
+        )
+    try:
+        result = subprocess.run(
+            ["docker", "stop", name], capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        return LifecycleResult(success=False, error=f"Failed to stop: {e}")
+    if result.returncode != 0:
+        return LifecycleResult(success=False, error=result.stderr.strip() or "docker stop failed")
+    return LifecycleResult(
+        success=True, state_after=ProbeState.DEPLOYED_STOPPED,
+        detail=f"Stopped container '{name}'",
+    )
+
+
+def restart_local_docker(target_name: str) -> "LifecycleResult":
+    """Restart a container (docker restart)."""
+    from .lifecycle import LifecycleResult, ProbeState
+    name = _container_name(target_name)
+    state = _docker_inspect_state(name)
+    if state is None:
+        return LifecycleResult(
+            success=False,
+            error=f"No container '{name}' found. Use 'rdst cache deploy' to create one.",
+        )
+    try:
+        result = subprocess.run(
+            ["docker", "restart", name], capture_output=True, text=True, timeout=60,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        return LifecycleResult(success=False, error=f"Failed to restart: {e}")
+    if result.returncode != 0:
+        return LifecycleResult(success=False, error=result.stderr.strip() or "docker restart failed")
+    return LifecycleResult(
+        success=True, state_after=ProbeState.DEPLOYED_RUNNING,
+        detail=f"Restarted container '{name}'",
+    )
 
 
 def _format_docker_error(error_msg: str) -> str:

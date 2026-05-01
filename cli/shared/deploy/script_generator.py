@@ -127,8 +127,19 @@ def build_variables(
     port: int | None = None,
     deploy_config: str = "readyset",
     namespace: str = "readyset",
+    no_request_path: bool = False,
+    memory_bytes: int | None = None,
+    cpus: str = "2",
 ) -> Dict[str, str]:
-    """Build template variables dict from target config."""
+    """Build template variables dict from target config.
+
+    Args:
+        no_request_path: If True, deploy with QUERY_CACHING=explicit (legacy
+            behavior — caches must be explicitly created via `cache add`).
+            Default False = in-request-path mode (auto-cache on every SELECT).
+        memory_bytes: ReadySet's READYSET_MEMORY_LIMIT (bytes). Default 4 GiB.
+        cpus: Docker --cpus value. Default "2".
+    """
     engine = target_config.get("engine", "postgresql")
     deploy_host = target_config.get("host", "localhost")
     if port:
@@ -137,6 +148,9 @@ def build_variables(
         readyset_port = _find_available_port(engine, deploy_host)
 
     metrics_port = _find_available_metrics_port(deploy_host)
+
+    if memory_bytes is None:
+        memory_bytes = 4 * 1024 * 1024 * 1024  # 4 GiB
 
     return {
         "db_host": target_config.get("host", "localhost"),
@@ -152,6 +166,10 @@ def build_variables(
         "squeepy_image": SQUEEPY_IMAGE,
         "deploy_config": deploy_config,
         "namespace": namespace,
+        "query_caching": "explicit" if no_request_path else "in-request-path",
+        "memory_bytes": memory_bytes,
+        "cpus": cpus,
+        "docker_memory": f"{memory_bytes // (1024 * 1024)}m",
     }
 
 

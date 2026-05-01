@@ -31,3 +31,6 @@ class CacheOptions:
     host: Optional[str] = None
     ssh_key: Optional[str] = None
     ssh_user: Optional[str] = None
+    no_request_path: bool = False  # opt-out: deploy with QUERY_CACHING=explicit
+    memory_bytes: Optional[int] = None  # READYSET_MEMORY_LIMIT + Docker --memory (None = 4 GiB default)
+    cpus: Optional[str] = None  # Docker --cpus value (None = "2" default)

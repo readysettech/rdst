@@ -445,6 +445,10 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
                 kubeconfig=getattr(args, 'kubeconfig', None),
                 script_only=getattr(args, 'script_only', False),
                 output_json=getattr(args, 'output_json', False),
+                no_request_path=getattr(args, 'no_request_path', False),
+                memory=getattr(args, 'memory', None),
+                cpus=getattr(args, 'cpus', None),
+                force=getattr(args, 'force', False),
             )
 
         # Other cache subcommands need target config
@@ -460,8 +464,12 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             targets_config.load()
             cache_target_config = targets_config.get(cache_target)
             if not cache_target_config:
-                available = ", ".join(targets_config.list_targets()) or "none"
-                return RdstResult(False, f"Target '{cache_target}' not found. Available: {available}")
+                # `cache remove` is idempotent — let it through with no
+                # config so its own handler can report "nothing to remove"
+                # instead of erroring at dispatch. Other commands still hard-fail.
+                if cache_subcommand != 'remove':
+                    available = ", ".join(targets_config.list_targets()) or "none"
+                    return RdstResult(False, f"Target '{cache_target}' not found. Available: {available}")
 
         if cache_subcommand == 'add':
             return cache_cmd.add(
@@ -498,6 +506,24 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
                 target_config=cache_target_config,
                 json_output=getattr(args, 'json_output', False),
                 yes=getattr(args, 'yes', False),
+            )
+        elif cache_subcommand == 'start':
+            return cache_cmd.start(
+                target=cache_target,
+                target_config=cache_target_config,
+                json_output=getattr(args, 'json_output', False),
+            )
+        elif cache_subcommand == 'stop':
+            return cache_cmd.stop(
+                target=cache_target,
+                target_config=cache_target_config,
+                json_output=getattr(args, 'json_output', False),
+            )
+        elif cache_subcommand == 'restart':
+            return cache_cmd.restart(
+                target=cache_target,
+                target_config=cache_target_config,
+                json_output=getattr(args, 'json_output', False),
             )
         else:
             return RdstResult(False, f"Unknown cache subcommand: {cache_subcommand}")
