@@ -48,7 +48,10 @@ def collect_pg_stat_statements(connection) -> List[Dict[str, Any]]:
             "max_exec_time, rows, shared_blks_hit, shared_blks_read "
             "FROM pg_stat_statements "
             "WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database()) "
-            "ORDER BY total_exec_time DESC LIMIT 500"
+            # Order by slowest single execution (max_exec_time) so the report
+            # surfaces queries with the worst per-call latency, not just the
+            # ones with the highest cumulative time.
+            "ORDER BY max_exec_time DESC LIMIT 500"
         )
         columns = [desc[0] for desc in cur.description]
         rows = [dict(zip(columns, row)) for row in cur.fetchall()]
@@ -71,7 +74,10 @@ def collect_mysql_digest_stats(connection) -> List[Dict[str, Any]]:
             "SUM_ROWS_SENT as rows_sent "
             "FROM performance_schema.events_statements_summary_by_digest "
             "WHERE SCHEMA_NAME = DATABASE() "
-            "ORDER BY SUM_TIMER_WAIT DESC LIMIT 500"
+            # Order by slowest single execution (MAX_TIMER_WAIT) so the report
+            # surfaces queries with the worst per-call latency, not the ones
+            # with the highest cumulative time across thousands of fast calls.
+            "ORDER BY MAX_TIMER_WAIT DESC LIMIT 500"
         )
         rows = cur.fetchall()
         # pymysql DictCursor returns dicts already; handle both cases

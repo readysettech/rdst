@@ -743,6 +743,9 @@ class CaptureService:
                 row_copy["avg_time_ms"] = time_delta / calls_delta if calls_delta > 0 else 0
             deltas.append(row_copy)
 
-        sort_key = "total_exec_time" if db_engine == "postgresql" else "total_time_ms"
+        # Sort by slowest single execution. For Postgres pg_stat_statements
+        # max_exec_time is captured directly; for MySQL the row carries
+        # max_time_ms (mapped from MAX_TIMER_WAIT in collect_mysql_digest_stats).
+        sort_key = "max_exec_time" if db_engine == "postgresql" else "max_time_ms"
         deltas.sort(key=lambda row: float(row.get(sort_key, 0)), reverse=True)
         return self._convert_raw_queries(deltas, db_engine, limit)
