@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import keyring
 import pytest
@@ -85,6 +86,46 @@ def tmp_rdst_home(monkeypatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("HOME", str(rdst_home))
 
     return rdst_data_dir
+
+
+@pytest.fixture
+def isolated_telemetry(monkeypatch, tmp_rdst_home):
+    """Real `TelemetryManager` rooted at the isolated HOME, with `track`
+    captured by a `MagicMock`.
+
+    Tests that want to assert on telemetry events opt in by requesting
+    this fixture. The instance is rebound on the per-feature
+    `from shared.telemetry import telemetry` imports — those bind at
+    module import time, so each consumer needs its own patch.
+
+    Disabled side effects: PostHog send, Sentry init, Slack webhooks.
+    Enabled bookkeeping: `_get_stats`, `_increment_stat`, finalizer
+    dispatch — these all run for real, so tests can assert on
+    counters too.
+    """
+    from shared.telemetry_manager import TelemetryManager
+
+    tm = TelemetryManager()
+    tm._rdst_dir = tmp_rdst_home
+    tm._enabled = True
+    tm._initialized = True
+    tm._device_id = "test-device-id"
+    tm._stats = {}
+
+    # Capture every track() call without doing real network work.
+    tm.track = MagicMock()
+    tm._slack_notify = MagicMock()
+    tm._slack_notify_first_analyze = MagicMock()
+
+    monkeypatch.setattr("shared.telemetry.telemetry", tm)
+    for mod in (
+        "features.analyze.api.routes",
+        "features.ask.api.routes",
+        "features.top.api.routes",
+        "features.scan.api.routes",
+    ):
+        monkeypatch.setattr(f"{mod}.telemetry", tm, raising=False)
+    return tm
 
 
 @pytest.fixture
