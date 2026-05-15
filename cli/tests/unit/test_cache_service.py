@@ -835,6 +835,6 @@ class TestResolveCacheIdForDrop:
         h, _ = reg.add_query(sql="SELECT 1", source="manual", target="db1")
         reg.update_readyset_identity(query_hash=h, readyset_query_id="q_translated")
         import shared.constants
-        monkeypatch.setattr(shared.constants, "RDST_DATA_DIR", tmp_path)
+        monkeypatch.setattr(shared.constants, "rdst_data_dir", lambda: tmp_path)
         result = CacheService._resolve_cache_id_for_drop(h)
         assert result == "q_translated"
