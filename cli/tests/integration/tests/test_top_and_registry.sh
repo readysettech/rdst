@@ -7,20 +7,8 @@ test_registry_and_files() {
   local queries_file="$registry_dir/queries.toml"
   local analysis_file="$registry_dir/analysis_results.toml"
 
-  # Seed a dedicated verification query so this check is self-contained and
-  # does NOT depend on the analyze area (test_analyze_inputs) having run.
-  # CI selects test areas from the changed-file set, so a diff touching only
-  # query/registry code runs this area WITHOUT analyze; the old code then
-  # grepped for a tag (film-popularity) that was never created and failed
-  # deterministically. `query add` writes tag=<name> without needing an
-  # EXPLAIN, so it is both self-sufficient and non-flaky.
-  local verify_tag="registry-verify-${DB_ENGINE}"
-  run_cmd "Seed registry-verification query" \
-    "${RDST_CMD[@]}" query add "$verify_tag" \
-    --query "SELECT 1 AS registry_probe" \
-    --target "$TARGET_NAME"
-  PRIMARY_TAG="$verify_tag"
-  PRIMARY_HASH="$(latest_hash_from_list)"
+  # PRIMARY_HASH and PRIMARY_TAG are set by fixture_seed_registry_query
+  # (or by test_analyze_inputs when the analyze area runs).
 
   # Verify registry directory exists
   [[ -d "$registry_dir" ]] || fail "Registry directory missing at ${registry_dir}"
@@ -59,16 +47,8 @@ test_registry_and_files() {
 test_list_command() {
   log_section "6. List Command Scenarios (${DB_ENGINE})"
 
-  # Seed a query so list assertions hold regardless of whether the analyze
-  # area ran. This area (top) is selectable independently of analyze, so it
-  # must not assume the registry was pre-populated elsewhere.
-  if [[ -z "$PRIMARY_HASH" ]]; then
-    run_cmd "Seed query for list scenarios" \
-      "${RDST_CMD[@]}" query add "list-probe-${DB_ENGINE}" \
-      --query "SELECT 1 AS list_probe" \
-      --target "$TARGET_NAME"
-    PRIMARY_HASH="$(latest_hash_from_list)"
-  fi
+  # PRIMARY_HASH is set by fixture_seed_registry_query (or by
+  # test_analyze_inputs when the analyze area runs).
 
   run_cmd "List recent queries" "${RDST_CMD[@]}" query list
   assert_contains "$PRIMARY_HASH" "list output should include primary hash"

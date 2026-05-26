@@ -11,6 +11,8 @@ GROUP BY tb.titleType \
 ORDER BY count DESC \
 LIMIT 25"
 
+  PRIMARY_TAG="film-popularity"
+
   run_cmd "Analyze inline query (text input)" \
     "${RDST_CMD[@]}" analyze \
     --target "$TARGET_NAME" \

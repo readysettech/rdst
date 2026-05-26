@@ -79,7 +79,51 @@ source "${SCRIPT_DIR}/tests/test_scan.sh"
 source "${SCRIPT_DIR}/tests/test_fleet.sh"
 source "${SCRIPT_DIR}/tests/test_audit_duration.sh"
 
-# Test suite execution
+# =============================================================================
+# AREA FIXTURES
+# =============================================================================
+# Each area declares the fixtures it needs.  The runner resolves the union of
+# fixtures for all selected areas, deduplicates, and runs them once before any
+# area tests execute.  This guarantees every area passes standalone without
+# relying on side effects from other areas.
+
+fixture_seed_registry_query() {
+  log_section "Fixture: seed registry query (${DB_ENGINE})"
+  local tag="fixture-probe-${DB_ENGINE}"
+  run_cmd "Add fixture query to registry" \
+    "${RDST_CMD[@]}" query add "$tag" \
+    --query "SELECT tb.titleType, COUNT(*) AS count FROM title_basics tb JOIN title_ratings tr ON tb.tconst = tr.tconst WHERE tr.numVotes > 1000 GROUP BY tb.titleType ORDER BY count DESC LIMIT 25" \
+    --target "$TARGET_NAME"
+  PRIMARY_TAG="$tag"
+  PRIMARY_HASH="$(latest_hash_from_list)"
+}
+
+# Area -> required fixtures (space-separated).  Empty = no fixtures needed.
+fixtures_for_area() {
+  case "$1" in
+    top|query) echo "fixture_seed_registry_query" ;;
+    *)         echo "" ;;
+  esac
+}
+
+# Resolve selected areas, collect their fixtures (deduped), and run them.
+run_area_fixtures() {
+  local resolved=""
+  for area in analyze top cache query scan fleet audit; do
+    should_run_area "$area" || continue
+    for fn in $(fixtures_for_area "$area"); do
+      case " $resolved " in
+        *" $fn "*) ;;
+        *) "$fn"; resolved="$resolved $fn" ;;
+      esac
+    done
+  done
+}
+
+# =============================================================================
+# TEST SUITE EXECUTION
+# =============================================================================
+
 run_test_suite() {
   local engine="$1"
   set_db_context "$engine"
@@ -89,7 +133,7 @@ run_test_suite() {
 
   # Reset global state
   PRIMARY_HASH=""
-  PRIMARY_TAG="film-popularity"
+  PRIMARY_TAG=""
   STRUCTURE_HASH=""
   LIST_HASH=""
 
@@ -104,6 +148,9 @@ run_test_suite() {
 
     # Error handling always runs (fast, catches CLI regressions)
     test_error_handling
+
+    # Run fixtures for selected areas before any area tests
+    run_area_fixtures
 
     if should_run_area "analyze"; then
       test_analyze_inputs

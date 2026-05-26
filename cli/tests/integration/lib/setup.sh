@@ -87,7 +87,7 @@ DB_PASSWORD=""
 
 # Test state variables
 PRIMARY_HASH=""
-PRIMARY_TAG="film-popularity"
+PRIMARY_TAG=""
 STRUCTURE_HASH=""
 LIST_HASH=""
 
