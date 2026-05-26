@@ -560,12 +560,16 @@ class TopCommand:
                         f"[{StyleTokens.WARNING}]Query:[/{StyleTokens.WARNING}] {query_display}\n"
                     )
 
-                    # Call rdst analyze via subprocess
+                    # Call rdst analyze via subprocess. Invoke via `-m rdst`
+                    # rather than a bare "rdst.py" path so the subprocess
+                    # resolves the same installed package regardless of the
+                    # current working directory.
                     import subprocess
 
                     cmd = [
                         sys.executable,
-                        "rdst.py",
+                        "-m",
+                        "rdst",
                         "analyze",
                         "--target",
                         target_name,

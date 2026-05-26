@@ -7,29 +7,20 @@ test_registry_and_files() {
   local queries_file="$registry_dir/queries.toml"
   local analysis_file="$registry_dir/analysis_results.toml"
 
-  # If running standalone (other tests commented out), create some test data
-  if [[ ! -s "$queries_file" ]]; then
-    echo "Registry empty - creating test queries for verification..."
-
-    # Run multiple analyze commands to ensure registry gets populated
-    run_cmd "Create test query 1 for registry verification" \
-      "${RDST_CMD[@]}" analyze \
-      --target "$TARGET_NAME" \
-      --save-as "registry-test-1" \
-      --skip-warning \
-      --query "SELECT * FROM title_basics LIMIT 1"
-
-    run_cmd "Create test query 2 for registry verification" \
-      "${RDST_CMD[@]}" analyze \
-      --target "$TARGET_NAME" \
-      --save-as "registry-test-2" \
-      --skip-warning \
-      --query "SELECT * FROM title_ratings LIMIT 1"
-
-    # Get the hash from latest query
-    PRIMARY_HASH=$(latest_hash_from_list)
-    PRIMARY_TAG="registry-test-2"
-  fi
+  # Seed a dedicated verification query so this check is self-contained and
+  # does NOT depend on the analyze area (test_analyze_inputs) having run.
+  # CI selects test areas from the changed-file set, so a diff touching only
+  # query/registry code runs this area WITHOUT analyze; the old code then
+  # grepped for a tag (film-popularity) that was never created and failed
+  # deterministically. `query add` writes tag=<name> without needing an
+  # EXPLAIN, so it is both self-sufficient and non-flaky.
+  local verify_tag="registry-verify-${DB_ENGINE}"
+  run_cmd "Seed registry-verification query" \
+    "${RDST_CMD[@]}" query add "$verify_tag" \
+    --query "SELECT 1 AS registry_probe" \
+    --target "$TARGET_NAME"
+  PRIMARY_TAG="$verify_tag"
+  PRIMARY_HASH="$(latest_hash_from_list)"
 
   # Verify registry directory exists
   [[ -d "$registry_dir" ]] || fail "Registry directory missing at ${registry_dir}"
@@ -37,11 +28,12 @@ test_registry_and_files() {
   # Verify queries.toml exists and has content
   [[ -s "$queries_file" ]] || fail "queries.toml missing or empty at ${queries_file}"
 
-  # Analysis results file is optional (may not be created if analysis fails)
+  # analysis_results.toml is an artifact of the analyze area, which may not
+  # run in a diff-selected subset. Its absence here is expected, not a problem.
   if [[ -f "$analysis_file" ]]; then
     echo "✓ analysis_results.toml found"
   else
-    echo "⚠ analysis_results.toml not created (analysis may have been incomplete)"
+    echo "  (analysis_results.toml absent — analyze area not run in this selection)"
   fi
 
   # Verify the query was saved to queries.toml
@@ -66,6 +58,17 @@ test_registry_and_files() {
 
 test_list_command() {
   log_section "6. List Command Scenarios (${DB_ENGINE})"
+
+  # Seed a query so list assertions hold regardless of whether the analyze
+  # area ran. This area (top) is selectable independently of analyze, so it
+  # must not assume the registry was pre-populated elsewhere.
+  if [[ -z "$PRIMARY_HASH" ]]; then
+    run_cmd "Seed query for list scenarios" \
+      "${RDST_CMD[@]}" query add "list-probe-${DB_ENGINE}" \
+      --query "SELECT 1 AS list_probe" \
+      --target "$TARGET_NAME"
+    PRIMARY_HASH="$(latest_hash_from_list)"
+  fi
 
   run_cmd "List recent queries" "${RDST_CMD[@]}" query list
   assert_contains "$PRIMARY_HASH" "list output should include primary hash"

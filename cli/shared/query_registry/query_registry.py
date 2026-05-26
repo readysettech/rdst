@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 import logging
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict, field, fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
 import shared.constants as shared_constants
@@ -627,6 +627,14 @@ class QueryEntry:
 
         # Remove deprecated parameter_history if present in old data
         data.pop("parameter_history", None)
+
+        # Drop any keys that aren't declared fields on this build of
+        # QueryEntry. A newer rdst may have written fields an older build
+        # doesn't know about (e.g. readyset_query_id); silently ignoring them
+        # keeps the on-disk registry forward-compatible instead of raising
+        # "unexpected keyword argument" and discarding the whole entry.
+        known_fields = {f.name for f in dataclass_fields(cls)}
+        data = {k: v for k, v in data.items() if k in known_fields}
 
         return cls(**data)
 

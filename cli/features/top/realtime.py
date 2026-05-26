@@ -270,10 +270,14 @@ def run_realtime_monitor(
 
                     target_name = target_config.get("name", "default")
 
-                    # Build command to run analyze in interactive mode
+                    # Build command to run analyze in interactive mode.
+                    # Invoke via `-m rdst` rather than a bare "rdst.py" path so
+                    # the subprocess resolves the same installed package
+                    # regardless of the current working directory.
                     cmd = [
                         sys.executable,  # Use same python interpreter
-                        "rdst.py",
+                        "-m",
+                        "rdst",
                         "analyze",
                         "--target",
                         target_name,
