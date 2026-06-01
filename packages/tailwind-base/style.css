@@ -450,31 +450,31 @@
     --tomato-dark-a-12: rgba(255, 243, 240, 0.98);
 
     /* Purple */
-    --purple-light-1: #fefcfe;
-    --purple-light-2: #fdfaff;
-    --purple-light-3: #f9f1fe;
-    --purple-light-4: #f3e7fc;
-    --purple-light-5: #eddbf9;
-    --purple-light-6: #e3ccf4;
-    --purple-light-7: #d3b4ed;
-    --purple-light-8: #be93e4;
-    --purple-light-9: #8e4ec6;
-    --purple-light-10: #8445bc;
-    --purple-light-11: #793aaf;
-    --purple-light-12: #2b0e44;
+    --purple-light-1: #FDFCFE;
+    --purple-light-2: #FBFAFF;
+    --purple-light-3: #F5F2FF;
+    --purple-light-4: #EDE9FE;
+    --purple-light-5: #E4DEFC;
+    --purple-light-6: #D7CFF9;
+    --purple-light-7: #C4B8F3;
+    --purple-light-8: #AA99EC;
+    --purple-light-9: #6E56CF;
+    --purple-light-10: #644FC1;
+    --purple-light-11: #5746AF;
+    --purple-light-12: #20134B;
 
-    --purple-dark-1: #1b141d;
-    --purple-dark-2: #221527;
-    --purple-dark-3: #301a3a;
-    --purple-dark-4: #3a1e48;
-    --purple-dark-5: #432155;
-    --purple-dark-6: #4e2667;
-    --purple-dark-7: #5f2d84;
-    --purple-dark-8: #7938b2;
-    --purple-dark-9: #8e4ec6;
-    --purple-dark-10: #9d5bd2;
-    --purple-dark-11: #bf7af0;
-    --purple-dark-12: #f7ecfc;
+    --purple-dark-1: #17151F;
+    --purple-dark-2: #1C172B;
+    --purple-dark-3: #251E40;
+    --purple-dark-4: #2C2250;
+    --purple-dark-5: #32275F;
+    --purple-dark-6: #392C72;
+    --purple-dark-7: #443592;
+    --purple-dark-8: #5842C3;
+    --purple-dark-9: #6E56CF;
+    --purple-dark-10: #7C66DC;
+    --purple-dark-11: #9E8CFC;
+    --purple-dark-12: #F1EEFE;
 
     --purple-dark-a-2: rgba(181, 42, 251, 0.045);
 
@@ -642,12 +642,12 @@
     --surface-primary-soft-hover: var(--sand-light-4);
     --surface-primary-soft-active: var(--sand-light-5);
 
-    --surface-rising-solid: var(--lime-light-9);
-    --surface-rising-solid-hover: var(--lime-light-10);
-    --surface-rising-solid-active: var(--lime-light-8);
-    --surface-rising-soft: var(--lime-light-3);
-    --surface-rising-soft-hover: var(--lime-light-4);
-    --surface-rising-soft-active: var(--lime-light-5);
+    --surface-rising-solid: var(--purple-light-9);
+    --surface-rising-solid-hover: var(--purple-light-10);
+    --surface-rising-solid-active: var(--purple-light-8);
+    --surface-rising-soft: var(--purple-light-3);
+    --surface-rising-soft-hover: var(--purple-light-4);
+    --surface-rising-soft-active: var(--purple-light-5);
 
     --surface-positive-solid: var(--grass-light-9);
     --surface-positive-solid-hover: var(--grass-light-10);
@@ -686,9 +686,9 @@
     --content-primary-soft: var(--sand-light-12);
     --content-primary-plain: var(--sand-light-12);
 
-    --content-rising-solid: var(--neutral-black);
-    --content-rising-soft: var(--lime-light-11);
-    --content-rising-plain: var(--lime-light-11);
+    --content-rising-solid: var(--purple-light-1);
+    --content-rising-soft: var(--purple-light-11);
+    --content-rising-plain: var(--purple-light-11);
 
     --content-positive-solid: var(--grass-light-1);
     --content-positive-soft: var(--grass-light-11);
@@ -713,8 +713,8 @@
     --border-primary-solid: var(--sand-dark-7);
     --border-primary-soft: var(--sand-dark-6);
 
-    --border-rising-solid: var(--lime-light-7);
-    --border-rising-soft: var(--lime-light-6);
+    --border-rising-solid: var(--purple-light-7);
+    --border-rising-soft: var(--purple-light-6);
 
     --border-positive-solid: var(--grass-light-7);
     --border-positive-soft: var(--grass-light-6);
@@ -759,12 +759,12 @@
     --surface-primary-soft-hover: var(--sand-dark-4);
     --surface-primary-soft-active: var(--sand-dark-5);
 
-    --surface-rising-solid: var(--lime-dark-9);
-    --surface-rising-solid-hover: var(--lime-dark-10);
-    --surface-rising-solid-active: var(--lime-dark-8);
-    --surface-rising-soft: var(--lime-dark-3);
-    --surface-rising-soft-hover: var(--lime-dark-4);
-    --surface-rising-soft-active: var(--lime-dark-5);
+    --surface-rising-solid: var(--purple-dark-9);
+    --surface-rising-solid-hover: var(--purple-dark-10);
+    --surface-rising-solid-active: var(--purple-dark-8);
+    --surface-rising-soft: var(--purple-dark-3);
+    --surface-rising-soft-hover: var(--purple-dark-4);
+    --surface-rising-soft-active: var(--purple-dark-5);
 
     --surface-positive-solid: var(--grass-dark-9);
     --surface-positive-solid-hover: var(--grass-dark-10);
@@ -804,8 +804,8 @@
     --content-primary-plain: var(--sand-dark-12);
 
     --content-rising-solid: var(--neutral-black);
-    --content-rising-soft: var(--lime-dark-11);
-    --content-rising-plain: var(--lime-dark-11);
+    --content-rising-soft: var(--purple-dark-11);
+    --content-rising-plain: var(--purple-dark-11);
 
     --content-positive-solid: var(--grass-dark-1);
     --content-positive-soft: var(--grass-dark-11);
@@ -830,8 +830,8 @@
     --border-primary-solid: var(--sand-light-7);
     --border-primary-soft: var(--sand-light-6);
 
-    --border-rising-solid: var(--lime-dark-7);
-    --border-rising-soft: var(--lime-dark-6);
+    --border-rising-solid: var(--purple-dark-7);
+    --border-rising-soft: var(--purple-dark-6);
 
     --border-positive-solid: var(--grass-dark-7);
     --border-positive-soft: var(--grass-dark-6);
