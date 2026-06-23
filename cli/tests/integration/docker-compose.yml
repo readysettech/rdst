@@ -5,7 +5,7 @@
 
 services:
   postgres:
-    image: postgres:15
+    image: ${PUBLIC_REPO_BASE:-public.ecr.aws}/docker/library/postgres:15.14
     container_name: rdst-test-postgres
     environment:
       POSTGRES_USER: testuser
@@ -30,7 +30,7 @@ services:
       -c pg_stat_statements.track=all
 
   mysql:
-    image: mysql:8.0
+    image: ${PUBLIC_REPO_BASE:-public.ecr.aws}/docker/library/mysql:8.0
     container_name: rdst-test-mysql
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
