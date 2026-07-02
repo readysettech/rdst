@@ -92,7 +92,7 @@ pip install rdst
 
    Fleet audit checks cache utilization, query support, and configuration
    across your ReadySet deployments. See the
-   [fleet audit docs](https://readyset.io/docs/rdst/fleet-and-audit/fleet-audit)
+   [fleet audit docs](https://readyset.io/docs/readyset-ai/rdst/fleet-and-audit/fleet-audit)
    for more.
 
 ## Commands
