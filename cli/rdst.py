@@ -340,19 +340,14 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             selected_hash = result.data.get("selected_hash")
             selected_target = result.data.get("selected_target")
 
-            # Build args for analyze command - use Python interpreter since rdst.py is a script
-            analyze_args = [
-                sys.executable,
-                sys.argv[0],
-                "analyze",
-                "--hash",
-                selected_hash,
-            ]
+            from shared.child_process import rdst_child_argv
+
+            analyze_args = ["analyze", "--hash", selected_hash]
             if selected_target:
                 analyze_args.extend(["--target", selected_target])
 
             # Replace this process with analyze - gives clean terminal state
-            os.execv(sys.executable, analyze_args)
+            os.execv(sys.executable, rdst_child_argv(analyze_args))
 
         return result
 

@@ -13,9 +13,9 @@ from __future__ import annotations
 from importlib import import_module
 import os
 import subprocess
-import sys
 import time
 
+from shared.child_process import rdst_child_argv
 from shared.cli.types import RdstResult
 from shared.config.targets import TargetsConfig
 from shared.ui import StyleTokens, get_console, MessagePanel, NextSteps
@@ -413,9 +413,9 @@ class DemoCommand:
 
         # Start background traffic
         bg_process = subprocess.Popen(
-            [sys.executable, "rdst.py", "query", "run"] + list(DEMO_QUERIES.keys()) +
-            ["--target", DEMO_TARGET, "--duration", "60", "--interval", "200", "--quiet"],
-            cwd=self._find_src_dir(),
+            rdst_child_argv(["query", "run"] + list(DEMO_QUERIES.keys()) +
+                            ["--target", DEMO_TARGET, "--duration", "60",
+                             "--interval", "200", "--quiet"]),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -460,8 +460,7 @@ class DemoCommand:
 
         # Try to create; if exists, just note it
         result = subprocess.run(
-            [sys.executable, "rdst.py"] + create_cmd,
-            cwd=self._find_src_dir(),
+            rdst_child_argv(create_cmd),
             capture_output=True, text=True,
         )
         if "already exists" in result.stdout + result.stderr:
@@ -567,37 +566,19 @@ class DemoCommand:
 
     def _run_rdst(self, args: list[str]):
         """Run an rdst subcommand via the same entry point."""
-        subprocess.run(
-            [sys.executable, "rdst.py"] + args,
-            cwd=self._find_src_dir(),
-        )
+        subprocess.run(rdst_child_argv(args))
 
     def _run_rdst_quiet(self, args: list[str]):
         """Run an rdst subcommand silently."""
         subprocess.run(
-            [sys.executable, "rdst.py"] + args,
-            cwd=self._find_src_dir(),
+            rdst_child_argv(args),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
 
     def _run_rdst_interactive(self, args: list[str]):
         """Run an rdst subcommand interactively (inherits stdin/stdout)."""
-        subprocess.run(
-            [sys.executable, "rdst.py"] + args,
-            cwd=self._find_src_dir(),
-        )
-
-    def _find_src_dir(self) -> str:
-        """Find the src directory containing rdst.py."""
-        from pathlib import Path
-
-        # Try relative to this file
-        this_dir = Path(__file__).resolve().parent
-        src_dir = this_dir.parent.parent
-        if (src_dir / "rdst.py").exists():
-            return str(src_dir)
-        return "."
+        subprocess.run(rdst_child_argv(args))
 
     def _print_connection_info(self):
         self.console.print(f"  [{StyleTokens.MUTED}]Host: 127.0.0.1:{DEMO_PORT}[/{StyleTokens.MUTED}]")

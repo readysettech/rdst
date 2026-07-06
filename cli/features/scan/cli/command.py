@@ -23,6 +23,8 @@ import re
 import sys
 import json
 from pathlib import Path
+
+from shared.child_process import rdst_child_argv
 from typing import List, Dict, Any, Optional
 
 from shared.ui import (
@@ -442,32 +444,21 @@ class ScanCommand:
 
         try:
             # Run rdst analyze as subprocess with JSON output (suppresses all Rich output)
-            cmd = [
-                "python3", "rdst.py", "analyze",
+            cmd = rdst_child_argv([
+                "analyze",
                 "-q", sql,
                 "--target", target,
                 "--json",
                 "--skip-warning",
-            ]
+            ])
 
             _start = _t.time()
-            # Run from rdst's own directory (where rdst.py lives).
-            # __file__ is at features/scan/cli/command.py so we need 4
-            # dirnames to climb to the rdst root (post-Farouk layout).
-            rdst_dir = os.path.dirname(
-                os.path.dirname(
-                    os.path.dirname(
-                        os.path.dirname(os.path.abspath(__file__))
-                    )
-                )
-            )
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 stdin=subprocess.DEVNULL,  # Isolate subprocess from terminal
-                timeout=60,  # 60s timeout — if EXPLAIN ANALYZE is slow, fall back to --fast
-                cwd=rdst_dir,
+                timeout=60,  # fall back to --fast if EXPLAIN ANALYZE is slow
             )
             _elapsed = _t.time() - _start
 
@@ -633,14 +624,14 @@ class ScanCommand:
         except subprocess.TimeoutExpired:
             # Retry with --fast (skips EXPLAIN ANALYZE, uses EXPLAIN only)
             try:
-                fast_cmd = [
-                    "python3", "rdst.py", "analyze",
+                fast_cmd = rdst_child_argv([
+                    "analyze",
                     "-q", sql,
                     "--target", target,
                     "--json",
                     "--fast",
                     "--skip-warning",
-                ]
+                ])
                 _start = _t.time()
                 proc = subprocess.run(
                     fast_cmd,
@@ -648,7 +639,6 @@ class ScanCommand:
                     text=True,
                     stdin=subprocess.DEVNULL,
                     timeout=60,  # --fast skips EXPLAIN ANALYZE, should be quick
-                    cwd=rdst_dir,
                 )
                 _elapsed = _t.time() - _start
 

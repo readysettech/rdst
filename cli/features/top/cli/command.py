@@ -560,23 +560,17 @@ class TopCommand:
                         f"[{StyleTokens.WARNING}]Query:[/{StyleTokens.WARNING}] {query_display}\n"
                     )
 
-                    # Call rdst analyze via subprocess. Invoke via `-m rdst`
-                    # rather than a bare "rdst.py" path so the subprocess
-                    # resolves the same installed package regardless of the
-                    # current working directory.
+                    # Call rdst analyze as a child rdst process.
                     import subprocess
 
-                    cmd = [
-                        sys.executable,
-                        "-m",
-                        "rdst",
+                    from shared.child_process import rdst_child_argv
+
+                    cmd = rdst_child_argv([
                         "analyze",
-                        "--target",
-                        target_name,
-                        "--query",
-                        query.query_text,
+                        "--target", target_name,
+                        "--query", query.query_text,
                         "--skip-warning",
-                    ]
+                    ])
 
                     try:
                         subprocess.run(

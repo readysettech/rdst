@@ -270,21 +270,15 @@ def run_realtime_monitor(
 
                     target_name = target_config.get("name", "default")
 
-                    # Build command to run analyze in interactive mode.
-                    # Invoke via `-m rdst` rather than a bare "rdst.py" path so
-                    # the subprocess resolves the same installed package
-                    # regardless of the current working directory.
-                    cmd = [
-                        sys.executable,  # Use same python interpreter
-                        "-m",
-                        "rdst",
+                    # Run analyze in interactive mode as a child rdst process.
+                    from shared.child_process import rdst_child_argv
+
+                    cmd = rdst_child_argv([
                         "analyze",
-                        "--target",
-                        target_name,
-                        "--query",
-                        query.query_text,
+                        "--target", target_name,
+                        "--query", query.query_text,
                         "--interactive",  # Enable interactive REPL mode
-                    ]
+                    ])
 
                     try:
                         # Run with inherited stdin/stdout/stderr for proper interactive mode
