@@ -1,7 +1,8 @@
 import type { ComponentProps, ReactNode } from 'react'
 import type { WithChildren } from '../../helpers/types'
 import { Spinner } from '../feedback/spinner'
-import { Icon, type IconListType } from '../svg/icon'
+import { Icon } from '../svg/icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { Skeleton } from './skeleton'
 import { Center, HStack } from './stack'
 import { Text } from './text'
@@ -19,7 +20,7 @@ type StepItemProps = {
   loading?: boolean
   label: string
   info?: string
-  iconName?: IconListType
+  iconName?: IconStrokeName
   labelChildren?: ReactNode
 } & Partial<WithChildren> &
   Omit<ComponentProps<'div'>, 'children'>

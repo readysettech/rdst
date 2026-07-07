@@ -1,14 +1,15 @@
 import { AnimatePresence, m } from 'motion/react'
 import { getTransition } from '../../motion/transition'
 import { Spinner } from '../feedback/spinner'
-import { Icon, type IconListType } from './icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
+import { Icon } from './icon'
 
 type IconWithSpinnerProps = {
   loading?: boolean
   hasIcon?: boolean
   rightGap?: boolean
   leftGap?: boolean
-  icon: IconListType
+  icon: IconStrokeName
   label: string
 }
 

@@ -1,11 +1,9 @@
 import * as AccessibleIcon from '@radix-ui/react-accessible-icon'
 import { tv, type VariantProps } from '@rs/tailwind-base'
-import type {
-  IconBulkName,
-  IconStrokeName,
-  IconVariant,
-} from '@rs/ui-icons/icon-name'
+import type { IconBulkName, IconStrokeName } from '@rs/ui-icons/icon-name'
 import type { SVGProps } from 'react'
+
+export type { IconBulkName, IconStrokeName } from '@rs/ui-icons/icon-name'
 
 export const iconRecipe = tv({
   base: ['inline', 'justify-self-center', 'stroke-current'],
@@ -27,9 +25,14 @@ type IconStyleProps = VariantProps<typeof iconRecipe>
 
 export type IconListType = IconStrokeName | IconBulkName
 
-export type IconProps = {
-  name: IconListType
-  variant?: IconVariant
+// The sprite a `variant` loads only contains that variant's symbols, so the
+// `name` must come from the matching set. Tying them together makes a
+// mismatched name (which silently renders a blank icon) a compile error.
+type IconVariantProps =
+  | { variant?: 'stroke'; name: IconStrokeName }
+  | { variant: 'bulk'; name: IconBulkName }
+
+export type IconProps = IconVariantProps & {
   label: string
   className?: string
 } & IconStyleProps &

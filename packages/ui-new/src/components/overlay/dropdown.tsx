@@ -18,7 +18,8 @@ import type { WithChildren, WithClassName } from '../../helpers/types'
 import { useDisclosure } from '../../hooks/use-disclosure'
 import { getTransition } from '../../motion/transition'
 import { HStack } from '../element/stack'
-import { Icon, type IconListType } from '../svg/icon'
+import { Icon } from '../svg/icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 
 const dropdownContentStyles = tv({
   base: [
@@ -156,8 +157,8 @@ const dropdownItemStyles = tv({
 })
 
 export type BaseDropdownItemProps = {
-  leftIcon?: IconListType
-  rightIcon?: IconListType
+  leftIcon?: IconStrokeName
+  rightIcon?: IconStrokeName
   label: string
   classMerge?: string
   href?: string

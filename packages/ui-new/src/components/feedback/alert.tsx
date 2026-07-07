@@ -1,7 +1,8 @@
 import { cn, tv, type VariantProps } from '@rs/tailwind-base'
 import { forwardRef, memo } from 'react'
 import type { WithChildren, WithClassName } from '../../helpers/types'
-import { Icon, type IconListType } from '../svg/icon'
+import { Icon } from '../svg/icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { IconWithSpinner } from '../svg/icon-with-spinner'
 
 const alertRecipe = tv({
@@ -285,7 +286,7 @@ const alertRecipe = tv({
 type AlertProps = VariantProps<typeof alertRecipe> & {
   disabled?: boolean
   loading?: boolean
-  icon?: IconListType
+  icon?: IconStrokeName
   label: string
   onClick?: () => void
 } & WithClassName &
@@ -334,7 +335,7 @@ const Alert = forwardRef<HTMLDivElement | HTMLAnchorElement, AlertProps>(
           loading={loading}
           hasIcon={hasLeftIcon || hasJustIcon}
           rightGap={!hasJustIcon}
-          icon={icon as IconListType}
+          icon={icon as IconStrokeName}
           label={label}
         />
         {!hasJustIcon && label}

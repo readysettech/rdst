@@ -2,7 +2,8 @@
 
 import { tv, type VariantProps } from '@rs/tailwind-base'
 import { forwardRef, type HTMLAttributes, memo, type Ref } from 'react'
-import { Icon, type IconListType } from '../svg/icon'
+import { Icon } from '../svg/icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 
 const tagStyles = tv({
   base: [
@@ -295,7 +296,7 @@ const tagStyles = tv({
 type TagVariants = VariantProps<typeof tagStyles>
 
 type TagProps = TagVariants & {
-  icon?: IconListType
+  icon?: IconStrokeName
   label: string
   className?: string
   classMerge?: string

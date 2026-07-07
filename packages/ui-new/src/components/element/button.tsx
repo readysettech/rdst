@@ -5,7 +5,8 @@ import {
   memo,
   type ReactNode,
 } from 'react'
-import { Icon, type IconListType } from '../svg/icon'
+import { Icon } from '../svg/icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { IconWithSpinner } from '../svg/icon-with-spinner'
 
 const buttonStyles = tv({
@@ -274,7 +275,7 @@ type ButtonVariants = VariantProps<typeof buttonStyles>
 
 type ButtonProps = ButtonVariants & {
   loading?: boolean
-  icon?: IconListType
+  icon?: IconStrokeName
   label: string
   children?: ReactNode
   className?: string
@@ -330,7 +331,7 @@ const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonProps>(
           loading={loading}
           hasIcon={Boolean(hasLeftIcon || hasJustIcon)}
           rightGap={!hasJustIcon}
-          icon={icon as IconListType}
+          icon={icon as IconStrokeName}
           label={label}
         />
         <div className={styles.inner({ class: innerClassName })}>

@@ -7,7 +7,8 @@ import {
   type InputHTMLAttributes,
   useState,
 } from 'react'
-import { Icon, type IconListType } from '../../svg/icon'
+import { Icon } from '../../svg/icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { IconWithSpinner } from '../../svg/icon-with-spinner'
 
 const inputTextStyles = tv({
@@ -60,7 +61,7 @@ const inputTextStyles = tv({
 type BaseInputTextVariants = VariantProps<typeof inputTextStyles>
 
 export type BaseInputTextProps = BaseInputTextVariants & {
-  icon?: IconListType
+  icon?: IconStrokeName
   iconClick?: () => void
   loading?: boolean
   justLoading?: boolean
@@ -141,7 +142,7 @@ const BaseInputText = forwardRef<HTMLInputElement, BaseInputTextProps>(
           }
         >
           <IconWithSpinner
-            icon={resolvedRightIcon as IconListType}
+            icon={resolvedRightIcon as IconStrokeName}
             loading={Boolean(loading || justLoading)}
             label={
               isPassword
@@ -154,7 +155,7 @@ const BaseInputText = forwardRef<HTMLInputElement, BaseInputTextProps>(
       ) : (
         <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-content-layout-1">
           <IconWithSpinner
-            icon={resolvedRightIcon as IconListType}
+            icon={resolvedRightIcon as IconStrokeName}
             loading={Boolean(loading || justLoading)}
             label={
               isPassword

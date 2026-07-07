@@ -2,7 +2,8 @@
 
 import { tv, type VariantProps } from '@rs/tailwind-base'
 import { forwardRef, type TextareaHTMLAttributes } from 'react'
-import { Icon, type IconListType } from '../../svg/icon'
+import { Icon } from '../../svg/icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { IconWithSpinner } from '../../svg/icon-with-spinner'
 
 const textareaStyles = tv({
@@ -52,7 +53,7 @@ const textareaStyles = tv({
 type BaseInputTextareaVariants = VariantProps<typeof textareaStyles>
 
 export type BaseInputTextareaProps = BaseInputTextareaVariants & {
-  icon?: IconListType
+  icon?: IconStrokeName
   iconClick?: () => void
   loading?: boolean
   containerClassName?: string
@@ -107,7 +108,7 @@ const BaseInputTextarea = forwardRef<
           aria-label={icon ?? 'Input action'}
         >
           <IconWithSpinner
-            icon={icon as IconListType}
+            icon={icon as IconStrokeName}
             loading={Boolean(loading)}
             label={icon ?? 'status icon'}
             hasIcon={hasRightIcon}
@@ -116,7 +117,7 @@ const BaseInputTextarea = forwardRef<
       ) : (
         <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-content-layout-3">
           <IconWithSpinner
-            icon={icon as IconListType}
+            icon={icon as IconStrokeName}
             loading={Boolean(loading)}
             label={icon ?? 'status icon'}
             hasIcon={hasRightIcon}
@@ -132,7 +133,7 @@ const BaseInputTextarea = forwardRef<
       <div className={containerClasses}>
         {hasLeftIcon && (
           <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-content-layout-3">
-            <Icon name={icon as IconListType} label={icon as IconListType} />
+            <Icon name={icon as IconStrokeName} label={icon as IconStrokeName} />
           </div>
         )}
         <textarea

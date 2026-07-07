@@ -16,7 +16,8 @@ import { useDisclosure } from '../../hooks/use-disclosure'
 import { getTransition } from '../../motion/transition'
 import { HStack } from '../element/stack'
 import { BaseInputCheckbox } from '../form/base/input-checkbox'
-import { Icon, type IconListType } from '../svg/icon'
+import { Icon } from '../svg/icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 
 // Base content styling recipe
 const dropdownContentStyles = tv({
@@ -185,7 +186,7 @@ const BaseItem = forwardRef<
   ComponentRef<typeof DropdownMenu.Item>,
   ComponentPropsWithoutRef<typeof DropdownMenu.Item> &
     VariantProps<typeof dropdownItemStyles> &
-    WithClassName & { leftIcon?: IconListType; rightIcon?: IconListType }
+    WithClassName & { leftIcon?: IconStrokeName; rightIcon?: IconStrokeName }
 >((props, ref) => {
   const { active, className, leftIcon, rightIcon, children, ...restProps } =
     props

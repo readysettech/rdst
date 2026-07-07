@@ -7,7 +7,8 @@ import {
   type ComponentRef,
   forwardRef,
 } from 'react'
-import { Icon, type IconListType } from '../svg/icon'
+import { Icon } from '../svg/icon'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { IconWithSpinner } from '../svg/icon-with-spinner'
 
 const tooltipStyles = tv({
@@ -374,7 +375,7 @@ export const TooltipTrigger = TooltipPrimitive.Trigger
 
 type TooltipContentProps = {
   loading?: boolean
-  icon?: IconListType
+  icon?: IconStrokeName
   label: string
 } & TooltipVariants &
   ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
@@ -428,7 +429,7 @@ export const TooltipContent = forwardRef<
           loading={loading}
           hasIcon={hasLeftIcon || hasJustIcon}
           rightGap={!hasJustIcon}
-          icon={icon as IconListType}
+          icon={icon as IconStrokeName}
           label={label}
         />
         {!hasJustIcon && label}
