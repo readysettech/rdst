@@ -10,6 +10,7 @@ import { HStack, VStack } from "@rs/ui-new/stack";
 import { Show } from "@rs/ui-new/show";
 import { m } from "@rs/ui-new/motion";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@rs/ui-new/tooltip";
+import { toast } from "@rs/ui-new/use-toast";
 import { useTarget } from "../hooks/useTarget";
 import { useSchema } from "../lib/useSchema";
 import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
@@ -91,11 +92,15 @@ function SchemaPage() {
     addEnum,
     addRelationship,
     addMetric,
+    refreshSchema,
+    profileSchema,
     annotateWithLLM,
     clearError,
   } = useSchema();
 
   const [initLoading, setInitLoading] = useState(false);
+  const [refreshLoading, setRefreshLoading] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [annotateLoading, setAnnotateLoading] = useState(false);
   const [annotateProgress, setAnnotateProgress] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -193,6 +198,40 @@ function SchemaPage() {
     }
     setAnnotateLoading(false);
     setAnnotateProgress(null);
+  };
+
+  const handleRefresh = async () => {
+    if (passwordLock.isLocked) return;
+    if (!target) return;
+    setRefreshLoading(true);
+    clearError();
+    const result = await refreshSchema(target);
+    setRefreshLoading(false);
+    if (!result) return;
+    if (result.ok) {
+      toast({ title: "Schema refreshed", description: result.message, variant: "positive" });
+      await checkStatus(target);
+      await loadSchema(target);
+    } else {
+      toast({ title: "Refresh failed", description: result.message, variant: "negative" });
+    }
+  };
+
+  const handleProfile = async () => {
+    if (passwordLock.isLocked) return;
+    if (!target) return;
+    setProfileLoading(true);
+    clearError();
+    const result = await profileSchema(target);
+    setProfileLoading(false);
+    if (!result) return;
+    if (result.ok) {
+      toast({ title: "Profiling complete", description: result.message, variant: "positive" });
+      await checkStatus(target);
+      await loadSchema(target);
+    } else {
+      toast({ title: "Profiling failed", description: result.message, variant: "negative" });
+    }
   };
 
   // Column/Table/Enum handlers
@@ -418,6 +457,26 @@ function SchemaPage() {
 
             <Show when={status?.exists}>
               <HStack className="gap-2 items-center">
+                <Button
+                  variant="primary"
+                  modifier="outline"
+                  icon="database-settings"
+                  iconPosition="left"
+                  label="Refresh"
+                  onClick={handleRefresh}
+                  loading={refreshLoading}
+                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || loading}
+                />
+                <Button
+                  variant="primary"
+                  modifier="outline"
+                  icon="speedometer"
+                  iconPosition="left"
+                  label="Profile"
+                  onClick={handleProfile}
+                  loading={profileLoading}
+                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || loading}
+                />
                 <Button
                   variant="rising"
                   modifier="solid"

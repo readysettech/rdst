@@ -305,6 +305,401 @@
         "title": "AddTerminologyRequest",
         "type": "object"
       },
+      "AgentAskRequest": {
+        "properties": {
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "AgentAskRequest",
+        "type": "object"
+      },
+      "AgentAskResponse": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "execution_time_ms": {
+            "default": 0.0,
+            "title": "Execution Time Ms",
+            "type": "number"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "row_count": {
+            "default": 0,
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "items": {},
+              "type": "array"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "AgentAskResponse",
+        "type": "object"
+      },
+      "AgentCreateRequest": {
+        "properties": {
+          "allowed_tables": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tables"
+          },
+          "denied_columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Denied Columns"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "guard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guard"
+          },
+          "masked_columns": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Masked Columns"
+          },
+          "max_rows": {
+            "default": 1000,
+            "title": "Max Rows",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "default": 30,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "target"
+        ],
+        "title": "AgentCreateRequest",
+        "type": "object"
+      },
+      "AgentDetail": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "guard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guard"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "restrictions": {
+            "$ref": "#/components/schemas/AgentRestrictionsModel"
+          },
+          "safety": {
+            "$ref": "#/components/schemas/AgentSafetyModel"
+          },
+          "semantic_layer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic Layer"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "target"
+        ],
+        "title": "AgentDetail",
+        "type": "object"
+      },
+      "AgentListResponse": {
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSummary"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agents",
+          "count"
+        ],
+        "title": "AgentListResponse",
+        "type": "object"
+      },
+      "AgentRestrictionsModel": {
+        "properties": {
+          "allowed_tables": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tables"
+          },
+          "denied_columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Denied Columns"
+          },
+          "masked_columns": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Masked Columns"
+          }
+        },
+        "title": "AgentRestrictionsModel",
+        "type": "object"
+      },
+      "AgentSafetyModel": {
+        "properties": {
+          "max_rows": {
+            "default": 1000,
+            "title": "Max Rows",
+            "type": "integer"
+          },
+          "read_only": {
+            "default": true,
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "default": 30,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "AgentSafetyModel",
+        "type": "object"
+      },
+      "AgentSummary": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "guard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guard"
+          },
+          "max_rows": {
+            "default": 1000,
+            "title": "Max Rows",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "target"
+        ],
+        "title": "AgentSummary",
+        "type": "object"
+      },
+      "AgentWriteResponse": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "name"
+        ],
+        "title": "AgentWriteResponse",
+        "type": "object"
+      },
       "AnalysisMetadata": {
         "additionalProperties": true,
         "properties": {
@@ -940,6 +1335,477 @@
         "title": "AskStatusEvent",
         "type": "object"
       },
+      "AuditCaptureRequest": {
+        "properties": {
+          "analysis": {
+            "default": true,
+            "title": "Analysis",
+            "type": "boolean"
+          },
+          "duration": {
+            "default": 60,
+            "title": "Duration",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "save": {
+            "default": true,
+            "title": "Save",
+            "type": "boolean"
+          },
+          "source": {
+            "default": "auto",
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "AuditCaptureRequest",
+        "type": "object"
+      },
+      "AuditCompleteEvent": {
+        "properties": {
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Snapshot Id"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Summary"
+          },
+          "type": {
+            "const": "complete",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "success"
+        ],
+        "title": "AuditCompleteEvent",
+        "type": "object"
+      },
+      "AuditDiffEvent": {
+        "properties": {
+          "diff": {
+            "additionalProperties": true,
+            "title": "Diff",
+            "type": "object"
+          },
+          "type": {
+            "const": "diff",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "diff"
+        ],
+        "title": "AuditDiffEvent",
+        "type": "object"
+      },
+      "AuditErrorEvent": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phase"
+          },
+          "type": {
+            "const": "error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ],
+        "title": "AuditErrorEvent",
+        "type": "object"
+      },
+      "AuditEvent": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/AuditStatusEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditTargetStartEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditMetricsCollectedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditTargetCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditTargetErrorEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditLlmInsightsEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditSnapshotSavedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditDiffEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditErrorEvent"
+          }
+        ]
+      },
+      "AuditLlmInsightsEvent": {
+        "properties": {
+          "insights": {
+            "title": "Insights",
+            "type": "string"
+          },
+          "type": {
+            "const": "llm_insights",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "insights"
+        ],
+        "title": "AuditLlmInsightsEvent",
+        "type": "object"
+      },
+      "AuditMetricsCollectedEvent": {
+        "properties": {
+          "metrics": {
+            "additionalProperties": true,
+            "title": "Metrics",
+            "type": "object"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "type": {
+            "const": "metrics_collected",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "target_name",
+          "metrics"
+        ],
+        "title": "AuditMetricsCollectedEvent",
+        "type": "object"
+      },
+      "AuditRunListResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/AuditRunSummary"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "count"
+        ],
+        "title": "AuditRunListResponse",
+        "type": "object"
+      },
+      "AuditRunRequest": {
+        "properties": {
+          "insights": {
+            "default": true,
+            "title": "Insights",
+            "type": "boolean"
+          },
+          "save": {
+            "default": true,
+            "title": "Save",
+            "type": "boolean"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "AuditRunRequest",
+        "type": "object"
+      },
+      "AuditRunSummary": {
+        "properties": {
+          "duration_seconds": {
+            "default": 0,
+            "title": "Duration Seconds",
+            "type": "integer"
+          },
+          "has_analysis": {
+            "default": false,
+            "title": "Has Analysis",
+            "type": "boolean"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "total_queries": {
+            "default": 0,
+            "title": "Total Queries",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "target_name",
+          "started_at"
+        ],
+        "title": "AuditRunSummary",
+        "type": "object"
+      },
+      "AuditSnapshotSavedEvent": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "snapshot_saved",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "snapshot_id"
+        ],
+        "title": "AuditSnapshotSavedEvent",
+        "type": "object"
+      },
+      "AuditStatusEvent": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "type": {
+            "const": "status",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "phase",
+          "message"
+        ],
+        "title": "AuditStatusEvent",
+        "type": "object"
+      },
+      "AuditTargetCompleteEvent": {
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "type": {
+            "const": "target_complete",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "target_name",
+          "result",
+          "index",
+          "total"
+        ],
+        "title": "AuditTargetCompleteEvent",
+        "type": "object"
+      },
+      "AuditTargetErrorEvent": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "type": {
+            "const": "target_error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "target_name",
+          "error",
+          "index",
+          "total"
+        ],
+        "title": "AuditTargetErrorEvent",
+        "type": "object"
+      },
+      "AuditTargetStartEvent": {
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "type": {
+            "const": "target_start",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "target_name",
+          "index",
+          "total"
+        ],
+        "title": "AuditTargetStartEvent",
+        "type": "object"
+      },
       "BenchmarkQueryInput": {
         "description": "A query to benchmark - either by identifier or raw SQL.",
         "properties": {
@@ -1071,6 +1937,14 @@
               "$ref": "#/components/schemas/DirectoryEntry"
             },
             "title": "Directories",
+            "type": "array"
+          },
+          "files": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DirectoryEntry"
+            },
+            "title": "Files",
             "type": "array"
           },
           "parent": {
@@ -1342,6 +2216,63 @@
         "title": "CacheErrorResponse",
         "type": "object"
       },
+      "CacheLifecycleRequest": {
+        "properties": {
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "CacheLifecycleRequest",
+        "type": "object"
+      },
+      "CacheLifecycleResponse": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "operation"
+        ],
+        "title": "CacheLifecycleResponse",
+        "type": "object"
+      },
       "CacheListResponse": {
         "properties": {
           "caches": {
@@ -1504,6 +2435,289 @@
           "running"
         ],
         "title": "CacheStatusResponse",
+        "type": "object"
+      },
+      "ChatCompleteEvent": {
+        "properties": {
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "tool_result_count": {
+            "default": 0,
+            "title": "Tool Result Count",
+            "type": "integer"
+          },
+          "type": {
+            "const": "complete",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "success"
+        ],
+        "title": "ChatCompleteEvent",
+        "type": "object"
+      },
+      "ChatErrorEvent": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "const": "error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ],
+        "title": "ChatErrorEvent",
+        "type": "object"
+      },
+      "ChatEvent": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ChatStatusEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ChatThinkingEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ChatToolCallEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ChatToolResultEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ChatResponseEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ChatCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ChatErrorEvent"
+          }
+        ]
+      },
+      "ChatHistoryMessage": {
+        "properties": {
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "summary"
+        ],
+        "title": "ChatHistoryMessage",
+        "type": "object"
+      },
+      "ChatMessageRequest": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ChatMessageRequest",
+        "type": "object"
+      },
+      "ChatResponseEvent": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "response",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "ChatResponseEvent",
+        "type": "object"
+      },
+      "ChatSessionCreateResponse": {
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "agent"
+        ],
+        "title": "ChatSessionCreateResponse",
+        "type": "object"
+      },
+      "ChatSessionInfo": {
+        "properties": {
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ChatHistoryMessage"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "agent",
+          "message_count",
+          "history"
+        ],
+        "title": "ChatSessionInfo",
+        "type": "object"
+      },
+      "ChatStatusEvent": {
+        "properties": {
+          "iteration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Iteration"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "type": {
+            "const": "status",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "phase",
+          "message"
+        ],
+        "title": "ChatStatusEvent",
+        "type": "object"
+      },
+      "ChatThinkingEvent": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "thinking",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "ChatThinkingEvent",
+        "type": "object"
+      },
+      "ChatToolCallEvent": {
+        "properties": {
+          "input": {
+            "additionalProperties": true,
+            "title": "Input",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "const": "tool_call",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "name"
+        ],
+        "title": "ChatToolCallEvent",
+        "type": "object"
+      },
+      "ChatToolResultEvent": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Data"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "type": {
+            "const": "tool_result",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "success",
+          "content"
+        ],
+        "title": "ChatToolResultEvent",
         "type": "object"
       },
       "ClearKeyringResponse": {
@@ -2135,9 +3349,26 @@
             "title": "Database Engine",
             "type": "string"
           },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
           "execution_time_ms": {
             "title": "Execution Time Ms",
             "type": "number"
+          },
+          "explain_analyze_skipped": {
+            "default": false,
+            "title": "Explain Analyze Skipped",
+            "type": "boolean"
           },
           "explain_plan": {
             "anyOf": [
@@ -2232,6 +3463,639 @@
           "cost_estimate"
         ],
         "title": "ExplainResults",
+        "type": "object"
+      },
+      "FleetAuditRequest": {
+        "properties": {
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "insights": {
+            "default": true,
+            "title": "Insights",
+            "type": "boolean"
+          },
+          "save": {
+            "default": true,
+            "title": "Save",
+            "type": "boolean"
+          },
+          "save_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Save Name"
+          },
+          "tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag"
+          }
+        },
+        "title": "FleetAuditRequest",
+        "type": "object"
+      },
+      "FleetConnectivityEvent": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Latency Ms"
+          },
+          "server_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Server Version"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "type": {
+            "const": "connectivity",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "target_name",
+          "status"
+        ],
+        "title": "FleetConnectivityEvent",
+        "type": "object"
+      },
+      "FleetDiffEntryResponse": {
+        "properties": {
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Pct"
+          },
+          "field_name": {
+            "title": "Field Name",
+            "type": "string"
+          },
+          "new_value": {
+            "title": "New Value"
+          },
+          "old_value": {
+            "title": "Old Value"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_name",
+          "field_name"
+        ],
+        "title": "FleetDiffEntryResponse",
+        "type": "object"
+      },
+      "FleetDiffResponse": {
+        "properties": {
+          "baseline_date": {
+            "title": "Baseline Date",
+            "type": "string"
+          },
+          "baseline_id": {
+            "title": "Baseline Id",
+            "type": "string"
+          },
+          "current_date": {
+            "title": "Current Date",
+            "type": "string"
+          },
+          "current_id": {
+            "title": "Current Id",
+            "type": "string"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/FleetDiffEntryResponse"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "new_targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "New Targets",
+            "type": "array"
+          },
+          "removed_targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "baseline_id",
+          "current_id",
+          "baseline_date",
+          "current_date",
+          "entries",
+          "new_targets",
+          "removed_targets"
+        ],
+        "title": "FleetDiffResponse",
+        "type": "object"
+      },
+      "FleetDiscoverEvent": {
+        "properties": {
+          "instances_found": {
+            "title": "Instances Found",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "regions_searched": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Regions Searched",
+            "type": "array"
+          },
+          "type": {
+            "const": "discover",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "instances_found",
+          "regions_searched",
+          "message"
+        ],
+        "title": "FleetDiscoverEvent",
+        "type": "object"
+      },
+      "FleetDiscoverRequest": {
+        "properties": {
+          "default_database": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Database"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "engine_filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Filter"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "name_pattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Pattern"
+          },
+          "password_env": {
+            "default": "FLEET_PASS",
+            "title": "Password Env",
+            "type": "string"
+          },
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Regions",
+            "type": "array"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          }
+        },
+        "required": [
+          "regions"
+        ],
+        "title": "FleetDiscoverRequest",
+        "type": "object"
+      },
+      "FleetErrorEvent": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phase"
+          },
+          "type": {
+            "const": "error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ],
+        "title": "FleetErrorEvent",
+        "type": "object"
+      },
+      "FleetEvent": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/FleetStatusEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FleetImportProgressEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FleetImportCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FleetDiscoverEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FleetListEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FleetConnectivityEvent"
+          },
+          {
+            "$ref": "#/components/schemas/FleetErrorEvent"
+          }
+        ]
+      },
+      "FleetImportCompleteEvent": {
+        "properties": {
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "target_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Names",
+            "type": "array"
+          },
+          "type": {
+            "const": "import_complete",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "success",
+          "imported",
+          "skipped",
+          "errors",
+          "target_names"
+        ],
+        "title": "FleetImportCompleteEvent",
+        "type": "object"
+      },
+      "FleetImportProgressEvent": {
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "type": {
+            "const": "import_progress",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "current",
+          "total",
+          "target_name",
+          "status",
+          "message"
+        ],
+        "title": "FleetImportProgressEvent",
+        "type": "object"
+      },
+      "FleetImportRequest": {
+        "properties": {
+          "csv_file": {
+            "title": "Csv File",
+            "type": "string"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "password_env": {
+            "default": "FLEET_PASS",
+            "title": "Password Env",
+            "type": "string"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "required": [
+          "csv_file"
+        ],
+        "title": "FleetImportRequest",
+        "type": "object"
+      },
+      "FleetListEvent": {
+        "properties": {
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "members": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "type": {
+            "const": "fleet_list",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "members",
+          "groups"
+        ],
+        "title": "FleetListEvent",
+        "type": "object"
+      },
+      "FleetSnapshotListResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/FleetSnapshotSummary"
+            },
+            "title": "Snapshots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "snapshots",
+          "count"
+        ],
+        "title": "FleetSnapshotListResponse",
+        "type": "object"
+      },
+      "FleetSnapshotSummary": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "default": "fleet",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "targets_audited": {
+            "title": "Targets Audited",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "name",
+          "created_at",
+          "targets_audited"
+        ],
+        "title": "FleetSnapshotSummary",
+        "type": "object"
+      },
+      "FleetStatusEvent": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "type": {
+            "const": "status",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "phase",
+          "message"
+        ],
+        "title": "FleetStatusEvent",
+        "type": "object"
+      },
+      "FleetTargetsResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "members": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Members",
+            "type": "array"
+          }
+        },
+        "required": [
+          "members",
+          "groups",
+          "count"
+        ],
+        "title": "FleetTargetsResponse",
         "type": "object"
       },
       "FormattedAnalysis": {
@@ -2438,6 +4302,406 @@
         "title": "FormattedQueryRewrite",
         "type": "object"
       },
+      "GuardCheckRequest": {
+        "properties": {
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "sql"
+        ],
+        "title": "GuardCheckRequest",
+        "type": "object"
+      },
+      "GuardCheckResponse": {
+        "properties": {
+          "guard": {
+            "title": "Guard",
+            "type": "string"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/GuardCheckResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "guard",
+          "sql",
+          "passed",
+          "results"
+        ],
+        "title": "GuardCheckResponse",
+        "type": "object"
+      },
+      "GuardCheckResult": {
+        "properties": {
+          "guard_name": {
+            "title": "Guard Name",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "suggestion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestion"
+          }
+        },
+        "required": [
+          "passed",
+          "level",
+          "guard_name",
+          "message"
+        ],
+        "title": "GuardCheckResult",
+        "type": "object"
+      },
+      "GuardDeriveRequest": {
+        "properties": {
+          "intent": {
+            "title": "Intent",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "schema_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Context"
+          }
+        },
+        "required": [
+          "name",
+          "intent"
+        ],
+        "title": "GuardDeriveRequest",
+        "type": "object"
+      },
+      "GuardDetail": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "derived": {
+            "default": false,
+            "title": "Derived",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "guards": {
+            "$ref": "#/components/schemas/GuardRulesModel"
+          },
+          "intent": {
+            "default": "",
+            "title": "Intent",
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/GuardLimitsModel"
+          },
+          "masking": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Masking",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "restrictions": {
+            "$ref": "#/components/schemas/GuardRestrictionsModel"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "GuardDetail",
+        "type": "object"
+      },
+      "GuardLimitsModel": {
+        "properties": {
+          "max_rows": {
+            "default": 1000,
+            "title": "Max Rows",
+            "type": "integer"
+          },
+          "timeout_seconds": {
+            "default": 30,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "GuardLimitsModel",
+        "type": "object"
+      },
+      "GuardListResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "guards": {
+            "items": {
+              "$ref": "#/components/schemas/GuardSummary"
+            },
+            "title": "Guards",
+            "type": "array"
+          }
+        },
+        "required": [
+          "guards",
+          "count"
+        ],
+        "title": "GuardListResponse",
+        "type": "object"
+      },
+      "GuardRestrictionsModel": {
+        "properties": {
+          "allowed_tables": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tables"
+          },
+          "denied_columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Denied Columns"
+          },
+          "required_filters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Filters"
+          }
+        },
+        "title": "GuardRestrictionsModel",
+        "type": "object"
+      },
+      "GuardRulesModel": {
+        "properties": {
+          "cost_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Limit"
+          },
+          "max_estimated_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Estimated Rows"
+          },
+          "max_tables": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tables"
+          },
+          "no_select_star": {
+            "default": false,
+            "title": "No Select Star",
+            "type": "boolean"
+          },
+          "require_limit": {
+            "default": false,
+            "title": "Require Limit",
+            "type": "boolean"
+          },
+          "require_where": {
+            "default": false,
+            "title": "Require Where",
+            "type": "boolean"
+          }
+        },
+        "title": "GuardRulesModel",
+        "type": "object"
+      },
+      "GuardSummary": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "derived": {
+            "default": false,
+            "title": "Derived",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "mask_count": {
+            "default": 0,
+            "title": "Mask Count",
+            "type": "integer"
+          },
+          "max_rows": {
+            "default": 1000,
+            "title": "Max Rows",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "GuardSummary",
+        "type": "object"
+      },
+      "GuardWriteResponse": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "name"
+        ],
+        "title": "GuardWriteResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2462,6 +4726,76 @@
           "status"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "ImportQueriesRequest": {
+        "properties": {
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "update": {
+            "default": false,
+            "title": "Update",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "ImportQueriesRequest",
+        "type": "object"
+      },
+      "ImportQueriesResponse": {
+        "properties": {
+          "errors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "imported": {
+            "default": 0,
+            "title": "Imported",
+            "type": "integer"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "skipped": {
+            "default": 0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "updated": {
+            "default": 0,
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "ImportQueriesResponse",
         "type": "object"
       },
       "IndexRecommendation": {
@@ -4980,6 +7314,81 @@
         "title": "SchemaMetricResponse",
         "type": "object"
       },
+      "SchemaOperationResponse": {
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "message"
+        ],
+        "title": "SchemaOperationResponse",
+        "type": "object"
+      },
+      "SchemaProfileRequest": {
+        "properties": {
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "SchemaProfileRequest",
+        "type": "object"
+      },
+      "SchemaRefreshRequest": {
+        "properties": {
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "SchemaRefreshRequest",
+        "type": "object"
+      },
       "SchemaResponse": {
         "properties": {
           "dialect": {
@@ -6671,6 +9080,59 @@
         "title": "TrialStatusResponse",
         "type": "object"
       },
+      "UpdateSqlRequest": {
+        "properties": {
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql"
+        ],
+        "title": "UpdateSqlRequest",
+        "type": "object"
+      },
+      "UpdateSqlResponse": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hash"
+          },
+          "hash_changed": {
+            "default": false,
+            "title": "Hash Changed",
+            "type": "boolean"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "UpdateSqlResponse",
+        "type": "object"
+      },
       "UpdateTagRequest": {
         "properties": {
           "tag": {
@@ -6760,6 +9222,368 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "WorkloadAnalysisProgressEvent": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "percent": {
+            "title": "Percent",
+            "type": "integer"
+          },
+          "type": {
+            "const": "analysis_progress",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message",
+          "percent"
+        ],
+        "title": "WorkloadAnalysisProgressEvent",
+        "type": "object"
+      },
+      "WorkloadCaptureCompleteEvent": {
+        "properties": {
+          "duration_seconds": {
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "total_executions": {
+            "title": "Total Executions",
+            "type": "integer"
+          },
+          "total_query_time_ms": {
+            "title": "Total Query Time Ms",
+            "type": "number"
+          },
+          "type": {
+            "const": "capture_complete",
+            "title": "Type",
+            "type": "string"
+          },
+          "unique_queries": {
+            "title": "Unique Queries",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "unique_queries",
+          "total_executions",
+          "total_query_time_ms",
+          "duration_seconds"
+        ],
+        "title": "WorkloadCaptureCompleteEvent",
+        "type": "object"
+      },
+      "WorkloadCaptureProgressEvent": {
+        "properties": {
+          "active_connections": {
+            "default": 0,
+            "title": "Active Connections",
+            "type": "integer"
+          },
+          "cache_hit_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cache Hit Ratio"
+          },
+          "elapsed_seconds": {
+            "title": "Elapsed Seconds",
+            "type": "number"
+          },
+          "total_executions": {
+            "default": 0,
+            "title": "Total Executions",
+            "type": "integer"
+          },
+          "total_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Total Seconds"
+          },
+          "tps": {
+            "default": 0.0,
+            "title": "Tps",
+            "type": "number"
+          },
+          "type": {
+            "const": "capture_progress",
+            "title": "Type",
+            "type": "string"
+          },
+          "unique_queries": {
+            "default": 0,
+            "title": "Unique Queries",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "elapsed_seconds"
+        ],
+        "title": "WorkloadCaptureProgressEvent",
+        "type": "object"
+      },
+      "WorkloadCompleteEvent": {
+        "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Analysis"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Summary"
+          },
+          "type": {
+            "const": "complete",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "success",
+          "run_id"
+        ],
+        "title": "WorkloadCompleteEvent",
+        "type": "object"
+      },
+      "WorkloadConnectedEvent": {
+        "properties": {
+          "db_engine": {
+            "title": "Db Engine",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "type": {
+            "const": "connected",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "target_name",
+          "db_engine",
+          "source"
+        ],
+        "title": "WorkloadConnectedEvent",
+        "type": "object"
+      },
+      "WorkloadErrorEvent": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phase"
+          },
+          "type": {
+            "const": "error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ],
+        "title": "WorkloadErrorEvent",
+        "type": "object"
+      },
+      "WorkloadEvent": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/WorkloadStatusEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadConnectedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadSnapshotEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadCaptureProgressEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadCaptureCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadAnalysisProgressEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadQueriesSavedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadErrorEvent"
+          }
+        ]
+      },
+      "WorkloadQueriesSavedEvent": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "hashes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hashes",
+            "type": "array"
+          },
+          "type": {
+            "const": "queries_saved",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "count",
+          "hashes"
+        ],
+        "title": "WorkloadQueriesSavedEvent",
+        "type": "object"
+      },
+      "WorkloadSnapshotEvent": {
+        "properties": {
+          "active_connections": {
+            "default": 0,
+            "title": "Active Connections",
+            "type": "integer"
+          },
+          "cache_hit_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cache Hit Ratio"
+          },
+          "stats_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stats Summary"
+          },
+          "type": {
+            "const": "snapshot",
+            "title": "Type",
+            "type": "string"
+          },
+          "when": {
+            "title": "When",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "when"
+        ],
+        "title": "WorkloadSnapshotEvent",
+        "type": "object"
+      },
+      "WorkloadStatusEvent": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "type": {
+            "const": "status",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "phase",
+          "message"
+        ],
+        "title": "WorkloadStatusEvent",
+        "type": "object"
       }
     }
   },
@@ -6770,6 +9594,433 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/agents": {
+      "get": {
+        "description": "List all agents.",
+        "operationId": "list_agents_api_agents_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Agents",
+        "tags": [
+          "agents"
+        ]
+      },
+      "post": {
+        "description": "Create a new agent. Validates that the target and guard exist.",
+        "operationId": "create_agent_api_agents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Agent",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/chat/sessions/{session_id}": {
+      "delete": {
+        "description": "End a chat session and discard its history.",
+        "operationId": "delete_chat_session_api_agents_chat_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Chat Session",
+        "tags": [
+          "agents"
+        ]
+      },
+      "get": {
+        "description": "Get a chat session's history summary.",
+        "operationId": "get_chat_session_api_agents_chat_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSessionInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Chat Session",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/chat/sessions/{session_id}/message": {
+      "post": {
+        "description": "Send one message to a chat session and stream progress via SSE.\n\nstream_chat rejects the turn with an error event if the session is\nalready processing a message.",
+        "operationId": "send_chat_message_api_agents_chat_sessions__session_id__message_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Chat Message",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{name}": {
+      "delete": {
+        "description": "Delete an agent.",
+        "operationId": "delete_agent_api_agents__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Agent",
+        "tags": [
+          "agents"
+        ]
+      },
+      "get": {
+        "description": "Get full agent configuration.",
+        "operationId": "get_agent_api_agents__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Agent",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{name}/ask": {
+      "post": {
+        "description": "Ask the agent a one-shot natural-language question.\n\nRuns NL-to-SQL, guard/safety validation, execution, and masking; the\nresponse matches the `rdst agent serve` /ask payload.",
+        "operationId": "ask_agent_api_agents__name__ask_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentAskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentAskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask Agent",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{name}/chat/sessions": {
+      "post": {
+        "description": "Start a chat session with an agent.\n\nSessions are held in server memory; history is ephemeral and dies with\nthe process, matching CLI chat semantics.",
+        "operationId": "create_chat_session_api_agents__name__chat_sessions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSessionCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Chat Session",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{name}/schema": {
+      "get": {
+        "description": "Get the schema summary visible to an agent.",
+        "operationId": "get_agent_schema_api_agents__name__schema_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Agent Schema Api Agents  Name  Schema Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Agent Schema",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
     "/api/analyze": {
       "post": {
         "operationId": "analyze_api_analyze_post",
@@ -6896,9 +10147,226 @@
         ]
       }
     },
+    "/api/audit": {
+      "post": {
+        "description": "Run a metrics-only audit on a target (SSE stream).",
+        "operationId": "run_audit_api_audit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Audit",
+        "tags": [
+          "audit",
+          "audit"
+        ]
+      }
+    },
+    "/api/audit/capture": {
+      "post": {
+        "description": "Capture live workload for a duration (SSE stream of WorkloadEvent).\n\nLong-lived: the stream stays open for the whole capture window. Client\ndisconnect cancels the capture and releases the database connection.",
+        "operationId": "run_capture_api_audit_capture_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditCaptureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkloadEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Capture",
+        "tags": [
+          "audit",
+          "audit"
+        ]
+      }
+    },
+    "/api/audit/runs": {
+      "get": {
+        "description": "List past audit runs (quick audits and duration captures).",
+        "operationId": "get_audit_runs_api_audit_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditRunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Audit Runs",
+        "tags": [
+          "audit",
+          "audit"
+        ]
+      }
+    },
+    "/api/audit/runs/{run_id}": {
+      "get": {
+        "description": "Fetch a saved audit run's full payload by ID (exact or prefix).",
+        "operationId": "get_audit_run_api_audit_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Audit Run Api Audit Runs  Run Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Audit Run",
+        "tags": [
+          "audit",
+          "audit"
+        ]
+      }
+    },
     "/api/browse": {
       "get": {
-        "description": "List subdirectories of a given path for the directory picker.\n\nArgs:\n    path: Directory to list. Defaults to home directory if omitted.\n\nReturns:\n    Current path, parent path, and sorted list of subdirectories.",
+        "description": "List subdirectories (and optionally files) of a path for the picker UI.\n\nArgs:\n    path: Directory to list. Defaults to home directory if omitted.\n    ext: When given, also list files with this extension (e.g. \"csv\").\n\nReturns:\n    Current path, parent path, sorted subdirectories, and matching files.",
         "operationId": "browse_directory_api_browse_get",
         "parameters": [
           {
@@ -6915,6 +10383,22 @@
                 }
               ],
               "title": "Path"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ext",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ext"
             }
           }
         ],
@@ -6999,7 +10483,7 @@
     },
     "/api/cache/deploy": {
       "post": {
-        "description": "Deploy ReadySet cache (SSE stream).",
+        "description": "Deploy Readyset cache (SSE stream).",
         "operationId": "deploy_cache_api_cache_deploy_post",
         "requestBody": {
           "content": {
@@ -7251,9 +10735,60 @@
         ]
       }
     },
+    "/api/cache/restart": {
+      "post": {
+        "description": "Restart a deployed cache, preserving its config.",
+        "operationId": "restart_cache_api_cache_restart_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheLifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CacheLifecycleResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CacheErrorResponse"
+                    }
+                  ],
+                  "title": "Response Restart Cache Api Cache Restart Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restart Cache",
+        "tags": [
+          "cache",
+          "cache"
+        ]
+      }
+    },
     "/api/cache/run": {
       "post": {
-        "description": "Run a query against both origin DB and ReadySet cache, stream comparison results (SSE).",
+        "description": "Run a query against both origin DB and Readyset cache, stream comparison results (SSE).",
         "operationId": "run_cache_comparison_api_cache_run_post",
         "requestBody": {
           "content": {
@@ -7286,6 +10821,57 @@
           }
         },
         "summary": "Run Cache Comparison",
+        "tags": [
+          "cache",
+          "cache"
+        ]
+      }
+    },
+    "/api/cache/start": {
+      "post": {
+        "description": "Start a stopped cache without redeploying.",
+        "operationId": "start_cache_api_cache_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheLifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CacheLifecycleResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CacheErrorResponse"
+                    }
+                  ],
+                  "title": "Response Start Cache Api Cache Start Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Cache",
         "tags": [
           "cache",
           "cache"
@@ -7340,6 +10926,57 @@
           }
         },
         "summary": "Get Cache Status",
+        "tags": [
+          "cache",
+          "cache"
+        ]
+      }
+    },
+    "/api/cache/stop": {
+      "post": {
+        "description": "Stop a running cache without removing it.",
+        "operationId": "stop_cache_api_cache_stop_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheLifecycleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CacheLifecycleResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CacheErrorResponse"
+                    }
+                  ],
+                  "title": "Response Stop Cache Api Cache Stop Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Cache",
         "tags": [
           "cache",
           "cache"
@@ -7820,6 +11457,765 @@
         ]
       }
     },
+    "/api/fleet/audit": {
+      "post": {
+        "description": "Audit all fleet targets concurrently (SSE stream of AuditEvent).",
+        "operationId": "run_fleet_audit_api_fleet_audit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetAuditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Fleet Audit",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/diff": {
+      "get": {
+        "description": "Compare two snapshots' per-target metrics and sizing verdicts.",
+        "operationId": "diff_fleet_snapshots_api_fleet_diff_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "baseline",
+            "required": true,
+            "schema": {
+              "title": "Baseline",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "current",
+            "required": true,
+            "schema": {
+              "title": "Current",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetDiffResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diff Fleet Snapshots",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/discover": {
+      "post": {
+        "description": "Discover RDS/Aurora instances from AWS and add them as targets (SSE stream).",
+        "operationId": "discover_fleet_api_fleet_discover_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetDiscoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discover Fleet",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/import": {
+      "post": {
+        "description": "Import fleet targets from a local CSV file (SSE stream).",
+        "operationId": "import_fleet_api_fleet_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Fleet",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/snapshots": {
+      "get": {
+        "description": "List saved fleet audit snapshots, newest first.\n\nSingle-target audit saves share the snapshot directory; they belong to\nthe audit run history, so this defaults to fleet-audit snapshots only.",
+        "operationId": "list_fleet_snapshots_api_fleet_snapshots_get",
+        "parameters": [
+          {
+            "description": "Filter by snapshot kind: fleet, single, or all",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "fleet",
+              "description": "Filter by snapshot kind: fleet, single, or all",
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetSnapshotListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Fleet Snapshots",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/snapshots/{snapshot_id}": {
+      "delete": {
+        "description": "Delete a snapshot by exact ID.",
+        "operationId": "delete_fleet_snapshot_api_fleet_snapshots__snapshot_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Delete Fleet Snapshot Api Fleet Snapshots  Snapshot Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Fleet Snapshot",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      },
+      "get": {
+        "description": "Fetch a snapshot's full payload by ID (exact or prefix).",
+        "operationId": "get_fleet_snapshot_api_fleet_snapshots__snapshot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Fleet Snapshot Api Fleet Snapshots  Snapshot Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fleet Snapshot",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/status": {
+      "get": {
+        "description": "Check connectivity for fleet targets (SSE stream).",
+        "operationId": "check_fleet_status_api_fleet_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Fleet Status",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/targets": {
+      "get": {
+        "description": "List fleet members (all configured database targets).",
+        "operationId": "list_fleet_targets_api_fleet_targets_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetTargetsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Fleet Targets",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/guards": {
+      "get": {
+        "description": "List all guards with summary info.",
+        "operationId": "list_guards_api_guards_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Guards",
+        "tags": [
+          "guards"
+        ]
+      },
+      "post": {
+        "description": "Create a guard from an explicit configuration.\n\nIntent-derived configs from POST /guards/derive are saved through here\nafter the user reviews them.",
+        "operationId": "create_guard_api_guards_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardDetail"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Guard",
+        "tags": [
+          "guards"
+        ]
+      }
+    },
+    "/api/guards/derive": {
+      "post": {
+        "description": "Derive guard rules from a natural-language intent (preview only).\n\nReturns the proposed configuration without saving it; the client reviews\nor edits the rules and saves via POST /guards.",
+        "operationId": "derive_guard_api_guards_derive_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardDeriveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Derive Guard",
+        "tags": [
+          "guards"
+        ]
+      }
+    },
+    "/api/guards/{name}": {
+      "delete": {
+        "description": "Delete a guard.",
+        "operationId": "delete_guard_api_guards__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Guard",
+        "tags": [
+          "guards"
+        ]
+      },
+      "get": {
+        "description": "Get full guard configuration.",
+        "operationId": "get_guard_api_guards__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Guard",
+        "tags": [
+          "guards"
+        ]
+      },
+      "put": {
+        "description": "Replace a guard's configuration. The name is immutable.",
+        "operationId": "update_guard_api_guards__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardDetail"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Guard",
+        "tags": [
+          "guards"
+        ]
+      }
+    },
+    "/api/guards/{name}/check": {
+      "post": {
+        "description": "Validate SQL against a guard.\n\nWith a target, EXPLAIN-backed checks (cost_limit, max_estimated_rows)\nrun against the database; without one they are skipped, matching the CLI.",
+        "operationId": "check_guard_api_guards__name__check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Guard",
+        "tags": [
+          "guards"
+        ]
+      }
+    },
     "/api/init/complete": {
       "post": {
         "operationId": "complete_init_api_init_complete_post",
@@ -8255,6 +12651,45 @@
         "summary": "Run Benchmark"
       }
     },
+    "/api/query-registry/import": {
+      "post": {
+        "description": "Import queries from a local SQL file (semicolon-separated, with\noptional `-- name:` / `-- target:` metadata comments).",
+        "operationId": "import_queries_api_query_registry_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportQueriesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportQueriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Queries"
+      }
+    },
     "/api/query-registry/{query_hash}": {
       "delete": {
         "description": "Remove a query from the registry.",
@@ -8293,6 +12728,56 @@
           }
         },
         "summary": "Remove Query From Registry"
+      }
+    },
+    "/api/query-registry/{query_hash}/sql": {
+      "patch": {
+        "description": "Replace a query's SQL, preserving its tag. The hash changes with the SQL.",
+        "operationId": "update_query_sql_api_query_registry__query_hash__sql_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_hash",
+            "required": true,
+            "schema": {
+              "title": "Query Hash",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSqlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSqlResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Query Sql"
       }
     },
     "/api/query-registry/{query_hash}/tag": {
@@ -9128,6 +13613,92 @@
           }
         },
         "summary": "Add Metric",
+        "tags": [
+          "semantic-layer",
+          "semantic-layer"
+        ]
+      }
+    },
+    "/api/semantic-layer/profile": {
+      "post": {
+        "description": "Profile column data distributions into the semantic layer.",
+        "operationId": "profile_schema_api_semantic_layer_profile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchemaProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Profile Schema",
+        "tags": [
+          "semantic-layer",
+          "semantic-layer"
+        ]
+      }
+    },
+    "/api/semantic-layer/refresh": {
+      "post": {
+        "description": "Re-introspect the database and merge structural changes, preserving annotations.",
+        "operationId": "refresh_schema_api_semantic_layer_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchemaRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Schema",
         "tags": [
           "semantic-layer",
           "semantic-layer"

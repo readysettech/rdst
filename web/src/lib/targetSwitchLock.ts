@@ -9,7 +9,9 @@ export type TargetLockReason =
   | 'benchmark'
   | 'readyset'
   | 'cache-deploy'
-  | 'cache-run';
+  | 'cache-run'
+  | 'audit'
+  | 'agent-chat';
 
 interface TargetSwitchLockState {
   isLocked: boolean;
@@ -26,6 +28,8 @@ const reasonMessage: Record<TargetLockReason, string> = {
   readyset: 'Target switching is disabled while Readyset operations are in progress.',
   'cache-deploy': 'Target switching is disabled while cache deployment is in progress.',
   'cache-run': 'Target switching is disabled while cache performance comparison is in progress.',
+  audit: 'Target switching is disabled while an audit is in progress.',
+  'agent-chat': 'Target switching is disabled while an agent chat is streaming.',
 };
 
 const lockCounts = new Map<TargetLockReason, number>();

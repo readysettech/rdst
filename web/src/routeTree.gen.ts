@@ -17,11 +17,15 @@ import { Route as ResultsRouteImport } from './routes/results'
 import { Route as ReadysetRouteImport } from './routes/readyset'
 import { Route as QueryRegistryRouteImport } from './routes/query-registry'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as GuardsRouteImport } from './routes/guards'
+import { Route as FleetRouteImport } from './routes/fleet'
 import { Route as DevSettingsRouteImport } from './routes/dev-settings'
 import { Route as ConfigureRouteImport } from './routes/configure'
 import { Route as CacheRouteImport } from './routes/cache'
 import { Route as BenchmarkRouteImport } from './routes/benchmark'
+import { Route as AuditRouteImport } from './routes/audit'
 import { Route as AskRouteImport } from './routes/ask'
+import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 
 const TopRoute = TopRouteImport.update({
@@ -64,6 +68,16 @@ const OnboardingRoute = OnboardingRouteImport.update({
   path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GuardsRoute = GuardsRouteImport.update({
+  id: '/guards',
+  path: '/guards',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FleetRoute = FleetRouteImport.update({
+  id: '/fleet',
+  path: '/fleet',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DevSettingsRoute = DevSettingsRouteImport.update({
   id: '/dev-settings',
   path: '/dev-settings',
@@ -84,9 +98,19 @@ const BenchmarkRoute = BenchmarkRouteImport.update({
   path: '/benchmark',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuditRoute = AuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AskRoute = AskRouteImport.update({
   id: '/ask',
   path: '/ask',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsRoute = AgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -97,11 +121,15 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/agents': typeof AgentsRoute
   '/ask': typeof AskRoute
+  '/audit': typeof AuditRoute
   '/benchmark': typeof BenchmarkRoute
   '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
   '/dev-settings': typeof DevSettingsRoute
+  '/fleet': typeof FleetRoute
+  '/guards': typeof GuardsRoute
   '/onboarding': typeof OnboardingRoute
   '/query-registry': typeof QueryRegistryRoute
   '/readyset': typeof ReadysetRoute
@@ -113,11 +141,15 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/agents': typeof AgentsRoute
   '/ask': typeof AskRoute
+  '/audit': typeof AuditRoute
   '/benchmark': typeof BenchmarkRoute
   '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
   '/dev-settings': typeof DevSettingsRoute
+  '/fleet': typeof FleetRoute
+  '/guards': typeof GuardsRoute
   '/onboarding': typeof OnboardingRoute
   '/query-registry': typeof QueryRegistryRoute
   '/readyset': typeof ReadysetRoute
@@ -130,11 +162,15 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/agents': typeof AgentsRoute
   '/ask': typeof AskRoute
+  '/audit': typeof AuditRoute
   '/benchmark': typeof BenchmarkRoute
   '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
   '/dev-settings': typeof DevSettingsRoute
+  '/fleet': typeof FleetRoute
+  '/guards': typeof GuardsRoute
   '/onboarding': typeof OnboardingRoute
   '/query-registry': typeof QueryRegistryRoute
   '/readyset': typeof ReadysetRoute
@@ -148,11 +184,15 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/agents'
     | '/ask'
+    | '/audit'
     | '/benchmark'
     | '/cache'
     | '/configure'
     | '/dev-settings'
+    | '/fleet'
+    | '/guards'
     | '/onboarding'
     | '/query-registry'
     | '/readyset'
@@ -164,11 +204,15 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/agents'
     | '/ask'
+    | '/audit'
     | '/benchmark'
     | '/cache'
     | '/configure'
     | '/dev-settings'
+    | '/fleet'
+    | '/guards'
     | '/onboarding'
     | '/query-registry'
     | '/readyset'
@@ -180,11 +224,15 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/agents'
     | '/ask'
+    | '/audit'
     | '/benchmark'
     | '/cache'
     | '/configure'
     | '/dev-settings'
+    | '/fleet'
+    | '/guards'
     | '/onboarding'
     | '/query-registry'
     | '/readyset'
@@ -197,11 +245,15 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AgentsRoute: typeof AgentsRoute
   AskRoute: typeof AskRoute
+  AuditRoute: typeof AuditRoute
   BenchmarkRoute: typeof BenchmarkRoute
   CacheRoute: typeof CacheRoute
   ConfigureRoute: typeof ConfigureRoute
   DevSettingsRoute: typeof DevSettingsRoute
+  FleetRoute: typeof FleetRoute
+  GuardsRoute: typeof GuardsRoute
   OnboardingRoute: typeof OnboardingRoute
   QueryRegistryRoute: typeof QueryRegistryRoute
   ReadysetRoute: typeof ReadysetRoute
@@ -270,6 +322,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/guards': {
+      id: '/guards'
+      path: '/guards'
+      fullPath: '/guards'
+      preLoaderRoute: typeof GuardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/fleet': {
+      id: '/fleet'
+      path: '/fleet'
+      fullPath: '/fleet'
+      preLoaderRoute: typeof FleetRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dev-settings': {
       id: '/dev-settings'
       path: '/dev-settings'
@@ -298,11 +364,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BenchmarkRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/audit': {
+      id: '/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ask': {
       id: '/ask'
       path: '/ask'
       fullPath: '/ask'
       preLoaderRoute: typeof AskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents': {
+      id: '/agents'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof AgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -317,11 +397,15 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AgentsRoute: AgentsRoute,
   AskRoute: AskRoute,
+  AuditRoute: AuditRoute,
   BenchmarkRoute: BenchmarkRoute,
   CacheRoute: CacheRoute,
   ConfigureRoute: ConfigureRoute,
   DevSettingsRoute: DevSettingsRoute,
+  FleetRoute: FleetRoute,
+  GuardsRoute: GuardsRoute,
   OnboardingRoute: OnboardingRoute,
   QueryRegistryRoute: QueryRegistryRoute,
   ReadysetRoute: ReadysetRoute,

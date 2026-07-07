@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { Alert } from "@rs/ui-new/alert";
 import { BaseInputText } from "@rs/ui-new/base-input-text";
 import { Button } from "@rs/ui-new/button";
 import { Card } from "@rs/ui-new/card";
@@ -10,7 +11,9 @@ import { Text } from "@rs/ui-new/text";
 import { HStack, VStack } from "@rs/ui-new/stack";
 import { m, AnimatePresence } from "@rs/ui-new/motion";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@rs/ui-new/tooltip";
+import { toast } from "@rs/ui-new/use-toast";
 import { useQueryRegistry } from "../lib/useQueryRegistry";
+import { PathPicker } from "../components/PathPicker";
 import { SQLInput } from "../components/SQLInput";
 import { SQLDisplay } from "../components/SQLDisplay";
 import { useTarget } from "../hooks/useTarget";
@@ -68,6 +71,7 @@ function QueryRegistryPage() {
     isLoading,
     isFetching,
     total,
+    listError,
     offset,
     nextPage,
     prevPage,
@@ -75,6 +79,8 @@ function QueryRegistryPage() {
     removeQuery,
     updateTag,
     addMutation: addQueryMutation,
+    updateSqlMutation,
+    importMutation,
   } = useQueryRegistry(150);
   const [searchTerm, setSearchTerm] = useState("");
   const [editingHash, setEditingHash] = useState<string | null>(null);
@@ -83,6 +89,11 @@ function QueryRegistryPage() {
   const [newSql, setNewSql] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
+  const [editingSqlHash, setEditingSqlHash] = useState<string | null>(null);
+  const [sqlDraft, setSqlDraft] = useState("");
+  const [showImportForm, setShowImportForm] = useState(false);
+  const [importPath, setImportPath] = useState("");
+  const [importUpdate, setImportUpdate] = useState(false);
   const { target } = useTarget();
 
   // Cache integration
@@ -110,6 +121,66 @@ function QueryRegistryPage() {
         onSuccess: () => {
           setNewSql("");
           setShowAddForm(false);
+        },
+      },
+    );
+  };
+
+  const handleStartEditSql = (hash: string, sql: string) => {
+    setEditingSqlHash(hash);
+    setSqlDraft(sql);
+  };
+
+  const handleCancelEditSql = () => {
+    setEditingSqlHash(null);
+    setSqlDraft("");
+  };
+
+  const handleSaveSql = (hash: string) => {
+    if (!sqlDraft.trim()) return;
+    updateSqlMutation.mutate(
+      { hash, sql: sqlDraft },
+      {
+        onSuccess: (result) => {
+          setEditingSqlHash(null);
+          setSqlDraft("");
+          toast({
+            title: "Query updated",
+            description: result.hash_changed
+              ? `SQL saved. New hash: ${result.hash?.slice(0, 8)}`
+              : "SQL saved.",
+            variant: "positive",
+          });
+        },
+        onError: (err) => {
+          toast({ title: "Update failed", description: err.message, variant: "negative" });
+        },
+      },
+    );
+  };
+
+  const handleImport = () => {
+    if (!importPath.trim()) return;
+    importMutation.mutate(
+      { file: importPath.trim(), update: importUpdate, target: target || undefined },
+      {
+        onSuccess: (result) => {
+          if (result.success) {
+            toast({
+              title: "Import complete",
+              description: result.message || `${result.imported} imported`,
+              variant: "positive",
+            });
+          } else {
+            toast({
+              title: "Import finished with issues",
+              description: result.message || `${result.errors?.length ?? 0} errors`,
+              variant: "negative",
+            });
+          }
+        },
+        onError: (err) => {
+          toast({ title: "Import failed", description: err.message, variant: "negative" });
         },
       },
     );
@@ -157,16 +228,28 @@ function QueryRegistryPage() {
             </VStack>
           </HStack>
 
-          <Show when={!showAddForm}>
-            <Button
-              variant="primary"
-              modifier="solid"
-              label="Add Query"
-              icon="add"
-              iconPosition="left"
-              onClick={() => setShowAddForm(true)}
-            />
-          </Show>
+          <HStack className="gap-2 items-center">
+            <Show when={!showImportForm}>
+              <Button
+                variant="primary"
+                modifier="outline"
+                label="Import from file"
+                icon="folder-file"
+                iconPosition="left"
+                onClick={() => setShowImportForm(true)}
+              />
+            </Show>
+            <Show when={!showAddForm}>
+              <Button
+                variant="primary"
+                modifier="solid"
+                label="Add Query"
+                icon="add"
+                iconPosition="left"
+                onClick={() => setShowAddForm(true)}
+              />
+            </Show>
+          </HStack>
         </HStack>
       </m.div>
 
@@ -219,6 +302,107 @@ function QueryRegistryPage() {
                       onClick={handleCreate}
                       loading={addQueryMutation.isPending}
                       disabled={!newSql.trim()}
+                    />
+                  </HStack>
+                </div>
+              </Card.Content>
+            </Card>
+          </m.div>
+        )}
+      </AnimatePresence>
+
+      {/* Import from file Form */}
+      <AnimatePresence>
+        {showImportForm && (
+          <m.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Card className="w-full overflow-hidden">
+              <Card.Content className="p-0">
+                <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
+                  <HStack className="gap-2 items-center">
+                    <Icon name="folder-file" label="Import" className="w-4 h-4 text-content-layout-3" />
+                    <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                      Import Queries from File
+                    </Text>
+                  </HStack>
+                </div>
+                <div className="p-5">
+                  <VStack className="gap-4 items-stretch">
+                    <Text level="body-small" className="text-content-layout-3">
+                      Import a local .sql file with semicolon-separated queries. Each query may
+                      carry optional <span className="font-mono">-- name:</span> and{" "}
+                      <span className="font-mono">-- target:</span> comments.
+                    </Text>
+                    <div className="grid grid-cols-1 tablet:grid-cols-[2fr_auto_auto] gap-3 items-end">
+                      <PathPicker
+                        value={importPath}
+                        onChange={setImportPath}
+                        fileExt="sql"
+                        label="File Path"
+                        disabled={importMutation.isPending}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setImportUpdate(!importUpdate)}
+                        className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
+                          data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
+                          data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
+                        data-active={importUpdate}
+                      >
+                        Update existing
+                      </button>
+                      <Button
+                        variant="rising"
+                        modifier="solid"
+                        label="Import"
+                        icon="folder-file"
+                        iconPosition="left"
+                        onClick={handleImport}
+                        loading={importMutation.isPending}
+                        disabled={!importPath.trim() || importMutation.isPending}
+                      />
+                    </div>
+
+                    {importMutation.data && (
+                      <VStack className="gap-2 items-stretch bg-surface-layout-2/50 rounded-lg p-4 border border-border-layout-1">
+                        <HStack className="gap-2 items-center flex-wrap">
+                          <Icon
+                            name={importMutation.data.success ? "tick-double" : "alert"}
+                            label="Result"
+                            className={`w-4 h-4 ${importMutation.data.success ? "text-content-positive-soft" : "text-content-negative-soft"}`}
+                          />
+                          <Tag size="small" variant="positive" modifier="ghost" label={`${importMutation.data.imported ?? 0} imported`} />
+                          <Tag size="small" variant="primary" modifier="ghost" label={`${importMutation.data.updated ?? 0} updated`} />
+                          <Tag size="small" variant="warning" modifier="ghost" label={`${importMutation.data.skipped ?? 0} skipped`} />
+                          <Tag size="small" variant="negative" modifier="ghost" label={`${importMutation.data.errors?.length ?? 0} errors`} />
+                        </HStack>
+                        {(importMutation.data.errors ?? []).map((message, index) => (
+                          <HStack key={`import-err-${index}`} className="gap-2 items-center">
+                            <Icon name="alert" label="Error" className="w-3.5 h-3.5 text-content-negative-soft shrink-0" />
+                            <Text level="caption" className="text-content-negative-soft">
+                              {message}
+                            </Text>
+                          </HStack>
+                        ))}
+                      </VStack>
+                    )}
+                  </VStack>
+                </div>
+                <div className="px-5 py-4 border-t border-border-layout-1 bg-surface-layout-1">
+                  <HStack className="justify-end gap-2">
+                    <Button
+                      variant="primary"
+                      modifier="ghost"
+                      label="Close"
+                      onClick={() => {
+                        setShowImportForm(false);
+                        setImportPath("");
+                        importMutation.reset();
+                      }}
                     />
                   </HStack>
                 </div>
@@ -294,6 +478,17 @@ function QueryRegistryPage() {
                 </HStack>
               </HStack>
             </div>
+
+            {/* Backend failed to read the registry; surface it instead of an empty list */}
+            <Show when={!!listError}>
+              <div className="px-5 py-3 border-b border-border-layout-1">
+                <Alert
+                  variant="negative"
+                  modifier="outline"
+                  label={`Could not load the query registry: ${listError}`}
+                />
+              </div>
+            </Show>
 
             {/* Loading state */}
             <Show when={isLoading}>
@@ -464,6 +659,15 @@ function QueryRegistryPage() {
                                   }}
                                 />
                                 <Button
+                                  variant="primary"
+                                  modifier="ghost"
+                                  size="small"
+                                  icon="filter-edit"
+                                  iconPosition="icon"
+                                  label="Edit SQL"
+                                  onClick={() => handleStartEditSql(entry.hash, entry.sql)}
+                                />
+                                <Button
                                   variant="negative"
                                   modifier="ghost"
                                   size="small"
@@ -500,22 +704,55 @@ function QueryRegistryPage() {
                           </HStack>
 
                           {/* Row 2: SQL */}
-                          <button
-                            type="button"
-                            onClick={() => setExpandedHash(expandedHash === entry.hash ? null : entry.hash)}
-                            className="mt-2 text-left bg-surface-layout-2 px-3 py-2 rounded-lg hover:ring-1 hover:ring-border-primary-soft transition-all cursor-pointer w-full block"
-                            title={entry.sql}
-                          >
-                            <SQLDisplay
-                              sql={
-                                expandedHash === entry.hash
-                                  ? entry.sql
-                                  : getCollapsedPreview(entry.sql)
-                              }
-                              wrap={expandedHash === entry.hash}
-                              showCopy={expandedHash === entry.hash}
-                            />
-                          </button>
+                          {editingSqlHash === entry.hash ? (
+                            <div className="mt-2">
+                              <SQLInput
+                                value={sqlDraft}
+                                onChange={setSqlDraft}
+                                placeholder="Edit SQL query..."
+                                minHeight="10rem"
+                                target={entry.target || target}
+                                showPrettify
+                              />
+                              <HStack className="justify-end gap-2 mt-3">
+                                <Button
+                                  variant="primary"
+                                  modifier="ghost"
+                                  size="small"
+                                  label="Cancel"
+                                  onClick={handleCancelEditSql}
+                                />
+                                <Button
+                                  variant="rising"
+                                  modifier="solid"
+                                  size="small"
+                                  label="Save"
+                                  icon="tick"
+                                  iconPosition="left"
+                                  onClick={() => handleSaveSql(entry.hash)}
+                                  loading={updateSqlMutation.isPending}
+                                  disabled={!sqlDraft.trim()}
+                                />
+                              </HStack>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedHash(expandedHash === entry.hash ? null : entry.hash)}
+                              className="mt-2 text-left bg-surface-layout-2 px-3 py-2 rounded-lg hover:ring-1 hover:ring-border-primary-soft transition-all cursor-pointer w-full block"
+                              title={entry.sql}
+                            >
+                              <SQLDisplay
+                                sql={
+                                  expandedHash === entry.hash
+                                    ? entry.sql
+                                    : getCollapsedPreview(entry.sql)
+                                }
+                                wrap={expandedHash === entry.hash}
+                                showCopy={expandedHash === entry.hash}
+                              />
+                            </button>
+                          )}
 
                           {/* Row 3: Metadata */}
                           <HStack className="mt-2 gap-2 flex-wrap items-center">

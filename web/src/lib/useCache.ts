@@ -14,6 +14,8 @@ import type {
   CacheRunRequest,
   CacheRunResult,
   CacheRunState,
+  CacheLifecycleOperation,
+  CacheLifecycleResponse,
 } from '../types/cache';
 
 type CacheErrorResponse = components['schemas']['CacheErrorResponse'];
@@ -72,6 +74,18 @@ export async function removeCacheTarget(target: string): Promise<{ success: bool
   await throwIfNotOk(response, 'Failed to remove cache');
   if (!data) throw new Error('Missing response body');
   return { success: data.success };
+}
+
+export async function cacheLifecycle(
+  target: string,
+  operation: CacheLifecycleOperation,
+): Promise<CacheLifecycleResponse> {
+  const path = `/api/cache/${operation}` as const;
+  const { data, response } = await api.POST(path, { body: { target } });
+  await throwIfNotOk(response, `Failed to ${operation} cache`);
+  if (!data) throw new Error('Missing response body');
+  if ('error' in data) throw new Error(data.error);
+  return data;
 }
 
 export async function dropAllCacheQueries(target: string): Promise<{ success: boolean }> {

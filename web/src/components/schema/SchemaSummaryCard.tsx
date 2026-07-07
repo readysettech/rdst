@@ -49,7 +49,7 @@ export function SchemaSummaryCard({ status }: SchemaSummaryCardProps) {
             {stats.map((stat, index) => (
               <div key={stat.label} className="flex items-center gap-6">
                 {index > 0 && (
-                  <div className="w-px h-10 bg-border-layout-1 hidden sm:block" />
+                  <div className="w-px h-10 bg-border-layout-1 hidden tablet:block" />
                 )}
                 <StatItem {...stat} />
               </div>

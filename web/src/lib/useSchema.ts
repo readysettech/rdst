@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { useTargetSwitchLock } from './targetSwitchLock'
+import type { components } from './api.generated'
 import type {
   SchemaStatus,
   SchemaDetails,
@@ -15,6 +16,8 @@ import type {
   AddRelationshipData,
   AddMetricData,
 } from '../types/schema'
+
+export type SchemaOperationResult = components['schemas']['SchemaOperationResponse']
 
 interface UseSchemaReturn {
   // State
@@ -42,6 +45,8 @@ interface UseSchemaReturn {
   addTerminology: (target: string, data: AddTerminologyData) => Promise<boolean>
   addRelationship: (target: string, data: AddRelationshipData) => Promise<boolean>
   addMetric: (target: string, data: AddMetricData) => Promise<boolean>
+  refreshSchema: (target: string) => Promise<SchemaOperationResult | null>
+  profileSchema: (target: string, table?: string) => Promise<SchemaOperationResult | null>
   annotateWithLLM: (
     target: string,
     tableName?: string,
@@ -450,6 +455,58 @@ export function useSchema(): UseSchemaReturn {
     [fetchWithAbort]
   )
 
+  const refreshSchema = useCallback(
+    async (target: string): Promise<SchemaOperationResult | null> => {
+      setLoading(true)
+      setError(null)
+
+      const { data, error: fetchError } = await fetchWithAbort<SchemaOperationResult>(
+        '/api/semantic-layer/refresh',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target }),
+        }
+      )
+
+      setLoading(false)
+
+      if (fetchError) {
+        setError(fetchError)
+        return null
+      }
+
+      return data
+    },
+    [fetchWithAbort]
+  )
+
+  const profileSchema = useCallback(
+    async (target: string, table?: string): Promise<SchemaOperationResult | null> => {
+      setLoading(true)
+      setError(null)
+
+      const { data, error: fetchError } = await fetchWithAbort<SchemaOperationResult>(
+        '/api/semantic-layer/profile',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target, table }),
+        }
+      )
+
+      setLoading(false)
+
+      if (fetchError) {
+        setError(fetchError)
+        return null
+      }
+
+      return data
+    },
+    [fetchWithAbort]
+  )
+
   const annotateWithLLM = useCallback(
     async (
       target: string,
@@ -548,6 +605,8 @@ export function useSchema(): UseSchemaReturn {
     addTerminology,
     addRelationship,
     addMetric,
+    refreshSchema,
+    profileSchema,
     annotateWithLLM,
 
     // Utilities

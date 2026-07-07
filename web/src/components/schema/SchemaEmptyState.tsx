@@ -38,7 +38,7 @@ export function SchemaEmptyState({ target, onInit, isLoading }: SchemaEmptyState
           </VStack>
 
           {/* Feature cards */}
-          <div className="grid gap-4 sm:grid-cols-2 w-full max-w-xl">
+          <div className="grid gap-4 tablet:grid-cols-2 w-full max-w-xl">
             <m.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}

@@ -23,13 +23,19 @@ import {
   fetchCacheStatus,
   fetchCacheList,
   addCacheQuery,
+  cacheLifecycle,
   deleteCacheQuery,
   dropAllCacheQueries,
   removeCacheTarget,
   useCacheDeploy,
   useCacheRun,
 } from '../lib/useCache';
-import type { CacheEntry, CacheAddResponse, CacheRunResult } from '../types/cache';
+import type {
+  CacheEntry,
+  CacheAddResponse,
+  CacheLifecycleOperation,
+  CacheRunResult,
+} from '../types/cache';
 
 type CacheSearch = {
   query?: string;
@@ -68,6 +74,8 @@ function EndpointCard({
   onRedeploy,
   onRemove,
   onEndpointRegistered,
+  onLifecycle,
+  pendingLifecycleOp,
   isRedeploying,
   isRemoving,
 }: {
@@ -77,6 +85,8 @@ function EndpointCard({
   onRedeploy?: () => void;
   onRemove?: () => void;
   onEndpointRegistered?: () => void;
+  onLifecycle?: (operation: CacheLifecycleOperation) => void;
+  pendingLifecycleOp?: CacheLifecycleOperation | null;
   isRedeploying?: boolean;
   isRemoving?: boolean;
 }) {
@@ -127,17 +137,51 @@ function EndpointCard({
                 </Text>
               </HStack>
               <HStack className="gap-2">
+                {!running && !needsEndpoint && onLifecycle && (
+                  <Button
+                    variant="primary"
+                    modifier="ghost"
+                    size="small"
+                    label="Start"
+                    icon="play"
+                    iconPosition="left"
+                    onClick={() => onLifecycle('start')}
+                    loading={pendingLifecycleOp === 'start'}
+                  />
+                )}
                 {!running && !needsEndpoint && onRedeploy && (
                   <Button
                     variant="primary"
                     modifier="ghost"
                     size="small"
                     label="Redeploy"
-                    icon="play"
+                    icon="database-settings"
                     iconPosition="left"
                     onClick={onRedeploy}
                     loading={isRedeploying}
                   />
+                )}
+                {running && !needsEndpoint && onLifecycle && (
+                  <>
+                    <Button
+                      variant="primary"
+                      modifier="ghost"
+                      size="small"
+                      label="Restart"
+                      icon="database-settings"
+                      iconPosition="left"
+                      onClick={() => onLifecycle('restart')}
+                      loading={pendingLifecycleOp === 'restart'}
+                    />
+                    <Button
+                      variant="primary"
+                      modifier="ghost"
+                      size="small"
+                      label="Stop"
+                      onClick={() => onLifecycle('stop')}
+                      loading={pendingLifecycleOp === 'stop'}
+                    />
+                  </>
                 )}
                 {onRemove && !confirmRemove && (
                   <Button
@@ -722,6 +766,31 @@ function CachePage() {
     },
   });
 
+  // Container lifecycle (start / stop / restart)
+  const lifecycleMutation = useMutation({
+    mutationFn: (operation: CacheLifecycleOperation) => cacheLifecycle(target!, operation),
+    onSuccess: (data, operation) => {
+      const titles: Record<CacheLifecycleOperation, string> = {
+        start: 'Cache started',
+        stop: 'Cache stopped',
+        restart: 'Cache restarted',
+      };
+      toast({ title: titles[operation], description: data.detail || undefined, variant: 'positive' });
+      queryClient.invalidateQueries({ queryKey: ['cache-status', target] });
+      if (operation !== 'stop') {
+        // ReadySet binds its SQL port a few seconds after the container
+        // starts; refetch again once it has had time to come up.
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ['cache-status', target] });
+        }, 5000);
+      }
+    },
+    onError: (err: Error, operation) => {
+      toast({ title: `Cache ${operation} failed`, description: err.message, variant: 'negative' });
+    },
+  });
+  const pendingLifecycleOp = lifecycleMutation.isPending ? lifecycleMutation.variables : null;
+
   // Remove cache target (undeploy)
   const removeMutation = useMutation({
     mutationFn: () => removeCacheTarget(target!),
@@ -931,7 +1000,7 @@ function CachePage() {
                   </VStack>
 
                   {/* Feature bullets */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+                  <div className="grid grid-cols-1 tablet:grid-cols-3 gap-4 w-full">
                     {[
                       {
                         icon: 'speedometer' as const,
@@ -1180,6 +1249,8 @@ function CachePage() {
           onRedeploy={handleDeploy}
           onRemove={() => removeMutation.mutate()}
           onEndpointRegistered={() => queryClient.invalidateQueries({ queryKey: ['cache-status', target] })}
+          onLifecycle={(operation) => lifecycleMutation.mutate(operation)}
+          pendingLifecycleOp={pendingLifecycleOp}
           isRedeploying={isDeploying}
           isRemoving={removeMutation.isPending}
         />

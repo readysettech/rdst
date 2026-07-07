@@ -401,7 +401,7 @@ export function PerformanceSummarySection({
       {/* Metrics grid */}
       <div className="p-6">
         {explainResults && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 tablet:grid-cols-4 gap-4 mb-6">
             <MetricCard
               label="Execution Time"
               value={`${explainResults.execution_time_ms?.toFixed(2) || "0"}ms`}

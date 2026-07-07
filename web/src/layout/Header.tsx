@@ -6,7 +6,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 
 interface RouteConfig {
   label: string;
-  icon: "speedometer" | "sparkles" | "observe" | "folder-file" | "play" | "layers" | "test-tube" | "settings";
+  icon: "speedometer" | "sparkles" | "observe" | "search" | "folder-file" | "play" | "layers" | "test-tube" | "settings" | "database-settings" | "document-validation" | "dashboard" | "user-shield" | "message-multiple" | "adjustment-horizontal";
   parent?: string;
 }
 
@@ -15,11 +15,18 @@ const routeConfig: Record<string, RouteConfig> = {
   "/results": { label: "Results", icon: "speedometer", parent: "/" },
   "/ask": { label: "Ask", icon: "sparkles" },
   "/top": { label: "Top Queries", icon: "observe" },
+  "/scan": { label: "Scan", icon: "search" },
   "/query-registry": { label: "Query Registry", icon: "folder-file" },
+  "/cache": { label: "Cache", icon: "database-settings" },
   "/benchmark": { label: "Benchmark", icon: "play" },
   "/schema": { label: "Schema", icon: "layers" },
+  "/audit": { label: "Audit", icon: "document-validation" },
+  "/guards": { label: "Guards", icon: "user-shield" },
+  "/agents": { label: "Agents", icon: "message-multiple" },
+  "/fleet": { label: "Fleet", icon: "dashboard" },
   "/readyset": { label: "Readyset Testing", icon: "test-tube" },
   "/configure": { label: "Configure", icon: "settings" },
+  "/dev-settings": { label: "Dev Settings", icon: "adjustment-horizontal" },
 };
 
 export function Header() {

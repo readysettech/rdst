@@ -49,6 +49,7 @@ vi.mock("../components/top", () => ({
 function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
   vi.mocked(useQueryRegistry).mockReturnValue({
     queries: [],
+    listError: null,
     isLoading: false,
     addQuery: vi.fn(),
     addMutation: {
@@ -71,6 +72,8 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
     } as any,
     removeQuery: vi.fn(),
     updateTag: vi.fn(),
+    updateSqlMutation: { mutate: vi.fn(), isPending: false } as any,
+    importMutation: { mutate: vi.fn(), isPending: false, data: undefined, reset: vi.fn() } as any,
     isFetching: false,
     total: 0,
     limit: 50,

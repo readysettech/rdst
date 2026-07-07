@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { fetchQueryRegistry, addQueryToRegistry, removeQueryFromRegistry, updateQueryTag, type QueryRegistryEntry } from './api';
+import { fetchQueryRegistry, addQueryToRegistry, removeQueryFromRegistry, updateQueryTag, updateQuerySql, importQueries, type QueryRegistryEntry, type ImportQueriesResponse } from './api';
 
 export type { QueryRegistryEntry };
 
@@ -17,6 +17,7 @@ export function useQueryRegistry(initialLimit = 100) {
   });
   const queries = data?.queries ?? [];
   const total = data?.total ?? 0;
+  const listError = data?.error ?? null;
 
   useEffect(() => {
     if (total > 0 && offset >= total) {
@@ -63,6 +64,30 @@ export function useQueryRegistry(initialLimit = 100) {
     },
   });
 
+  const updateSqlMutation = useMutation({
+    mutationFn: ({ hash, sql }: { hash: string; sql: string }) =>
+      updateQuerySql(hash, sql).then((result) => {
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to update SQL');
+        }
+        return result;
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] });
+    },
+  });
+
+  const importMutation = useMutation<
+    ImportQueriesResponse,
+    Error,
+    { file: string; update?: boolean; target?: string }
+  >({
+    mutationFn: ({ file, update, target }) => importQueries(file, { update, target }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] });
+    },
+  });
+
   const addQuery = (sql: string, target?: string) => {
     addMutation.mutate({ sql, target });
   };
@@ -92,6 +117,7 @@ export function useQueryRegistry(initialLimit = 100) {
     isLoading,
     isFetching,
     total,
+    listError,
     limit,
     offset,
     setLimit,
@@ -103,5 +129,7 @@ export function useQueryRegistry(initialLimit = 100) {
     addMutation,
     removeQuery,
     updateTag,
+    updateSqlMutation,
+    importMutation,
   };
 }

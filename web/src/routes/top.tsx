@@ -9,6 +9,7 @@ import { Icon } from '@rs/ui-new/icon';
 import { HStack, VStack } from '@rs/ui-new/stack';
 import { Show } from '@rs/ui-new/show';
 import { CopyButton } from '@rs/ui-new/copy-button';
+import { toast } from '@rs/ui-new/use-toast';
 import { TargetLockNotice } from '../components';
 import { useTarget } from '../hooks/useTarget';
 import { useTop } from '../lib/useTop';
@@ -209,15 +210,38 @@ export function TopPage() {
     if (!target || queries.length === 0) return;
 
     const unsavedQueries = queries.filter((query) => !savedHashes.has(query.query_hash));
+    if (unsavedQueries.length === 0) {
+      toast({
+        title: 'Nothing to save',
+        description: 'All listed queries are already in the registry.',
+        variant: 'primary',
+      });
+      return;
+    }
 
-    const saves = unsavedQueries.map((query) =>
-      addQueryMutation.mutateAsync({
-        sql: query.query_text,
-        target,
-      }),
+    const results = await Promise.allSettled(
+      unsavedQueries.map((query) =>
+        addQueryMutation.mutateAsync({ sql: query.query_text, target }),
+      ),
     );
+    const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    const saved = results.length - failures.length;
 
-    await Promise.allSettled(saves);
+    if (failures.length === 0) {
+      toast({
+        title: 'Saved to registry',
+        description: `${saved} ${saved === 1 ? 'query' : 'queries'} saved.`,
+        variant: 'positive',
+      });
+    } else {
+      const reason = failures[0].reason;
+      const firstError = reason instanceof Error ? reason.message : String(reason);
+      toast({
+        title: saved > 0 ? 'Saved with errors' : 'Save failed',
+        description: `${saved} saved, ${failures.length} failed. ${firstError}`,
+        variant: 'negative',
+      });
+    }
   }, [target, queries, savedHashes, addQueryMutation]);
 
   // Reset when mode changes

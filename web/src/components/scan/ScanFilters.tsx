@@ -13,7 +13,7 @@ import { Card } from '@rs/ui-new/card';
 import { Show } from '@rs/ui-new/show';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
 import type { ScanState } from '../../types/scan';
-import { DirectoryPicker } from './DirectoryPicker';
+import { PathPicker } from '../PathPicker';
 
 interface ScanFiltersProps {
   directory: string;
@@ -81,7 +81,7 @@ export function ScanFilters({
           <div className="p-5 space-y-4">
             {/* Directory path + Start button row */}
             <div className="flex gap-3 items-end">
-              <DirectoryPicker
+              <PathPicker
                 value={directory}
                 onChange={setDirectory}
                 disabled={isDisabled}

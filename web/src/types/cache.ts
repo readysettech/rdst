@@ -15,6 +15,8 @@ export type CacheAddResponse = components['schemas']['CacheAddResponse'];
 export type CacheEntry = components['schemas']['CacheEntryResponse'];
 export type CacheListResponse = components['schemas']['CacheListResponse'];
 export type CacheRunRequest = components['schemas']['CacheRunRequest'];
+export type CacheLifecycleResponse = components['schemas']['CacheLifecycleResponse'];
+export type CacheLifecycleOperation = 'start' | 'stop' | 'restart';
 
 // UI state machines — not part of the API contract.
 export type CacheDeployState = 'idle' | 'deploying' | 'complete' | 'error';

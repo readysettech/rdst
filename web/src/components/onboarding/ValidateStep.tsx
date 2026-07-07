@@ -267,7 +267,7 @@ export function ValidateStep({
                           </Text>
                         </div>
                         {targetNeedsPassword && (
-                          <div className="mt-3 flex flex-col items-start justify-between gap-3 rounded-lg border border-border-warning-soft bg-surface-warning-soft/10 px-4 py-3 sm:flex-row sm:items-center">
+                          <div className="mt-3 flex flex-col items-start justify-between gap-3 rounded-lg border border-border-warning-soft bg-surface-warning-soft/10 px-4 py-3 tablet:flex-row tablet:items-center">
                             <VStack className="gap-0.5 items-start">
                               <Text level="label-small" className="text-content-warning-soft">
                                 Database password required

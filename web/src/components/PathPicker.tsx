@@ -1,6 +1,7 @@
 /**
- * Directory picker — clicking the input opens a popover with a folder browser
- * and a manual path input.
+ * Server-side path picker — clicking the input opens a popover with a folder
+ * browser. Selects a directory by default; pass `fileExt` to pick a file with
+ * that extension instead.
  */
 
 import { useState, useCallback } from 'react';
@@ -9,28 +10,45 @@ import { Button } from '@rs/ui-new/button';
 import { Icon } from '@rs/ui-new/icon';
 import { Text } from '@rs/ui-new/text';
 import { VStack } from '@rs/ui-new/stack';
-import { useBrowse } from '../../lib/useBrowse';
+import { useBrowse } from '../lib/useBrowse';
 
-interface DirectoryPickerProps {
+interface PathPickerProps {
   value: string;
-  onChange: (dir: string) => void;
+  onChange: (path: string) => void;
   disabled?: boolean;
   recentDirs?: string[];
+  /** When set, the picker selects a file with this extension (e.g. "csv"). */
+  fileExt?: string;
+  label?: string;
+  placeholder?: string;
 }
 
-export function DirectoryPicker({ value, onChange, disabled, recentDirs }: DirectoryPickerProps) {
+export function PathPicker({
+  value,
+  onChange,
+  disabled,
+  recentDirs,
+  fileExt,
+  label,
+  placeholder,
+}: PathPickerProps) {
   const [open, setOpen] = useState(false);
   const [browsePath, setBrowsePath] = useState<string | undefined>(undefined);
-  const { data, isLoading, isError } = useBrowse(browsePath, open);
+  const { data, isLoading, isError } = useBrowse(browsePath, open, fileExt);
 
   const handleOpen = useCallback(
     (nextOpen: boolean) => {
       if (nextOpen) {
-        setBrowsePath(value.trim() || undefined);
+        // A previously selected file can't be browsed into; start at its folder.
+        let start = value.trim();
+        if (fileExt && start.toLowerCase().endsWith(`.${fileExt.toLowerCase()}`)) {
+          start = start.slice(0, start.lastIndexOf('/')) || '/';
+        }
+        setBrowsePath(start || undefined);
       }
       setOpen(nextOpen);
     },
-    [value],
+    [value, fileExt],
   );
 
   const navigateTo = useCallback((path: string) => {
@@ -61,10 +79,12 @@ export function DirectoryPicker({ value, onChange, disabled, recentDirs }: Direc
       )
     : [];
 
+  const files = fileExt ? (data?.files ?? []) : [];
+
   return (
     <VStack className="gap-1.5 items-start flex-1">
       <Text as="label" level="label-small" className="text-content-layout-2">
-        Directory path
+        {label ?? (fileExt ? 'File path' : 'Directory path')}
       </Text>
 
       <Popover open={open} onOpenChange={handleOpen}>
@@ -75,14 +95,25 @@ export function DirectoryPicker({ value, onChange, disabled, recentDirs }: Direc
             className="flex items-center gap-2 h-10 w-full rounded-lg border border-border-layout-1 bg-surface-layout-2 px-3 py-2 text-body-medium text-left cursor-pointer hover:border-border-layout-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Icon
-              name="folder-file"
+              name={fileExt ? 'document-validation' : 'folder-file'}
               label=""
               className="w-4 h-4 text-content-layout-3 shrink-0"
             />
             {value.trim() ? (
-              <span className="text-content-layout-1 truncate">{value}</span>
+              // RTL outer span moves the ellipsis to the left so the final
+              // path segment stays visible; the bdi keeps the path itself LTR.
+              <span
+                className="text-content-layout-1 truncate text-left"
+                style={{ direction: 'rtl' }}
+                title={value}
+              >
+                <bdi>{value}</bdi>
+              </span>
             ) : (
-              <span className="text-content-layout-3">Choose a project folder...</span>
+              <span className="text-content-layout-3">
+                {placeholder ??
+                  (fileExt ? `Choose a .${fileExt} file...` : 'Choose a project folder...')}
+              </span>
             )}
           </button>
         </PopoverTrigger>
@@ -152,7 +183,7 @@ export function DirectoryPicker({ value, onChange, disabled, recentDirs }: Direc
               )}
             </div>
 
-            {/* Directory list */}
+            {/* Directory + file list */}
             <div className="max-h-64 overflow-y-auto">
               {isError && (
                 <div className="px-3 py-4 text-center">
@@ -199,10 +230,31 @@ export function DirectoryPicker({ value, onChange, disabled, recentDirs }: Direc
                     </button>
                   ))}
 
-                  {data.directories.length === 0 && (
+                  {files.map((file) => (
+                    <button
+                      key={file.path}
+                      type="button"
+                      onClick={() => {
+                        onChange(file.path);
+                        setOpen(false);
+                      }}
+                      className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-surface-layout-2 cursor-pointer text-left"
+                    >
+                      <Icon
+                        name="document-validation"
+                        label=""
+                        className="w-3.5 h-3.5 text-content-layout-3"
+                      />
+                      <Text level="label-small" className="text-content-layout-1 truncate">
+                        {file.name}
+                      </Text>
+                    </button>
+                  ))}
+
+                  {data.directories.length === 0 && files.length === 0 && (
                     <div className="px-3 py-4 text-center">
                       <Text level="caption" className="text-content-layout-3">
-                        No subdirectories
+                        {fileExt ? `No folders or .${fileExt} files` : 'No subdirectories'}
                       </Text>
                     </div>
                   )}
@@ -210,17 +262,19 @@ export function DirectoryPicker({ value, onChange, disabled, recentDirs }: Direc
               )}
             </div>
 
-            {/* Select button */}
-            <div className="border-t border-border-layout-1 px-3 py-2">
-              <Button
-                variant="rising"
-                modifier="solid"
-                label="Select this folder"
-                onClick={handleSelect}
-                className="w-full"
-                disabled={!data?.current}
-              />
-            </div>
+            {/* Select button (directory mode only; files are picked directly) */}
+            {!fileExt && (
+              <div className="border-t border-border-layout-1 px-3 py-2">
+                <Button
+                  variant="rising"
+                  modifier="solid"
+                  label="Select this folder"
+                  onClick={handleSelect}
+                  className="w-full"
+                  disabled={!data?.current}
+                />
+              </div>
+            )}
           </PopoverContent>
       </Popover>
     </VStack>

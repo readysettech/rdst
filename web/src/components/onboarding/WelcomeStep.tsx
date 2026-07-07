@@ -71,7 +71,7 @@ export function WelcomeStep({ onNext, isLoading }: WelcomeStepProps) {
         </div>
 
         {/* Features Grid */}
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 tablet:grid-cols-2">
           {features.map((feature, index) => (
             <m.div
               key={feature.title}

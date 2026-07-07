@@ -137,6 +137,32 @@ export async function updateQueryTag(hash: string, tag: string): Promise<{ succe
   return data;
 }
 
+export type UpdateSqlResponse = apiComponents['schemas']['UpdateSqlResponse'];
+
+export async function updateQuerySql(hash: string, sql: string): Promise<UpdateSqlResponse> {
+  const { data, response } = await typedClient.PATCH('/api/query-registry/{query_hash}/sql', {
+    params: { path: { query_hash: hash } },
+    body: { sql },
+  });
+  await throwIfNotOk(response, 'Failed to update SQL');
+  if (!data) throw new Error('Missing response body');
+  return data;
+}
+
+export type ImportQueriesResponse = apiComponents['schemas']['ImportQueriesResponse'];
+
+export async function importQueries(
+  file: string,
+  options?: { update?: boolean; target?: string },
+): Promise<ImportQueriesResponse> {
+  const { data, response } = await typedClient.POST('/api/query-registry/import', {
+    body: { file, update: options?.update, target: options?.target },
+  });
+  await throwIfNotOk(response, 'Failed to import queries');
+  if (!data) throw new Error('Missing response body');
+  return data;
+}
+
 export type ReadysetContainerStatus = apiComponents['schemas']['ContainerStatus'];
 export type ReadysetSetupRequest = apiComponents['schemas']['SetupRequest'];
 export type ReadysetCacheRequest = apiComponents['schemas']['CacheRequest'];
@@ -233,9 +259,12 @@ export async function fetchTrialStatus(): Promise<TrialStatusResponse> {
 export type BrowseDirectoryEntry = apiComponents['schemas']['DirectoryEntry'];
 export type BrowseResponse = apiComponents['schemas']['BrowseResponse'];
 
-export async function fetchBrowse(path?: string): Promise<BrowseResponse> {
-  const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : '/api/browse';
-  const response = await fetch(url);
+export async function fetchBrowse(path?: string, ext?: string): Promise<BrowseResponse> {
+  const params = new URLSearchParams();
+  if (path) params.set('path', path);
+  if (ext) params.set('ext', ext);
+  const query = params.toString();
+  const response = await fetch(query ? `/api/browse?${query}` : '/api/browse');
   if (!response.ok) {
     throw new Error(`Failed to browse directory: ${response.status}`);
   }
