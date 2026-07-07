@@ -126,6 +126,15 @@ class ChatAgent:
             self._llm_manager = LLMManager()
         return self._llm_manager
 
+    def _resolve_model(self) -> str:
+        """Resolve the chat model through the shared LLM configuration.
+
+        Follows the same chain as LLMManager.query: config-file llm.model,
+        then RDST_ANTHROPIC_MODEL, then the Claude provider default.
+        """
+        llm = self._get_llm()
+        return llm.defaults.model or llm.provider("claude").default_model()
+
     def clear_history(self) -> None:
         """Clear conversation history."""
         self.messages = []
@@ -326,7 +335,7 @@ class ChatAgent:
         client = anthropic.Anthropic(**kwargs)
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=self._resolve_model(),
             max_tokens=4096,
             system=SYSTEM_PROMPT,
             tools=CHAT_TOOLS,

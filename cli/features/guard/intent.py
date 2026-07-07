@@ -153,7 +153,7 @@ def derive_rules_from_intent(
     """
     # Get or create LLM manager
     if llm_manager is None:
-        from ..llm_manager import LLMManager
+        from shared.llm_manager import LLMManager
         llm_manager = LLMManager()
 
     # Build prompt

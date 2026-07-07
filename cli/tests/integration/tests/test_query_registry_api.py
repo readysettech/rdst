@@ -6,6 +6,8 @@ into a tmp dir per test by the `tmp_rdst_home` fixture in `conftest.py`.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from shared.query_registry import hash_sql
 
 
@@ -30,6 +32,41 @@ async def test_query_registry_post_strips_comments_and_persists_canonical_sql(cl
     assert payload["offset"] == 0
     assert queries[0]["hash"] == post_payload["hash"]
     assert queries[0]["sql"] == "SELECT * FROM users WHERE id = :p1"
+
+
+async def test_list_normalizes_legacy_list_target_entry(client, tmp_rdst_home: Path):
+    """Entries written by legacy clients with last_target as a list must not
+    blank the listing; the target is normalized to a string on load."""
+    (tmp_rdst_home / "queries.toml").write_text(
+        '[queries.aaaa1111bbbb]\n'
+        'sql = "SELECT count(*) FROM users"\n'
+        'hash = "aaaa1111bbbb"\n'
+        'tag = "chat-how-many-users"\n'
+        'first_analyzed = "2026-04-05T23:20:38Z"\n'
+        'last_analyzed = "2026-07-07T14:08:24Z"\n'
+        'frequency = 0\n'
+        'source = "chat"\n'
+        'last_target = []\n'
+        '\n'
+        '[queries.cccc2222dddd]\n'
+        'sql = "SELECT * FROM orders WHERE id = :p1"\n'
+        'hash = "cccc2222dddd"\n'
+        'tag = ""\n'
+        'first_analyzed = "2026-07-07T10:00:00Z"\n'
+        'last_analyzed = "2026-07-07T10:00:00Z"\n'
+        'frequency = 3\n'
+        'source = "top-historical"\n'
+        'last_target = "pgtest"\n'
+    )
+
+    listing = await client.get("/api/query-registry?limit=150")
+    assert listing.status_code == 200
+    payload = listing.json()
+    assert payload["error"] is None
+    assert payload["total"] == 2
+    by_hash = {q["hash"]: q for q in payload["queries"]}
+    assert by_hash["aaaa1111bbbb"]["target"] == ""
+    assert by_hash["cccc2222dddd"]["target"] == "pgtest"
 
 
 async def test_register_then_delete_then_list_excludes_query(client):
@@ -97,3 +134,73 @@ async def test_list_pagination_offset_and_limit(client):
         q["hash"] for q in p3["queries"]
     }
     assert len(seen) == 5
+
+
+async def test_update_sql_preserves_tag_and_changes_hash(client):
+    post = await client.post("/api/query-registry", json={"sql": "SELECT id FROM users"})
+    old_hash = post.json()["hash"]
+    patch = await client.patch(
+        f"/api/query-registry/{old_hash}/tag", json={"tag": "my_query"}
+    )
+    assert patch.json()["success"] is True
+
+    # Structurally different SQL — literals alone normalize to the same hash.
+    response = await client.patch(
+        f"/api/query-registry/{old_hash}/sql",
+        json={"sql": "SELECT id, email FROM users"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["hash_changed"] is True
+    assert body["hash"] != old_hash
+
+    listing = (await client.get("/api/query-registry")).json()
+    assert listing["total"] == 1
+    assert listing["queries"][0]["hash"] == body["hash"]
+    assert listing["queries"][0]["tag"] == "my_query"
+
+
+async def test_update_sql_unknown_hash(client):
+    response = await client.patch(
+        "/api/query-registry/nope/sql", json={"sql": "SELECT 1"}
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": False, "hash": None, "hash_changed": False, "error": "Query not found",
+    }
+
+
+async def test_import_sql_file(client, tmp_path):
+    sql_file = tmp_path / "queries.sql"
+    sql_file.write_text(
+        "-- name: users_by_id\n"
+        "SELECT * FROM users WHERE id = ?;\n"
+        "\n"
+        "-- name: recent_orders\n"
+        "-- target: prod\n"
+        "SELECT * FROM orders ORDER BY created_at DESC LIMIT 10;\n"
+    )
+
+    response = await client.post(
+        "/api/query-registry/import", json={"file": str(sql_file)}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["imported"] == 2
+    assert body["errors"] == []
+
+    listing = (await client.get("/api/query-registry")).json()
+    assert listing["total"] == 2
+    tags = {q["tag"] for q in listing["queries"]}
+    assert tags == {"users_by_id", "recent_orders"}
+
+
+async def test_import_missing_file(client):
+    response = await client.post(
+        "/api/query-registry/import", json={"file": "/nonexistent/queries.sql"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False

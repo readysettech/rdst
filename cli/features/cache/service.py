@@ -20,6 +20,7 @@ from .events import (
     CacheDeployCompleteEvent,
     CacheDropAllEvent,
     CacheEvent,
+    CacheLifecycleEvent,
     CacheListEvent,
     CacheRunCompleteEvent,
     CacheStatusEvent,
@@ -774,6 +775,79 @@ class CacheService:
         if config.get(target_name):
             config.remove(target_name)
             config.save()
+
+    # ------------------------------------------------------------------
+    # Lifecycle (start / stop / restart)
+    # ------------------------------------------------------------------
+
+    async def lifecycle(
+        self, input_data: CacheInput, operation: str
+    ) -> AsyncGenerator[CacheEvent, None]:
+        """Start, stop, or restart a deployed cache without redeploying.
+
+        Yields: CacheLifecycleEvent or ErrorEvent
+        """
+        try:
+            if operation not in ("start", "stop", "restart"):
+                yield ErrorEvent(
+                    type="error",
+                    message=f"Unknown lifecycle operation '{operation}'.",
+                    stage="lifecycle",
+                )
+                return
+
+            resolved = self._resolve_cache_target(input_data.target)
+            if resolved is None:
+                yield ErrorEvent(
+                    type="error",
+                    message=f"No cache target found for '{input_data.target}'.",
+                    stage=operation,
+                )
+                return
+
+            cache_name, cache_config = resolved
+            result = await asyncio.to_thread(
+                self._run_lifecycle_op, operation, cache_name, cache_config
+            )
+            if result.success:
+                yield CacheLifecycleEvent(
+                    type="cache_lifecycle",
+                    operation=operation,
+                    success=True,
+                    state=result.state_after.value if result.state_after else None,
+                    detail=result.detail,
+                )
+            else:
+                yield ErrorEvent(
+                    type="error",
+                    message=result.error or f"cache {operation} failed",
+                    stage=operation,
+                )
+        except Exception as e:
+            yield ErrorEvent(type="error", message=str(e), stage=operation)
+
+    @staticmethod
+    def _run_lifecycle_op(
+        operation: str, cache_name: str, cache_config: Dict[str, Any]
+    ):
+        """Dispatch a lifecycle op through shared.deploy.lifecycle.
+
+        Containers and units are named after the upstream database target,
+        so pass that name rather than the cache target's.
+        """
+        from shared.deploy import lifecycle
+
+        deploy_mode = cache_config.get("deploy_mode") or "docker"
+        upstream = cache_config.get("upstream_target", cache_name)
+        op_fn = getattr(lifecycle, operation)
+        return op_fn(
+            upstream,
+            mode=deploy_mode,
+            host=cache_config.get("host"),
+            namespace=cache_config.get("namespace"),
+            ssh_key=cache_config.get("ssh_key"),
+            ssh_user=cache_config.get("ssh_user"),
+        )
 
     # ------------------------------------------------------------------
     # Deploy

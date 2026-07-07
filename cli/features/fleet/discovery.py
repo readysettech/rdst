@@ -40,8 +40,15 @@ def discover_rds_instances(
     default_user: str | None = None,
     default_group: str | None = None,
     default_database: str | None = None,
+    errors: list[str] | None = None,
 ):
-    """Discover RDS instances across regions using botocore."""
+    """Discover RDS instances across regions using botocore.
+
+    A failed region does not stop discovery in the remaining regions. When
+    `errors` is provided, a human-readable message per failed region is
+    appended so callers can distinguish "region is empty" from "region
+    could not be listed".
+    """
     for region in regions:
         logger.info("Discovering RDS instances in %s...", region)
         try:
@@ -90,15 +97,19 @@ def discover_rds_instances(
         except Exception as exc:
             error_message = str(exc)
             if "AccessDeniedException" in error_message or "not authorized" in error_message.lower():
-                logger.error(
-                    "Cannot list RDS instances in %s. Ensure your role has "
-                    "rds:DescribeDBInstances permission.",
-                    region,
+                message = (
+                    f"{region}: cannot list RDS instances. Ensure your role has "
+                    "rds:DescribeDBInstances permission."
                 )
-            elif "ExpiredTokenException" in error_message:
-                logger.error("AWS credentials expired. Refresh with: aws sso login")
+            elif "ExpiredToken" in error_message:
+                message = (
+                    f"{region}: AWS credentials expired. Refresh with: aws sso login"
+                )
             else:
-                logger.error("Error discovering instances in %s: %s", region, exc)
+                message = f"{region}: error discovering instances: {exc}"
+            logger.error(message)
+            if errors is not None:
+                errors.append(message)
 
 
 def discover_aurora_cluster(

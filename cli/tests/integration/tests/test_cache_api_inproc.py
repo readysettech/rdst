@@ -62,6 +62,22 @@ async def test_list_for_undeployed_target_returns_error_payload(
     assert "No cache deployed" in (body.get("error") or "")
 
 
+async def test_start_for_undeployed_target_returns_error_payload(
+    client, tmp_rdst_home, monkeypatch
+):
+    """`/cache/start` for a target with no deployment surfaces an error
+    payload — there's no cache container to start."""
+    _seed_target()
+    monkeypatch.setenv("CACHE_PASSWORD", "irrelevant")
+
+    response = await client.post("/api/cache/start", json={"target": "cachetest"})
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+    assert body.get("success") is False
+    assert "No cache target found" in (body.get("error") or "")
+
+
 async def test_status_locked_when_target_password_missing(
     client, tmp_rdst_home, monkeypatch
 ):

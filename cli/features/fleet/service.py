@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -11,6 +12,7 @@ from shared.db_connection import create_direct_connection
 from .csv_importer import parse_csv
 from .events import (
     FleetConnectivityEvent,
+    FleetDiscoverEvent,
     FleetErrorEvent,
     FleetEvent,
     FleetImportCompleteEvent,
@@ -133,6 +135,135 @@ class FleetService:
             target_names=imported_names,
         )
 
+    async def discover(
+        self,
+        regions: list[str],
+        *,
+        engine_filter: str | None = None,
+        name_pattern: str | None = None,
+        password_env: str = "FLEET_PASS",
+        default_user: str | None = None,
+        default_group: str | None = None,
+        default_database: str | None = None,
+        dry_run: bool = False,
+    ):
+        """Discover RDS/Aurora instances from AWS and add them as targets.
+
+        Uses the local AWS credential chain (env vars, ~/.aws, SSO). Emits
+        import_progress per instance and import_complete with the totals,
+        matching the CSV import event flow.
+        """
+        from .auth import detect_aws_credentials
+        from .discovery import discover_rds_instances
+
+        has_creds, message = await asyncio.to_thread(detect_aws_credentials)
+        if not has_creds:
+            yield FleetErrorEvent(type="error", message=message, phase="discover")
+            return
+
+        yield FleetStatusEvent(
+            type="status",
+            phase="discover",
+            message=f"Discovering RDS instances in {', '.join(regions)}...",
+        )
+
+        discovery_errors: list[str] = []
+
+        def _discover_all() -> list[FleetMember]:
+            return list(
+                discover_rds_instances(
+                    regions=regions,
+                    engine_filter=engine_filter,
+                    name_pattern=name_pattern,
+                    password_env=password_env,
+                    default_user=default_user,
+                    default_group=default_group,
+                    default_database=default_database,
+                    errors=discovery_errors,
+                )
+            )
+
+        members = await asyncio.to_thread(_discover_all)
+
+        for error_message in discovery_errors:
+            yield FleetErrorEvent(type="error", message=error_message, phase="discover")
+
+        if not members and discovery_errors:
+            # Nothing found and at least one region failed: an empty result
+            # is not trustworthy, so don't report success.
+            yield FleetImportCompleteEvent(
+                type="import_complete",
+                success=False,
+                imported=0,
+                skipped=0,
+                errors=len(discovery_errors),
+                target_names=[],
+            )
+            return
+
+        yield FleetDiscoverEvent(
+            type="discover",
+            instances_found=len(members),
+            regions_searched=regions,
+            message=f"Found {len(members)} instance(s)",
+        )
+
+        config = self._get_config()
+        existing_hosts = set()
+        for name in config.list_targets():
+            target_config = config.get(name)
+            if target_config:
+                existing_hosts.add(target_config.get("host", "").lower())
+
+        imported = 0
+        skipped = 0
+        imported_names: list[str] = []
+        total = len(members)
+
+        for index, member in enumerate(members):
+            role = next((t for t in ("writer", "reader") if t in member.tags), None)
+            detail = f"{member.engine}, {member.instance_class or 'unknown'}"
+            if role:
+                detail = f"{role}, {detail}"
+
+            if config.get(member.name) or member.host.lower() in existing_hosts:
+                skipped += 1
+                yield FleetImportProgressEvent(
+                    type="import_progress",
+                    current=index + 1,
+                    total=total,
+                    target_name=member.name,
+                    status="skipped",
+                    message=f"Target '{member.name}' already exists",
+                )
+                continue
+
+            if not dry_run:
+                config.upsert(member.name, member.to_target_config())
+            imported += 1
+            imported_names.append(member.name)
+            prefix = "[dry-run] Would import" if dry_run else "Discovered"
+            yield FleetImportProgressEvent(
+                type="import_progress",
+                current=index + 1,
+                total=total,
+                target_name=member.name,
+                status="importing",
+                message=f"{prefix} '{member.name}' ({detail})",
+            )
+
+        if not dry_run and imported > 0:
+            config.save()
+
+        yield FleetImportCompleteEvent(
+            type="import_complete",
+            success=True,
+            imported=imported,
+            skipped=skipped,
+            errors=0,
+            target_names=imported_names,
+        )
+
     async def list_fleet(self, group: str | None = None, tag: str | None = None):
         """List fleet members — all database targets."""
         config = self._get_config()
@@ -195,7 +326,7 @@ class FleetService:
 
             try:
                 started = time.monotonic()
-                version = self._check_connection(target_config)
+                version = await asyncio.to_thread(self._check_connection, target_config)
                 latency = (time.monotonic() - started) * 1000
                 yield FleetConnectivityEvent(
                     type="connectivity",

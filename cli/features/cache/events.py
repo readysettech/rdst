@@ -65,6 +65,17 @@ class CacheDeleteEvent:
 
 
 @dataclass
+class CacheLifecycleEvent:
+    """Cache lifecycle operation result (start/stop/restart)."""
+
+    type: Literal["cache_lifecycle"]
+    operation: str
+    success: bool
+    state: Optional[str] = None
+    detail: Optional[str] = None
+
+
+@dataclass
 class CacheDropAllEvent:
     """Drop all caches result."""
 
@@ -97,6 +108,7 @@ CacheEvent = Union[
     CacheAddEvent,
     CacheDeleteEvent,
     CacheDropAllEvent,
+    CacheLifecycleEvent,
     CacheRunCompleteEvent,
     ErrorEvent,
 ]

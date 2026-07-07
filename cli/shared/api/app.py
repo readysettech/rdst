@@ -59,8 +59,11 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
     union as an SSE stream. They get a `text/event-stream` 200 response added
     to their operation, pointing at the union schema.
     """
+    from features.agent.events import ChatEvent
     from features.analyze.events import AnalyzeEvent
     from features.ask.events import AskEvent
+    from features.audit.events import AuditEvent, WorkloadEvent
+    from features.fleet.events import FleetEvent
     from features.cache.readyset_events import (
         ReadysetCacheEvent,
         ReadysetExplainEvent,
@@ -73,6 +76,10 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
     return {
         "AnalyzeEvent": (AnalyzeEvent, ["/api/analyze", "/api/analyze/quick"]),
         "AskEvent": (AskEvent, ["/api/ask"]),
+        "AuditEvent": (AuditEvent, ["/api/audit", "/api/fleet/audit"]),
+        "ChatEvent": (ChatEvent, ["/api/agents/chat/sessions/{session_id}/message"]),
+        "WorkloadEvent": (WorkloadEvent, ["/api/audit/capture"]),
+        "FleetEvent": (FleetEvent, ["/api/fleet/status", "/api/fleet/import", "/api/fleet/discover"]),
         "QueryBenchmarkEvent": (
             QueryBenchmarkEvent,
             ["/api/query-registry/benchmark"],
@@ -171,8 +178,12 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    from features.agent.api import routes as agent
     from features.analyze.api import routes as analyze
     from features.ask.api import routes as ask
+    from features.audit.api import routes as audit
+    from features.fleet.api import routes as fleet
+    from features.guard.api import routes as guard
     from features.cache.api import readyset_routes as readyset
     from features.cache.api import routes as cache
     from features.configure.api import routes as configure
@@ -186,8 +197,12 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     from features.schema.api import semantic_layer_routes as semantic_layer
     from shared.api.routes import browse, dev, env, report, status
 
+    app.include_router(agent.router, prefix="/api")
     app.include_router(analyze.router, prefix="/api")
+    app.include_router(audit.router, prefix="/api", tags=["audit"])
     app.include_router(browse.router, prefix="/api", tags=["browse"])
+    app.include_router(fleet.router, prefix="/api", tags=["fleet"])
+    app.include_router(guard.router, prefix="/api")
     app.include_router(cache.router, prefix="/api", tags=["cache"])
     app.include_router(ask.router, prefix="/api", tags=["ask"])
     app.include_router(configure.router, prefix="/api", tags=["configure"])

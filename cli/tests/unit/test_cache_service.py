@@ -8,6 +8,7 @@ from features.cache.events import (
     CacheDeleteEvent,
     CacheDeployCompleteEvent,
     CacheDropAllEvent,
+    CacheLifecycleEvent,
     CacheListEvent,
     CacheStatusEvent,
     CacheRunCompleteEvent,
@@ -104,6 +105,15 @@ class TestCacheTypes:
         evt = CacheDropAllEvent(type="cache_drop_all", success=True, count=3)
         assert evt.type == "cache_drop_all"
         assert evt.count == 3
+
+    def test_cache_lifecycle_event(self):
+        evt = CacheLifecycleEvent(
+            type="cache_lifecycle", operation="start", success=True,
+            state="deployed_running", detail="Started container",
+        )
+        assert evt.type == "cache_lifecycle"
+        assert evt.operation == "start"
+        assert evt.state == "deployed_running"
 
 
 # ============================================================================
@@ -492,6 +502,85 @@ class TestCacheDropAll:
                 events = [e async for e in service.drop_all(CacheInput(target="mydb"))]
         assert events[-1].type == "cache_drop_all"
         assert events[-1].count == 0
+
+
+# ============================================================================
+# Lifecycle: start / stop / restart
+# ============================================================================
+
+
+class TestCacheLifecycle:
+    CACHE_CONFIG = {
+        "target_type": "readyset", "engine": "postgresql",
+        "host": "127.0.0.1", "port": 5433, "user": "admin",
+        "database": "myapp", "upstream_target": "mydb",
+        "deploy_mode": "docker",
+    }
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_start_success(self):
+        from features.cache.service import CacheService
+        from shared.deploy.lifecycle import LifecycleResult, ProbeState
+
+        service = CacheService()
+        result = LifecycleResult(
+            success=True, state_after=ProbeState.DEPLOYED_RUNNING,
+            detail="Started container rdst-readyset-mydb",
+        )
+        with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", self.CACHE_CONFIG)):
+            with patch.object(service, "_run_lifecycle_op", return_value=result) as mock_op:
+                events = [e async for e in service.lifecycle(CacheInput(target="mydb"), "start")]
+        assert len(events) == 1
+        evt = events[0]
+        assert evt.type == "cache_lifecycle"
+        assert evt.operation == "start"
+        assert evt.success is True
+        assert evt.state == "deployed_running"
+        mock_op.assert_called_once_with("start", "mydb-cache", self.CACHE_CONFIG)
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_op_failure(self):
+        from features.cache.service import CacheService
+        from shared.deploy.lifecycle import LifecycleResult
+
+        service = CacheService()
+        result = LifecycleResult(success=False, error="container not found")
+        with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", self.CACHE_CONFIG)):
+            with patch.object(service, "_run_lifecycle_op", return_value=result):
+                events = [e async for e in service.lifecycle(CacheInput(target="mydb"), "stop")]
+        assert events[-1].type == "error"
+        assert "container not found" in events[-1].message
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_no_cache_target(self):
+        from features.cache.service import CacheService
+
+        service = CacheService()
+        with patch.object(service, "_resolve_cache_target", return_value=None):
+            events = [e async for e in service.lifecycle(CacheInput(target="mydb"), "restart")]
+        assert events[-1].type == "error"
+        assert "No cache target found" in events[-1].message
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_unknown_operation(self):
+        from features.cache.service import CacheService
+
+        service = CacheService()
+        events = [e async for e in service.lifecycle(CacheInput(target="mydb"), "explode")]
+        assert events[-1].type == "error"
+        assert "Unknown lifecycle operation" in events[-1].message
+
+    def test_run_lifecycle_op_dispatches_upstream_name(self):
+        """Lifecycle ops act on the upstream target name, since containers
+        and units are named after it."""
+        from features.cache.service import CacheService
+
+        with patch("shared.deploy.lifecycle.restart") as mock_restart:
+            CacheService._run_lifecycle_op("restart", "mydb-cache", self.CACHE_CONFIG)
+        mock_restart.assert_called_once_with(
+            "mydb", mode="docker", host="127.0.0.1",
+            namespace=None, ssh_key=None, ssh_user=None,
+        )
 
 
 # ============================================================================

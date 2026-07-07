@@ -405,6 +405,59 @@ async def list_schema_targets() -> SchemaTargetListResponse:
     return _target_list_to_response(target_list)
 
 
+class SchemaRefreshRequest(BaseModel):
+    target: Optional[str] = None
+
+
+class SchemaProfileRequest(BaseModel):
+    target: Optional[str] = None
+    table: Optional[str] = None
+
+
+class SchemaOperationResponse(BaseModel):
+    ok: bool
+    message: str
+    data: Optional[dict[str, Any]] = None
+
+
+@router.post("/semantic-layer/refresh")
+async def refresh_schema(
+    request: SchemaRefreshRequest,
+    guard: TargetGuard = Depends(require_target_body),
+) -> SchemaOperationResponse:
+    """Re-introspect the database and merge structural changes, preserving annotations."""
+    import asyncio
+
+    service = SchemaService()
+    result = await asyncio.to_thread(
+        service.refresh, guard.target_name, guard.target_config
+    )
+    return SchemaOperationResponse(
+        ok=result.get("ok", False),
+        message=result.get("message", ""),
+        data=result.get("data"),
+    )
+
+
+@router.post("/semantic-layer/profile")
+async def profile_schema(
+    request: SchemaProfileRequest,
+    guard: TargetGuard = Depends(require_target_body),
+) -> SchemaOperationResponse:
+    """Profile column data distributions into the semantic layer."""
+    import asyncio
+
+    service = SchemaService()
+    result = await asyncio.to_thread(
+        service.profile, guard.target_name, guard.target_config, request.table
+    )
+    return SchemaOperationResponse(
+        ok=result.get("ok", False),
+        message=result.get("message", ""),
+        data=result.get("data"),
+    )
+
+
 @router.post("/semantic-layer/init")
 async def init_schema(
     request: SchemaInitRequest,

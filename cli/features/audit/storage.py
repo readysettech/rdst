@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from dataclasses import asdict
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from .models import WorkloadRun
+
+logger = logging.getLogger(__name__)
 
 
 class AuditStorage:
@@ -93,3 +96,85 @@ class AuditStorage:
             os.unlink(path)
             return True
         return False
+
+
+def list_audit_runs(
+    target: str | None = None, limit: int = 20
+) -> list[dict[str, Any]]:
+    """Merged run history: duration captures plus quick-audit snapshots.
+
+    Captures come from AuditStorage; quick audits (no capture window) are
+    saved to the fleet snapshot store as `audit_*.json`. Newest first.
+    """
+    runs = AuditStorage().list_runs(target=target, limit=limit)
+
+    from features.fleet import SnapshotStore
+
+    store = SnapshotStore()
+    if store.base_dir.exists():
+        for path in sorted(store.base_dir.glob("audit_*.json"), reverse=True):
+            try:
+                with open(path) as file_obj:
+                    data = json.load(file_obj)
+                snap_target = data.get("target_name", "")
+                if target and snap_target != target:
+                    continue
+                # Skip snapshots that also have a workload run — those are
+                # already listed via their capture entry.
+                if (data.get("workload") or {}).get("run_id"):
+                    continue
+                # A failed health-LLM attempt leaves {"error": ...} in
+                # health_analysis; that is not an analyzed run.
+                health = data.get("health_analysis")
+                has_analysis = bool(health) and not (
+                    isinstance(health, dict) and set(health) == {"error"}
+                )
+                runs.append(
+                    {
+                        "run_id": path.stem,
+                        "target_name": snap_target,
+                        "started_at": (data.get("audited_at") or "")[:19],
+                        "duration_seconds": 0,
+                        "total_queries": len(data.get("top_queries", [])),
+                        "source": "quick",
+                        "has_analysis": has_analysis,
+                        "path": str(path),
+                    }
+                )
+            except Exception:
+                continue
+    runs.sort(key=lambda run: run.get("started_at", ""), reverse=True)
+    return runs[:limit]
+
+
+def find_audit_run(run_id: str, target: str | None = None) -> dict[str, Any] | None:
+    """Locate a run by ID (exact or prefix): snapshots first, then captures."""
+    from features.fleet import SnapshotStore
+
+    store = SnapshotStore()
+    if store.base_dir.exists():
+        candidates = [store.base_dir / f"{run_id}.json"]
+        candidates.extend(
+            path
+            for path in sorted(store.base_dir.glob("*.json"), reverse=True)
+            if path.stem.startswith(run_id)
+        )
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                with open(path) as file_obj:
+                    return json.load(file_obj)
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning("Skipping unreadable audit snapshot %s: %s", path, e)
+
+    storage = AuditStorage()
+    if not target:
+        for run in storage.list_runs(limit=200):
+            if run["run_id"] == run_id or run["run_id"].startswith(run_id):
+                target = run["target_name"]
+                run_id = run["run_id"]
+                break
+    if target:
+        return storage.load_run(target, run_id)
+    return None

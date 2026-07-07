@@ -45,6 +45,11 @@ class SnapshotStore:
         return None
 
     def list_snapshots(self) -> list[dict[str, Any]]:
+        """List snapshot summaries, newest first.
+
+        `kind` distinguishes fleet-audit snapshots (per-target `results`
+        list) from single-target audit saves stored in the same directory.
+        """
         if not self.base_dir.exists():
             return []
 
@@ -53,12 +58,14 @@ class SnapshotStore:
             try:
                 with open(path) as file_obj:
                     data = json.load(file_obj)
+                is_fleet = isinstance(data.get("results"), list)
                 snapshots.append(
                     {
                         "snapshot_id": data.get("snapshot_id", path.stem),
                         "name": data.get("name", path.stem),
                         "created_at": data.get("created_at", ""),
                         "targets_audited": data.get("targets_audited", 0),
+                        "kind": "fleet" if is_fleet else "single",
                         "path": str(path),
                     }
                 )
@@ -69,6 +76,7 @@ class SnapshotStore:
                         "name": path.stem,
                         "created_at": "",
                         "targets_audited": 0,
+                        "kind": "single",
                         "path": str(path),
                     }
                 )

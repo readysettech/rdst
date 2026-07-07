@@ -367,8 +367,9 @@ class CaptureService:
                                 q.get("normalized_query") or q.get("query") or ""
                                 for q in cumulative_top_queries
                             )
-                        schema_context = query_stats_module.collect_schema_for_tables(
-                            connection, table_names, db_engine, query_texts=all_query_texts
+                        schema_context = await asyncio.to_thread(
+                            query_stats_module.collect_schema_for_tables,
+                            connection, table_names, db_engine, query_texts=all_query_texts,
                         )
                         if schema_context:
                             logger.debug("Collected schema for %d tables", len(table_names))
@@ -389,7 +390,9 @@ class CaptureService:
                         schema_context=schema_context,
                     )
                     llm = LLMManager()
-                    llm_result = llm.generate_response(prompt, max_tokens=6144, temperature=0.0)
+                    llm_result = await asyncio.to_thread(
+                        llm.generate_response, prompt, max_tokens=6144, temperature=0.0,
+                    )
                     raw_text = llm_result.get("response", "")
                     analysis_dict = parse_llm_json(raw_text)
                     used_model = llm_result.get("model", "unknown")

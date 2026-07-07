@@ -22,6 +22,7 @@ from ..events import (
     CacheDeployCompleteEvent,
     CacheDropAllEvent,
     CacheEvent,
+    CacheLifecycleEvent,
     CacheListEvent,
     CacheRunCompleteEvent,
     CacheStatusEvent,
@@ -57,6 +58,10 @@ class CacheRegisterRequest(BaseModel):
     target: Optional[str] = None
     cache_host: str
     cache_port: int = 5433
+
+
+class CacheLifecycleRequest(BaseModel):
+    target: Optional[str] = None
 
 
 class CacheRunRequest(BaseModel):
@@ -114,6 +119,13 @@ class CacheDeleteResponse(BaseModel):
 class CacheDropAllResponse(BaseModel):
     success: bool
     count: int
+
+
+class CacheLifecycleResponse(BaseModel):
+    success: bool
+    operation: str
+    state: Optional[str] = None
+    detail: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +228,13 @@ def _event_to_dict(event: CacheEvent) -> dict:
         return {
             "success": event.success,
             "count": event.count,
+        }
+    if isinstance(event, CacheLifecycleEvent):
+        return {
+            "success": event.success,
+            "operation": event.operation,
+            "state": event.state,
+            "detail": event.detail,
         }
     if isinstance(event, ErrorEvent):
         return {
@@ -332,6 +351,41 @@ async def drop_all_caches(
     service = CacheService()
     event = await _collect_final(
         service.drop_all(CacheInput(target=guard.target_name))
+    )
+    return _event_to_dict(event)
+
+
+@router.post("/start")
+async def start_cache(
+    request: CacheLifecycleRequest,
+    guard: TargetGuard = Depends(require_target_body),
+) -> Union[CacheLifecycleResponse, CacheErrorResponse]:
+    """Start a stopped cache without redeploying."""
+    return await _lifecycle_endpoint(guard.target_name, "start")
+
+
+@router.post("/stop")
+async def stop_cache(
+    request: CacheLifecycleRequest,
+    guard: TargetGuard = Depends(require_target_body),
+) -> Union[CacheLifecycleResponse, CacheErrorResponse]:
+    """Stop a running cache without removing it."""
+    return await _lifecycle_endpoint(guard.target_name, "stop")
+
+
+@router.post("/restart")
+async def restart_cache(
+    request: CacheLifecycleRequest,
+    guard: TargetGuard = Depends(require_target_body),
+) -> Union[CacheLifecycleResponse, CacheErrorResponse]:
+    """Restart a deployed cache, preserving its config."""
+    return await _lifecycle_endpoint(guard.target_name, "restart")
+
+
+async def _lifecycle_endpoint(target_name: str, operation: str) -> dict:
+    service = CacheService()
+    event = await _collect_final(
+        service.lifecycle(CacheInput(target=target_name), operation)
     )
     return _event_to_dict(event)
 

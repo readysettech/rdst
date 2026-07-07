@@ -7,7 +7,12 @@ from typing import Any, AsyncGenerator, Optional
 
 from shared.anthropic_env import has_anthropic_api_key
 
-from .semantic_layer import SchemaIntrospector, SemanticLayerManager
+from .semantic_layer import (
+    SchemaIntrospector,
+    SemanticLayerManager,
+    create_data_profiler,
+    parse_row_estimate,
+)
 
 from .events import SchemaCompleteEvent, SchemaErrorEvent, SchemaEvent, SchemaStatusEvent
 from .models import (
@@ -251,6 +256,166 @@ class SchemaService:
                 enum_columns=[],
                 error=f"Failed to initialize semantic layer: {exc}",
             )
+
+    def refresh(self, target: str, target_config: dict[str, Any]) -> dict[str, Any]:
+        """Re-introspect the database and merge structural changes into the
+        existing semantic layer, preserving annotations."""
+        if not self._manager.exists(target):
+            return {
+                "ok": False,
+                "message": f"No semantic layer found for '{target}'. Run 'rdst schema init --target {target}' first.",
+                "data": None,
+            }
+
+        try:
+            existing = self._manager.load(target)
+            introspector = SchemaIntrospector(target_config)
+            fresh = introspector.introspect(target_name=target, enum_threshold=20, sample_enums=False)
+            changes = {
+                "tables_added": [],
+                "tables_removed": [],
+                "columns_added": [],
+                "columns_removed": [],
+                "columns_type_changed": [],
+                "indexes_added": [],
+                "indexes_removed": [],
+                "row_estimates_updated": [],
+                "relationships_updated": 0,
+            }
+
+            all_table_names = set(list(existing.tables.keys()) + list(fresh.tables.keys()))
+            for table_name in all_table_names:
+                if table_name not in fresh.tables:
+                    changes["tables_removed"].append(table_name)
+                    del existing.tables[table_name]
+                    continue
+                if table_name not in existing.tables:
+                    changes["tables_added"].append(table_name)
+                    existing.tables[table_name] = fresh.tables[table_name]
+                    continue
+
+                old_table = existing.tables[table_name]
+                new_table = fresh.tables[table_name]
+
+                if old_table.row_estimate != new_table.row_estimate:
+                    changes["row_estimates_updated"].append(
+                        f"{table_name}: {old_table.row_estimate} -> {new_table.row_estimate}"
+                    )
+                    old_table.row_estimate = new_table.row_estimate
+
+                old_cols = set(old_table.columns.keys())
+                new_cols = set(new_table.columns.keys())
+                for col_name in new_cols - old_cols:
+                    changes["columns_added"].append(f"{table_name}.{col_name}")
+                    old_table.columns[col_name] = new_table.columns[col_name]
+                for col_name in old_cols - new_cols:
+                    changes["columns_removed"].append(f"{table_name}.{col_name}")
+                    del old_table.columns[col_name]
+                for col_name in old_cols & new_cols:
+                    old_col = old_table.columns[col_name]
+                    new_col = new_table.columns[col_name]
+                    if old_col.data_type != new_col.data_type and old_col.data_type != "enum":
+                        changes["columns_type_changed"].append(
+                            f"{table_name}.{col_name}: {old_col.data_type} -> {new_col.data_type}"
+                        )
+                        old_col.data_type = new_col.data_type
+                    old_col.value_pattern = new_col.value_pattern
+
+                old_idx_names = set(old_table.indexes.keys()) if old_table.indexes else set()
+                new_idx_names = set(new_table.indexes.keys()) if new_table.indexes else set()
+                for idx_name in new_idx_names - old_idx_names:
+                    changes["indexes_added"].append(f"{table_name}.{idx_name}")
+                for idx_name in old_idx_names - new_idx_names:
+                    changes["indexes_removed"].append(f"{table_name}.{idx_name}")
+
+                old_table.indexes = new_table.indexes
+                if new_table.relationships:
+                    old_table.relationships = new_table.relationships
+                    changes["relationships_updated"] += 1
+
+            existing.extensions = fresh.extensions
+            existing.custom_types = fresh.custom_types
+            self._manager.save(existing)
+
+            total_changes = (
+                len(changes["tables_added"])
+                + len(changes["tables_removed"])
+                + len(changes["columns_added"])
+                + len(changes["columns_removed"])
+                + len(changes["columns_type_changed"])
+                + len(changes["indexes_added"])
+                + len(changes["indexes_removed"])
+                + len(changes["row_estimates_updated"])
+            )
+            if total_changes == 0:
+                message = f"Schema for '{target}' is up to date. No structural changes detected."
+            else:
+                message = f"Refreshed schema for '{target}' — {total_changes} change(s), annotations preserved."
+
+            return {
+                "ok": True,
+                "message": message,
+                "data": {
+                    "target": target,
+                    "changes": {k: v for k, v in changes.items() if v},
+                    "total_changes": total_changes,
+                    "path": str(self._manager.get_path(target)),
+                },
+            }
+        except ConnectionError as exc:
+            return {
+                "ok": False,
+                "message": f"Database connection failed: {exc}",
+                "data": None,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "message": f"Failed to refresh schema: {exc}",
+                "data": None,
+            }
+
+    def profile(
+        self,
+        target: str,
+        target_config: dict[str, Any],
+        table_name: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Profile column data distributions and store them as annotations."""
+        if not self._manager.exists(target):
+            return {
+                "ok": False,
+                "message": f"No semantic layer for '{target}'. Run 'rdst schema init' first.",
+            }
+        layer = self._manager.load(target)
+
+        profiler = create_data_profiler(target_config)
+        if table_name:
+            if table_name not in layer.tables:
+                return {
+                    "ok": False,
+                    "message": f"Table '{table_name}' not found in semantic layer.",
+                }
+            tables_to_profile = {table_name: layer.tables[table_name]}
+        else:
+            tables_to_profile = layer.tables
+
+        for tname, tann in tables_to_profile.items():
+            row_est = parse_row_estimate(tann.row_estimate)
+            tp = profiler.profile_table(
+                tname,
+                tann.columns,
+                row_est,
+                tann.row_estimate or "0",
+                tann.relationships,
+            )
+            tann.apply_profile(tp)
+
+        self._manager.save(layer)
+        return {
+            "ok": True,
+            "message": f"Profiled {len(tables_to_profile)} table(s) for '{target}'.",
+        }
 
     def export(self, target: str, format: str = "yaml") -> SchemaExportResult:
         if not self._manager.exists(target):

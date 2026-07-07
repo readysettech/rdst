@@ -23,6 +23,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _get_guard_module():
+    """Lazy import of the guard package for check_query/mask_results."""
+    import features.guard
+
+    return features.guard
+
 class SafetyViolationError(Exception):
     """SQL violates agent safety policy."""
 

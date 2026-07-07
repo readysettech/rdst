@@ -7,9 +7,12 @@ from datetime import datetime
 from sse_starlette.sse import EventSourceResponse
 import json
 import asyncio
+import logging
 import time
 
 from shared.api.target_guard import TargetGuard, require_target_body
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -79,24 +82,31 @@ async def get_query_registry(
         else:
             queries = all_queries
 
-        return QueryRegistryResponse(
-            queries=[
-                QueryRegistryEntry(
-                    sql=q.sql,
-                    hash=q.hash,
-                    tag=q.tag,
-                    last_analyzed=q.last_analyzed,
-                    target=q.last_target,
-                    frequency=q.frequency,
-                    source=q.source,
-                    most_recent_params=q.most_recent_params,
-                    first_analyzed=q.first_analyzed,
-                    max_duration_ms=q.max_duration_ms,
-                    avg_duration_ms=q.avg_duration_ms,
-                    observation_count=q.observation_count,
+        entries: list[QueryRegistryEntry] = []
+        for q in queries:
+            try:
+                entries.append(
+                    QueryRegistryEntry(
+                        sql=q.sql,
+                        hash=q.hash,
+                        tag=q.tag,
+                        last_analyzed=q.last_analyzed,
+                        target=q.last_target,
+                        frequency=q.frequency,
+                        source=q.source,
+                        most_recent_params=q.most_recent_params,
+                        first_analyzed=q.first_analyzed,
+                        max_duration_ms=q.max_duration_ms,
+                        avg_duration_ms=q.avg_duration_ms,
+                        observation_count=q.observation_count,
+                    )
                 )
-                for q in queries
-            ],
+            except Exception:
+                # A single malformed entry must not blank the whole listing.
+                logger.warning("Skipping malformed registry entry %s", q.hash)
+
+        return QueryRegistryResponse(
+            queries=entries,
             total=total,
             limit=limit,
             offset=offset,
@@ -178,6 +188,104 @@ async def update_query_tag(
 
     except Exception as e:
         return UpdateTagResponse(success=False, error=str(e))
+
+
+class UpdateSqlRequest(BaseModel):
+    sql: str
+
+
+class UpdateSqlResponse(BaseModel):
+    success: bool
+    hash: Optional[str] = None
+    hash_changed: bool = False
+    error: Optional[str] = None
+
+
+@router.patch("/query-registry/{query_hash}/sql")
+async def update_query_sql(
+    query_hash: str, request: UpdateSqlRequest
+) -> UpdateSqlResponse:
+    """Replace a query's SQL, preserving its tag. The hash changes with the SQL."""
+    try:
+        from shared.query_registry import QueryRegistry
+
+        registry = QueryRegistry()
+        registry.load()
+
+        entry = registry.get_query(query_hash)
+        if not entry:
+            return UpdateSqlResponse(success=False, error="Query not found")
+
+        new_hash, _ = registry.add_query(
+            sql=request.sql,
+            tag=entry.tag,
+            source=entry.source,
+            target=entry.last_target,
+        )
+        if new_hash != query_hash:
+            registry.remove_query(query_hash)
+
+        return UpdateSqlResponse(
+            success=True, hash=new_hash, hash_changed=new_hash != query_hash,
+        )
+    except Exception as e:
+        return UpdateSqlResponse(success=False, error=str(e))
+
+
+class ImportQueriesRequest(BaseModel):
+    file: str
+    update: bool = False
+    target: Optional[str] = None
+
+
+class ImportQueriesResponse(BaseModel):
+    success: bool
+    imported: int = 0
+    updated: int = 0
+    skipped: int = 0
+    errors: list[str] = []
+    message: str = ""
+
+
+@router.post("/query-registry/import")
+async def import_queries(request: ImportQueriesRequest) -> ImportQueriesResponse:
+    """Import queries from a local SQL file (semicolon-separated, with
+    optional `-- name:` / `-- target:` metadata comments)."""
+    from ..models import QueryCommandInput
+    from ..service import QueryService
+
+    service = QueryService()
+    payload = None
+    error_message = None
+    async for event in service.execute(
+        QueryCommandInput(
+            subcommand="import",
+            kwargs={
+                "file": request.file,
+                "update": request.update,
+                "target": request.target,
+            },
+        )
+    ):
+        if event.type == "complete":
+            payload = event.result
+        elif event.type == "error":
+            error_message = event.message
+
+    if payload is None:
+        return ImportQueriesResponse(
+            success=False, message=error_message or "Import failed",
+        )
+
+    data = payload.get("data") or {}
+    return ImportQueriesResponse(
+        success=bool(payload.get("ok")),
+        imported=data.get("imported", 0),
+        updated=data.get("updated", 0),
+        skipped=data.get("skipped", 0),
+        errors=data.get("errors", []),
+        message=payload.get("message", ""),
+    )
 
 
 # ============================================================================

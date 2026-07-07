@@ -608,6 +608,9 @@ class QueryEntry:
         # Handle backward compatibility
         if "last_target" not in data:
             data["last_target"] = ""
+        # Legacy writers stored last_target as a list; normalize to a string.
+        if isinstance(data["last_target"], list):
+            data["last_target"] = data["last_target"][0] if data["last_target"] else ""
         if "most_recent_params" not in data:
             data["most_recent_params"] = {}
         if "parameters" not in data:
@@ -767,6 +770,15 @@ class QueryRegistry:
             self.load()
 
         canonical_sql = canonicalize_sql(sql)
+
+        # Procedural statements (PL/pgSQL DO blocks, CALL) are not analyzable
+        # queries; reject them with a clear reason instead of a parse error.
+        first_keyword = re.match(r"\s*(\w+)", canonical_sql or "")
+        if first_keyword and first_keyword.group(1).upper() in ("DO", "CALL"):
+            raise ValueError(
+                f"{first_keyword.group(1).upper()} statements can't be saved to "
+                "the registry; only plain SQL queries can be analyzed."
+            )
 
         # Enforce size limit for registry storage
         query_bytes = len(canonical_sql.encode("utf-8")) if canonical_sql else 0

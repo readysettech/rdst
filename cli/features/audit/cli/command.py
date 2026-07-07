@@ -1218,39 +1218,9 @@ class AuditCommand:
         limit = getattr(args, "limit", 20)
         output_json = getattr(args, "output_json", False)
 
-        storage = AuditStorage()
-        runs = storage.list_runs(target=target, limit=limit)
+        from features.audit.storage import list_audit_runs
 
-        # Also include saved audit snapshots (quick audits without duration)
-        store = SnapshotStore()
-        snapshots_dir = store.base_dir
-        if snapshots_dir.exists():
-            import json as _json
-            for path in sorted(snapshots_dir.glob("audit_*.json"), reverse=True):
-                try:
-                    with open(path) as f:
-                        data = _json.load(f)
-                    snap_target = data.get("target_name", "")
-                    if target and snap_target != target:
-                        continue
-                    # Don't duplicate — skip if this audit also has a workload run
-                    if data.get("workload", {}).get("run_id"):
-                        continue
-                    runs.append({
-                        "run_id": path.stem,
-                        "target_name": snap_target,
-                        "started_at": data.get("audited_at", "")[:19],
-                        "duration_seconds": 0,
-                        "total_queries": len(data.get("top_queries", [])),
-                        "source": "quick",
-                        "has_analysis": False,
-                        "path": str(path),
-                    })
-                except Exception:
-                    continue
-            # Re-sort by started_at descending and apply limit
-            runs.sort(key=lambda r: r.get("started_at", ""), reverse=True)
-            runs = runs[:limit]
+        runs = list_audit_runs(target=target, limit=limit)
 
         if output_json:
             print(json.dumps(runs, indent=2))
@@ -1296,36 +1266,10 @@ class AuditCommand:
         if not run_id:
             return RdstResult(False, "Run ID required")
 
-        import json as _json
+        from features.audit.storage import find_audit_run
 
-        data = None
         target = getattr(args, "target", None)
-
-        # Search snapshots first (full merged reports)
-        store = SnapshotStore()
-        if store.base_dir.exists():
-            exact = store.base_dir / f"{run_id}.json"
-            if exact.exists():
-                with open(exact) as f:
-                    data = _json.load(f)
-            else:
-                for p in sorted(store.base_dir.glob("*.json"), reverse=True):
-                    if run_id in p.stem:
-                        with open(p) as f:
-                            data = _json.load(f)
-                        break
-
-        # Fall back to capture storage (duration captures from single-target audit)
-        if data is None:
-            storage = AuditStorage()
-            if not target:
-                for r in storage.list_runs(limit=200):
-                    if r["run_id"] == run_id or r["run_id"].startswith(run_id):
-                        target = r["target_name"]
-                        run_id = r["run_id"]
-                        break
-            if target:
-                data = storage.load_run(target, run_id)
+        data = find_audit_run(run_id, target=target)
 
         if data is None:
             return RdstResult(False, f"Run '{run_id}' not found. Try: rdst audit list")

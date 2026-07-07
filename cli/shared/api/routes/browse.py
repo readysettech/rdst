@@ -1,6 +1,6 @@
 """Browse API endpoint for server-side directory navigation.
 
-Provides filesystem directory listing for the directory picker UI,
+Provides filesystem directory listing for the directory/file picker UI,
 since browser-native folder pickers return sandboxed paths.
 """
 
@@ -37,17 +37,21 @@ class BrowseResponse(BaseModel):
     current: str
     parent: Optional[str]
     directories: list[DirectoryEntry]
+    files: list[DirectoryEntry] = []
 
 
 @router.get("/browse")
-async def browse_directory(path: Optional[str] = None) -> BrowseResponse:
-    """List subdirectories of a given path for the directory picker.
+async def browse_directory(
+    path: Optional[str] = None, ext: Optional[str] = None
+) -> BrowseResponse:
+    """List subdirectories (and optionally files) of a path for the picker UI.
 
     Args:
         path: Directory to list. Defaults to home directory if omitted.
+        ext: When given, also list files with this extension (e.g. "csv").
 
     Returns:
-        Current path, parent path, and sorted list of subdirectories.
+        Current path, parent path, sorted subdirectories, and matching files.
     """
     if path:
         resolved = os.path.abspath(os.path.expanduser(path))
@@ -64,7 +68,10 @@ async def browse_directory(path: Optional[str] = None) -> BrowseResponse:
     if parent == resolved:
         parent = None
 
+    suffix = f".{ext.lstrip('.').lower()}" if ext else None
+
     directories: list[DirectoryEntry] = []
+    files: list[DirectoryEntry] = []
     try:
         entries = os.listdir(resolved)
     except PermissionError:
@@ -79,13 +86,17 @@ async def browse_directory(path: Optional[str] = None) -> BrowseResponse:
         try:
             if os.path.isdir(full_path):
                 directories.append(DirectoryEntry(name=entry, path=full_path))
+            elif suffix and entry.lower().endswith(suffix):
+                files.append(DirectoryEntry(name=entry, path=full_path))
         except PermissionError:
             continue
 
     directories.sort(key=lambda d: d.name.lower())
+    files.sort(key=lambda f: f.name.lower())
 
     return BrowseResponse(
         current=resolved,
         parent=parent,
         directories=directories,
+        files=files,
     )

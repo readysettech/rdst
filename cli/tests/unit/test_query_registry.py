@@ -294,6 +294,42 @@ class TestQueryEntry:
         assert entry.last_target == ""
         assert entry.most_recent_params == {}
 
+    def test_from_dict_normalizes_list_last_target(self):
+        """Legacy writers stored last_target as a list; normalize to a string."""
+        base = {
+            "sql": "SELECT count(*) FROM users",
+            "hash": "abc123",
+            "tag": "",
+            "first_analyzed": "",
+            "last_analyzed": "",
+            "frequency": 0,
+            "source": "chat",
+        }
+
+        assert QueryEntry.from_dict({**base, "last_target": []}).last_target == ""
+        assert QueryEntry.from_dict({**base, "last_target": ["pgtest"]}).last_target == "pgtest"
+
+
+class TestProceduralStatementRejection:
+    """Procedural statements get a clear error, not a parse failure."""
+
+    def test_do_block_rejected_with_honest_error(self, temp_dir):
+        registry = QueryRegistry(registry_path=str(Path(temp_dir) / "queries.toml"))
+        do_block = (
+            "DO $$ DECLARE i int; BEGIN FOR i IN 1..300 LOOP "
+            "PERFORM count(*) FROM orders WHERE customer_id = (random()*5000)::int; "
+            "END LOOP; END $$"
+        )
+
+        with pytest.raises(ValueError, match="DO statements can't be saved"):
+            registry.add_query(sql=do_block, source="top", target="pgtest")
+
+    def test_call_rejected_with_honest_error(self, temp_dir):
+        registry = QueryRegistry(registry_path=str(Path(temp_dir) / "queries.toml"))
+
+        with pytest.raises(ValueError, match="CALL statements can't be saved"):
+            registry.add_query(sql="CALL refresh_stats()", source="top", target="pgtest")
+
 
 class TestQueryRegistry:
     """Tests for the QueryRegistry class."""
