@@ -6,24 +6,25 @@ import { Link, useRouterState } from "@tanstack/react-router";
 
 interface RouteConfig {
   label: string;
-  icon: "speedometer" | "sparkles" | "observe" | "search" | "folder-file" | "play" | "layers" | "test-tube" | "settings" | "database-settings" | "document-validation" | "dashboard" | "user-shield" | "message-multiple" | "adjustment-horizontal";
+  icon: "speedometer" | "sparkles" | "observe" | "search" | "folder-file" | "play" | "layers" | "test-tube" | "settings" | "database-settings" | "document-validation" | "dashboard" | "user-shield" | "message-multiple" | "adjustment-horizontal" | "building";
   parent?: string;
 }
 
 const routeConfig: Record<string, RouteConfig> = {
-  "/": { label: "Query Analyzer", icon: "speedometer" },
-  "/results": { label: "Results", icon: "speedometer", parent: "/" },
+  "/": { label: "Home", icon: "dashboard" },
+  "/analyze": { label: "Analyze Query", icon: "speedometer" },
+  "/results": { label: "Results", icon: "speedometer", parent: "/analyze" },
   "/ask": { label: "Ask", icon: "sparkles" },
-  "/top": { label: "Top Queries", icon: "observe" },
-  "/scan": { label: "Scan", icon: "search" },
-  "/query-registry": { label: "Query Registry", icon: "folder-file" },
-  "/cache": { label: "Cache", icon: "database-settings" },
+  "/top": { label: "Slow Queries", icon: "observe" },
+  "/scan": { label: "Code Scan", icon: "search" },
+  "/query-registry": { label: "Saved Queries", icon: "folder-file" },
+  "/cache": { label: "Caching", icon: "database-settings" },
   "/benchmark": { label: "Benchmark", icon: "play" },
   "/schema": { label: "Schema", icon: "layers" },
-  "/audit": { label: "Audit", icon: "document-validation" },
+  "/audit": { label: "Health Check", icon: "document-validation" },
   "/guards": { label: "Guards", icon: "user-shield" },
   "/agents": { label: "Agents", icon: "message-multiple" },
-  "/fleet": { label: "Fleet", icon: "dashboard" },
+  "/fleet": { label: "Fleet", icon: "building" },
   "/readyset": { label: "Readyset Testing", icon: "test-tube" },
   "/configure": { label: "Configure", icon: "settings" },
   "/dev-settings": { label: "Dev Settings", icon: "adjustment-horizontal" },

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { tv } from "@rs/tailwind-base";
 import { Icon } from "@rs/ui-new/icon";
+import type { IconStrokeName } from "@rs/ui-icons/icon-name";
 import { Text } from "@rs/ui-new/text";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { TargetDropdown } from "../components/TargetDropdown";
@@ -54,33 +55,96 @@ const navItemStyles = tv({
   },
 });
 
-const navItems = [
-  { label: "Query Analyzer", icon: "speedometer" as const, to: "/" },
-  { label: "Ask", icon: "sparkles" as const, to: "/ask" },
-  { label: "Top Queries", icon: "observe" as const, to: "/top" },
-  { label: "Scan", icon: "search" as const, to: "/scan" },
-  {
-    label: "Query Registry",
-    icon: "folder-file" as const,
-    to: "/query-registry",
-  },
-  { label: "Cache", icon: "database-settings" as const, to: "/cache" },
-  { label: "Audit", icon: "document-validation" as const, to: "/audit" },
-  { label: "Guards", icon: "user-shield" as const, to: "/guards" },
-  { label: "Agents", icon: "message-multiple" as const, to: "/agents" },
-  { label: "Fleet", icon: "dashboard" as const, to: "/fleet" },
-  { label: "Benchmark", icon: "play" as const, to: "/benchmark" },
-  { label: "Schema", icon: "layers" as const, to: "/schema" },
-  { label: "Configure", icon: "settings" as const, to: "/configure" },
+interface NavItem {
+  label: string;
+  icon: IconStrokeName;
+  to: string;
+}
+
+const primaryItems: NavItem[] = [
+  { label: "Home", icon: "dashboard", to: "/" },
+  { label: "Ask", icon: "sparkles", to: "/ask" },
 ];
+
+const sections: Array<{ title: string; items: NavItem[] }> = [
+  {
+    title: "Diagnose",
+    items: [
+      { label: "Slow Queries", icon: "observe", to: "/top" },
+      { label: "Health Check", icon: "document-validation", to: "/audit" },
+      { label: "Analyze Query", icon: "speedometer", to: "/analyze" },
+    ],
+  },
+  {
+    title: "Optimize",
+    items: [
+      { label: "Caching", icon: "database-settings", to: "/cache" },
+      { label: "Saved Queries", icon: "folder-file", to: "/query-registry" },
+      { label: "Code Scan", icon: "search", to: "/scan" },
+    ],
+  },
+];
+
+const advancedItems: NavItem[] = [
+  { label: "Agents", icon: "message-multiple", to: "/agents" },
+  { label: "Guards", icon: "user-shield", to: "/guards" },
+  { label: "Fleet", icon: "building", to: "/fleet" },
+  { label: "Benchmark", icon: "play", to: "/benchmark" },
+  { label: "Schema", icon: "layers", to: "/schema" },
+  { label: "Configure", icon: "settings", to: "/configure" },
+];
+
+const ADVANCED_STORAGE_KEY = "rdst-sidebar-advanced";
+
+function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+  return (
+    <Link to={item.to} className={navItemStyles({ active })}>
+      <Icon
+        name={item.icon}
+        label={item.label}
+        className={`w-4 h-4 transition-transform group-hover:scale-110 ${
+          active ? "text-content-primary-soft" : "text-content-layout-3"
+        }`}
+      />
+      <span>{item.label}</span>
+    </Link>
+  );
+}
+
+function SectionTitle({ title }: { title: string }) {
+  return (
+    <Text
+      level="caption"
+      className="text-content-layout-3 uppercase tracking-wider px-3 pt-3 pb-1"
+    >
+      {title}
+    </Text>
+  );
+}
 
 export function Sidebar() {
   const router = useRouterState();
   const currentPath = router.location.pathname;
   const { target: selectedTarget, setTarget: setSelectedTarget } = useTarget();
   const [reportOpen, setReportOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => localStorage.getItem(ADVANCED_STORAGE_KEY) === "open",
+  );
 
   const { data: status } = useSystemStatus();
+
+  const isActive = (item: NavItem) =>
+    currentPath === item.to || (item.to === "/analyze" && currentPath === "/results");
+
+  // Keep the active item visible when landing directly on an advanced route.
+  const advancedActive = advancedItems.some(isActive);
+  const showAdvanced = advancedOpen || advancedActive;
+
+  const toggleAdvanced = () => {
+    const next = !advancedOpen;
+    setAdvancedOpen(next);
+    localStorage.setItem(ADVANCED_STORAGE_KEY, next ? "open" : "closed");
+  };
 
   return (
     <aside className={sidebarStyles()}>
@@ -94,46 +158,45 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex flex-col gap-1 p-3 flex-1 overflow-y-auto">
-        {navItems.map((item) => {
-          const isActive =
-            currentPath === item.to ||
-            (item.to === "/" && currentPath === "/results");
+        {primaryItems.map((item) => (
+          <NavLink key={item.to} item={item} active={isActive(item)} />
+        ))}
 
-          return (
-            <Link
-              key={item.to}
-              to={item.to}
-              className={navItemStyles({ active: isActive })}
-            >
-              <Icon
-                name={item.icon}
-                label={item.label}
-                className={`w-4 h-4 transition-transform group-hover:scale-110 ${
-                  isActive
-                    ? "text-content-primary-soft"
-                    : "text-content-layout-3"
-                }`}
+        {sections.map((section) => (
+          <div key={section.title} className="flex flex-col gap-1">
+            <SectionTitle title={section.title} />
+            {section.items.map((item) => (
+              <NavLink key={item.to} item={item} active={isActive(item)} />
+            ))}
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={toggleAdvanced}
+          className="flex items-center gap-1.5 px-3 pt-3 pb-1 cursor-pointer text-content-layout-3 hover:text-content-layout-2 transition-colors"
+        >
+          <Text level="caption" className="uppercase tracking-wider inherit">
+            Advanced
+          </Text>
+          <Icon
+            name={showAdvanced ? "chevron-down" : "chevron-right"}
+            label=""
+            className="w-3 h-3"
+          />
+        </button>
+        {showAdvanced && (
+          <>
+            {advancedItems.map((item) => (
+              <NavLink key={item.to} item={item} active={isActive(item)} />
+            ))}
+            {import.meta.env.DEV && (
+              <NavLink
+                item={{ label: "Dev Settings", icon: "test-tube", to: "/dev-settings" }}
+                active={currentPath === "/dev-settings"}
               />
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
-        {import.meta.env.DEV && (
-          <Link
-            to="/dev-settings"
-            className={navItemStyles({ active: currentPath === '/dev-settings' })}
-          >
-            <Icon
-              name="test-tube"
-              label="Dev Settings"
-              className={`w-4 h-4 transition-transform group-hover:scale-110 ${
-                currentPath === '/dev-settings'
-                  ? "text-content-primary-soft"
-                  : "text-content-layout-3"
-              }`}
-            />
-            <span>Dev Settings</span>
-          </Link>
+            )}
+          </>
         )}
       </nav>
 

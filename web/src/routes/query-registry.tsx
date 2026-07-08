@@ -216,11 +216,11 @@ function QueryRegistryPage() {
         <HStack className="justify-between items-start">
           <HStack className="gap-4 items-center">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
-              <Icon name="folder-file" label="Query Registry" className="w-6 h-6 text-content-primary-soft" />
+              <Icon name="folder-file" label="Saved Queries" className="w-6 h-6 text-content-primary-soft" />
             </div>
             <VStack className="gap-1 items-start">
               <Text as="h1" level="headline-3" className="text-content-layout-1">
-                Query Registry
+                Saved Queries
               </Text>
               <Text level="body-small" className="text-content-layout-3">
                 Saved queries from analysis sessions. Use the Analyze action to run a query.

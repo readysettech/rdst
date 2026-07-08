@@ -25,6 +25,7 @@ import { Route as CacheRouteImport } from './routes/cache'
 import { Route as BenchmarkRouteImport } from './routes/benchmark'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as AskRouteImport } from './routes/ask'
+import { Route as AnalyzeRouteImport } from './routes/analyze'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -108,6 +109,11 @@ const AskRoute = AskRouteImport.update({
   path: '/ask',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AnalyzeRoute = AnalyzeRouteImport.update({
+  id: '/analyze',
+  path: '/analyze',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentsRoute = AgentsRouteImport.update({
   id: '/agents',
   path: '/agents',
@@ -122,6 +128,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
+  '/analyze': typeof AnalyzeRoute
   '/ask': typeof AskRoute
   '/audit': typeof AuditRoute
   '/benchmark': typeof BenchmarkRoute
@@ -142,6 +149,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
+  '/analyze': typeof AnalyzeRoute
   '/ask': typeof AskRoute
   '/audit': typeof AuditRoute
   '/benchmark': typeof BenchmarkRoute
@@ -163,6 +171,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
+  '/analyze': typeof AnalyzeRoute
   '/ask': typeof AskRoute
   '/audit': typeof AuditRoute
   '/benchmark': typeof BenchmarkRoute
@@ -185,6 +194,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/agents'
+    | '/analyze'
     | '/ask'
     | '/audit'
     | '/benchmark'
@@ -205,6 +215,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/agents'
+    | '/analyze'
     | '/ask'
     | '/audit'
     | '/benchmark'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/agents'
+    | '/analyze'
     | '/ask'
     | '/audit'
     | '/benchmark'
@@ -246,6 +258,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRoute
+  AnalyzeRoute: typeof AnalyzeRoute
   AskRoute: typeof AskRoute
   AuditRoute: typeof AuditRoute
   BenchmarkRoute: typeof BenchmarkRoute
@@ -378,6 +391,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AskRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/analyze': {
+      id: '/analyze'
+      path: '/analyze'
+      fullPath: '/analyze'
+      preLoaderRoute: typeof AnalyzeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agents': {
       id: '/agents'
       path: '/agents'
@@ -398,6 +418,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRoute,
+  AnalyzeRoute: AnalyzeRoute,
   AskRoute: AskRoute,
   AuditRoute: AuditRoute,
   BenchmarkRoute: BenchmarkRoute,

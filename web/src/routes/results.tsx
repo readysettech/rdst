@@ -22,7 +22,7 @@ type ResultsSearch = {
 export const Route = createFileRoute('/results')({
   validateSearch: (search: Record<string, unknown>): ResultsSearch => {
     if (!search.query || typeof search.query !== 'string') {
-      throw redirect({ to: '/' });
+      throw redirect({ to: '/analyze' });
     }
     return {
       query: search.query,
@@ -120,8 +120,8 @@ export function ResultsPage({ search }: ResultsPageProps) {
 
   const handleParamCancel = useCallback(() => {
     setShowParamDialog(false);
-    // Go back to the previous page
-    navigate({ to: '/' });
+    // Go back to the query editor
+    navigate({ to: '/analyze' });
   }, [navigate]);
 
   // Check conversation status when analysis completes
@@ -166,7 +166,7 @@ export function ResultsPage({ search }: ResultsPageProps) {
             icon="arrow-left"
             iconPosition="icon"
             label="Back"
-            onClick={() => navigate({ to: '/' })}
+            onClick={() => navigate({ to: '/analyze' })}
           />
           <div className="w-px h-5 bg-border-layout-1" />
           <Text as="span" level="body-small" className="text-content-layout-3">

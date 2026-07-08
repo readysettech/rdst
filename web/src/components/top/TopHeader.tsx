@@ -62,12 +62,12 @@ export function TopHeader({ state, queriesCount, onSaveAll }: TopHeaderProps) {
       <HStack className="justify-between items-start">
         <HStack className="gap-4 items-center">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-warning-soft flex items-center justify-center">
-            <Icon name="observe" label="Top Queries" className="w-6 h-6 text-content-primary-soft" />
+            <Icon name="observe" label="Slow Queries" className="w-6 h-6 text-content-primary-soft" />
           </div>
           <VStack className="gap-1 items-start">
             <HStack className="gap-3 items-center">
               <Text as="h1" level="headline-3" className="text-content-layout-1">
-                Top Queries
+                Slow Queries
               </Text>
               <Tag
                 size="small"

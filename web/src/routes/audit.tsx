@@ -773,14 +773,14 @@ function AuditPage() {
         <HStack className="justify-between items-start">
           <HStack className="gap-4 items-center">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-info-soft to-surface-primary-soft flex items-center justify-center">
-              <Icon name="document-validation" label="Audit" className="w-6 h-6 text-content-info-soft" />
+              <Icon name="document-validation" label="Health Check" className="w-6 h-6 text-content-info-soft" />
             </div>
             <VStack className="gap-1 items-start">
               <Text as="h1" level="headline-3" className="text-content-layout-1">
-                Database Audit
+                Health Check
               </Text>
               <Text level="body-small" className="text-content-layout-3">
-                Health check, sizing verdict, and cache opportunities for "{target}".
+                Full audit of "{target}": sizing verdict, slow spots, and cache opportunities.
               </Text>
             </VStack>
           </HStack>
