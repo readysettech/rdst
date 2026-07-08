@@ -2,11 +2,24 @@
 stop reaching Slack (like the wizard not tracking trial events)."""
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_trial_token_leak():
+    """The registration flows under test export RDST_TRIAL_TOKEN; restore the
+    environment afterwards so the fake token can't bleed into other tests."""
+    before = os.environ.get("RDST_TRIAL_TOKEN")
+    yield
+    if before is None:
+        os.environ.pop("RDST_TRIAL_TOKEN", None)
+    else:
+        os.environ["RDST_TRIAL_TOKEN"] = before
 
 
 @pytest.fixture
@@ -49,6 +62,10 @@ def _run_wizard_registration(mock_telemetry, email="user@example.com", token="va
     with (
         patch("features.configure.cli.wizard.Prompt") as mock_prompt,
         patch.dict("sys.modules", {"requests": mock_requests}),
+        # Keep the fake token out of os.environ and the real OS keyring.
+        patch.object(
+            ConfigurationWizard, "_persist_secret_to_keyring", return_value=True
+        ),
     ):
         mock_prompt.ask.side_effect = [email, token]
         wizard._run_trial_registration(mock_cfg)
@@ -254,7 +271,7 @@ class TestTrialServiceDisplayName:
             importlib.reload(ts_mod)
             from features.trial.service import TrialService
 
-            svc = TrialService()
+            svc = TrialService(secret_store=MagicMock())
             with patch.object(svc, "_load_config") as mock_load:
                 mock_load.return_value = MagicMock()
                 result = _asyncio.new_event_loop().run_until_complete(svc.register("user@example.com"))
@@ -277,7 +294,7 @@ class TestTrialServiceDisplayName:
 
         from features.trial.service import TrialService
 
-        svc = TrialService()
+        svc = TrialService(secret_store=MagicMock())
         with patch.object(svc, "_load_config", return_value=MagicMock()):
             result = _asyncio.new_event_loop().run_until_complete(
                 svc.activate(token="valid-trial-token-12345", email="user@example.com", email_tier="business")
