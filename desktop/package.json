@@ -11,6 +11,7 @@
     "build:web": "node ./scripts/build-web.mjs",
     "build:sidecar": "node ./scripts/build-sidecar.mjs",
     "dev": "tsup && (tsup --watch & ELECTRON_RENDERER_URL=${ELECTRON_RENDERER_URL:-http://localhost:3001} electron .)",
+    "lock:sidecar": "uv pip compile ../../../rdst/pyproject.toml scripts/requirements-sidecar.in --python-version 3.12 --universal --generate-hashes --no-emit-index-url --output-file scripts/requirements-sidecar.lock",
     "package": "electron-builder",
     "prepackage": "pnpm build:web && pnpm build:sidecar && pnpm build",
     "start": "electron .",

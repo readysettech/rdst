@@ -1,5 +1,7 @@
 import {
+  accessSync,
   chmodSync,
+  constants,
   copyFileSync,
   cpSync,
   existsSync,
@@ -29,11 +31,21 @@ const workRoot = path.resolve(buildRoot, "work");
 const specRoot = path.resolve(buildRoot, "spec");
 const venvRoot = path.resolve(buildRoot, "venv");
 const pyinstallerAppDir = path.resolve(distRoot, "rdst");
+const lockedRequirements = path.resolve(appDir, "scripts/requirements-sidecar.lock");
+const PINNED_PYTHON_VERSION = "3.12";
 
 const PYTHON_CANDIDATES =
   process.platform === "win32"
-    ? ["py", "python", "python3"]
-    : ["python3.12", "python3.11", "python3.10", "python3", "python"];
+    ? [
+        { command: "py", args: ["-3.12"] },
+        { command: "python", args: [] },
+        { command: "python3", args: [] }
+      ]
+    : [
+        { command: "python3.12", args: [] },
+        { command: "python3", args: [] },
+        { command: "python", args: [] }
+      ];
 
 const PYINSTALLER_ARGS = [
   "--onedir",
@@ -68,17 +80,34 @@ function run(command, args, options = {}) {
   }
 }
 
-function commandExists(command) {
-  return spawnSync(command, ["--version"], { stdio: "ignore" }).status === 0;
+function pythonVersion(candidate) {
+  const result = spawnSync(
+    candidate.command,
+    [
+      ...candidate.args,
+      "-c",
+      "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+    ],
+    { encoding: "utf8" }
+  );
+  return result.status === 0 ? result.stdout.trim() : null;
 }
 
 function detectPython() {
   for (const candidate of PYTHON_CANDIDATES) {
-    if (commandExists(candidate)) {
+    if (pythonVersion(candidate) === PINNED_PYTHON_VERSION) {
       return candidate;
     }
   }
-  throw new Error(`Unable to find Python. Tried: ${PYTHON_CANDIDATES.join(", ")}`);
+  throw new Error(
+    `Unable to find Python ${PINNED_PYTHON_VERSION}. Tried: ${PYTHON_CANDIDATES.map(
+      ({ command, args }) => [command, ...args].join(" ")
+    ).join(", ")}`
+  );
+}
+
+function runPython(candidate, args, options = {}) {
+  run(candidate.command, [...candidate.args, ...args], options);
 }
 
 function makeExecutable(filePath) {
@@ -87,29 +116,33 @@ function makeExecutable(filePath) {
   }
 }
 
-function ensureExecutable(filePath) {
+function validateExecutable(filePath) {
   if (!existsSync(filePath) || !statSync(filePath).isFile()) {
     throw new Error(`RDST backend executable not found: ${filePath}`);
   }
-  makeExecutable(filePath);
+  if (process.platform !== "win32") {
+    accessSync(filePath, constants.X_OK);
+  }
 }
 
 function stageSidecarDir(sourceDir) {
   const sourceExecutable = path.resolve(sourceDir, executableName);
-  ensureExecutable(sourceExecutable);
+  validateExecutable(sourceExecutable);
   rmSync(sidecarAppDir, { recursive: true, force: true });
   mkdirSync(sidecarPlatformDir, { recursive: true });
   cpSync(sourceDir, sidecarAppDir, { recursive: true });
-  ensureExecutable(stagedExecutable);
+  makeExecutable(stagedExecutable);
+  validateExecutable(stagedExecutable);
   console.log(`[rdst-desktop] Staged RDST backend sidecar at ${sidecarAppDir}`);
 }
 
 function stageSidecarBinary(sourcePath) {
-  ensureExecutable(sourcePath);
+  validateExecutable(sourcePath);
   rmSync(sidecarAppDir, { recursive: true, force: true });
   mkdirSync(sidecarAppDir, { recursive: true });
   copyFileSync(sourcePath, stagedExecutable);
-  ensureExecutable(stagedExecutable);
+  makeExecutable(stagedExecutable);
+  validateExecutable(stagedExecutable);
   console.log(`[rdst-desktop] Staged RDST backend sidecar at ${stagedExecutable}`);
 }
 
@@ -136,12 +169,31 @@ function buildWithPyInstaller() {
 
   rmSync(buildRoot, { recursive: true, force: true });
   mkdirSync(buildRoot, { recursive: true });
-  run(hostPython, ["-m", "venv", venvRoot]);
+  runPython(hostPython, ["-m", "venv", venvRoot]);
 
   const python = venvPythonPath();
-  run(python, ["-m", "pip", "install", "--disable-pip-version-check", "--upgrade", "pip"]);
-  run(python, ["-m", "pip", "install", "--disable-pip-version-check", "-e", rdstDir]);
-  run(python, ["-m", "pip", "install", "--disable-pip-version-check", "pyinstaller"]);
+  if (!existsSync(lockedRequirements)) {
+    throw new Error(`Pinned sidecar requirements not found: ${lockedRequirements}`);
+  }
+  run(python, [
+    "-m",
+    "pip",
+    "install",
+    "--disable-pip-version-check",
+    "--require-hashes",
+    "--requirement",
+    lockedRequirements
+  ]);
+  run(python, [
+    "-m",
+    "pip",
+    "install",
+    "--disable-pip-version-check",
+    "--no-build-isolation",
+    "--no-deps",
+    "--editable",
+    rdstDir
+  ]);
 
   mkdirSync(distRoot, { recursive: true });
   mkdirSync(workRoot, { recursive: true });

@@ -160,5 +160,6 @@ function closeServer(server: Server): Promise<void> {
       }
       resolve()
     })
+    server.closeAllConnections()
   })
 }

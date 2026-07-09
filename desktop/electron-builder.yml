@@ -11,10 +11,6 @@ extraFiles:
     to: "sidecar"
     filter:
       - "**/*"
-protocols:
-  name: RDST Desktop
-  schemes:
-    - rdst
 mac:
   category: public.app-category.developer-tools
   target:

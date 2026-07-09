@@ -15,6 +15,7 @@ export default defineConfig([
     entry: { 'preload/index': 'src/preload/index.ts' },
     outDir: 'out',
     format: 'esm',
+    outExtension: () => ({ js: '.mjs' }),
     platform: 'node',
     target: 'node22',
     external: ['electron'],

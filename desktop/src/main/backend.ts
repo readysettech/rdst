@@ -1,14 +1,17 @@
 import type { ChildProcess } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { accessSync, constants, existsSync, statSync } from 'node:fs'
+import { createServer } from 'node:net'
 import path from 'node:path'
 
 const BACKEND_NAME = 'rdst'
 const DEFAULT_HOST = '127.0.0.1'
-const DEFAULT_PORT = 8787
 const READY_PATH = '/api/init/status'
 const STARTUP_TIMEOUT_MS = 30_000
 const READINESS_INTERVAL_MS = 250
+const READINESS_REQUEST_TIMEOUT_MS = 1_000
+const SHUTDOWN_TIMEOUT_MS = 3_000
+const FORCE_KILL_TIMEOUT_MS = 1_000
 const MAX_OUTPUT_LINES = 10
 
 export interface BackendHandle {
@@ -112,12 +115,39 @@ async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+export async function findAvailablePort(host: string): Promise<number> {
+  const server = createServer()
+  server.unref()
+
+  return await new Promise<number>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, host, () => {
+      const address = server.address()
+      if (!address || typeof address === 'string') {
+        server.close()
+        reject(new Error(`Unable to allocate an RDST backend port on ${host}`))
+        return
+      }
+
+      const { port } = address
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve(port)
+      })
+    })
+  })
+}
+
 async function waitForBackend(
   apiBaseUrl: string,
   getExitStatus: () => {
     code: number | null
     signal: NodeJS.Signals | null
   } | null,
+  getSpawnError: () => Error | null,
   getStdout: () => string[],
   getStderr: () => string[]
 ): Promise<void> {
@@ -125,6 +155,11 @@ async function waitForBackend(
   let lastError = 'not checked yet'
 
   while (Date.now() < deadline) {
+    const spawnError = getSpawnError()
+    if (spawnError) {
+      throw new Error(`Unable to start RDST backend: ${spawnError.message}`)
+    }
+
     const exitStatus = getExitStatus()
     if (exitStatus) {
       throw new Error(
@@ -135,7 +170,9 @@ async function waitForBackend(
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}${READY_PATH}`)
+      const response = await fetch(`${apiBaseUrl}${READY_PATH}`, {
+        signal: AbortSignal.timeout(READINESS_REQUEST_TIMEOUT_MS),
+      })
       if (response.ok) {
         return
       }
@@ -156,7 +193,7 @@ export async function startBackend(
   options: StartBackendOptions
 ): Promise<BackendHandle> {
   const host = options.host ?? DEFAULT_HOST
-  const port = options.port ?? DEFAULT_PORT
+  const port = options.port ?? (await findAvailablePort(host))
   const apiBaseUrl = `http://${host}:${port}`
   const binaryPath = resolveBackendBinaryPath(options.resourcesPath)
   validateExecutable(binaryPath)
@@ -167,6 +204,7 @@ export async function startBackend(
     code: number | null
     signal: NodeJS.Signals | null
   } | null = null
+  let spawnError: Error | null = null
 
   const child = spawn(
     binaryPath,
@@ -185,13 +223,24 @@ export async function startBackend(
   child.once('exit', (code, signal) => {
     exitStatus = { code, signal }
   })
+  child.once('error', (error) => {
+    spawnError = error
+  })
 
-  await waitForBackend(
-    apiBaseUrl,
-    () => exitStatus,
-    () => stdoutLines,
-    () => stderrLines
-  )
+  try {
+    await waitForBackend(
+      apiBaseUrl,
+      () => exitStatus,
+      () => spawnError,
+      () => stdoutLines,
+      () => stderrLines
+    )
+  } catch (error) {
+    if (!spawnError) {
+      await terminateProcess(child)
+    }
+    throw error
+  }
 
   return {
     process: child,
@@ -200,13 +249,54 @@ export async function startBackend(
   }
 }
 
-export function stopBackend(handle: BackendHandle | null): void {
-  if (!handle || handle.process.exitCode !== null) return
-  handle.process.kill('SIGTERM')
-  const timeout = setTimeout(() => {
-    if (handle.process.exitCode === null) {
-      handle.process.kill('SIGKILL')
+function processHasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null
+}
+
+async function waitForExit(
+  child: ChildProcess,
+  timeoutMs: number
+): Promise<boolean> {
+  if (processHasExited(child)) return true
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false
+    const finish = (exited: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      child.off('exit', onExit)
+      child.off('close', onExit)
+      resolve(exited)
     }
-  }, 3000)
-  timeout.unref()
+    const onExit = () => finish(true)
+    const timeout = setTimeout(() => finish(false), timeoutMs)
+    child.once('exit', onExit)
+    child.once('close', onExit)
+  })
+}
+
+async function terminateProcess(child: ChildProcess): Promise<void> {
+  if (processHasExited(child)) return
+
+  try {
+    child.kill('SIGTERM')
+  } catch (error) {
+    console.warn('[rdst-desktop] failed to terminate RDST backend:', error)
+  }
+  if (await waitForExit(child, SHUTDOWN_TIMEOUT_MS)) return
+
+  try {
+    child.kill('SIGKILL')
+  } catch (error) {
+    console.warn('[rdst-desktop] failed to kill RDST backend:', error)
+  }
+  if (!(await waitForExit(child, FORCE_KILL_TIMEOUT_MS))) {
+    console.warn('[rdst-desktop] RDST backend did not exit after SIGKILL')
+  }
+}
+
+export async function stopBackend(handle: BackendHandle | null): Promise<void> {
+  if (!handle) return
+  await terminateProcess(handle.process)
 }

@@ -1,0 +1,6 @@
+# Build tooling that is not declared by RDST itself. RDST's runtime
+# dependencies are compiled from ../../../rdst/pyproject.toml.
+editables==0.6
+hatchling==1.31.0
+pip==26.1.2
+pyinstaller==6.21.0

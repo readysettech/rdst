@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, dialog, shell } from 'electron'
 
 import { type BackendHandle, startBackend, stopBackend } from './backend.js'
 import { type StaticServerHandle, startStaticServer } from './static-server.js'
@@ -12,6 +12,7 @@ let mainWindow: BrowserWindow | null = null
 let backend: BackendHandle | null = null
 let webServer: StaticServerHandle | null = null
 let quitCleanupStarted = false
+let cleanupPromise: Promise<void> | null = null
 
 function getResourcesPath(): string {
   return app.isPackaged
@@ -33,8 +34,8 @@ async function resolveRendererUrl(): Promise<string> {
   return webServer.url
 }
 
-function createWindow(rendererUrl: string): BrowserWindow {
-  mainWindow = new BrowserWindow({
+async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
+  const window = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 900,
@@ -44,14 +45,15 @@ function createWindow(rendererUrl: string): BrowserWindow {
     trafficLightPosition:
       process.platform === 'darwin' ? { x: 12, y: 12 } : undefined,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
+      preload: path.join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
   })
+  mainWindow = window
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  window.webContents.setWindowOpenHandler(({ url }) => {
     const parsed = new URL(url)
     if (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
       return { action: 'allow' }
@@ -60,41 +62,90 @@ function createWindow(rendererUrl: string): BrowserWindow {
     return { action: 'deny' }
   })
 
-  void mainWindow.loadURL(rendererUrl)
-  return mainWindow
-}
-
-async function cleanup(): Promise<void> {
-  if (webServer) {
-    await webServer.close().catch((error) => {
-      console.warn('[rdst-desktop] failed to close web server:', error)
-    })
-    webServer = null
-  }
-  stopBackend(backend)
-  backend = null
-}
-
-void app.whenReady().then(async () => {
-  const rendererUrl = await resolveRendererUrl()
-  createWindow(rendererUrl)
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(rendererUrl)
-    }
+  window.once('closed', () => {
+    if (mainWindow === window) mainWindow = null
   })
-})
+  await window.loadURL(rendererUrl)
+  return window
+}
 
-app.on('before-quit', (event) => {
-  if (quitCleanupStarted) return
-  quitCleanupStarted = true
-  event.preventDefault()
-  void cleanup().finally(() => app.quit())
-})
+function cleanup(): Promise<void> {
+  cleanupPromise ??= (async () => {
+    const server = webServer
+    webServer = null
+    if (server) {
+      await server.close().catch((error) => {
+        console.warn('[rdst-desktop] failed to close web server:', error)
+      })
+    }
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+    const backendHandle = backend
+    backend = null
+    await stopBackend(backendHandle)
+  })()
+  return cleanupPromise
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function focusMainWindow(): void {
+  if (!mainWindow) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+async function startApplication(): Promise<void> {
+  await app.whenReady()
+
+  try {
+    const rendererUrl = await resolveRendererUrl()
+    await createWindow(rendererUrl)
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        void createWindow(rendererUrl).catch((error) => {
+          console.error('[rdst-desktop] failed to create window:', error)
+          dialog.showErrorBox(
+            'RDST Desktop',
+            `Unable to open the RDST window.\n\n${errorMessage(error)}`
+          )
+        })
+        return
+      }
+      focusMainWindow()
+    })
+  } catch (error) {
+    console.error('[rdst-desktop] failed to start:', error)
+    await cleanup()
+    dialog.showErrorBox('RDST Desktop failed to start', errorMessage(error))
     app.quit()
   }
-})
+}
+
+function configurePrimaryInstance(): void {
+  app.on('second-instance', focusMainWindow)
+
+  app.on('before-quit', (event) => {
+    if (quitCleanupStarted) return
+    quitCleanupStarted = true
+    event.preventDefault()
+    void cleanup().finally(() => app.quit())
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
+    }
+  })
+
+  void startApplication()
+}
+
+if (app.requestSingleInstanceLock()) {
+  configurePrimaryInstance()
+} else {
+  app.quit()
+}
