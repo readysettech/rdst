@@ -1,0 +1,27 @@
+{
+  "name": "rdst-desktop",
+  "version": "0.1.0",
+  "description": "RDST desktop application",
+  "author": "Readyset",
+  "private": true,
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "build": "tsup",
+    "build:web": "node ./scripts/build-web.mjs",
+    "build:sidecar": "node ./scripts/build-sidecar.mjs",
+    "dev": "tsup && (tsup --watch & ELECTRON_RENDERER_URL=${ELECTRON_RENDERER_URL:-http://localhost:3001} electron .)",
+    "package": "electron-builder",
+    "prepackage": "pnpm build:web && pnpm build:sidecar && pnpm build",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@rs/typescript-config": "workspace:*",
+    "@types/node": "catalog:common",
+    "electron": "^40.7.0",
+    "electron-builder": "^26.0.12",
+    "tsup": "^8.5.0",
+    "typescript": "catalog:common"
+  }
+}
