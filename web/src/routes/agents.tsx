@@ -8,6 +8,7 @@ import type { IconStrokeName } from '@rs/ui-icons/icon-name';
 import { Show } from '@rs/ui-new/show';
 import { Spinner } from '@rs/ui-new/spinner';
 import { Tag } from '@rs/ui-new/tag';
+import * as ScrollArea from '@rs/ui-new/scroll';
 import { Text } from '@rs/ui-new/text';
 import { HStack, VStack } from '@rs/ui-new/stack';
 import { BaseInputText } from '@rs/ui-new/base-input-text';
@@ -769,39 +770,49 @@ function ChatPanel({ agent }: { agent: AgentSummary | null }) {
       }
     >
       <VStack className="items-stretch">
-        <div
-          ref={scrollRef}
-          className="h-[440px] overflow-y-auto px-5 py-4 flex flex-col gap-3"
-        >
-          <Show
-            when={chat.transcript.length > 0}
-            fallback={
-              <VStack className="gap-2 items-center justify-center h-full">
-                <Icon
-                  name="sparkles"
-                  label="Start chatting"
-                  className="w-8 h-8 text-content-layout-3"
-                />
-                <Text level="body-small" className="text-content-layout-3">
-                  Ask a question about {agent.target}. History is kept in memory and clears when the
-                  server restarts.
-                </Text>
-              </VStack>
-            }
+        <ScrollArea.Root className="h-[440px] w-full overflow-hidden">
+          <ScrollArea.Viewport
+            ref={scrollRef}
+            className="h-full w-full custom-scrollbar [&>div]:h-full"
           >
-            {chat.transcript.map((item) => (
-              <TranscriptRow key={item.id} item={item} target={agent.target} />
-            ))}
-            <Show when={!!chat.statusMessage}>
-              <HStack className="gap-2 items-center">
-                <Spinner size="base" />
-                <Text level="body-small" className="text-content-layout-3">
-                  {chat.statusMessage}
-                </Text>
-              </HStack>
-            </Show>
-          </Show>
-        </div>
+            <div className="h-full px-5 py-4 flex flex-col gap-3">
+              <Show
+                when={chat.transcript.length > 0}
+                fallback={
+                  <VStack className="gap-2 items-center justify-center h-full">
+                    <Icon
+                      name="sparkles"
+                      label="Start chatting"
+                      className="w-8 h-8 text-content-layout-3"
+                    />
+                    <Text level="body-small" className="text-content-layout-3">
+                      Ask a question about {agent.target}. History is kept in memory and clears when the
+                      server restarts.
+                    </Text>
+                  </VStack>
+                }
+              >
+                {chat.transcript.map((item) => (
+                  <TranscriptRow key={item.id} item={item} target={agent.target} />
+                ))}
+                <Show when={!!chat.statusMessage}>
+                  <HStack className="gap-2 items-center">
+                    <Spinner size="base" />
+                    <Text level="body-small" className="text-content-layout-3">
+                      {chat.statusMessage}
+                    </Text>
+                  </HStack>
+                </Show>
+              </Show>
+            </div>
+          </ScrollArea.Viewport>
+          <ScrollArea.Scrollbar
+            className="flex select-none touch-none bg-border-layout-2 transition-[background,width] duration-fast ease-base w-2 hover:w-4"
+            orientation="vertical"
+          >
+            <ScrollArea.Thumb className="relative flex-1 bg-content-layout-disabled transition-[background] duration-fast ease-base hover:bg-content-layout-3" />
+          </ScrollArea.Scrollbar>
+        </ScrollArea.Root>
 
         <div className="px-5 py-4 border-t border-border-layout-1 bg-surface-layout-2/30">
           <HStack className="gap-2 items-end">

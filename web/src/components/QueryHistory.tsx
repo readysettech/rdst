@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button } from '@rs/ui-new/button';
+import { Scrollable } from '@rs/ui-new/scrollable';
 import { Show } from '@rs/ui-new/show';
 import { Tag } from '@rs/ui-new/tag';
 import { Text } from '@rs/ui-new/text';
@@ -115,13 +116,17 @@ export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
                   {/* Query content */}
                   <VStack className="gap-2 flex-1 min-w-0 items-start">
                     {/* SQL Preview */}
-                    <div className="w-full rounded-lg bg-surface-layout-2 px-3 py-2 max-h-32 overflow-auto">
-                      <SQLDisplay
-                        sql={entry.sql}
-                        className="text-sm"
-                        wrap
-                        showCopy
-                      />
+                    <div className="w-full rounded-lg bg-surface-layout-2">
+                      <Scrollable className="max-h-32">
+                        <div className="px-3 py-2">
+                          <SQLDisplay
+                            sql={entry.sql}
+                            className="text-sm"
+                            wrap
+                            showCopy
+                          />
+                        </div>
+                      </Scrollable>
                     </div>
 
                     {/* Metadata row */}

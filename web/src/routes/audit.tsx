@@ -8,6 +8,7 @@ import type { IconStrokeName } from '@rs/ui-icons/icon-name';
 import { Show } from '@rs/ui-new/show';
 import { Spinner } from '@rs/ui-new/spinner';
 import { Tag } from '@rs/ui-new/tag';
+import { Scrollable } from '@rs/ui-new/scrollable';
 import { Text } from '@rs/ui-new/text';
 import { HStack, VStack } from '@rs/ui-new/stack';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
@@ -364,8 +365,12 @@ function AuditReportView({ report }: { report: AuditReport }) {
                 {topQueries.map((query, index) => (
                   <tr key={query.query_hash || index} className="hover:bg-surface-layout-2/50 transition-colors">
                     <td className="px-4 py-3">
-                      <div className="bg-surface-layout-2 px-3 py-2 rounded-lg max-h-24 overflow-auto max-w-2xl">
-                        <SQLDisplay sql={query.query_text || ''} wrap />
+                      <div className="bg-surface-layout-2 rounded-lg max-w-2xl">
+                        <Scrollable className="max-h-24">
+                          <div className="px-3 py-2">
+                            <SQLDisplay sql={query.query_text || ''} wrap />
+                          </div>
+                        </Scrollable>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -445,8 +450,12 @@ function WorkloadQueriesTable({ queries }: { queries: WorkloadQuery[] }) {
           {queries.map((query, index) => (
             <tr key={query.query_hash || index} className="hover:bg-surface-layout-2/50 transition-colors">
               <td className="px-4 py-3">
-                <div className="bg-surface-layout-2 px-3 py-2 rounded-lg max-h-24 overflow-auto max-w-2xl">
-                  <SQLDisplay sql={query.query_text || query.normalized_query || ''} wrap />
+                <div className="bg-surface-layout-2 rounded-lg max-w-2xl">
+                  <Scrollable className="max-h-24">
+                    <div className="px-3 py-2">
+                      <SQLDisplay sql={query.query_text || query.normalized_query || ''} wrap />
+                    </div>
+                  </Scrollable>
                 </div>
               </td>
               <td className="px-4 py-3 text-right">

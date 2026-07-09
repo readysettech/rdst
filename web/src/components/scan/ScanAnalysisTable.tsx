@@ -12,6 +12,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@rs/ui-new/button';
+import { Scrollable } from '@rs/ui-new/scrollable';
 import { Text } from '@rs/ui-new/text';
 import { Icon } from '@rs/ui-new/icon';
 import { Tag } from '@rs/ui-new/tag';
@@ -172,178 +173,180 @@ function AnalysisDetailModal({ query, onClose, onAnalyze }: AnalysisDetailModalP
               </div>
 
               {/* Content */}
-              <div className="p-5 space-y-5 max-h-[60vh] overflow-auto">
-                {/* SQL */}
-                <div>
-                  <Text
-                    as="label"
-                    level="label-small"
-                    className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                  >
-                    SQL
-                  </Text>
-                  <div className="bg-surface-layout-2 rounded-lg p-3 overflow-auto">
-                    <SQLDisplay sql={displaySql} wrap showCopy />
+              <Scrollable className="max-h-[60vh]">
+                <div className="p-5 space-y-5">
+                  {/* SQL */}
+                  <div>
+                    <Text
+                      as="label"
+                      level="label-small"
+                      className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                    >
+                      SQL
+                    </Text>
+                    <div className="bg-surface-layout-2 rounded-lg p-3 overflow-auto">
+                      <SQLDisplay sql={displaySql} wrap showCopy />
+                    </div>
                   </div>
+
+                  {hasRenderableRichSections && (
+                    <div className="space-y-6">
+                      {perf && (
+                        <PerformanceSummarySection
+                          perf={perf}
+                          explainResults={explainResults}
+                        />
+                      )}
+
+                      {rewriteTesting && (
+                        <TestedOptimizationsSection testing={rewriteTesting} />
+                      )}
+
+                      {indexRecommendations.length > 0 && (
+                        <IndexRecommendationsSection
+                          recommendations={indexRecommendations}
+                        />
+                      )}
+
+                      {optimizationOpportunities.length > 0 && (
+                        <AdditionalRecommendationsSection
+                          opportunities={optimizationOpportunities}
+                        />
+                      )}
+
+                      {cacheability && (
+                        <ReadysetCacheabilitySection cacheability={cacheability} />
+                      )}
+                    </div>
+                  )}
+
+                  {(showFallbackPerformance ||
+                    showFallbackIssues ||
+                    showFallbackRecommendations ||
+                    showFallbackBenchmarks) && (
+                    <div className="space-y-6">
+                      {showFallbackPerformance && (
+                        <div>
+                          <Text
+                            as="label"
+                            level="label-small"
+                            className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                          >
+                            Performance
+                          </Text>
+                          <HStack className="gap-4 items-center">
+                            {query.risk_score !== null && (
+                              <HStack className="gap-1.5 items-center">
+                                <Text level="body-small" className="text-content-layout-2">
+                                  Risk Score:
+                                </Text>
+                                <Text level="headline-5" className={getScoreColor(query.risk_score)}>
+                                  {query.risk_score}
+                                </Text>
+                              </HStack>
+                            )}
+                            {query.execution_time_ms !== undefined && (
+                              <HStack className="gap-1.5 items-center">
+                                <Text level="body-small" className="text-content-layout-2">
+                                  Execution:
+                                </Text>
+                                <Text level="mono-small" className="text-content-layout-1">
+                                  {query.execution_time_ms.toFixed(1)}ms
+                                </Text>
+                              </HStack>
+                            )}
+                          </HStack>
+                        </div>
+                      )}
+
+                      {query.issues.length > 0 ? (
+                        <div>
+                          <Text
+                            as="label"
+                            level="label-small"
+                            className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                          >
+                            Issues
+                          </Text>
+                          <div className="space-y-1.5">
+                            {query.issues.map((issue, i) => (
+                              <HStack key={i} className="gap-2 items-start">
+                                <Icon
+                                  name="alert"
+                                  label="Issue"
+                                  className="w-3.5 h-3.5 text-content-warning-soft shrink-0 mt-0.5"
+                                />
+                                <Text level="body-small" className="text-content-layout-2">
+                                  {issue}
+                                </Text>
+                              </HStack>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        !hasRenderableRichSections && (
+                          <Text level="body-small" className="text-content-positive-soft">
+                            No issues found
+                          </Text>
+                        )
+                      )}
+
+                      {showFallbackRecommendations && (
+                        <div>
+                          <Text
+                            as="label"
+                            level="label-small"
+                            className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                          >
+                            Recommendations
+                          </Text>
+                          <div className="space-y-1.5">
+                            {query.recommendations.map((rec, i) => (
+                              <HStack key={i} className="gap-2 items-start">
+                                <Icon
+                                  name="tick"
+                                  label="Recommendation"
+                                  className="w-3.5 h-3.5 text-content-positive-soft shrink-0 mt-0.5"
+                                />
+                                <Text level="body-small" className="text-content-layout-2">
+                                  {rec}
+                                </Text>
+                              </HStack>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {showFallbackBenchmarks && (
+                        <div>
+                          <Text
+                            as="label"
+                            level="label-small"
+                            className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                          >
+                            Rewrite Benchmarks
+                          </Text>
+                          <div className="space-y-1.5">
+                            {query.rewrite_benchmarks?.map((bench, i) => (
+                              <HStack key={i} className="gap-2 items-start">
+                                <Icon
+                                  name="speedometer"
+                                  label="Benchmark"
+                                  className="w-3.5 h-3.5 text-content-layout-3 shrink-0 mt-0.5"
+                                />
+                                <Text level="body-small" className="text-content-layout-2">
+                                  {bench}
+                                </Text>
+                              </HStack>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                 </div>
-
-                {hasRenderableRichSections && (
-                  <div className="space-y-6">
-                    {perf && (
-                      <PerformanceSummarySection
-                        perf={perf}
-                        explainResults={explainResults}
-                      />
-                    )}
-
-                    {rewriteTesting && (
-                      <TestedOptimizationsSection testing={rewriteTesting} />
-                    )}
-
-                    {indexRecommendations.length > 0 && (
-                      <IndexRecommendationsSection
-                        recommendations={indexRecommendations}
-                      />
-                    )}
-
-                    {optimizationOpportunities.length > 0 && (
-                      <AdditionalRecommendationsSection
-                        opportunities={optimizationOpportunities}
-                      />
-                    )}
-
-                    {cacheability && (
-                      <ReadysetCacheabilitySection cacheability={cacheability} />
-                    )}
-                  </div>
-                )}
-
-                {(showFallbackPerformance ||
-                  showFallbackIssues ||
-                  showFallbackRecommendations ||
-                  showFallbackBenchmarks) && (
-                  <div className="space-y-6">
-                    {showFallbackPerformance && (
-                      <div>
-                        <Text
-                          as="label"
-                          level="label-small"
-                          className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                        >
-                          Performance
-                        </Text>
-                        <HStack className="gap-4 items-center">
-                          {query.risk_score !== null && (
-                            <HStack className="gap-1.5 items-center">
-                              <Text level="body-small" className="text-content-layout-2">
-                                Risk Score:
-                              </Text>
-                              <Text level="headline-5" className={getScoreColor(query.risk_score)}>
-                                {query.risk_score}
-                              </Text>
-                            </HStack>
-                          )}
-                          {query.execution_time_ms !== undefined && (
-                            <HStack className="gap-1.5 items-center">
-                              <Text level="body-small" className="text-content-layout-2">
-                                Execution:
-                              </Text>
-                              <Text level="mono-small" className="text-content-layout-1">
-                                {query.execution_time_ms.toFixed(1)}ms
-                              </Text>
-                            </HStack>
-                          )}
-                        </HStack>
-                      </div>
-                    )}
-
-                    {query.issues.length > 0 ? (
-                      <div>
-                        <Text
-                          as="label"
-                          level="label-small"
-                          className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                        >
-                          Issues
-                        </Text>
-                        <div className="space-y-1.5">
-                          {query.issues.map((issue, i) => (
-                            <HStack key={i} className="gap-2 items-start">
-                              <Icon
-                                name="alert"
-                                label="Issue"
-                                className="w-3.5 h-3.5 text-content-warning-soft shrink-0 mt-0.5"
-                              />
-                              <Text level="body-small" className="text-content-layout-2">
-                                {issue}
-                              </Text>
-                            </HStack>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      !hasRenderableRichSections && (
-                        <Text level="body-small" className="text-content-positive-soft">
-                          No issues found
-                        </Text>
-                      )
-                    )}
-
-                    {showFallbackRecommendations && (
-                      <div>
-                        <Text
-                          as="label"
-                          level="label-small"
-                          className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                        >
-                          Recommendations
-                        </Text>
-                        <div className="space-y-1.5">
-                          {query.recommendations.map((rec, i) => (
-                            <HStack key={i} className="gap-2 items-start">
-                              <Icon
-                                name="tick"
-                                label="Recommendation"
-                                className="w-3.5 h-3.5 text-content-positive-soft shrink-0 mt-0.5"
-                              />
-                              <Text level="body-small" className="text-content-layout-2">
-                                {rec}
-                              </Text>
-                            </HStack>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {showFallbackBenchmarks && (
-                      <div>
-                        <Text
-                          as="label"
-                          level="label-small"
-                          className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                        >
-                          Rewrite Benchmarks
-                        </Text>
-                        <div className="space-y-1.5">
-                          {query.rewrite_benchmarks?.map((bench, i) => (
-                            <HStack key={i} className="gap-2 items-start">
-                              <Icon
-                                name="speedometer"
-                                label="Benchmark"
-                                className="w-3.5 h-3.5 text-content-layout-3 shrink-0 mt-0.5"
-                              />
-                              <Text level="body-small" className="text-content-layout-2">
-                                {bench}
-                              </Text>
-                            </HStack>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-              </div>
+              </Scrollable>
 
               {/* Footer */}
               <div className="flex justify-end gap-3 px-5 py-4 border-t border-border-layout-1 bg-surface-layout-1">

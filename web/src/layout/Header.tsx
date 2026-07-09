@@ -3,6 +3,7 @@ import { Icon } from "@rs/ui-new/icon";
 import { Text } from "@rs/ui-new/text";
 import { HStack } from "@rs/ui-new/stack";
 import { Link, useRouterState } from "@tanstack/react-router";
+import { WindowControls } from "../components/WindowControls";
 
 interface RouteConfig {
   label: string;
@@ -30,7 +31,15 @@ const routeConfig: Record<string, RouteConfig> = {
   "/dev-settings": { label: "Dev Settings", icon: "adjustment-horizontal" },
 };
 
-export function Header() {
+interface HeaderProps {
+  isElectronMac?: boolean;
+  isElectronLinux?: boolean;
+}
+
+export function Header({
+  isElectronMac = false,
+  isElectronLinux = false,
+}: HeaderProps) {
   const router = useRouterState();
   const currentPath = router.location.pathname;
   const config = routeConfig[currentPath];
@@ -42,17 +51,18 @@ export function Header() {
   return (
     <header
       className={cn(
+        "draggable-region",
         "h-14",
-        "bg-surface-layout-1/80",
-        "backdrop-blur-md",
-        "border-b border-border-layout-1",
+        isElectronMac
+          ? "bg-surface-layout-1/55 backdrop-blur-xl border-b border-border-layout-1/60"
+          : "bg-surface-layout-1/80 backdrop-blur-md border-b border-border-layout-1",
         "pl-64",
         "sticky top-0 z-20",
       )}
     >
       <HStack className="px-6 h-full items-center justify-between">
         {/* Breadcrumb */}
-        <HStack className="items-center gap-2">
+        <HStack className="no-drag items-center gap-2">
           <Link
             to="/"
             className="text-content-layout-3 hover:text-content-layout-1 transition-colors"
@@ -87,6 +97,8 @@ export function Header() {
             </Text>
           </HStack>
         </HStack>
+
+        {isElectronLinux && <WindowControls />}
       </HStack>
     </header>
   );

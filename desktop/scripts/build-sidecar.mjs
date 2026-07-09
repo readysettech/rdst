@@ -6,8 +6,10 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   rmSync,
-  statSync
+  statSync,
+  writeFileSync
 } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -32,6 +34,7 @@ const specRoot = path.resolve(buildRoot, "spec");
 const venvRoot = path.resolve(buildRoot, "venv");
 const pyinstallerAppDir = path.resolve(distRoot, "rdst");
 const lockedRequirements = path.resolve(appDir, "scripts/requirements-sidecar.lock");
+const rendererDist = path.resolve(appDir, "out/renderer");
 const PINNED_PYTHON_VERSION = "3.12";
 
 const PYTHON_CANDIDATES =
@@ -52,6 +55,8 @@ const PYINSTALLER_ARGS = [
   "--clean",
   "--noconfirm",
   "--name=rdst",
+  // Bundle the rdst dist-info so importlib.metadata can report the version.
+  "--copy-metadata=rdst",
   "--collect-all=keyring",
   "--collect-all=fastapi_ai_sdk",
   "--collect-all=psycopg2",
@@ -160,7 +165,47 @@ function venvPythonPath() {
   return path.resolve(venvRoot, "bin/python");
 }
 
+function prepareRdstPackageSources() {
+  const rendererIndex = path.resolve(rendererDist, "index.html");
+  if (!existsSync(rendererIndex)) {
+    throw new Error(
+      `RDST renderer not found at ${rendererIndex}. Run pnpm build:web before building the sidecar.`
+    );
+  }
+
+  const rdstWebDist = path.resolve(rdstDir, "web_dist");
+  rmSync(rdstWebDist, { recursive: true, force: true });
+  cpSync(rendererDist, rdstWebDist, { recursive: true });
+
+  const versionSourcePath = path.resolve(rdstDir, "_version.py");
+  const versionBuildPath = path.resolve(rdstDir, "_version_build.py");
+  const requestedVersion = process.env.RDST_BUILD_VERSION;
+
+  const versionSource = readFileSync(versionSourcePath, "utf8");
+  const major = versionSource.match(/^MAJOR\s*=\s*(\d+)/m)?.[1];
+  const minor = versionSource.match(/^MINOR\s*=\s*(\d+)/m)?.[1];
+  if (!major || !minor) {
+    throw new Error(`Unable to read MAJOR/MINOR from ${versionSourcePath}`);
+  }
+
+  const version = requestedVersion ?? `${major}.${minor}.0`;
+  writeFileSync(
+    versionBuildPath,
+    [
+      '"""Generated version metadata for an RDST Desktop package build."""',
+      "",
+      `MAJOR = ${major}`,
+      `MINOR = ${minor}`,
+      "",
+      `__version__ = ${JSON.stringify(version)}`,
+      "__version_info__ = (MAJOR, MINOR)",
+      ""
+    ].join("\n")
+  );
+}
+
 function buildWithPyInstaller() {
+  prepareRdstPackageSources();
   const hostPython = detectPython();
   const rdstEntry = path.resolve(rdstDir, "rdst.py");
   if (!existsSync(rdstEntry)) {

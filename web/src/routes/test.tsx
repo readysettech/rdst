@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
+import { Scrollable } from '@rs/ui-new/scrollable'
 import { Text } from '@rs/ui-new/text'
 import { m } from '@rs/ui-new/motion'
 import { ParameterDialog } from '../components/top/ParameterDialog'
@@ -419,9 +420,13 @@ function TestPage() {
           <Text level="label-small" className="text-content-layout-3 uppercase tracking-wider">
             Last Submitted Query
           </Text>
-          <pre className="bg-surface-layout-1 border border-border-layout-1 rounded-lg p-4 text-sm overflow-auto max-h-64 whitespace-pre-wrap">
-            {lastSubmitted}
-          </pre>
+          <div className="bg-surface-layout-1 border border-border-layout-1 rounded-lg">
+            <Scrollable className="max-h-64">
+              <pre className="p-4 text-sm whitespace-pre-wrap">
+                {lastSubmitted}
+              </pre>
+            </Scrollable>
+          </div>
         </div>
       )}
     </div>

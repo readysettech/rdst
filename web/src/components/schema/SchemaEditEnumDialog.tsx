@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Scrollable } from '@rs/ui-new/scrollable'
 import { Text } from '@rs/ui-new/text'
 import { Button } from '@rs/ui-new/button'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
@@ -111,34 +112,36 @@ export function SchemaEditEnumDialog({
                 <Text level="label-small" className="text-content-layout-2">
                   Values ({entries.length})
                 </Text>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {entries.map((entry, index) => (
-                    <div
-                      key={index}
-                      className="flex items-start gap-2 bg-surface-layout-1 rounded-lg p-2"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <BaseInputText
-                          value={entry.value}
-                          onChange={(e) => handleUpdateEntry(index, 'value', e.target.value)}
-                          placeholder="Value"
-                          className="mb-1"
-                        />
-                        <BaseInputText
-                          value={entry.meaning}
-                          onChange={(e) => handleUpdateEntry(index, 'meaning', e.target.value)}
-                          placeholder="Description/meaning"
+                <Scrollable className="max-h-64">
+                  <div className="space-y-2">
+                    {entries.map((entry, index) => (
+                      <div
+                        key={index}
+                        className="flex items-start gap-2 bg-surface-layout-1 rounded-lg p-2"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <BaseInputText
+                            value={entry.value}
+                            onChange={(e) => handleUpdateEntry(index, 'value', e.target.value)}
+                            placeholder="Value"
+                            className="mb-1"
+                          />
+                          <BaseInputText
+                            value={entry.meaning}
+                            onChange={(e) => handleUpdateEntry(index, 'meaning', e.target.value)}
+                            placeholder="Description/meaning"
+                          />
+                        </div>
+                        <Button
+                          modifier="ghost"
+                          size="small"
+                          label="Remove"
+                          onClick={() => handleRemoveEntry(index)}
                         />
                       </div>
-                      <Button
-                        modifier="ghost"
-                        size="small"
-                        label="Remove"
-                        onClick={() => handleRemoveEntry(index)}
-                      />
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </Scrollable>
               </div>
             )}
 

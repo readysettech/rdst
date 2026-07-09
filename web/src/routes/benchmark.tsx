@@ -7,6 +7,7 @@ import { Button } from "@rs/ui-new/button";
 import { Card } from "@rs/ui-new/card";
 import { Icon } from "@rs/ui-new/icon";
 import { Show } from "@rs/ui-new/show";
+import { Scrollable } from "@rs/ui-new/scrollable";
 import { Text } from "@rs/ui-new/text";
 import { Tag } from "@rs/ui-new/tag";
 import { HStack, VStack } from "@rs/ui-new/stack";
@@ -568,62 +569,64 @@ export function BenchmarkPage() {
               </Show>
 
               <Show when={!registryLoading && filteredQueries.length > 0}>
-                <div className="max-h-80 overflow-y-auto p-4 space-y-2">
-                  {filteredQueries.map((query, index) => {
-                    const identifier = query.tag || query.hash;
-                    const isSelected = selectedQueries.includes(identifier);
-                    const queryHasParams = hasParameters(query.sql);
-                    return (
-                      <m.button
-                        key={query.hash}
-                        type="button"
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.2, delay: index * 0.02 }}
-                        onClick={() => toggleQuery(identifier)}
-                        className={`w-full text-left p-4 rounded-xl border transition-all ${
-                          isSelected
-                            ? "bg-surface-primary-soft/50 border-border-primary-soft"
-                            : "bg-surface-layout-2/50 border-border-layout-1 hover:bg-surface-layout-2"
-                        } cursor-pointer`}
-                      >
-                        <HStack className="gap-3 items-start">
-                          <div
-                            className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-colors ${
-                              isSelected ? "bg-surface-primary-solid border-surface-primary-solid" : "border-border-layout-2"
-                            }`}
-                          >
-                            {isSelected && (
-                              <Icon name="tick" label="Selected" className="w-3 h-3 text-white" />
-                            )}
-                          </div>
-                          <VStack className="gap-1 items-start flex-1 min-w-0">
-                            <HStack className="gap-2 items-center flex-wrap">
-                              <Text level="label-small" className="text-content-layout-1">
-                                {query.tag || "(unnamed)"}
-                              </Text>
-                              <Text level="mono-small" className="text-content-layout-3">
-                                {query.hash.slice(0, 8)}
-                              </Text>
-                              {query.target && (
-                                <Tag size="small" variant="informative" modifier="ghost" label={query.target} />
+                <Scrollable className="max-h-80">
+                  <div className="p-4 space-y-2">
+                    {filteredQueries.map((query, index) => {
+                      const identifier = query.tag || query.hash;
+                      const isSelected = selectedQueries.includes(identifier);
+                      const queryHasParams = hasParameters(query.sql);
+                      return (
+                        <m.button
+                          key={query.hash}
+                          type="button"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ duration: 0.2, delay: index * 0.02 }}
+                          onClick={() => toggleQuery(identifier)}
+                          className={`w-full text-left p-4 rounded-xl border transition-all ${
+                            isSelected
+                              ? "bg-surface-primary-soft/50 border-border-primary-soft"
+                              : "bg-surface-layout-2/50 border-border-layout-1 hover:bg-surface-layout-2"
+                          } cursor-pointer`}
+                        >
+                          <HStack className="gap-3 items-start">
+                            <div
+                              className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-colors ${
+                                isSelected ? "bg-surface-primary-solid border-surface-primary-solid" : "border-border-layout-2"
+                              }`}
+                            >
+                              {isSelected && (
+                                <Icon name="tick" label="Selected" className="w-3 h-3 text-white" />
                               )}
-                              {queryHasParams && (
-                                <Tag size="small" variant="warning" modifier="ghost" label="Has params" />
-                              )}
-                            </HStack>
-                            <div className="bg-surface-layout-2 px-2 py-1 rounded-md max-w-full overflow-hidden">
-                              <SQLDisplay
-                                sql={query.sql.length > 80 ? `${query.sql.slice(0, 80)}...` : query.sql}
-                                wrap={false}
-                              />
                             </div>
-                          </VStack>
-                        </HStack>
-                      </m.button>
-                    );
-                  })}
-                </div>
+                            <VStack className="gap-1 items-start flex-1 min-w-0">
+                              <HStack className="gap-2 items-center flex-wrap">
+                                <Text level="label-small" className="text-content-layout-1">
+                                  {query.tag || "(unnamed)"}
+                                </Text>
+                                <Text level="mono-small" className="text-content-layout-3">
+                                  {query.hash.slice(0, 8)}
+                                </Text>
+                                {query.target && (
+                                  <Tag size="small" variant="informative" modifier="ghost" label={query.target} />
+                                )}
+                                {queryHasParams && (
+                                  <Tag size="small" variant="warning" modifier="ghost" label="Has params" />
+                                )}
+                              </HStack>
+                              <div className="bg-surface-layout-2 px-2 py-1 rounded-md max-w-full overflow-hidden">
+                                <SQLDisplay
+                                  sql={query.sql.length > 80 ? `${query.sql.slice(0, 80)}...` : query.sql}
+                                  wrap={false}
+                                />
+                              </div>
+                            </VStack>
+                          </HStack>
+                        </m.button>
+                      );
+                    })}
+                  </div>
+                </Scrollable>
               </Show>
             </Card.Content>
           </Card>
@@ -668,8 +671,12 @@ export function BenchmarkPage() {
                             </Text>
                           </HStack>
 
-                          <div className="bg-surface-layout-2 rounded-lg p-3 max-h-32 overflow-auto">
-                            <SQLDisplay sql={q.sql} wrap />
+                          <div className="bg-surface-layout-2 rounded-lg">
+                            <Scrollable className="max-h-32">
+                              <div className="p-3">
+                                <SQLDisplay sql={q.sql} wrap />
+                              </div>
+                            </Scrollable>
                           </div>
 
                           <div className="space-y-2 pl-4 border-l-2 border-border-primary-soft">

@@ -6,6 +6,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@rs/ui-new/button';
+import { Scrollable } from '@rs/ui-new/scrollable';
 import { Text } from '@rs/ui-new/text';
 import { Icon } from '@rs/ui-new/icon';
 import { Tag } from '@rs/ui-new/tag';
@@ -123,82 +124,86 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
               </div>
 
               {/* Content */}
-              <div className="p-5 space-y-5 max-h-[60vh] overflow-auto">
-                {/* ORM Code */}
-                <div>
-                  <Text
-                    as="label"
-                    level="label-small"
-                    className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                  >
-                    ORM Code
-                  </Text>
-                  <div className="bg-surface-layout-2 rounded-lg p-3 overflow-auto">
-                    <Highlight lang={guessOrmLanguage(query.orm_type)}>
-                      {query.orm_code}
-                    </Highlight>
+              <Scrollable className="max-h-[60vh]">
+                <div className="p-5 space-y-5">
+                  {/* ORM Code */}
+                  <div>
+                    <Text
+                      as="label"
+                      level="label-small"
+                      className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                    >
+                      ORM Code
+                    </Text>
+                    <div className="bg-surface-layout-2 rounded-lg">
+                      <Scrollable orientation="horizontal" className="p-3">
+                        <Highlight lang={guessOrmLanguage(query.orm_type)}>
+                          {query.orm_code}
+                        </Highlight>
+                      </Scrollable>
+                    </div>
                   </div>
+
+                  {/* SQL */}
+                  {query.sql && (
+                    <div>
+                      <Text
+                        as="label"
+                        level="label-small"
+                        className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                      >
+                        SQL
+                      </Text>
+                      <div className="bg-surface-layout-2 rounded-lg p-3 overflow-auto">
+                        <SQLDisplay sql={displaySql} wrap />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Issues */}
+                  {query.issues.length > 0 && (
+                    <div>
+                      <Text
+                        as="label"
+                        level="label-small"
+                        className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                      >
+                        Issues
+                      </Text>
+                      <div className="space-y-1.5">
+                        {query.issues.map((issue, i) => (
+                          <HStack key={i} className="gap-2 items-start">
+                            <Icon
+                              name="alert"
+                              label="Issue"
+                              className="w-3.5 h-3.5 text-content-warning-soft shrink-0 mt-0.5"
+                            />
+                            <Text level="body-small" className="text-content-layout-2">
+                              {issue}
+                            </Text>
+                          </HStack>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Skip reason */}
+                  {query.status === 'skipped' && query.skip_reason && (
+                    <div>
+                      <Text
+                        as="label"
+                        level="label-small"
+                        className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                      >
+                        Skip Reason
+                      </Text>
+                      <Text level="body-small" className="text-content-layout-3 italic">
+                        {query.skip_reason}
+                      </Text>
+                    </div>
+                  )}
                 </div>
-
-                {/* SQL */}
-                {query.sql && (
-                  <div>
-                    <Text
-                      as="label"
-                      level="label-small"
-                      className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                    >
-                      SQL
-                    </Text>
-                    <div className="bg-surface-layout-2 rounded-lg p-3 overflow-auto">
-                      <SQLDisplay sql={displaySql} wrap />
-                    </div>
-                  </div>
-                )}
-
-                {/* Issues */}
-                {query.issues.length > 0 && (
-                  <div>
-                    <Text
-                      as="label"
-                      level="label-small"
-                      className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                    >
-                      Issues
-                    </Text>
-                    <div className="space-y-1.5">
-                      {query.issues.map((issue, i) => (
-                        <HStack key={i} className="gap-2 items-start">
-                          <Icon
-                            name="alert"
-                            label="Issue"
-                            className="w-3.5 h-3.5 text-content-warning-soft shrink-0 mt-0.5"
-                          />
-                          <Text level="body-small" className="text-content-layout-2">
-                            {issue}
-                          </Text>
-                        </HStack>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Skip reason */}
-                {query.status === 'skipped' && query.skip_reason && (
-                  <div>
-                    <Text
-                      as="label"
-                      level="label-small"
-                      className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                    >
-                      Skip Reason
-                    </Text>
-                    <Text level="body-small" className="text-content-layout-3 italic">
-                      {query.skip_reason}
-                    </Text>
-                  </div>
-                )}
-              </div>
+              </Scrollable>
 
               {/* Footer */}
               <div className="flex justify-end gap-3 px-5 py-4 border-t border-border-layout-1 bg-surface-layout-1">

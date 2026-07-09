@@ -2,7 +2,11 @@
   "name": "rdst-desktop",
   "version": "0.1.0",
   "description": "RDST desktop application",
-  "author": "Readyset",
+  "author": {
+    "name": "Readyset",
+    "email": "support@readyset.io"
+  },
+  "homepage": "https://readyset.io",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
@@ -10,19 +14,28 @@
     "build": "tsup",
     "build:web": "node ./scripts/build-web.mjs",
     "build:sidecar": "node ./scripts/build-sidecar.mjs",
-    "dev": "tsup && (tsup --watch & ELECTRON_RENDERER_URL=${ELECTRON_RENDERER_URL:-http://localhost:3001} electron .)",
+    "dev": "node ./scripts/dev.mjs",
+    "dev:electron": "tsup && (tsup --watch & ELECTRON_RENDERER_URL=${ELECTRON_RENDERER_URL:-http://localhost:3001} electron .)",
     "lock:sidecar": "uv pip compile ../../../rdst/pyproject.toml scripts/requirements-sidecar.in --python-version 3.12 --universal --generate-hashes --no-emit-index-url --output-file scripts/requirements-sidecar.lock",
-    "package": "electron-builder",
+    "package": "electron-builder && pnpm verify:packaged-glass",
     "prepackage": "pnpm build:web && pnpm build:sidecar && pnpm build",
     "start": "electron .",
-    "typecheck": "tsc --noEmit"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "verify:packaged-glass": "node ./scripts/check-native-glass-bundle.mjs"
+  },
+  "dependencies": {
+    "electron-liquid-glass": "^1.1.1",
+    "node-gyp-build": "^4.8.4"
   },
   "devDependencies": {
+    "@electron/asar": "^4.0.1",
     "@rs/typescript-config": "workspace:*",
     "@types/node": "catalog:common",
     "electron": "^40.7.0",
     "electron-builder": "^26.0.12",
     "tsup": "^8.5.0",
-    "typescript": "catalog:common"
+    "typescript": "catalog:common",
+    "vitest": "^3.2.4"
   }
 }

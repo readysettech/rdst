@@ -6,6 +6,7 @@ import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { Modal, ModalContent, ModalContentContainer } from '@rs/ui-new/modal'
+import * as ScrollArea from '@rs/ui-new/scroll'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -144,47 +145,57 @@ export function ParameterDialog({
               >
                 Parameters
               </Text>
-              <div className="min-h-0 overflow-auto flex-1 space-y-3">
-                {parameters.map((param) => {
-                  const key =
-                    param.placeholder === '?'
-                      ? `?${param.index}`
-                      : param.placeholder
-                  const colorIndex =
-                    colorByPlaceholder.get(param.placeholder) ?? 0
-                  const color = getParameterColor(colorIndex)
-                  return (
-                    <div key={key} className="flex items-center gap-3">
-                      <div className="w-14 flex-shrink-0 text-right">
-                        <span
-                          className="inline-block px-2 py-1 rounded border font-mono text-sm"
-                          style={{
-                            backgroundColor: color.badgeBackground,
-                            borderColor: color.badgeBorder,
-                            color: color.badgeText,
-                          }}
-                        >
-                          {key}
-                        </span>
-                      </div>
-                      <div className="flex-1">
-                        <BaseInputText
-                          name={`param-${key}`}
-                          value={values[key] || ''}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            handleValueChange(key, e.target.value)
-                          }
-                          placeholder="Enter value"
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-                <Text level="body-small" className="text-content-layout-3">
-                  Strings are automatically quoted. Numbers, NULL, TRUE, FALSE
-                  are passed as-is.
-                </Text>
-              </div>
+              <ScrollArea.Root className="min-h-0 flex-1 overflow-hidden">
+                <ScrollArea.Viewport className="h-full w-full custom-scrollbar">
+                  <div className="space-y-3">
+                    {parameters.map((param) => {
+                      const key =
+                        param.placeholder === '?'
+                          ? `?${param.index}`
+                          : param.placeholder
+                      const colorIndex =
+                        colorByPlaceholder.get(param.placeholder) ?? 0
+                      const color = getParameterColor(colorIndex)
+                      return (
+                        <div key={key} className="flex items-center gap-3">
+                          <div className="w-14 flex-shrink-0 text-right">
+                            <span
+                              className="inline-block px-2 py-1 rounded border font-mono text-sm"
+                              style={{
+                                backgroundColor: color.badgeBackground,
+                                borderColor: color.badgeBorder,
+                                color: color.badgeText,
+                              }}
+                            >
+                              {key}
+                            </span>
+                          </div>
+                          <div className="flex-1">
+                            <BaseInputText
+                              name={`param-${key}`}
+                              value={values[key] || ''}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                handleValueChange(key, e.target.value)
+                              }
+                              placeholder="Enter value"
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <Text level="body-small" className="text-content-layout-3">
+                      Strings are automatically quoted. Numbers, NULL, TRUE, FALSE
+                      are passed as-is.
+                    </Text>
+                  </div>
+                </ScrollArea.Viewport>
+                <ScrollArea.Scrollbar
+                  className="flex select-none touch-none bg-border-layout-2 transition-[background,width] duration-fast ease-base w-2 hover:w-4"
+                  orientation="vertical"
+                >
+                  <ScrollArea.Thumb className="relative flex-1 bg-content-layout-disabled transition-[background] duration-fast ease-base hover:bg-content-layout-3" />
+                </ScrollArea.Scrollbar>
+              </ScrollArea.Root>
             </div>
           </div>
 

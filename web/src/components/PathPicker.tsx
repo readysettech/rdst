@@ -8,6 +8,7 @@ import { useState, useCallback } from 'react';
 import { Popover, PopoverTrigger, PopoverContent } from '@rs/ui-new/popover';
 import { Button } from '@rs/ui-new/button';
 import { Icon } from '@rs/ui-new/icon';
+import { Scrollable } from '@rs/ui-new/scrollable';
 import { Text } from '@rs/ui-new/text';
 import { VStack } from '@rs/ui-new/stack';
 import { useBrowse } from '../lib/useBrowse';
@@ -184,7 +185,7 @@ export function PathPicker({
             </div>
 
             {/* Directory + file list */}
-            <div className="max-h-64 overflow-y-auto">
+            <Scrollable className="max-h-64">
               {isError && (
                 <div className="px-3 py-4 text-center">
                   <Text level="caption" className="text-content-negative-1">
@@ -260,7 +261,7 @@ export function PathPicker({
                   )}
                 </>
               )}
-            </div>
+            </Scrollable>
 
             {/* Select button (directory mode only; files are picked directly) */}
             {!fileExt && (

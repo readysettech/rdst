@@ -8,6 +8,7 @@ import { Icon } from '@rs/ui-new/icon';
 import { Show } from '@rs/ui-new/show';
 import { Spinner } from '@rs/ui-new/spinner';
 import { Tag } from '@rs/ui-new/tag';
+import { Scrollable } from '@rs/ui-new/scrollable';
 import { Text } from '@rs/ui-new/text';
 import { HStack, VStack } from '@rs/ui-new/stack';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
@@ -544,8 +545,12 @@ function CachedQueryRow({
           </VStack>
         </td>
         <td className="px-4 py-3">
-          <div className="bg-surface-layout-2 px-3 py-2 rounded-lg max-h-24 overflow-auto max-w-lg">
-            <SQLDisplay sql={entry.query} wrap />
+          <div className="bg-surface-layout-2 rounded-lg max-w-lg">
+            <Scrollable className="max-h-24">
+              <div className="px-3 py-2">
+                <SQLDisplay sql={entry.query} wrap />
+              </div>
+            </Scrollable>
           </div>
         </td>
         <td className="px-4 py-3 text-center">

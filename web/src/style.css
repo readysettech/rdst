@@ -34,10 +34,44 @@
     scroll-behavior: smooth;
   }
 
+  /* Transparent chrome lets the desktop app's native glass show through;
+     the browser app paints its own background in the layout shell. */
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  /* Fixed-viewport layout: the document itself must never scroll, even when
+     helpers (e.g. CodeMirror tooltip holders) are appended to <body>. */
+  html,
+  body {
+    overflow: hidden;
+  }
+
+  .custom-scrollbar {
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+      width: 0px;
+      height: 0px;
+    }
+  }
+
   body {
     font-family: var(--font-sans);
     color: var(--color-content-layout-1);
     font-feature-settings: "ss02" on;
+  }
+
+  .draggable-region {
+    -webkit-app-region: drag;
+  }
+
+  .no-drag {
+    -webkit-app-region: no-drag;
   }
 
   ::selection {

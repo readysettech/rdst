@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Text } from "@rs/ui-new/text";
 import { Alert } from "@rs/ui-new/alert";
 import { Icon } from "@rs/ui-new/icon";
+import { Scrollable } from "@rs/ui-new/scrollable";
 import { HStack, VStack } from "@rs/ui-new/stack";
 import { m, AnimatePresence } from "@rs/ui-new/motion";
 import { useOnboarding } from "../../lib/useOnboarding";
@@ -111,12 +112,12 @@ export function OnboardingWizard() {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 bg-surface-layout-2">
+    <div className="fixed inset-0 z-50 h-dvh bg-surface-layout-2">
       {/* Background gradient */}
       <div className="absolute inset-0 bg-gradient-to-br from-surface-primary-soft/5 via-transparent to-surface-info-soft/5" />
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-gradient-radial from-surface-primary-soft/10 to-transparent blur-3xl" />
 
-      <div className="h-full w-full overflow-y-auto relative">
+      <Scrollable className="relative">
         <div className="max-w-4xl mx-auto w-full px-6 py-10">
           {/* Header */}
           <m.div
@@ -309,7 +310,7 @@ export function OnboardingWizard() {
             </m.div>
           </AnimatePresence>
         </div>
-      </div>
+      </Scrollable>
     </div>
   );
 }

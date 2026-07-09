@@ -12,3 +12,4 @@ export { AskPanel } from './AskPanel';
 export { ReportDialog } from './ReportDialog';
 export { EnvSecretsDialog } from './EnvSecretsDialog';
 export { TargetLockNotice } from './TargetLockNotice';
+export { WindowControls } from './WindowControls';

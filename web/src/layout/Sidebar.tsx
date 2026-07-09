@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { tv } from "@rs/tailwind-base";
+import { cn, tv } from "@rs/tailwind-base";
 import { Icon } from "@rs/ui-new/icon";
 import type { IconStrokeName } from "@rs/ui-icons/icon-name";
+import { Scrollable } from "@rs/ui-new/scrollable";
 import { Text } from "@rs/ui-new/text";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { TargetDropdown } from "../components/TargetDropdown";
@@ -12,17 +13,28 @@ import { TrialBalanceBadge } from "../components/TrialBalanceBadge";
 
 const sidebarStyles = tv({
   base: [
-    "bg-surface-layout-1",
-    "h-dvh",
     "w-64",
     "flex",
     "flex-col",
-    "fixed",
     "border-r border-border-layout-1",
     "left-0",
-    "top-0",
     "z-30",
   ],
+  variants: {
+    isElectronMac: {
+      true: [
+        "absolute",
+        "inset-y-0",
+        "h-full",
+        "bg-surface-layout-1/10",
+        "backdrop-blur-2xl",
+        "backdrop-saturate-150",
+        "border-border-layout-1/45",
+        "shadow-[inset_-1px_0_0_rgba(255,255,255,0.06)]",
+      ],
+      false: ["fixed", "top-0", "h-dvh", "bg-surface-layout-1"],
+    },
+  },
 });
 
 const navItemStyles = tv({
@@ -122,7 +134,11 @@ function SectionTitle({ title }: { title: string }) {
   );
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  isElectronMac?: boolean;
+}
+
+export function Sidebar({ isElectronMac = false }: SidebarProps) {
   const router = useRouterState();
   const currentPath = router.location.pathname;
   const { target: selectedTarget, setTarget: setSelectedTarget } = useTarget();
@@ -146,59 +162,81 @@ export function Sidebar() {
     localStorage.setItem(ADVANCED_STORAGE_KEY, next ? "open" : "closed");
   };
 
+  // Match the sidebar surface at 10% over the transparent window so the
+  // native glass tint reads through it.
+  const macGlassStyle = isElectronMac
+    ? {
+        background:
+          "color-mix(in oklab, var(--color-surface-layout-1) 10%, transparent)",
+      }
+    : undefined;
+
   return (
-    <aside className={sidebarStyles()}>
+    <aside className={sidebarStyles({ isElectronMac })} style={macGlassStyle}>
+      {/* On desktop mac the window traffic lights get their own draggable
+          strip above the target selector. */}
+      {isElectronMac && <div className="draggable-region h-8 shrink-0" />}
+
       {/* Target selector */}
-      <div className="h-14 border-b border-border-layout-1">
-        <TargetDropdown
-          selectedTarget={selectedTarget}
-          onSelectTarget={setSelectedTarget}
-        />
+      <div
+        className={cn(
+          "draggable-region h-14 border-b",
+          isElectronMac ? "border-border-layout-1/45" : "border-border-layout-1",
+        )}
+      >
+        <div className="no-drag h-full">
+          <TargetDropdown
+            selectedTarget={selectedTarget}
+            onSelectTarget={setSelectedTarget}
+          />
+        </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex flex-col gap-1 p-3 flex-1 overflow-y-auto">
-        {primaryItems.map((item) => (
-          <NavLink key={item.to} item={item} active={isActive(item)} />
-        ))}
+      <Scrollable className="flex-1">
+        <nav className="flex flex-col gap-1 p-3">
+          {primaryItems.map((item) => (
+            <NavLink key={item.to} item={item} active={isActive(item)} />
+          ))}
 
-        {sections.map((section) => (
-          <div key={section.title} className="flex flex-col gap-1">
-            <SectionTitle title={section.title} />
-            {section.items.map((item) => (
-              <NavLink key={item.to} item={item} active={isActive(item)} />
-            ))}
-          </div>
-        ))}
+          {sections.map((section) => (
+            <div key={section.title} className="flex flex-col gap-1">
+              <SectionTitle title={section.title} />
+              {section.items.map((item) => (
+                <NavLink key={item.to} item={item} active={isActive(item)} />
+              ))}
+            </div>
+          ))}
 
-        <button
-          type="button"
-          onClick={toggleAdvanced}
-          className="flex items-center gap-1.5 px-3 pt-3 pb-1 cursor-pointer text-content-layout-3 hover:text-content-layout-2 transition-colors"
-        >
-          <Text level="caption" className="uppercase tracking-wider inherit">
-            Advanced
-          </Text>
-          <Icon
-            name={showAdvanced ? "chevron-down" : "chevron-right"}
-            label=""
-            className="w-3 h-3"
-          />
-        </button>
-        {showAdvanced && (
-          <>
-            {advancedItems.map((item) => (
-              <NavLink key={item.to} item={item} active={isActive(item)} />
-            ))}
-            {import.meta.env.DEV && (
-              <NavLink
-                item={{ label: "Dev Settings", icon: "test-tube", to: "/dev-settings" }}
-                active={currentPath === "/dev-settings"}
-              />
-            )}
-          </>
-        )}
-      </nav>
+          <button
+            type="button"
+            onClick={toggleAdvanced}
+            className="flex items-center gap-1.5 px-3 pt-3 pb-1 cursor-pointer text-content-layout-3 hover:text-content-layout-2 transition-colors"
+          >
+            <Text level="caption" className="uppercase tracking-wider inherit">
+              Advanced
+            </Text>
+            <Icon
+              name={showAdvanced ? "chevron-down" : "chevron-right"}
+              label=""
+              className="w-3 h-3"
+            />
+          </button>
+          {showAdvanced && (
+            <>
+              {advancedItems.map((item) => (
+                <NavLink key={item.to} item={item} active={isActive(item)} />
+              ))}
+              {import.meta.env.DEV && (
+                <NavLink
+                  item={{ label: "Dev Settings", icon: "test-tube", to: "/dev-settings" }}
+                  active={currentPath === "/dev-settings"}
+                />
+              )}
+            </>
+          )}
+        </nav>
+      </Scrollable>
 
       {/* Footer */}
       <div className="p-3 border-t border-border-layout-1 space-y-2">

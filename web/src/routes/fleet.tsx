@@ -646,60 +646,64 @@ function StreamLog({
           exit={{ opacity: 0, height: 0 }}
           className="overflow-hidden"
         >
-          <VStack className="gap-1 items-stretch bg-surface-layout-2/50 rounded-lg p-4 border border-border-layout-1 max-h-64 overflow-y-auto">
-            {instancesFound !== undefined && (
-              <HStack className="gap-2 items-center">
-                <Icon name="search" label="Discovered" className="w-3.5 h-3.5 text-content-layout-3" />
-                <Text level="caption" className="text-content-layout-2">
-                  Found {instancesFound} instance{instancesFound === 1 ? '' : 's'}
-                </Text>
-              </HStack>
-            )}
-            {progress.map((entry, index) => (
-              <HStack key={index} className="gap-2 items-center">
-                <Tag
-                  size="small"
-                  variant={entry.status === 'skipped' ? 'warning' : 'positive'}
-                  modifier="ghost"
-                  label={entry.status}
-                />
-                <Text level="caption" className="text-content-layout-2">
-                  {entry.message}
-                </Text>
-              </HStack>
-            ))}
-            {errors.map((message, index) => (
-              <HStack key={`err-${index}`} className="gap-2 items-start">
-                <Icon name="alert" label="Error" className="w-3.5 h-3.5 text-content-negative-soft mt-0.5 shrink-0" />
-                <Text level="caption" className="text-content-negative-soft">
-                  {message}
-                </Text>
-              </HStack>
-            ))}
-            {result && (
-              <HStack className="gap-2 items-center pt-2">
-                <Icon
-                  name={result.success ? 'tick-double' : 'alert'}
-                  label="Result"
-                  className={`w-4 h-4 ${result.success ? 'text-content-positive-soft' : 'text-content-negative-soft'}`}
-                />
-                <Text level="label-small" className="text-content-layout-1">
-                  {result.imported} imported, {result.skipped} skipped, {result.errors} errors
-                </Text>
-              </HStack>
-            )}
-            {(result || errors.length > 0) && (
-              <HStack className="justify-end pt-1">
-                <Button
-                  variant="primary"
-                  modifier="ghost"
-                  size="small"
-                  label="Clear"
-                  onClick={onClear}
-                />
-              </HStack>
-            )}
-          </VStack>
+          <div className="bg-surface-layout-2/50 rounded-lg border border-border-layout-1">
+          <Scrollable className="max-h-64">
+              <VStack className="gap-1 items-stretch p-4">
+                {instancesFound !== undefined && (
+                  <HStack className="gap-2 items-center">
+                    <Icon name="search" label="Discovered" className="w-3.5 h-3.5 text-content-layout-3" />
+                    <Text level="caption" className="text-content-layout-2">
+                      Found {instancesFound} instance{instancesFound === 1 ? '' : 's'}
+                    </Text>
+                  </HStack>
+                )}
+                {progress.map((entry, index) => (
+                  <HStack key={index} className="gap-2 items-center">
+                    <Tag
+                      size="small"
+                      variant={entry.status === 'skipped' ? 'warning' : 'positive'}
+                      modifier="ghost"
+                      label={entry.status}
+                    />
+                    <Text level="caption" className="text-content-layout-2">
+                      {entry.message}
+                    </Text>
+                  </HStack>
+                ))}
+                {errors.map((message, index) => (
+                  <HStack key={`err-${index}`} className="gap-2 items-start">
+                    <Icon name="alert" label="Error" className="w-3.5 h-3.5 text-content-negative-soft mt-0.5 shrink-0" />
+                    <Text level="caption" className="text-content-negative-soft">
+                      {message}
+                    </Text>
+                  </HStack>
+                ))}
+                {result && (
+                  <HStack className="gap-2 items-center pt-2">
+                    <Icon
+                      name={result.success ? 'tick-double' : 'alert'}
+                      label="Result"
+                      className={`w-4 h-4 ${result.success ? 'text-content-positive-soft' : 'text-content-negative-soft'}`}
+                    />
+                    <Text level="label-small" className="text-content-layout-1">
+                      {result.imported} imported, {result.skipped} skipped, {result.errors} errors
+                    </Text>
+                  </HStack>
+                )}
+                {(result || errors.length > 0) && (
+                  <HStack className="justify-end pt-1">
+                    <Button
+                      variant="primary"
+                      modifier="ghost"
+                      size="small"
+                      label="Clear"
+                      onClick={onClear}
+                    />
+                  </HStack>
+                )}
+              </VStack>
+            </Scrollable>
+          </div>
         </m.div>
       )}
     </AnimatePresence>
