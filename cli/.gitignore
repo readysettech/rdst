@@ -37,6 +37,7 @@ storybook_output.html
 # Test artifacts
 .pytest_cache/
 test-results/
+.buildkite-artifacts/
 *.egg-info/
 .coverage
 htmlcov/

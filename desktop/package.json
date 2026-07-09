@@ -18,6 +18,7 @@
     "dev:electron": "tsup && (tsup --watch & ELECTRON_RENDERER_URL=${ELECTRON_RENDERER_URL:-http://localhost:3001} electron .)",
     "lock:sidecar": "uv pip compile ../../../rdst/pyproject.toml scripts/requirements-sidecar.in --python-version 3.12 --universal --generate-hashes --no-emit-index-url --output-file scripts/requirements-sidecar.lock",
     "package": "electron-builder && pnpm verify:packaged-glass",
+    "package:linux": "pnpm prepackage && if [ -n \"${RDST_BUILD_VERSION:-}\" ]; then electron-builder --linux --x64 --publish never -c.extraMetadata.version=\"$RDST_BUILD_VERSION\"; else electron-builder --linux --x64 --publish never; fi",
     "prepackage": "pnpm build:web && pnpm build:sidecar && pnpm build",
     "start": "electron .",
     "test": "vitest run",

@@ -24,5 +24,9 @@ win:
   target:
     - nsis
 linux:
+  artifactName: "rdst-desktop-${version}-${arch}.${ext}"
+  category: Development
   target:
     - AppImage
+    - deb
+    - rpm
