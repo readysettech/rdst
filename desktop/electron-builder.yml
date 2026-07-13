@@ -14,6 +14,7 @@ extraFiles:
     filter:
       - "**/*"
 mac:
+  artifactName: "rdst-desktop-${version}-${arch}.${ext}"
   category: public.app-category.developer-tools
   target:
     - dmg

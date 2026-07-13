@@ -38,6 +38,7 @@ storybook_output.html
 .pytest_cache/
 test-results/
 .buildkite-artifacts/
+.buildkite-toolchain/
 *.egg-info/
 .coverage
 htmlcov/
