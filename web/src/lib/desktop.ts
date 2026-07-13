@@ -6,12 +6,37 @@ export interface DesktopWindowControls {
   onMaximizedChange: (callback: (maximized: boolean) => void) => () => void;
 }
 
+export interface DesktopUpdateLink {
+  label: string;
+  url: string;
+}
+
+export interface DesktopUpdateState {
+  /**
+   * "ready" means the shell downloaded the update and can install it on
+   * restart; "available" means the install format requires a manual
+   * download via the provided links.
+   */
+  status: "available" | "ready";
+  version: string;
+  downloadLinks: DesktopUpdateLink[];
+}
+
+export interface DesktopUpdates {
+  getState: () => Promise<DesktopUpdateState | null>;
+  install: () => void;
+  onStateChange: (
+    callback: (state: DesktopUpdateState) => void,
+  ) => () => void;
+}
+
 declare global {
   interface Window {
     rdstDesktop?: {
       isDesktop: true;
       platform: string;
       windowControls?: DesktopWindowControls;
+      updates?: DesktopUpdates;
     };
   }
 }
@@ -40,4 +65,8 @@ export function isDesktopLinux(): boolean {
 
 export function getWindowControls(): DesktopWindowControls | undefined {
   return window.rdstDesktop?.windowControls;
+}
+
+export function getDesktopUpdates(): DesktopUpdates | undefined {
+  return window.rdstDesktop?.updates;
 }

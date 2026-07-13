@@ -21,6 +21,11 @@ mac:
     - zip
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
+  # Update channel fed by main-branch CI builds; keep in sync with
+  # UPDATE_FEED_URLS in src/main/update-policy.ts.
+  publish:
+    - provider: generic
+      url: https://downloads.readyset.io/packages/rdst-desktop/macos/update
 win:
   target:
     - nsis
@@ -31,3 +36,6 @@ linux:
     - AppImage
     - deb
     - rpm
+  publish:
+    - provider: generic
+      url: https://downloads.readyset.io/packages/rdst-desktop/linux/update

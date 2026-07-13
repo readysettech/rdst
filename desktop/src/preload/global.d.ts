@@ -1,3 +1,5 @@
+import type { UpdateStatePayload } from '../main/update-policy.js'
+
 export {}
 
 declare global {
@@ -12,6 +14,13 @@ declare global {
         isMaximized: () => Promise<boolean>
         onMaximizedChange: (
           callback: (maximized: boolean) => void
+        ) => () => void
+      }
+      updates: {
+        getState: () => Promise<UpdateStatePayload | null>
+        install: () => void
+        onStateChange: (
+          callback: (state: UpdateStatePayload) => void
         ) => () => void
       }
     }

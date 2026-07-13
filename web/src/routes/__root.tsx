@@ -6,6 +6,7 @@ import { Main } from '../layout/Main';
 import { ConfigWarning } from '../components';
 import { isDesktopLinux, isDesktopMac } from '../lib/desktop';
 import { EmailGate } from '../components/EmailGate';
+import { useDesktopUpdates } from '../lib/useDesktopUpdates';
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -14,6 +15,7 @@ export const Route = createRootRoute({
 function RootComponent() {
   const isElectronMac = isDesktopMac();
   const isElectronLinux = isDesktopLinux();
+  useDesktopUpdates();
 
   return (
     <div

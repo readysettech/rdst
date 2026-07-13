@@ -9,6 +9,7 @@ import {
   loadLiquidGlass,
 } from './liquid-glass.js'
 import { type StaticServerHandle, startStaticServer } from './static-server.js'
+import { setupAutoUpdates } from './updater.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RENDERER_DIR = path.resolve(__dirname, '../renderer')
@@ -217,6 +218,12 @@ async function startApplication(): Promise<void> {
   liquidGlassFailureReason = liquidGlassResult.failureReason
 
   registerWindowControlHandlers()
+
+  setupAutoUpdates({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    appImagePath: process.env.APPIMAGE,
+  })
 
   try {
     const rendererUrl = await resolveRendererUrl()

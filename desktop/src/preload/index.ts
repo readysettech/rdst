@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+import type { UpdateStatePayload } from '../main/update-policy.js'
+
 contextBridge.exposeInMainWorld('rdstDesktop', {
   isDesktop: true,
   platform: process.platform,
@@ -15,6 +17,18 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
       ipcRenderer.on('window:maximized-changed', listener)
       return () =>
         ipcRenderer.removeListener('window:maximized-changed', listener)
+    },
+  },
+  updates: {
+    getState: (): Promise<UpdateStatePayload | null> =>
+      ipcRenderer.invoke('updates:get-state'),
+    install: () => ipcRenderer.send('updates:install'),
+    onStateChange: (callback: (state: UpdateStatePayload) => void) => {
+      const listener = (_event: unknown, state: UpdateStatePayload) =>
+        callback(state)
+      ipcRenderer.on('updates:state-changed', listener)
+      return () =>
+        ipcRenderer.removeListener('updates:state-changed', listener)
     },
   },
 })
