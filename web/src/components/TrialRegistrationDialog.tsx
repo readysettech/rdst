@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   Modal,
@@ -39,6 +39,26 @@ export function TrialRegistrationDialog({
   const [email, setEmail] = useState("");
   const [token, setToken] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Prefill the email captured at the gate so the common case is one click,
+  // but leave it fully editable: a user who gave a wrong or throwaway address
+  // at the gate can correct it here, and verification runs against what they
+  // type. On successful activation the backend promotes the verified address
+  // to the primary identity (see TrialService.activate).
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void fetch("/api/settings/email")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const stored = typeof data?.email === "string" ? data.email : null;
+        if (!cancelled && stored) setEmail((current) => current || stored);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
   const registerMutation = useMutation({
     mutationFn: async (registerEmail: string): Promise<RegisterMutationData> => {
       const result = await registerTrial(registerEmail);

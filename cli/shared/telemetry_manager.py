@@ -422,6 +422,7 @@ class TelemetryManager:
             all_props = self._get_base_properties()
             if properties:
                 all_props.update(properties)
+            self._add_stored_email_properties(all_props)
 
             # Fire and forget in background thread
             def send():
@@ -448,6 +449,27 @@ class TelemetryManager:
             thread = threading.Thread(target=send, daemon=True)
             thread.start()
 
+        except Exception:
+            pass
+
+    def _add_stored_email_properties(self, properties: Dict[str, Any]) -> None:
+        try:
+            from shared.config.targets import create_targets_config
+
+            cfg = create_targets_config(path=str(self._rdst_dir / "config.toml"))
+            cfg.load()
+            # Identity precedence: the primary [[emails]] entry (set at the gate,
+            # promoted on trial verification) is the human's identity. The
+            # [trial].email is only a fallback for pre-gate installs that
+            # registered a trial before an [[emails]] entry existed.
+            email = cfg.get_email()
+            if not email:
+                email = cfg.get_trial_config().get("email")
+            if not email:
+                return
+            properties.setdefault("email", email)
+            if "email_domain" not in properties:
+                properties["email_domain"] = email.split("@")[1] if "@" in email else "unknown"
         except Exception:
             pass
 

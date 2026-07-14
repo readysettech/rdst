@@ -1,0 +1,19 @@
+{
+  "_comment": "Single source of truth for client/server email-format parity. Read by both tests/unit/test_settings_email_route.py (Python _EMAIL_RE) and web-apps/apps/rdst/src/components/emailValidation.test.tsx (JS EMAIL_RE). Keep the two regexes identical; if one diverges its suite goes red here.",
+  "cases": [
+    { "email": "user@example.com", "valid": true },
+    { "email": "a.b-c+tag@sub.example.co.uk", "valid": true },
+    { "email": "x@y.z", "valid": true },
+    { "email": "a@b.c", "valid": true },
+    { "email": "USER@EXAMPLE.COM", "valid": true },
+    { "email": "plainaddress", "valid": false },
+    { "email": "@no-local.com", "valid": false },
+    { "email": "no-domain@", "valid": false },
+    { "email": "no-at-sign.com", "valid": false },
+    { "email": "spaces in@email.com", "valid": false },
+    { "email": "two@@at.com", "valid": false },
+    { "email": "trailing@dot.", "valid": false },
+    { "email": "nodot@domain", "valid": false },
+    { "email": "", "valid": false }
+  ]
+}

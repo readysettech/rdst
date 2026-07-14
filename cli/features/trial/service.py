@@ -184,6 +184,11 @@ class TrialService:
                 trial_config["limit_cents"] = limit_cents
                 trial_config["remaining_cents"] = limit_cents
             cfg.set_trial_config(trial_config)
+            # Trial activation confirms a real, reachable address (the user
+            # clicked the verification link). Promote it to the primary
+            # [[emails]] identity so telemetry follows the real human even when
+            # the gate captured a wrong or throwaway address first.
+            cfg.set_email(email)
             cfg.save()
         except Exception as exc:
             return TrialActivateResult(

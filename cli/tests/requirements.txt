@@ -21,3 +21,4 @@ fastapi>=0.115.0
 sse-starlette>=2.0.0
 fastapi-ai-sdk>=0.1.0
 keyring>=25.0.0
+dnspython>=2.4

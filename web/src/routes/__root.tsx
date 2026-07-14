@@ -5,6 +5,7 @@ import { Sidebar } from '../layout/Sidebar';
 import { Main } from '../layout/Main';
 import { ConfigWarning } from '../components';
 import { isDesktopLinux, isDesktopMac } from '../lib/desktop';
+import { EmailGate } from '../components/EmailGate';
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -29,6 +30,7 @@ function RootComponent() {
         <ConfigWarning />
         <Outlet />
       </Main>
+      <EmailGate />
     </div>
   );
 }
