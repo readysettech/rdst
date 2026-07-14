@@ -212,6 +212,13 @@ function HomePage() {
             </Text>
             <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
               <JobCard
+                to="/demo"
+                icon="querypilot"
+                title="See Readyset Platform in action"
+                description="Spin up a throwaway demo and watch Readyset serve live traffic side by side with Postgres, while QueryPilot automatically caches the queries that matter. One click cleans it all up."
+                chip={{ label: "Try the Demo", variant: "primary" }}
+              />
+              <JobCard
                 to="/ask"
                 icon="sparkles"
                 title="Ask a question"

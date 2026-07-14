@@ -20,6 +20,7 @@ import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as GuardsRouteImport } from './routes/guards'
 import { Route as FleetRouteImport } from './routes/fleet'
 import { Route as DevSettingsRouteImport } from './routes/dev-settings'
+import { Route as DemoRouteImport } from './routes/demo'
 import { Route as ConfigureRouteImport } from './routes/configure'
 import { Route as CacheRouteImport } from './routes/cache'
 import { Route as BenchmarkRouteImport } from './routes/benchmark'
@@ -84,6 +85,11 @@ const DevSettingsRoute = DevSettingsRouteImport.update({
   path: '/dev-settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DemoRoute = DemoRouteImport.update({
+  id: '/demo',
+  path: '/demo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConfigureRoute = ConfigureRouteImport.update({
   id: '/configure',
   path: '/configure',
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/benchmark': typeof BenchmarkRoute
   '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
+  '/demo': typeof DemoRoute
   '/dev-settings': typeof DevSettingsRoute
   '/fleet': typeof FleetRoute
   '/guards': typeof GuardsRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/benchmark': typeof BenchmarkRoute
   '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
+  '/demo': typeof DemoRoute
   '/dev-settings': typeof DevSettingsRoute
   '/fleet': typeof FleetRoute
   '/guards': typeof GuardsRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/benchmark': typeof BenchmarkRoute
   '/cache': typeof CacheRoute
   '/configure': typeof ConfigureRoute
+  '/demo': typeof DemoRoute
   '/dev-settings': typeof DevSettingsRoute
   '/fleet': typeof FleetRoute
   '/guards': typeof GuardsRoute
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | '/benchmark'
     | '/cache'
     | '/configure'
+    | '/demo'
     | '/dev-settings'
     | '/fleet'
     | '/guards'
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | '/benchmark'
     | '/cache'
     | '/configure'
+    | '/demo'
     | '/dev-settings'
     | '/fleet'
     | '/guards'
@@ -242,6 +253,7 @@ export interface FileRouteTypes {
     | '/benchmark'
     | '/cache'
     | '/configure'
+    | '/demo'
     | '/dev-settings'
     | '/fleet'
     | '/guards'
@@ -264,6 +276,7 @@ export interface RootRouteChildren {
   BenchmarkRoute: typeof BenchmarkRoute
   CacheRoute: typeof CacheRoute
   ConfigureRoute: typeof ConfigureRoute
+  DemoRoute: typeof DemoRoute
   DevSettingsRoute: typeof DevSettingsRoute
   FleetRoute: typeof FleetRoute
   GuardsRoute: typeof GuardsRoute
@@ -356,6 +369,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/demo': {
+      id: '/demo'
+      path: '/demo'
+      fullPath: '/demo'
+      preLoaderRoute: typeof DemoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/configure': {
       id: '/configure'
       path: '/configure'
@@ -424,6 +444,7 @@ const rootRouteChildren: RootRouteChildren = {
   BenchmarkRoute: BenchmarkRoute,
   CacheRoute: CacheRoute,
   ConfigureRoute: ConfigureRoute,
+  DemoRoute: DemoRoute,
   DevSettingsRoute: DevSettingsRoute,
   FleetRoute: FleetRoute,
   GuardsRoute: GuardsRoute,

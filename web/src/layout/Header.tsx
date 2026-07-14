@@ -7,12 +7,13 @@ import { WindowControls } from "../components/WindowControls";
 
 interface RouteConfig {
   label: string;
-  icon: "speedometer" | "sparkles" | "observe" | "search" | "folder-file" | "play" | "layers" | "test-tube" | "settings" | "database-settings" | "document-validation" | "dashboard" | "user-shield" | "message-multiple" | "adjustment-horizontal" | "building";
+  icon: "speedometer" | "sparkles" | "observe" | "search" | "folder-file" | "play" | "layers" | "test-tube" | "settings" | "database-settings" | "document-validation" | "dashboard" | "user-shield" | "message-multiple" | "adjustment-horizontal" | "building" | "querypilot";
   parent?: string;
 }
 
 const routeConfig: Record<string, RouteConfig> = {
   "/": { label: "Home", icon: "dashboard" },
+  "/demo": { label: "Demo", icon: "querypilot" },
   "/analyze": { label: "Analyze Query", icon: "speedometer" },
   "/results": { label: "Results", icon: "speedometer", parent: "/analyze" },
   "/ask": { label: "Ask", icon: "sparkles" },

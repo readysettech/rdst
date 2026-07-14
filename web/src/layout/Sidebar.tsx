@@ -73,8 +73,15 @@ interface NavItem {
   to: string;
 }
 
+const homeItem: NavItem = { label: "Home", icon: "dashboard", to: "/" };
+
+// Demo sits in its own section directly under Home, above Diagnose/Optimize.
+const tryItSection: { title: string; items: NavItem[] } = {
+  title: "Try it",
+  items: [{ label: "Demo", icon: "querypilot", to: "/demo" }],
+};
+
 const primaryItems: NavItem[] = [
-  { label: "Home", icon: "dashboard", to: "/" },
   { label: "Ask", icon: "sparkles", to: "/ask" },
 ];
 
@@ -195,6 +202,15 @@ export function Sidebar({ isElectronMac = false }: SidebarProps) {
       {/* Navigation */}
       <Scrollable className="flex-1">
         <nav className="flex flex-col gap-1 p-3">
+          <NavLink key={homeItem.to} item={homeItem} active={isActive(homeItem)} />
+
+          <div key={tryItSection.title} className="flex flex-col gap-1">
+            <SectionTitle title={tryItSection.title} />
+            {tryItSection.items.map((item) => (
+              <NavLink key={item.to} item={item} active={isActive(item)} />
+            ))}
+          </div>
+
           {primaryItems.map((item) => (
             <NavLink key={item.to} item={item} active={isActive(item)} />
           ))}
