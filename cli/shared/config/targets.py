@@ -1,5 +1,7 @@
 """Shared target configuration helpers."""
 
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -147,9 +149,22 @@ class TargetsConfig:
         self._data.setdefault("init", {"completed": False})
 
     def save(self) -> None:
+        """Persist the whole config atomically so a crash mid-write can't leave
+        a truncated file. All sections in ``self._data`` are preserved."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "w") as f:
-            toml.dump(self._data, f)
+        fd, tmp = tempfile.mkstemp(
+            dir=str(self.path.parent), prefix=".config.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                toml.dump(self._data, f)
+            os.replace(tmp, self.path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
     def list_targets(self) -> List[str]:
         return sorted(self._data.get("targets", {}).keys())
@@ -382,6 +397,24 @@ class TargetsConfig:
     def is_trial_active(self) -> bool:
         trial = self._data.get("trial", {})
         return bool(trial.get("token") and trial.get("status") == "active")
+
+    # ------------------------------------------------------------------
+    # QueryPilot web-demo state.
+    #
+    # The demo keeps its whole persistent footprint in a single [demo]
+    # section (ports, discovery mode, cache budget, cron flags, auto-teardown
+    # deadline) so it needs no extra files under ~/.rdst. It is otherwise
+    # fully separate from targets and other rdst features.
+    # ------------------------------------------------------------------
+
+    def get_demo_state(self) -> Dict[str, Any]:
+        return self._data.get("demo", {}) or {}
+
+    def set_demo_state(self, state: Dict[str, Any]) -> None:
+        self._data["demo"] = state
+
+    def clear_demo_state(self) -> bool:
+        return self._data.pop("demo", None) is not None
 
     def list_targets_by_group(self, group: str) -> List[str]:
         targets = self._data.get("targets", {})

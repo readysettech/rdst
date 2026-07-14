@@ -52,6 +52,20 @@ run_cmd() {
   wait $heartbeat_pid 2>/dev/null || true
 
   local elapsed=$(( SECONDS - start_time ))
+
+  # An LLM workflow step can hit its timeout on a rare slow API response
+  # (healthy runs take ~5s; the step allows 60s). Retry exactly once, loudly,
+  # so a tail-latency event does not fail the build while a real regression
+  # (which would time out twice) still does.
+  if [[ $exit_code -ne 0 ]] && grep -q "timed out after" "$LAST_OUTPUT_FILE"; then
+    echo "RETRY: '$label' hit an LLM step timeout after ${elapsed}s" \
+         "(output $(wc -c < "$LAST_OUTPUT_FILE") bytes); retrying once"
+    start_time=$SECONDS
+    exit_code=0
+    "$@" 2>&1 | tee "$LAST_OUTPUT_FILE" || exit_code=${PIPESTATUS[0]}
+    elapsed=$(( SECONDS - start_time ))
+  fi
+
   if [[ $exit_code -eq 0 ]]; then
     echo "PASS (${elapsed}s)"
   else

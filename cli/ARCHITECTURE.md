@@ -84,6 +84,8 @@ Current feature-owned domains:
 - `guard`
 - `init`
 - `interactive`
+- `qpdemo`
+- `qprouter`
 - `query_registry`
 - `scan`
 - `schema`
@@ -106,6 +108,8 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 - `guard`: guardrail configuration, masking, intent checks, guard CLI
 - `init`: first-run setup and environment/bootstrap validation
 - `interactive`: interactive query status and interactive command flow
+- `qpdemo`: QueryPilot web demo orchestration, dual-path load, demo API
+- `qprouter`: SQP router deploy and clients, pattern/reason engine
 - `query_registry`: saved query management, registry APIs, query execution helpers
 - `scan`: codebase scanning, ORM extraction, query discovery, scan analysis
 - `schema`: schema inspection, semantic layer management, annotation flows

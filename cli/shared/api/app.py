@@ -195,6 +195,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     from features.top.api import routes as top
     from features.trial.api import routes as trial
     from features.schema.api import semantic_layer_routes as semantic_layer
+    from features.qpdemo.api import routes as qpdemo
     from shared.api.routes import browse, dev, env, report, status
 
     app.include_router(agent.router, prefix="/api")
@@ -219,6 +220,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(trial.router, prefix="/api", tags=["trial"])
     app.include_router(scan.router, prefix="/api", tags=["scan"])
     app.include_router(dev.router, prefix="/api", tags=["dev"])
+    app.include_router(qpdemo.router, prefix="/api", tags=["demo"])
 
     @app.get("/health")
     async def health_check() -> HealthResponse:
