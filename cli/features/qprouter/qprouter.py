@@ -153,8 +153,12 @@ class QPRouter:
             self.readyset.drop_cache(name)
 
     # ---------------------------------------------------------- QueryPilot cron
-    def reset_querypilot_caches(self) -> dict[str, Any]:
-        """Delete QueryPilot-owned SQP rules and their ReadySet caches."""
+    def reset_querypilot_caches(self, include_manual: bool = False) -> dict[str, Any]:
+        """Delete QueryPilot-owned SQP rules and their ReadySet caches.
+
+        With include_manual, also drop hand-created caches: when QueryPilot takes
+        over it starts from a clean slate and owns all caching, so the manual
+        picks the visitor made first are cleared."""
         rules = self.admin.pattern_rules()
         digests = {to_decimal(d["fingerprint_hash"]): d for d in self.admin.digests(limit=500)}
         cache_names = _cache_names_by_fingerprint(self.readyset.show_caches())
@@ -163,7 +167,9 @@ class QPRouter:
         errors: list[str] = []
         for rule in rules:
             fp = to_decimal(rule["fingerprint_hash"])
-            if rule.get("target_pool") != "readyset" or _owner(rule) == "manual":
+            if rule.get("target_pool") != "readyset":
+                continue
+            if _owner(rule) == "manual" and not include_manual:
                 continue
             names = set(cache_names.get(fp, []))
             if _cache_name(rule):

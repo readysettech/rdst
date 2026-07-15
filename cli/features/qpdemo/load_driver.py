@@ -12,6 +12,7 @@ maps to the demo's load-intensity control.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -20,16 +21,27 @@ from random import Random
 from typing import Any, Callable
 
 
+def _think(tier: str, default: float) -> float:
+    return float(os.environ.get(f"QPDEMO_THINK_{tier.upper()}_S", default))
+
+
 # Per-tier think time paces UNCACHED queries so the shared upstream Postgres
-# stays stable under load. It is a ceiling on the uncached path only: a query
-# that returns faster than FAST_PATH_MS was served from Readyset's cache, so its
-# worker runs open-loop and the cached tier can surge. This is what lets caching
-# multiply completions instead of being capped by a fixed pace.
+# stays stable and the demo runs identically on a small (2-core) machine. It is a
+# ceiling on the uncached path only: a query that returns faster than
+# FAST_PATH_MS was served from Readyset's cache, so its worker runs open-loop and
+# the cached tier surges. That is what lets caching multiply completions while the
+# uncached baseline stays low and steady. Deliberately generous: the demo targets
+# a small baseline (~tens of QPS) that any laptop sustains without overloading a
+# container, and the cache win shows as the ratio, not the absolute number.
+# Env-overridable (QPDEMO_THINK_<TIER>_S) for tuning without a code change.
 TIER_THINK_S = {
-    "cheap": 0.005,
-    "mid": 0.030,
-    "row": 0.004,
-    "heavy": 0.0,
+    "cheap": _think("cheap", 0.05),
+    "mid": _think("mid", 0.15),
+    "row": _think("row", 0.05),
+    # Heavy analytical aggregations run fast enough on a 2-core Postgres to peg
+    # its cap if unpaced; a longer think keeps the upstream comfortably off the
+    # cap. Cached queries skip think entirely, so this never limits the surge.
+    "heavy": _think("heavy", 0.25),
 }
 # A query under this wall-clock latency was served from cache; skip its think so
 # cached tiers surge. Uncached queries (direct Postgres, or router pass-through)
@@ -167,6 +179,26 @@ class PathLoad:
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._tier_thread_counts: dict[str, int] = {}
+        # Keys currently served from ReadySet's cache. The router path runs those
+        # open-loop (skips think) so its line surges as queries get cached, while
+        # everything else stays paced. The direct path never surges: it is the
+        # steady baseline. Fed by the service from live cache state.
+        self._cached_keys: frozenset[str] = frozenset()
+
+    def set_cached_keys(self, keys: Iterable[str]) -> None:
+        self._cached_keys = frozenset(keys or ())
+
+    def _should_pace(self, key: str, dt_ms: float, think: float) -> bool:
+        """Whether this completed query should sleep its think time. Router cache
+        hits run open-loop (never pace) so ReadySet's line surges as queries get
+        cached; the direct path and uncached router queries stay paced, holding a
+        steady baseline. A genuinely fast uncached query (under FAST_PATH_MS)
+        also skips its pace."""
+        if not think:
+            return False
+        if self.path != "direct" and key in self._cached_keys:
+            return False
+        return dt_ms > FAST_PATH_MS
 
     def _rebuild_tier_queries(self) -> None:
         rng = Random(f"{self.path}:tiered-load")
@@ -255,7 +287,7 @@ class PathLoad:
                 stat.count += 1
                 stat.total_ms += dt
             think = TIER_THINK_S.get(tier, 0.0)
-            if think and dt > FAST_PATH_MS:
+            if self._should_pace(key, dt, think):
                 time.sleep(think)
         if conn:
             try:
@@ -376,6 +408,11 @@ class DualPathLoadDriver:
         self.direct = PathLoad("direct", direct_dsn, queries)
         self.sqp = PathLoad("sqp", sqp_dsn, queries)
 
+    def set_cached_keys(self, keys: Iterable[str]) -> None:
+        """Tell the router path which query keys ReadySet is serving from cache
+        so it runs them open-loop and its throughput surges."""
+        self.sqp.set_cached_keys(keys)
+
     def run(self, workers: int, duration_s: float, window_s: float = 1.0,
             on_window: Callable[[WindowStat, WindowStat], None] | None = None
             ) -> list[tuple[WindowStat, WindowStat]]:
@@ -417,8 +454,13 @@ class DualPathLoadDriver:
     def query_stats(self) -> dict[str, dict[str, dict[str, float | int | None]]]:
         return {"direct": self.direct.query_stats(), "router": self.sqp.query_stats()}
 
-    def reset_query_stats(self, key: str | None = None) -> None:
-        self.direct.reset_query_stats(key)
+    def reset_query_stats(self, key: str | None = None, router_only: bool = False) -> None:
+        # router_only keeps the direct (Postgres) average in place while
+        # restarting the router (ReadySet) one: used when a query is cached by
+        # hand, so ReadySet's number rebuilds instantly from cached executions
+        # and the Postgres baseline stays put instead of blanking.
+        if not router_only:
+            self.direct.reset_query_stats(key)
         self.sqp.reset_query_stats(key)
 
     def recent_errors(self) -> dict[str, list[str]]:

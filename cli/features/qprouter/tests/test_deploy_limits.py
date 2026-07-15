@@ -59,26 +59,23 @@ def test_limit_flags_are_env_overridable(monkeypatch):
     assert deploy._limit_flags("readyset") == ["--cpus", "3", "--memory", "4g"]
 
 
-def test_data_path_cpus_scales_4_to_8_and_never_exceeds_host():
-    # 4-8 cores on a capable machine, capped at 8, and never more than the host
-    # physically has (a sub-4-core machine gets what it has, not a forced 4).
-    assert deploy._data_path_cpus(1) == 1
-    assert deploy._data_path_cpus(2) == 2
-    assert deploy._data_path_cpus(4) == 4
-    assert deploy._data_path_cpus(6) == 6
-    assert deploy._data_path_cpus(8) == 8
-    assert deploy._data_path_cpus(16) == 8
-    assert deploy._data_path_cpus(32) == 8
-    for cores in range(1, 65):
-        assert deploy._data_path_cpus(cores) <= cores
+def test_caps_are_a_fixed_laptop_floor():
+    # Caps are fixed (not host-scaled) so the demo behaves identically on every
+    # machine; stability comes from the small offered load, not big ceilings.
+    assert deploy.RESOURCE_LIMITS["pg"]["cpus"] == "2"
+    assert deploy.RESOURCE_LIMITS["readyset"]["cpus"] == "2"
+    assert deploy.RESOURCE_LIMITS["pg"]["memory"] == "2g"
+    assert deploy.RESOURCE_LIMITS["readyset"]["memory"] == "2g"
 
 
-def test_router_cpus_is_a_small_fixed_cap():
-    # SQP is a light proxy, never the bottleneck: 2 cores everywhere, or fewer on
-    # a single-core host. It does not scale up with Postgres.
-    assert deploy._router_cpus(1) == 1
-    assert deploy._router_cpus(2) == 2
-    assert deploy._router_cpus(8) == 2
-    assert deploy._router_cpus(32) == 2
-    for cores in range(1, 65):
-        assert deploy._router_cpus(cores) <= cores
+def test_readyset_gets_a_long_shallow_cache_ttl(monkeypatch):
+    # Long TTL keeps the ~20 shallow caches from refreshing in lockstep every few
+    # seconds, which is what makes the ReadySet throughput line sawtooth.
+    calls = _capture(monkeypatch)
+    deploy.deploy_readyset("qpdemo-readyset", 5433, 6034, 5432,
+                           {"user": "u", "password": "p", "database": "d"})
+    (cmd,) = calls
+    env = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-e"]
+    ttl = [e for e in env if e.startswith("DEFAULT_TTL_MS=")]
+    assert ttl, "DEFAULT_TTL_MS not set on the ReadySet container"
+    assert int(ttl[0].split("=", 1)[1]) >= 60_000

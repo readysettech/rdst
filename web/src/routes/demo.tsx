@@ -97,12 +97,13 @@ const STATUS_LABEL: Record<PatternStatus, string> = {
   unsupported: 'unsupported',
 };
 
-const MODE_SWITCH_CONFIRM = "This resets all counters and starts the comparison over. QueryPilot's caches are dropped and re-selected under the new policy; queries you cached manually are kept.";
+const MODE_SWITCH_CONFIRM = 'This resets all counters and starts the comparison over. QueryPilot drops every cache and re-selects under the new policy.';
 const MODE_RESET_COPY = 'Counters resetting... throughput will dip while caches rebuild, then climb as QueryPilot re-selects.';
 const HEARTBEAT_TOOLTIP = 'QueryPilot is watching your traffic and caching by the selected policy. It re-evaluates every 15 seconds.';
 const CHART_INFO_TOOLTIP = 'The demo sends a simulated production workload against an orders database — to Postgres and to Readyset, side by side. This is a comparison, not an offload: the gap between the lines shows how much faster your queries get once QueryPilot caches them.';
 const LEGEND_POSTGRES_TOOLTIP = 'Every query also runs directly against Postgres, uncached — your before picture.';
 const LEGEND_READYSET_TOOLTIP = 'The same queries through Readyset: cached ones are served from the cache, everything else passes through untouched.';
+const MANUAL_CACHE_DISABLED_TOOLTIP = "QueryPilot manages caching while it's on. Turn it off to cache by hand.";
 const TOUR_STORAGE_KEY = 'qpdemo_walkthrough_done';
 
 type SortKey = 'query' | 'postgres_hits' | 'readyset_hits' | 'direct_avg_ms' | 'router_avg_ms' | 'status';
@@ -690,9 +691,17 @@ function StartCard({ onStart }: { onStart: () => void }) {
         </div>
         <ul className="mt-2 space-y-1.5">
           <PreflightItem
-            state={!checks ? 'checking' : checks.docker_running ? 'ok' : 'blocked'}
+            state={
+              !checks ? 'checking'
+                : !checks.docker_installed || !checks.docker_running ? 'blocked'
+                : 'ok'
+            }
             okLabel="Docker is running"
-            pendingLabel="Docker isn't running - start Docker, then re-check"
+            pendingLabel={
+              checks && !checks.docker_installed
+                ? "Docker isn't installed - install Docker Desktop to run the demo"
+                : "Docker isn't running - start Docker to run the demo"
+            }
           />
           <PreflightItem
             state={
@@ -722,7 +731,7 @@ function StartCard({ onStart }: { onStart: () => void }) {
         iconPosition="left"
         label="Start demo environment"
         className="mt-4"
-        disabled={checks ? (!checks.docker_running || !checks.disk_space_ok) : false}
+        disabled={checks ? (!checks.docker_installed || !checks.docker_running || !checks.disk_space_ok) : false}
         onClick={onStart}
       />
     </div>
@@ -770,7 +779,7 @@ function popoverCopy(row: PatternRow, mode: DiscoveryMode, cacheBudget: number) 
       };
     case 'manual':
       return {
-        sentence: 'Cached by you. QueryPilot keeps manual caches across policy switches.',
+        sentence: 'Cached by you. Turning QueryPilot on drops manual caches and lets it manage caching.',
         numbers: baseNumbers,
       };
     case 'not_select_shaped':
@@ -870,6 +879,7 @@ function PatternTable({
   mode,
   cacheBudget,
   suggestedKeys,
+  querypilotOn,
   onCache,
   onUncache,
 }: {
@@ -877,6 +887,7 @@ function PatternTable({
   mode: DiscoveryMode;
   cacheBudget: number;
   suggestedKeys: Set<string>;
+  querypilotOn: boolean;
   onCache: (key: string, title: string) => void;
   onUncache: (key: string, title: string) => void;
 }) {
@@ -998,10 +1009,37 @@ function PatternTable({
                       <StatusPopover row={row} mode={mode} cacheBudget={cacheBudget} open={openPopover === row.key} onOpenChange={(o) => setPopover(row, o)} />
                     </td>
                     <td className="px-3 py-2">
-                      {row.status === 'cached_manual' ? (
-                        <Button variant="primary" modifier="ghost" size="small" label="Uncache" onClick={() => onUncache(row.key, row.title)} />
-                      ) : canManualCache(row) ? (
-                        <Button variant="primary" modifier="ghost" size="small" icon="database-settings" iconPosition="left" label="Cache" onClick={() => onCache(row.key, row.title)} />
+                      {row.status === 'cached_manual' || row.status === 'cached_querypilot' || canManualCache(row) ? (
+                        // Manual caching is the early hands-on beat. Once QueryPilot
+                        // is on it owns all caching, so these switches gray out but
+                        // stay visible, showing who currently caches each query.
+                        querypilotOn ? (
+                          // A disabled switch swallows hover, so the span is the
+                          // tooltip trigger. The table has no TooltipProvider
+                          // ancestor, so each switch carries its own.
+                          <TooltipProvider delayDuration={150}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="inline-flex">
+                                  <BaseInputSwitch
+                                    name={`manual-cache-${row.key}`}
+                                    checked={row.status === 'cached_manual' || row.status === 'cached_querypilot'}
+                                    disabled
+                                  />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent label={MANUAL_CACHE_DISABLED_TOOLTIP} />
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <BaseInputSwitch
+                            name={`manual-cache-${row.key}`}
+                            checked={row.status === 'cached_manual' || row.status === 'cached_querypilot'}
+                            onCheckedChange={(next) =>
+                              next ? onCache(row.key, row.title) : onUncache(row.key, row.title)
+                            }
+                          />
+                        )
                       ) : null}
                     </td>
                   </tr>
@@ -1154,25 +1192,25 @@ function tourConfig(step: TourStepId): { anchor: string | null; copy: string; pr
     case 'table':
       return { anchor: 'table', copy: 'These are all the queries being sent. Each shows how often it runs and how long it takes on each path. Expand a row to see the query.', primary: 'Next' };
     case 'manual':
-      return { anchor: 'manual-suggestions', copy: "Now let's grab two easy wins: cache these two queries. Caching them gives a noticeable bump in overall throughput." };
+      return { anchor: 'manual-suggestions', copy: "Now let's grab two easy wins: cache these two queries by hand and see what caching does to them." };
     case 'manualResult':
-      return { anchor: 'manual-suggestions', copy: 'Look at these two rows: their Readyset average drops sharply as Readyset serves them from cache, while the Postgres path stays where it was.', primary: 'Next' };
+      return { anchor: 'manual-suggestions', copy: "Look at these two rows: now that Readyset serves them from cache, their Readyset latency drops dramatically compared to Postgres - the same query, answered from memory instead of recomputed.", primary: 'Next' };
     case 'querypilot':
-      return { anchor: 'querypilot', copy: 'Now the fun part. QueryPilot watches your traffic and picks what to cache for you — starting with your most expensive queries (our demo configuration has it caching the top 10). Turn it on and give it a minute to make its first pass.' };
+      return { anchor: 'querypilot', copy: "Now the fun part. That manual pass was you trying it by hand; turn on QueryPilot and it takes the wheel. It drops your manual picks and manages caching itself, watching your traffic and caching the queries your app runs most often (our demo configuration caches the top 20). Give it a minute to make its first pass, then watch the Readyset line surge past the flat Postgres line." };
     case 'qpWaiting':
       return { anchor: 'chart', copy: 'QueryPilot is making its first pass — watch the lines while the caches build.' };
     case 'autoCachedChart':
-      return { anchor: 'chart', copy: 'Watch the teal line — QueryPilot just cached your heaviest queries, and Readyset is serving them from memory.', primary: 'Next' };
+      return { anchor: 'chart', copy: 'Watch the teal line — QueryPilot just cached your most frequent queries, and Readyset is serving them from memory.', primary: 'Next' };
     case 'autoCached':
-      return { anchor: 'cached-querypilot-rows', copy: 'QueryPilot cached your heaviest queries. Hover the status on one of these to see why it was chosen - and scroll the table to see the rest it cached.', primary: 'Next' };
+      return { anchor: 'cached-querypilot-rows', copy: 'QueryPilot cached your most frequent queries. Hover the status on one of these to see why it was chosen.', primary: 'Next' };
     case 'mode':
-      return { anchor: 'mode', copy: 'Now switch to Most frequent — QueryPilot will cache the 20 queries your app calls most often instead.' };
+      return { anchor: 'mode', copy: 'Now switch to Most expensive — QueryPilot will cache the 20 most expensive queries instead.' };
     case 'reselecting':
-      return { anchor: 'chart', copy: 'QueryPilot dropped its old picks and is re-selecting for Most frequent. Watch the Readyset line climb as the new caches build, then continue when you are ready.', primary: 'Next' };
+      return { anchor: 'chart', copy: 'QueryPilot dropped its old picks and is re-selecting for Most expensive. Watch the Readyset line climb as the new caches build, then continue when you are ready.', primary: 'Next' };
     case 'modeWhyNot':
       return { anchor: 'uncached-rows', copy: 'Hover over the status of an uncached query to see why QueryPilot passed on it.', primary: 'Next' };
     case 'finale':
-      return { anchor: null, copy: "That's the tour, and now it's yours. Readyset QueryPilot keeps caching by your chosen policy, and the ones you manually cached stay. Once you're done, click Tear down — it removes all the demo containers and the whole demo from your system.", primary: 'Finish' };
+      return { anchor: null, copy: "That's the tour, and now it's yours. Readyset QueryPilot keeps caching by your chosen policy, managing every cache for you. Once you're done, click Tear down — it removes all the demo containers and the whole demo from your system.", primary: 'Finish' };
   }
 }
 
@@ -1323,17 +1361,17 @@ export function DemoPage() {
   const suggestions = useMemo(() => suggestedMidTier(d.patterns, d.cacheBudget), [d.cacheBudget, d.patterns]);
   const suggestedKeys = useMemo(() => new Set(suggestions.map((p) => p.key)), [suggestions]);
   const hasQueryPilotCache = d.patterns.some((p) => p.status === 'cached_querypilot');
-  // Gate for the 'reselecting' step: hold Next until QueryPilot's Most-frequent
+  // Gate for the 'reselecting' step: hold Next until QueryPilot's Most-expensive
   // pass has filled its budget, so the modeWhyNot anchor lands on a query that
-  // stays uncached instead of one still mid-accumulation. Count every cached
-  // row (QueryPilot-owned plus the surviving manual pair, which fall inside the
-  // count_star top set) against the budget; capped at the catalog size so it can
-  // never wait for more caches than exist.
+  // stays uncached instead of one still mid-accumulation. Free the step once a
+  // clear majority of the budget has landed rather than every last cache: the
+  // last one or two can lag, and holding the visitor on "18 of 20" reads as
+  // stuck. Capped at the catalog size so it never waits for more than exist.
   const reselectTarget = Math.min(d.cacheBudget, d.patterns.length);
   const reselectCached = d.patterns.filter(
     (p) => p.status === 'cached_querypilot' || p.status === 'cached_manual',
   ).length;
-  const reselectComplete = reselectCached >= reselectTarget;
+  const reselectComplete = reselectCached >= Math.min(reselectTarget, 11);
   // Live Readyset-vs-Postgres throughput multiple over the recent window, for
   // the permanent ratio line. Always computed, never gated.
   const liftRatio = windowLiftRatio(d.samples, 15);
@@ -1431,13 +1469,13 @@ export function DemoPage() {
     if (tourStep === 'qpWaiting' && hasQueryPilotCache) setTourStep('autoCachedChart');
   }, [hasQueryPilotCache, tourStep]);
 
-  // mode -> reselecting once the visitor switches to Most frequent; the step
-  // anchors the chart while the count_star pass rebuilds caches, then advances
+  // mode -> reselecting once the visitor switches to Most expensive; the step
+  // anchors the chart while the sum_time pass rebuilds caches, then advances
   // to modeWhyNot on the first re-cache event.
   useEffect(() => {
     const previous = previousModeRef.current;
     previousModeRef.current = d.mode;
-    if (tourStep === 'mode' && previous !== d.mode && d.mode === 'count_star') {
+    if (tourStep === 'mode' && previous !== d.mode && d.mode === 'sum_time') {
       setTourStep('reselecting');
     }
   }, [d.mode, tourStep]);
@@ -1524,6 +1562,7 @@ export function DemoPage() {
             mode={d.mode}
             cacheBudget={d.cacheBudget}
             suggestedKeys={suggestedKeys}
+            querypilotOn={d.querypilotOn}
             onCache={d.cache}
             onUncache={d.uncache}
           />
@@ -1541,7 +1580,7 @@ export function DemoPage() {
           primaryDisabled={tourStep === 'reselecting' && !reselectComplete}
           copyOverride={
             tourStep === 'reselecting' && !reselectComplete
-              ? `QueryPilot dropped its old picks and is re-selecting for Most frequent. It has cached ${reselectCached} of ${reselectTarget} so far - the Readyset line climbs as each one lands. Continue once they are all cached.`
+              ? 'QueryPilot dropped its old picks and is re-selecting for Most expensive. Watch the Readyset line climb as the new caches land.'
               : undefined
           }
           deps={[d.phase, d.loadRunning, d.mode, d.querypilotOn, d.patterns.length, suggestions.length]}

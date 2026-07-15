@@ -109,6 +109,48 @@ def test_patterns_compute_querypilot_reasons():
     assert rows[4]["decision"]["winner_values"] == [1000]
 
 
+def test_reset_querypilot_caches_include_manual_flag():
+    # Default preserves hand-created (manual) caches; include_manual clears them
+    # too, which is how QueryPilot takes over all caching when it turns on.
+    dropped = []
+
+    class Admin:
+        def pattern_rules(self):
+            return [
+                {"fingerprint_hash": "1", "target_pool": "readyset",
+                 "comment": 'readyset-meta: {"cache_name":"qp_cache_1"}'},
+                {"fingerprint_hash": "2", "target_pool": "readyset",
+                 "comment": _manual_comment(2)},
+            ]
+
+        def digests(self, limit=100, order_by="sum_time", min_count=None):
+            return []
+
+        def drop_pattern_rule(self, fp):
+            dropped.append(fp)
+
+    class RS:
+        database = "sqp_test"
+
+        def show_caches(self):
+            return []
+
+        def drop_cache(self, name):
+            pass
+
+    def _fresh_qp():
+        qp = QPRouter("127.0.0.1", 6432, 9091, api_key=None, readyset=RS())
+        qp.admin = Admin()
+        return qp
+
+    _fresh_qp().reset_querypilot_caches()
+    assert dropped == [1]  # manual (fp 2) preserved
+
+    dropped.clear()
+    _fresh_qp().reset_querypilot_caches(include_manual=True)
+    assert sorted(dropped) == [1, 2]  # manual dropped too
+
+
 def test_qp_crontab_uses_supercronic_seconds_field(tmp_path):
     ports = qdeploy.Ports(pg=5432, readyset=5433, readyset_metrics=6034, sqp=6432, metrics=9090)
     _, _, crontab = qdeploy.write_qp_config(

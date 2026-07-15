@@ -19,6 +19,7 @@ export interface ContainerProgress {
 }
 
 export interface PreflightChecks {
+  docker_installed: boolean;
   docker_running: boolean;
   images_present: boolean;
   missing_images: string[];

@@ -176,6 +176,56 @@ def test_querypilot_autocaches(provisioned):
     provisioned.stop_load()
 
 
+def test_querypilot_surge_holds_without_sawtooth(provisioned):
+    # After QueryPilot caches, the ReadySet line must SURGE and HOLD, not
+    # sawtooth up and down. The root cause of the old sawtooth was a 10-second
+    # shallow-cache TTL: ~20 caches created together refreshed in lockstep every
+    # few seconds and the throughput line collapsed and recovered repeatedly. The
+    # fix is a long TTL. This guards both the root cause (long TTL, deterministic)
+    # and the symptom (a stable, elevated router line).
+    import re
+
+    provisioned.set_querypilot(False)
+    provisioned.start_load(6)
+    # Feed QueryPilot the frequent queries so it caches (it opens on count_star).
+    for _ in range(3):
+        _drive_sqp(provisioned, _sql("C01"), 40)
+        _drive_sqp(provisioned, _sql("C02"), 30)
+        _drive_sqp(provisioned, _sql("C03"), 25)
+    provisioned.set_querypilot(True)
+    _wait_for(
+        lambda: [p for p in provisioned.patterns() if p["status"] == "cached_querypilot"],
+        timeout=150,
+    )
+
+    # Root cause: every shallow cache carries a long TTL, so they never refresh
+    # in a tight loop. A short TTL here would reintroduce the sawtooth.
+    caches = provisioned._qp.readyset.show_caches()
+    ttls = [int(m) for row in caches for m in re.findall(r"ttl (\d+) ms", " ".join(map(str, row)))]
+    assert ttls, "no shallow-cache TTLs found via SHOW CACHES"
+    assert min(ttls) >= 60_000, f"shallow TTL too short (sawtooth risk): {min(ttls)} ms"
+
+    # Symptom: poll patterns() (which feeds the cached-key set to the load driver)
+    # each window and sample the router-vs-direct ratio. Ratios are host-speed
+    # independent, so this holds on a weak CI box. After warmup the router must
+    # stay elevated every window; a sawtooth would drop a window toward parity.
+    ratios = []
+    for _ in range(12):
+        provisioned.patterns()
+        time.sleep(2)
+        router, direct, n = _trailing_means(provisioned, window_s=3)
+        if n and direct > 0:
+            ratios.append(router / direct)
+    provisioned.set_querypilot(False)
+    provisioned.stop_load()
+
+    assert len(ratios) >= 6, f"too few windows sampled: {len(ratios)}"
+    settled = sorted(ratios[3:])  # drop warmup windows while caches populate
+    median = settled[len(settled) // 2]
+    assert median >= 2.0, f"router did not surge: median ratio {median:.1f} (ratios {[round(r, 1) for r in ratios]})"
+    assert min(settled) >= 1.2, f"router dipped toward the baseline: ratios {[round(r, 1) for r in ratios]}"
+
+
 def test_discovery_mode_switch_resets_and_reselects(provisioned):
     provisioned.stop_load()
     provisioned.set_querypilot(False)
@@ -288,24 +338,37 @@ def test_stats_reset_on_querypilot_toggle(provisioned):
     assert all(p["hits"] == 0 for p in after)
 
 
-def test_querypilot_off_drops_only_querypilot_owned(provisioned):
+def test_querypilot_takes_over_caching_from_manual(provisioned):
+    # QueryPilot is command-and-control: enabling it drops every cache (including
+    # the hand-created one) and manages caching itself; disabling it drops its
+    # own caches.
     provisioned.stop_load()
     provisioned.set_querypilot(False)
     _drive_sqp(provisioned, _sql("H01"), 8)
     provisioned.cache("H01")
+    assert _wait_for(
+        lambda: [p for p in provisioned.patterns()
+                 if p["key"] == "H01" and p["status"] == "cached_manual"],
+        timeout=30,
+    ), "manual cache did not take"
 
     _drive_sqp(provisioned, _sql("C01"), 30)
     _drive_sqp(provisioned, _sql("C02"), 25)
     _drive_sqp(provisioned, _sql("C03"), 20)
     provisioned.set_querypilot(True)
+    # Enabling QueryPilot drops the manual cache: H01 is no longer manual (it is
+    # either pass_through or, if QueryPilot's policy re-selects it, its own).
+    assert _wait_for(
+        lambda: next((p for p in provisioned.patterns()
+                      if p["key"] == "H01"), {}).get("status") != "cached_manual",
+        timeout=60,
+    ), "QueryPilot did not drop the manual cache when it took over"
     qp_rows = _wait_for(
         lambda: [p for p in provisioned.patterns() if p["status"] == "cached_querypilot"],
         timeout=150,
     )
-    assert qp_rows, "QueryPilot cached nothing before off transition"
+    assert qp_rows, "QueryPilot cached nothing after taking over"
 
     provisioned.set_querypilot(False)
     rows = provisioned.patterns()
     assert not [p for p in rows if p["status"] == "cached_querypilot"]
-    assert next(p for p in rows if p["key"] == "H01")["status"] == "cached_manual"
-    provisioned.uncache("H01")

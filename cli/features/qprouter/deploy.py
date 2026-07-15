@@ -50,60 +50,25 @@ PINNED_IMAGES: dict[str, str] = {
     "qp-cron": QP_CRON_IMAGE,
 }
 
-# Per-container resource caps. A local demo must never consume the whole machine
-# (`docker run` applies NO limit by default, so Postgres under the comparison
-# workload grabs every core on the host), but the caps must not be so tight that
-# the comparison stops being meaningful. A fixed cap can't do both: 2 cores is
-# absurd on a 32-core workstation yet 8 would swamp a laptop. So the CPU caps
-# scale to the host's core count.
-#
-# Postgres and ReadySet are the data path: under "most expensive" only the rare
-# heavy queries are cached, so the bulk of traffic (the cheap queries) still hits
-# Postgres on BOTH paths. If Postgres is starved they bottleneck on it together
-# and the lines stay neck-and-neck. They get 4-8 cores each on a capable machine,
-# never more than the host physically has.
-
-
-def _host_cpus() -> int:
-    """Logical cores available to this process. sched_getaffinity respects CPU
-    pinning; fall back to the full count where it is unavailable."""
-    try:
-        return len(os.sched_getaffinity(0))
-    except AttributeError:
-        return os.cpu_count() or 4
-
-
-def _data_path_cpus(host_cpus: int) -> int:
-    """Postgres/ReadySet target: at least 4 cores on a capable machine, at most
-    8, and just whatever exists on a machine with fewer than 4 (we can't hand out
-    cores the host doesn't have)."""
-    return min(8, host_cpus)
-
-
-def _router_cpus(host_cpus: int) -> int:
-    """SQP only proxies queries (I/O-light, never the bottleneck: it idled at
-    ~1-11% while Postgres was pegged). 2 cores is ample headroom; never above
-    what the host has."""
-    return min(2, host_cpus)
-
-
-_HOST_CPUS = _host_cpus()
-_DATA_CPUS = _data_path_cpus(_HOST_CPUS)
-_ROUTER_CPUS = _router_cpus(_HOST_CPUS)
-
-# `--cpus` is the ceiling that matters; memory is generous so a cache is never
-# OOM-killed mid-demo. All overridable via env for tuning without a code change.
+# Per-container resource caps, fixed at a laptop floor. The demo is designed to
+# run identically on a small machine (~2 cores / 2 GB available to Docker), so
+# the numbers are consistent on every system rather than scaling with the host.
+# The stability lever is the OFFERED LOAD (few workers, see load_driver), not the
+# resource ceiling: a small workload stays comfortably within these caps, and the
+# caps stop any container from monopolizing the machine. `--cpus` is the ceiling
+# that matters; memory is generous so a cache is never OOM-killed mid-demo. All
+# overridable via env for tuning without a code change.
 RESOURCE_LIMITS: dict[str, dict[str, str]] = {
     "pg": {
-        "cpus": os.environ.get("QPDEMO_PG_CPUS") or str(_DATA_CPUS),
+        "cpus": os.environ.get("QPDEMO_PG_CPUS", "2"),
         "memory": os.environ.get("QPDEMO_PG_MEM", "2g"),
     },
     "readyset": {
-        "cpus": os.environ.get("QPDEMO_READYSET_CPUS") or str(_DATA_CPUS),
+        "cpus": os.environ.get("QPDEMO_READYSET_CPUS", "2"),
         "memory": os.environ.get("QPDEMO_READYSET_MEM", "2g"),
     },
     "sqp": {
-        "cpus": os.environ.get("QPDEMO_SQP_CPUS") or str(_ROUTER_CPUS),
+        "cpus": os.environ.get("QPDEMO_SQP_CPUS", "1"),
         "memory": os.environ.get("QPDEMO_SQP_MEM", "512m"),
     },
     "qp-cron": {
@@ -225,6 +190,11 @@ def deploy_readyset(name: str, port: int, metrics_port: int, pg_port: int,
         "-e", f"METRICS_ADDRESS=0.0.0.0:{metrics_port}",
         "-e", "DISABLE_TELEMETRY=true",
         "-e", "ALLOW_UNAUTHENTICATED_CONNECTIONS=true",
+        # Shallow caches default to a 10s TTL, so every cache re-runs upstream
+        # every few seconds; with ~20 caches created together those refreshes
+        # land in lockstep and the ReadySet throughput line sawtooths. A 3-minute
+        # TTL makes refreshes rare and the line steady for the length of a demo.
+        "-e", f"DEFAULT_TTL_MS={os.environ.get('QPDEMO_SHALLOW_TTL_MS', '180000')}",
         "-p", f"{port}:{port}",
         "-p", f"{metrics_port}:{metrics_port}",
         READYSET_IMAGE,

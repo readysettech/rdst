@@ -268,6 +268,7 @@ describe('DemoPage', () => {
   it('renders the start card as a live preflight checklist when everything is ready', async () => {
     markTourDone();
     stubPreflight({
+      docker_installed: true,
       docker_running: true,
       images_present: true,
       missing_images: [],
@@ -291,9 +292,10 @@ describe('DemoPage', () => {
     expect(start.disabled).toBe(false);
   });
 
-  it('flags missing docker and pending image download on the checklist, with a re-check', async () => {
+  it('flags docker installed-but-stopped and pending image download, with a re-check', async () => {
     markTourDone();
     const fetchMock = stubPreflight({
+      docker_installed: true,
       docker_running: false,
       images_present: false,
       missing_images: ['a', 'b', 'c', 'd'],
@@ -305,7 +307,7 @@ describe('DemoPage', () => {
     mockDemo({ phase: 'idle' });
     render(<DemoPage />);
 
-    expect(await screen.findByText(/Docker isn't running/)).toBeTruthy();
+    expect(await screen.findByText(/Docker isn't running - start Docker to run the demo/)).toBeTruthy();
     expect(screen.getByText(/Container images not downloaded yet - about 2GB/)).toBeTruthy();
     const start = screen.getByRole('button', { name: /Start demo environment/ }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
@@ -320,6 +322,27 @@ describe('DemoPage', () => {
     await waitFor(() => {
       expect(preflightCalls()).toBeGreaterThan(before);
     });
+  });
+
+  it('flags docker not installed as a red blocker and disables Start', async () => {
+    markTourDone();
+    stubPreflight({
+      docker_installed: false,
+      docker_running: false,
+      images_present: false,
+      missing_images: ['a', 'b', 'c', 'd'],
+      download_mb: 500,
+      disk_space_ok: true,
+      disk_free_gb: 120,
+      disk_required_gb: 2,
+    });
+    mockDemo({ phase: 'idle' });
+    render(<DemoPage />);
+
+    expect(await screen.findByText(/Docker isn't installed - install Docker Desktop to run the demo/)).toBeTruthy();
+    expect(screen.queryByText("Docker is running")).toBeNull();
+    const start = screen.getByRole('button', { name: /Start demo environment/ }) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
   });
 
   it('shows a teardown interstitial with containers ticking to removed', () => {
@@ -481,6 +504,78 @@ describe('DemoPage', () => {
     expect(screen.queryByText(/Query shape/)).toBeNull();
   });
 
+  it('renders manual caching as a per-row switch that caches and uncaches', () => {
+    markTourDone();
+    const cache = vi.fn();
+    const uncache = vi.fn();
+    mockDemo({
+      querypilotOn: false,
+      cache,
+      uncache,
+      patterns: [
+        row({ key: 'PT', title: 'Uncached query', status: 'pass_through', hits: 5 }),
+        row({ key: 'MC', title: 'Manually cached query', status: 'cached_manual', hits: 5, reason: { kind: 'manual' } }),
+      ],
+    });
+    render(<DemoPage />);
+
+    const offSwitch = rowScope('Uncached query').getByRole('switch');
+    const onSwitch = rowScope('Manually cached query').getByRole('switch');
+    expect(offSwitch.getAttribute('aria-checked')).toBe('false');
+    expect(onSwitch.getAttribute('aria-checked')).toBe('true');
+
+    // Sliding off->on caches; on->off uncaches, through the existing handlers.
+    fireEvent.click(offSwitch);
+    expect(cache).toHaveBeenCalledWith('PT', 'Uncached query');
+    fireEvent.click(onSwitch);
+    expect(uncache).toHaveBeenCalledWith('MC', 'Manually cached query');
+  });
+
+  it('grays out and disables the per-row cache switches while QueryPilot is on', () => {
+    markTourDone();
+    const cache = vi.fn();
+    mockDemo({
+      querypilotOn: true,
+      cache,
+      patterns: [row({ key: 'PT', title: 'Uncached query', status: 'pass_through', hits: 5 })],
+    });
+    render(<DemoPage />);
+
+    // The switch stays visible (grayed), not hidden, but cannot be toggled.
+    const sw = rowScope('Uncached query').getByRole('switch') as HTMLButtonElement;
+    expect(sw.disabled).toBe(true);
+    fireEvent.click(sw);
+    expect(cache).not.toHaveBeenCalled();
+  });
+
+  it('keeps a disabled, checked switch on QueryPilot-cached rows while QueryPilot is on', () => {
+    markTourDone();
+    const uncache = vi.fn();
+    mockDemo({
+      querypilotOn: true,
+      uncache,
+      patterns: [
+        row({ key: 'QP', title: 'QueryPilot cached query', status: 'cached_querypilot', hits: 5, reason: { kind: 'selected', rank: 1, metric: 'count_star', metric_value: 900, cutoff: 10 } }),
+        row({ key: 'PT', title: 'Uncached query', status: 'pass_through', hits: 5 }),
+      ],
+    });
+    render(<DemoPage />);
+
+    // Previously this row's switch vanished under QueryPilot; now it stays,
+    // disabled and showing ON to reflect that the query is cached.
+    const cachedSwitch = rowScope('QueryPilot cached query').getByRole('switch') as HTMLButtonElement;
+    expect(cachedSwitch.disabled).toBe(true);
+    expect(cachedSwitch.getAttribute('aria-checked')).toBe('true');
+
+    // Uncached rows keep a disabled switch too, but showing OFF.
+    const uncachedSwitch = rowScope('Uncached query').getByRole('switch') as HTMLButtonElement;
+    expect(uncachedSwitch.disabled).toBe(true);
+    expect(uncachedSwitch.getAttribute('aria-checked')).toBe('false');
+
+    fireEvent.click(cachedSwitch);
+    expect(uncache).not.toHaveBeenCalled();
+  });
+
   it('confirms mode switches with an in-page dialog and shows the reset overlay while the PATCH is pending', async () => {
     markTourDone();
     let resolveMode: (() => void) | null = null;
@@ -496,7 +591,9 @@ describe('DemoPage', () => {
     // The confirm is an in-page dialog styled like the tour bubbles; the browser
     // window.confirm / alert is banned.
     expect(confirmSpy).not.toHaveBeenCalled();
-    expect(screen.getByText("This resets all counters and starts the comparison over. QueryPilot's caches are dropped and re-selected under the new policy; queries you cached manually are kept.")).toBeTruthy();
+    expect(screen.getByText('This resets all counters and starts the comparison over. QueryPilot drops every cache and re-selects under the new policy.')).toBeTruthy();
+    // Command-and-control: the confirm no longer claims manual caches survive.
+    expect(screen.queryByText(/cached manually are kept/)).toBeNull();
     expect(setDiscoveryMode).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch policy' }));
@@ -527,8 +624,8 @@ describe('DemoPage', () => {
     const welcome = /This demo spins up a small database/;
     let state = {
       ...makeBase(),
-      // QueryPilot opens on the most-expensive policy in the new flow.
-      mode: 'sum_time',
+      // QueryPilot opens on the most-frequent policy in the new flow.
+      mode: 'count_star',
       patterns: [
         row({ key: 'H03', title: 'Daily item revenue', group: 'expensive_aggregate', hits: 12, direct_avg_ms: 320, reason: { kind: 'below_rank', rank: 11, metric: 'sum_time_us', metric_value: 3_800_000 } }),
         row({ key: 'H04', title: 'Revenue by customer segment', group: 'expensive_aggregate', hits: 10, direct_avg_ms: 300, reason: { kind: 'below_rank', rank: 12, metric: 'sum_time_us', metric_value: 3_000_000 } }),
@@ -559,8 +656,8 @@ describe('DemoPage', () => {
     state = { ...state, patterns: cachedManual };
     rerender(<DemoPage />);
     // After both easy wins are cached, the tour holds on those two rows to show
-    // the Readyset-vs-Postgres hit divergence, then Next advances to QueryPilot.
-    expect(await screen.findByText(/their Readyset average drops/)).toBeTruthy();
+    // the per-query throughput jump, then Next advances to QueryPilot.
+    expect(await screen.findByText(/their Readyset latency drops dramatically/)).toBeTruthy();
     // The two rows must STAY highlighted after caching (the cutout tracks the
     // suggested keys, not cacheability, which flips false once cached).
     expect(document.querySelectorAll('[data-tour-manual-suggested="true"]').length).toBe(2);
@@ -574,33 +671,31 @@ describe('DemoPage', () => {
     expect(await screen.findByText(/QueryPilot is making its first pass/)).toBeTruthy();
     expect(screen.queryByText(welcome)).toBeNull();
 
-    const expensiveRow = row({ key: 'qp1', title: 'Revenue by category', group: 'expensive_aggregate', status: 'cached_querypilot', hits: 100, direct_avg_ms: 210, router_avg_ms: 0.9, reason: { kind: 'selected', rank: 1, metric: 'sum_time_us', metric_value: 7_000_000, cutoff: 10 } });
-    state = { ...state, patterns: [...cachedManual, expensiveRow] };
+    const frequentRow = row({ key: 'qp1', title: 'Product tile by id', group: 'cheap_point_lookup', status: 'cached_querypilot', hits: 900, direct_avg_ms: 5, router_avg_ms: 0.8, reason: { kind: 'selected', rank: 1, metric: 'count_star', metric_value: 900, cutoff: 20 } });
+    state = { ...state, patterns: [...cachedManual, frequentRow] };
     rerender(<DemoPage />);
     expect(await screen.findByText(/Watch the teal line/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByText(/Hover the status on one of these to see why it was chosen/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText(/Now switch to Most frequent/)).toBeTruthy();
+    expect(await screen.findByText(/Now switch to Most expensive/)).toBeTruthy();
 
-    // Switch to Most frequent: the re-selecting step anchors the chart while
+    // Switch to Most expensive: the re-selecting step anchors the chart while
     // the new caches build; Welcome must not re-appear here either. Its Next is
-    // gated until QueryPilot fills the count_star budget, so the why-not anchor
+    // gated until QueryPilot fills the sum_time budget, so the why-not anchor
     // lands on a query that stays uncached rather than one still mid-pass.
-    const uncachedExpensive = row({ key: 'qp3', title: 'Revenue by country', group: 'expensive_aggregate', status: 'pass_through', hits: 12, direct_avg_ms: 300, router_avg_ms: 300, reason: { kind: 'below_rank', rank: 14, metric: 'count_star', metric_value: 12 } });
-    state = { ...state, mode: 'count_star', cacheBudget: 3, patterns: [...cachedManual, uncachedExpensive] };
+    const uncachedCheap = row({ key: 'qp3', title: 'Product tile by id', group: 'cheap_point_lookup', status: 'pass_through', hits: 300, direct_avg_ms: 5, router_avg_ms: 5, reason: { kind: 'below_rank', rank: 14, metric: 'sum_time_us', metric_value: 1_500_000 } });
+    state = { ...state, mode: 'sum_time', cacheBudget: 3, patterns: [...cachedManual, uncachedCheap] };
     rerender(<DemoPage />);
-    expect(await screen.findByText(/re-selecting for Most frequent/)).toBeTruthy();
+    expect(await screen.findByText(/re-selecting for Most expensive/)).toBeTruthy();
     expect(screen.queryByText(welcome)).toBeNull();
-    // Budget not yet met (2 of 3 cached): Next is held disabled and the step
-    // reports live progress.
-    expect(screen.getByText(/cached 2 of 3/)).toBeTruthy();
+    // Majority not yet cached (2 of 3): Next is held disabled while caches land.
     expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true);
 
-    // A frequent query caches, filling the budget; the slowest (expensive)
-    // query stays uncached and is the stable why-not anchor. Next now enables.
-    const frequentRow = row({ key: 'qp2', title: 'Product tile by id', group: 'cheap_point_lookup', status: 'cached_querypilot', hits: 300, direct_avg_ms: 5, router_avg_ms: 0.8, reason: { kind: 'selected', rank: 1, metric: 'count_star', metric_value: 300, cutoff: 20 } });
-    state = { ...state, patterns: [...cachedManual, frequentRow, uncachedExpensive] };
+    // An expensive query caches, filling the budget; the cheap query stays
+    // uncached and is the stable why-not anchor. Next now enables.
+    const expensiveRow2 = row({ key: 'qp2', title: 'Revenue by region', group: 'expensive_aggregate', status: 'cached_querypilot', hits: 40, direct_avg_ms: 260, router_avg_ms: 0.9, reason: { kind: 'selected', rank: 1, metric: 'sum_time_us', metric_value: 6_500_000, cutoff: 10 } });
+    state = { ...state, patterns: [...cachedManual, expensiveRow2, uncachedCheap] };
     rerender(<DemoPage />);
     expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));

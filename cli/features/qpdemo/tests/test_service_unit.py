@@ -119,10 +119,58 @@ def test_enabling_querypilot_resets_to_opening_policy(tmp_path, monkeypatch):
 
     svc.set_querypilot(True)
 
-    # Enabling always reopens on the most-expensive policy: sum_time, top 10.
-    assert svc._discovery_mode == "sum_time"
-    assert svc._cache_budget == service_mod.MODE_BUDGETS["sum_time"]
-    assert written and written[-1][-2:] == ("sum_time", service_mod.MODE_BUDGETS["sum_time"])
+    # Enabling always reopens on the most-frequent policy: count_star, top 20.
+    assert svc._discovery_mode == "count_star"
+    assert svc._cache_budget == service_mod.MODE_BUDGETS["count_star"]
+    assert written and written[-1][-2:] == ("count_star", service_mod.MODE_BUDGETS["count_star"])
+
+
+def test_enabling_querypilot_drops_all_caches_including_manual(tmp_path, monkeypatch):
+    # QueryPilot is command-and-control: turning it on clears every cache first,
+    # including the ones the visitor made by hand, so it owns caching from there.
+    svc = _bare_service(tmp_path, monkeypatch)
+    svc._qp_paused = True
+    svc._ports = type("Ports", (), {"admin": 6035, "readyset": 5433})()
+    reset_calls = []
+
+    class FakeQP:
+        def reset_querypilot_caches(self, include_manual=False):
+            reset_calls.append(include_manual)
+            return {"dropped_rules": 0, "dropped_caches": []}
+
+    svc._qp = FakeQP()
+    monkeypatch.setattr(service_mod.qdeploy, "write_qp_config", lambda *a, **k: None)
+    svc._start_qp_cron = lambda: None
+    svc._reset_comparison_window = lambda: None
+
+    svc.set_querypilot(True)
+
+    assert reset_calls == [True]
+
+
+def test_disabling_querypilot_flips_flag_before_stopping_cron(tmp_path, monkeypatch):
+    # The supervisor keeps qp-cron alive while QueryPilot is enabled, and dropping
+    # caches takes a moment. So the enabled flag must go False BEFORE qp-cron is
+    # stopped -- otherwise the supervisor revives it mid-drop and it re-caches
+    # everything (the caches drop, then instantly reappear).
+    svc = _bare_service(tmp_path, monkeypatch)
+    svc._qp_enabled = True
+    svc._qp_paused = False
+    svc._ports = type("Ports", (), {"admin": 6035, "readyset": 5433})()
+
+    class FakeQP:
+        def reset_querypilot_caches(self, include_manual=False):
+            return {"dropped_rules": 0, "dropped_caches": []}
+
+    svc._qp = FakeQP()
+    svc._save_state = lambda: None
+    svc._reset_comparison_window = lambda: None
+    flag_when_stopped = []
+    svc._stop_container = lambda name: flag_when_stopped.append(svc._qp_enabled)
+
+    svc.set_querypilot(False)
+
+    assert flag_when_stopped == [False], "qp-cron stopped while still 'enabled': supervisor would revive it"
 
 
 def test_supervisor_respects_querypilot_off(tmp_path, monkeypatch):
@@ -397,11 +445,13 @@ def test_pull_failure_raises(monkeypatch):
 
 def test_preflight_all_green(monkeypatch):
     svc = _bare_pull_service()
+    svc.docker_installed = lambda: True
     svc.docker_ok = lambda: True
     monkeypatch.setattr(
         service_mod.qdeploy, "image_present", lambda image, runner=None: True,
     )
     out = svc.preflight()
+    assert out["docker_installed"] is True
     assert out["docker_running"] is True
     assert out["images_present"] is True
     assert out["missing_images"] == []
@@ -410,10 +460,12 @@ def test_preflight_all_green(monkeypatch):
     assert isinstance(out["disk_space_ok"], bool)
 
 
-def test_preflight_docker_down_marks_all_images_missing():
+def test_preflight_docker_installed_but_down_marks_all_images_missing():
     svc = _bare_pull_service()
+    svc.docker_installed = lambda: True
     svc.docker_ok = lambda: False
     out = svc.preflight()
+    assert out["docker_installed"] is True
     assert out["docker_running"] is False
     assert out["images_present"] is False
     assert out["download_mb"] == service_mod.IMAGE_DOWNLOAD_MB
@@ -422,8 +474,20 @@ def test_preflight_docker_down_marks_all_images_missing():
     )
 
 
+def test_preflight_docker_not_installed():
+    # Not-installed is distinct from installed-but-down: docker_running is forced
+    # False without even probing the daemon, so the UI can say "install Docker".
+    svc = _bare_pull_service()
+    svc.docker_installed = lambda: False
+    out = svc.preflight()
+    assert out["docker_installed"] is False
+    assert out["docker_running"] is False
+    assert out["images_present"] is False
+
+
 def test_preflight_partial_images_scale_download_estimate(monkeypatch):
     svc = _bare_pull_service()
+    svc.docker_installed = lambda: True
     svc.docker_ok = lambda: True
     missing = service_mod.qdeploy.PINNED_IMAGES["readyset"]
     monkeypatch.setattr(
@@ -602,8 +666,8 @@ def test_enabling_querypilot_fires_event(tmp_path, monkeypatch):
 
     qp_events = [p for n, p in events if n == "querypilot_enabled"]
     assert len(qp_events) == 1
-    # Enabling always reopens on the most-expensive policy; the event carries it.
-    assert qp_events[0]["mode"] == "sum_time"
+    # Enabling always reopens on the most-frequent policy; the event carries it.
+    assert qp_events[0]["mode"] == "count_star"
     assert qp_events[0]["display_name"] == "RDST QueryPilot Enabled"
 
 

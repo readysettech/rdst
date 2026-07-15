@@ -65,3 +65,30 @@ def test_tier_plan_keeps_cheap_queries_from_starving():
     assert sum(plan.values()) == 8
     assert plan["heavy"] > plan["cheap"]
 
+
+
+def test_router_paces_uncached_but_surges_cached():
+    # The router (non-direct) path skips its think time for keys ReadySet is
+    # serving from cache, so its throughput surges as queries get cached; slow
+    # uncached queries stay paced.
+    router = PathLoad("sqp", {}, ["SELECT 1"])
+    router.set_cached_keys({"C01"})
+    # cached key -> open-loop (no pace) even though it's slow
+    assert router._should_pace("C01", dt_ms=50.0, think=0.05) is False
+    # uncached slow key -> paced
+    assert router._should_pace("H01", dt_ms=50.0, think=0.05) is True
+
+
+def test_direct_path_never_surges_on_cache():
+    # The direct path is the steady baseline: it always paces a slow query, even
+    # if that key happens to be cached, so ReadySet's advantage shows as the
+    # router pulling ahead rather than the baseline moving.
+    direct = PathLoad("direct", {}, ["SELECT 1"])
+    direct.set_cached_keys({"C01"})
+    assert direct._should_pace("C01", dt_ms=50.0, think=0.05) is True
+
+
+def test_a_genuinely_fast_query_skips_its_pace():
+    router = PathLoad("sqp", {}, ["SELECT 1"])
+    # under FAST_PATH_MS -> no pace regardless of cache membership
+    assert router._should_pace("H01", dt_ms=1.0, think=0.05) is False

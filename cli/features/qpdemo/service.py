@@ -46,8 +46,15 @@ QP_NUMBER_OF_QUERIES = 10
 # QueryPilot opens on the most-expensive policy (the tour's first payoff), then
 # the visitor switches to most-frequent. Each policy carries its own budget:
 # top 10 by total time, top 20 by call count.
-QP_DEFAULT_MODE = "sum_time"
-MODE_BUDGETS = {"sum_time": 10, "count_star": 20}
+# QueryPilot opens on the most-frequent policy: caching the queries the app runs
+# most often is where the throughput surge is dramatic (the cached ReadySet path
+# rockets past the direct baseline), so that is the demo's headline beat right
+# after turning QueryPilot on. The tour then switches to most-expensive.
+QP_DEFAULT_MODE = "count_star"
+# Both policies cache their top 20. For most-expensive this reaches past the ~10
+# heaviest queries into the more frequent ones, so its throughput line climbs
+# more instead of being carried only by rare heavy queries.
+MODE_BUDGETS = {"sum_time": 20, "count_star": 20}
 QP_CACHE_BUDGET_MIN = 1
 QP_CACHE_BUDGET_MAX = 40
 QP_MIN_EXECUTION = 5
@@ -93,7 +100,12 @@ class DemoService:
         # Rolling window + events are in-memory only; a restart starts empty.
         self._history: list[dict] = []
         self._events: list[dict] = []
-        self._workers = 8
+        # Small worker pool: the demo offers a light, steady load so it stays
+        # stable within a laptop-floor container (2 cores / 2 GB) on any machine.
+        # Throughput comes from cache hits cycling these workers open-loop, not
+        # from piling on concurrency; two workers keep Postgres off its cap while
+        # the cached ReadySet path still surges ~20x. Env-overridable for tuning.
+        self._workers = int(os.environ.get("QPDEMO_WORKERS", "2"))
         self._discovery_mode = "count_star"
         self._cache_budget = QP_NUMBER_OF_QUERIES
         self._qp_cron_fast = True
@@ -303,6 +315,14 @@ class DemoService:
                                   timeout=8).returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
+
+    @staticmethod
+    def docker_installed() -> bool:
+        """True when the docker binary is on PATH. Distinguishes 'not installed'
+        (point them to install Docker) from 'installed but daemon down' (point
+        them to start Docker) on the preflight checklist."""
+        import shutil
+        return shutil.which("docker") is not None
 
     def _container_state(self, name: str) -> str:
         try:
@@ -535,7 +555,8 @@ class DemoService:
         enough free disk. Cheap enough to re-run on every card mount / retry."""
         import shutil
 
-        docker_running = self.docker_ok()
+        docker_installed = self.docker_installed()
+        docker_running = self.docker_ok() if docker_installed else False
         images = list(qdeploy.PINNED_IMAGES.values())
         missing = (
             [i for i in images if not qdeploy.image_present(i)]
@@ -550,6 +571,7 @@ class DemoService:
         except OSError:
             free_gb = 0.0
         return {
+            "docker_installed": docker_installed,
             "docker_running": docker_running,
             "images_present": not missing,
             "missing_images": missing,
@@ -982,9 +1004,9 @@ class DemoService:
                     "transient_errors": s.transient_errors},
         }
 
-    def _reset_comparison_window(self, key: str | None = None) -> None:
+    def _reset_comparison_window(self, key: str | None = None, router_only: bool = False) -> None:
         if self._driver:
-            self._driver.reset_query_stats(key)
+            self._driver.reset_query_stats(key, router_only=router_only)
 
     # ---- patterns / caching --------------------------------------------------
     def _raw_patterns(self):
@@ -1069,6 +1091,15 @@ class DemoService:
             })
         self._prefer_manual_guide_mid_tier(out)
         self._maybe_fire_demo_completed(out)
+        # Feed the router path the keys ReadySet is serving from cache so it runs
+        # them open-loop and its throughput surges, while the direct path holds a
+        # steady baseline. Reflects live cache state (manual + QueryPilot), so it
+        # follows caching, mode switches, and resets automatically.
+        if self._driver:
+            self._driver.set_cached_keys(
+                r["key"] for r in out
+                if r["status"] in ("cached_querypilot", "cached_manual")
+            )
         return out
 
     def _maybe_fire_demo_completed(self, rows: list[dict]) -> None:
@@ -1125,12 +1156,13 @@ class DemoService:
         self._qp.manual_cache(fp)
         self._sync_workload_denylist()
         self._record_event("manual_cache", f"you cached {label}")
-        # Reset ONLY this query's windowed averages so they rebuild from cached
-        # executions and the drop is immediate — the slow pre-cache samples no
-        # longer drag the average down. Other queries are untouched.
+        # Reset ONLY this query's ReadySet average (not the Postgres one) so the
+        # cached number rebuilds instantly from cached executions while the
+        # Postgres baseline stays put -- it neither drags the ReadySet average
+        # down through old slow samples nor blanks out. Other queries untouched.
         q = self._catalog_by_key.get(str(fingerprint).strip())
         if q:
-            self._reset_comparison_window(q.id)
+            self._reset_comparison_window(q.id, router_only=True)
         return {"success": True, "fingerprint": fp, "owner": "manual"}
 
     def uncache(self, fingerprint: str) -> dict:
@@ -1151,10 +1183,15 @@ class DemoService:
         was_enabled = self._qp_enabled
         reset = None
         if enabled:
+            # QueryPilot takes over all caching: drop every existing cache first,
+            # including the ones the visitor made by hand, so it starts from a
+            # clean slate and owns what gets cached from here on. Manual caching
+            # is only the hands-on beat before QueryPilot is turned on.
+            reset = self._qp.reset_querypilot_caches(include_manual=True) if self._qp else None
             # Enabling always starts from the demo's opening policy: cache the
-            # most expensive queries (top 10 by total time), regardless of any
-            # prior mode or budget the visitor left behind. The tour then switches
-            # to most-frequent.
+            # most frequent queries (top 20 by hit count), regardless of any prior
+            # mode or budget the visitor left behind. The tour then switches to
+            # most-expensive.
             self._discovery_mode = QP_DEFAULT_MODE
             self._cache_budget = MODE_BUDGETS[QP_DEFAULT_MODE]
             if self._ports:
@@ -1175,10 +1212,15 @@ class DemoService:
                     mode=self._discovery_mode,
                 )
         else:
-            self._stop_container(NAMES["qp-cron"])
-            reset = self._qp.reset_querypilot_caches() if self._qp else None
+            # Flip the flag BEFORE stopping qp-cron and dropping caches. Dropping
+            # caches takes a moment, and the supervisor keeps qp-cron alive while
+            # QueryPilot is "enabled" -- if the flag were still set, it would
+            # revive qp-cron mid-drop and it would immediately re-cache everything
+            # (the caches drop, then instantly reappear).
             self._qp_enabled = False
             self._qp_paused = True
+            self._stop_container(NAMES["qp-cron"])
+            reset = self._qp.reset_querypilot_caches() if self._qp else None
             self._health["qp-cron"] = "running"
             self._supervisor_failures["qp-cron"] = 0
             self._save_state()
