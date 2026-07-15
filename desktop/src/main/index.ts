@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
@@ -13,6 +15,11 @@ import { setupAutoUpdates } from './updater.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RENDERER_DIR = path.resolve(__dirname, '../renderer')
+
+// CI smoke mode: boot the full shell (sidecar backend, static server,
+// renderer), print SMOKE_OK, and exit. See rdst/.buildkite smoke scripts.
+const SMOKE_MODE = process.env.RDST_DESKTOP_SMOKE === '1'
+const SMOKE_TIMEOUT_MS = 120_000
 
 let mainWindow: BrowserWindow | null = null
 let backend: BackendHandle | null = null
@@ -159,6 +166,13 @@ async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
     if (mainWindow === window) mainWindow = null
   })
 
+  if (SMOKE_MODE) {
+    window.webContents.on('render-process-gone', (_event, details) => {
+      console.error(`[rdst-desktop] smoke: renderer process gone: ${details.reason}`)
+      exitSmoke(1)
+    })
+  }
+
   const sendMaximizedState = (maximized: boolean) => {
     if (!window.isDestroyed()) {
       window.webContents.send('window:maximized-changed', maximized)
@@ -201,6 +215,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+// Boot-stage breadcrumbs so a CI hang pinpoints the stalled phase.
+function smokeLog(stage: string): void {
+  if (SMOKE_MODE) console.log(`[rdst-desktop] smoke: ${stage}`)
+}
+
 function focusMainWindow(): void {
   if (!mainWindow) return
   if (mainWindow.isMinimized()) mainWindow.restore()
@@ -208,26 +227,66 @@ function focusMainWindow(): void {
   mainWindow.focus()
 }
 
+// Stop the backend before exiting so smoke failures never orphan the
+// sidecar; if teardown itself wedges, force the exit after a grace period.
+function exitSmoke(code: number): void {
+  const forceExit = setTimeout(() => app.exit(code), 10_000)
+  void cleanup().finally(() => {
+    clearTimeout(forceExit)
+    app.exit(code)
+  })
+}
+
+async function runSmokeCheck(window: BrowserWindow): Promise<void> {
+  const title = await window.webContents.executeJavaScript('document.title')
+  console.log(`SMOKE_OK title=${String(title)}`)
+  window.destroy()
+  exitSmoke(0)
+}
+
 async function startApplication(): Promise<void> {
+  if (SMOKE_MODE) {
+    // Self-imposed deadline so a hung boot cannot wedge a CI step.
+    setTimeout(() => {
+      console.error('[rdst-desktop] smoke: timed out waiting for shell readiness')
+      exitSmoke(2)
+    }, SMOKE_TIMEOUT_MS)
+  }
+
   await app.whenReady()
+  smokeLog('electron ready')
 
   const liquidGlassResult = await loadLiquidGlass({
     platform: process.platform,
   })
   liquidGlass = liquidGlassResult.module
   liquidGlassFailureReason = liquidGlassResult.failureReason
+  smokeLog('liquid glass loaded')
 
   registerWindowControlHandlers()
 
-  setupAutoUpdates({
-    isPackaged: app.isPackaged,
-    platform: process.platform,
-    appImagePath: process.env.APPIMAGE,
-  })
+  // No updater in smoke mode: main-build packages ship with updates
+  // enabled, and an update check against the production feed mid-smoke
+  // would make the run nondeterministic.
+  if (!SMOKE_MODE) {
+    setupAutoUpdates({
+      isPackaged: app.isPackaged,
+      platform: process.platform,
+      appImagePath: process.env.APPIMAGE,
+    })
+  }
 
   try {
     const rendererUrl = await resolveRendererUrl()
-    await createWindow(rendererUrl)
+    smokeLog('backend and static server ready')
+
+    const window = await createWindow(rendererUrl)
+    smokeLog('window loaded')
+
+    if (SMOKE_MODE) {
+      await runSmokeCheck(window)
+      return
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -245,6 +304,10 @@ async function startApplication(): Promise<void> {
   } catch (error) {
     console.error('[rdst-desktop] failed to start:', error)
     await cleanup()
+    if (SMOKE_MODE) {
+      app.exit(1)
+      return
+    }
     dialog.showErrorBox('RDST Desktop failed to start', errorMessage(error))
     app.quit()
   }
@@ -267,6 +330,14 @@ function configurePrimaryInstance(): void {
   })
 
   void startApplication()
+}
+
+if (SMOKE_MODE) {
+  // Throwaway state dir: keeps shared CI agents clean and scopes the
+  // single-instance lock so stale processes cannot short-circuit the run.
+  app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'rdst-smoke-')))
+  // The sidecar inherits this env: CI launches must not emit telemetry.
+  process.env.RDST_TELEMETRY = 'off'
 }
 
 if (app.requestSingleInstanceLock()) {

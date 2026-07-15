@@ -39,3 +39,32 @@ linux:
   publish:
     - provider: generic
       url: https://downloads.readyset.io/packages/rdst-desktop/linux/update
+# electron-builder's default depends lists plus ALSA: the Electron binary
+# links libasound.so.2 at load time, so a stock install without it fails
+# to launch. Overriding depends replaces the defaults, hence the full list.
+# The ALSA dep is versioned so apt must pick a real alsa-lib (libasound2 or
+# the versioned-Provides libasound2t64), never the liboss4-salsa stub whose
+# unversioned Provides also claims libasound2.
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - "libasound2 (>= 1.0.17)"
+rpm:
+  depends:
+    - gtk3
+    - libnotify
+    - nss
+    - libXScrnSaver
+    - "(libXtst or libXtst6)"
+    - xdg-utils
+    - at-spi2-core
+    - "(libuuid or libuuid1)"
+    - alsa-lib
