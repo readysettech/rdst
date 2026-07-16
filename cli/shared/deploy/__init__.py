@@ -1,6 +1,6 @@
 """RDST Deploy — shared Readyset deployment helpers."""
 
-READYSET_IMAGE = "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset:latest"
+READYSET_IMAGE = "docker.io/readysettech/readyset:latest"
 
 from .kubernetes import deploy_kubernetes
 from .local_docker import deploy_local_docker
