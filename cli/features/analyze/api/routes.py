@@ -2,6 +2,7 @@ import json
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from shared.api.models import AnalyzeRequest
@@ -25,7 +26,9 @@ router = APIRouter()
 
 
 def _serialize_for_json(obj):
-    if isinstance(obj, dict):
+    if isinstance(obj, BaseModel):
+        return obj.model_dump(mode="json")
+    elif isinstance(obj, dict):
         return {k: _serialize_for_json(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [_serialize_for_json(v) for v in obj]

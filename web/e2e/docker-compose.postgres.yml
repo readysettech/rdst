@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:15.14
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    environment:
+      POSTGRES_DB: rdst_test
+      POSTGRES_PASSWORD: rdst_e2e_password
+      POSTGRES_USER: rdst_test
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U rdst_test -d rdst_test]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - ../../../../rdst/tests/integration/init-scripts/postgres:/docker-entrypoint-initdb.d:ro
+
+  browser:
+    image: mcr.microsoft.com/playwright:v1.61.0-noble
+    # Run as the image default (root) so writes to the mounted checkout
+    # always succeed, matching the pipeline's docker-plugin steps. Playwright
+    # launches Chromium without the sandbox by default, so root is fine.
+    # Override for local compose runs to keep artifacts owned by your user.
+    user: "${RDST_E2E_BROWSER_USER:-0:0}"
+    working_dir: /workdir
+    environment:
+      CI: "${CI:-true}"
+      RDST_E2E_DB_HOST: postgres
+      RDST_E2E_DB_PORT: "5432"
+      RDST_E2E_DB_PASSWORD: rdst_e2e_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../../../..:/workdir

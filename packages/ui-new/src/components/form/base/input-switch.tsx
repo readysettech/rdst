@@ -50,6 +50,8 @@ const switchStyles = tv({
 
 export type BaseInputSwitchProps = {
   id?: string
+  'aria-label'?: string
+  'aria-labelledby'?: string
   checked: boolean
   onCheckedChange?: (checked: boolean) => void
   disabled?: boolean

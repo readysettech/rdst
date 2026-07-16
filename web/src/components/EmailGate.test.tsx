@@ -19,6 +19,20 @@ describe('EmailGate', () => {
     vi.unstubAllGlobals();
   });
 
+  it('renders nothing while the settings check is in flight', async () => {
+    let resolveCheck!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      resolveCheck = resolve;
+    })));
+
+    render(<EmailGate />);
+
+    expect(screen.queryByText('Tell us where to reach you')).toBeNull();
+
+    resolveCheck(jsonResponse({ email: null }));
+    expect(await screen.findByText('Tell us where to reach you')).toBeTruthy();
+  });
+
   it('blocks until a valid email is stored', async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

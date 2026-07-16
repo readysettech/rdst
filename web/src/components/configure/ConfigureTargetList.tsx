@@ -72,6 +72,8 @@ export function ConfigureTargetList({
           {targets.map((target, index) => (
             <m.div
               key={target.name}
+              data-testid="target-row"
+              data-target-name={target.name}
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.2, delay: index * 0.05 }}

@@ -136,6 +136,8 @@ export function TopPage() {
         limit,
         duration: duration > 0 ? duration : undefined,
         auto_save: autoSave,
+        min_freq: minFreq,
+        min_load_pct: minLoadPct,
       });
     } else {
       getTop(target, {
@@ -144,6 +146,8 @@ export function TopPage() {
         sort: sort as 'total_time' | 'freq' | 'avg_time' | 'load',
         filter_pattern: filterPattern || undefined,
         auto_save: autoSave,
+        min_freq: minFreq,
+        min_load_pct: minLoadPct,
       });
     }
   }, [
@@ -156,6 +160,8 @@ export function TopPage() {
     source,
     sort,
     filterPattern,
+    minFreq,
+    minLoadPct,
     startRealtime,
     getTop,
   ]);

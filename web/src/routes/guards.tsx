@@ -670,6 +670,8 @@ function GuardEditor({
         <div className="grid grid-cols-1 tablet:grid-cols-3 gap-3">
           <HStack className="gap-2 items-center">
             <BaseInputSwitch
+              id="guard-require-where"
+              aria-label="Require WHERE"
               name="require-where"
               checked={form.requireWhere}
               onCheckedChange={(checked) => update('requireWhere', checked === true)}
@@ -680,6 +682,8 @@ function GuardEditor({
           </HStack>
           <HStack className="gap-2 items-center">
             <BaseInputSwitch
+              id="guard-require-limit"
+              aria-label="Require LIMIT"
               name="require-limit"
               checked={form.requireLimit}
               onCheckedChange={(checked) => update('requireLimit', checked === true)}
@@ -690,6 +694,8 @@ function GuardEditor({
           </HStack>
           <HStack className="gap-2 items-center">
             <BaseInputSwitch
+              id="guard-no-select-star"
+              aria-label="No SELECT star"
               name="no-select-star"
               checked={form.noSelectStar}
               onCheckedChange={(checked) => update('noSelectStar', checked === true)}

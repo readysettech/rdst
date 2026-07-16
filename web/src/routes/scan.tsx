@@ -39,8 +39,8 @@ function ScanPage() {
   // Cache integration
   const { cacheQuery, cachingId: cachingHash } = useCacheAction({ target });
 
-  const handleCacheQuery = useCallback((sql: string) => {
-    cacheQuery(sql, sql);
+  const handleCacheQuery = useCallback((sql: string, id: string) => {
+    cacheQuery(sql, id);
   }, [cacheQuery]);
 
   // Filter state

@@ -542,6 +542,8 @@ function QueryRegistryPage() {
                   {filteredQueries.map((entry, index) => (
                     <m.div
                       key={entry.hash}
+                      data-testid="query-registry-row"
+                      data-query-hash={entry.hash}
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, x: -20 }}

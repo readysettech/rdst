@@ -14,7 +14,7 @@ import { HStack, VStack } from '@rs/ui-new/stack';
 import { Card } from '@rs/ui-new/card';
 import { Show } from '@rs/ui-new/show';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
-import { Modal, ModalContent, ModalContentContainer } from '@rs/ui-new/modal';
+import { Modal, ModalContent, ModalContentContainer, ModalTitle } from '@rs/ui-new/modal';
 import { Highlight } from '@rs/ui-new/highlight';
 import { SQLDisplay } from '../SQLDisplay';
 import { useFormatSql } from '../../lib/useFormatSql';
@@ -25,7 +25,7 @@ interface ScanResultsTableProps {
   queries: ScanQuery[];
   state: ScanState;
   target: string | null;
-  onCacheQuery?: (sql: string) => void;
+  onCacheQuery?: (sql: string, id: string) => void;
   cachingHash?: string | null;
 }
 
@@ -83,6 +83,9 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
     <Modal open={!!query} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={!!query}>
         <ModalContent size="large" className="p-0 gap-0">
+          <ModalTitle className="sr-only">
+            {query ? `${query.function || query.class || 'Query'} details` : 'Query details'}
+          </ModalTitle>
           {query && (
             <>
               {/* Header */}
@@ -248,6 +251,8 @@ function QueryRow({ query, qIdx, onViewDetail, onAnalyze, onCache, isCaching }: 
 
   return (
     <m.div
+      data-testid="scan-query-row"
+      data-query-hash={query.hash || query.snippet_hash}
       initial={{ opacity: 0, y: -5 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 5 }}
@@ -449,6 +454,8 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
                     <div key={`file-${group.file}`}>
                       {/* File group header */}
                       <m.div
+                        data-testid="scan-file-group-toggle"
+                        data-file={group.file}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
@@ -498,7 +505,11 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
                               qIdx={qIdx}
                               onViewDetail={() => setDetailQuery(query)}
                               onAnalyze={() => handleAnalyze(query)}
-                              onCache={onCacheQuery && query.sql ? () => onCacheQuery(query.sql!) : undefined}
+                              onCache={
+                                onCacheQuery && query.sql
+                                  ? () => onCacheQuery(query.sql!, query.snippet_hash)
+                                  : undefined
+                              }
                               isCaching={cachingHash === query.snippet_hash}
                             />
                           ))}

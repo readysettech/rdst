@@ -1,0 +1,261 @@
+import {
+  configureTestTarget,
+  expect,
+  setBackendFixtures,
+  test,
+} from './fixtures'
+
+const runId = 'audit_e2e_guard_20260715_120000'
+
+const auditReport = {
+  target_name: 'e2e-guard',
+  engine: 'postgresql',
+  host: 'db.internal',
+  instance_class: 'db.r6g.large',
+  audited_at: '2026-07-15T12:00:00Z',
+  metrics: {
+    max_connections: 100,
+    active_connections: 82,
+    idle_connections: 18,
+    connection_utilization_pct: 82,
+    cache_hit_rate: 97.4,
+    database_size_mb: 2048,
+    server_version: 'PostgreSQL 16.3',
+    tracked_query_count: 42,
+    uptime_seconds: 432000,
+    read_pct: 91,
+    write_pct: 9,
+    storage_allocated_gb: 100,
+    storage_used_pct: 73,
+    storage_type: 'gp3',
+  },
+  sizing: {
+    verdict: 'oversized',
+    explanation: 'Memory usage is consistently below the provisioned tier.',
+    suggested_instance_class: 'db.r6g.medium',
+    potential_savings_usd: 210,
+  },
+  cache_opportunity: {
+    score: 88,
+    level: 'high',
+    explanation: 'Repeated read-heavy queries are strong cache candidates.',
+  },
+  top_queries: [
+    {
+      query_hash: 'slow-query-001',
+      query_text: 'SELECT * FROM orders WHERE customer_id = $1',
+      calls: 3200,
+      total_time_ms: 48000,
+      avg_time_ms: 15,
+      pct_total_time: 31.5,
+    },
+  ],
+  health_analysis: {
+    health_score: 58,
+    health_label: 'Needs attention',
+    health_score_rationale:
+      'Connection pressure and repeated reads are the primary risks.',
+    executive_summary:
+      'The database is stable but has clear capacity and caching opportunities.',
+    findings: [
+      {
+        severity: 'warn',
+        title: 'Connection pool is nearing capacity',
+        body: 'Peak utilization leaves little room for traffic bursts.',
+      },
+    ],
+    recommended_actions: [
+      {
+        rank: 1,
+        title: 'Reduce connection pressure',
+        body: 'Tune pool limits and investigate idle sessions.',
+      },
+    ],
+  },
+}
+
+const successfulAuditEvents = [
+  {
+    event: 'status',
+    data: {
+      type: 'status',
+      phase: 'connect',
+      message: 'Auditing e2e-guard...',
+    },
+  },
+  {
+    event: 'target_start',
+    data: {
+      type: 'target_start',
+      target_name: 'e2e-guard',
+      index: 0,
+      total: 1,
+    },
+  },
+  {
+    event: 'status',
+    data: {
+      type: 'status',
+      phase: 'collect',
+      message: 'Collecting database metrics...',
+    },
+  },
+  {
+    event: 'metrics_collected',
+    data: {
+      type: 'metrics_collected',
+      target_name: 'e2e-guard',
+      metrics: auditReport.metrics,
+    },
+  },
+  {
+    event: 'status',
+    data: {
+      type: 'status',
+      phase: 'insights',
+      message: 'Analyzing health data...',
+    },
+  },
+  {
+    event: 'snapshot_saved',
+    data: {
+      type: 'snapshot_saved',
+      snapshot_id: runId,
+      path: `/tmp/${runId}.json`,
+    },
+  },
+  {
+    event: 'target_complete',
+    data: {
+      type: 'target_complete',
+      target_name: 'e2e-guard',
+      result: auditReport,
+      index: 0,
+      total: 1,
+    },
+  },
+  {
+    event: 'complete',
+    data: { type: 'complete', success: true, snapshot_id: runId },
+  },
+]
+
+async function prepareAuditPage(
+  page: Parameters<typeof configureTestTarget>[0]
+) {
+  await configureTestTarget(page, { hasPassword: true })
+  await page.goto('/audit')
+  await expect(
+    page.getByRole('heading', { name: 'Health Check' })
+  ).toBeVisible()
+  await expect(
+    page.getByText('Full audit of "e2e-guard"', { exact: false })
+  ).toBeVisible()
+}
+
+test('runs a streamed health check and reopens it from history', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    audit: [{ events: successfulAuditEvents.map(({ data }) => data) }],
+  })
+  await prepareAuditPage(page)
+
+  const auditRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/audit'
+  )
+  await page.getByRole('button', { name: 'Run Audit' }).click()
+
+  const request = await auditRequest
+  expect(request.postDataJSON()).toEqual({
+    insights: true,
+    target: 'e2e-guard',
+  })
+  await expect(
+    page.getByText('Starting audit...', { exact: true })
+  ).toBeVisible()
+
+  await expect(page.getByText('Latest audit', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('paragraph').filter({ hasText: /^Health Analysis$/ })
+  ).toBeVisible()
+  await expect(page.getByText('58', { exact: true })).toBeVisible()
+  await expect(
+    page.getByText('Connection pool is nearing capacity', { exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByText('Recommended Actions', { exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByText('Reduce connection pressure', { exact: true })
+  ).toBeVisible()
+  await expect(page.getByText('Oversized', { exact: true })).toBeVisible()
+  await expect(
+    page.getByText('Repeated read-heavy queries are strong cache candidates.', {
+      exact: true,
+    })
+  ).toBeVisible()
+  await expect(
+    page.getByRole('paragraph').filter({ hasText: /^Top Queries \(1\)$/ })
+  ).toBeVisible()
+
+  const pastRun = page.getByRole('button').filter({ hasText: runId })
+  await expect(pastRun).toHaveCount(1)
+  await pastRun.click()
+
+  await expect(
+    page.getByText(`Saved run: ${runId}`, { exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByText('Connection pool is nearing capacity', { exact: true })
+  ).toBeVisible()
+})
+
+test('shows a streamed audit failure and retries successfully', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    audit: [
+      {
+        events: [
+          {
+            type: 'target_error',
+            target_name: 'e2e-guard',
+            error: 'Database connection refused during health check',
+            index: 0,
+            total: 1,
+          },
+          { type: 'complete', success: false },
+        ],
+      },
+      { events: successfulAuditEvents.map(({ data }) => data) },
+    ],
+  })
+  await prepareAuditPage(page)
+
+  let auditCalls = 0
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/audit'
+    ) {
+      auditCalls += 1
+    }
+  })
+
+  await page.getByRole('button', { name: 'Run Audit' }).click()
+  await expect(
+    page.getByText('Database connection refused during health check', {
+      exact: true,
+    })
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'Run Audit' }).click()
+  await expect(page.getByText('Latest audit', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('paragraph').filter({ hasText: /^Health Analysis$/ })
+  ).toBeVisible()
+  expect(auditCalls).toBe(2)
+})

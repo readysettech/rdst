@@ -20,7 +20,7 @@ import { HStack } from '@rs/ui-new/stack';
 import { Card } from '@rs/ui-new/card';
 import { Show } from '@rs/ui-new/show';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
-import { Modal, ModalContent, ModalContentContainer } from '@rs/ui-new/modal';
+import { Modal, ModalContent, ModalContentContainer, ModalTitle } from '@rs/ui-new/modal';
 import { SQLDisplay } from '../SQLDisplay';
 import { useFormatSql } from '../../lib/useFormatSql';
 import { collapseWhitespace } from '../../lib/collapseWhitespace';
@@ -130,6 +130,9 @@ function AnalysisDetailModal({ query, onClose, onAnalyze }: AnalysisDetailModalP
     <Modal open={!!query} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={!!query}>
         <ModalContent size="large" className="p-0 gap-0">
+          <ModalTitle className="sr-only">
+            {query ? `${query.function || 'Query'} analysis details` : 'Query analysis details'}
+          </ModalTitle>
           {query && (
             <>
               {/* Header */}
@@ -391,6 +394,8 @@ function AnalysisRow({ query, idx, onViewDetail }: AnalysisRowProps) {
   return (
     <m.div
       key={query.hash}
+      data-testid="scan-analysis-row"
+      data-query-hash={query.hash}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.15, delay: idx * 0.03 }}

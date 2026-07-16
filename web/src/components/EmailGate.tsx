@@ -71,7 +71,9 @@ export function EmailGate() {
     }
   };
 
-  if (state === 'ready') return null;
+  // Render nothing until the settings check says the gate is needed, so
+  // users with a stored email never see the overlay flash on page load.
+  if (state !== 'needed') return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" role="presentation">
@@ -88,7 +90,7 @@ export function EmailGate() {
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          disabled={saving || state === 'checking'}
+          disabled={saving}
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           onKeyDown={(event) => {
@@ -98,10 +100,9 @@ export function EmailGate() {
           placeholder="you@company.com"
         />
         {error && <p className="mt-3 text-sm text-content-negative-soft">{error}</p>}
-        {state === 'checking' && <p className="mt-3 text-sm text-content-layout-3">Checking contact settings...</p>}
         <button
           type="button"
-          disabled={saving || state === 'checking'}
+          disabled={saving}
           onClick={() => void submit()}
           className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg bg-surface-primary-solid px-4 text-sm font-medium text-content-primary-solid disabled:opacity-50"
         >

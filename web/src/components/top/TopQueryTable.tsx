@@ -143,6 +143,8 @@ export function TopQueryTable({
                 return (
                   <m.div
                     key={query.query_hash}
+                    data-testid="top-query-row"
+                    data-query-hash={query.query_hash}
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}

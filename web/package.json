@@ -7,6 +7,11 @@
     "dev:vite": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
+    "test:e2e": "pnpm run test:browser-integration",
+    "test:browser-integration": "node ./e2e/run.mjs",
+    "test:e2e:postgres": "node ./e2e/run.mjs --config playwright.postgres.config.ts",
+    "test:e2e:ui": "node ./e2e/run.mjs --ui",
+    "test:e2e:debug": "node ./e2e/run.mjs --debug",
     "clean": "rm -rf node_modules .output dist",
     "gen:api": "openapi-typescript src/lib/openapi.schema.json --default-non-nullable false -o src/lib/api.generated.ts"
   },
@@ -34,6 +39,7 @@
     "sql-formatter": "catalog:common"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.0",
     "@rs/typescript-config": "workspace:*",
     "@rs/ui-icons": "workspace:*",
     "@tailwindcss/vite": "catalog:tailwind4",

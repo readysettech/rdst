@@ -5,22 +5,27 @@
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
-import { Modal, ModalContent, ModalContentContainer } from '@rs/ui-new/modal'
+import {
+  Modal,
+  ModalContent,
+  ModalContentContainer,
+  ModalTitle,
+} from '@rs/ui-new/modal'
 import * as ScrollArea from '@rs/ui-new/scroll'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useMemo, useState } from 'react'
+import {
+  detectParameters,
+  hasParameters,
+  resolveInitialValue,
+  substituteParameters,
+} from '../../lib/sqlParameters'
+import { useFormatSql } from '../../lib/useFormatSql'
 import {
   buildParameterHighlights,
   getParameterColor,
 } from '../parameterHighlighting'
 import { SQLDisplay } from '../SQLDisplay'
-import { useFormatSql } from '../../lib/useFormatSql'
-import {
-  detectParameters,
-  hasParameters,
-  substituteParameters,
-  resolveInitialValue,
-} from '../../lib/sqlParameters'
 
 export { hasParameters }
 
@@ -101,13 +106,9 @@ export function ParameterDialog({
                 />
               </div>
               <div>
-                <Text
-                  as="h2"
-                  level="headline-5"
-                  className="text-content-layout-1"
-                >
+                <ModalTitle className="text-headline-5 h-auto">
                   Enter Parameter Values
-                </Text>
+                </ModalTitle>
                 <Text level="body-small" className="text-content-layout-3">
                   {parameters.length} parameter
                   {parameters.length !== 1 ? 's' : ''} detected
@@ -174,9 +175,9 @@ export function ParameterDialog({
                             <BaseInputText
                               name={`param-${key}`}
                               value={values[key] || ''}
-                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                handleValueChange(key, e.target.value)
-                              }
+                              onChange={(
+                                e: React.ChangeEvent<HTMLInputElement>
+                              ) => handleValueChange(key, e.target.value)}
                               placeholder="Enter value"
                             />
                           </div>
@@ -184,8 +185,8 @@ export function ParameterDialog({
                       )
                     })}
                     <Text level="body-small" className="text-content-layout-3">
-                      Strings are automatically quoted. Numbers, NULL, TRUE, FALSE
-                      are passed as-is.
+                      Strings are automatically quoted. Numbers, NULL, TRUE,
+                      FALSE are passed as-is.
                     </Text>
                   </div>
                 </ScrollArea.Viewport>

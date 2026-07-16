@@ -479,6 +479,8 @@ function CachedQueryRow({
     return (
       <m.tr
         key={entry.cache_id}
+        data-testid="cache-query-row"
+        data-cache-id={entry.cache_id}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         className="bg-surface-negative-soft/10"
@@ -525,6 +527,8 @@ function CachedQueryRow({
     <>
       <m.tr
         key={entry.cache_id}
+        data-testid="cache-query-row"
+        data-cache-id={entry.cache_id}
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, x: -20 }}
