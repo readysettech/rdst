@@ -896,3 +896,65 @@ def test_patterns_feeds_open_loop_keys_from_readyset_caches(tmp_path, monkeypatc
     assert by_key["0xdef"]["status"] == "cached_querypilot"
     assert by_key["0xabc"]["has_cache"] is True
     assert by_key["0xdef"]["has_cache"] is False
+
+
+def test_patterns_preseeds_full_catalog_for_stable_rows(tmp_path, monkeypatch):
+    """The pattern row SET is constant from the first poll: every active
+    workload query appears immediately (zero stats until traffic reaches
+    it), so table rows update in place and never pop in mid-demo."""
+    from features.qpdemo.workload import WORKLOAD
+
+    svc = _bare_service(tmp_path, monkeypatch)
+    svc._driver = None
+    svc._raw_patterns = lambda: []
+    svc._catalog = {}
+    svc._catalog_by_shape = {}
+    svc._catalog_by_key = {}
+    svc._discovery_mode = "sum_time"
+
+    rows = svc.patterns()
+
+    active = {q.id for q in WORKLOAD if q.weight > 0}
+    inactive = {q.id for q in WORKLOAD if q.weight <= 0}
+    keys = {r["key"] for r in rows}
+    assert keys == active
+    assert not keys & inactive
+    stub = rows[0]
+    assert stub["hits"] == 0
+    assert stub["has_cache"] is False
+    assert stub["status"] == "not_eligible"
+    assert stub["reason"]["kind"] == "below_min_execution"
+
+
+def test_provision_rescales_container_percents_after_pull(tmp_path, monkeypatch):
+    """When images actually download, the pull stage owns the front of the
+    bar and container milestones rescale into the remainder; with cached
+    images the authored 5..100 milestones pass through untouched."""
+    def events():
+        return iter([
+            {"type": "progress", "stage": "images", "percent": 2,
+             "message": "Pulling img (1/1, ~630 MB)..."},
+            {"type": "progress", "stage": "images", "percent": 60,
+             "message": "Pulled img"},
+            {"type": "progress", "stage": "start", "percent": 5, "message": "go"},
+            {"type": "container", "name": "pg", "percent": 30, "state": "ready"},
+            {"type": "complete", "percent": 100},
+        ])
+
+    svc = _bare_service(tmp_path, monkeypatch)
+    svc._provision_locked = events
+    out = list(svc.provision())
+    assert [e["percent"] for e in out] == [2, 60, 60, 71, 100]
+
+    def cached_events():
+        return iter([
+            {"type": "progress", "stage": "images", "percent": 3,
+             "message": "All container images already cached"},
+            {"type": "progress", "stage": "start", "percent": 5, "message": "go"},
+            {"type": "container", "name": "pg", "percent": 30, "state": "ready"},
+            {"type": "complete", "percent": 100},
+        ])
+
+    svc._provision_locked = cached_events
+    out = list(svc.provision())
+    assert [e["percent"] for e in out] == [3, 5, 30, 100]

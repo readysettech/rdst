@@ -174,6 +174,15 @@ export HOME="$TMP_HOME"
 READYSET_CONTAINER_NAME="rdst-integration-test-readyset"
 READYSET_PORT="${READYSET_PORT:-5433}"
 
+# Cache tests deploy Readyset via `rdst cache`; pull its image up front so
+# the first deploy never races a cold multi-hundred-MB download. Best-effort:
+# if the pull fails, `docker run` still pulls on demand.
+READYSET_TEST_IMAGE="$(python3 -c 'from shared.deploy import READYSET_IMAGE; print(READYSET_IMAGE)' 2>/dev/null || true)"
+if [[ -n "$READYSET_TEST_IMAGE" ]]; then
+  echo "Pre-pulling Readyset image for cache tests: $READYSET_TEST_IMAGE"
+  docker pull "$READYSET_TEST_IMAGE" >/dev/null 2>&1 || true
+fi
+
 # =============================================================================
 # CLEANUP
 # =============================================================================

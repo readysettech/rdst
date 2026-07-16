@@ -1,6 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Text } from "@rs/ui-new/text";
 import { Icon } from "@rs/ui-new/icon";
 import type { IconStrokeName } from "@rs/ui-icons/icon-name";
@@ -9,14 +8,11 @@ import { Button } from "@rs/ui-new/button";
 import { Show } from "@rs/ui-new/show";
 import { HStack, VStack } from "@rs/ui-new/stack";
 import { m } from "@rs/ui-new/motion";
-import { TargetLockNotice } from "../components";
-import { EnvSecretsDialog } from "../components/EnvSecretsDialog";
 import { useTarget } from "../hooks/useTarget";
 import { useSystemStatus } from "../lib/useSystemStatus";
-import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
-import { invalidateTrialRelatedQueries, useTrialSource } from "../lib/trialQueries";
+import { useTrialSource } from "../lib/trialQueries";
 import { fetchAuditRuns } from "../lib/useAudit";
-import { fetchQueryRegistry, type EnvRequirement } from "../lib/api";
+import { fetchQueryRegistry } from "../lib/api";
 import { formatTimestamp } from "../lib/formatters";
 
 export const Route = createFileRoute("/")({
@@ -28,7 +24,11 @@ interface JobCardProps {
   icon: IconStrokeName;
   title: string;
   description: string;
-  chip?: { label: string; variant: "positive" | "warning" | "informative" | "primary" };
+  chip?: {
+    label: string;
+    variant: "positive" | "warning" | "informative" | "primary";
+    modifier?: "solid" | "outline" | "ghost";
+  };
 }
 
 function JobCard({ to, icon, title, description, chip }: JobCardProps) {
@@ -55,7 +55,12 @@ function JobCard({ to, icon, title, description, chip }: JobCardProps) {
           {description}
         </Text>
         <Show when={!!chip}>
-          <Tag size="small" variant={chip!.variant} modifier="ghost" label={chip!.label} />
+          <Tag
+            size="small"
+            variant={chip!.variant}
+            modifier={chip!.modifier ?? "ghost"}
+            label={chip!.label}
+          />
         </Show>
       </VStack>
     </Link>
@@ -64,22 +69,9 @@ function JobCard({ to, icon, title, description, chip }: JobCardProps) {
 
 function HomePage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { target } = useTarget();
   const { data: status } = useSystemStatus();
-  const { anthropicRequirement, envRequirements } = useTrialSource();
-  const passwordLock = useTargetPasswordLock(target);
-  const [keyDialogOpen, setKeyDialogOpen] = useState(false);
-
-  // Same shaping Configure uses: fall back to the accepted env names when the
-  // requirement doesn't carry them.
-  const keyDialogRequirements: EnvRequirement[] = useMemo(() => {
-    if (!anthropicRequirement) return [];
-    if (!anthropicRequirement.accepted_names || anthropicRequirement.accepted_names.length === 0) {
-      return [{ ...anthropicRequirement, accepted_names: ["ANTHROPIC_API_KEY", "RDST_TRIAL_TOKEN"] }];
-    }
-    return [anthropicRequirement];
-  }, [anthropicRequirement]);
+  const { anthropicRequirement } = useTrialSource();
 
   const hasTargets = (status?.targets?.length ?? 0) > 0;
 
@@ -168,45 +160,6 @@ function HomePage() {
           transition={{ duration: 0.4, delay: 0.1 }}
         >
           <VStack className="gap-4 items-stretch">
-            {/* Setup blockers, fixable in place */}
-            <Show when={passwordLock.isLocked}>
-              <TargetLockNotice
-                message={passwordLock.message}
-                requirements={passwordLock.missingTargetRequirements}
-                keyringAvailable={passwordLock.keyringAvailable}
-              />
-            </Show>
-            <Show when={needsApiKey}>
-              <div className="rounded-xl border border-border-warning-soft bg-surface-warning-soft/10 p-4">
-                <HStack className="items-start justify-between gap-4">
-                  <HStack className="items-start gap-3">
-                    <Icon
-                      name="key"
-                      label="API key missing"
-                      className="mt-0.5 w-4 h-4 text-content-warning-soft"
-                    />
-                    <VStack className="items-start gap-1">
-                      <Text level="label-small" className="text-content-warning-soft">
-                        AI features need an Anthropic API key
-                      </Text>
-                      <Text level="body-small" className="text-content-layout-2">
-                        Ask, health-check insights, and query advice use Claude.
-                        Add a key once and everything lights up.
-                      </Text>
-                    </VStack>
-                  </HStack>
-                  <Button
-                    variant="primary"
-                    modifier="outline"
-                    icon="key"
-                    iconPosition="left"
-                    label="Add API key"
-                    onClick={() => setKeyDialogOpen(true)}
-                  />
-                </HStack>
-              </div>
-            </Show>
-
             <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
               What do you want to do?
             </Text>
@@ -215,8 +168,8 @@ function HomePage() {
                 to="/demo"
                 icon="querypilot"
                 title="See Readyset Platform in action"
-                description="Spin up a throwaway demo and watch Readyset serve live traffic side by side with Postgres, while QueryPilot automatically caches the queries that matter. One click cleans it all up."
-                chip={{ label: "Try the Demo", variant: "primary" }}
+                description="See QueryPilot cache your hottest queries in real time as Readyset and Postgres run the same workload side by side. Local containers, one-click cleanup."
+                chip={{ label: "Try it", variant: "positive", modifier: "solid" }}
               />
               <JobCard
                 to="/ask"
@@ -271,16 +224,6 @@ function HomePage() {
         </m.div>
       </Show>
 
-      <EnvSecretsDialog
-        isOpen={keyDialogOpen}
-        onClose={() => setKeyDialogOpen(false)}
-        requirements={keyDialogRequirements}
-        showManualAnthropicInput
-        keyringAvailable={Boolean(envRequirements?.keyring_available)}
-        onSuccess={() => {
-          void invalidateTrialRelatedQueries(queryClient);
-        }}
-      />
     </div>
   );
 }

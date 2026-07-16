@@ -11,8 +11,6 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, TypeAdapter
 
-from shared.api.docker_prepull import start_prepull
-
 
 class HealthResponse(BaseModel):
     status: str
@@ -20,8 +18,6 @@ class HealthResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    #Startup and shutdown events for the app
-    start_prepull()
     yield
 
 

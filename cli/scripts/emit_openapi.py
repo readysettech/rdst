@@ -27,9 +27,9 @@ if str(RDST_ROOT) not in sys.path:
 
 def main() -> int:
     # create_app() only constructs the FastAPI instance and registers
-    # routers; the lifespan callback (which kicks off docker pre-pull) does
-    # not fire unless the app is actually started. `app.openapi()` just
-    # walks the route table, so this is side-effect-free.
+    # routers; the lifespan callback does not fire unless the app is
+    # actually started. `app.openapi()` just walks the route table, so
+    # this is side-effect-free.
     from shared.api.app import create_app
 
     app = create_app()

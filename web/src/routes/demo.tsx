@@ -90,7 +90,7 @@ const MODE_LABEL: Record<DiscoveryMode, string> = {
 
 const STATUS_LABEL: Record<PatternStatus, string> = {
   cached_querypilot: 'cached · QueryPilot',
-  cached_manual: 'cached · by you',
+  cached_manual: 'cached · manually',
   pass_through: 'pass-through',
   not_eligible: 'not eligible yet',
   denylisted: 'denylisted',
@@ -98,16 +98,25 @@ const STATUS_LABEL: Record<PatternStatus, string> = {
 };
 
 const MODE_SWITCH_CONFIRM = 'This resets all counters and starts the comparison over. QueryPilot drops every cache and re-selects under the new policy.';
-const MODE_RESET_COPY = 'Counters resetting... throughput will dip while caches rebuild, then climb as QueryPilot re-selects.';
-const HEARTBEAT_TOOLTIP = 'QueryPilot is watching your traffic and caching by the selected policy. It re-evaluates every 15 seconds.';
-const CHART_INFO_TOOLTIP = 'The demo sends a simulated production workload against an orders database — to Postgres and to Readyset, side by side. This is a comparison, not an offload: the gap between the lines shows how much faster your queries get once QueryPilot caches them.';
-const LEGEND_POSTGRES_TOOLTIP = 'Every query also runs directly against Postgres, uncached — your before picture.';
-const LEGEND_READYSET_TOOLTIP = 'The same queries through Readyset: cached ones are served from the cache, everything else passes through untouched.';
+const MODE_RESET_COPY = 'Counters resetting. Throughput dips while caches rebuild, then climbs as QueryPilot re-selects.';
+const HEARTBEAT_TOOLTIP = 'QueryPilot watches traffic and caches by the selected policy, re-evaluating every 15 seconds.';
+const CHART_INFO_TOOLTIP = 'Throughput on each path, side by side. This is a comparison, not an offload — the gap between the lines is how much faster queries run once Readyset caches them.';
+const LEGEND_POSTGRES_TOOLTIP = 'The same queries run directly against Postgres, uncached — the baseline.';
+const LEGEND_READYSET_TOOLTIP = 'Queries through Readyset: cached ones served from cache, everything else passed through untouched.';
 const MANUAL_CACHE_DISABLED_TOOLTIP = "QueryPilot manages caching while it's on. Turn it off to cache by hand.";
+// A checked switch means "actively caching" everywhere in the demo; green
+// makes that state readable at a glance.
+const SWITCH_CHECKED_GREEN = 'data-[state=checked]:bg-surface-positive-solid';
 const TOUR_STORAGE_KEY = 'qpdemo_walkthrough_done';
 
-type SortKey = 'query' | 'postgres_hits' | 'readyset_hits' | 'direct_avg_ms' | 'router_avg_ms' | 'status';
+type SnapshotSortKey = 'postgres_hits' | 'readyset_hits' | 'direct_avg_ms' | 'router_avg_ms' | 'status';
 type WindowMode = '5m' | '1m';
+
+// The one true row order: stable query identity. Every other order is a
+// user-taken snapshot layered on top of it.
+function rowIdentity(a: PatternRow, b: PatternRow) {
+  return a.key.localeCompare(b.key) || a.title.localeCompare(b.title);
+}
 type TourStepId =
   | 'welcome'
   | 'traffic'
@@ -190,10 +199,6 @@ function metricIsTime(metric?: PatternReason['metric'] | PatternRow['alt_metric'
   return metric === 'sum_time' || metric === 'sum_time_us';
 }
 
-function metricName(reason: PatternReason) {
-  return metricIsTime(reason.metric) ? 'total time' : 'hit count';
-}
-
 function metricValueText(reason: PatternReason, row: PatternRow) {
   const value = reason.metric_value ?? row.hits;
   if (metricIsTime(reason.metric)) return formatWholeMs(value / 1000);
@@ -207,10 +212,6 @@ function scoreFormula(reason: PatternReason, row: PatternRow) {
 
 function latestSample(samples: LoadSample[]) {
   return samples.length ? samples[samples.length - 1] : null;
-}
-
-function otherMode(mode: DiscoveryMode): DiscoveryMode {
-  return mode === 'sum_time' ? 'count_star' : 'sum_time';
 }
 
 function modeFromMetric(metric: PatternRow['alt_metric'] | undefined | null, fallback: DiscoveryMode) {
@@ -231,13 +232,24 @@ function canManualCache(row: PatternRow) {
   return row.status === 'pass_through' || row.status === 'not_eligible';
 }
 
-// The manual "easy wins" are two fixed heavy queries (adjacent in the default
-// key sort, so the tour highlight is one clean two-row block). Caching them by
-// hand shows an unmistakable Readyset-average drop (hundreds of ms -> ~1ms);
-// QueryPilot then fills its budget with the next-heaviest queries. Fixed keys,
-// not runtime latency, so the pick is stable and present the instant load
-// starts (latency stats are still empty then).
-const MANUAL_SUGGESTED_KEYS = ['H03', 'H04'];
+// The manual "easy wins" are two fixed heavy queries (adjacent in the key
+// sort, so the tour highlight is one clean two-row block). H01/H02 carry the
+// slowest Postgres averages in the workload while their small result sets
+// serve from cache in single-digit milliseconds, so caching them by hand
+// shows the starkest possible Readyset-average drop (~500ms -> ~1-7ms).
+// Fixed keys, not runtime latency, so the pick is stable and present the
+// instant load starts (latency stats are still empty then).
+const MANUAL_SUGGESTED_KEYS = ['H01', 'H02'];
+
+// Rows the why-not tour step can safely spotlight: the below-threshold probes
+// rank at the bottom under BOTH policies (single-weight, sub-ms lookups), so
+// they are guaranteed to still be uncached whenever the step is reached.
+const TOUR_UNCACHED_PICKS = ['D03', 'D04'];
+
+// A QueryPilot pass runs every 15s; a cached set untouched for two passes
+// (plus margin) means the re-selection is done even if the budget never
+// quite fills - QueryPilot occasionally leaves its last pick or two unmade.
+const RESELECT_SETTLE_MS = 35_000;
 
 function suggestedMidTier(patterns: PatternRow[], _budget = 10) {
   return MANUAL_SUGGESTED_KEYS
@@ -252,11 +264,11 @@ export function eventDescription(event: LoadEvent): string {
   switch (event.type) {
     case 'manual_cache': {
       const title = event.label.replace(/^you cached\s+/i, '').trim();
-      return title ? `You cached '${title}'` : 'You cached a query';
+      return title ? `Cached '${title}' manually` : 'Cached a query manually';
     }
     case 'manual_uncache': {
       const title = event.label.replace(/^you uncached\s+/i, '').trim();
-      return title ? `You removed the cache on '${title}'` : 'You removed a cache';
+      return title ? `Removed cache on '${title}'` : 'Removed a cache';
     }
     case 'qp_on':
       return 'QueryPilot turned on';
@@ -469,7 +481,7 @@ function HeartbeatDot() {
       <Tooltip>
         <TooltipTrigger asChild>
           <span
-            className="qpdemo-heartbeat inline-block h-2.5 w-2.5 cursor-default rounded-full bg-[var(--qpdemo-router)]"
+            className="qpdemo-heartbeat inline-block h-2.5 w-2.5 cursor-default rounded-full bg-surface-positive-solid"
             aria-label="QueryPilot activity"
           />
         </TooltipTrigger>
@@ -510,7 +522,7 @@ function ControlsRow({
 
       <div data-tour-anchor="querypilot" className="flex items-center gap-3">
         <Text as="span" level="body-small" className="text-content-layout-2">QueryPilot</Text>
-        <BaseInputSwitch name="querypilot" checked={querypilotOn} disabled={disabled} onCheckedChange={onToggleQueryPilot} />
+        <BaseInputSwitch name="querypilot" className={SWITCH_CHECKED_GREEN} checked={querypilotOn} disabled={disabled} onCheckedChange={onToggleQueryPilot} />
         <Text as="span" level="body-small" className="font-medium text-content-layout-1">{querypilotOn ? 'On' : 'Off'}</Text>
         {querypilotOn && <HeartbeatDot />}
       </div>
@@ -620,8 +632,18 @@ function ProvisionView({ containers, pct, phase }: { containers: ContainerProgre
           </div>
         );
       })}
-      <div className="h-1.5 overflow-hidden rounded-full bg-surface-layout-soft">
-        <div className="h-full bg-content-rising-plain transition-[width]" style={{ width: `${pct}%` }} />
+      <div className="flex items-center gap-3 pt-1">
+        <div className="h-3 flex-1 overflow-hidden rounded-full bg-surface-layout-soft">
+          <div className="h-full bg-content-rising-plain transition-[width]" style={{ width: `${pct}%` }} />
+        </div>
+        <Text
+          as="span"
+          level="label-small"
+          data-testid="provision-percent"
+          className="w-10 text-right tabular-nums text-content-layout-1"
+        >
+          {Math.round(pct)}%
+        </Text>
       </div>
     </div>
   );
@@ -680,9 +702,9 @@ function StartCard({ onStart }: { onStart: () => void }) {
   return (
     <div className={panel('qpdemo-enter max-w-2xl p-5')}>
       <Text as="p" level="body-small" className="max-w-[58ch] text-content-layout-2">
-        Click start and we'll build an orders database in local containers, put it under a live
-        workload, and route it through Readyset — so you can cache queries and watch the effect
-        immediately. Nothing touches your real databases.
+        The demo builds an orders database in local containers, puts it under a live workload, and
+        routes it through Readyset Platform. Cache a query and the effect shows immediately.
+        Everything runs in self-contained, temporary containers.
       </Text>
       <div className="mt-4 rounded-lg border border-border-layout-1 bg-surface-layout-soft/40 p-3">
         <div className="flex items-center justify-between gap-2">
@@ -699,8 +721,8 @@ function StartCard({ onStart }: { onStart: () => void }) {
             okLabel="Docker is running"
             pendingLabel={
               checks && !checks.docker_installed
-                ? "Docker isn't installed - install Docker Desktop to run the demo"
-                : "Docker isn't running - start Docker to run the demo"
+                ? "Docker isn't installed — install Docker Desktop to continue"
+                : "Docker isn't running — start Docker to continue"
             }
           />
           <PreflightItem
@@ -713,23 +735,23 @@ function StartCard({ onStart }: { onStart: () => void }) {
             okLabel="Container images downloaded"
             pendingLabel={
               checks && !checks.disk_space_ok
-                ? 'Not enough free disk - the demo needs about 2GB'
-                : 'Container images not downloaded yet - about 2GB'
+                ? 'Not enough free disk — the demo needs about 2 GB'
+                : 'Container images not downloaded yet — about 2 GB'
             }
           />
         </ul>
       </div>
       <Text as="p" level="caption" className="mt-3 max-w-[58ch] rounded-lg border border-border-layout-1 bg-surface-layout-soft/40 p-2.5 text-content-layout-2">
         <span className="font-semibold text-[var(--qpdemo-router)]">Note:</span>{' '}
-        the environment cleans itself up after an hour, and you can
-        remove it yourself at any time with Tear down.
+        the environment cleans itself up after an hour, or remove it
+        yourself anytime with Tear down.
       </Text>
       <Button
         variant="primary"
         size="base"
         icon="play"
         iconPosition="left"
-        label="Start demo environment"
+        label="Start the demo"
         className="mt-4"
         disabled={checks ? (!checks.docker_installed || !checks.docker_running || !checks.disk_space_ok) : false}
         onClick={onStart}
@@ -738,14 +760,13 @@ function StartCard({ onStart }: { onStart: () => void }) {
   );
 }
 
-function altRankClause(row: PatternRow, mode: DiscoveryMode) {
-  if (row.alt_rank == null) return '';
-  const altMode = modeFromMetric(row.alt_metric, otherMode(mode));
-  return ` Under ${MODE_LABEL[altMode]} it would rank #${row.alt_rank}.`;
-}
-
 // Tight, collision-safe popover copy: at most a short sentence plus one numbers
 // line. Numbers are preserved; the prose is kept to a few words per clause.
+// Plain-words name for what the active policy ranks on.
+function modePhrase(activeMode: DiscoveryMode) {
+  return activeMode === 'sum_time' ? 'most expensive' : 'most frequently run';
+}
+
 function popoverCopy(row: PatternRow, mode: DiscoveryMode, cacheBudget: number) {
   const reason = row.reason;
   const activeMode = modeFromMetric(reason.metric, mode);
@@ -754,17 +775,17 @@ function popoverCopy(row: PatternRow, mode: DiscoveryMode, cacheBudget: number) 
   switch (reason.kind) {
     case 'selected':
       return {
-        sentence: `Cached: ranks #${reason.rank ?? '?'} by ${metricName(reason)} under ${MODE_LABEL[activeMode]}.${altRankClause(row, activeMode)}`,
+        sentence: `Cached: one of the top ${budget} ${modePhrase(activeMode)} queries right now.`,
         numbers: `${scoreFormula(reason, row)} · budget: top ${budget}`,
       };
     case 'below_rank':
       return {
-        sentence: `Not cached: ranks #${reason.rank ?? '?'} by ${metricName(reason)} under ${MODE_LABEL[activeMode]} - outside the top ${budget}.${altRankClause(row, activeMode)}`,
+        sentence: `Not cached: not among the top ${budget} ${modePhrase(activeMode)} queries right now.`,
         numbers: `${scoreFormula(reason, row)} · budget: top ${budget}`,
       };
     case 'below_min_execution':
       return {
-        sentence: `Not cached yet: needs ${reason.threshold ?? 5} runs before QueryPilot spends cache on it.`,
+        sentence: "Not cached yet: this query hasn't run enough times to be considered.",
         numbers: `${reason.count ?? row.hits} of ${reason.threshold ?? 5} runs · ${baseNumbers}`,
       };
     case 'denylisted':
@@ -779,7 +800,7 @@ function popoverCopy(row: PatternRow, mode: DiscoveryMode, cacheBudget: number) 
       };
     case 'manual':
       return {
-        sentence: 'Cached by you. Turning QueryPilot on drops manual caches and lets it manage caching.',
+        sentence: 'Cached manually. Turning QueryPilot on drops manual caches and lets it manage caching.',
         numbers: baseNumbers,
       };
     case 'not_select_shaped':
@@ -880,6 +901,9 @@ function PatternTable({
   cacheBudget,
   suggestedKeys,
   querypilotOn,
+  tourActive,
+  tourCachedKeys,
+  tourUncachedKey,
   onCache,
   onUncache,
 }: {
@@ -888,36 +912,58 @@ function PatternTable({
   cacheBudget: number;
   suggestedKeys: Set<string>;
   querypilotOn: boolean;
+  tourActive: boolean;
+  tourCachedKeys: string[] | null;
+  tourUncachedKey: string | null;
   onCache: (key: string, title: string) => void;
   onUncache: (key: string, title: string) => void;
 }) {
   const [openSql, setOpenSql] = useState<Set<string>>(new Set());
   const [openPopover, setOpenPopover] = useState<string | null>(null);
-  // Default sort is the stable workload/query identity order, so rows never
-  // move under the cursor while counters update; every column stays sortable
-  // and live re-sorting under a user-chosen sort is expected.
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'query', dir: 'asc' });
+  // Row-order invariants:
+  // 1. Rows never re-sort on their own. The default order is the stable
+  //    workload/query identity, and a column-header click captures a one-time
+  //    SNAPSHOT of that column's values as a frozen key order - counters keep
+  //    changing but rows hold their positions until the next click.
+  // 2. While the tour is running, the order is ALWAYS the query identity, so
+  //    every tour step knows exactly where its rows live; header sorting is
+  //    disabled until the tour is over.
+  const [frozenOrder, setFrozenOrder] = useState<{ col: SnapshotSortKey; dir: 'asc' | 'desc'; keys: string[] } | null>(null);
   const sorted = useMemo(() => {
-    const sign = sort.dir === 'asc' ? 1 : -1;
-    const identity = (a: PatternRow, b: PatternRow) => a.key.localeCompare(b.key) || a.title.localeCompare(b.title);
-    return [...patterns].sort((a, b) => {
-      if (sort.key === 'query') return sign * identity(a, b);
-      if (sort.key === 'status') {
-        return sign * STATUS_LABEL[a.status].localeCompare(STATUS_LABEL[b.status]) || identity(a, b);
-      }
-      const av = a[sort.key];
-      const bv = b[sort.key];
-      const an = av == null ? -Infinity : Number(av);
-      const bn = bv == null ? -Infinity : Number(bv);
-      return sign * (an - bn) || identity(a, b);
-    });
-  }, [patterns, sort]);
+    const base = [...patterns].sort(rowIdentity);
+    if (tourActive || !frozenOrder) return base;
+    const pos = new Map(frozenOrder.keys.map((k, i) => [k, i]));
+    return base.sort(
+      (a, b) =>
+        (pos.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (pos.get(b.key) ?? Number.MAX_SAFE_INTEGER) ||
+        rowIdentity(a, b),
+    );
+  }, [patterns, frozenOrder, tourActive]);
 
-  const toggleSort = (key: SortKey) => {
-    setSort((s) => {
-      if (s.key === key) return { key, dir: s.dir === 'desc' ? 'asc' : 'desc' };
-      return { key, dir: key === 'query' ? 'asc' : 'desc' };
-    });
+  const snapshotSort = (col: SnapshotSortKey) => {
+    if (tourActive) return;
+    const dir: 'asc' | 'desc' = frozenOrder?.col === col && frozenOrder.dir === 'desc' ? 'asc' : 'desc';
+    const sign = dir === 'asc' ? 1 : -1;
+    const keys = [...patterns]
+      .sort((a, b) => {
+        if (col === 'status') return sign * STATUS_LABEL[a.status].localeCompare(STATUS_LABEL[b.status]) || rowIdentity(a, b);
+        const an = a[col] == null ? -Infinity : Number(a[col]);
+        const bn = b[col] == null ? -Infinity : Number(b[col]);
+        return sign * (an - bn) || rowIdentity(a, b);
+      })
+      .map((r) => r.key);
+    setFrozenOrder({ col, dir, keys });
+  };
+
+  const resetOrder = () => {
+    if (tourActive) return;
+    setFrozenOrder(null);
+  };
+
+  const sortMark = (col: SnapshotSortKey | 'query') => {
+    if (col === 'query') return frozenOrder == null ? '▲' : '';
+    if (frozenOrder?.col !== col) return '';
+    return frozenOrder.dir === 'desc' ? ' ▼' : ' ▲';
   };
 
   const toggleSql = (key: string) => {
@@ -933,21 +979,19 @@ function PatternTable({
     setOpenPopover(open ? row.key : null);
   };
 
-  const sortMark = (key: SortKey) => sort.key === key ? (sort.dir === 'desc' ? '▼' : '▲') : '↕';
-  // Anchor exactly one uncached row for the tour's "why did QueryPilot pass on
-  // it" step, keeping the highlight tight instead of unioning every row.
+  // Tour spotlights are PINNED by DemoPage at step entry and passed down, so
+  // a step highlights the same rows for its whole lifetime no matter how
+  // statuses evolve underneath. The live derivations below are only the
+  // fallback for renders where nothing is pinned yet.
   const uncached = sorted.filter(
     (r) => r.status === 'pass_through' || r.status === 'not_eligible',
   );
-  // Anchor the tour's why-not step on an expensive uncached query when one
-  // exists (its receipt is the interesting one and it reads clearly as a query
-  // row); fall back to the first uncached row otherwise.
-  const firstUncachedKey = [...uncached]
-    .sort((a, b) => (b.direct_avg_ms ?? 0) - (a.direct_avg_ms ?? 0) || a.key.localeCompare(b.key))[0]?.key;
-  // Highlight only the first two QueryPilot-cached rows for the tour; the cutout
-  // stays a tidy block and the copy invites scrolling to the rest.
+  const firstUncachedKey =
+    tourUncachedKey ??
+    [...uncached].sort((a, b) => (b.direct_avg_ms ?? 0) - (a.direct_avg_ms ?? 0) || a.key.localeCompare(b.key))[0]?.key;
   const highlightedCachedKeys = new Set(
-    sorted.filter((r) => r.status === 'cached_querypilot').slice(0, 2).map((r) => r.key),
+    tourCachedKeys ??
+      sorted.filter((r) => r.status === 'cached_querypilot').slice(0, 2).map((r) => r.key),
   );
 
   return (
@@ -959,25 +1003,27 @@ function PatternTable({
           <thead className="sticky top-0 z-10 bg-surface-layout-1">
             <tr className="border-b border-border-layout-1 text-left text-label-small text-content-layout-3">
               <th className="w-8 px-3 py-2" />
+              {/* Header clicks take a one-time value snapshot; rows never
+                  re-sort live, and sorting is inert while the tour runs. */}
               <th className="px-3 py-2">
-                <button className="font-semibold" onClick={() => toggleSort('query')}>Query {sortMark('query')}</button>
+                <button className="font-semibold disabled:cursor-default" disabled={tourActive} onClick={resetOrder}>Query{sortMark('query')}</button>
               </th>
               <th className="px-3 py-2 text-right">
-                <button className="font-semibold" onClick={() => toggleSort('postgres_hits')}>Postgres hits {sortMark('postgres_hits')}</button>
+                <button className="font-semibold disabled:cursor-default" disabled={tourActive} onClick={() => snapshotSort('postgres_hits')}>Postgres hits{sortMark('postgres_hits')}</button>
               </th>
               <th className="px-3 py-2 text-right">
-                <button className="font-semibold" onClick={() => toggleSort('readyset_hits')}>Readyset hits {sortMark('readyset_hits')}</button>
+                <button className="font-semibold disabled:cursor-default" disabled={tourActive} onClick={() => snapshotSort('readyset_hits')}>Readyset hits{sortMark('readyset_hits')}</button>
               </th>
               <th className="px-3 py-2 text-right">
-                <button className="font-semibold" onClick={() => toggleSort('direct_avg_ms')}>Postgres avg {sortMark('direct_avg_ms')}</button>
+                <button className="font-semibold disabled:cursor-default" disabled={tourActive} onClick={() => snapshotSort('direct_avg_ms')}>Postgres avg{sortMark('direct_avg_ms')}</button>
               </th>
               <th className="px-3 py-2 text-right">
-                <button className="font-semibold" onClick={() => toggleSort('router_avg_ms')}>Readyset avg {sortMark('router_avg_ms')}</button>
+                <button className="font-semibold disabled:cursor-default" disabled={tourActive} onClick={() => snapshotSort('router_avg_ms')}>Readyset avg{sortMark('router_avg_ms')}</button>
               </th>
               <th className="px-3 py-2">
-                <button className="font-semibold" onClick={() => toggleSort('status')}>Status {sortMark('status')}</button>
+                <button className="font-semibold disabled:cursor-default" disabled={tourActive} onClick={() => snapshotSort('status')}>Status{sortMark('status')}</button>
               </th>
-              <th className="px-3 py-2" />
+              <th className="px-3 py-2 font-semibold">Cache status</th>
             </tr>
           </thead>
           <tbody>
@@ -1004,7 +1050,19 @@ function PatternTable({
                     <td className="px-3 py-2 text-right tabular-nums text-content-layout-2">{row.postgres_hits.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-content-layout-2">{row.readyset_hits.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-content-layout-2">{formatMs(row.direct_avg_ms)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${row.router_avg_ms != null && row.direct_avg_ms != null && row.router_avg_ms < row.direct_avg_ms ? 'font-semibold text-content-positive-soft' : 'text-content-layout-2'}`}>{formatMs(row.router_avg_ms)}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${row.router_avg_ms != null && row.direct_avg_ms != null && row.router_avg_ms < row.direct_avg_ms ? 'font-semibold text-content-positive-soft' : 'text-content-layout-2'}`}>
+                      {row.router_avg_ms == null && row.status.startsWith('cached_') ? (
+                        // Freshly cached: the average is held until the cache is
+                        // actually serving, so show that the number is on its way.
+                        <span
+                          className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent align-middle opacity-70"
+                          role="status"
+                          aria-label="warming cache"
+                        />
+                      ) : (
+                        formatMs(row.router_avg_ms)
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       <StatusPopover row={row} mode={mode} cacheBudget={cacheBudget} open={openPopover === row.key} onOpenChange={(o) => setPopover(row, o)} />
                     </td>
@@ -1023,6 +1081,7 @@ function PatternTable({
                                 <span className="inline-flex">
                                   <BaseInputSwitch
                                     name={`manual-cache-${row.key}`}
+                                    className={SWITCH_CHECKED_GREEN}
                                     checked={row.status === 'cached_manual' || row.status === 'cached_querypilot'}
                                     disabled
                                   />
@@ -1034,6 +1093,7 @@ function PatternTable({
                         ) : (
                           <BaseInputSwitch
                             name={`manual-cache-${row.key}`}
+                            className={SWITCH_CHECKED_GREEN}
                             checked={row.status === 'cached_manual' || row.status === 'cached_querypilot'}
                             onCheckedChange={(next) =>
                               next ? onCache(row.key, row.title) : onUncache(row.key, row.title)
@@ -1054,7 +1114,7 @@ function PatternTable({
             {patterns.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-8 text-center">
-                  <Text as="span" level="body-small" className="text-content-layout-3">Start the traffic to see workload queries.</Text>
+                  <Text as="span" level="body-small" className="text-content-layout-3">Workload queries appear once traffic starts.</Text>
                 </td>
               </tr>
             )}
@@ -1108,6 +1168,30 @@ export function formatLiftRatio(ratio: number): string {
   return ratio >= 2 ? `${Math.round(ratio)}x` : `${ratio.toFixed(1)}x`;
 }
 
+// Intersect an element's rect with every scrollable ancestor. An element
+// scrolled out of an inner scroll box (the query table) still reports a rect
+// at the coordinates it WOULD occupy - clipped, invisible, and often on top
+// of unrelated UI. The tour must never draw a cutout over such phantom
+// coordinates: null here means "not actually visible anywhere".
+export function clipToScrollAncestors(el: HTMLElement, r: DOMRect): DOMRect | null {
+  let top = r.top;
+  let left = r.left;
+  let bottom = r.bottom;
+  let right = r.right;
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const s = window.getComputedStyle(node);
+    if (/(auto|scroll|hidden)/.test(`${s.overflow}${s.overflowY}${s.overflowX}`)) {
+      const c = node.getBoundingClientRect();
+      top = Math.max(top, c.top);
+      left = Math.max(left, c.left);
+      bottom = Math.min(bottom, c.bottom);
+      right = Math.min(right, c.right);
+    }
+  }
+  if (bottom - top < 2 || right - left < 2) return null;
+  return new DOMRect(left, top, right - left, bottom - top);
+}
+
 function useAnchorRect(anchor: string | null, deps: unknown[]) {
   const [rect, setRect] = useState<ReturnType<typeof unionRects>>(null);
 
@@ -1119,7 +1203,13 @@ function useAnchorRect(anchor: string | null, deps: unknown[]) {
 
     const measure = () => {
       const elements = Array.from(document.querySelectorAll<HTMLElement>(anchorSelector(anchor)));
-      const next = unionRects(elements.map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0));
+      const visible = elements
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 ? clipToScrollAncestors(el, r) : null;
+        })
+        .filter((r): r is DOMRect => r != null);
+      const next = unionRects(visible);
       setRect(next);
       return next;
     };
@@ -1138,7 +1228,11 @@ function useAnchorRect(anchor: string | null, deps: unknown[]) {
 
     const update = () => {
       const r = measure();
-      if (r && (r.top < 0 || r.bottom > window.innerHeight)) {
+      // No visible rect (anchor exists but is scrolled out of its container)
+      // or a rect outside the window: bring the anchor back into view rather
+      // than spotlighting empty space.
+      const anchorExists = document.querySelector(anchorSelector(anchor)) != null;
+      if ((r == null && anchorExists) || (r && (r.top < 0 || r.bottom > window.innerHeight))) {
         bringIntoView();
         // Re-measure next frame after the scroll settles.
         window.requestAnimationFrame(measure);
@@ -1181,36 +1275,36 @@ function tourConfig(step: TourStepId): { anchor: string | null; copy: string; pr
     case 'welcome':
       return {
         anchor: null,
-        copy: "This demo spins up a small database, puts it under load, and places Readyset in front of it. Nothing touches your real data, and one click cleans it all up when you're done.",
+        copy: "This demo spins up a small database, puts it under load, and places Readyset in front of it. Everything runs in temporary containers, and one click cleans it all up.",
         primary: 'Show me',
         secondary: "I'll explore on my own",
       };
     case 'traffic':
-      return { anchor: 'traffic', copy: "First, we'll start sending traffic to both paths (Readyset and your Postgres database). This gives us a baseline throughput to evaluate performance." };
+      return { anchor: 'traffic', copy: "Traffic starts flowing to both paths — Readyset and Postgres — establishing a baseline throughput to measure against." };
     case 'chart':
-      return { anchor: 'chart', copy: "The workload is being sent to both Readyset and straight Postgres. Teal is Readyset; amber is Postgres. They match right now because Readyset simply proxies queries to the upstream database until caches are created. Once caches exist, queries are served straight from Readyset's fast memory — and you'll see the difference immediately.", primary: 'Next' };
+      return { anchor: 'chart', copy: "The same workload runs through Readyset (teal) and straight Postgres (amber). The lines match right now because Readyset proxies to the upstream database until caches exist. Once queries are cached, Readyset serves them from memory and the lines separate.", primary: 'Next' };
     case 'table':
-      return { anchor: 'table', copy: 'These are all the queries being sent. Each shows how often it runs and how long it takes on each path. Expand a row to see the query.', primary: 'Next' };
+      return { anchor: 'table', copy: 'Every query in the workload, with how often it runs and how long it takes on each path. Expand a row to see the query.', primary: 'Next' };
     case 'manual':
-      return { anchor: 'manual-suggestions', copy: "Now let's grab two easy wins: cache these two queries by hand and see what caching does to them." };
+      return { anchor: 'manual-suggestions', copy: "Two easy wins: cache these queries by hand to see what caching does to them." };
     case 'manualResult':
-      return { anchor: 'manual-suggestions', copy: "Look at these two rows: now that Readyset serves them from cache, their Readyset latency drops dramatically compared to Postgres - the same query, answered from memory instead of recomputed.", primary: 'Next' };
+      return { anchor: 'manual-suggestions', copy: "These two rows are now served from cache: Readyset latency drops sharply against Postgres — the same query answered from memory instead of recomputed.", primary: 'Next' };
     case 'querypilot':
-      return { anchor: 'querypilot', copy: "Now the fun part. That manual pass was you trying it by hand; turn on QueryPilot and it takes the wheel. It drops your manual picks and manages caching itself, watching your traffic and caching the queries your app runs most often (our demo configuration caches the top 20). Give it a minute to make its first pass, then watch the Readyset line surge past the flat Postgres line." };
+      return { anchor: 'querypilot', copy: "That was manual caching. Now, turn on QueryPilot to automate it: it drops the manual picks and manages caching itself, watching traffic and caching the most frequent queries (top 20 in this demo). The first pass takes about a minute, after which the Readyset line pulls ahead of Postgres." };
     case 'qpWaiting':
-      return { anchor: 'chart', copy: 'QueryPilot is making its first pass — watch the lines while the caches build.' };
+      return { anchor: 'chart', copy: 'QueryPilot is making its first pass while the caches build.' };
     case 'autoCachedChart':
-      return { anchor: 'chart', copy: 'Watch the teal line — QueryPilot just cached your most frequent queries, and Readyset is serving them from memory.', primary: 'Next' };
+      return { anchor: 'chart', copy: 'QueryPilot just cached the most frequent queries — the teal line climbs as Readyset serves them from memory.', primary: 'Next' };
     case 'autoCached':
-      return { anchor: 'cached-querypilot-rows', copy: 'QueryPilot cached your most frequent queries. Hover the status on one of these to see why it was chosen.', primary: 'Next' };
+      return { anchor: 'cached-querypilot-rows', copy: 'QueryPilot cached the most frequent queries. Hover a status chip to see why it was chosen.', primary: 'Next' };
     case 'mode':
-      return { anchor: 'mode', copy: 'Now switch to Most expensive — QueryPilot will cache the 20 most expensive queries instead.' };
+      return { anchor: 'mode', copy: 'Switch to Most expensive — QueryPilot re-caches around the 20 most expensive queries instead.' };
     case 'reselecting':
-      return { anchor: 'chart', copy: 'QueryPilot dropped its old picks and is re-selecting for Most expensive. Watch the Readyset line climb as the new caches build, then continue when you are ready.', primary: 'Next' };
+      return { anchor: 'chart', copy: 'QueryPilot dropped its old picks and is re-selecting for Most expensive. The Readyset line climbs as the new caches build — continue when ready.', primary: 'Next' };
     case 'modeWhyNot':
-      return { anchor: 'uncached-rows', copy: 'Hover over the status of an uncached query to see why QueryPilot passed on it.', primary: 'Next' };
+      return { anchor: 'uncached-rows', copy: 'Hover the status of an uncached query to see why QueryPilot passed on it.', primary: 'Next' };
     case 'finale':
-      return { anchor: null, copy: "That's the tour, and now it's yours. Readyset QueryPilot keeps caching by your chosen policy, managing every cache for you. Once you're done, click Tear down — it removes all the demo containers and the whole demo from your system.", primary: 'Finish' };
+      return { anchor: null, copy: "That's the tour. QueryPilot keeps caching by the chosen policy, managing every cache automatically. Click Tear down anytime to remove the containers and the whole demo from your system.", primary: 'Finish' };
   }
 }
 
@@ -1361,17 +1455,28 @@ export function DemoPage() {
   const suggestions = useMemo(() => suggestedMidTier(d.patterns, d.cacheBudget), [d.cacheBudget, d.patterns]);
   const suggestedKeys = useMemo(() => new Set(suggestions.map((p) => p.key)), [suggestions]);
   const hasQueryPilotCache = d.patterns.some((p) => p.status === 'cached_querypilot');
-  // Gate for the 'reselecting' step: hold Next until QueryPilot's Most-expensive
-  // pass has filled its budget, so the modeWhyNot anchor lands on a query that
-  // stays uncached instead of one still mid-accumulation. Free the step once a
-  // clear majority of the budget has landed rather than every last cache: the
-  // last one or two can lag, and holding the visitor on "18 of 20" reads as
-  // stuck. Capped at the catalog size so it never waits for more than exist.
+  // Gate for the 'reselecting' step: Next stays locked until QueryPilot's
+  // Most-expensive pass is DONE - the budget is full, or the cached set has
+  // stopped changing for two full QueryPilot passes. Only a finished pass
+  // makes "this query stays uncached" a settled claim for the next step, so
+  // the why-not spotlight can be pinned once and never proven wrong.
   const reselectTarget = Math.min(d.cacheBudget, d.patterns.length);
-  const reselectCached = d.patterns.filter(
-    (p) => p.status === 'cached_querypilot' || p.status === 'cached_manual',
-  ).length;
-  const reselectComplete = reselectCached >= Math.min(reselectTarget, 11);
+  const cachedSetSig = d.patterns
+    .filter((p) => p.status === 'cached_querypilot' || p.status === 'cached_manual')
+    .map((p) => p.key)
+    .sort()
+    .join(',');
+  const reselectCached = cachedSetSig === '' ? 0 : cachedSetSig.split(',').length;
+  const [cachedSetChange, setCachedSetChange] = useState({ sig: '', at: 0 });
+  useEffect(() => {
+    if (cachedSetSig !== cachedSetChange.sig) {
+      setCachedSetChange({ sig: cachedSetSig, at: Date.now() });
+    }
+  }, [cachedSetSig, cachedSetChange.sig]);
+  const reselectComplete =
+    reselectCached > 0 &&
+    (reselectCached >= reselectTarget ||
+      Date.now() - cachedSetChange.at > RESELECT_SETTLE_MS);
   // Live Readyset-vs-Postgres throughput multiple over the recent window, for
   // the permanent ratio line. Always computed, never gated.
   const liftRatio = windowLiftRatio(d.samples, 15);
@@ -1443,6 +1548,45 @@ export function DemoPage() {
       setTourStep('welcome');
     }
   }, [d.phase, tourDone, tourStep]);
+
+  // Tour spotlights are pinned the moment their step activates and hold for
+  // the step's whole lifetime. Deriving them live made the cutout chase the
+  // data: more caches landing re-elected "the first two cached rows" (or a
+  // new slowest-uncached row) and the spotlight leapt across the table.
+  const [pinnedCachedKeys, setPinnedCachedKeys] = useState<string[] | null>(null);
+  const [pinnedUncachedKey, setPinnedUncachedKey] = useState<string | null>(null);
+  // Pins are strictly pin-once: a spotlight NEVER moves during its step. The
+  // claims stay true by sequencing, not correction - cached rows stay cached
+  // under the active policy, and the why-not step is only reachable after the
+  // re-selection pass has finished, when D03/D04 (designed to never rank) are
+  // settled pass-through rows.
+  useEffect(() => {
+    if (tourStep !== 'autoCached') {
+      if (pinnedCachedKeys) setPinnedCachedKeys(null);
+      return;
+    }
+    if (pinnedCachedKeys) return;
+    const cached = d.patterns
+      .filter((p) => p.status === 'cached_querypilot')
+      .sort(rowIdentity)
+      .slice(0, 2)
+      .map((p) => p.key);
+    if (cached.length) setPinnedCachedKeys(cached);
+  }, [tourStep, d.patterns, pinnedCachedKeys]);
+  useEffect(() => {
+    if (tourStep !== 'modeWhyNot') {
+      if (pinnedUncachedKey) setPinnedUncachedKey(null);
+      return;
+    }
+    if (pinnedUncachedKey) return;
+    const uncached = d.patterns.filter(
+      (p) => p.status === 'pass_through' || p.status === 'not_eligible',
+    );
+    const preferred = TOUR_UNCACHED_PICKS.find((k) => uncached.some((p) => p.key === k));
+    const fallback = [...uncached].sort(rowIdentity)[0]?.key ?? null;
+    const pick = preferred ?? fallback;
+    if (pick) setPinnedUncachedKey(pick);
+  }, [tourStep, d.patterns, pinnedUncachedKey]);
 
   // traffic -> chart once load is actually running.
   useEffect(() => {
@@ -1516,7 +1660,7 @@ export function DemoPage() {
         <div>
           <Text as="h1" level="headline-3" className="text-content-layout-1">See Readyset Platform in action</Text>
           <Text as="p" level="body-small" className="mt-1 max-w-[72ch] text-content-layout-2">
-            The demo sends a simulated production workload against an orders database — to Postgres and to Readyset, side by side. You see exactly how much faster your queries get, and how much load Readyset would take off your database in production.
+            The same workload runs against an orders database through Postgres and Readyset Platform, side by side — showing how much faster your queries get as QueryPilot automatically chooses the right queries to cache.
           </Text>
         </div>
         <div className="flex gap-2">
@@ -1542,7 +1686,7 @@ export function DemoPage() {
               window ratio, so it never mounts/unmounts and jumps the layout. */}
           <div className="flex h-7 items-center">
             <Text as="p" level="body-small" data-testid="lift-ratio" className="font-medium tabular-nums text-content-layout-2">
-              Readyset is at{' '}
+              Readyset throughput is{' '}
               <span className={liftRatio >= 1.3 ? 'text-content-positive-soft' : 'text-content-layout-1'}>{formatLiftRatio(liftRatio)}</span>{' '}
               Postgres direct
             </Text>
@@ -1563,11 +1707,14 @@ export function DemoPage() {
             cacheBudget={d.cacheBudget}
             suggestedKeys={suggestedKeys}
             querypilotOn={d.querypilotOn}
+            tourActive={tourStep != null}
+            tourCachedKeys={pinnedCachedKeys}
+            tourUncachedKey={pinnedUncachedKey}
             onCache={d.cache}
             onUncache={d.uncache}
           />
           <Text as="p" level="caption" className="max-w-[78ch] text-content-layout-3">
-            Hits and latency averages cover the current comparison window. They restart whenever QueryPilot is toggled or the policy changes, while the chart keeps its full history and marks each event.
+            Hit counts and latency averages cover the current comparison window and reset whenever QueryPilot is toggled or the policy changes. The chart keeps its full history and marks each event.
           </Text>
         </div>
       )}
@@ -1580,7 +1727,7 @@ export function DemoPage() {
           primaryDisabled={tourStep === 'reselecting' && !reselectComplete}
           copyOverride={
             tourStep === 'reselecting' && !reselectComplete
-              ? 'QueryPilot dropped its old picks and is re-selecting for Most expensive. Watch the Readyset line climb as the new caches land.'
+              ? 'QueryPilot dropped its old picks and is re-selecting for Most expensive. The Readyset line climbs as the new caches land.'
               : undefined
           }
           deps={[d.phase, d.loadRunning, d.mode, d.querypilotOn, d.patterns.length, suggestions.length]}

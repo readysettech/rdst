@@ -139,8 +139,7 @@ async def client(app):
     """In-process httpx client that drives the ASGI app directly.
 
     Lifespan events do not fire under ASGITransport, which is what we want
-    in tests — startup hooks like `start_prepull` would otherwise spawn a
-    `docker pull` against the ReadySet image.
+    in tests — startup hooks must not run side effects here.
     """
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as c:

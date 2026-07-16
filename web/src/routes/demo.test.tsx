@@ -7,7 +7,7 @@ vi.mock('../components/SQLDisplay', () => ({
 }));
 
 import { toast } from '@rs/ui-new/use-toast';
-import { DemoPage, windowLiftRatio, eventDescription, parameterizeSql } from './demo';
+import { DemoPage, windowLiftRatio, eventDescription, parameterizeSql, clipToScrollAncestors } from './demo';
 import * as useDemoMod from '../lib/useDemo';
 import type { LoadSample, PatternRow } from '../lib/useDemo';
 
@@ -286,9 +286,9 @@ describe('DemoPage', () => {
     expect(screen.getByText(/Container images downloaded/)).toBeTruthy();
     // The auto-clean line is a styled note, and the card has its own copy.
     expect(screen.getByText(/cleans itself up after an hour/)).toBeTruthy();
-    expect(screen.getByText(/cache queries and watch the effect/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Start demo environment/ })).toBeTruthy();
-    const start = screen.getByRole('button', { name: /Start demo environment/ }) as HTMLButtonElement;
+    expect(screen.getByText(/Cache a query and the effect shows immediately/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Start the demo/ })).toBeTruthy();
+    const start = screen.getByRole('button', { name: /Start the demo/ }) as HTMLButtonElement;
     expect(start.disabled).toBe(false);
   });
 
@@ -307,9 +307,9 @@ describe('DemoPage', () => {
     mockDemo({ phase: 'idle' });
     render(<DemoPage />);
 
-    expect(await screen.findByText(/Docker isn't running - start Docker to run the demo/)).toBeTruthy();
-    expect(screen.getByText(/Container images not downloaded yet - about 2GB/)).toBeTruthy();
-    const start = screen.getByRole('button', { name: /Start demo environment/ }) as HTMLButtonElement;
+    expect(await screen.findByText(/Docker isn't running — start Docker to continue/)).toBeTruthy();
+    expect(screen.getByText(/Container images not downloaded yet — about 2 GB/)).toBeTruthy();
+    const start = screen.getByRole('button', { name: /Start the demo/ }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
 
     const preflightCalls = () =>
@@ -339,9 +339,9 @@ describe('DemoPage', () => {
     mockDemo({ phase: 'idle' });
     render(<DemoPage />);
 
-    expect(await screen.findByText(/Docker isn't installed - install Docker Desktop to run the demo/)).toBeTruthy();
+    expect(await screen.findByText(/Docker isn't installed — install Docker Desktop to continue/)).toBeTruthy();
     expect(screen.queryByText("Docker is running")).toBeNull();
-    const start = screen.getByRole('button', { name: /Start demo environment/ }) as HTMLButtonElement;
+    const start = screen.getByRole('button', { name: /Start the demo/ }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
   });
 
@@ -383,31 +383,57 @@ describe('DemoPage', () => {
     expect(screen.queryByText(/Query shape/)).toBeNull();
   });
 
-  it('defaults to the stable query-identity order and re-sorts only when a header is clicked', () => {
+  it('defaults to query-identity order and header clicks take a frozen snapshot', () => {
     markTourDone();
-    mockDemo({
-      patterns: [
-        row({ key: 'A', title: 'Slow uncached', status: 'pass_through', hits: 400, postgres_hits: 400, readyset_hits: 380 }),
-        row({ key: 'B', title: 'Fast cached', status: 'cached_querypilot', hits: 900, postgres_hits: 300, readyset_hits: 900, reason: { kind: 'selected', rank: 1, metric: 'count_star', metric_value: 900, cutoff: 10 } }),
-      ],
-    });
-    render(<DemoPage />);
+    const patterns = [
+      row({ key: 'A', title: 'Slow uncached', status: 'pass_through', hits: 400, postgres_hits: 400, readyset_hits: 380 }),
+      row({ key: 'B', title: 'Fast cached', status: 'cached_querypilot', hits: 900, postgres_hits: 300, readyset_hits: 900, reason: { kind: 'selected', rank: 1, metric: 'count_star', metric_value: 900, cutoff: 10 } }),
+    ];
+    const hook = vi.spyOn(useDemoMod, 'useDemo');
+    let state = { ...makeBase(), patterns } as DemoState;
+    hook.mockImplementation(() => state);
+    const { rerender } = render(<DemoPage />);
 
-    // Divergence after caching: Readyset served 900 while Postgres saw only 300.
-    const cached = rowScope('Fast cached');
-    expect(cached.getByText('300')).toBeTruthy();
-    expect(cached.getByText('900')).toBeTruthy();
-    // Default sort is the stable query identity (workload key order), NOT hit
-    // counts, so rows never move under the cursor as counters update.
     const titles = () => screen.getAllByTestId('pattern-title').map((el) => el.textContent);
+    // Default: stable query identity, and the switch column is labeled.
     expect(titles()).toEqual(['Slow uncached', 'Fast cached']);
-    // Column-header sorting stays available: Readyset hits desc puts the cached
-    // row first.
+    expect(screen.getByText('Cache status')).toBeTruthy();
+    // A header click snapshots the CURRENT values: Readyset-hits desc puts
+    // the cached row first.
     fireEvent.click(screen.getByRole('button', { name: /Readyset hits/ }));
     expect(titles()).toEqual(['Fast cached', 'Slow uncached']);
-    // And the Query header returns to the identity order.
-    fireEvent.click(screen.getByRole('button', { name: /^Query\s/ }));
+    // Counters change so that live re-sorting WOULD flip the order; the
+    // frozen snapshot must hold every row exactly where it was.
+    state = {
+      ...state,
+      patterns: [
+        { ...patterns[0], readyset_hits: 5_000 },
+        { ...patterns[1], readyset_hits: 901 },
+      ],
+    } as DemoState;
+    rerender(<DemoPage />);
+    expect(titles()).toEqual(['Fast cached', 'Slow uncached']);
+    // The Query header returns to the identity order.
+    fireEvent.click(screen.getByRole('button', { name: /^Query/ }));
     expect(titles()).toEqual(['Slow uncached', 'Fast cached']);
+  });
+
+  it('clips tour anchor rects to scroll containers so hidden rows never anchor', () => {
+    const container = {
+      parentElement: null,
+      getBoundingClientRect: () => new DOMRect(0, 100, 500, 200),
+    } as unknown as HTMLElement;
+    const el = { parentElement: container } as unknown as HTMLElement;
+    const spy = vi.spyOn(window, 'getComputedStyle').mockReturnValue(
+      { overflow: 'auto', overflowY: '', overflowX: '' } as CSSStyleDeclaration,
+    );
+    // Row half above the table's scroll viewport: clipped to the visible part.
+    const clipped = clipToScrollAncestors(el, new DOMRect(0, 80, 500, 40));
+    expect(clipped?.top).toBe(100);
+    expect(clipped?.bottom).toBe(120);
+    // Row scrolled fully out of the viewport: not visible, no phantom rect.
+    expect(clipToScrollAncestors(el, new DOMRect(0, 20, 500, 40))).toBeNull();
+    spy.mockRestore();
   });
 
   it('shows sequential provision steps: done collapsed, active with live substep, pending dimmed', () => {
@@ -483,13 +509,11 @@ describe('DemoPage', () => {
     render(<DemoPage />);
 
     fireEvent.click(rowScope('Revenue by category').getByRole('button', { name: /details/i }));
-    expect(document.body.textContent).toContain('Cached: ranks #1 by total time under Most expensive.');
-    expect(document.body.textContent).toContain('Under Most frequent it would rank #24');
+    expect(document.body.textContent).toContain('Cached: one of the top 10 most expensive queries right now.');
     fireEvent.click(rowScope('Orders per day (30d)').getByRole('button', { name: /details/i }));
-    expect(document.body.textContent).toContain('Cached by you');
+    expect(document.body.textContent).toContain('Cached manually');
     fireEvent.click(rowScope('Customer reorder summary').getByRole('button', { name: /details/i }));
-    expect(document.body.textContent).toContain('Not cached: ranks #12 by hit count under Most frequent - outside the top 10.');
-    expect(document.body.textContent).toContain('Under Most expensive it would rank #18');
+    expect(document.body.textContent).toContain('Not cached: not among the top 10 most frequently run queries right now.');
     fireEvent.click(rowScope('Cohort revenue (quarterly)').getByRole('button', { name: /details/i }));
     expect(document.body.textContent).toContain('3 of 5 runs');
     fireEvent.click(rowScope('Live server time').getByRole('button', { name: /details/i }));
@@ -598,12 +622,12 @@ describe('DemoPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch policy' }));
     expect(setDiscoveryMode).toHaveBeenCalledWith('sum_time');
-    expect(screen.getByText('Counters resetting... throughput will dip while caches rebuild, then climb as QueryPilot re-selects.')).toBeTruthy();
+    expect(screen.getByText('Counters resetting. Throughput dips while caches rebuild, then climbs as QueryPilot re-selects.')).toBeTruthy();
 
     expect(resolveMode).toBeTruthy();
     (resolveMode as unknown as () => void)();
     await waitFor(() => {
-      expect(screen.queryByText('Counters resetting... throughput will dip while caches rebuild, then climb as QueryPilot re-selects.')).toBeNull();
+      expect(screen.queryByText('Counters resetting. Throughput dips while caches rebuild, then climbs as QueryPilot re-selects.')).toBeNull();
     });
   });
 
@@ -627,8 +651,8 @@ describe('DemoPage', () => {
       // QueryPilot opens on the most-frequent policy in the new flow.
       mode: 'count_star',
       patterns: [
-        row({ key: 'H03', title: 'Daily item revenue', group: 'expensive_aggregate', hits: 12, direct_avg_ms: 320, reason: { kind: 'below_rank', rank: 11, metric: 'sum_time_us', metric_value: 3_800_000 } }),
-        row({ key: 'H04', title: 'Revenue by customer segment', group: 'expensive_aggregate', hits: 10, direct_avg_ms: 300, reason: { kind: 'below_rank', rank: 12, metric: 'sum_time_us', metric_value: 3_000_000 } }),
+        row({ key: 'H01', title: 'Daily item revenue', group: 'expensive_aggregate', hits: 12, direct_avg_ms: 320, reason: { kind: 'below_rank', rank: 11, metric: 'sum_time_us', metric_value: 3_800_000 } }),
+        row({ key: 'H02', title: 'Revenue by customer segment', group: 'expensive_aggregate', hits: 10, direct_avg_ms: 300, reason: { kind: 'below_rank', rank: 12, metric: 'sum_time_us', metric_value: 3_000_000 } }),
       ],
     } as DemoState;
     hook.mockImplementation(() => state);
@@ -636,33 +660,33 @@ describe('DemoPage', () => {
 
     expect(await screen.findByText(welcome)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Show me' }));
-    expect(screen.getByText(/First, we'll start sending traffic to both paths \(Readyset/)).toBeTruthy();
+    expect(screen.getByText(/Traffic starts flowing to both paths/)).toBeTruthy();
 
     state = { ...state, loadRunning: true, samples: [sample(at, 1_000, 1_000)], windows: [sample(at, 1_000, 1_000)] };
     rerender(<DemoPage />);
-    expect(await screen.findByText(/The workload is being sent to both Readyset/)).toBeTruthy();
+    expect(await screen.findByText(/The same workload runs through Readyset \(teal\)/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByText(/These are all the queries being sent/)).toBeTruthy();
-    expect(screen.getByText(/These are all the queries being sent/)).toBeTruthy();
+    expect(screen.getByText(/Every query in the workload/)).toBeTruthy();
+    expect(screen.getByText(/Every query in the workload/)).toBeTruthy();
 
     // Hover/read steps never auto-advance: opening a status popover leaves the
     // table step in place; only its Next button advances.
     fireEvent.click(rowScope('Daily item revenue').getByRole('button', { name: /details/i }));
-    expect(screen.getByText(/These are all the queries being sent/)).toBeTruthy();
+    expect(screen.getByText(/Every query in the workload/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(screen.getByText(/Now let's grab two easy wins: cache these two queries\b/)).toBeTruthy();
+    expect(screen.getByText(/Two easy wins: cache these queries by hand/)).toBeTruthy();
 
     const cachedManual = state.patterns.map((p) => ({ ...p, status: 'cached_manual' as const, reason: { kind: 'manual' as const } }));
     state = { ...state, patterns: cachedManual };
     rerender(<DemoPage />);
     // After both easy wins are cached, the tour holds on those two rows to show
     // the per-query throughput jump, then Next advances to QueryPilot.
-    expect(await screen.findByText(/their Readyset latency drops dramatically/)).toBeTruthy();
+    expect(await screen.findByText(/Readyset latency drops sharply/)).toBeTruthy();
     // The two rows must STAY highlighted after caching (the cutout tracks the
     // suggested keys, not cacheability, which flips false once cached).
     expect(document.querySelectorAll('[data-tour-manual-suggested="true"]').length).toBe(2);
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText(/Now the fun part/)).toBeTruthy();
+    expect(await screen.findByText(/That was manual caching. Now, turn on QueryPilot/)).toBeTruthy();
 
     // Enable QueryPilot: the tour shows a visible chart-anchored waiting step
     // (no dead air) and must NOT flash Welcome again.
@@ -674,11 +698,20 @@ describe('DemoPage', () => {
     const frequentRow = row({ key: 'qp1', title: 'Product tile by id', group: 'cheap_point_lookup', status: 'cached_querypilot', hits: 900, direct_avg_ms: 5, router_avg_ms: 0.8, reason: { kind: 'selected', rank: 1, metric: 'count_star', metric_value: 900, cutoff: 20 } });
     state = { ...state, patterns: [...cachedManual, frequentRow] };
     rerender(<DemoPage />);
-    expect(await screen.findByText(/Watch the teal line/)).toBeTruthy();
+    expect(await screen.findByText(/the teal line climbs as Readyset serves them from memory/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText(/Hover the status on one of these to see why it was chosen/)).toBeTruthy();
+    expect(await screen.findByText(/Hover a status chip to see why it was chosen/)).toBeTruthy();
+    // The spotlight is pinned at step entry: a later-cached row that would
+    // out-sort the pinned one must NOT steal the highlight mid-step.
+    expect(document.querySelectorAll('[data-tour-cached-querypilot="true"]').length).toBe(1);
+    const earlierCached = row({ key: 'aa1', title: 'Alphabetically first cached', group: 'cheap_point_lookup', status: 'cached_querypilot', hits: 800, direct_avg_ms: 4, router_avg_ms: 0.7, reason: { kind: 'selected', rank: 2, metric: 'count_star', metric_value: 800, cutoff: 20 } });
+    state = { ...state, patterns: [...cachedManual, frequentRow, earlierCached] };
+    rerender(<DemoPage />);
+    const pinnedCachedRow = document.querySelector('[data-tour-cached-querypilot="true"]');
+    expect(pinnedCachedRow?.textContent).toContain('Product tile by id');
+    expect(document.querySelectorAll('[data-tour-cached-querypilot="true"]').length).toBe(1);
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText(/Now switch to Most expensive/)).toBeTruthy();
+    expect(await screen.findByText(/Switch to Most expensive/)).toBeTruthy();
 
     // Switch to Most expensive: the re-selecting step anchors the chart while
     // the new caches build; Welcome must not re-appear here either. Its Next is
@@ -699,12 +732,19 @@ describe('DemoPage', () => {
     rerender(<DemoPage />);
     expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText(/Hover over the status of an uncached query to see why QueryPilot passed on it/)).toBeTruthy();
-
+    expect(await screen.findByText(/Hover the status of an uncached query to see why QueryPilot passed on it/)).toBeTruthy();
+    // The why-not anchor pins at step entry too: a new uncached row that
+    // would out-sort the pinned one must not move the spotlight.
+    expect(document.querySelector('[data-tour-uncached="true"]')?.textContent).toContain('Product tile by id');
+    const earlierUncached = row({ key: 'aa2', title: 'Alphabetically first uncached', group: 'cheap_point_lookup', status: 'pass_through', hits: 40, direct_avg_ms: 900, router_avg_ms: 900, reason: { kind: 'below_rank', rank: 20, metric: 'sum_time_us', metric_value: 100 } });
+    state = { ...state, patterns: [...cachedManual, expensiveRow2, uncachedCheap, earlierUncached] };
+    rerender(<DemoPage />);
+    expect(document.querySelector('[data-tour-uncached="true"]')?.textContent).toContain('Product tile by id');
+    expect(document.querySelectorAll('[data-tour-uncached="true"]').length).toBe(1);
     // The why-not step is a read step too: it advances via Next to the finale,
     // which carries the QueryPilot brand line and a Finish button.
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText(/Readyset QueryPilot keeps caching by your chosen policy/)).toBeTruthy();
+    expect(await screen.findByText(/QueryPilot keeps caching by the chosen policy/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
     expect(screen.queryByText(/Readyset QueryPilot keeps caching/)).toBeNull();
 
@@ -730,9 +770,9 @@ describe('parameterizeSql', () => {
 describe('eventDescription', () => {
   it('names the query a cache acted on from the recorded label', () => {
     expect(eventDescription({ t: at, type: 'manual_cache', label: 'you cached Orders per day (30d)' }))
-      .toBe("You cached 'Orders per day (30d)'");
+      .toBe("Cached 'Orders per day (30d)' manually");
     expect(eventDescription({ t: at, type: 'manual_uncache', label: 'you uncached Orders per day (30d)' }))
-      .toBe("You removed the cache on 'Orders per day (30d)'");
+      .toBe("Removed cache on 'Orders per day (30d)'");
   });
 
   it('describes QueryPilot and policy events specifically', () => {

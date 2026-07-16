@@ -42,6 +42,36 @@ def _resolve_embedded_web_dist_dir() -> Path | None:
     return None
 
 
+def _open_browser_when_ready(host: str, port: int) -> None:
+    """Open the default browser at the web UI once the server answers.
+
+    Polls /health from a daemon thread so uvicorn owns the main thread; gives
+    up quietly after a short deadline (headless boxes, missing browser)."""
+    import threading
+    import time
+    import urllib.request
+    import webbrowser
+
+    browse_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    url = f"http://{browse_host}:{port}"
+
+    def _wait_and_open() -> None:
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                urllib.request.urlopen(f"{url}/health", timeout=1)
+            except Exception:
+                time.sleep(0.25)
+                continue
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+            return
+
+    threading.Thread(target=_wait_and_open, daemon=True).start()
+
+
 def _resolve_rdst_source_dir(repo_root: Path | None = None) -> Path:
     def _looks_like_rdst_source_dir(candidate: Path) -> bool:
         return (
@@ -814,6 +844,10 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
 
         if reload:
             print("Auto-reload enabled (watching for file changes)")
+        open_browser = serve_static and not getattr(args, "no_browser", False)
+        if open_browser:
+            print("Opening the web UI in your browser (disable with --no-browser)")
+            _open_browser_when_ready(host, port)
         print("Press Ctrl+C to stop")
         print()
 

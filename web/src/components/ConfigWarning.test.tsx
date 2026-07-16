@@ -25,12 +25,17 @@ vi.mock('../hooks/useTarget', () => ({
   useTarget: () => ({ target: null }),
 }));
 
+// The banner shows on feature pages and stays off the home page, so the
+// default mocked route is a feature page; tests flip mockPathname to '/'
+// to cover the home suppression.
+let mockPathname = '/ask';
+
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual('@tanstack/react-router');
   return {
     ...actual,
     useNavigate: () => vi.fn(),
-    useLocation: () => ({ pathname: '/' }),
+    useLocation: () => ({ pathname: mockPathname }),
   };
 });
 
@@ -98,6 +103,7 @@ function renderWarning(queryClient: QueryClient) {
 describe('ConfigWarning env secret flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPathname = '/ask';
     vi.mocked(fetchStatus).mockResolvedValue({
       configured: true,
       default_target: 'prod',
@@ -139,6 +145,19 @@ describe('ConfigWarning env secret flow', () => {
     expect(await screen.findByRole('button', { name: /Try Free Trial/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Set API Key/i })).toBeTruthy();
     expect(screen.getByText(/export RDST_ANTHROPIC_API_KEY=<value>/i)).toBeTruthy();
+  });
+
+  it('stays off the home page even when the key is missing', async () => {
+    mockPathname = '/';
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    renderWarning(queryClient);
+
+    await waitFor(() => expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /Try Free Trial/i })).toBeNull();
+    expect(screen.queryByText(/Missing Anthropic API Key/i)).toBeNull();
   });
 
   it('does not show top banner for target-password-only requirements', async () => {

@@ -1055,6 +1055,11 @@ The server is only required for the web client.""",
                 default="127.0.0.1",
                 help="Host to bind to (default: 127.0.0.1)",
             ),
+            ArgDef(
+                "--no-browser",
+                action="store_true",
+                help="Do not open the web UI in a browser on startup",
+            ),
             # Internal/dev-only FastAPI reload flag.
             # Kept hidden from CLI help.
             ArgDef(

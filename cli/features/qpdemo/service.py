@@ -61,7 +61,16 @@ QP_MIN_EXECUTION = 5
 HISTORY_WINDOW_S = 5 * 60
 AUTO_TEARDOWN_S = 60 * 60
 QP_INTERVALS = {"15s": 15, "1min": 60}
-MANUAL_GUIDE_QUERY_KEYS = ("H03", "H04")
+# Approximate compressed download per pinned image (MB). Drives each pull's
+# share of the progress bar so the bar tracks bytes, not image count.
+IMAGE_PULL_MB = {"pg": 630, "readyset": 215, "sqp": 75, "qp-cron": 55}
+# On a first run the pull stage owns the bar up to here; container starts
+# split the remainder. Cached runs skip straight past the pull stage.
+IMAGE_STAGE_MAX_PCT = 60
+# Anonymous registry pulls are rate-limited per IP; wait out the window a few
+# times before declaring the provision failed.
+PULL_RATE_LIMIT_RETRIES = 3
+PULL_RATE_LIMIT_WAIT_S = 45
 # Preflight estimates surfaced on the start card: total first-run image download
 # and the free disk the demo needs while running.
 IMAGE_DOWNLOAD_MB = 1100
@@ -586,24 +595,46 @@ class DemoService:
         """Explicitly pull any of the four pinned images that aren't cached yet,
         streaming per-image progress. `run`/`create` stay on --pull=never, so
         this is the demo's only registry access. `runner` is injectable for
-        tests; production uses the docker subprocess runner."""
+        tests; production uses the docker subprocess runner.
+
+        On a first run the download dominates provisioning wall time, so the
+        pull stage owns the 2..IMAGE_STAGE_MAX_PCT span of the progress bar and
+        each image advances it by its share of the missing bytes. Anonymous
+        registry pulls are rate-limited per IP, so a rate-limited pull retries
+        after a pause instead of failing the provision."""
         run = runner or qdeploy._run
-        images = list(qdeploy.PINNED_IMAGES.values())
-        total = len(images)
+        images = list(qdeploy.PINNED_IMAGES.items())
         yield {"type": "progress", "stage": "images", "percent": 1,
                "message": "Checking container images..."}
-        for idx, image in enumerate(images, start=1):
-            pct = 1 + int(idx / total * 3)
-            if qdeploy.image_present(image, run):
+        missing = [(k, img) for k, img in images if not qdeploy.image_present(img, run)]
+        if not missing:
+            yield {"type": "progress", "stage": "images", "percent": 3,
+                   "message": "All container images already cached"}
+            return
+        total_mb = sum(IMAGE_PULL_MB.get(k, 100) for k, _ in missing)
+        done_mb = 0
+        span = IMAGE_STAGE_MAX_PCT - 2
+        for idx, (key, image) in enumerate(missing, start=1):
+            pct = 2 + int(span * done_mb / total_mb)
+            yield {"type": "progress", "stage": "images", "percent": pct,
+                   "message": f"Pulling {image} ({idx}/{len(missing)}, "
+                              f"~{IMAGE_PULL_MB.get(key, 100)} MB)..."}
+            for attempt in range(1, PULL_RATE_LIMIT_RETRIES + 2):
+                r = qdeploy.pull_image(image, run)
+                if r.returncode == 0:
+                    break
+                err = (r.stderr or "")
+                rate_limited = "toomanyrequests" in err or "Rate exceeded" in err
+                if not rate_limited or attempt > PULL_RATE_LIMIT_RETRIES:
+                    raise RuntimeError(f"Failed to pull {image}: {err[:300]}")
                 yield {"type": "progress", "stage": "images", "percent": pct,
-                       "message": f"Image present: {image}"}
-                continue
-            yield {"type": "progress", "stage": "images", "percent": pct,
-                   "message": f"Pulling {image} ({idx}/{total})..."}
-            r = qdeploy.pull_image(image, run)
-            if r.returncode != 0:
-                raise RuntimeError(f"Failed to pull {image}: {(r.stderr or '')[:300]}")
-            yield {"type": "progress", "stage": "images", "percent": pct,
+                       "message": f"Registry rate limit hit; retrying in "
+                                  f"{PULL_RATE_LIMIT_WAIT_S}s "
+                                  f"({attempt}/{PULL_RATE_LIMIT_RETRIES})..."}
+                time.sleep(PULL_RATE_LIMIT_WAIT_S)
+            done_mb += IMAGE_PULL_MB.get(key, 100)
+            yield {"type": "progress", "stage": "images",
+                   "percent": 2 + int(span * done_mb / total_mb),
                    "message": f"Pulled {image}"}
 
     # ---- provision -----------------------------------------------------------
@@ -614,7 +645,19 @@ class DemoService:
             return
         self._provisioning = True
         try:
-            yield from self._provision_locked()
+            # Container-start milestones are authored on a 5..100 scale for the
+            # cached-images case. When a real download happens it owns the bar
+            # up to IMAGE_STAGE_MAX_PCT, so the container milestones rescale
+            # into the remainder instead of snapping the bar backwards.
+            base = 5
+            for ev in self._provision_locked():
+                pct = ev.get("percent")
+                if ev.get("stage") == "images":
+                    if str(ev.get("message", "")).startswith("Pulling"):
+                        base = IMAGE_STAGE_MAX_PCT
+                elif isinstance(pct, int) and pct >= 5:
+                    ev["percent"] = base + round((pct - 5) * (100 - base) / 95)
+                yield ev
         finally:
             self._provisioning = False
             self._lifecycle_lock.release()
@@ -1090,7 +1133,6 @@ class DemoService:
                 "alt_rank": r.alt_rank,
                 "alt_metric": r.alt_metric,
             })
-        self._prefer_manual_guide_mid_tier(out)
         self._maybe_fire_demo_completed(out)
         # Feed the router path the keys ReadySet is serving from cache so it runs
         # them open-loop and its throughput surges, while the direct path holds a
@@ -1104,6 +1146,31 @@ class DemoService:
             self._driver.set_cached_keys(
                 r["key"] for r in out if r["has_cache"]
             )
+        # Pre-seed every active catalog query that traffic hasn't reached yet.
+        # The row SET is therefore constant from the first render: rows only
+        # ever update in place, never pop in as queries get their first
+        # execution, so nothing in the table moves mid-demo.
+        seen_keys = {r["key"] for r in out}
+        for q in WORKLOAD:
+            if q.id in seen_keys or q.weight <= 0:
+                continue
+            out.append({
+                "key": q.id,
+                "title": q.title,
+                "sql": q.sql,
+                "group": q.group,
+                "status": "not_eligible",
+                "hits": 0,
+                "has_cache": False,
+                "postgres_hits": 0,
+                "readyset_hits": 0,
+                "direct_avg_ms": None,
+                "router_avg_ms": None,
+                "reason": {"kind": "below_min_execution", "count": 0},
+                "log_reason": None,
+                "alt_rank": None,
+                "alt_metric": None,
+            })
         return out
 
     def _maybe_fire_demo_completed(self, rows: list[dict]) -> None:
@@ -1118,24 +1185,6 @@ class DemoService:
             self._track_demo_event(
                 "demo_completed", "RDST Demo Completed", discovery_mode="count_star",
             )
-
-    @staticmethod
-    def _prefer_manual_guide_mid_tier(rows: list[dict]) -> None:
-        preferred = {key: i for i, key in enumerate(MANUAL_GUIDE_QUERY_KEYS)}
-        mid_rows = [row for row in rows if row.get("group") == "mid_tier"]
-        if not mid_rows:
-            return
-        ordered_mid_rows = sorted(
-            mid_rows,
-            key=lambda row: (
-                0 if row.get("key") in preferred else 1,
-                preferred.get(row.get("key"), len(preferred)),
-            ),
-        )
-        mid_iter = iter(ordered_mid_rows)
-        for i, row in enumerate(rows):
-            if row.get("group") == "mid_tier":
-                rows[i] = next(mid_iter)
 
     def _resolve_cache_target(self, identifier: str) -> tuple[str, str]:
         text = str(identifier).strip()

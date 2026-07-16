@@ -274,6 +274,13 @@ export function ConfigWarning() {
     return null;
   }
 
+  // The home page stays welcome-clean: no key/trial banner there. The pages
+  // that actually use the key (Ask, Audit, ...) still show it, and the Ask
+  // card on home carries its own "needs a key" chip.
+  if (location.pathname === '/') {
+    return null;
+  }
+
   const shouldShowManualAnthropicInput =
     warningConfig.actionType === 'open-env-dialog' ||
     warningConfig.secondaryActionType === 'open-env-dialog';
