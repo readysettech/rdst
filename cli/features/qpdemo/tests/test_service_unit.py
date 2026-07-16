@@ -839,3 +839,60 @@ def test_baked_image_is_pinned_and_pulled(monkeypatch):
     svc = _bare_pull_service()
     list(svc._pull_missing_images(runner=stub))
     assert service_mod.qdeploy.BAKED_PG_IMAGE in stub.pulled()
+
+
+def test_patterns_feeds_open_loop_keys_from_readyset_caches(tmp_path, monkeypatch):
+    """The open-loop feed keys off ReadySet cache existence (data plane), not
+    SQP rule state: a rule that churns away for one poll must not re-pace a
+    query the cache is still serving, and a rule without a live cache must not
+    surge a query that is really passing through."""
+    svc = _bare_service(tmp_path, monkeypatch)
+
+    class RuleGoneCacheServing:
+        sql = "SELECT 1"
+        fingerprint_hex = "0xabc"
+        cached = False
+        has_cache = True
+        owner = None
+        decision = {"reason": "selected"}
+        log_reason = None
+        alt_rank = None
+        alt_metric = None
+
+    class RuleUpCacheMissing:
+        sql = "SELECT 2"
+        fingerprint_hex = "0xdef"
+        cached = True
+        has_cache = False
+        owner = "querypilot"
+        decision = {"reason": "selected"}
+        log_reason = None
+        alt_rank = None
+        alt_metric = None
+
+    class Driver:
+        def __init__(self):
+            self.keys = None
+
+        def query_stats(self):
+            return {"direct": {}, "router": {}}
+
+        def set_cached_keys(self, keys):
+            self.keys = set(keys)
+
+    svc._driver = Driver()
+    svc._raw_patterns = lambda: [RuleGoneCacheServing(), RuleUpCacheMissing()]
+    svc._catalog = {}
+    svc._catalog_by_shape = {}
+    svc._catalog_by_key = {}
+    svc._discovery_mode = "sum_time"
+
+    rows = svc.patterns()
+
+    assert svc._driver.keys == {"0xabc"}
+    by_key = {r["key"]: r for r in rows}
+    # UI status still reflects the policy plane (rules) independently.
+    assert by_key["0xabc"]["status"] == "pass_through"
+    assert by_key["0xdef"]["status"] == "cached_querypilot"
+    assert by_key["0xabc"]["has_cache"] is True
+    assert by_key["0xdef"]["has_cache"] is False

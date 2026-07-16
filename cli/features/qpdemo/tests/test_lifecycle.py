@@ -132,7 +132,7 @@ def test_workload_titles_matched(provisioned):
     assert sum(1 for p in pats if p.get("title")) >= 3
     row = pats[0]
     assert {
-        "key", "title", "sql", "group", "status", "hits",
+        "key", "title", "sql", "group", "status", "hits", "has_cache",
         "postgres_hits", "readyset_hits", "direct_avg_ms",
         "router_avg_ms", "reason", "log_reason", "alt_rank", "alt_metric",
     } == set(row)

@@ -1080,6 +1080,7 @@ class DemoService:
                 # one path up; ``hits`` stays as the larger of the two for older
                 # clients that predate the split.
                 "hits": max(direct_hits, router_hits),
+                "has_cache": bool(getattr(r, "has_cache", False)),
                 "postgres_hits": direct_hits,
                 "readyset_hits": router_hits,
                 "direct_avg_ms": _round_float(direct_stat.get("avg_ms")),
@@ -1093,12 +1094,15 @@ class DemoService:
         self._maybe_fire_demo_completed(out)
         # Feed the router path the keys ReadySet is serving from cache so it runs
         # them open-loop and its throughput surges, while the direct path holds a
-        # steady baseline. Reflects live cache state (manual + QueryPilot), so it
-        # follows caching, mode switches, and resets automatically.
+        # steady baseline. Keyed off ReadySet cache existence (the data plane),
+        # not SQP rule state: QueryPilot's reconcile can drop and re-add rules
+        # within a single pass, so rule state can look empty for one poll while
+        # every query is still served from cache. Caches only disappear on
+        # genuine resets (QP toggle, mode switch, uncache), so pacing follows
+        # those immediately.
         if self._driver:
             self._driver.set_cached_keys(
-                r["key"] for r in out
-                if r["status"] in ("cached_querypilot", "cached_manual")
+                r["key"] for r in out if r["has_cache"]
             )
         return out
 
@@ -1160,9 +1164,15 @@ class DemoService:
         # cached number rebuilds instantly from cached executions while the
         # Postgres baseline stays put -- it neither drags the ReadySet average
         # down through old slow samples nor blanks out. Other queries untouched.
+        # The rebuilt average is also held until the cache is actually serving:
+        # executions that land before the cache warms still run at pass-through
+        # speed, and letting them into a freshly reset average makes the cache
+        # win look far smaller than it is.
         q = self._catalog_by_key.get(str(fingerprint).strip())
         if q:
             self._reset_comparison_window(q.id, router_only=True)
+            if self._driver:
+                self._driver.defer_router_stats_until_warm(q.id)
         return {"success": True, "fingerprint": fp, "owner": "manual"}
 
     def uncache(self, fingerprint: str) -> dict:

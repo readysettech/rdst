@@ -48,6 +48,14 @@ TIER_THINK_S = {
 # land well above it and stay paced.
 FAST_PATH_MS = 2.0
 
+# Warm gate for freshly cached queries: a sample at or under this latency means
+# the cache is serving (cached executions land in single-digit-to-low-tens of ms
+# even on capped containers; pass-throughs land in the hundreds). Samples above
+# it are dropped from the per-query comparison stats while the gate is armed, up
+# to the cap, so a just-reset average never blends in pre-warm pass-throughs.
+WARM_GATE_MS = 100.0
+WARM_GATE_MAX_SAMPLES = 30
+
 
 @dataclass
 class WindowStat:
@@ -176,6 +184,10 @@ class PathLoad:
         self._transient_errors = 0
         self._last_errors: list[str] = []
         self._query_stats: dict[str, QueryStat] = {}
+        # Keys whose per-query stats are held until a warm (cache-speed) sample
+        # arrives; value counts the samples dropped while waiting. See
+        # defer_stats_until_warm.
+        self._stats_gate: dict[str, int] = {}
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._tier_thread_counts: dict[str, int] = {}
@@ -283,9 +295,10 @@ class PathLoad:
             dt = (time.perf_counter() - t0) * 1000.0
             with self._lock:
                 self._samples.append(dt)
-                stat = self._query_stats.setdefault(key, QueryStat())
-                stat.count += 1
-                stat.total_ms += dt
+                if self._stats_record_allowed(key, dt):
+                    stat = self._query_stats.setdefault(key, QueryStat())
+                    stat.count += 1
+                    stat.total_ms += dt
             think = TIER_THINK_S.get(tier, 0.0)
             if self._should_pace(key, dt, think):
                 time.sleep(think)
@@ -341,6 +354,31 @@ class PathLoad:
             avg_ms=sum(samples) / n if n else 0.0,
         )
 
+    def defer_stats_until_warm(self, key: str) -> None:
+        """Hold this key's per-query average until its cache is serving.
+
+        Executions that complete before a freshly created cache warms still run
+        at pass-through speed; recording them into a just-reset average makes
+        the cache win look far smaller than it is. While the gate is armed,
+        samples above WARM_GATE_MS are dropped from the comparison stats (the
+        throughput window is untouched); the first warm sample records and
+        lifts the gate. The gate also lifts after WARM_GATE_MAX_SAMPLES so a
+        cache that never materializes cannot suppress the average forever.
+        """
+        with self._lock:
+            self._stats_gate[key] = 0
+
+    def _stats_record_allowed(self, key: str, dt_ms: float) -> bool:
+        """Caller must hold self._lock."""
+        dropped = self._stats_gate.get(key)
+        if dropped is None:
+            return True
+        if dt_ms <= WARM_GATE_MS or dropped + 1 >= WARM_GATE_MAX_SAMPLES:
+            del self._stats_gate[key]
+            return True
+        self._stats_gate[key] = dropped + 1
+        return False
+
     def query_stats(self) -> dict[str, dict[str, float | int | None]]:
         with self._lock:
             return {
@@ -353,12 +391,16 @@ class PathLoad:
         # restarts (used when a single query is cached, so its average rebuilds
         # from cached executions instead of inching down through the old slow
         # samples); without a key, all restart (policy / QueryPilot change).
-        # The throughput sample buffer and error counters are left alone.
+        # The throughput sample buffer and error counters are left alone. Any
+        # armed warm gate is disarmed too: a reset means the caller is starting
+        # this comparison over, not waiting out a cache fill.
         with self._lock:
             if key is None:
                 self._query_stats = {}
+                self._stats_gate = {}
             else:
                 self._query_stats.pop(key, None)
+                self._stats_gate.pop(key, None)
 
     def recent_errors(self) -> list[str]:
         with self._lock:
@@ -412,6 +454,12 @@ class DualPathLoadDriver:
         """Tell the router path which query keys ReadySet is serving from cache
         so it runs them open-loop and its throughput surges."""
         self.sqp.set_cached_keys(keys)
+
+    def defer_router_stats_until_warm(self, key: str) -> None:
+        """Manual cache: hold the router average for this key until the cache
+        is serving, so the rebuilt number shows cache speed from its first
+        sample. The direct (Postgres) path is untouched."""
+        self.sqp.defer_stats_until_warm(key)
 
     def run(self, workers: int, duration_s: float, window_s: float = 1.0,
             on_window: Callable[[WindowStat, WindowStat], None] | None = None

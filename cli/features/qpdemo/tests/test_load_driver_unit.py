@@ -92,3 +92,45 @@ def test_a_genuinely_fast_query_skips_its_pace():
     router = PathLoad("sqp", {}, ["SELECT 1"])
     # under FAST_PATH_MS -> no pace regardless of cache membership
     assert router._should_pace("H01", dt_ms=1.0, think=0.05) is False
+
+
+def test_warm_gate_holds_stats_until_cache_speed_sample():
+    # A freshly cached query's average must rebuild from cached executions:
+    # pass-through samples that land before the cache warms are dropped, the
+    # first cache-speed sample records and lifts the gate.
+    load = PathLoad("sqp", {}, ["SELECT 1"])
+    load.defer_stats_until_warm("M01")
+    with load._lock:
+        assert load._stats_record_allowed("M01", 350.0) is False
+        assert load._stats_record_allowed("M01", 22.0) is True
+        # gate lifted: later slow samples record normally
+        assert load._stats_record_allowed("M01", 350.0) is True
+
+
+def test_warm_gate_only_affects_the_deferred_key():
+    load = PathLoad("sqp", {}, ["SELECT 1"])
+    load.defer_stats_until_warm("M01")
+    with load._lock:
+        assert load._stats_record_allowed("M02", 350.0) is True
+
+
+def test_warm_gate_lifts_after_sample_cap():
+    # A cache that never materializes cannot suppress the average forever.
+    from features.qpdemo.load_driver import WARM_GATE_MAX_SAMPLES
+
+    load = PathLoad("sqp", {}, ["SELECT 1"])
+    load.defer_stats_until_warm("M01")
+    with load._lock:
+        for _ in range(WARM_GATE_MAX_SAMPLES - 1):
+            assert load._stats_record_allowed("M01", 350.0) is False
+        assert load._stats_record_allowed("M01", 350.0) is True
+
+
+def test_reset_query_stats_disarms_warm_gate():
+    # A reset means the caller is starting the comparison over, not waiting
+    # out a cache fill.
+    load = PathLoad("sqp", {}, ["SELECT 1"])
+    load.defer_stats_until_warm("M01")
+    load.reset_query_stats("M01")
+    with load._lock:
+        assert load._stats_record_allowed("M01", 350.0) is True

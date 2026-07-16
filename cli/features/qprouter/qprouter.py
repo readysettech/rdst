@@ -37,6 +37,11 @@ class PatternRow:
     past_threshold: bool
     past_warmup: bool
     decision: dict[str, Any]
+    # Whether ReadySet holds a cache for this fingerprint right now. Distinct
+    # from `cached` (an SQP routing rule exists): rules can churn transiently
+    # while the cache itself keeps serving, so data-plane consumers should key
+    # off this rather than rule state.
+    has_cache: bool = False
     log_reason: str | None = None
     pct_load: float = 0.0            # share of total sum_time across patterns
     alt_rank: int | None = None
@@ -51,6 +56,7 @@ class PatternRow:
             "calls": self.calls,
             "sum_time_us": self.sum_time_us,
             "cached": self.cached,
+            "has_cache": self.has_cache,
             "owner": self.owner,
             "state": self.state,
             "cache_name": self.cache_name,
@@ -122,6 +128,7 @@ class QPRouter:
                 calls=int(d.get("count_star", 0)),
                 sum_time_us=int(d.get("sum_time_us", 0)),
                 cached=cached,
+                has_cache=bool(cache_names.get(fp)),
                 owner=owner,
                 state=_rule_state(rule),
                 cache_name=cache_name,
