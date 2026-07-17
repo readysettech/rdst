@@ -522,6 +522,25 @@ function ErrorState({
   error: { message: string; phase?: string | null };
   onRetry: () => void;
 }) {
+  const isAuthenticationError = /trial access|api key|authentication|unauthorized|\b401\b/i.test(
+    error.message,
+  );
+  const title = isAuthenticationError
+    ? 'AI service authentication failed'
+    : error.phase === 'generate'
+      ? "Couldn't generate SQL"
+      : 'Request failed';
+  const phaseLabels: Record<string, string> = {
+    config: 'Configuration',
+    schema: 'Loading database schema',
+    filter: 'Selecting relevant tables',
+    clarify: 'Clarifying the question',
+    generate: 'Generating SQL',
+    validate: 'Validating SQL',
+    execute: 'Running the query',
+  };
+  const phaseLabel = error.phase ? phaseLabels[error.phase] : undefined;
+
   return (
     <div className="bg-surface-negative-soft/50 border border-border-negative-soft rounded-xl p-6">
       <HStack className="gap-4 items-start">
@@ -531,18 +550,18 @@ function ErrorState({
         <VStack className="gap-3 items-start flex-1">
           <VStack className="gap-1 items-start">
             <Text level="headline-4" className="text-content-negative-soft">
-              Something went wrong
+              {title}
             </Text>
             <Text level="body-small" className="text-content-layout-2 leading-relaxed">
               {error.message}
             </Text>
           </VStack>
-          {error.phase && (
+          {phaseLabel && (
             <Tag
               variant="negative"
               modifier="ghost"
               size="small"
-              label={`Failed during: ${error.phase}`}
+              label={`Failed while: ${phaseLabel}`}
             />
           )}
           <Button

@@ -242,14 +242,14 @@ class TestSignupFlow:
         assert cfg.get_identity()["verified"] is True
         assert cfg.get_token_for_email("ada@example.com") == "tok-1"
 
-    def test_keyservice_unreachable_reports_not_started(self, client, config_path):
+    def test_keyservice_unreachable_returns_service_error(self, client, config_path):
         _StubEmailService.register_result = {"success": False, "error": "boom"}
         r = client.post("/api/settings/email", json={
             "email": "ada@example.com", "first_name": "Ada", "last_name": "L",
         })
         body = r.json()
-        assert body["verified"] is False
-        assert body["verification_started"] is False
+        assert r.status_code == 502
+        assert "temporarily unavailable" in body["detail"]
         # The identity is still stored so a later retry needs no re-typing.
         cfg = TargetsConfig(path=str(config_path))
         cfg.load()
@@ -268,6 +268,20 @@ class TestSignupFlow:
 
     def test_verify_poll_without_email(self, client):
         assert client.post("/api/settings/email/verify-poll").json() == {"verified": False}
+
+    def test_verify_poll_distinguishes_service_failure_from_pending(self, client):
+        client.post("/api/settings/email", json={
+            "email": "ada@example.com", "first_name": "Ada", "last_name": "L",
+        })
+        _StubEmailService.status_result = {
+            "verified": False,
+            "error": "HTTP 500",
+        }
+
+        response = client.post("/api/settings/email/verify-poll")
+
+        assert response.status_code == 502
+        assert "temporarily unavailable" in response.json()["detail"]
 
     def test_names_are_per_machine_across_email_swaps(self, client, config_path):
         client.post("/api/settings/email", json={

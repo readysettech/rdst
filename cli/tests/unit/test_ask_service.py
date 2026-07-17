@@ -112,6 +112,7 @@ class TestAskServiceAsk:
         error_events = [e for e in events if isinstance(e, AskErrorEvent)]
         assert len(error_events) == 1
         assert "No target" in error_events[0].message
+        assert "rdst configure add" in error_events[0].message
 
     @pytest.mark.asyncio
     async def test_error_target_not_found(self, service, options):

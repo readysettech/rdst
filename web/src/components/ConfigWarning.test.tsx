@@ -29,12 +29,13 @@ vi.mock('../hooks/useTarget', () => ({
 // default mocked route is a feature page; tests flip mockPathname to '/'
 // to cover the home suppression.
 let mockPathname = '/ask';
+const mockNavigate = vi.fn();
 
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual('@tanstack/react-router');
   return {
     ...actual,
-    useNavigate: () => vi.fn(),
+    useNavigate: () => mockNavigate,
     useLocation: () => ({ pathname: mockPathname }),
   };
 });
@@ -171,6 +172,73 @@ describe('ConfigWarning env secret flow', () => {
     await waitFor(() => expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: /Try Free Trial/i })).toBeNull();
     expect(screen.queryByText(/Missing Anthropic API Key/i)).toBeNull();
+  });
+
+  it('keeps a fresh zero-target install on the home page', async () => {
+    mockPathname = '/';
+    vi.mocked(fetchStatus).mockResolvedValue({
+      configured: false,
+      default_target: null,
+      targets: [],
+      version: '1.0.0',
+      error: null,
+    });
+    vi.mocked(fetchInitStatus).mockResolvedValue({
+      initialized: false,
+      targets: [],
+      default_target: null,
+      llm_configured: false,
+    });
+
+    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+
+    await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled());
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('allows a fresh zero-target install to open the demo', async () => {
+    mockPathname = '/demo';
+    vi.mocked(fetchStatus).mockResolvedValue({
+      configured: false,
+      default_target: null,
+      targets: [],
+      version: '1.0.0',
+      error: null,
+    });
+    vi.mocked(fetchInitStatus).mockResolvedValue({
+      initialized: false,
+      targets: [],
+      default_target: null,
+      llm_configured: false,
+    });
+
+    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+
+    await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled());
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('routes a zero-target database feature to onboarding', async () => {
+    mockPathname = '/analyze';
+    vi.mocked(fetchStatus).mockResolvedValue({
+      configured: false,
+      default_target: null,
+      targets: [],
+      version: '1.0.0',
+      error: null,
+    });
+    vi.mocked(fetchInitStatus).mockResolvedValue({
+      initialized: false,
+      targets: [],
+      default_target: null,
+      llm_configured: false,
+    });
+
+    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith({ to: '/onboarding' });
+    });
   });
 
   it('does not show top banner for target-password-only requirements', async () => {

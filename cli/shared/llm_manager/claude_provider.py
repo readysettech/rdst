@@ -165,12 +165,22 @@ class ClaudeProvider(Provider):
         except Exception as e:
             raise LLMError(f"Claude request error: {e}", code="HTTP_ERROR", cause=e)
 
-        if resp.status_code == 403 and base_url:
-            # Check for trial-specific errors from our proxy
+        if resp.status_code in (401, 403) and base_url:
+            # Check for trial-specific errors from our proxy. These responses
+            # come from the RDST keyservice, not from Claude, so do not label
+            # them as Claude API failures in user-facing errors.
             try:
                 err_json = resp.json()
             except Exception:
                 err_json = {}
+            if resp.status_code == 401:
+                raise LLMError(
+                    "RDST's AI service could not validate your trial access. "
+                    "Try again shortly, refresh your trial token, or configure "
+                    "your own Anthropic API key.",
+                    code="TRIAL_AUTH_INVALID",
+                    status=401,
+                )
             if err_json.get("code") == "TRIAL_EXHAUSTED":
                 detail = err_json.get("detail", "Trial credits exhausted.")
                 raise LLMError(
@@ -200,8 +210,24 @@ class ClaudeProvider(Provider):
             )
             logger.debug(f"Full API error response: {json.dumps(err_json, indent=2)}")
             logger.debug(f"Status code: {resp.status_code}")
+            if base_url:
+                raise LLMError(
+                    "The RDST AI service returned an error. Try again shortly "
+                    "or configure your own Anthropic API key.",
+                    code="PROXY_HTTP",
+                    status=resp.status_code,
+                )
+            if resp.status_code == 401:
+                raise LLMError(
+                    "Anthropic rejected the configured API key. Check the key "
+                    "and try again.",
+                    code="ANTHROPIC_AUTH_INVALID",
+                    status=401,
+                )
             raise LLMError(
-                f"Claude error: {msg}", code="PROVIDER_HTTP", status=resp.status_code
+                f"Anthropic API error: {msg}",
+                code="PROVIDER_HTTP",
+                status=resp.status_code,
             )
 
         data = resp.json()

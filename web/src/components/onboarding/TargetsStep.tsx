@@ -66,10 +66,14 @@ export function TargetsStep({
   };
 
   const handleFormSubmit = async (data: ConfigureFormData) => {
-    if (editingTarget) {
-      await onUpdateTarget(editingTarget.name, data);
-    } else {
-      await onAddTarget(data);
+    try {
+      if (editingTarget) {
+        await onUpdateTarget(editingTarget.name, data);
+      } else {
+        await onAddTarget(data);
+      }
+    } catch {
+      return;
     }
     setShowForm(false);
     setEditingTarget(null);

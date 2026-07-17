@@ -26,13 +26,22 @@ const engineOptions = [
   { value: 'mysql', label: 'MySQL' },
 ];
 
+export function defaultPasswordEnv(targetName: string): string {
+  const normalized = targetName
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return normalized ? `RDST_${normalized}_PASSWORD` : '';
+}
+
 interface ParsedConnectionUrl {
   engine: string;
   host: string;
   port: number;
   database: string;
   user: string;
-  hasPassword: boolean;
+  password: string;
   tls: boolean;
 }
 
@@ -80,7 +89,7 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
       port: parsed.port ? Number.parseInt(parsed.port, 10) : defaultPort,
       database,
       user: parsed.username ? decodeURIComponent(parsed.username) : '',
-      hasPassword: !!parsed.password,
+      password: parsed.password ? decodeURIComponent(parsed.password) : '',
       tls,
     };
   } catch {
@@ -102,6 +111,10 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
   const [database, setDatabase] = useState(initialData?.database || '');
   const [user, setUser] = useState(initialData?.user || '');
   const [passwordEnv, setPasswordEnv] = useState(initialData?.password_env || '');
+  const [password, setPassword] = useState('');
+  const [passwordEnvCustomized, setPasswordEnvCustomized] = useState(
+    Boolean(initialData?.password_env),
+  );
   const [tls, setTls] = useState(initialData?.tls ?? false);
   const [readOnly, setReadOnly] = useState(initialData?.read_only ?? false);
 
@@ -125,18 +138,23 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
     setPort(parsed.port);
     setDatabase(parsed.database);
     setUser(parsed.user);
+    setPassword(parsed.password);
     setTls(parsed.tls);
 
     // Auto-generate name from database if not already set
     if (!name && parsed.database) {
       setName(parsed.database);
+      if (!passwordEnvCustomized) {
+        setPasswordEnv(defaultPasswordEnv(parsed.database));
+      }
     }
 
     // Clear the URL field after successful parse
     setConnectionUrl('');
   };
 
-  const isAddModePasswordValid = !isAddMode || passwordEnv.trim().length > 0;
+  const isAddModePasswordValid =
+    !isAddMode || (passwordEnv.trim().length > 0 && password.length > 0);
   const isValid = name && host && port && database && user && isAddModePasswordValid;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -150,6 +168,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
       port,
       database,
       user,
+      password: password || undefined,
       password_env: passwordEnv || undefined,
       tls,
       read_only: readOnly,
@@ -164,6 +183,8 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
     setDatabase('');
     setUser('');
     setPasswordEnv('');
+    setPassword('');
+    setPasswordEnvCustomized(false);
     setTls(false);
     setReadOnly(false);
     onCancel?.();
@@ -240,7 +261,13 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
                   <BaseInputText
                     name="name"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => {
+                      const nextName = e.target.value;
+                      setName(nextName);
+                      if (isAddMode && !passwordEnvCustomized) {
+                        setPasswordEnv(defaultPasswordEnv(nextName));
+                      }
+                    }}
                     placeholder="my-database"
                     disabled={isLoading || !!initialData?.name}
                     required
@@ -341,18 +368,40 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
               <div className="space-y-4">
                 <div>
                   <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
+                    Database Password {isAddMode ? '*' : ''}
+                  </Text>
+                  <BaseInputText
+                    name="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={isAddMode ? 'Enter database password' : 'Leave blank to keep current password'}
+                    disabled={isLoading}
+                    required={isAddMode}
+                    autoComplete="new-password"
+                  />
+                  <Text level="caption" className="text-content-layout-3 mt-1">
+                    Stored in your local secret store, never in the target configuration
+                  </Text>
+                </div>
+
+                <div>
+                  <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
                     Password Environment Variable {isAddMode ? '*' : ''}
                   </Text>
                   <BaseInputText
                     name="password_env"
                     value={passwordEnv}
-                    onChange={(e) => setPasswordEnv(e.target.value)}
-                    placeholder="DB_PASSWORD"
+                    onChange={(e) => {
+                      setPasswordEnv(e.target.value);
+                      setPasswordEnvCustomized(true);
+                    }}
+                    placeholder="RDST_MY_DATABASE_PASSWORD"
                     disabled={isLoading}
                     required={isAddMode}
                   />
                   <Text level="caption" className="text-content-layout-3 mt-1">
-                    Name of environment variable containing the password
+                    Advanced: the name RDST uses to look up this password
                   </Text>
                 </div>
 

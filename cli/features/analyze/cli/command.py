@@ -612,6 +612,24 @@ class AnalyzeCommand:
             if output_json and interactive:
                 return RdstResult(False, "--json cannot be used with --interactive")
 
+            # Validate the database target before checking unrelated LLM
+            # configuration. A fresh install should be told to add a target,
+            # not sent down the API-key setup path first.
+            if not review:
+                if not target:
+                    return RdstResult(
+                        False,
+                        "No target specified and no default target configured. "
+                        "Run 'rdst configure add' to set one up.",
+                    )
+                _validate_cfg = TargetsConfig()
+                _validate_cfg.load()
+                if not _validate_cfg.get(target):
+                    return RdstResult(
+                        False,
+                        f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
+                    )
+
             # Check for API key BEFORE any LLM operations (interactive mode, review, or analysis)
             api_key_error = self._check_api_key_configured()
             if api_key_error:
@@ -764,16 +782,6 @@ class AnalyzeCommand:
                         print()
 
             # Readyset analysis always runs in parallel (Docker check is soft/non-fatal)
-
-            # Validate target exists BEFORE showing the EXPLAIN ANALYZE prompt
-            if target:
-                _validate_cfg = TargetsConfig()
-                _validate_cfg.load()
-                if not _validate_cfg.get(target):
-                    return RdstResult(
-                        False,
-                        f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
-                    )
 
             # EXPLAIN ANALYZE safety warning (unless --skip-warning or --fast)
             showed_warning = False

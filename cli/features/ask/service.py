@@ -55,7 +55,10 @@ class AskService:
             if target_name is None:
                 yield AskErrorEvent(
                     type="error",
-                    message="No target specified and no default configured",
+                    message=(
+                        "No target specified and no default target configured. "
+                        "Run 'rdst configure add' to set one up."
+                    ),
                 )
                 return
 

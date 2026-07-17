@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Optional
 
@@ -12,6 +13,7 @@ from shared.api.guards import is_loopback_request, same_host_from_headers
 from shared.config.targets import TargetsConfig
 
 router = APIRouter(prefix="/settings")
+logger = logging.getLogger(__name__)
 
 # Kept byte-for-byte in sync with the client gate regex in
 # web-apps/apps/rdst/src/components/emailValidation.ts. The parity test
@@ -182,8 +184,13 @@ async def set_email(request: Request, body: EmailRequest) -> EmailUpdateResponse
             success=True, email=email, verified=True, verification_started=True,
         )
     if result.get("error"):
-        return EmailUpdateResponse(
-            success=True, email=email, verified=False, verification_started=False,
+        logger.warning("Email verification registration failed: %s", result["error"])
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "The RDST verification service is temporarily unavailable. "
+                "Please try again in a moment."
+            ),
         )
     return EmailUpdateResponse(
         success=True, email=email, verified=False, verification_started=True,
@@ -208,6 +215,15 @@ async def verify_poll(request: Request) -> VerifyPollResponse:
     from features.audit.email_service import EmailService
 
     status = EmailService().check_status(identity["email"])
+    if status.get("error"):
+        logger.warning("Email verification status check failed: %s", status["error"])
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "The RDST verification service is temporarily unavailable. "
+                "Please try again in a moment."
+            ),
+        )
     if status.get("verified") and status.get("report_token"):
         cfg.add_verified_email(identity["email"], status["report_token"])
         cfg.save()

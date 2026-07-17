@@ -55,7 +55,11 @@ async def get_status() -> StatusResponse:
 
         for name in target_names:
             target_config = cfg.get(name)
-            if target_config:
+            # Readyset deployments are implementation targets used by cache
+            # commands, not databases the Web UI can inspect. Exposing them
+            # in the global selector lets users choose a target that Top,
+            # Audit, and other database pages cannot operate against.
+            if target_config and target_config.get("target_type") != "readyset":
                 targets_list.append(
                     TargetInfo(
                         name=name,

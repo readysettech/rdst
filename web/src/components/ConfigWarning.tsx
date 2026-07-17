@@ -246,7 +246,11 @@ export function ConfigWarning() {
 
   useEffect(() => {
     if (isLoading || initLoading || !status || !initStatus) return;
-    if (location.pathname === '/onboarding') return;
+    if (
+      location.pathname === '/' ||
+      location.pathname === '/onboarding' ||
+      location.pathname.startsWith('/demo')
+    ) return;
     if (initStatus.initialized === false || status.targets.length === 0) {
       navigate({ to: '/onboarding' });
     }

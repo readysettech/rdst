@@ -90,7 +90,10 @@ class TopService:
             if target_name is None:
                 yield TopErrorEvent(
                     type="error",
-                    message="No target specified and no default configured. Run 'rdst configure' first.",
+                    message=(
+                        "No target specified and no default target configured. "
+                        "Run 'rdst configure add' to set one up."
+                    ),
                     stage="config",
                 )
                 return
@@ -247,7 +250,10 @@ class TopService:
             if target_name is None:
                 yield TopErrorEvent(
                     type="error",
-                    message="No target specified and no default configured",
+                    message=(
+                        "No target specified and no default target configured. "
+                        "Run 'rdst configure add' to set one up."
+                    ),
                     stage="config",
                 )
                 return

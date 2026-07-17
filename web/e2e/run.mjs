@@ -1,17 +1,9 @@
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const isolatedHome = mkdtempSync(join(tmpdir(), 'rdst-web-e2e-'))
-
-// The EmailGate modal blocks every page until ~/.rdst/config.toml holds a
-// primary email, so seed one before the server starts.
-mkdirSync(join(isolatedHome, '.rdst'))
-writeFileSync(
-  join(isolatedHome, '.rdst', 'config.toml'),
-  '[[emails]]\nemail = "e2e@readyset.io"\nprimary = true\n'
-)
 const browserPath =
   process.env.PLAYWRIGHT_BROWSERS_PATH ?? join(homedir(), '.cache', 'ms-playwright')
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'

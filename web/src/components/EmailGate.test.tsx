@@ -143,7 +143,7 @@ describe('EmailGate', () => {
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
 
-    expect(await screen.findByText(/couldn't reach the verification service/)).toBeTruthy();
+    expect(await screen.findByText(/verification service is temporarily unavailable/)).toBeTruthy();
     // The gate stays up: no way into the app without verification.
     expect(screen.getByText('Tell us who you are')).toBeTruthy();
   });

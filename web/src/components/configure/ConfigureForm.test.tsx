@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { ConfigureForm } from './ConfigureForm'
 
 class ResizeObserverMock {
@@ -15,6 +15,10 @@ describe('ConfigureForm connection URL parsing', () => {
 
   afterAll(() => {
     vi.unstubAllGlobals()
+  })
+
+  afterEach(() => {
+    cleanup()
   })
 
   it('enables TLS when parsing a PostgreSQL URL with sslmode=require', () => {
@@ -33,9 +37,6 @@ describe('ConfigureForm connection URL parsing', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.change(screen.getByPlaceholderText('DB_PASSWORD'), {
-      target: { value: 'RDST_DB_PASSWORD' },
-    })
     fireEvent.click(screen.getByRole('button', { name: 'Add Target' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
@@ -45,8 +46,25 @@ describe('ConfigureForm connection URL parsing', () => {
         port: 5432,
         database: 'app_db',
         user: 'alice',
+        password: 'secret',
+        password_env: 'RDST_APP_DB_PASSWORD',
         tls: true,
       })
     )
+  })
+
+  it('defaults the password environment name from the target name', () => {
+    const onSubmit = vi.fn()
+
+    render(<ConfigureForm onSubmit={onSubmit} />)
+
+    fireEvent.change(screen.getByPlaceholderText('my-database'), {
+      target: { value: 'customer prod' },
+    })
+
+    expect(
+      (screen.getByPlaceholderText('RDST_MY_DATABASE_PASSWORD') as HTMLInputElement)
+        .value,
+    ).toBe('RDST_CUSTOMER_PROD_PASSWORD')
   })
 })

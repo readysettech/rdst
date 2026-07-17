@@ -247,7 +247,7 @@ test('shows a streamed Ask failure and returns to a clean input', async ({
   await page.getByRole('button', { name: 'Generate SQL' }).click()
 
   await expect(
-    page.getByText('Something went wrong', { exact: true })
+    page.getByText("Couldn't generate SQL", { exact: true })
   ).toBeVisible()
   await expect(
     page.getByText('The SQL generator is temporarily unavailable', {
@@ -255,7 +255,7 @@ test('shows a streamed Ask failure and returns to a clean input', async ({
     })
   ).toBeVisible()
   await expect(
-    page.getByText('Failed during: generate', { exact: true })
+    page.getByText('Failed while: Generating SQL', { exact: true })
   ).toBeVisible()
 
   await page.getByRole('button', { name: 'Try again' }).click()

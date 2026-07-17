@@ -18,9 +18,14 @@ vi.mock('./client', () => {
   return { api }
 })
 
+vi.mock('./api', () => ({
+  setEnvSecret: vi.fn(),
+}))
+
 // Import after the mock so the hook picks up the mocked client.
 import { useConfigure } from './useConfigure'
 import { api } from './client'
+import { setEnvSecret } from './api'
 
 function sseResponse(payload: string): Response {
   const stream = new ReadableStream({
@@ -45,6 +50,48 @@ afterEach(() => {
 })
 
 describe('useConfigure unknown events', () => {
+  it('stores a new target password in the same add action', async () => {
+    vi.mocked(api.POST).mockResolvedValueOnce({
+      data: { success: true, target_name: 'prod' },
+      response: jsonResponse({ success: true }),
+    } as any)
+    vi.mocked(setEnvSecret).mockResolvedValueOnce({
+      success: true,
+      name: 'RDST_PROD_PASSWORD',
+      persisted: true,
+      session_only: false,
+      message: null,
+    })
+    vi.mocked(api.GET).mockResolvedValueOnce({
+      data: { targets: [], default_target: null },
+      response: jsonResponse({}),
+    } as any)
+
+    const queryClient = new QueryClient()
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      React.createElement(QueryClientProvider, { client: queryClient }, children)
+    const { result } = renderHook(() => useConfigure(), { wrapper })
+
+    await act(async () => {
+      await result.current.addTarget({
+        name: 'prod',
+        engine: 'postgresql',
+        host: 'db.example.com',
+        port: 5432,
+        database: 'app',
+        user: 'admin',
+        password_env: 'RDST_PROD_PASSWORD',
+        password: 'secret',
+      })
+    })
+
+    expect(setEnvSecret).toHaveBeenCalledWith({
+      name: 'RDST_PROD_PASSWORD',
+      value: 'secret',
+      persist: true,
+    })
+  })
+
   it('ignores unknown events without setting error', async () => {
     vi.stubGlobal(
       'fetch',

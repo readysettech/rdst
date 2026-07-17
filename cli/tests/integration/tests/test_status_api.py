@@ -71,3 +71,44 @@ async def test_status_reports_configured_targets_with_password_state(
     assert by_name["prod"]["has_password"] is True
     assert by_name["staging"]["is_default"] is False
     assert by_name["staging"]["has_password"] is False
+
+
+async def test_status_hides_readyset_cache_targets(
+    client, tmp_rdst_home, monkeypatch
+):
+    """The global Web selector contains databases, not cache endpoints."""
+    monkeypatch.setenv("DATABASE_PASSWORD", "database-secret")
+    monkeypatch.setenv("CACHE_PASSWORD", "cache-secret")
+
+    cfg = TargetsConfig()
+    cfg.load()
+    cfg.upsert(
+        "orders",
+        {
+            "engine": "postgresql",
+            "host": "db.example.com",
+            "port": 5432,
+            "database": "orders",
+            "user": "appuser",
+            "password_env": "DATABASE_PASSWORD",
+        },
+    )
+    cfg.upsert(
+        "orders-cache",
+        {
+            "engine": "postgresql",
+            "host": "127.0.0.1",
+            "port": 5433,
+            "database": "orders",
+            "user": "appuser",
+            "password_env": "CACHE_PASSWORD",
+            "target_type": "readyset",
+            "upstream_target": "orders",
+        },
+    )
+    cfg.save()
+
+    response = await client.get("/api/status")
+
+    assert response.status_code == 200, response.text
+    assert [target["name"] for target in response.json()["targets"]] == ["orders"]

@@ -1,4 +1,4 @@
-import { awaitEmailGateClosed, clearTargets, expect, test } from '../fixtures'
+import { clearTargets, expect, test } from '../fixtures'
 
 test('configures Postgres and introspects its schema through the UI', async ({
   page,
@@ -9,7 +9,6 @@ test('configures Postgres and introspects its schema through the UI', async ({
   await clearTargets(page.request)
 
   await page.goto('/onboarding')
-  await awaitEmailGateClosed(page)
   await page.getByRole('button', { name: 'Get Started' }).click()
   await page.getByRole('button', { name: 'Add Your First Target' }).click()
   await page.locator('[name="name"]').fill('postgres-e2e')
@@ -17,6 +16,9 @@ test('configures Postgres and introspects its schema through the UI', async ({
   await page.locator('[name="port"]').fill(String(port))
   await page.locator('[name="database"]').fill('rdst_test')
   await page.locator('[name="user"]').fill('rdst_test')
+  await page
+    .locator('[name="password"]')
+    .fill(process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password')
   await page.locator('[name="password_env"]').fill('RDST_E2E_DB_PASSWORD')
   await page.getByRole('button', { name: 'Add Target' }).click()
   await expect(page.getByText('1 target configured')).toBeVisible()

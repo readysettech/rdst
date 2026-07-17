@@ -96,6 +96,7 @@ class TestTopServiceGetTopQueries:
         assert events[0].type == "status"
         assert events[1].type == "error"
         assert "No target specified" in events[1].message
+        assert "rdst configure add" in events[1].message
 
     @pytest.mark.asyncio
     async def test_error_target_not_found(self, service, input_data, options):

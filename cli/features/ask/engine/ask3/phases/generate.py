@@ -70,7 +70,7 @@ def generate_sql(
     if not result.get('success'):
         error = result.get('error', 'Unknown error')
         logger.error(f"SQL generation failed: {error}")
-        ctx.mark_error(f"Failed to generate SQL: {error}")
+        ctx.mark_error(error)
         presenter.error(error)
         return ctx
 

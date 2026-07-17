@@ -936,11 +936,22 @@ export function ReadysetCacheabilitySection({
   onDeployNavigate?: () => void;
   isCaching?: boolean;
 }) {
-  if (!cacheability.checked) return null;
-
-  const isCacheable = cacheability.cacheable;
-  const variant: StyleVariant = isCacheable ? "positive" : "negative";
+  const isVerified =
+    cacheability.checked &&
+    cacheability.method !== "static_analysis" &&
+    cacheability.method !== "readyset_unavailable";
+  const isCacheable = isVerified && cacheability.cacheable === true;
+  const variant: StyleVariant = !isVerified
+    ? "warning"
+    : isCacheable
+      ? "positive"
+      : "negative";
   const style = variantStyles[variant];
+  const verdict = !isVerified
+    ? "Not Verified"
+    : isCacheable
+      ? "Cacheable"
+      : "Not Cacheable";
 
   return (
     <m.div
@@ -961,7 +972,7 @@ export function ReadysetCacheabilitySection({
           <HStack className="justify-between items-center mb-4">
             <HStack className="gap-4 items-center">
               <m.div
-                className={`w-14 h-14 rounded-2xl ${isCacheable ? "bg-surface-positive-soft" : "bg-surface-negative-soft"} flex items-center justify-center`}
+                className={`w-14 h-14 rounded-2xl ${!isVerified ? "bg-surface-warning-soft" : isCacheable ? "bg-surface-positive-soft" : "bg-surface-negative-soft"} flex items-center justify-center`}
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{
@@ -972,16 +983,16 @@ export function ReadysetCacheabilitySection({
                 }}
               >
                 <Icon
-                  name={isCacheable ? "tick-double" : "close"}
-                  label={isCacheable ? "Cacheable" : "Not Cacheable"}
+                  name={!isVerified ? "alert" : isCacheable ? "tick-double" : "close"}
+                  label={verdict}
                   className={`w-7 h-7 ${style.text}`}
                 />
               </m.div>
               <VStack className="gap-1 items-start">
                 <Text level="headline-4" className={style.text}>
-                  {isCacheable ? "Cacheable" : "Not Cacheable"}
+                  {verdict}
                 </Text>
-                {cacheability.confidence && (
+                {isVerified && cacheability.confidence && (
                   <Text level="caption" className="text-content-layout-3">
                     {cacheability.confidence.charAt(0).toUpperCase() +
                       cacheability.confidence.slice(1)}{" "}
@@ -992,8 +1003,8 @@ export function ReadysetCacheabilitySection({
             </HStack>
             <HStack className="gap-2 items-center">
               <Tag
-                variant={isCacheable ? "positive" : "negative"}
-                label={isCacheable ? "READY" : "BLOCKED"}
+                variant={!isVerified ? "warning" : isCacheable ? "positive" : "negative"}
+                label={!isVerified ? "UNAVAILABLE" : isCacheable ? "READY" : "BLOCKED"}
               />
             </HStack>
           </HStack>
@@ -1007,7 +1018,7 @@ export function ReadysetCacheabilitySection({
           )}
 
           {/* Cache action buttons */}
-          {isCacheable && (onCacheQuery || onDeployNavigate) && (
+          {isVerified && isCacheable && (onCacheQuery || onDeployNavigate) && (
             <m.div
               className="mt-5 pt-5 border-t border-border-layout-1/30"
               initial={{ opacity: 0 }}
@@ -1037,7 +1048,7 @@ export function ReadysetCacheabilitySection({
             </m.div>
           )}
         </div>
-        {cacheability.issues && cacheability.issues.length > 0 && (
+        {isVerified && cacheability.issues && cacheability.issues.length > 0 && (
           <div className="p-5 bg-surface-layout-1 border-t border-border-layout-1">
             <HStack className="gap-2 items-center mb-3">
               <Icon

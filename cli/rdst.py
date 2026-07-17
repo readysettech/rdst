@@ -69,7 +69,7 @@ def _open_url_in_browser(url: str) -> None:
         return
     for opener in (
         ["wslview", url],
-        ["powershell.exe", "-NoProfile", "-Command", f"Start-Process '{url}'"],
+        ["explorer.exe", url],
     ):
         try:
             subprocess.run(opener, check=True, capture_output=True, timeout=10)

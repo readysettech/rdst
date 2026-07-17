@@ -788,6 +788,31 @@ class TestAnalyzeTargetValidationBeforePrompt:
             f"Error should mention the target: {result.message!r}"
         )
 
+    def test_analyze_reports_missing_target_before_missing_api_key(self):
+        from features.analyze.cli.command import AnalyzeCommand, AnalyzeInput
+        from shared.query_registry import hash_sql, normalize_sql
+
+        query = "SELECT 1"
+        cmd = AnalyzeCommand()
+        resolved_input = AnalyzeInput(
+            sql=query,
+            normalized_sql=normalize_sql(query),
+            source="inline",
+            hash=hash_sql(query),
+        )
+
+        with patch.object(
+            cmd,
+            "_check_api_key_configured",
+            return_value="No LLM API key configured",
+        ):
+            result = cmd.execute_analyze(resolved_input, target=None)
+
+        assert result.ok is False
+        assert "No target specified" in result.message
+        assert "rdst configure add" in result.message
+        assert "LLM API key" not in result.message
+
     def test_analyze_target_validation_before_explain_prompt_in_source(self):
         """
         In execute_analyze(), target existence must be checked before the

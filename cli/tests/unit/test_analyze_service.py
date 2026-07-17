@@ -577,6 +577,76 @@ class TestAnalyzeServiceProcessResults:
         assert readyset_events[0].method == "readyset_container"
 
     @pytest.mark.asyncio
+    async def test_readyset_failure_is_not_reported_as_not_cacheable(
+        self, service, input_data
+    ):
+        workflow_result = {
+            "success": True,
+            "result": {
+                "readyset_cacheability": {
+                    "checked": True,
+                    "cacheable": False,
+                    "method": "static_analysis",
+                    "issues": ["Static heuristic rejected the query"],
+                },
+                "FormatFinalResults": {},
+            },
+        }
+        readyset_result = {
+            "success": False,
+            "error": "Readyset endpoint was not reachable",
+        }
+
+        events = []
+        async for event in service._process_results(
+            workflow_result=workflow_result,
+            readyset_result=readyset_result,
+            input=input_data,
+        ):
+            events.append(event)
+
+        checked = next(event for event in events if event.type == "readyset_checked")
+        assert checked.checked is False
+        assert checked.cacheable is None
+        assert checked.method == "readyset_unavailable"
+
+        complete = next(event for event in events if event.type == "complete")
+        assert complete.readyset_cacheability["checked"] is False
+        assert complete.readyset_cacheability["cacheable"] is None
+        assert complete.readyset_cacheability["method"] == "readyset_unavailable"
+
+    def test_readyset_explain_failure_is_not_a_verdict(self, service, input_data):
+        with patch(
+            "features.analyze.service.explain_create_cache_readyset",
+            return_value={
+                "success": False,
+                "cacheable": False,
+                "error": "connection refused",
+            },
+        ):
+            result = service._run_readyset_analysis_inner(
+                input=input_data,
+                target_name="prod",
+                target_config={
+                    "engine": "postgresql",
+                    "database": "app",
+                    "user": "admin",
+                },
+                cache_target_name="prod-cache",
+                cache_config={
+                    "engine": "postgresql",
+                    "host": "127.0.0.1",
+                    "port": 5433,
+                    "database": "app",
+                    "user": "admin",
+                },
+            )
+
+        assert result["success"] is False
+        assert result["checked"] is False
+        assert result["error"] == "connection refused"
+
+    @pytest.mark.asyncio
     async def test_process_results_complete_event(self, service, input_data):
         """Test _process_results yields CompleteEvent with all data."""
         events = []

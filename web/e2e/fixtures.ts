@@ -90,15 +90,6 @@ export function consumeBrowserError(browserErrors: string[], expected: string) {
   browserErrors.splice(0, 1)
 }
 
-// The runner seeds a primary email so the EmailGate stays closed, but the
-// gate still overlays the app while its settings check is in flight. Wait it
-// out before clicking buttons whose names collide with the gate's.
-export async function awaitEmailGateClosed(page: Page) {
-  await expect(
-    page.getByRole('dialog', { name: 'Tell us who you are' })
-  ).toHaveCount(0)
-}
-
 export async function configureTestTarget(
   page: Page,
   { hasPassword = false }: { hasPassword?: boolean } = {}

@@ -99,4 +99,24 @@ describe("AskPanel", () => {
       "rdst-query-results-20250102-030405.csv",
     );
   });
+
+  it("presents trial authentication failures without internal enum names", () => {
+    vi.mocked(useAsk).mockReturnValue({
+      ...baseUseAskState,
+      state: "error",
+      result: undefined,
+      error: {
+        type: "error",
+        message: "RDST's AI service could not validate your trial access.",
+        phase: "generate",
+      },
+    });
+
+    render(<AskPanel />);
+
+    expect(screen.getByText("AI service authentication failed")).toBeTruthy();
+    expect(screen.getByText("Failed while: Generating SQL")).toBeTruthy();
+    expect(screen.queryByText(/AskPhase/)).toBeNull();
+    expect(screen.queryByText("Something went wrong")).toBeNull();
+  });
 });

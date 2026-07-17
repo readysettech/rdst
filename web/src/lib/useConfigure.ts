@@ -5,6 +5,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
+import { setEnvSecret } from './api';
 import type {
   ConfigureTarget,
   ConfigureTargetDetail,
@@ -182,6 +183,19 @@ export function useConfigure(): UseConfigureReturn {
         throw new Error(result.data.message || 'Failed to add target');
       }
 
+      if (data.password && data.password_env) {
+        const secretResult = await setEnvSecret({
+          name: data.password_env,
+          value: data.password,
+          persist: true,
+        });
+        if (!secretResult.success) {
+          throw new Error(
+            secretResult.message || 'Target was added, but its password could not be saved',
+          );
+        }
+      }
+
       setState('success');
       // Refresh target list and invalidate status for header dropdown
       await listTargets();
@@ -193,6 +207,7 @@ export function useConfigure(): UseConfigureReturn {
       const errorMessage = err instanceof Error ? err.message : 'Failed to add target';
       setError(errorMessage);
       setState('error');
+      throw err;
     } finally {
       setLoading(false);
       abortControllerRef.current = null;
@@ -235,6 +250,19 @@ export function useConfigure(): UseConfigureReturn {
         throw new Error(result.data.message || 'Failed to update target');
       }
 
+      if (data.password && data.password_env) {
+        const secretResult = await setEnvSecret({
+          name: data.password_env,
+          value: data.password,
+          persist: true,
+        });
+        if (!secretResult.success) {
+          throw new Error(
+            secretResult.message || 'Target was updated, but its password could not be saved',
+          );
+        }
+      }
+
       setState('success');
       // Refresh target list
       await listTargets();
@@ -245,6 +273,7 @@ export function useConfigure(): UseConfigureReturn {
       const errorMessage = err instanceof Error ? err.message : 'Failed to update target';
       setError(errorMessage);
       setState('error');
+      throw err;
     } finally {
       setLoading(false);
       abortControllerRef.current = null;

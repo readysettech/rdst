@@ -89,9 +89,12 @@ class EmailService:
                 )
                 if resp.status_code == 200:
                     return resp.json()
-                return {"verified": False}
-        except Exception:
-            return {"verified": False}
+                return {
+                    "verified": False,
+                    "error": f"Verification service returned HTTP {resp.status_code}",
+                }
+        except Exception as exc:
+            return {"verified": False, "error": str(exc)}
 
     def send_report(
         self,

@@ -702,7 +702,13 @@ function CachePage() {
     queryFn: () => fetchCacheStatus(target!),
     enabled: !!target && !passwordLock.isLocked,
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    // Container start returns before ReadySet has necessarily bound its SQL
+    // endpoint. Poll quickly while deployed-but-unreachable so users do not
+    // have to press Start repeatedly, then return to the normal slow cadence.
+    refetchInterval: (query) => {
+      const status = query.state.data;
+      return status?.deployed && !status.running ? 1_000 : 60_000;
+    },
   });
 
   // Cache list (only when deployed)

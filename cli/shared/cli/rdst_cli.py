@@ -667,7 +667,8 @@ class RdstCLI:
                 if not target:
                     return RdstResult(
                         False,
-                        "No target specified and no default target configured. Use --target or run 'rdst configure'",
+                        "No target specified and no default target configured. "
+                        "Use --target or run 'rdst configure add' to set one up.",
                     )
 
             complete_event = None

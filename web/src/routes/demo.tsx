@@ -8,6 +8,7 @@ import { BaseInputSwitch } from '@rs/ui-new/base-input-switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@rs/ui-new/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover';
 import { toast } from '@rs/ui-new/use-toast';
+import { EmailGate } from '../components/EmailGate';
 import { SQLDisplay } from '../components/SQLDisplay';
 import { buildParameterHighlights } from '../components/parameterHighlighting';
 import {
@@ -24,7 +25,16 @@ import {
   type PreflightChecks,
 } from '../lib/useDemo';
 
-export const Route = createFileRoute('/demo')({ component: DemoPage });
+export const Route = createFileRoute('/demo')({ component: DemoRoute });
+
+function DemoRoute() {
+  return (
+    <>
+      <DemoPage />
+      <EmailGate />
+    </>
+  );
+}
 
 const DEMO_STYLE = `
 .qpdemo {

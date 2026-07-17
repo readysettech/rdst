@@ -517,6 +517,16 @@ class AnalyzeService:
                 quiet=True,
             )
 
+            if not explain_result.get("success"):
+                return {
+                    "success": False,
+                    "checked": False,
+                    "error": explain_result.get(
+                        "error", "Readyset cacheability verification failed."
+                    ),
+                    "explain_cache_result": explain_result,
+                }
+
             # Try to create cache, warm, measure, then DROP (analyze is ephemeral)
             create_result = {}
             warm_result = {}
@@ -665,33 +675,50 @@ class AnalyzeService:
                 best_rewrite=rewrite_results.get("best_rewrite"),
             )
 
-        # Yield ReadysetCheckedEvent if readyset results available
+        # Only a successful EXPLAIN CREATE CACHE against Readyset is a
+        # cacheability verdict. Static SQL inspection and connection failures
+        # are useful diagnostics, but must not be rendered as "Not Cacheable".
         readyset_cacheability = context.get("readyset_cacheability", {})
+        cacheability_payload: Dict[str, Any]
         if readyset_result and readyset_result.get("success"):
-            # Use actual readyset container result
             final_verdict = readyset_result.get("final_verdict", {})
             explain_cache = readyset_result.get("explain_cache_result", {})
+            cacheability_payload = {
+                "checked": True,
+                "cacheable": final_verdict.get("cacheable"),
+                "confidence": final_verdict.get("confidence"),
+                "method": final_verdict.get("method"),
+                "explanation": explain_cache.get("explanation"),
+                "issues": explain_cache.get("issues"),
+                "warnings": explain_cache.get("warnings"),
+            }
+        elif readyset_result:
+            cacheability_payload = {
+                "checked": False,
+                "cacheable": None,
+                "confidence": "unknown",
+                "method": "readyset_unavailable",
+                "explanation": readyset_result.get(
+                    "error", "Readyset cacheability verification was unavailable."
+                ),
+                "issues": [],
+                "warnings": [],
+            }
+        else:
+            cacheability_payload = {
+                "checked": False,
+                "cacheable": None,
+                "confidence": "unknown",
+                "method": "static_analysis",
+                "explanation": "Readyset cacheability was not verified.",
+                "issues": [],
+                "warnings": readyset_cacheability.get("warnings", []),
+            }
+
+        if cacheability_payload:
             yield ReadysetCheckedEvent(
                 type="readyset_checked",
-                checked=True,
-                cacheable=final_verdict.get("cacheable"),
-                confidence=final_verdict.get("confidence"),
-                method=final_verdict.get("method"),
-                explanation=explain_cache.get("explanation"),
-                issues=explain_cache.get("issues"),
-                warnings=explain_cache.get("warnings"),
-            )
-        elif readyset_cacheability.get("checked"):
-            # Use static analysis result from workflow
-            yield ReadysetCheckedEvent(
-                type="readyset_checked",
-                checked=True,
-                cacheable=readyset_cacheability.get("cacheable"),
-                confidence=readyset_cacheability.get("confidence"),
-                method=readyset_cacheability.get("method"),
-                explanation=readyset_cacheability.get("explanation"),
-                issues=readyset_cacheability.get("issues"),
-                warnings=readyset_cacheability.get("warnings"),
+                **cacheability_payload,
             )
 
         # Merge readyset result into context if available (success or error)
@@ -711,6 +738,8 @@ class AnalyzeService:
 
         # Yield CompleteEvent
         formatted = context.get("FormatFinalResults", {})
+        if isinstance(formatted, dict):
+            formatted["readyset_cacheability"] = cacheability_payload
         yield CompleteEvent(
             type="complete",
             success=True,
@@ -720,8 +749,6 @@ class AnalyzeService:
             explain_results=_serialize_for_json(explain_results),
             llm_analysis=_serialize_for_json(context.get("llm_analysis", {})),
             rewrite_testing=_serialize_for_json(rewrite_results),
-            readyset_cacheability=_serialize_for_json(
-                readyset_result if readyset_result else readyset_cacheability
-            ),
+            readyset_cacheability=_serialize_for_json(cacheability_payload),
             formatted=_serialize_for_json(formatted),
         )

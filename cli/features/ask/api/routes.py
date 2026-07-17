@@ -30,6 +30,14 @@ from shared.telemetry import telemetry
 router = APIRouter()
 
 
+def _phase_value(phase: object | None) -> str | None:
+    """Serialize enum phases without leaking ``AskPhase.GENERATE``."""
+    if phase is None:
+        return None
+    value = getattr(phase, "value", phase)
+    return str(value)
+
+
 def _serialize_value(val: Any) -> Any:
     if val is None:
         return None
@@ -54,7 +62,9 @@ def _event_to_sse(event: AskEvent) -> dict:
     if isinstance(event, AskStatusEvent):
         return {
             "event": "status",
-            "data": json.dumps({"phase": str(event.phase), "message": event.message}),
+            "data": json.dumps(
+                {"phase": _phase_value(event.phase), "message": event.message}
+            ),
         }
     if isinstance(event, AskSchemaLoadedEvent):
         return {
@@ -120,7 +130,7 @@ def _event_to_sse(event: AskEvent) -> dict:
         return {
             "event": "error",
             "data": json.dumps(
-                {"message": event.message, "phase": str(event.phase) if event.phase else None}
+                {"message": event.message, "phase": _phase_value(event.phase)}
             ),
         }
     return {

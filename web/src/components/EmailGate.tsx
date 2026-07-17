@@ -52,7 +52,16 @@ async function submitSignup(email: string, firstName: string, lastName: string) 
 
 async function pollVerification(): Promise<boolean> {
   const response = await fetch('/api/settings/email/verify-poll', { method: 'POST' });
-  if (!response.ok) return false;
+  if (!response.ok) {
+    let detail = 'The RDST verification service is temporarily unavailable.';
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === 'string') detail = body.detail;
+    } catch {
+      /* keep default */
+    }
+    throw new Error(detail);
+  }
   const body = (await response.json()) as { verified?: boolean };
   return Boolean(body.verified);
 }
@@ -96,12 +105,21 @@ export function EmailGate() {
   const beginPolling = useCallback(() => {
     stopPolling();
     pollTimer.current = window.setInterval(() => {
-      void pollVerification().then((verified) => {
-        if (verified) {
+      void pollVerification()
+        .then((verified) => {
+          if (verified) {
+            stopPolling();
+            setState('ready');
+          }
+        })
+        .catch((e: unknown) => {
           stopPolling();
-          setState('ready');
-        }
-      });
+          setError(
+            e instanceof Error
+              ? e.message
+              : 'The RDST verification service is temporarily unavailable.',
+          );
+        });
     }, POLL_INTERVAL_MS);
   }, [stopPolling]);
 
@@ -128,9 +146,7 @@ export function EmailGate() {
         return;
       }
       if (!result.verification_started) {
-        setError(
-          "We couldn't reach the verification service. Check your connection and try again.",
-        );
+        setError('The RDST verification service is temporarily unavailable. Please try again.');
         return;
       }
       setState('verifying');
@@ -151,6 +167,12 @@ export function EmailGate() {
       } else {
         setError('Not verified yet - click the link in the email we sent, then try again.');
       }
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'The RDST verification service is temporarily unavailable.',
+      );
     } finally {
       setSaving(false);
     }

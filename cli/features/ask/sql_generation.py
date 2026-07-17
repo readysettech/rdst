@@ -232,7 +232,7 @@ def generate_sql_from_nl(
             'sql': '',
             'explanation': '',
             'confidence': 0.0,
-            'error': f'SQL generation failed: {str(e)}'
+            'error': str(e)
         }
 
 

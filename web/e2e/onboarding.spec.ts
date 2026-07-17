@@ -1,5 +1,4 @@
 import {
-  awaitEmailGateClosed,
   clearTargets,
   expect,
   setBackendFixtures,
@@ -38,7 +37,6 @@ test('completes first-run onboarding and persists the target', async ({
 
   await page.goto('/onboarding')
   await expect(page.getByText('Step 1 of 4')).toBeVisible()
-  await awaitEmailGateClosed(page)
   await page.getByRole('button', { name: 'Get Started' }).click()
 
   await page.getByRole('button', { name: 'Add Your First Target' }).click()
@@ -46,6 +44,7 @@ test('completes first-run onboarding and persists the target', async ({
   await page.locator('[name="host"]').fill('127.0.0.1')
   await page.locator('[name="database"]').fill('app')
   await page.locator('[name="user"]').fill('e2e')
+  await page.locator('[name="password"]').fill('test-password')
   await page.locator('[name="password_env"]').fill('TEST_DB_PASSWORD')
   await page.getByRole('button', { name: 'Add Target' }).click()
 

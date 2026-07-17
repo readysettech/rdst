@@ -30,11 +30,14 @@ class TestOpenUrlInBrowser:
         assert run.call_count == 1
         assert run.call_args[0][0][0] == "wslview"
 
-    def test_wsl_tries_powershell_when_wslview_missing(self):
+    def test_wsl_tries_windows_explorer_when_wslview_missing(self):
         with mock.patch.object(webbrowser, "open", return_value=False), \
              mock.patch.object(rdst, "_running_under_wsl", return_value=True), \
              mock.patch("subprocess.run",
                         side_effect=[FileNotFoundError(), mock.Mock()]) as run:
             rdst._open_url_in_browser("http://127.0.0.1:8787")
         assert run.call_count == 2
-        assert run.call_args_list[1][0][0][0] == "powershell.exe"
+        assert run.call_args_list[1][0][0] == [
+            "explorer.exe",
+            "http://127.0.0.1:8787",
+        ]

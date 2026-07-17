@@ -96,10 +96,14 @@ function ConfigurePage() {
   };
 
   const handleFormSubmit = async (data: ConfigureFormData) => {
-    if (editingTarget) {
-      await updateTarget(editingTarget.name, data);
-    } else {
-      await addTarget(data);
+    try {
+      if (editingTarget) {
+        await updateTarget(editingTarget.name, data);
+      } else {
+        await addTarget(data);
+      }
+    } catch {
+      return;
     }
     setShowForm(false);
     setEditingTarget(null);
