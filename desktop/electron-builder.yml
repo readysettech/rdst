@@ -19,6 +19,14 @@ mac:
   target:
     - dmg
     - zip
+  # Notarization requires the hardened runtime. Signing credentials come
+  # from the environment (CSC_LINK/CSC_KEY_PASSWORD). Notarization is
+  # handled outside electron-builder: the CI build script submits the dmg
+  # asynchronously and a separate pipeline step polls Apple's verdict, so
+  # the build never blocks on the notary queue.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  notarize: false
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
   # Update channel fed by main-branch CI builds; keep in sync with
