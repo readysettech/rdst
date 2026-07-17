@@ -725,6 +725,15 @@ function StartCard({ onStart }: { onStart: () => void }) {
                 : "Docker isn't running — start Docker to continue"
             }
           />
+          {/* Apple Silicon only, and only when the engine definitively cannot
+              run amd64 containers: everyone else never sees this row. */}
+          {checks?.amd64_emulation === 'unavailable' && (
+            <PreflightItem
+              state="blocked"
+              okLabel="Intel-container support ready"
+              pendingLabel="Enable 'Use Rosetta for x86_64/amd64 emulation' in Docker settings, then re-check"
+            />
+          )}
           <PreflightItem
             state={
               !checks ? 'checking'
@@ -753,7 +762,7 @@ function StartCard({ onStart }: { onStart: () => void }) {
         iconPosition="left"
         label="Start the demo"
         className="mt-4"
-        disabled={checks ? (!checks.docker_installed || !checks.docker_running || !checks.disk_space_ok) : false}
+        disabled={checks ? (!checks.docker_installed || !checks.docker_running || !checks.disk_space_ok || checks.amd64_emulation === 'unavailable') : false}
         onClick={onStart}
       />
     </div>

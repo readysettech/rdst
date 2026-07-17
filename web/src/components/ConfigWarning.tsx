@@ -274,10 +274,10 @@ export function ConfigWarning() {
     return null;
   }
 
-  // The home page stays welcome-clean: no key/trial banner there. The pages
-  // that actually use the key (Ask, Audit, ...) still show it, and the Ask
-  // card on home carries its own "needs a key" chip.
-  if (location.pathname === '/') {
+  // The banner only belongs on pages that use the key (Ask, Audit, ...).
+  // The home page stays welcome-clean (the Ask card carries its own "needs a
+  // key" chip), and the demo runs entirely without an Anthropic key.
+  if (location.pathname === '/' || location.pathname.startsWith('/demo')) {
     return null;
   }
 

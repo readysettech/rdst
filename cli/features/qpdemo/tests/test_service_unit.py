@@ -1,5 +1,6 @@
 import subprocess
 import threading
+from unittest import mock
 
 import pytest
 
@@ -524,7 +525,7 @@ def _stub_successful_provision(svc, monkeypatch):
     svc._container_state = lambda name: "created"
     svc._ensure_supervisor = lambda: None
     qd = service_mod.qdeploy
-    monkeypatch.setattr(qd, "allocate_ports", lambda: qd.Ports(
+    monkeypatch.setattr(qd, "allocate_ports", lambda exclude=None: qd.Ports(
         pg=5432, readyset=5433, readyset_metrics=6034, sqp=6432, metrics=9090))
     monkeypatch.setattr(qd, "write_sqp_config", lambda *a, **k: (None, None))
     monkeypatch.setattr(qd, "write_qp_config", lambda *a, **k: None)
@@ -728,7 +729,7 @@ def test_provision_surfaces_port_exhaustion(tmp_path, monkeypatch):
     svc._pull_missing_images = lambda: iter(())
     monkeypatch.setattr(
         service_mod.qdeploy, "allocate_ports",
-        lambda: (_ for _ in ()).throw(RuntimeError("No free TCP port available")),
+        lambda exclude=None: (_ for _ in ()).throw(RuntimeError("No free TCP port available")),
     )
 
     events = list(svc.provision())
@@ -958,3 +959,124 @@ def test_provision_rescales_container_percents_after_pull(tmp_path, monkeypatch)
     svc._provision_locked = cached_events
     out = list(svc.provision())
     assert [e["percent"] for e in out] == [3, 5, 30, 100]
+
+
+def test_provision_retries_on_port_conflict(tmp_path, monkeypatch):
+    """The port probe can race another process (and some engines leak
+    bindings): a container start that fails with a port-conflict signature
+    re-allocates above the burned ports and retries instead of failing the
+    provision."""
+    svc = _bare_service(tmp_path, monkeypatch)
+    svc._ports = None
+    svc.docker_ok = lambda: True
+    svc._stop_supervisor = lambda: None
+    svc._force_clean = lambda: None
+    svc._pull_missing_images = lambda: iter(())
+    svc._make_qprouter = lambda: None
+    svc._save_state = lambda: None
+    svc._wait_pg_connect = lambda timeout: True
+    svc._warmup_paths = lambda passes: {"queries": 0}
+    svc._ensure_supervisor = lambda: None
+    svc._track_demo_event = lambda *a, **kw: None
+
+    def _ok_wait(timeout):
+        return True
+        yield  # unreachable; makes this a generator like the real waiter
+
+    svc._wait_readyset_events = _ok_wait
+    svc._wait_sqp_events = _ok_wait
+
+    allocations = []
+
+    def fake_allocate(exclude=None):
+        base = 5432 + 10 * len(allocations)
+        ports = service_mod.qdeploy.Ports(
+            pg=base, readyset=base + 1, readyset_metrics=base + 2,
+            sqp=base + 3, metrics=base + 4,
+        )
+        allocations.append((set(exclude or ()), ports))
+        return ports
+
+    ok = mock.Mock(returncode=0, stderr="")
+    conflict = mock.Mock(
+        returncode=1,
+        stderr="driver failed programming external connectivity on endpoint qpdemo-pg",
+    )
+    pg_results = [conflict, ok]
+
+    monkeypatch.setattr(service_mod.qdeploy, "allocate_ports", fake_allocate)
+    monkeypatch.setattr(service_mod.qdeploy, "write_sqp_config",
+                        lambda *a, **kw: (tmp_path / "sqp.toml", tmp_path / "deny"))
+    monkeypatch.setattr(service_mod.qdeploy, "write_qp_config", lambda *a, **kw: None)
+    monkeypatch.setattr(service_mod.qdeploy, "deploy_postgres_baked",
+                        lambda name, port: pg_results.pop(0))
+    monkeypatch.setattr(service_mod.qdeploy, "deploy_readyset", lambda *a, **kw: ok)
+    monkeypatch.setattr(service_mod.qdeploy, "deploy_sqp", lambda *a, **kw: ok)
+    monkeypatch.setattr(service_mod.qdeploy, "deploy_qp_cron", lambda *a, **kw: ok)
+
+    events = list(svc.provision())
+
+    assert events[-1]["type"] == "complete"
+    # Second allocation excluded every port the first attempt burned.
+    assert len(allocations) == 2
+    assert allocations[1][0] >= {5432, 5433, 5434, 5435, 5436}
+    assert any("retrying on the next free ports" in str(e.get("message", ""))
+               for e in events)
+
+
+class TestAmd64EmulationPreflight:
+
+    def _status(self, tmp_path, monkeypatch, *, plat="darwin", machine="arm64",
+                docker_running=True, run_result=None, run_raises=False):
+        import platform as platform_mod
+
+        svc = _bare_service(tmp_path, monkeypatch)
+        svc._amd64_emulation_ok = False
+        monkeypatch.setattr(service_mod.sys, "platform", plat)
+        monkeypatch.setattr(platform_mod, "machine", lambda: machine)
+        if run_raises:
+            def _boom(*a, **kw):
+                raise OSError("docker missing")
+            monkeypatch.setattr(service_mod.qdeploy, "_run", _boom)
+        elif run_result is not None:
+            monkeypatch.setattr(service_mod.qdeploy, "_run", lambda *a, **kw: run_result)
+        return svc, svc._amd64_emulation_status(docker_running)
+
+    def test_not_applicable_off_mac(self, tmp_path, monkeypatch):
+        _, status = self._status(tmp_path, monkeypatch, plat="linux")
+        assert status == "not_applicable"
+
+    def test_not_applicable_on_intel_mac(self, tmp_path, monkeypatch):
+        _, status = self._status(tmp_path, monkeypatch, machine="x86_64")
+        assert status == "not_applicable"
+
+    def test_ok_when_probe_runs_amd64(self, tmp_path, monkeypatch):
+        svc, status = self._status(
+            tmp_path, monkeypatch,
+            run_result=mock.Mock(returncode=0, stdout="x86_64\n", stderr=""),
+        )
+        assert status == "ok"
+        # Sticky: later checks skip the probe entirely.
+        assert svc._amd64_emulation_status(True) == "ok"
+
+    def test_unavailable_only_on_definitive_failure(self, tmp_path, monkeypatch):
+        _, status = self._status(
+            tmp_path, monkeypatch,
+            run_result=mock.Mock(returncode=1, stdout="",
+                                 stderr="exec format error"),
+        )
+        assert status == "unavailable"
+
+    def test_ambiguous_failures_never_scare(self, tmp_path, monkeypatch):
+        _, status = self._status(
+            tmp_path, monkeypatch,
+            run_result=mock.Mock(returncode=1, stdout="",
+                                 stderr="network timeout while pulling"),
+        )
+        assert status == "ok"
+        _, status = self._status(tmp_path, monkeypatch, run_raises=True)
+        assert status == "ok"
+
+    def test_not_applicable_when_docker_down(self, tmp_path, monkeypatch):
+        _, status = self._status(tmp_path, monkeypatch, docker_running=False)
+        assert status == "not_applicable"

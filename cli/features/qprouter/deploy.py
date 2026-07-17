@@ -112,13 +112,29 @@ class Ports:
 
 
 def _port_free(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    """Whether Docker could publish `port` on this host.
+
+    Probes a wildcard bind on BOTH stacks with no SO_REUSEADDR: on
+    macOS/BSD, a reuse-enabled loopback bind succeeds even while another
+    process (a local Postgres, another engine's port forwarder) holds the
+    port on 0.0.0.0 or ::, which made the demo pick busy ports on Macs and
+    fail at container start."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s4:
         try:
-            s.bind(("127.0.0.1", port))
-            return True
+            s4.bind(("", port))
         except OSError:
             return False
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s6:
+            s6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            try:
+                s6.bind(("::", port))
+            except OSError:
+                return False
+    except OSError:
+        # Host without IPv6 support: the IPv4 probe already answered.
+        pass
+    return True
 
 
 def _next_free(base: int, taken: set[int]) -> int:
@@ -137,9 +153,28 @@ def _next_free(base: int, taken: set[int]) -> int:
     return p
 
 
-def allocate_ports() -> Ports:
-    """Find a free, non-colliding port for each component (increment on conflict)."""
-    taken: set[int] = set()
+# docker/engine error signatures that mean "the host port was taken after
+# all" - the probe can race another process, and some engines leak bindings.
+_PORT_CONFLICT_MARKERS = (
+    "port is already allocated",
+    "address already in use",
+    "failed programming external connectivity",
+    "failed to set up container networking",
+)
+
+
+def is_port_conflict(error_text: str) -> bool:
+    """Whether a container-start error is a host-port conflict (retry on new
+    ports) rather than a real failure."""
+    text = (error_text or "").lower()
+    return any(marker in text for marker in _PORT_CONFLICT_MARKERS)
+
+
+def allocate_ports(exclude: set[int] | None = None) -> Ports:
+    """Find a free, non-colliding port for each component (increment on
+    conflict). `exclude` blacklists ports a previous attempt already failed
+    on."""
+    taken: set[int] = set(exclude or ())
     return Ports(
         pg=_next_free(BASE_PORTS["pg"], taken),
         readyset=_next_free(BASE_PORTS["readyset"], taken),

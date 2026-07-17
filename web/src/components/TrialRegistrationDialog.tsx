@@ -18,6 +18,7 @@ import { registerTrial, activateTrial } from "../lib/api";
 type Step = "email" | "verify" | "success";
 type RegisterMutationData =
   | { mode: "registered"; limitDisplay: string | null; emailTier: string | null }
+  | { mode: "instant"; token: string; emailTier: string | null }
   | { mode: "already-registered" };
 
 type TrialMutationError = Error & {
@@ -63,6 +64,16 @@ export function TrialRegistrationDialog({
     mutationFn: async (registerEmail: string): Promise<RegisterMutationData> => {
       const result = await registerTrial(registerEmail);
       if (result.success) {
+        if (result.trial_token) {
+          // Email already verified (web gate or CLI flow): the keyservice
+          // hands the token straight back, so activation is one click with
+          // no inbox round-trip.
+          return {
+            mode: "instant",
+            token: result.trial_token,
+            emailTier: result.email_tier ?? null,
+          };
+        }
         return {
           mode: "registered",
           limitDisplay: result.limit_display ?? null,
@@ -76,7 +87,15 @@ export function TrialRegistrationDialog({
       error.didYouMean = result.did_you_mean ?? undefined;
       throw error;
     },
-    onSuccess: () => {
+    onSuccess: (data, registerEmail) => {
+      if (data.mode === "instant") {
+        activateMutation.mutate({
+          token: data.token,
+          email: registerEmail,
+          emailTier: data.emailTier,
+        });
+        return;
+      }
       setStep("verify");
     },
   });

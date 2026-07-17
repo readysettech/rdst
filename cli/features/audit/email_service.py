@@ -63,6 +63,10 @@ class EmailService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def check_status(self, email: str) -> Dict[str, Any]:
+        """Single non-blocking verification check for `email`."""
+        return self._sync(self._check_status(email))
+
     def poll_verification(
         self, email: str, timeout_seconds: int = 300, interval: float = 3.0
     ) -> Dict[str, Any]:

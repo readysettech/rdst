@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn, tv } from "@rs/tailwind-base";
 import { Icon } from "@rs/ui-new/icon";
 import type { IconStrokeName } from "@rs/ui-icons/icon-name";
@@ -10,6 +11,37 @@ import { ReportDialog } from "../components/ReportDialog";
 import { useTarget } from "../hooks/useTarget";
 import { useSystemStatus } from "../lib/useSystemStatus";
 import { TrialBalanceBadge } from "../components/TrialBalanceBadge";
+
+// Plain-text acknowledgement of who is signed in; deliberately not a control.
+function SidebarIdentity() {
+  const { data } = useQuery({
+    queryKey: ["settings", "email"],
+    queryFn: async () => {
+      const response = await fetch("/api/settings/email");
+      if (!response.ok) return null;
+      return (await response.json()) as {
+        email: string | null;
+        first_name: string | null;
+        last_name: string | null;
+      };
+    },
+    staleTime: 60_000,
+  });
+  if (!data?.email) return null;
+  const name = [data.first_name, data.last_name].filter(Boolean).join(" ");
+  return (
+    <div className="px-3 py-1">
+      {name && (
+        <Text as="div" level="caption" className="truncate font-medium text-content-layout-2">
+          {name}
+        </Text>
+      )}
+      <Text as="div" level="caption" className="truncate text-content-layout-3">
+        {data.email}
+      </Text>
+    </div>
+  );
+}
 
 const sidebarStyles = tv({
   base: [
@@ -256,6 +288,7 @@ export function Sidebar({ isElectronMac = false }: SidebarProps) {
 
       {/* Footer */}
       <div className="p-3 border-t border-border-layout-1 space-y-2">
+        <SidebarIdentity />
         <TrialBalanceBadge />
         <button
           type="button"

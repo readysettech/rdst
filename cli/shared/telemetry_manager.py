@@ -432,9 +432,13 @@ class TelemetryManager:
                     email = all_props.get("email")
                     if email and email != "unknown":
                         try:
+                            person_props = {"email": email}
+                            for key in ("first_name", "last_name"):
+                                if all_props.get(key):
+                                    person_props[key] = all_props[key]
                             posthog.identify(
                                 distinct_id=self.device_id,
-                                properties={"email": email},
+                                properties=person_props,
                             )
                         except Exception:
                             pass
@@ -462,7 +466,8 @@ class TelemetryManager:
             # promoted on trial verification) is the human's identity. The
             # [trial].email is only a fallback for pre-gate installs that
             # registered a trial before an [[emails]] entry existed.
-            email = cfg.get_email()
+            identity = cfg.get_identity()
+            email = identity.get("email")
             if not email:
                 email = cfg.get_trial_config().get("email")
             if not email:
@@ -470,6 +475,10 @@ class TelemetryManager:
             properties.setdefault("email", email)
             if "email_domain" not in properties:
                 properties["email_domain"] = email.split("@")[1] if "@" in email else "unknown"
+            if identity.get("first_name"):
+                properties.setdefault("first_name", identity["first_name"])
+            if identity.get("last_name"):
+                properties.setdefault("last_name", identity["last_name"])
         except Exception:
             pass
 

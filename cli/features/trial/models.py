@@ -19,6 +19,10 @@ class TrialRegisterResult:
     detail: str | None = None
     did_you_mean: str | None = None
     status_code: int = 200
+    # Present when the keyservice returned the token directly: the email was
+    # already verified (e.g. through the web gate), so there is no
+    # verification email to wait for and the client can activate immediately.
+    trial_token: str | None = None
 
 
 @dataclass

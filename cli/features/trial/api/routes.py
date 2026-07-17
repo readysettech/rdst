@@ -23,6 +23,9 @@ class TrialRegisterResponse(BaseModel):
     detail: str | None = None
     did_you_mean: str | None = None
     status_code: int = 200
+    # Set when the email was already verified and the keyservice handed the
+    # token back directly - the UI can activate without any inbox round-trip.
+    trial_token: str | None = None
 
 
 class TrialActivateRequest(BaseModel):
@@ -71,6 +74,7 @@ async def register_trial(
         detail=result.detail,
         did_you_mean=result.did_you_mean,
         status_code=result.status_code,
+        trial_token=result.trial_token,
     )
 
 

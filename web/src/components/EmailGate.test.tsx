@@ -10,7 +10,43 @@ function jsonResponse(data: unknown) {
 }
 
 function errorResponse(status: number) {
-  return new Response('nope', { status });
+  return new Response(JSON.stringify({ detail: 'nope' }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+const FRESH_INSTALL = { email: null, first_name: null, last_name: null, verified: false };
+
+function stubGateFetch(overrides: {
+  identity?: unknown;
+  submit?: () => Response;
+  poll?: () => Response;
+}) {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith('/api/settings/email/verify-poll')) {
+      return Promise.resolve(overrides.poll?.() ?? jsonResponse({ verified: false }));
+    }
+    if (url.endsWith('/api/settings/email') && !init?.method) {
+      return Promise.resolve(jsonResponse(overrides.identity ?? FRESH_INSTALL));
+    }
+    if (url.endsWith('/api/settings/email') && init?.method === 'POST') {
+      return Promise.resolve(
+        overrides.submit?.() ??
+          jsonResponse({ success: true, verified: false, verification_started: true }),
+      );
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+function fillForm() {
+  fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Ada' } });
+  fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Lovelace' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@example.com' } });
 }
 
 describe('EmailGate', () => {
@@ -27,93 +63,113 @@ describe('EmailGate', () => {
 
     render(<EmailGate />);
 
-    expect(screen.queryByText('Tell us where to reach you')).toBeNull();
+    expect(screen.queryByText('Tell us who you are')).toBeNull();
 
-    resolveCheck(jsonResponse({ email: null }));
-    expect(await screen.findByText('Tell us where to reach you')).toBeTruthy();
+    resolveCheck(jsonResponse(FRESH_INSTALL));
+    expect(await screen.findByText('Tell us who you are')).toBeTruthy();
   });
 
-  it('blocks until a valid email is stored', async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/api/settings/email') && !init?.method) return Promise.resolve(jsonResponse({ email: null }));
-      if (url.endsWith('/api/settings/email') && init?.method === 'POST') return Promise.resolve(jsonResponse({ email: 'mike@example.com' }));
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
+  it('requires name and email, then holds for inbox verification', async () => {
+    const fetchMock = stubGateFetch({});
     render(<EmailGate />);
 
-    expect(await screen.findByText('Tell us where to reach you')).toBeTruthy();
+    expect(await screen.findByText('Tell us who you are')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
-    expect(screen.getByText('Please enter a valid email address.')).toBeTruthy();
+    expect(screen.getByText('Please enter your first name.')).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'mike@example.com' } });
+    fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
 
-    await waitFor(() => {
-      expect(screen.queryByText('Tell us where to reach you')).toBeNull();
-    });
-    expect(fetchMock).toHaveBeenCalledWith('/api/settings/email');
+    expect(await screen.findByText('Check your inbox')).toBeTruthy();
+    // Names go to OUR api only; the backend keeps them off the keyservice.
     expect(fetchMock).toHaveBeenCalledWith('/api/settings/email', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ email: 'mike@example.com' }),
+      body: JSON.stringify({ email: 'ada@example.com', first_name: 'Ada', last_name: 'Lovelace' }),
     }));
   });
 
-  it('does not show the gate when the backend already has an email', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse({ email: 'stored@example.com' }))));
-
+  it('moves on when the manual check reports verified', async () => {
+    let verified = false;
+    stubGateFetch({ poll: () => jsonResponse({ verified }) });
     render(<EmailGate />);
 
+    await screen.findByText('Tell us who you are');
+    fillForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
+    await screen.findByText('Check your inbox');
+
+    fireEvent.click(screen.getByRole('button', { name: "I've clicked the link" }));
+    expect(await screen.findByText(/Not verified yet/)).toBeTruthy();
+
+    verified = true;
+    fireEvent.click(screen.getByRole('button', { name: "I've clicked the link" }));
     await waitFor(() => {
-      expect(screen.queryByText('Tell us where to reach you')).toBeNull();
+      expect(screen.queryByText('Check your inbox')).toBeNull();
     });
   });
 
-  it('fails open (renders the app) when the settings GET returns 403', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(errorResponse(403))));
-
+  it('skips the inbox hold when the email is already verified elsewhere', async () => {
+    stubGateFetch({
+      submit: () => jsonResponse({ success: true, verified: true, verification_started: true }),
+    });
     render(<EmailGate />);
 
+    await screen.findByText('Tell us who you are');
+    fillForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
     await waitFor(() => {
-      expect(screen.queryByText('Tell us where to reach you')).toBeNull();
+      expect(screen.queryByText('Tell us who you are')).toBeNull();
+      expect(screen.queryByText('Check your inbox')).toBeNull();
+    });
+  });
+
+  it('grandfathers any install that already has a stored email', async () => {
+    stubGateFetch({
+      identity: { email: 'old@example.com', first_name: null, last_name: null, verified: false },
+    });
+    render(<EmailGate />);
+    await waitFor(() => {
+      expect(screen.queryByText('Tell us who you are')).toBeNull();
+    });
+  });
+
+  it('hard-blocks with a retry message when the keyservice is unreachable', async () => {
+    stubGateFetch({
+      submit: () => jsonResponse({ success: true, verified: false, verification_started: false }),
+    });
+    render(<EmailGate />);
+
+    await screen.findByText('Tell us who you are');
+    fillForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
+
+    expect(await screen.findByText(/couldn't reach the verification service/)).toBeTruthy();
+    // The gate stays up: no way into the app without verification.
+    expect(screen.getByText('Tell us who you are')).toBeTruthy();
+  });
+
+  it('fails open when OUR settings API is unavailable', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(errorResponse(403))));
+    render(<EmailGate />);
+    await waitFor(() => {
+      expect(screen.queryByText('Tell us who you are')).toBeNull();
     });
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
 
-  it('fails open (renders the app) when the settings GET returns 500', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(errorResponse(500))));
-
-    render(<EmailGate />);
-
-    await waitFor(() => {
-      expect(screen.queryByText('Tell us where to reach you')).toBeNull();
-    });
-  });
-
   it('keeps the gate up with an error when the POST fails', async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/api/settings/email') && !init?.method) return Promise.resolve(jsonResponse({ email: null }));
-      if (url.endsWith('/api/settings/email') && init?.method === 'POST') return Promise.resolve(errorResponse(400));
-      return Promise.resolve(jsonResponse({}));
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
+    stubGateFetch({ submit: () => errorResponse(400) });
     render(<EmailGate />);
 
-    expect(await screen.findByText('Tell us where to reach you')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'mike@example.com' } });
+    await screen.findByText('Tell us who you are');
+    fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
 
     await waitFor(() => {
       expect(screen.getByText('nope')).toBeTruthy();
     });
-    // Gate must remain — a failed save cannot let the user past.
-    expect(screen.getByText('Tell us where to reach you')).toBeTruthy();
+    expect(screen.getByText('Tell us who you are')).toBeTruthy();
   });
 });

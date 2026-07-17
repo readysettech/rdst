@@ -1,47 +1,86 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { isValidEmail, normalizeEmail } from './emailValidation';
 
-type EmailGateState = 'checking' | 'needed' | 'ready';
+// The signup gate for rdst web: first name, last name, and email (all
+// required), then inbox verification through the keyservice - the same
+// mailbox proof a trial registration performs, minus the trial token.
+//
+// Rules:
+// - Existing installs are grandfathered: any stored email means no gate.
+// - An email already verified by any flow (trial, CLI audit report, this
+//   gate on another machine) passes instantly with no second email.
+// - Names stay on this machine (config + telemetry); they are never sent to
+//   the keyservice.
+// - If the keyservice is unreachable, the gate holds (hard block) with a
+//   retry - but if OUR OWN settings API is unavailable the gate steps aside,
+//   since that says nothing about the user and must not brick the app.
+type GateState = 'checking' | 'collect' | 'verifying' | 'ready';
 
-function extractEmail(payload: unknown): string | null {
-  if (typeof payload === 'string') return payload.trim() || null;
-  if (!payload || typeof payload !== 'object') return null;
-  const record = payload as Record<string, unknown>;
-  const value = record.email ?? record.stored_email;
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
+const POLL_INTERVAL_MS = 3000;
+
+interface StoredIdentity {
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  verified: boolean;
 }
 
-async function getStoredEmail() {
+async function getStoredIdentity(): Promise<StoredIdentity> {
   const response = await fetch('/api/settings/email');
-  if (!response.ok) throw new Error(await response.text() || 'Email settings are unavailable.');
-  return extractEmail(await response.json());
+  if (!response.ok) throw new Error((await response.text()) || 'Email settings are unavailable.');
+  return (await response.json()) as StoredIdentity;
 }
 
-async function saveStoredEmail(email: string) {
+async function submitSignup(email: string, firstName: string, lastName: string) {
   const response = await fetch('/api/settings/email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, first_name: firstName, last_name: lastName }),
   });
-  if (!response.ok) throw new Error(await response.text() || 'Could not save this email.');
-  return extractEmail(await response.json()) ?? email;
+  if (!response.ok) {
+    let detail = 'Could not save your details.';
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === 'string') detail = body.detail;
+    } catch {
+      /* keep default */
+    }
+    throw new Error(detail);
+  }
+  return (await response.json()) as { verified: boolean; verification_started: boolean };
+}
+
+async function pollVerification(): Promise<boolean> {
+  const response = await fetch('/api/settings/email/verify-poll', { method: 'POST' });
+  if (!response.ok) return false;
+  const body = (await response.json()) as { verified?: boolean };
+  return Boolean(body.verified);
 }
 
 export function EmailGate() {
-  const [state, setState] = useState<EmailGateState>('checking');
+  const [state, setState] = useState<GateState>('checking');
   const [email, setEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const pollTimer = useRef<number | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimer.current != null) {
+      window.clearInterval(pollTimer.current);
+      pollTimer.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    getStoredEmail()
-      .then((storedEmail) => {
+    getStoredIdentity()
+      .then((identity) => {
         if (cancelled) return;
-        // Gate ONLY when the settings API answered and had no email. If the GET
-        // itself failed (403 off-loopback, 500, network) we fail open and let
-        // the app render — the gate must never brick the app.
-        setState(storedEmail ? 'ready' : 'needed');
+        // Any stored email - verified or not - means this install predates
+        // the gate or already passed it. Only fresh installs sign up.
+        setState(identity.email ? 'ready' : 'collect');
       })
       .catch((e: Error) => {
         if (cancelled) return;
@@ -50,11 +89,32 @@ export function EmailGate() {
       });
     return () => {
       cancelled = true;
+      stopPolling();
     };
-  }, []);
+  }, [stopPolling]);
+
+  const beginPolling = useCallback(() => {
+    stopPolling();
+    pollTimer.current = window.setInterval(() => {
+      void pollVerification().then((verified) => {
+        if (verified) {
+          stopPolling();
+          setState('ready');
+        }
+      });
+    }, POLL_INTERVAL_MS);
+  }, [stopPolling]);
 
   const submit = async () => {
     const normalized = normalizeEmail(email);
+    if (!firstName.trim()) {
+      setError('Please enter your first name.');
+      return;
+    }
+    if (!lastName.trim()) {
+      setError('Please enter your last name.');
+      return;
+    }
     if (!isValidEmail(normalized)) {
       setError('Please enter a valid email address.');
       return;
@@ -62,10 +122,35 @@ export function EmailGate() {
     setSaving(true);
     setError(null);
     try {
-      await saveStoredEmail(normalized);
-      setState('ready');
+      const result = await submitSignup(normalized, firstName.trim(), lastName.trim());
+      if (result.verified) {
+        setState('ready');
+        return;
+      }
+      if (!result.verification_started) {
+        setError(
+          "We couldn't reach the verification service. Check your connection and try again.",
+        );
+        return;
+      }
+      setState('verifying');
+      beginPolling();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save this email.');
+      setError(e instanceof Error ? e.message : 'Could not save your details.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const checkNow = async () => {
+    setSaving(true);
+    try {
+      if (await pollVerification()) {
+        stopPolling();
+        setState('ready');
+      } else {
+        setError('Not verified yet - click the link in the email we sent, then try again.');
+      }
     } finally {
       setSaving(false);
     }
@@ -73,41 +158,104 @@ export function EmailGate() {
 
   // Render nothing until the settings check says the gate is needed, so
   // users with a stored email never see the overlay flash on page load.
-  if (state !== 'needed') return null;
+  if (state === 'ready' || state === 'checking') return null;
+
+  const inputClass =
+    'mt-2 h-11 w-full rounded-lg border border-border-layout-1 bg-surface-layout-soft px-3 text-sm text-content-layout-1 outline-none focus:border-border-primary-soft disabled:opacity-60';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" role="presentation">
       <div role="dialog" aria-modal="true" aria-labelledby="email-gate-title" className="w-full max-w-md rounded-lg border border-border-layout-1 bg-surface-layout-1 p-6 shadow-xl">
-        <h2 id="email-gate-title" className="text-xl font-medium text-content-layout-1">Tell us where to reach you</h2>
-        <p className="mt-2 text-sm leading-relaxed text-content-layout-2">We'll use this to keep you posted on ReadySet — no spam.</p>
-        <label className="mt-5 block text-sm font-medium text-content-layout-2" htmlFor="rdst-email-gate">
-          Email
-        </label>
-        <input
-          id="rdst-email-gate"
-          type="email"
-          autoComplete="email"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          disabled={saving}
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') void submit();
-          }}
-          className="mt-2 h-11 w-full rounded-lg border border-border-layout-1 bg-surface-layout-soft px-3 text-sm text-content-layout-1 outline-none focus:border-border-primary-soft disabled:opacity-60"
-          placeholder="you@company.com"
-        />
-        {error && <p className="mt-3 text-sm text-content-negative-soft">{error}</p>}
-        <button
-          type="button"
-          disabled={saving}
-          onClick={() => void submit()}
-          className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg bg-surface-primary-solid px-4 text-sm font-medium text-content-primary-solid disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Get started'}
-        </button>
+        {state === 'verifying' ? (
+          <>
+            <h2 id="email-gate-title" className="text-xl font-medium text-content-layout-1">Check your inbox</h2>
+            <p className="mt-2 text-sm leading-relaxed text-content-layout-2">
+              We sent a verification link to{' '}
+              <span className="font-medium text-content-layout-1">{normalizeEmail(email)}</span>.
+              Click it to continue.
+            </p>
+            {error && <p className="mt-3 text-sm text-content-negative-soft">{error}</p>}
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void checkNow()}
+              className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg bg-surface-primary-solid px-4 text-sm font-medium text-content-primary-solid disabled:opacity-50"
+            >
+              {saving ? 'Checking...' : "I've clicked the link"}
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                stopPolling();
+                setError(null);
+                setState('collect');
+              }}
+              className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-lg border border-border-layout-1 px-4 text-sm font-medium text-content-layout-2 disabled:opacity-50"
+            >
+              Use a different email
+            </button>
+          </>
+        ) : (
+          <>
+            <h2 id="email-gate-title" className="text-xl font-medium text-content-layout-1">Tell us who you are</h2>
+            <p className="mt-2 text-sm leading-relaxed text-content-layout-2">
+              We'll send a quick verification link to your email — no spam, ever.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-content-layout-2" htmlFor="rdst-first-name">First name</label>
+                <input
+                  id="rdst-first-name"
+                  autoComplete="given-name"
+                  disabled={saving}
+                  value={firstName}
+                  onChange={(event) => setFirstName(event.target.value)}
+                  className={inputClass}
+                  placeholder="Ada"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-content-layout-2" htmlFor="rdst-last-name">Last name</label>
+                <input
+                  id="rdst-last-name"
+                  autoComplete="family-name"
+                  disabled={saving}
+                  value={lastName}
+                  onChange={(event) => setLastName(event.target.value)}
+                  className={inputClass}
+                  placeholder="Lovelace"
+                />
+              </div>
+            </div>
+            <label className="mt-4 block text-sm font-medium text-content-layout-2" htmlFor="rdst-email-gate">Email</label>
+            <input
+              id="rdst-email-gate"
+              type="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              disabled={saving}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void submit();
+              }}
+              className={inputClass}
+              placeholder="you@company.com"
+            />
+            {error && <p className="mt-3 text-sm text-content-negative-soft">{error}</p>}
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void submit()}
+              className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg bg-surface-primary-solid px-4 text-sm font-medium text-content-primary-solid disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Get started'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

@@ -147,6 +147,19 @@ describe('ConfigWarning env secret flow', () => {
     expect(screen.getByText(/export RDST_ANTHROPIC_API_KEY=<value>/i)).toBeTruthy();
   });
 
+  it('stays off the demo page even when the key is missing', async () => {
+    mockPathname = '/demo';
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    renderWarning(queryClient);
+
+    await waitFor(() => expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /Try Free Trial/i })).toBeNull();
+    expect(screen.queryByText(/Missing Anthropic API Key/i)).toBeNull();
+  });
+
   it('stays off the home page even when the key is missing', async () => {
     mockPathname = '/';
     const queryClient = new QueryClient({

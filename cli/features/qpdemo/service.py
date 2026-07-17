@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -71,9 +72,15 @@ IMAGE_STAGE_MAX_PCT = 60
 # times before declaring the provision failed.
 PULL_RATE_LIMIT_RETRIES = 3
 PULL_RATE_LIMIT_WAIT_S = 45
+# Container starts that lose a port race re-allocate and retry this many
+# times before surfacing a ports-exhausted error.
+PORT_RETRY_ATTEMPTS = 3
 # Preflight estimates surfaced on the start card: total first-run image download
 # and the free disk the demo needs while running.
 IMAGE_DOWNLOAD_MB = 1100
+# Tiny multi-arch image used to prove the engine can run amd64 containers
+# on Apple Silicon (via Rosetta or QEMU). Only ever pulled on ARM Macs.
+AMD64_PROBE_IMAGE = "public.ecr.aws/docker/library/busybox:stable"
 DISK_REQUIRED_GB = 2
 
 
@@ -131,6 +138,9 @@ class DemoService:
         self._supervisor_stop = threading.Event()
         self._supervisor: threading.Thread | None = None
         self._provisioning = False
+        # Sticky success flag for the Apple Silicon emulation probe: once an
+        # amd64 container has provably run, no need to re-probe this session.
+        self._amd64_emulation_ok = False
         # Serializes provision/teardown: two interleaved provisions (double
         # click, tab retry) force-clean each other's containers mid-deploy and
         # corrupt ports/health state.
@@ -559,6 +569,43 @@ class DemoService:
         )
 
     # ---- preflight -------------------------------------------------------------
+    def _amd64_emulation_status(self, docker_running: bool) -> str:
+        """'ok' | 'unavailable' | 'not_applicable'.
+
+        Three of the demo images are amd64-only, so an Apple Silicon host
+        needs Rosetta/QEMU emulation in its container engine. Only a
+        DEFINITIVE cannot-run answer (exec format error class) reports
+        unavailable; every ambiguous outcome (pull hiccup, timeout, engine
+        quirk) counts as ok, because emulation is on by default in modern
+        engines and this check must not scare users whose setup works. An ok
+        result is cached; unavailable re-probes so the re-check button
+        reflects a flipped setting immediately."""
+        import platform as _platform
+
+        if sys.platform != "darwin" or _platform.machine() != "arm64":
+            return "not_applicable"
+        if not docker_running:
+            return "not_applicable"
+        if self._amd64_emulation_ok:
+            return "ok"
+        try:
+            r = qdeploy._run(
+                ["docker", "run", "--rm", "--platform", "linux/amd64",
+                 AMD64_PROBE_IMAGE, "uname", "-m"],
+                timeout=120,
+            )
+        except Exception:
+            return "ok"
+        if r.returncode == 0 and "x86_64" in (r.stdout or ""):
+            self._amd64_emulation_ok = True
+            return "ok"
+        err = (r.stderr or "").lower()
+        definitive = ("exec format error", "no matching manifest",
+                      "no match for platform", "rosetta is only intended")
+        if any(marker in err for marker in definitive):
+            return "unavailable"
+        return "ok"
+
     def preflight(self) -> dict:
         """Live start-card checklist: Docker reachable, demo images cached, and
         enough free disk. Cheap enough to re-run on every card mount / retry."""
@@ -588,6 +635,7 @@ class DemoService:
             "disk_space_ok": free_gb >= DISK_REQUIRED_GB,
             "disk_free_gb": round(free_gb, 1),
             "disk_required_gb": DISK_REQUIRED_GB,
+            "amd64_emulation": self._amd64_emulation_status(docker_running),
         }
 
     # ---- image pull (step 0) -------------------------------------------------
@@ -672,7 +720,6 @@ class DemoService:
             self._stop_supervisor()
             self._force_clean()  # idempotent
             yield from self._pull_missing_images()
-            self._ports = qdeploy.allocate_ports()
             self._discovery_mode = QP_DEFAULT_MODE
             self._cache_budget = MODE_BUDGETS[QP_DEFAULT_MODE]
             self._qp_cron_fast = True
@@ -684,57 +731,78 @@ class DemoService:
             self._auto_teardown_at = self._clock() + AUTO_TEARDOWN_S
             self._health = {n: "recovering" for n in NAMES}
             self._supervisor_failures = {n: 0 for n in NAMES}
-            self._qp = self._make_qprouter()
-            self._save_state()
-            p = self._ports
-            yield {"type": "progress", "stage": "start", "percent": 5,
-                   "message": f"Starting containers (pg:{p.pg} readyset:{p.readyset} sqp:{p.sqp})..."}
 
-            cfg_path, denylist_path = qdeploy.write_sqp_config(
-                WORKDIR, p, p.pg, p.readyset, API_KEY, CREDS,
-            )
-            qdeploy.write_qp_config(
-                QP_CONFIG_DIR, p.admin, p.readyset, CREDS,
-                self._discovery_mode, self._cache_budget,
-            )
+            # The port probe can race another process, and some engines leak
+            # bindings, so a start can still hit "port already allocated". A
+            # conflict re-allocates above the burned ports and retries; only
+            # a genuinely exhausted host surfaces an error.
+            excluded_ports: set[int] = set()
+            for ports_attempt in range(1, PORT_RETRY_ATTEMPTS + 1):
+                self._ports = qdeploy.allocate_ports(exclude=excluded_ports)
+                self._qp = self._make_qprouter()
+                self._save_state()
+                p = self._ports
+                try:
+                    yield {"type": "progress", "stage": "start", "percent": 5,
+                           "message": f"Starting containers (pg:{p.pg} readyset:{p.readyset} sqp:{p.sqp})..."}
 
-            yield {"type": "container", "name": "pg", "label": "Postgres (Orders dataset)",
-                   "state": "starting", "percent": 6, "detail": "Starting Postgres..."}
-            # Postgres ships pre-built: the container only starts, it never
-            # generates data. Ready in a second or two.
-            r = qdeploy.deploy_postgres_baked(NAMES["pg"], p.pg)
-            if r.returncode != 0:
-                raise RuntimeError(f"Postgres failed: {r.stderr[:300]}")
-            yield {"type": "progress", "stage": "pg", "percent": 20,
-                   "message": "Starting the pre-built Orders database..."}
-            if not self._wait_pg_connect(60):
-                raise RuntimeError("Postgres did not become ready.")
-            yield {"type": "container", "name": "pg", "label": "Postgres (Orders dataset)",
-                   "state": "ready", "percent": 30}
+                    cfg_path, denylist_path = qdeploy.write_sqp_config(
+                        WORKDIR, p, p.pg, p.readyset, API_KEY, CREDS,
+                    )
+                    qdeploy.write_qp_config(
+                        QP_CONFIG_DIR, p.admin, p.readyset, CREDS,
+                        self._discovery_mode, self._cache_budget,
+                    )
 
-            yield {"type": "container", "name": "readyset", "label": "Readyset cache engine",
-                   "state": "starting", "percent": 32,
-                   "detail": "Waiting for Readyset to connect..."}
-            r = qdeploy.deploy_readyset(
-                NAMES["readyset"], p.readyset, p.readyset_metrics, p.pg, CREDS,
-            )
-            if r.returncode != 0:
-                raise RuntimeError(f"ReadySet failed: {r.stderr[:300]}")
-            if not (yield from self._wait_readyset_events(300)):
-                raise RuntimeError("ReadySet did not snapshot in time.")
-            yield {"type": "container", "name": "readyset", "label": "Readyset cache engine",
-                   "state": "ready", "percent": 60}
+                    yield {"type": "container", "name": "pg", "label": "Postgres (Orders dataset)",
+                           "state": "starting", "percent": 6, "detail": "Starting Postgres..."}
+                    # Postgres ships pre-built: the container only starts, it never
+                    # generates data. Ready in a second or two.
+                    r = qdeploy.deploy_postgres_baked(NAMES["pg"], p.pg)
+                    if r.returncode != 0:
+                        raise RuntimeError(f"Postgres failed: {r.stderr[:300]}")
+                    yield {"type": "progress", "stage": "pg", "percent": 20,
+                           "message": "Starting the pre-built Orders database..."}
+                    if not self._wait_pg_connect(60):
+                        raise RuntimeError("Postgres did not become ready.")
+                    yield {"type": "container", "name": "pg", "label": "Postgres (Orders dataset)",
+                           "state": "ready", "percent": 30}
 
-            yield {"type": "container", "name": "sqp", "label": "QueryPilot router",
-                   "state": "starting", "percent": 62,
-                   "detail": "Starting the QueryPilot router..."}
-            r = qdeploy.deploy_sqp(NAMES["sqp"], p, cfg_path, denylist_path)
-            if r.returncode != 0:
-                raise RuntimeError(f"SQP failed: {r.stderr[:300]}")
-            if not (yield from self._wait_sqp_events(90)):
-                raise RuntimeError("SQP proxy did not become ready.")
-            yield {"type": "container", "name": "sqp", "label": "QueryPilot router",
-                   "state": "ready", "percent": 85}
+                    yield {"type": "container", "name": "readyset", "label": "Readyset cache engine",
+                           "state": "starting", "percent": 32,
+                           "detail": "Waiting for Readyset to connect..."}
+                    r = qdeploy.deploy_readyset(
+                        NAMES["readyset"], p.readyset, p.readyset_metrics, p.pg, CREDS,
+                    )
+                    if r.returncode != 0:
+                        raise RuntimeError(f"ReadySet failed: {r.stderr[:300]}")
+                    if not (yield from self._wait_readyset_events(300)):
+                        raise RuntimeError("ReadySet did not snapshot in time.")
+                    yield {"type": "container", "name": "readyset", "label": "Readyset cache engine",
+                           "state": "ready", "percent": 60}
+
+                    yield {"type": "container", "name": "sqp", "label": "QueryPilot router",
+                           "state": "starting", "percent": 62,
+                           "detail": "Starting the QueryPilot router..."}
+                    r = qdeploy.deploy_sqp(NAMES["sqp"], p, cfg_path, denylist_path)
+                    if r.returncode != 0:
+                        raise RuntimeError(f"SQP failed: {r.stderr[:300]}")
+                    if not (yield from self._wait_sqp_events(90)):
+                        raise RuntimeError("SQP proxy did not become ready.")
+                    yield {"type": "container", "name": "sqp", "label": "QueryPilot router",
+                           "state": "ready", "percent": 85}
+                except RuntimeError as exc:
+                    if ports_attempt < PORT_RETRY_ATTEMPTS and qdeploy.is_port_conflict(str(exc)):
+                        excluded_ports.update(
+                            v for v in p.as_dict().values() if isinstance(v, int)
+                        )
+                        yield {"type": "progress", "stage": "start", "percent": 5,
+                               "message": "A required port is in use by another "
+                                          "program; retrying on the next free ports..."}
+                        self._force_clean()
+                        continue
+                    raise
+                break
 
             yield {"type": "progress", "stage": "warmup", "percent": 88,
                    "message": "Warming up the database on both paths (parallel)..."}

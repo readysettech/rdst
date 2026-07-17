@@ -42,6 +42,42 @@ def _resolve_embedded_web_dist_dir() -> Path | None:
     return None
 
 
+def _running_under_wsl() -> bool:
+    try:
+        with open("/proc/version", encoding="utf-8") as fh:
+            return "microsoft" in fh.read().lower()
+    except OSError:
+        return False
+
+
+def _open_url_in_browser(url: str) -> None:
+    """Open `url` in the system default browser, best-effort.
+
+    `webbrowser` covers macOS (`open`), native Windows (`os.startfile`), and
+    desktop Linux (`xdg-open`). Under WSL no Linux-side browser may be wired
+    up, so fall back to launching the WINDOWS default browser through the
+    interop layer. Headless boxes end up a silent no-op."""
+    import subprocess
+    import webbrowser
+
+    try:
+        if webbrowser.open(url):
+            return
+    except Exception:
+        pass
+    if not _running_under_wsl():
+        return
+    for opener in (
+        ["wslview", url],
+        ["powershell.exe", "-NoProfile", "-Command", f"Start-Process '{url}'"],
+    ):
+        try:
+            subprocess.run(opener, check=True, capture_output=True, timeout=10)
+            return
+        except Exception:
+            continue
+
+
 def _open_browser_when_ready(host: str, port: int) -> None:
     """Open the default browser at the web UI once the server answers.
 
@@ -50,7 +86,6 @@ def _open_browser_when_ready(host: str, port: int) -> None:
     import threading
     import time
     import urllib.request
-    import webbrowser
 
     browse_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{browse_host}:{port}"
@@ -63,10 +98,7 @@ def _open_browser_when_ready(host: str, port: int) -> None:
             except Exception:
                 time.sleep(0.25)
                 continue
-            try:
-                webbrowser.open(url)
-            except Exception:
-                pass
+            _open_url_in_browser(url)
             return
 
     threading.Thread(target=_wait_and_open, daemon=True).start()

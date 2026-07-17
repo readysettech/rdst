@@ -241,6 +241,10 @@ class TargetsConfig:
     #
     # On disk:
     #
+    #   [identity]
+    #   first_name = "Ada"
+    #   last_name = "Lovelace"
+    #
     #   [[emails]]
     #   email = "user@example.com"
     #   primary = true
@@ -249,7 +253,9 @@ class TargetsConfig:
     #   verified_at = "2026-..."
     #
     # Exactly one entry is `primary = true`. That entry's email is the user's
-    # identity for telemetry and the default report recipient.
+    # identity for telemetry and the default report recipient. The machine's
+    # one human name lives in [identity] and rides with whichever email is
+    # primary on telemetry.
     # ------------------------------------------------------------------
 
     def _emails_list(self) -> List[Dict[str, Any]]:
@@ -284,6 +290,31 @@ class TargetsConfig:
                 entry.pop("primary", None)
         if not found:
             emails.append({"email": email, "primary": True, "verified": False})
+
+    def set_name(self, first_name: str, last_name: str) -> None:
+        """Store the machine's one human name, in the top-level [identity]
+        table. Per machine, not per email: swapping between several emails
+        keeps the same person. Blank parts leave the stored value alone."""
+        identity = self._data.setdefault("identity", {})
+        if first_name:
+            identity["first_name"] = first_name
+        if last_name:
+            identity["last_name"] = last_name
+
+    def get_identity(self) -> Dict[str, Any]:
+        """The machine identity: primary email (with verified state) plus the
+        machine-level name."""
+        identity = self._data.get("identity") or {}
+        emails = self._emails_list()
+        primary = next((e for e in emails if e.get("primary")), None)
+        if primary is None and emails:
+            primary = emails[0]
+        return {
+            "email": primary.get("email") if primary else None,
+            "first_name": identity.get("first_name"),
+            "last_name": identity.get("last_name"),
+            "verified": bool(primary.get("verified")) if primary else False,
+        }
 
     def set_primary_email(self, email: str) -> bool:
         """Mark an existing entry as primary. Returns False if not found."""

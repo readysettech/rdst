@@ -22,15 +22,33 @@ _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 class EmailRequest(BaseModel):
     email: str
+    # Optional lead enrichment: stored locally and attached to telemetry
+    # alongside the email. Never required.
+    first_name: str = ""
+    last_name: str = ""
 
 
 class EmailResponse(BaseModel):
     email: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    verified: bool = False
 
 
 class EmailUpdateResponse(BaseModel):
     success: bool
     email: str
+    # Whether the email is verified (possibly instantly, when the keyservice
+    # already knew it from the trial or CLI report flow) and whether a
+    # verification email is on its way. verified=False with
+    # verification_started=False means the keyservice was unreachable; the
+    # gate holds and offers a retry.
+    verified: bool = False
+    verification_started: bool = False
+
+
+class VerifyPollResponse(BaseModel):
+    verified: bool
 
 
 def _normalized_email(email: str) -> str:
@@ -114,7 +132,13 @@ async def get_email(request: Request) -> EmailResponse:
         raise HTTPException(status_code=403, detail="Forbidden")
     cfg = TargetsConfig()
     cfg.load()
-    return EmailResponse(email=cfg.get_email())
+    identity = cfg.get_identity()
+    return EmailResponse(
+        email=identity["email"],
+        first_name=identity["first_name"],
+        last_name=identity["last_name"],
+        verified=identity["verified"],
+    )
 
 
 @router.post("/email")
@@ -136,6 +160,56 @@ async def set_email(request: Request, body: EmailRequest) -> EmailUpdateResponse
     cfg = TargetsConfig()
     cfg.load()
     cfg.set_email(email)
+    cfg.set_name(body.first_name.strip()[:100], body.last_name.strip()[:100])
     cfg.save()
     _fire_email_captured(email, domain)
-    return EmailUpdateResponse(success=True, email=email)
+
+    # New signups prove mailbox access through the keyservice — the same
+    # verification a trial registration performs, minus the trial token. An
+    # email already verified by any flow (trial, CLI audit report, this gate
+    # on another machine) comes back verified instantly and no email is sent.
+    # Names are deliberately NOT sent: they live on this machine and in
+    # telemetry only.
+    from features.audit.email_service import EmailService
+
+    result = EmailService().register_email(email)
+    if result.get("verified"):
+        token = result.get("report_token")
+        if token:
+            cfg.add_verified_email(email, token)
+            cfg.save()
+        return EmailUpdateResponse(
+            success=True, email=email, verified=True, verification_started=True,
+        )
+    if result.get("error"):
+        return EmailUpdateResponse(
+            success=True, email=email, verified=False, verification_started=False,
+        )
+    return EmailUpdateResponse(
+        success=True, email=email, verified=False, verification_started=True,
+    )
+
+
+@router.post("/email/verify-poll")
+async def verify_poll(request: Request) -> VerifyPollResponse:
+    """One non-blocking check of the primary email's verification, mirroring
+    the CLI report flow's /report-status poll; persists the report token the
+    moment the keyservice confirms the click."""
+    if not is_loopback_request(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    cfg = TargetsConfig()
+    cfg.load()
+    identity = cfg.get_identity()
+    if not identity["email"]:
+        return VerifyPollResponse(verified=False)
+    if identity["verified"]:
+        return VerifyPollResponse(verified=True)
+
+    from features.audit.email_service import EmailService
+
+    status = EmailService().check_status(identity["email"])
+    if status.get("verified") and status.get("report_token"):
+        cfg.add_verified_email(identity["email"], status["report_token"])
+        cfg.save()
+        return VerifyPollResponse(verified=True)
+    return VerifyPollResponse(verified=False)

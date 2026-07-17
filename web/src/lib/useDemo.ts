@@ -27,6 +27,11 @@ export interface PreflightChecks {
   disk_space_ok: boolean;
   disk_free_gb: number;
   disk_required_gb: number;
+  // Apple Silicon only: whether the engine can run the demo's amd64 images.
+  // 'unavailable' is a definitive cannot-run answer; every other host or
+  // ambiguous outcome reports 'ok'/'not_applicable' so this almost never
+  // surfaces.
+  amd64_emulation: 'ok' | 'unavailable' | 'not_applicable';
 }
 
 export interface ThroughputMetrics {

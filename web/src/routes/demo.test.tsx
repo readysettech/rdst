@@ -436,6 +436,36 @@ describe('DemoPage', () => {
     spy.mockRestore();
   });
 
+  it('surfaces the Rosetta ask only on a definitive cannot-emulate answer', () => {
+    markTourDone();
+    mockDemo({ phase: 'idle' } as Partial<DemoState>);
+    stubPreflight({
+      docker_installed: true, docker_running: true, images_present: true,
+      missing_images: [], download_mb: 0, disk_space_ok: true,
+      disk_free_gb: 50, disk_required_gb: 2, amd64_emulation: 'unavailable',
+    });
+    render(<DemoPage />);
+    return waitFor(() => {
+      expect(screen.getByText(/Use Rosetta for x86_64\/amd64 emulation/)).toBeTruthy();
+      expect((screen.getByRole('button', { name: /Start the demo/ }) as HTMLButtonElement).disabled).toBe(true);
+    });
+  });
+
+  it('never mentions Rosetta when emulation is fine or not applicable', () => {
+    markTourDone();
+    mockDemo({ phase: 'idle' } as Partial<DemoState>);
+    stubPreflight({
+      docker_installed: true, docker_running: true, images_present: true,
+      missing_images: [], download_mb: 0, disk_space_ok: true,
+      disk_free_gb: 50, disk_required_gb: 2, amd64_emulation: 'ok',
+    });
+    render(<DemoPage />);
+    return waitFor(() => {
+      expect(screen.queryByText(/Rosetta/)).toBeNull();
+      expect((screen.getByRole('button', { name: /Start the demo/ }) as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
   it('shows sequential provision steps: done collapsed, active with live substep, pending dimmed', () => {
     markTourDone();
     mockDemo({

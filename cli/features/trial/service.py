@@ -155,6 +155,7 @@ class TrialService:
             limit_display=resp_data.get("limit_display", "$5.00"),
             email_tier=resp_data.get("email_tier", "business"),
             status_code=resp.status_code,
+            trial_token=resp_data.get("trial_token"),
         )
 
     async def activate(

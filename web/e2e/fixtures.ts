@@ -95,7 +95,7 @@ export function consumeBrowserError(browserErrors: string[], expected: string) {
 // out before clicking buttons whose names collide with the gate's.
 export async function awaitEmailGateClosed(page: Page) {
   await expect(
-    page.getByRole('dialog', { name: 'Tell us where to reach you' })
+    page.getByRole('dialog', { name: 'Tell us who you are' })
   ).toHaveCount(0)
 }
 

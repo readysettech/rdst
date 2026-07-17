@@ -3062,6 +3062,114 @@
         "title": "DirectoryEntry",
         "type": "object"
       },
+      "DiscoveryModeBody": {
+        "properties": {
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "DiscoveryModeBody",
+        "type": "object"
+      },
+      "EmailRequest": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "first_name": {
+            "default": "",
+            "title": "First Name",
+            "type": "string"
+          },
+          "last_name": {
+            "default": "",
+            "title": "Last Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "EmailRequest",
+        "type": "object"
+      },
+      "EmailResponse": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "title": "EmailResponse",
+        "type": "object"
+      },
+      "EmailUpdateResponse": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "verification_started": {
+            "default": false,
+            "title": "Verification Started",
+            "type": "boolean"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "email"
+        ],
+        "title": "EmailUpdateResponse",
+        "type": "object"
+      },
       "EnvRequirement": {
         "properties": {
           "accepted_names": {
@@ -3463,6 +3571,19 @@
           "cost_estimate"
         ],
         "title": "ExplainResults",
+        "type": "object"
+      },
+      "FingerprintBody": {
+        "properties": {
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fingerprint"
+        ],
+        "title": "FingerprintBody",
         "type": "object"
       },
       "FleetAuditRequest": {
@@ -5579,6 +5700,19 @@
           "max_ms"
         ],
         "title": "QueryBenchmarkStats",
+        "type": "object"
+      },
+      "QueryPilotBody": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "QueryPilotBody",
         "type": "object"
       },
       "QueryRegistryEntry": {
@@ -7751,6 +7885,19 @@
         "title": "SetDefaultRequest",
         "type": "object"
       },
+      "SettingsBody": {
+        "properties": {
+          "cache_budget": {
+            "title": "Cache Budget",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cache_budget"
+        ],
+        "title": "SettingsBody",
+        "type": "object"
+      },
       "SetupRequest": {
         "properties": {
           "target": {
@@ -8958,6 +9105,17 @@
           "success": {
             "title": "Success",
             "type": "boolean"
+          },
+          "trial_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Token"
           }
         },
         "required": [
@@ -9221,6 +9379,36 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerifyPollResponse": {
+        "properties": {
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "verified"
+        ],
+        "title": "VerifyPollResponse",
+        "type": "object"
+      },
+      "WorkersBody": {
+        "properties": {
+          "workers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workers"
+          }
+        },
+        "title": "WorkersBody",
         "type": "object"
       },
       "WorkloadAnalysisProgressEvent": {
@@ -11371,6 +11559,473 @@
         "summary": "Test Connection",
         "tags": [
           "configure"
+        ]
+      }
+    },
+    "/api/demo/cache": {
+      "post": {
+        "operationId": "cache_api_demo_cache_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FingerprintBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cache",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/discovery-mode": {
+      "patch": {
+        "operationId": "discovery_mode_api_demo_discovery_mode_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoveryModeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discovery Mode",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/load": {
+      "patch": {
+        "operationId": "load_intensity_api_demo_load_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkersBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Load Intensity",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/load/history": {
+      "get": {
+        "operationId": "load_history_api_demo_load_history_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Load History",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/load/start": {
+      "post": {
+        "operationId": "load_start_api_demo_load_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkersBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Load Start",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/load/stop": {
+      "post": {
+        "operationId": "load_stop_api_demo_load_stop_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Load Stop",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/load/stream": {
+      "get": {
+        "operationId": "load_stream_api_demo_load_stream_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Load Stream",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/patterns": {
+      "get": {
+        "operationId": "patterns_api_demo_patterns_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Patterns",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/preflight": {
+      "get": {
+        "operationId": "preflight_api_demo_preflight_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Preflight",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/provision": {
+      "post": {
+        "operationId": "provision_api_demo_provision_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Provision",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/querypilot": {
+      "post": {
+        "operationId": "querypilot_api_demo_querypilot_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryPilotBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Querypilot",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/settings": {
+      "patch": {
+        "operationId": "settings_api_demo_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Settings",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/status": {
+      "get": {
+        "operationId": "status_api_demo_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/teardown": {
+      "post": {
+        "operationId": "teardown_api_demo_teardown_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Teardown",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/uncache": {
+      "post": {
+        "operationId": "uncache_api_demo_uncache_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FingerprintBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Uncache",
+        "tags": [
+          "demo",
+          "demo"
+        ]
+      }
+    },
+    "/api/demo/workload": {
+      "get": {
+        "operationId": "workload_api_demo_workload_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Workload",
+        "tags": [
+          "demo",
+          "demo"
         ]
       }
     },
@@ -13900,6 +14555,88 @@
         "tags": [
           "semantic-layer",
           "semantic-layer"
+        ]
+      }
+    },
+    "/api/settings/email": {
+      "get": {
+        "operationId": "get_email_api_settings_email_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Email",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "operationId": "set_email_api_settings_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailUpdateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Email",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/email/verify-poll": {
+      "post": {
+        "description": "One non-blocking check of the primary email's verification, mirroring\nthe CLI report flow's /report-status poll; persists the report token the\nmoment the keyservice confirms the click.",
+        "operationId": "verify_poll_api_settings_email_verify_poll_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyPollResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Verify Poll",
+        "tags": [
+          "settings"
         ]
       }
     },
