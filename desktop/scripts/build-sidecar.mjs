@@ -135,7 +135,10 @@ function stageSidecarDir(sourceDir) {
   validateExecutable(sourceExecutable);
   rmSync(sidecarAppDir, { recursive: true, force: true });
   mkdirSync(sidecarPlatformDir, { recursive: true });
-  cpSync(sourceDir, sidecarAppDir, { recursive: true });
+  // PyInstaller dedups shared libraries with relative symlinks; without
+  // verbatimSymlinks, cpSync rewrites their targets to absolute paths
+  // into the build tree, which dangle on every other machine.
+  cpSync(sourceDir, sidecarAppDir, { recursive: true, verbatimSymlinks: true });
   makeExecutable(stagedExecutable);
   validateExecutable(stagedExecutable);
   console.log(`[rdst-desktop] Staged RDST backend sidecar at ${sidecarAppDir}`);
