@@ -100,6 +100,26 @@ export async function setEnvSecret(payload: SetEnvSecretRequest): Promise<SetEnv
   return response.json();
 }
 
+export type AnthropicKeyValidation = {
+  valid: boolean;
+  reason: 'ok' | 'rejected' | 'no_key' | 'provider_error';
+  model: string | null;
+};
+
+// Validity, not just presence: pings Anthropic with the resolved key so the UI
+// can distinguish a "configured" key from a "working" one. Result is cached
+// briefly server-side. Untyped by the generated client until gen:api runs.
+export async function validateAnthropicKey(): Promise<AnthropicKeyValidation> {
+  const response = await fetch('/api/env/anthropic/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to validate Anthropic key: ${response.status}`);
+  }
+  return response.json();
+}
+
 export type SchemaResponse = apiComponents['schemas']['SchemaResponse'];
 
 export async function fetchSchema(target?: string): Promise<SchemaResponse> {

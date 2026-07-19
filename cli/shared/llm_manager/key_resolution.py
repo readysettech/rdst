@@ -77,18 +77,27 @@ def _make_attestation_headers(trial_token: str) -> dict[str, str]:
 
 
 def resolve_api_key() -> KeyResolution:
-    """Resolve API key with priority: env > trial > keyring.
+    """Resolve API key with priority: env > active trial > keyring.
 
     Resolution order:
       1. ANTHROPIC_API_KEY env var  → direct to Anthropic
       2. RDST_TRIAL_TOKEN env var   → trial proxy
-      3. Trial token in config.toml → trial proxy
+      3. Trial token in config.toml → trial proxy (only when *active*)
       4. ANTHROPIC_API_KEY in OS keyring (set via rdst web) → direct
       5. RDST_TRIAL_TOKEN in OS keyring → trial proxy
 
     Keyring is checked last because it may be slow on systems
     without a keyring daemon. The backend type is checked first
     (instant) so dead backends never cause a delay.
+
+    Keyring-precedence rule (T17 / configure-and-identity open-dependency #2):
+    a *present own key in the keyring beats an exhausted trial*. When the
+    config marks the trial ``exhausted`` we probe the keyring for a real
+    ``ANTHROPIC_API_KEY`` **before** raising ``TRIAL_EXHAUSTED`` — a user who
+    saved their own key via the web UI must never be blocked by a stale
+    exhausted marker in ``config.toml``. The common active-trial / no-trial
+    paths still skip the keyring probe, preserving the slow-keyring
+    optimization.
 
     Returns:
         KeyResolution with routing info and attestation headers.
@@ -97,6 +106,15 @@ def resolve_api_key() -> KeyResolution:
         LLMError: If no key is found anywhere.
     """
     from .base import LLMError
+
+    def _keyring_secret(name: str) -> str | None:
+        """Read one secret from the OS keyring, swallowing backend errors."""
+        try:
+            from shared.secret_store_service import SecretStoreService
+
+            return SecretStoreService().get_secret(name)
+        except Exception:
+            return None
 
     # 1. User's own Anthropic API key (env var) — fastest path
     key = os.getenv("ANTHROPIC_API_KEY")
@@ -129,6 +147,14 @@ def resolve_api_key() -> KeyResolution:
         pass
 
     if trial_status == "exhausted":
+        # A present own key wins over an exhausted trial — probe the keyring
+        # before honoring the exhausted status so a valid saved key is never
+        # blocked (T17 keyring-precedence fix).
+        own_key = _keyring_secret("ANTHROPIC_API_KEY")
+        if own_key:
+            os.environ["ANTHROPIC_API_KEY"] = own_key
+            return KeyResolution(api_key=own_key, is_trial=False)
+
         raise LLMError(
             "Trial credits exhausted.\n\n"
             "To continue using RDST:\n"
@@ -147,26 +173,20 @@ def resolve_api_key() -> KeyResolution:
         )
 
     # 4. OS keyring (checked last — may be slow on first probe)
-    try:
-        from shared.secret_store_service import SecretStoreService
+    keyring_key = _keyring_secret("ANTHROPIC_API_KEY")
+    if keyring_key:
+        os.environ["ANTHROPIC_API_KEY"] = keyring_key
+        return KeyResolution(api_key=keyring_key, is_trial=False)
 
-        store = SecretStoreService()
-        keyring_key = store.get_secret("ANTHROPIC_API_KEY")
-        if keyring_key:
-            os.environ["ANTHROPIC_API_KEY"] = keyring_key
-            return KeyResolution(api_key=keyring_key, is_trial=False)
-
-        # 5. Trial token in keyring (for future web UI support)
-        keyring_trial = store.get_secret("RDST_TRIAL_TOKEN")
-        if keyring_trial:
-            return KeyResolution(
-                api_key=keyring_trial,
-                is_trial=True,
-                proxy_url=keyservice_url("/v1/messages"),
-                extra_headers=_make_attestation_headers(keyring_trial),
-            )
-    except Exception:
-        pass
+    # 5. Trial token in keyring (for future web UI support)
+    keyring_trial = _keyring_secret("RDST_TRIAL_TOKEN")
+    if keyring_trial:
+        return KeyResolution(
+            api_key=keyring_trial,
+            is_trial=True,
+            proxy_url=keyservice_url("/v1/messages"),
+            extra_headers=_make_attestation_headers(keyring_trial),
+        )
 
     raise LLMError(
         "No LLM API key configured.\n\n"

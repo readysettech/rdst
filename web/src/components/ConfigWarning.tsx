@@ -252,7 +252,9 @@ export function ConfigWarning() {
       location.pathname.startsWith('/demo')
     ) return;
     if (initStatus.initialized === false || status.targets.length === 0) {
-      navigate({ to: '/onboarding' });
+      // Route to Connect preserving where the user was headed, so they land
+      // back there after connecting (configure-and-identity open-dep #4).
+      navigate({ to: '/onboarding', search: { redirect: location.pathname } });
     }
   }, [isLoading, initLoading, status, initStatus, location.pathname, navigate]);
 

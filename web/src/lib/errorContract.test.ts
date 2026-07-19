@@ -52,6 +52,46 @@ describe('classifyError', () => {
     expect(
       classifyError({ code: 'error', message: 'Claude error: HTTP 401' })
     ).toBe('provider')
+    expect(
+      classifyError({ code: 'error', message: 'AI request was unauthorized' })
+    ).toBe('provider')
+  })
+
+  it('routes DB credential failures to database, never provider', () => {
+    // Regression: a Postgres auth failure must offer "Check connection",
+    // not "Fix API key" — the DB-auth signatures beat the provider tokens.
+    expect(
+      classifyError({
+        code: 'error',
+        message: 'FATAL: password authentication failed for user "app"',
+      })
+    ).toBe('database')
+    expect(
+      classifyError({
+        code: 'error',
+        message: 'no pg_hba.conf entry for host "10.0.0.5"',
+      })
+    ).toBe('database')
+    expect(
+      classifyError({
+        code: 'error',
+        message: "Access denied for user 'app'@'localhost'",
+      })
+    ).toBe('database')
+  })
+
+  it('never treats digit runs or snake_case identifiers as auth failures', () => {
+    // Regression: "1401" must not match the 401 token, and
+    // "unauthorized_logs" must not match the unauthorized token.
+    expect(
+      classifyError({ code: 'error', message: 'query returned 1401 rows' })
+    ).toBe('database')
+    expect(
+      classifyError({
+        code: 'error',
+        message: 'relation "unauthorized_logs" does not exist',
+      })
+    ).toBe('database')
   })
 
   it('defaults SQL/connection failures to database', () => {

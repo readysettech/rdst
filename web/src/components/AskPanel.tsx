@@ -13,6 +13,8 @@ import { Tag } from "@rs/ui-new/tag";
 import { CopyButton } from "@rs/ui-new/copy-button";
 import { m } from "@rs/ui-new/motion";
 import { useAsk, AskClarificationQuestion, AskStatusEvent, AskSchemaLoadedEvent } from "../lib/ask";
+import { classifyError } from "../lib/errorContract";
+import { RoutableNotice } from "./RoutableNotice";
 import { createCsvFilename, downloadCsv, toCsv } from "../lib/csv";
 import { SQLDisplay } from "./SQLDisplay";
 
@@ -559,14 +561,14 @@ function ErrorState({
   error: { message: string; phase?: string | null };
   onRetry: () => void;
 }) {
-  const isAuthenticationError = /trial access|api key|authentication|unauthorized|\b401\b/i.test(
-    error.message,
-  );
-  const title = isAuthenticationError
-    ? 'AI service authentication failed'
-    : error.phase === 'generate'
-      ? "Couldn't generate SQL"
-      : 'Request failed';
+  // Route by structured error class, not a message regex: an AI-credential
+  // failure (provider / trial keyservice) renders the routable credential
+  // notice instead of an unwinnable retry. The ask SSE error carries no code
+  // yet, so classify from the message — the same shared classifier the rest
+  // of the app uses.
+  const errorClass = classifyError({ code: '', message: error.message });
+  const isAuthenticationError =
+    errorClass === 'provider' || errorClass === 'rdst-service';
   const phaseLabels: Record<string, string> = {
     config: 'Configuration',
     schema: 'Loading database schema',
@@ -577,6 +579,28 @@ function ErrorState({
     execute: 'Running the query',
   };
   const phaseLabel = error.phase ? phaseLabels[error.phase] : undefined;
+  if (isAuthenticationError) {
+    return (
+      <VStack className="gap-3 items-start">
+        <RoutableNotice
+          kind={errorClass === 'rdst-service' ? 'trial-exhausted' : 'key-needed'}
+          title="AI service authentication failed"
+          message={error.message}
+          className="w-full"
+        />
+        {phaseLabel && (
+          <Tag
+            variant="negative"
+            modifier="ghost"
+            size="small"
+            label={`Failed while: ${phaseLabel}`}
+          />
+        )}
+      </VStack>
+    );
+  }
+  const title =
+    error.phase === 'generate' ? "Couldn't generate SQL" : 'Request failed';
 
   return (
     <div className="bg-surface-negative-soft/50 border border-border-negative-soft rounded-xl p-6">

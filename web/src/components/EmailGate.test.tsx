@@ -44,8 +44,6 @@ function stubGateFetch(overrides: {
 }
 
 function fillForm() {
-  fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Ada' } });
-  fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Lovelace' } });
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@example.com' } });
 }
 
@@ -63,28 +61,28 @@ describe('EmailGate', () => {
 
     render(<EmailGate />);
 
-    expect(screen.queryByText('Tell us who you are')).toBeNull();
+    expect(screen.queryByText('Enter your email to start the demo')).toBeNull();
 
     resolveCheck(jsonResponse(FRESH_INSTALL));
-    expect(await screen.findByText('Tell us who you are')).toBeTruthy();
+    expect(await screen.findByText('Enter your email to start the demo')).toBeTruthy();
   });
 
-  it('requires name and email, then holds for inbox verification', async () => {
+  it('requires a valid email, then holds for inbox verification', async () => {
     const fetchMock = stubGateFetch({});
     render(<EmailGate />);
 
-    expect(await screen.findByText('Tell us who you are')).toBeTruthy();
+    expect(await screen.findByText('Enter your email to start the demo')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
-    expect(screen.getByText('Please enter your first name.')).toBeTruthy();
+    expect(screen.getByText('Please enter a valid email address.')).toBeTruthy();
 
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
 
     expect(await screen.findByText('Check your inbox')).toBeTruthy();
-    // Names go to OUR api only; the backend keeps them off the keyservice.
+    // Email only — a local demo needs no name; the POST carries just the email.
     expect(fetchMock).toHaveBeenCalledWith('/api/settings/email', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ email: 'ada@example.com', first_name: 'Ada', last_name: 'Lovelace' }),
+      body: JSON.stringify({ email: 'ada@example.com' }),
     }));
   });
 
@@ -93,7 +91,7 @@ describe('EmailGate', () => {
     stubGateFetch({ poll: () => jsonResponse({ verified }) });
     render(<EmailGate />);
 
-    await screen.findByText('Tell us who you are');
+    await screen.findByText('Enter your email to start the demo');
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
     await screen.findByText('Check your inbox');
@@ -114,11 +112,11 @@ describe('EmailGate', () => {
     });
     render(<EmailGate />);
 
-    await screen.findByText('Tell us who you are');
+    await screen.findByText('Enter your email to start the demo');
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
     await waitFor(() => {
-      expect(screen.queryByText('Tell us who you are')).toBeNull();
+      expect(screen.queryByText('Enter your email to start the demo')).toBeNull();
       expect(screen.queryByText('Check your inbox')).toBeNull();
     });
   });
@@ -129,7 +127,7 @@ describe('EmailGate', () => {
     });
     render(<EmailGate />);
     await waitFor(() => {
-      expect(screen.queryByText('Tell us who you are')).toBeNull();
+      expect(screen.queryByText('Enter your email to start the demo')).toBeNull();
     });
   });
 
@@ -139,13 +137,13 @@ describe('EmailGate', () => {
     });
     render(<EmailGate />);
 
-    await screen.findByText('Tell us who you are');
+    await screen.findByText('Enter your email to start the demo');
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
 
     expect(await screen.findByText(/verification service is temporarily unavailable/)).toBeTruthy();
     // The gate stays up: no way into the app without verification.
-    expect(screen.getByText('Tell us who you are')).toBeTruthy();
+    expect(screen.getByText('Enter your email to start the demo')).toBeTruthy();
   });
 
   it('fails open when OUR settings API is unavailable', async () => {
@@ -153,7 +151,7 @@ describe('EmailGate', () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(errorResponse(403))));
     render(<EmailGate />);
     await waitFor(() => {
-      expect(screen.queryByText('Tell us who you are')).toBeNull();
+      expect(screen.queryByText('Enter your email to start the demo')).toBeNull();
     });
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -163,13 +161,13 @@ describe('EmailGate', () => {
     stubGateFetch({ submit: () => errorResponse(400) });
     render(<EmailGate />);
 
-    await screen.findByText('Tell us who you are');
+    await screen.findByText('Enter your email to start the demo');
     fillForm();
     fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
 
     await waitFor(() => {
       expect(screen.getByText('nope')).toBeTruthy();
     });
-    expect(screen.getByText('Tell us who you are')).toBeTruthy();
+    expect(screen.getByText('Enter your email to start the demo')).toBeTruthy();
   });
 });

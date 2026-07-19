@@ -79,6 +79,18 @@ export function EnvSecretsDialog({
       },
     ];
   }, [requirements, showManualAnthropicInput]);
+  // When the dialog is only asking for the AI key, its title matches the
+  // trigger ("Update Anthropic API key") instead of the generic "Set Required
+  // Secrets" — "Required" is wrong once a key is already configured.
+  // (configure-settings Copy #1)
+  const isAnthropicOnly =
+    entries.length > 0 && entries.every((e) => e.key.startsWith("anthropic_api_key"));
+  const dialogTitle = isAnthropicOnly ? "Update Anthropic API key" : "Set required secrets";
+  const anthropicProcessEnvShadow =
+    isAnthropicOnly &&
+    requirements.some(
+      (r) => r.kind === "anthropic_api_key" && r.source === "process_env",
+    );
   const [values, setValues] = useState<Record<string, string>>({});
   const [persist, setPersist] = useState(true);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -155,7 +167,7 @@ export function EnvSecretsDialog({
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={isOpen}>
         <ModalContent size="base" className="p-0 overflow-hidden">
-          <ModalTitle className="sr-only">Set Required Secrets</ModalTitle>
+          <ModalTitle className="sr-only">{dialogTitle}</ModalTitle>
           <ModalDescription className="sr-only">
             Enter missing environment variable values for database and AI access.
           </ModalDescription>
@@ -166,7 +178,7 @@ export function EnvSecretsDialog({
               </div>
               <VStack className="gap-0.5 items-start">
                 <Text level="headline-4" className="text-content-layout-1">
-                  Set Required Secrets
+                  {dialogTitle}
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
                   Secrets are masked and never shown after submission.
@@ -174,6 +186,15 @@ export function EnvSecretsDialog({
               </VStack>
             </HStack>
           </div>
+          {anthropicProcessEnvShadow && (
+            <div className="px-6 pt-4">
+              <Alert
+                variant="warning"
+                modifier="outline"
+                label="A key set in RDST's process environment will override this until the app restarts."
+              />
+            </div>
+          )}
 
           <div className="p-6 space-y-4">
             {!keyringAvailable && (

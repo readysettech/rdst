@@ -228,9 +228,12 @@ function ErrorStateImpl({
             'w-16 h-16'
           )}
         >
+          {/* Decorative: the visible title carries the name — labelling the
+              icon with it would make screen readers announce it twice. */}
           <Icon
             name={glyph}
-            label={title}
+            label=""
+            aria-hidden="true"
             className={cn(
               'w-8 h-8',
               accentTextRecipe({ accent } as AccentVariant)
@@ -317,9 +320,12 @@ function ErrorStateImpl({
             'w-12 h-12 rounded-xl flex items-center justify-center shrink-0'
           )}
         >
+          {/* Decorative: the visible title carries the name (no double
+              announcement for screen readers). */}
           <Icon
             name={glyph}
-            label={title}
+            label=""
+            aria-hidden="true"
             className={cn(
               'w-6 h-6',
               accentTextRecipe({ accent } as AccentVariant)
@@ -422,9 +428,12 @@ function InlineNoticeImpl({
       )}
     >
       <HStack className="gap-3 items-start">
+        {/* Decorative when a visible title exists — otherwise screen readers
+            would announce the title twice. Labelled only in the no-title case. */}
         <Icon
           name={glyph}
-          label={title ?? 'Notice'}
+          label={title ? '' : 'Notice'}
+          aria-hidden={title ? 'true' : undefined}
           className={cn(
             'w-4 h-4 mt-0.5 shrink-0',
             accentTextRecipe({ accent } as AccentVariant)

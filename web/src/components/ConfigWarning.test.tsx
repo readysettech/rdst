@@ -237,7 +237,12 @@ describe('ConfigWarning env secret flow', () => {
     renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith({ to: '/onboarding' });
+      // Routes to Connect preserving the intended destination so the user
+      // returns to /analyze after connecting (route-with-intent).
+      expect(mockNavigate).toHaveBeenCalledWith({
+        to: '/onboarding',
+        search: { redirect: '/analyze' },
+      });
     });
   });
 

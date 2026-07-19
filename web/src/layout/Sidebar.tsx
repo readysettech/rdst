@@ -142,8 +142,13 @@ const advancedItems: NavItem[] = [
   { label: "Fleet", icon: "building", to: "/fleet" },
   { label: "Benchmark", icon: "play", to: "/benchmark" },
   { label: "Schema", icon: "layers", to: "/schema" },
-  { label: "Configure", icon: "settings", to: "/configure" },
 ];
+
+// Configuration recedes off the daily nav: after first connect the only global
+// config control is the target switcher (top) plus a quiet footer "Settings"
+// utility, never a top-level or Advanced nav item (configure-and-identity
+// step 2 / T17). [USE-030, USE-034]
+const settingsItem: NavItem = { label: "Settings", icon: "settings", to: "/configure" };
 
 const ADVANCED_STORAGE_KEY = "rdst-sidebar-advanced";
 
@@ -291,6 +296,8 @@ export function Sidebar({ isElectronMac = false }: SidebarProps) {
       <div className="p-3 border-t border-border-layout-1 space-y-2">
         <SidebarIdentity />
         <TrialBalanceBadge />
+        {/* Settings recedes here as a quiet utility, out of the daily nav. */}
+        <NavLink item={settingsItem} active={isActive(settingsItem)} />
         <button
           type="button"
           onClick={() => setReportOpen(true)}

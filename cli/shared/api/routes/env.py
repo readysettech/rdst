@@ -51,6 +51,12 @@ class EnvSetResponse(BaseModel):
     message: Optional[str] = None
 
 
+class AnthropicValidateResponse(BaseModel):
+    valid: bool
+    reason: Literal["ok", "rejected", "no_key", "provider_error"]
+    model: Optional[str] = None
+
+
 def _normalize_host(host: str) -> str:
     if host.startswith("::ffff:"):
         return host.split("::ffff:", 1)[1]
@@ -132,3 +138,25 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
         session_only=bool(result.get("session_only", True)),
         message=result.get("message"),
     )
+
+
+@router.post("/env/anthropic/validate")
+async def validate_anthropic_key(request: Request) -> AnthropicValidateResponse:
+    """Report whether the configured Anthropic key actually authenticates.
+
+    Presence is not validity — a stale or mistyped key still resolves. This
+    pings the provider once (cheapest model, one token) so the UI can tell a
+    "configured" key from a "working" one. Loopback + same-host guarded; the
+    blocking provider call is offloaded off the event loop.
+    """
+    if not _is_loopback_request(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not _same_host_from_headers(request):
+        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+
+    import asyncio
+
+    from shared.anthropic_env import validate_anthropic_key as check_key
+
+    result = await asyncio.to_thread(check_key)
+    return AnthropicValidateResponse(**result)

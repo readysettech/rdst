@@ -947,6 +947,41 @@
         "title": "AnnotateRequest",
         "type": "object"
       },
+      "AnthropicValidateResponse": {
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "reason": {
+            "enum": [
+              "ok",
+              "rejected",
+              "no_key",
+              "provider_error"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "reason"
+        ],
+        "title": "AnthropicValidateResponse",
+        "type": "object"
+      },
       "AskClarificationNeededEvent": {
         "description": "Clarification needed from the user.",
         "properties": {
@@ -12172,6 +12207,28 @@
         "summary": "Clear Keyring",
         "tags": [
           "dev"
+        ]
+      }
+    },
+    "/api/env/anthropic/validate": {
+      "post": {
+        "description": "Report whether the configured Anthropic key actually authenticates.\n\nPresence is not validity \u2014 a stale or mistyped key still resolves. This\npings the provider once (cheapest model, one token) so the UI can tell a\n\"configured\" key from a \"working\" one. Loopback + same-host guarded; the\nblocking provider call is offloaded off the event loop.",
+        "operationId": "validate_anthropic_key_api_env_anthropic_validate_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicValidateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Validate Anthropic Key",
+        "tags": [
+          "env"
         ]
       }
     },

@@ -2,7 +2,7 @@
  * Form component for configuring database targets
  */
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button } from '@rs/ui-new/button';
 import { BaseInputText } from '@rs/ui-new/base-input-text';
 import { BaseInputSelect } from '@rs/ui-new/base-input-select';
@@ -19,12 +19,36 @@ interface ConfigureFormProps {
   onSubmit?: (data: ConfigureFormData) => void;
   onCancel?: () => void;
   isLoading?: boolean;
+  /** Override the add-mode submit label (e.g. "Test & connect" on first run). */
+  submitLabel?: string;
 }
 
 const engineOptions = [
   { value: 'postgresql', label: 'PostgreSQL' },
   { value: 'mysql', label: 'MySQL' },
 ];
+
+/**
+ * A form label programmatically associated with its input via `htmlFor` — the
+ * flagship-setup a11y fix (configure had 8 labels, 0 associated). `Text` does
+ * not type `htmlFor`, so the association lives on a native `<label>` wrapping a
+ * `Text` span. [USE-088]
+ */
+function FieldLabel({
+  htmlFor,
+  children,
+}: {
+  htmlFor: string;
+  children: ReactNode;
+}) {
+  return (
+    <label htmlFor={htmlFor} className="block mb-1.5">
+      <Text as="span" level="label-small" className="text-content-layout-2">
+        {children}
+      </Text>
+    </label>
+  );
+}
 
 export function defaultPasswordEnv(targetName: string): string {
   const normalized = targetName
@@ -97,7 +121,7 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
   }
 }
 
-export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: ConfigureFormProps) {
+export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, submitLabel }: ConfigureFormProps) {
   const isAddMode = !initialData?.name;
   const [connectionUrl, setConnectionUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -207,14 +231,17 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
             <div className="rounded-xl bg-surface-layout-2/50 p-4">
               <HStack className="gap-2 items-center mb-3">
                 <Icon name="connect" label="Quick setup" className="w-4 h-4 text-content-primary-soft" />
-                <Text level="label-small" className="text-content-primary-soft">
-                  Quick Setup
-                </Text>
+                <label htmlFor="cfg-connection-url">
+                  <Text as="span" level="label-small" className="text-content-primary-soft">
+                    Quick Setup
+                  </Text>
+                </label>
               </HStack>
               <div className="space-y-2">
                 <div className="flex gap-2">
                   <div className="flex-1">
                     <BaseInputText
+                      id="cfg-connection-url"
                       name="connectionUrl"
                       value={connectionUrl}
                       onChange={(e) => {
@@ -255,10 +282,9 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
               </HStack>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
-                    Target Name *
-                  </Text>
+                  <FieldLabel htmlFor="cfg-name">Target Name *</FieldLabel>
                   <BaseInputText
+                    id="cfg-name"
                     name="name"
                     value={name}
                     onChange={(e) => {
@@ -275,10 +301,9 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
                 </div>
 
                 <div>
-                  <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
-                    Database Engine *
-                  </Text>
+                  <FieldLabel htmlFor="cfg-engine">Database Engine *</FieldLabel>
                   <BaseInputSelect
+                    id="cfg-engine"
                     name="engine"
                     options={engineOptions}
                     value={engine}
@@ -299,10 +324,9 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
               </HStack>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
-                    Host *
-                  </Text>
+                  <FieldLabel htmlFor="cfg-host">Host *</FieldLabel>
                   <BaseInputText
+                    id="cfg-host"
                     name="host"
                     value={host}
                     onChange={(e) => setHost(e.target.value)}
@@ -313,10 +337,9 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
                 </div>
 
                 <div>
-                  <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
-                    Port *
-                  </Text>
+                  <FieldLabel htmlFor="cfg-port">Port *</FieldLabel>
                   <BaseInputText
+                    id="cfg-port"
                     name="port"
                     type="number"
                     value={String(port)}
@@ -328,10 +351,9 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
                 </div>
 
                 <div>
-                  <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
-                    Database *
-                  </Text>
+                  <FieldLabel htmlFor="cfg-database">Database *</FieldLabel>
                   <BaseInputText
+                    id="cfg-database"
                     name="database"
                     value={database}
                     onChange={(e) => setDatabase(e.target.value)}
@@ -342,10 +364,9 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
                 </div>
 
                 <div>
-                  <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
-                    User *
-                  </Text>
+                  <FieldLabel htmlFor="cfg-user">User *</FieldLabel>
                   <BaseInputText
+                    id="cfg-user"
                     name="user"
                     value={user}
                     onChange={(e) => setUser(e.target.value)}
@@ -367,10 +388,11 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
               </HStack>
               <div className="space-y-4">
                 <div>
-                  <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
+                  <FieldLabel htmlFor="cfg-password">
                     Database Password {isAddMode ? '*' : ''}
-                  </Text>
+                  </FieldLabel>
                   <BaseInputText
+                    id="cfg-password"
                     name="password"
                     type="password"
                     value={password}
@@ -386,10 +408,11 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
                 </div>
 
                 <div>
-                  <Text as="label" level="label-small" className="text-content-layout-2 block mb-1.5">
+                  <FieldLabel htmlFor="cfg-password-env">
                     Password Environment Variable {isAddMode ? '*' : ''}
-                  </Text>
+                  </FieldLabel>
                   <BaseInputText
+                    id="cfg-password-env"
                     name="password_env"
                     value={passwordEnv}
                     onChange={(e) => {
@@ -406,16 +429,20 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
                 </div>
 
                 <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
-                  <VStack className="gap-0.5 items-start">
-                    <Text level="label-small" className="text-content-layout-1">
-                      TLS / SSL
-                    </Text>
-                    <Text level="caption" className="text-content-layout-3">
-                      Require encrypted connection
-                    </Text>
-                  </VStack>
+                  <label htmlFor="cfg-tls" className="cursor-pointer">
+                    <VStack className="gap-0.5 items-start">
+                      <Text as="span" level="label-small" className="text-content-layout-1">
+                        TLS / SSL
+                      </Text>
+                      <Text as="span" level="caption" className="text-content-layout-3">
+                        Require encrypted connection
+                      </Text>
+                    </VStack>
+                  </label>
                   <BaseInputSwitch
+                    id="cfg-tls"
                     name="tls"
+                    aria-label="TLS / SSL — require encrypted connection"
                     checked={tls}
                     onCheckedChange={setTls}
                     disabled={isLoading}
@@ -423,16 +450,20 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
                 </div>
 
                 <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
-                  <VStack className="gap-0.5 items-start">
-                    <Text level="label-small" className="text-content-layout-1">
-                      Read Only
-                    </Text>
-                    <Text level="caption" className="text-content-layout-3">
-                      Restrict to SELECT queries only
-                    </Text>
-                  </VStack>
+                  <label htmlFor="cfg-read-only" className="cursor-pointer">
+                    <VStack className="gap-0.5 items-start">
+                      <Text as="span" level="label-small" className="text-content-layout-1">
+                        Read Only
+                      </Text>
+                      <Text as="span" level="caption" className="text-content-layout-3">
+                        Restrict to SELECT queries only
+                      </Text>
+                    </VStack>
+                  </label>
                   <BaseInputSwitch
+                    id="cfg-read-only"
                     name="read_only"
+                    aria-label="Read Only — restrict to SELECT queries only"
                     checked={readOnly}
                     onCheckedChange={setReadOnly}
                     disabled={isLoading}
@@ -455,7 +486,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading }: Co
             <Button
               variant="rising"
               modifier="solid"
-              label={initialData?.name ? 'Update Target' : 'Add Target'}
+              label={initialData?.name ? 'Update Target' : submitLabel ?? 'Add Target'}
               type="submit"
               loading={isLoading}
               disabled={!isValid}

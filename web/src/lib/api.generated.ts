@@ -947,6 +947,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/env/anthropic/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Anthropic Key
+         * @description Report whether the configured Anthropic key actually authenticates.
+         *
+         *     Presence is not validity — a stale or mistyped key still resolves. This
+         *     pings the provider once (cheapest model, one token) so the UI can tell a
+         *     "configured" key from a "working" one. Loopback + same-host guarded; the
+         *     blocking provider call is offloaded off the event loop.
+         */
+        post: operations["validate_anthropic_key_api_env_anthropic_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/env/requirements": {
         parameters: {
             query?: never;
@@ -2590,6 +2615,18 @@ export interface components {
             table_name?: string | null;
             /** Target */
             target: string;
+        };
+        /** AnthropicValidateResponse */
+        AnthropicValidateResponse: {
+            /** Model */
+            model?: string | null;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "ok" | "rejected" | "no_key" | "provider_error";
+            /** Valid */
+            valid: boolean;
         };
         /**
          * AskClarificationNeededEvent
@@ -7872,6 +7909,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClearKeyringResponse"];
+                };
+            };
+        };
+    };
+    validate_anthropic_key_api_env_anthropic_validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicValidateResponse"];
                 };
             };
         };

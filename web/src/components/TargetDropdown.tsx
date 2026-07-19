@@ -86,14 +86,19 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
     setOpen(nextOpen);
   };
 
+  // A real <button> so the one always-visible config control is keyboard
+  // focusable and Enter/Space-activatable — the Dropdown.Trigger→<button> fix
+  // (configure-and-identity step 2 / app-chrome HIGH). [USE-030, USE-018]
   const trigger = (
-    <div
+    <button
+      type="button"
+      aria-label={`Switch database — current: ${currentTarget ?? 'none'}`}
       aria-disabled={isLocked}
       title={isLocked ? lockMessage : undefined}
       className={`flex justify-between items-center text-content-layout-1 p-2 pr-3 h-14 w-full rounded-lg ${
         isLocked
           ? 'cursor-not-allowed opacity-60 bg-surface-layout-2/50'
-          : 'cursor-pointer hover:bg-surface-primary-soft-hover focus-visible:shadow-focus'
+          : 'cursor-pointer hover:bg-surface-primary-soft-hover focus-visible:shadow-focus focus-visible:outline-none'
       }`}
     >
       <div className="flex gap-2 items-center">
@@ -108,7 +113,7 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
         )}
         <Icon name="chevron-down" label="Target Dropdown" />
       </div>
-    </div>
+    </button>
   );
 
   if (targets.length === 0) {

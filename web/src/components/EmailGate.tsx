@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isValidEmail, normalizeEmail } from './emailValidation';
 
-// The signup gate for rdst web: first name, last name, and email (all
-// required), then inbox verification through the keyservice - the same
-// mailbox proof a trial registration performs, minus the trial token.
+// The signup gate for rdst web: email only, then inbox verification through
+// the keyservice - the same mailbox proof a trial registration performs, minus
+// the trial token. A local-Docker demo needs no more than a verifiable email,
+// so the name fields are gone (over-asking for a local demo — USE-068), and
+// the telemetry use is disclosed honestly rather than hidden.
 //
 // Rules:
 // - Existing installs are grandfathered: any stored email means no gate.
 // - An email already verified by any flow (trial, CLI audit report, this
 //   gate on another machine) passes instantly with no second email.
-// - Names stay on this machine (config + telemetry); they are never sent to
-//   the keyservice.
 // - If the keyservice is unreachable, the gate holds (hard block) with a
 //   retry - but if OUR OWN settings API is unavailable the gate steps aside,
 //   since that says nothing about the user and must not brick the app.
@@ -31,11 +31,11 @@ async function getStoredIdentity(): Promise<StoredIdentity> {
   return (await response.json()) as StoredIdentity;
 }
 
-async function submitSignup(email: string, firstName: string, lastName: string) {
+async function submitSignup(email: string) {
   const response = await fetch('/api/settings/email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, first_name: firstName, last_name: lastName }),
+    body: JSON.stringify({ email }),
   });
   if (!response.ok) {
     let detail = 'Could not save your details.';
@@ -69,8 +69,6 @@ async function pollVerification(): Promise<boolean> {
 export function EmailGate() {
   const [state, setState] = useState<GateState>('checking');
   const [email, setEmail] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const pollTimer = useRef<number | null>(null);
@@ -125,14 +123,6 @@ export function EmailGate() {
 
   const submit = async () => {
     const normalized = normalizeEmail(email);
-    if (!firstName.trim()) {
-      setError('Please enter your first name.');
-      return;
-    }
-    if (!lastName.trim()) {
-      setError('Please enter your last name.');
-      return;
-    }
     if (!isValidEmail(normalized)) {
       setError('Please enter a valid email address.');
       return;
@@ -140,7 +130,7 @@ export function EmailGate() {
     setSaving(true);
     setError(null);
     try {
-      const result = await submitSignup(normalized, firstName.trim(), lastName.trim());
+      const result = await submitSignup(normalized);
       if (result.verified) {
         setState('ready');
         return;
@@ -220,37 +210,20 @@ export function EmailGate() {
           </>
         ) : (
           <>
-            <h2 id="email-gate-title" className="text-xl font-medium text-content-layout-1">Tell us who you are</h2>
+            <h2 id="email-gate-title" className="text-xl font-medium text-content-layout-1">Enter your email to start the demo</h2>
             <p className="mt-2 text-sm leading-relaxed text-content-layout-2">
-              We'll send a quick verification link to your email — no spam, ever.
+              We use your email to send the verification link and to understand
+              product usage — no spam.{' '}
+              <a
+                href="https://readyset.io/privacy"
+                target="_blank"
+                rel="noreferrer"
+                className="text-content-primary-soft hover:underline"
+              >
+                Privacy
+              </a>
             </p>
-            <div className="mt-5 flex gap-3">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-content-layout-2" htmlFor="rdst-first-name">First name</label>
-                <input
-                  id="rdst-first-name"
-                  autoComplete="given-name"
-                  disabled={saving}
-                  value={firstName}
-                  onChange={(event) => setFirstName(event.target.value)}
-                  className={inputClass}
-                  placeholder="Ada"
-                />
-              </div>
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-content-layout-2" htmlFor="rdst-last-name">Last name</label>
-                <input
-                  id="rdst-last-name"
-                  autoComplete="family-name"
-                  disabled={saving}
-                  value={lastName}
-                  onChange={(event) => setLastName(event.target.value)}
-                  className={inputClass}
-                  placeholder="Lovelace"
-                />
-              </div>
-            </div>
-            <label className="mt-4 block text-sm font-medium text-content-layout-2" htmlFor="rdst-email-gate">Email</label>
+            <label className="mt-5 block text-sm font-medium text-content-layout-2" htmlFor="rdst-email-gate">Email</label>
             <input
               id="rdst-email-gate"
               type="email"

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import time
 from typing import Any
 
 from shared.config.targets import TargetsConfig
@@ -104,8 +106,79 @@ def has_anthropic_api_key(
     return get_anthropic_api_key(secret_store=secret_store, cfg=cfg) is not None
 
 
+_VALIDITY_TTL_SECONDS = 60.0
+# Validity is cached by a fingerprint of the resolved key: a changed key
+# re-validates immediately while repeated page loads reuse the last result
+# instead of pinging Anthropic every time.
+_validity_cache: dict[str, tuple[dict[str, Any], float]] = {}
+
+
+def clear_anthropic_validity_cache() -> None:
+    """Drop cached validity results (used by tests)."""
+    _validity_cache.clear()
+
+
+def validate_anthropic_key(
+    secret_store: Any | None = None,
+    cfg: Any | None = None,
+) -> dict[str, Any]:
+    """Report whether the resolved Anthropic key actually authenticates.
+
+    Presence (`has_anthropic_api_key`) only proves a key is set; a stale,
+    revoked, or mistyped key still looks "configured" while every AI feature
+    fails at use. This makes a minimal authenticated request (cheapest model,
+    one output token) to tell "configured" from "working".
+
+    The ping goes through ``LLMManager``, which resolves the key via
+    ``resolve_api_key()`` — so the probe reports on the *same* key the AI
+    features will use, and it cooperates with the keyring-precedence fix
+    (a present own key beating an exhausted trial) rather than masking it.
+
+    Returns ``{"valid": bool, "reason": str, "model": str | None}`` where
+    reason is ``ok`` | ``rejected`` | ``no_key`` | ``provider_error``. Blocking
+    (network I/O) — callers on the event loop must offload via ``to_thread``.
+    """
+    key = get_anthropic_api_key(secret_store=secret_store, cfg=cfg)
+    if key is None:
+        return {"valid": False, "reason": "no_key", "model": None}
+
+    fingerprint = hashlib.sha256(key.encode()).hexdigest()[:16]
+    cached = _validity_cache.get(fingerprint)
+    now = time.monotonic()
+    if cached is not None and cached[1] > now:
+        return cached[0]
+
+    from shared.llm_manager import LLMError, LLMManager
+    from shared.llm_manager.claude_provider import AnthropicModel
+
+    model = AnthropicModel.HAIKU_4_5.value
+    try:
+        LLMManager().query(
+            system_message="ping",
+            user_query="ping",
+            model=model,
+            max_tokens=1,
+            temperature=0,
+        )
+        result: dict[str, Any] = {"valid": True, "reason": "ok", "model": model}
+    except LLMError as exc:
+        rejected = exc.code in ("ANTHROPIC_AUTH_INVALID", "TRIAL_AUTH_INVALID")
+        result = {
+            "valid": False,
+            "reason": "rejected" if rejected else "provider_error",
+            "model": model,
+        }
+    except Exception:
+        result = {"valid": False, "reason": "provider_error", "model": model}
+
+    _validity_cache[fingerprint] = (result, now + _VALIDITY_TTL_SECONDS)
+    return result
+
+
 __all__ = [
+    "clear_anthropic_validity_cache",
     "get_anthropic_api_key",
     "get_anthropic_source",
     "has_anthropic_api_key",
+    "validate_anthropic_key",
 ]

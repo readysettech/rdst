@@ -14,6 +14,7 @@ import { Alert } from "@rs/ui-new/alert";
 import { HStack, VStack } from "@rs/ui-new/stack";
 import { Icon } from "@rs/ui-new/icon";
 import { registerTrial, activateTrial } from "../lib/api";
+import { RoutableNotice } from "./RoutableNotice";
 
 type Step = "email" | "verify" | "success";
 type RegisterMutationData =
@@ -23,6 +24,7 @@ type RegisterMutationData =
 
 type TrialMutationError = Error & {
   didYouMean?: string;
+  errorCode?: string;
 };
 
 interface TrialRegistrationDialogProps {
@@ -40,6 +42,7 @@ export function TrialRegistrationDialog({
   const [email, setEmail] = useState("");
   const [token, setToken] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
 
   // Prefill the email captured at the gate so the common case is one click,
   // but leave it fully editable: a user who gave a wrong or throwaway address
@@ -85,6 +88,10 @@ export function TrialRegistrationDialog({
       }
       const error = new Error(result.detail ?? "Registration failed.") as TrialMutationError;
       error.didYouMean = result.did_you_mean ?? undefined;
+      // Preserve the machine-readable code so the UI can branch a capacity
+      // limit (PROGRAM_FULL) or a rate limit (RATE_LIMITED) to a real next
+      // move instead of failing the same button again.
+      error.errorCode = result.error_code ?? undefined;
       throw error;
     },
     onSuccess: (data, registerEmail) => {
@@ -125,11 +132,31 @@ export function TrialRegistrationDialog({
     registerMutation.error instanceof Error ? registerMutation.error : null;
   const activateError =
     activateMutation.error instanceof Error ? activateMutation.error : null;
-  const errorMessage = validationError ?? activateError?.message ?? registerError?.message ?? null;
+  const trialErrorCode =
+    registerError && "errorCode" in registerError
+      ? (registerError as TrialMutationError).errorCode ?? null
+      : null;
+  const isProgramFull = trialErrorCode === "PROGRAM_FULL";
+  const isRateLimited = trialErrorCode === "RATE_LIMITED";
+  // Only surface the generic error Alert for failures we don't branch below.
+  const errorMessage =
+    validationError ??
+    activateError?.message ??
+    (isProgramFull || isRateLimited ? null : registerError?.message ?? null);
   const didYouMean =
     registerError && "didYouMean" in registerError
       ? (registerError as TrialMutationError).didYouMean ?? null
       : null;
+
+  // RATE_LIMITED shows a live countdown, not a re-click of the same button.
+  useEffect(() => {
+    if (!isRateLimited) return;
+    setRetryIn(30);
+    const id = setInterval(() => {
+      setRetryIn((n) => (n <= 1 ? 0 : n - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isRateLimited]);
   const alreadyRegistered = registerMutation.data?.mode === "already-registered";
   const limitDisplay =
     registerMutation.data?.mode === "registered"
@@ -145,6 +172,7 @@ export function TrialRegistrationDialog({
     setEmail("");
     setToken("");
     setValidationError(null);
+    setRetryIn(0);
     registerMutation.reset();
     activateMutation.reset();
   };
@@ -222,6 +250,29 @@ export function TrialRegistrationDialog({
           {/* Content */}
           <div className="p-6 space-y-4">
             {errorMessage && <Alert variant="negative" modifier="outline" label={errorMessage} />}
+
+            {/* Branched trial dead-ends: a capacity limit routes to own-key
+                entry (a real alternative), a rate limit shows a countdown —
+                never the same failing button again. (onboarding F8) */}
+            {isProgramFull && (
+              <RoutableNotice
+                kind="key-needed"
+                title="The free trial is full right now"
+                message="Add your own Anthropic API key instead to keep using AI analysis."
+                onBeforeRoute={handleClose}
+              />
+            )}
+            {isRateLimited && (
+              <Alert
+                variant="warning"
+                modifier="outline"
+                label={
+                  retryIn > 0
+                    ? `Too many attempts — try again in ${retryIn}s.`
+                    : "You can try again now."
+                }
+              />
+            )}
 
             {step === "email" && (
               <>
@@ -363,12 +414,16 @@ export function TrialRegistrationDialog({
               {step === "email" && (
                 <Button
                   variant="rising"
-                  label="Start Free Trial"
+                  label={
+                    isRateLimited && retryIn > 0
+                      ? `Try again in ${retryIn}s`
+                      : "Start Free Trial"
+                  }
                   icon="arrow-right"
                   iconPosition="right"
                   onClick={handleRegister}
                   loading={loading}
-                  disabled={!email || loading}
+                  disabled={!email || loading || (isRateLimited && retryIn > 0)}
                 />
               )}
 

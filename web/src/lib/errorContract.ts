@@ -28,8 +28,8 @@ const RECOVERY: Record<ErrorClass, RecoveryTarget | undefined> = {
   'user-config': { label: 'Open Settings', to: '/configure' },
   database: { label: 'Check connection', to: '/configure' },
   'local-dependency': { label: 'Set up caching', to: '/cache' },
-  'rdst-service': { label: 'Open Settings', to: '/configure' },
-  provider: { label: 'AI Settings', to: '/configure' },
+  'rdst-service': { label: 'Fix API key', to: '/configure' },
+  provider: { label: 'Fix API key', to: '/configure' },
   'valid-negative': undefined,
 }
 
@@ -94,7 +94,40 @@ export function classifyError(envelope: ApiErrorEnvelope): ErrorClass {
   ) {
     return 'rdst-service'
   }
-  if (CONTAINS(hay, ['anthropic', 'claude', 'provider', 'llm'])) {
+  // Database credential failures must beat the provider auth tokens below: a
+  // Postgres/MySQL "password authentication failed for user …" (or a pg_hba
+  // rule rejection) is a connection problem that routes to "Check connection",
+  // never to "Fix API key".
+  if (
+    CONTAINS(hay, [
+      'password authentication',
+      'authentication failed for user',
+      'access denied for user',
+      'pg_hba',
+    ])
+  ) {
+    return 'database'
+  }
+  // Provider = the AI credential/LLM layer. Auth-failure tokens live here (not
+  // in the DB class below) so an AI authentication error routes recovery to
+  // "Fix API key", never to "check connection". User-config / rdst-service are
+  // checked first, so an AWS-profile or trial message never lands here. The
+  // auth words are word-bounded and 401 is matched only in its HTTP-status
+  // forms, so "unauthorized_logs" or "1401 rows" never classify as provider.
+  if (
+    CONTAINS(hay, [
+      'anthropic',
+      'claude',
+      'provider',
+      'llm',
+      'auth_invalid',
+      'invalid api key',
+      'ai service',
+    ]) ||
+    /\bauthentication\b/.test(hay) ||
+    /\bunauthorized\b/.test(hay) ||
+    /\b(?:http|status|code)[\s:_-]*401\b/.test(hay)
+  ) {
     return 'provider'
   }
   if (

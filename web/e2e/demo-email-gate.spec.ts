@@ -1,7 +1,11 @@
 import { configureTestTarget, expect, test } from './fixtures'
 
 test('requires signup on the demo page only', async ({ page }) => {
-  const gate = page.getByRole('dialog', { name: 'Tell us who you are' })
+  // The gate collects only an email now; its dialog is labelled by the
+  // collect-state heading.
+  const gate = page.getByRole('dialog', {
+    name: 'Enter your email to start the demo',
+  })
   await configureTestTarget(page)
 
   await page.goto('/')
