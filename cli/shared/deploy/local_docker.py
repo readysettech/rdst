@@ -175,8 +175,9 @@ def _create_container(
         return {
             "success": False,
             "error": (
-                "Docker is not installed.\n"
-                "Install Docker: https://docs.docker.com/get-docker/"
+                "Docker CLI was not found on RDST's PATH.\n"
+                "Install Docker, or make the docker CLI available on PATH: "
+                "https://docs.docker.com/get-docker/"
             ),
         }
 

@@ -9,6 +9,7 @@ from typing import Dict, Any, Tuple
 class DockerError:
     """Docker error types with user-friendly messages and remediation steps."""
 
+    CLI_NOT_FOUND = "cli_not_found"
     DAEMON_NOT_RUNNING = "daemon_not_running"
     IMAGE_NOT_FOUND = "image_not_found"
     NETWORK_ERROR = "network_error"
@@ -139,9 +140,12 @@ def check_docker_available() -> Dict[str, Any]:
     except FileNotFoundError:
         return {
             "success": False,
-            "error": "Docker is not installed",
-            "error_type": DockerError.DAEMON_NOT_RUNNING,
-            "remediation": "Install Docker: https://docs.docker.com/get-docker/"
+            "error": "Docker CLI was not found on RDST's PATH",
+            "error_type": DockerError.CLI_NOT_FOUND,
+            "remediation": (
+                "Install Docker, or make the docker CLI available on PATH: "
+                "https://docs.docker.com/get-docker/"
+            )
         }
     except subprocess.TimeoutExpired:
         return {

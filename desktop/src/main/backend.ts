@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { accessSync, constants, existsSync, statSync } from 'node:fs'
 import { createServer } from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
 
 const BACKEND_NAME = 'rdst'
@@ -13,6 +14,55 @@ const READINESS_REQUEST_TIMEOUT_MS = 1_000
 const SHUTDOWN_TIMEOUT_MS = 3_000
 const FORCE_KILL_TIMEOUT_MS = 1_000
 const MAX_OUTPUT_LINES = 10
+
+const POSIX_SYSTEM_PATHS = ['/usr/local/bin', '/usr/bin', '/bin']
+
+function addUniquePathEntry(entries: string[], entry: string): void {
+  if (entry && !entries.includes(entry)) entries.push(entry)
+}
+
+/**
+ * GUI applications do not inherit the interactive shell's PATH on macOS.
+ * Keep the launch environment intact, but add the conventional locations for
+ * Docker Desktop and package-manager-installed command line tools so the
+ * Python sidecar can resolve `docker` when RDST is opened from Finder.
+ */
+export function backendExecutablePath(
+  currentPath: string | undefined = process.env.PATH,
+  platform: NodeJS.Platform = process.platform,
+  homeDir: string = os.homedir()
+): string | undefined {
+  if (platform === 'win32') return currentPath
+
+  const entries = (currentPath ?? '')
+    .split(path.delimiter)
+    .filter((entry) => entry.length > 0)
+
+  for (const entry of POSIX_SYSTEM_PATHS) addUniquePathEntry(entries, entry)
+  addUniquePathEntry(entries, path.join(homeDir, '.docker', 'bin'))
+
+  if (platform === 'darwin') {
+    addUniquePathEntry(entries, '/opt/homebrew/bin')
+    addUniquePathEntry(entries, '/opt/local/bin')
+    addUniquePathEntry(
+      entries,
+      '/Applications/Docker.app/Contents/Resources/bin'
+    )
+    addUniquePathEntry(
+      entries,
+      path.join(
+        homeDir,
+        'Applications',
+        'Docker.app',
+        'Contents',
+        'Resources',
+        'bin'
+      )
+    )
+  }
+
+  return entries.join(path.delimiter)
+}
 
 export interface BackendHandle {
   process: ChildProcess
@@ -209,7 +259,13 @@ export async function startBackend(
   const child = spawn(
     binaryPath,
     ['web', '--ui', 'none', '--host', host, '--port', String(port)],
-    { stdio: ['ignore', 'pipe', 'pipe'] }
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PATH: backendExecutablePath(),
+      },
+    }
   )
 
   child.stdout.on('data', (chunk: Buffer) => {
