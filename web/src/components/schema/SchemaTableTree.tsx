@@ -202,7 +202,7 @@ export function SchemaTableTree({
                                 </Show>
                               </div>
                               <HStack className="gap-1 shrink-0">
-                                <Show when={!!onEditEnum && (!!col.enum_values || col.data_type?.includes('enum'))}>
+                                <Show when={!!onEditEnum && (Object.keys(col.enum_values ?? {}).length > 0 || col.data_type?.includes('enum'))}>
                                   <Button
                                     modifier="ghost"
                                     size="small"

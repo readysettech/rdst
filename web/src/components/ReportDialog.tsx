@@ -157,7 +157,12 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={isOpen}>
-        <ModalContent size="base" className="gap-0 p-0 overflow-hidden">
+        <ModalContent
+          size="base"
+          className="gap-0 p-0 overflow-hidden"
+          title="Share Your Feedback"
+          description="Help us improve RDST for everyone"
+        >
           {/* Header with gradient */}
           <m.div
             initial={{ opacity: 0, y: -10 }}

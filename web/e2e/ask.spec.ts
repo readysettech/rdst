@@ -97,7 +97,7 @@ test('asks a question and renders generated SQL with query results', async ({
   await page
     .getByPlaceholder('Ask a question about your data...')
     .fill(question)
-  await page.getByRole('button', { name: 'Generate SQL' }).click()
+  await page.getByRole('button', { name: 'Ask Ask' }).click()
 
   await expect(page.getByText('Generated SQL', { exact: true })).toBeVisible()
   await expect(
@@ -194,7 +194,7 @@ test('answers a clarification and resumes the original ask session', async ({
   await page
     .getByPlaceholder('Ask a question about your data...')
     .fill(question)
-  await page.getByRole('button', { name: 'Generate SQL' }).click()
+  await page.getByRole('button', { name: 'Ask Ask' }).click()
 
   await expect(
     page.getByText(
@@ -205,7 +205,7 @@ test('answers a clarification and resumes the original ask session', async ({
     page.getByText('Which revenue definition', { exact: true })
   ).toBeVisible()
   await page.getByRole('radio', { name: 'Gross revenue' }).check()
-  await page.getByRole('button', { name: 'Generate SQL' }).click()
+  await page.getByRole('button', { name: 'Ask Ask' }).click()
 
   await expect(page.getByRole('cell', { name: '7300' })).toBeVisible()
   expect(requests).toEqual([
@@ -244,7 +244,7 @@ test('shows a streamed Ask failure and returns to a clean input', async ({
   await page
     .getByPlaceholder('Ask a question about your data...')
     .fill('Show recent orders')
-  await page.getByRole('button', { name: 'Generate SQL' }).click()
+  await page.getByRole('button', { name: 'Ask Ask' }).click()
 
   await expect(
     page.getByText("Couldn't generate SQL", { exact: true })
@@ -263,6 +263,6 @@ test('shows a streamed Ask failure and returns to a clean input', async ({
     page.getByPlaceholder('Ask a question about your data...')
   ).toHaveValue('')
   await expect(
-    page.getByRole('button', { name: 'Generate SQL' })
+    page.getByRole('button', { name: 'Ask Ask' })
   ).toBeDisabled()
 })

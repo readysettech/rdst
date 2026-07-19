@@ -796,14 +796,20 @@
 
     --content-layout-1: var(--sand-dark-12);
     --content-layout-2: var(--sand-dark-11);
-    --content-layout-3: var(--sand-dark-10);
+    /* WCAG AA (QW1): re-derived from sand-dark-10 (#7F7C77, 4.14:1) to 4.87:1
+       on surface-layout-1 and 5.11:1 on surface-layout-2. Kept distinct from
+       content-layout-2 (#A19E9A) to preserve the tertiary tier. [USE-004/VIS-058] */
+    --content-layout-3: #8B8883;
     --content-layout-disabled: var(--sand-dark-9);
 
     --content-primary-solid: var(--sand-light-12);
     --content-primary-soft: var(--sand-dark-12);
     --content-primary-plain: var(--sand-dark-12);
 
-    --content-rising-solid: var(--neutral-black);
+    /* WCAG AA (QW8): white label on the purple solid fill (surface-rising-solid,
+       #6E56CF) — black was 3.90:1, white is 5.39:1. Light theme already uses a
+       near-white on-color; this fixes the dark theme. [USE-004/VIS-015] */
+    --content-rising-solid: var(--neutral-white);
     --content-rising-soft: var(--purple-dark-11);
     --content-rising-plain: var(--purple-dark-11);
 

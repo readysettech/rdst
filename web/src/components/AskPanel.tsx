@@ -73,6 +73,20 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
 
   const isLoading = state === "loading" || state === "generating";
 
+  // Show the SQL that actually ran (post-validation, from the result event),
+  // not the pre-validation generated SQL. The backend injects a LIMIT during
+  // validation but does not emit an explicit warning yet (T15) — derive it by
+  // comparing: a LIMIT present in the executed SQL but not the generated one
+  // means one was added. [QW13]
+  const executedSql = result?.sql ?? sqlGenerated?.sql ?? "";
+  const limitAdded = Boolean(
+    result?.sql &&
+      sqlGenerated?.sql &&
+      /\blimit\b/i.test(result.sql) &&
+      !/\blimit\b/i.test(sqlGenerated.sql),
+  );
+  const runsAgainst = target ?? "demo";
+
   return (
     <VStack className="gap-6 w-full">
       {/* Question Input */}
@@ -102,6 +116,13 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
                     }}
                   />
                 </div>
+                <HStack className="gap-1.5 items-center mt-3">
+                  <Icon name="user-shield" label="Read-only" className="w-3.5 h-3.5 text-content-info-soft shrink-0" />
+                  <Text level="caption" className="text-content-layout-3">
+                    Runs a read-only query against{" "}
+                    <span className="font-medium text-content-layout-2">{runsAgainst}</span>
+                  </Text>
+                </HStack>
                 <HStack className="justify-between items-center mt-4">
                   <HStack className="gap-2 items-center">
                     <Icon name="info" label="Hint" className="w-4 h-4 text-content-layout-3" />
@@ -114,7 +135,7 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
                     disabled={disabled || !question.trim()}
                     variant="rising"
                     modifier="solid"
-                    label="Generate SQL"
+                    label="Ask"
                     icon="sparkles"
                     iconPosition="left"
                   />
@@ -196,7 +217,7 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                <SQLResultCard sql={sqlGenerated.sql} explanation={sqlGenerated.explanation} />
+                <SQLResultCard sql={executedSql} explanation={sqlGenerated.explanation} limitAdded={limitAdded} />
               </m.div>
             )}
 
@@ -357,9 +378,11 @@ function LoadingState({
 function SQLResultCard({
   sql,
   explanation,
+  limitAdded,
 }: {
   sql: string;
   explanation?: string | null;
+  limitAdded?: boolean;
 }) {
   return (
     <Card className="w-full overflow-hidden">
@@ -381,6 +404,20 @@ function SQLResultCard({
       <div className="bg-surface-layout-2">
         <SQLDisplay sql={sql} className="p-4" />
       </div>
+      {limitAdded && (
+        <div className="p-4 border-t border-border-layout-1">
+          <HStack className="gap-2 items-start">
+            <Icon
+              name="info"
+              label="Note"
+              className="w-4 h-4 text-content-info-soft mt-0.5 shrink-0"
+            />
+            <Text level="body-small" className="text-content-layout-2 leading-relaxed">
+              A <code className="font-mono">LIMIT</code> was added to keep the result set bounded.
+            </Text>
+          </HStack>
+        </div>
+      )}
       {explanation && (
         <div className="p-4 border-t border-border-layout-1">
           <HStack className="gap-2 items-start">
@@ -789,7 +826,7 @@ function ClarificationPanel({
               disabled={disabled || !hasAnswer}
               variant="rising"
               modifier="solid"
-              label={isLastQuestion ? "Generate SQL" : "Continue"}
+              label={isLastQuestion ? "Ask" : "Continue"}
               icon={isLastQuestion ? "sparkles" : "arrow-right"}
               iconPosition="right"
             />

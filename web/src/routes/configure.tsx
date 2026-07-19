@@ -187,8 +187,8 @@ function ConfigurePage() {
         >
           <div className="rounded-xl border border-border-layout-1 bg-surface-layout-2/50 p-4">
             <HStack className="gap-3 items-start">
-              <div className="w-9 h-9 rounded-xl bg-surface-informative-soft flex items-center justify-center shrink-0">
-                <Icon name="info" label="Storage" className="w-4 h-4 text-content-informative-soft" />
+              <div className="w-9 h-9 rounded-xl bg-surface-info-soft flex items-center justify-center shrink-0">
+                <Icon name="info" label="Storage" className="w-4 h-4 text-content-info-soft" />
               </div>
               <VStack className="gap-1 items-start flex-1 min-w-0">
                 <Text level="label-small" className="text-content-layout-1">
@@ -301,8 +301,9 @@ function ConfigurePage() {
         </m.div>
       </Show>
 
-      {/* Connection Test Result */}
-      <Show when={!!connectionTestResult}>
+      {/* Connection Test Result — also render while a test is in flight so the
+          loading card shows instead of a dead-looking button. [QW17] */}
+      <Show when={!!connectionTestResult || state === "loading"}>
         <m.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}

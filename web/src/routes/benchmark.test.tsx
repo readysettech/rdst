@@ -8,6 +8,9 @@ import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => options,
+  // autoCodeSplitting rewrites the route's `component` to a lazyRouteComponent
+  // call; the tests render BenchmarkPage directly, so this just needs to exist.
+  lazyRouteComponent: (loader: unknown) => loader,
 }));
 
 vi.mock("@tanstack/react-query", () => ({

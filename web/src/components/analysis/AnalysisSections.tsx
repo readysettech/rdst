@@ -193,11 +193,15 @@ export function resolveRewriteTesting(
 export function ScoreGauge({
   score,
   size = 80,
+  variant: variantOverride,
 }: {
   score: number;
   size?: number;
+  // When set, the ring/number use this variant instead of the raw score band,
+  // so the gauge agrees with the surrounding rating verdict. [QW20]
+  variant?: StyleVariant;
 }) {
-  const variant = getScoreVariant(score);
+  const variant = variantOverride ?? getScoreVariant(score);
   const style = variantStyles[variant];
   const radius = (size - 8) / 2;
   const circumference = radius * 2 * Math.PI;
@@ -369,7 +373,11 @@ export function PerformanceSummarySection({
         <HStack className="justify-between items-center">
           <HStack className="gap-5 items-center">
             {perf.efficiency_score !== undefined && (
-              <ScoreGauge score={perf.efficiency_score} size={80} />
+              <ScoreGauge
+                score={perf.efficiency_score}
+                size={80}
+                variant={ratingVariant === "informative" ? "info" : (ratingVariant as StyleVariant)}
+              />
             )}
             <VStack className="gap-1 items-start">
               <Text level="headline-3" className="text-content-layout-1">

@@ -560,7 +560,7 @@ function CachedQueryRow({
         <td className="px-4 py-3 text-center">
           <Tag
             size="small"
-            variant="warning"
+            variant="informative"
             modifier="ghost"
             label={entry.ttl}
           />
@@ -690,6 +690,9 @@ function CachePage() {
   // Add cache form state — pre-fill from search param
   const [addQuery, setAddQuery] = useState(pendingQuery || '');
   const [dryRunResult, setDryRunResult] = useState<CacheAddResponse | null>(null);
+  // Bumped after a successful cache so the CodeMirror editor fully remounts
+  // (clears its buffer/history), not just its controlled value. [QW16]
+  const [editorResetKey, setEditorResetKey] = useState(0);
   const [showDropAllConfirm, setShowDropAllConfirm] = useState(false);
   const autoCacheTriggered = useRef(false);
 
@@ -754,6 +757,7 @@ function CachePage() {
     onSuccess: () => {
       setAddQuery('');
       setDryRunResult(null);
+      setEditorResetKey((k) => k + 1);
       queryClient.invalidateQueries({ queryKey: ['cache-list', target] });
     },
   });
@@ -905,6 +909,10 @@ function CachePage() {
 
   const handleCheckAndCache = () => {
     if (!addQuery.trim() || !target) return;
+    // Clear any stale success/error from a previous run so a fresh check never
+    // shows a green "success" beside a new red error. [QW16]
+    checkMutation.reset();
+    createMutation.reset();
     setDryRunResult(null);
     checkMutation.mutate(addQuery.trim());
   };
@@ -1459,6 +1467,7 @@ function CachePage() {
               <div className="p-5">
                 <VStack className="gap-4 items-stretch">
                   <SQLInput
+                    key={editorResetKey}
                     value={addQuery}
                     onChange={(val) => {
                       setAddQuery(val);

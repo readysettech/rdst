@@ -70,7 +70,7 @@ function getWarningConfig(
     return {
       title: 'Missing Anthropic API Key',
       description: `Required API key is missing: ${names}. Start a free trial or set your own key.`,
-      command: 'export RDST_ANTHROPIC_API_KEY=<value>',
+      command: 'export ANTHROPIC_API_KEY=<value>',
       severity: 'warning',
       actionLabel: 'Try Free Trial',
       actionType: 'open-trial-dialog',

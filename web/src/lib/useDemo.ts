@@ -440,8 +440,10 @@ export function useDemo() {
         if (current === 'provisioning' || current === 'tearing-down') return current;
         return s.provisioned ? 'ready' : 'idle';
       });
+      return s;
     } catch (e: any) {
       setError(`Status unavailable: ${e?.message ?? String(e)}`);
+      return undefined;
     }
   }, []);
 
@@ -584,19 +586,26 @@ export function useDemo() {
 
   const toggleQueryPilot = useCallback(async (on: boolean) => {
     setQuerypilotOn(on);
-    // Enabling always opens on the most-expensive policy, matching the backend reset.
-    if (on) setMode('sum_time');
+    // Do NOT optimistically set the mode — the backend decides the policy, and
+    // guessing here made the selector flip on the next status poll. [QW18]
     setPatterns((ps) => resetPatternStats(ps, true));
     addEvent(on ? 'qp_on' : 'qp_off', on ? 'QueryPilot on' : 'QueryPilot off');
-    setNotice(on
-      ? 'QueryPilot is on. It caches your top 10 most expensive queries.'
-      : 'QueryPilot is off. Its caches were dropped; the ones you made stay.');
+    if (!on) {
+      setNotice('QueryPilot is off. Its caches were dropped; the ones you made stay.');
+    }
     await setQueryPilot(on);
     setPatterns((ps) => resetPatternStats(ps, true));
-    await refreshStatus();
+    const status = await refreshStatus();
     await refreshPatterns();
     await refreshHistory();
-  }, [addEvent, refreshHistory, refreshPatterns, refreshStatus]);
+    // Announce the real, server-confirmed policy + budget — never a hard-coded
+    // "10 most expensive" that can contradict the actual mode/number. [QW18]
+    if (on) {
+      const policy = status?.querypilot.mode === 'sum_time' ? 'most expensive' : 'most frequent';
+      const budget = status?.cache_budget ?? cacheBudget;
+      setNotice(`QueryPilot is on. It caches your top ${budget} ${policy} queries.`);
+    }
+  }, [addEvent, cacheBudget, refreshHistory, refreshPatterns, refreshStatus]);
 
   const setDiscoveryMode = useCallback(async (nextMode: DiscoveryMode) => {
     if (nextMode === mode) return;

@@ -154,6 +154,17 @@ export type ModalContentProps = {
   overlayClassName?: string
   innerClassName?: string
   closeClassName?: string
+  /**
+   * Accessible dialog title. When the content has no visible `ModalTitle`,
+   * pass this so Radix has a required `Dialog.Title` (rendered screen-reader
+   * only) and stops warning "`DialogContent` requires a `DialogTitle`".
+   */
+  title?: string
+  /**
+   * Accessible dialog description, wired to `aria-describedby`. Rendered
+   * screen-reader only when the content has no visible description.
+   */
+  description?: string
 } & ComponentPropsWithoutRef<typeof Dialog.Content> &
   ModalVariants
 
@@ -171,6 +182,8 @@ export const ModalContent = forwardRef<
       overlayClassName,
       innerClassName,
       closeClassName,
+      title,
+      description,
       ...props
     },
     ref
@@ -207,6 +220,14 @@ export const ModalContent = forwardRef<
             transition={transition}
             className={cn(innerClassName)}
           >
+            {title ? (
+              <Dialog.Title className="sr-only">{title}</Dialog.Title>
+            ) : null}
+            {description ? (
+              <Dialog.Description className="sr-only">
+                {description}
+              </Dialog.Description>
+            ) : null}
             {children}
             {!hideClose && (
               <Dialog.Close className={styles.close({ class: closeClassName })}>

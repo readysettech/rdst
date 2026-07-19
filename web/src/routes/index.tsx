@@ -96,12 +96,9 @@ function HomePage() {
 
   return (
     <div className="space-y-8 w-full">
-      {/* Hero Header */}
-      <m.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
+      {/* Hero Header — render instantly; the entrance fade read as latency on
+          a launcher you navigate constantly. [QW21] */}
+      <m.div initial={false}>
         <HStack className="gap-4 items-center">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
             <Icon name="dashboard" label="Home" className="w-6 h-6 text-content-primary-soft" />

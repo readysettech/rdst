@@ -61,7 +61,7 @@ describe("AskPanel", () => {
     const textarea = screen.getByPlaceholderText(/Ask a question about your data/i);
     fireEvent.change(textarea, { target: { value: "How many users?" } });
 
-    const submitButton = screen.getByRole("button", { name: /Generate SQL/i });
+    const submitButton = screen.getByRole("button", { name: /Ask/i });
     expect((submitButton as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(submitButton);
 

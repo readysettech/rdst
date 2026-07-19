@@ -188,7 +188,7 @@ export function PathPicker({
             <Scrollable className="max-h-64">
               {isError && (
                 <div className="px-3 py-4 text-center">
-                  <Text level="caption" className="text-content-negative-1">
+                  <Text level="caption" className="text-content-negative-soft">
                     Could not read directory
                   </Text>
                 </div>

@@ -27,8 +27,17 @@ import {
 import type { TopDbLimitWarningEventData, TopMode, TopQuery } from '../types/top';
 
 export const Route = createFileRoute('/top')({
-  component: TopPage,
+  component: TopPageRoute,
 });
+
+// `component:` must reference a non-exported symbol for TanStack
+// `autoCodeSplitting` to relocate the page (and the CodeMirror SQL-editor stack
+// it pulls in) into a lazy chunk. This local wrapper does that; `TopPage` stays
+// exported for the component tests — same shape as demo.tsx (DemoRoute/DemoPage)
+// and results.tsx (ResultsRouteComponent/ResultsPage). [T12]
+function TopPageRoute() {
+  return <TopPage />;
+}
 
 function formatKB(bytes: number) {
   return `${Math.round(bytes / 1024)} KB`;
@@ -95,6 +104,19 @@ export function TopPage() {
   const [minFreq, setMinFreq] = useState(0);
   const [minLoadPct, setMinLoadPct] = useState(0);
 
+  // Validate the filter regex client-side so an invalid pattern shows an inline
+  // message and keeps the last good results, instead of being sent to the
+  // backend and returning a raw Python `re` error that nukes the table. [QW15]
+  const filterPatternError = useMemo(() => {
+    if (!filterPattern.trim()) return null;
+    try {
+      new RegExp(filterPattern);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : 'Invalid regular expression';
+    }
+  }, [filterPattern]);
+
   // Parameter dialog state
   const [paramDialogQuery, setParamDialogQuery] = useState<string | null>(null);
   const [paramDialogStoredParams, setParamDialogStoredParams] = useState<Record<string, unknown> | undefined>(undefined);
@@ -130,6 +152,9 @@ export function TopPage() {
 
   const handleStart = useCallback(() => {
     if (!target || passwordLock.isLocked) return;
+    // Don't send an invalid regex to the backend — keep the last good results
+    // and let the inline message guide the fix. [QW15]
+    if (filterPatternError) return;
 
     if (mode === 'realtime') {
       startRealtime(target, {
@@ -160,6 +185,7 @@ export function TopPage() {
     source,
     sort,
     filterPattern,
+    filterPatternError,
     minFreq,
     minLoadPct,
     startRealtime,
@@ -293,6 +319,7 @@ export function TopPage() {
         setLimit={setLimit}
         filterPattern={filterPattern}
         setFilterPattern={setFilterPattern}
+        filterPatternError={filterPatternError}
         duration={duration}
         setDuration={setDuration}
         autoSave={autoSave}

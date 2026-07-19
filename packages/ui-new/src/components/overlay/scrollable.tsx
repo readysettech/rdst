@@ -4,6 +4,12 @@ import type { WithChildren, WithClassName } from '../../helpers/types'
 
 type ScrollableProps = {
   orientation?: 'vertical' | 'horizontal'
+  /**
+   * Radix ScrollArea visibility. Defaults to `hover` (scrollbar auto-hides).
+   * Use `auto` for a persistent scrollbar whenever the content overflows, so
+   * off-screen content is discoverable.
+   */
+  type?: 'auto' | 'always' | 'scroll' | 'hover'
 } & WithChildren &
   WithClassName
 
@@ -11,8 +17,10 @@ export const Scrollable = ({
   children,
   className,
   orientation = 'vertical',
+  type = 'hover',
 }: ScrollableProps) => (
   <ScrollArea.Root
+    type={type}
     className={cn([
       'transition-[padding]',
       'duration-fast',
@@ -34,10 +42,13 @@ export const Scrollable = ({
         'transition-[background,width]',
         'duration-fast',
         'ease-base',
-        'data-orientation=vertical:w-2',
-        'data-orientation=vertical:hover:w-4',
-        'data-orientation=horizontal:h-2',
-        'data-orientation=horizontal:hover:h-4',
+        // Correct Tailwind v4 data-variant syntax — the bracketless form
+        // generated no rule, so the scrollbar rendered at 0px width and was
+        // never visible (overlay scrollbar, so no layout shift). [QW2]
+        'data-[orientation=vertical]:w-2',
+        'data-[orientation=vertical]:hover:w-4',
+        'data-[orientation=horizontal]:h-2',
+        'data-[orientation=horizontal]:hover:h-4',
       ])}
       orientation={orientation}
     >

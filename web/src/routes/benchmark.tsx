@@ -27,8 +27,17 @@ import { isRemoteTargetHost } from "../lib/targetHost";
 import { useSystemStatus } from "../lib/useSystemStatus";
 
 export const Route = createFileRoute("/benchmark")({
-  component: BenchmarkPage,
+  component: BenchmarkPageRoute,
 });
+
+// `component:` must reference a non-exported symbol for TanStack
+// `autoCodeSplitting` to relocate the page (and the CodeMirror SQL-editor stack
+// it pulls in) into a lazy chunk. This local wrapper does that; `BenchmarkPage`
+// stays exported for the component tests — same shape as demo.tsx and
+// results.tsx. [T12]
+function BenchmarkPageRoute() {
+  return <BenchmarkPage />;
+}
 
 type WizardStep = "configure" | "running";
 
@@ -260,6 +269,19 @@ export function BenchmarkPage() {
       .filter((q): q is NonNullable<typeof q> => q !== null);
   }, [selectedQueries, queryById]);
 
+  // A selection hidden by the current filter must never run or be counted —
+  // scope the runnable set to what is actually visible so Start can't launch an
+  // invisible query and the "N selected" count stays honest. [QW22]
+  const visibleIdentifiers = useMemo(
+    () => new Set(filteredQueries.map((q) => q.tag || q.hash)),
+    [filteredQueries],
+  );
+  const runnableQueryObjects = useMemo(
+    () => selectedQueryObjects.filter((q) => visibleIdentifiers.has(q.identifier)),
+    [selectedQueryObjects, visibleIdentifiers],
+  );
+  const runnableCount = runnableQueryObjects.length;
+
   const hasQueriesWithParams = useMemo(() => {
     return selectedQueryObjects.some((q) => q.parameters.length > 0);
   }, [selectedQueryObjects]);
@@ -296,7 +318,7 @@ export function BenchmarkPage() {
   const canStart =
     !!runTarget &&
     !destinationLock.isLocked &&
-    selectedQueries.length > 0 &&
+    runnableCount > 0 &&
     (!hasQueriesWithParams || allParamsFilled);
 
   const toggleQuery = (identifier: string) => {
@@ -332,7 +354,7 @@ export function BenchmarkPage() {
     if (destinationLock.isLocked) return;
     if (!canStart || !runTarget) return;
 
-    const queryInputs: BenchmarkQueryInput[] = selectedQueryObjects.map((q) => {
+    const queryInputs: BenchmarkQueryInput[] = runnableQueryObjects.map((q) => {
       if (q.parameters.length > 0) {
         const values: Record<string, string> = {};
         for (const p of q.parameters) {
@@ -381,7 +403,7 @@ export function BenchmarkPage() {
       isOpen={confirmOpen}
       target={runTarget ?? destinationTarget ?? ""}
       isRemote={destinationIsRemote}
-      queryCount={selectedQueries.length}
+      queryCount={runnableCount}
       loadSummary={loadSummary}
       estimatedExecutions={estimatedExecutions}
       executionCap={BENCHMARK_EXECUTION_CAP}
@@ -595,9 +617,9 @@ export function BenchmarkPage() {
                     </Text>
                     <Tag
                       size="small"
-                      variant={selectedQueries.length > 0 ? "primary" : "informative"}
+                      variant={runnableCount > 0 ? "primary" : "informative"}
                       modifier="ghost"
-                      label={`${selectedQueries.length} selected`}
+                      label={`${runnableCount} selected`}
                     />
                   </HStack>
                   <HStack className="gap-4 items-end">
@@ -848,6 +870,15 @@ export function BenchmarkPage() {
     ? ((progress.total_failures / progress.total_executions) * 100).toFixed(1)
     : "0.0";
 
+  // A finished run where every execution failed is a failure, not a green
+  // "Complete" with a double-tick — derive the header verdict from the outcome,
+  // not from `state` alone. [QW10]
+  const runAllFailed =
+    state !== "running" &&
+    (progress?.total_executions ?? 0) > 0 &&
+    (progress?.total_failures ?? 0) >= (progress?.total_executions ?? 0);
+  const runIsFailure = state === "error" || runAllFailed;
+
   return (
     <div className="space-y-6 w-full">
       {confirmDialog}
@@ -863,16 +894,16 @@ export function BenchmarkPage() {
             <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
               state === "running"
                 ? "bg-gradient-to-br from-surface-primary-soft to-surface-info-soft"
-                : state === "error"
+                : runIsFailure
                   ? "bg-gradient-to-br from-surface-negative-soft to-surface-warning-soft"
                   : "bg-gradient-to-br from-surface-positive-soft to-surface-primary-soft"
             }`}>
               <Icon
-                name={state === "running" ? "play" : state === "error" ? "alert" : "tick-double"}
+                name={state === "running" ? "play" : runIsFailure ? "alert" : "tick-double"}
                 label="Status"
                 className={`w-6 h-6 ${
                   state === "running" ? "text-content-primary-soft animate-pulse" :
-                  state === "error" ? "text-content-negative-soft" :
+                  runIsFailure ? "text-content-negative-soft" :
                   "text-content-positive-soft"
                 }`}
               />
@@ -883,13 +914,13 @@ export function BenchmarkPage() {
                   Benchmark
                 </Text>
                 <Tag
-                  variant={state === "running" ? "informative" : state === "error" ? "negative" : "positive"}
+                  variant={state === "running" ? "informative" : runIsFailure ? "negative" : "positive"}
                   modifier="solid"
-                  label={state === "running" ? "Running..." : state === "error" ? "Error" : "Complete"}
+                  label={state === "running" ? "Running..." : state === "error" ? "Error" : runAllFailed ? "Failed" : "Complete"}
                 />
               </HStack>
               <Text level="body-small" className="text-content-layout-3">
-                {selectedQueries.length} queries • {mode === "interval" ? `${intervalMs}ms interval` : `${concurrency} workers`} • {durationSeconds}s duration
+                {runnableCount} queries • {mode === "interval" ? `${intervalMs}ms interval` : `${concurrency} workers`} • {durationSeconds}s duration
               </Text>
             </VStack>
           </HStack>

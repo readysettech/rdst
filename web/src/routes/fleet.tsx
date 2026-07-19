@@ -96,6 +96,15 @@ const VERDICT_LABELS: Record<
   unknown: { label: 'Unknown', variant: 'informative' },
 };
 
+// Proper engine display names — the backend emits lowercase enum values, which
+// CSS `capitalize` renders as "Postgresql"/"Mysql". [QW19]
+const ENGINE_LABELS: Record<string, string> = {
+  postgresql: 'PostgreSQL',
+  mysql: 'MySQL',
+};
+const engineLabel = (engine: string | null | undefined) =>
+  engine ? (ENGINE_LABELS[engine.toLowerCase()] ?? engine) : '-';
+
 function StatusCell({ result }: { result: FleetConnectivityEvent | undefined }) {
   if (!result) {
     return <Text level="caption" className="text-content-layout-3">-</Text>;
@@ -177,7 +186,7 @@ function MemberRow({
         </VStack>
       </td>
       <td className="px-4 py-3">
-        <Tag size="small" variant="informative" modifier="ghost" label={member.engine || '-'} />
+        <Tag size="small" variant="informative" modifier="ghost" label={engineLabel(member.engine)} />
       </td>
       <td className="px-4 py-3">
         <Text level="mono-small" className="text-content-layout-2 break-all">
@@ -1184,12 +1193,12 @@ function FleetPage() {
                               key={engine}
                               type="button"
                               onClick={() => setEngineFilter(engine)}
-                              className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap capitalize
+                              className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
                                 data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
                                 data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
                               data-active={engineFilter === engine}
                             >
-                              {engine}
+                              {engine === 'all' ? 'All' : engineLabel(engine)}
                             </button>
                           ))}
                         </HStack>

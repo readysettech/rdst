@@ -25,6 +25,7 @@ interface TopFiltersProps {
   setLimit: (limit: number) => void;
   filterPattern: string;
   setFilterPattern: (pattern: string) => void;
+  filterPatternError?: string | null;
   minFreq: number;
   setMinFreq: (value: number) => void;
   minLoadPct: number;
@@ -85,6 +86,7 @@ export function TopFilters({
   setLimit,
   filterPattern,
   setFilterPattern,
+  filterPatternError,
   minFreq,
   setMinFreq,
   minLoadPct,
@@ -264,6 +266,11 @@ export function TopFilters({
                   placeholder="e.g., SELECT.*users"
                   disabled={isDisabled}
                 />
+                <Show when={!!filterPatternError}>
+                  <Text level="caption" className="text-content-negative-soft">
+                    Invalid regex — {filterPatternError}
+                  </Text>
+                </Show>
               </VStack>
             </div>
           </div>
@@ -290,7 +297,7 @@ export function TopFilters({
                   iconPosition="left"
                   onClick={onStart}
                   loading={isLoading}
-                  disabled={!hasTarget}
+                  disabled={!hasTarget || !!filterPatternError}
                 />
               </Show>
             </HStack>

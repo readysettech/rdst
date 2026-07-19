@@ -231,8 +231,9 @@ export function Sidebar({ isElectronMac = false }: SidebarProps) {
         </div>
       </div>
 
-      {/* Navigation */}
-      <Scrollable className="flex-1">
+      {/* Navigation — persistent scrollbar so the Advanced group is
+          discoverable/reachable below the fold at 1280×720. [QW2] */}
+      <Scrollable className="flex-1" type="auto">
         <nav className="flex flex-col gap-1 p-3">
           <NavLink key={homeItem.to} item={homeItem} active={isActive(homeItem)} />
 

@@ -123,7 +123,7 @@ function AnalysisDetailModal({ query, onClose, onAnalyze }: AnalysisDetailModalP
     hasRenderableRichSections,
   } = useMemo(() => getRichAnalysis(query?.raw_analysis), [query?.raw_analysis]);
   const showFallbackPerformance = query ? !perf && (query.execution_time_ms !== undefined || query.risk_score !== null) : false;
-  const showFallbackIssues = query ? query.issues.length > 0 || !hasRenderableRichSections : false;
+  const showFallbackIssues = query ? !hasRenderableRichSections : false;
   const showFallbackRecommendations = query ? query.recommendations.length > 0 : false;
   const showFallbackBenchmarks = query ? !rewriteTesting && Boolean(query.rewrite_benchmarks?.length) : false;
 
@@ -263,37 +263,39 @@ function AnalysisDetailModal({ query, onClose, onAnalyze }: AnalysisDetailModalP
                         </div>
                       )}
 
-                      {query.issues.length > 0 ? (
-                        <div>
-                          <Text
-                            as="label"
-                            level="label-small"
-                            className="text-content-layout-3 uppercase tracking-wider block mb-2"
-                          >
-                            Issues
-                          </Text>
-                          <div className="space-y-1.5">
-                            {query.issues.map((issue, i) => (
-                              <HStack key={i} className="gap-2 items-start">
-                                <Icon
-                                  name="alert"
-                                  label="Issue"
-                                  className="w-3.5 h-3.5 text-content-warning-soft shrink-0 mt-0.5"
-                                />
-                                <Text level="body-small" className="text-content-layout-2">
-                                  {issue}
-                                </Text>
-                              </HStack>
-                            ))}
+                      {/* Only render the fallback Issues block when there are no
+                          rich sections — otherwise it duplicates the rich
+                          "Performance Concerns" list. [QW12] */}
+                      {!hasRenderableRichSections &&
+                        (query.issues.length > 0 ? (
+                          <div>
+                            <Text
+                              as="label"
+                              level="label-small"
+                              className="text-content-layout-3 uppercase tracking-wider block mb-2"
+                            >
+                              Issues
+                            </Text>
+                            <div className="space-y-1.5">
+                              {query.issues.map((issue, i) => (
+                                <HStack key={i} className="gap-2 items-start">
+                                  <Icon
+                                    name="alert"
+                                    label="Issue"
+                                    className="w-3.5 h-3.5 text-content-warning-soft shrink-0 mt-0.5"
+                                  />
+                                  <Text level="body-small" className="text-content-layout-2">
+                                    {issue}
+                                  </Text>
+                                </HStack>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        !hasRenderableRichSections && (
+                        ) : (
                           <Text level="body-small" className="text-content-positive-soft">
                             No issues found
                           </Text>
-                        )
-                      )}
+                        ))}
 
                       {showFallbackRecommendations && (
                         <div>

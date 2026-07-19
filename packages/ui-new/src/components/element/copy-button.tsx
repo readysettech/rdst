@@ -17,8 +17,7 @@ export const CopyButton = ({ text }: { text: string }) => {
 
   return (
     <Button
-      id="copy-button"
-      label="Copied"
+      label={isCopied ? 'Copied' : 'Copy'}
       modifier="link"
       size="small"
       icon={isCopied ? 'tick-double' : 'copy'}

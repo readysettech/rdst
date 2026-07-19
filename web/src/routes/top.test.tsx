@@ -9,6 +9,9 @@ import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => options,
   useNavigate: () => vi.fn(),
+  // autoCodeSplitting rewrites the route's `component` to a lazyRouteComponent
+  // call; the tests render TopPage directly, so this just needs to exist.
+  lazyRouteComponent: (loader: unknown) => loader,
 }));
 
 vi.mock("@tanstack/react-query", () => ({

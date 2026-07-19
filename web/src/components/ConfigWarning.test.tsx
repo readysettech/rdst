@@ -145,7 +145,7 @@ describe('ConfigWarning env secret flow', () => {
 
     expect(await screen.findByRole('button', { name: /Try Free Trial/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Set API Key/i })).toBeTruthy();
-    expect(screen.getByText(/export RDST_ANTHROPIC_API_KEY=<value>/i)).toBeTruthy();
+    expect(screen.getByText(/export ANTHROPIC_API_KEY=<value>/i)).toBeTruthy();
   });
 
   it('stays off the demo page even when the key is missing', async () => {
