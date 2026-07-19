@@ -5,6 +5,32 @@ import json
 from typing import Dict, Any
 
 
+# Tokens that mark a Readyset compatibility check that did not *complete* — a
+# transient startup/connectivity/timeout/db error — as opposed to a definitive
+# "not supported" verdict. When the support column or raw output carries one of
+# these, the check is treated as a failure (surfaced as UNAVAILABLE upstream),
+# never as a false "Not Cacheable / BLOCKED" verdict (P69).
+_CHECK_INCOMPLETE_TOKENS = (
+    "db error",
+    "error",
+    "failed",
+    "timeout",
+    "timed out",
+    "connection",
+    "refused",
+    "unreachable",
+    "startup",
+    "unavailable",
+    "pending",
+)
+
+
+def _is_check_incomplete(text: str) -> bool:
+    """True when ``text`` signals the cacheability check could not complete."""
+    lowered = (text or "").lower()
+    return any(token in lowered for token in _CHECK_INCOMPLETE_TOKENS)
+
+
 def explain_create_cache_readyset(
     query: str = None,
     readyset_port: int | str = 5433,
@@ -77,10 +103,13 @@ def explain_create_cache_readyset(
             )
 
         if result.returncode != 0:
+            # Human-readable message only; the raw client output rides in
+            # error_detail for the UI's technical-details expander (P41).
             return {
                 "success": False,
                 "cacheable": False,
-                "error": f"Readyset EXPLAIN CREATE CACHE failed: {result.stderr}",
+                "error": "Readyset could not be reached to verify cacheability.",
+                "error_detail": (result.stderr or "").strip() or None,
                 "query": query,
             }
 
@@ -105,6 +134,19 @@ def explain_create_cache_readyset(
             if len(parts) >= 3:
                 query_id = parts[0].strip()
                 readyset_supported = parts[2].lower().strip()
+
+                # A "no: db error" (or any error-flavored) support value means
+                # the check itself could not run — not a definitive unsupported
+                # verdict. Report it as a check failure so the UI shows
+                # UNAVAILABLE, never a false BLOCKED (P69).
+                if _is_check_incomplete(readyset_supported):
+                    return {
+                        "success": False,
+                        "cacheable": False,
+                        "error": "Readyset could not complete the cacheability check.",
+                        "error_detail": parts[2].strip(),
+                        "query": query,
+                    }
 
                 # Check if Readyset supports this query
                 if readyset_supported == "yes":
@@ -147,11 +189,15 @@ def explain_create_cache_readyset(
             issues.append(f"Readyset does not support this query pattern")
             explanation = issues[0]
         elif "error" in output.lower() or "failed" in output.lower():
-            cacheable = False
-            confidence = "high"
-            # Extract error details
-            issues.append(f"Readyset error: {output}")
-            explanation = issues[0]
+            # A bare error line is a check that did not complete, not a
+            # definitive "not cacheable" verdict — surface as UNAVAILABLE (P69).
+            return {
+                "success": False,
+                "cacheable": False,
+                "error": "Readyset could not complete the cacheability check.",
+                "error_detail": output,
+                "query": query,
+            }
         else:
             # Try to parse as JSON
             try:
@@ -194,14 +240,16 @@ def explain_create_cache_readyset(
         return {
             "success": False,
             "cacheable": False,
-            "error": "Readyset EXPLAIN CREATE CACHE timed out",
+            "error": "The Readyset cacheability check timed out.",
+            "error_detail": "EXPLAIN CREATE CACHE timed out",
             "query": query,
         }
     except Exception as e:
         return {
             "success": False,
             "cacheable": False,
-            "error": f"Failed to execute EXPLAIN CREATE CACHE: {str(e)}",
+            "error": "The Readyset cacheability check failed to run.",
+            "error_detail": str(e),
             "query": query,
         }
 

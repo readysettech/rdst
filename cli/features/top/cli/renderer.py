@@ -301,9 +301,14 @@ class TopRenderer:
     def _render_error(self, event: TopErrorEvent) -> None:
         """Render an error event."""
         stderr_console = create_console(stderr=True)
+        # Append the correlation detail (exception class) when present — the
+        # humane envelope message alone hides the class from terminal users.
+        message = (
+            f"{event.message} ({event.detail})" if event.detail else event.message
+        )
         stderr_console.print(
             MessagePanel(
-                event.message,
+                message,
                 title=f"Error{' (' + event.stage + ')' if event.stage else ''}",
                 variant="error",
             )

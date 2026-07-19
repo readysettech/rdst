@@ -1,5 +1,6 @@
 export * from './alert'
 export * from './circular-progress'
+export * from './error-state'
 export * from './progress'
 export * from './spinner'
 export * from './toast'

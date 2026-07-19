@@ -116,6 +116,8 @@ class ReadysetCacheability(_Base):
     confidence: Optional[Literal["high", "medium", "low", "unknown"]] = None
     method: Optional[str] = None
     explanation: Optional[str] = None
+    # Raw technical text behind the UI's details expander (P41).
+    detail: Optional[str] = None
     issues: Optional[list[str]] = None
     warnings: Optional[list[str]] = None
 

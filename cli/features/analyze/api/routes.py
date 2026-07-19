@@ -93,6 +93,7 @@ def _event_to_sse(event: AnalyzeEvent) -> dict:
                         "confidence": event.confidence,
                         "method": event.method,
                         "explanation": event.explanation,
+                        "detail": event.detail,
                         "issues": event.issues,
                         "warnings": event.warnings,
                     }
@@ -118,7 +119,13 @@ def _event_to_sse(event: AnalyzeEvent) -> dict:
             ),
         }
     elif isinstance(event, ErrorEvent):
-        error_data: dict = {"message": event.message}
+        # Shared {code, message, detail} envelope (B7/T24); stage/partial_results
+        # ride alongside for consumers that use them.
+        error_data: dict = {
+            "code": event.code,
+            "message": event.message,
+            "detail": event.detail,
+        }
         if event.stage:
             error_data["stage"] = event.stage
         if event.partial_results:
@@ -153,7 +160,18 @@ async def _analyze_generator(
                 yield _event_to_sse(event)
         except Exception as e:
             run.error(e)
-            yield {"event": "error", "data": json.dumps({"message": str(e)})}
+            # Do not stream the raw exception text to the UI (B7/T24); keep the
+            # class name in ``detail`` for correlation only.
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {
+                        "code": "internal_error",
+                        "message": "The analysis could not be completed.",
+                        "detail": type(e).__name__,
+                    }
+                ),
+            }
 
 
 async def _quick_analyze_generator(

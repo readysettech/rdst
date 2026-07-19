@@ -2591,7 +2591,10 @@ export interface components {
             /** Target */
             target: string;
         };
-        /** AskClarificationNeededEvent */
+        /**
+         * AskClarificationNeededEvent
+         * @description Clarification needed from the user.
+         */
         AskClarificationNeededEvent: {
             /** Interpretations */
             interpretations: components["schemas"]["AskInterpretation"][];
@@ -2605,7 +2608,10 @@ export interface components {
              */
             type: "clarification_needed";
         };
-        /** AskClarificationQuestion */
+        /**
+         * AskClarificationQuestion
+         * @description A clarification question for the user.
+         */
         AskClarificationQuestion: {
             /** Id */
             id: string;
@@ -2614,7 +2620,10 @@ export interface components {
             /** Question */
             question: string;
         };
-        /** AskErrorEvent */
+        /**
+         * AskErrorEvent
+         * @description Ask encountered an error.
+         */
         AskErrorEvent: {
             /** Message */
             message: string;
@@ -2630,7 +2639,10 @@ export interface components {
             type: "error";
         };
         AskEvent: components["schemas"]["AskStatusEvent"] | components["schemas"]["AskSchemaLoadedEvent"] | components["schemas"]["AskClarificationNeededEvent"] | components["schemas"]["AskSqlGeneratedEvent"] | components["schemas"]["AskResultEvent"] | components["schemas"]["AskErrorEvent"];
-        /** AskInterpretation */
+        /**
+         * AskInterpretation
+         * @description A possible interpretation of the user's question.
+         */
         AskInterpretation: {
             /** Assumptions */
             assumptions: string[];
@@ -2677,7 +2689,10 @@ export interface components {
              */
             timeout?: number;
         };
-        /** AskResultEvent */
+        /**
+         * AskResultEvent
+         * @description Ask completed with results.
+         */
         AskResultEvent: {
             /** Columns */
             columns: string[];
@@ -2711,7 +2726,10 @@ export interface components {
              */
             type: "result";
         };
-        /** AskSchemaLoadedEvent */
+        /**
+         * AskSchemaLoadedEvent
+         * @description Schema has been loaded.
+         */
         AskSchemaLoadedEvent: {
             /** Source */
             source: string;
@@ -2725,7 +2743,10 @@ export interface components {
              */
             type: "schema_loaded";
         };
-        /** AskSqlGeneratedEvent */
+        /**
+         * AskSqlGeneratedEvent
+         * @description SQL has been generated.
+         */
         AskSqlGeneratedEvent: {
             /**
              * Explanation
@@ -2740,7 +2761,10 @@ export interface components {
              */
             type: "sql_generated";
         };
-        /** AskStatusEvent */
+        /**
+         * AskStatusEvent
+         * @description Status update during ask execution.
+         */
         AskStatusEvent: {
             /** Message */
             message: string;
@@ -3306,7 +3330,14 @@ export interface components {
              */
             type: "tool_call";
         };
-        /** ChatToolResultEvent */
+        /**
+         * ChatToolResultEvent
+         * @description Result of one tool execution.
+         *
+         *     For query_database, `data` carries sql/columns/rows/row_count/
+         *     execution_time_ms/truncated/query_hash/query_tag; for get_schema it
+         *     carries tables/source.
+         */
         ChatToolResultEvent: {
             /** Content */
             content: string;
@@ -3539,8 +3570,27 @@ export interface components {
             /** Success */
             success: boolean;
         };
-        /** ErrorEvent */
+        /**
+         * ErrorEvent
+         * @description Error event for service workflows.
+         *
+         *     ``code`` and ``detail`` mirror the shared HTTP error envelope
+         *     (``shared.api.app._error_envelope``) so an SSE failure carries the same
+         *     {code, message, detail} shape the client normalizes in ``lib/sse.ts``.
+         *     Both stay optional so existing producers that only set ``message`` keep
+         *     working; the client derives a code when one is absent.
+         */
         ErrorEvent: {
+            /**
+             * Code
+             * @default null
+             */
+            code?: string | null;
+            /**
+             * Detail
+             * @default null
+             */
+            detail?: unknown | null;
             /** Message */
             message: string;
             /**
@@ -4423,7 +4473,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** ProgressEvent */
+        /**
+         * ProgressEvent
+         * @description Progress update during a multi-step operation.
+         */
         ProgressEvent: {
             /** Message */
             message: string;
@@ -4437,7 +4490,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** QueryBenchmarkCompleteEvent */
+        /**
+         * QueryBenchmarkCompleteEvent
+         * @description Benchmark finished; carries the final tally.
+         */
         QueryBenchmarkCompleteEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -4457,7 +4513,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** QueryBenchmarkErrorEvent */
+        /**
+         * QueryBenchmarkErrorEvent
+         * @description Benchmark failed before completion.
+         */
         QueryBenchmarkErrorEvent: {
             /** Error */
             error: string;
@@ -4468,7 +4527,10 @@ export interface components {
             type: "error";
         };
         QueryBenchmarkEvent: components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"];
-        /** QueryBenchmarkProgressEvent */
+        /**
+         * QueryBenchmarkProgressEvent
+         * @description Benchmark progress tick.
+         */
         QueryBenchmarkProgressEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -4488,7 +4550,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** QueryBenchmarkStats */
+        /**
+         * QueryBenchmarkStats
+         * @description Statistics for a single benchmarked query.
+         */
         QueryBenchmarkStats: {
             /** Avg Ms */
             avg_ms: number;
@@ -4625,6 +4690,11 @@ export interface components {
              */
             confidence?: ("high" | "medium" | "low" | "unknown") | null;
             /**
+             * Detail
+             * @default null
+             */
+            detail?: string | null;
+            /**
              * Explanation
              * @default null
              */
@@ -4661,6 +4731,11 @@ export interface components {
              * @default null
              */
             confidence?: ("high" | "medium" | "low" | "unknown") | null;
+            /**
+             * Detail
+             * @default null
+             */
+            detail?: string | null;
             /**
              * Explanation
              * @default null
@@ -4945,7 +5020,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** ScanCompleteEvent */
+        /**
+         * ScanCompleteEvent
+         * @description Scan completed.
+         */
         ScanCompleteEvent: {
             /** Success */
             success: boolean;
@@ -4959,7 +5037,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** ScanErrorEvent */
+        /**
+         * ScanErrorEvent
+         * @description Scan error.
+         */
         ScanErrorEvent: {
             /** Message */
             message: string;
@@ -4975,7 +5056,10 @@ export interface components {
             type: "error";
         };
         ScanEvent: components["schemas"]["ScanStatusEvent"] | components["schemas"]["ScanFilesFoundEvent"] | components["schemas"]["ScanProgressEvent"] | components["schemas"]["ScanQueryResultEvent"] | components["schemas"]["ScanRegistryEvent"] | components["schemas"]["ScanCompleteEvent"] | components["schemas"]["ScanErrorEvent"];
-        /** ScanFilesFoundEvent */
+        /**
+         * ScanFilesFoundEvent
+         * @description Files with ORM patterns discovered.
+         */
         ScanFilesFoundEvent: {
             /** Files */
             files: {
@@ -5018,7 +5102,10 @@ export interface components {
          * @enum {string}
          */
         ScanPhase: "config" | "discovery" | "extraction" | "conversion" | "registry" | "analysis";
-        /** ScanProgressEvent */
+        /**
+         * ScanProgressEvent
+         * @description Progress update within a scan phase.
+         */
         ScanProgressEvent: {
             /** Current */
             current: number;
@@ -5034,7 +5121,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** ScanQueryResultEvent */
+        /**
+         * ScanQueryResultEvent
+         * @description Individual query result from scan.
+         */
         ScanQueryResultEvent: {
             /** Query */
             query: {
@@ -5046,7 +5136,10 @@ export interface components {
              */
             type: "query_result";
         };
-        /** ScanRegistryEvent */
+        /**
+         * ScanRegistryEvent
+         * @description Registry save results.
+         */
         ScanRegistryEvent: {
             /** New Queries */
             new_queries: number;
@@ -5116,7 +5209,10 @@ export interface components {
              */
             warn_threshold?: number;
         };
-        /** ScanStatusEvent */
+        /**
+         * ScanStatusEvent
+         * @description Status update during scan.
+         */
         ScanStatusEvent: {
             /** Message */
             message: string;
@@ -5569,7 +5665,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** TopCompleteEvent */
+        /**
+         * TopCompleteEvent
+         * @description Operation completed.
+         */
         TopCompleteEvent: {
             /** Newly Saved */
             newly_saved: number;
@@ -5585,7 +5684,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** TopConnectedEvent */
+        /**
+         * TopConnectedEvent
+         * @description Database connection established.
+         */
         TopConnectedEvent: {
             /** Db Engine */
             db_engine: string;
@@ -5610,7 +5712,10 @@ export interface components {
             /** Setting Name */
             setting_name: string;
         };
-        /** TopDbLimitWarningEvent */
+        /**
+         * TopDbLimitWarningEvent
+         * @description Database query size limit is below recommended threshold.
+         */
         TopDbLimitWarningEvent: {
             /** Db Engine */
             db_engine: string;
@@ -5626,8 +5731,25 @@ export interface components {
              */
             type: "db_limit_warning";
         };
-        /** TopErrorEvent */
+        /**
+         * TopErrorEvent
+         * @description Error occurred.
+         *
+         *     ``code`` and ``detail`` mirror the shared error envelope (B7/T24):
+         *     ``message`` stays humane, ``detail`` carries the exception class name for
+         *     correlation — never the raw ``str(e)``, which can embed host/DSN material.
+         */
         TopErrorEvent: {
+            /**
+             * Code
+             * @default null
+             */
+            code?: string | null;
+            /**
+             * Detail
+             * @default null
+             */
+            detail?: string | null;
             /** Message */
             message: string;
             /**
@@ -5666,7 +5788,10 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /** TopQueriesEvent */
+        /**
+         * TopQueriesEvent
+         * @description Batch of top queries.
+         */
         TopQueriesEvent: {
             /** Db Engine */
             db_engine: string;
@@ -5692,7 +5817,10 @@ export interface components {
              */
             type: "queries";
         };
-        /** TopQueryData */
+        /**
+         * TopQueryData
+         * @description Individual query data.
+         */
         TopQueryData: {
             /** Avg Time */
             avg_time: string;
@@ -5754,7 +5882,10 @@ export interface components {
             /** Total Time */
             total_time: string;
         };
-        /** TopQuerySavedEvent */
+        /**
+         * TopQuerySavedEvent
+         * @description Query saved to registry.
+         */
         TopQuerySavedEvent: {
             /** Is New */
             is_new: boolean;
@@ -5766,7 +5897,10 @@ export interface components {
              */
             type: "query_saved";
         };
-        /** TopSourceFallbackEvent */
+        /**
+         * TopSourceFallbackEvent
+         * @description Source fallback occurred.
+         */
         TopSourceFallbackEvent: {
             /** From Source */
             from_source: string;
@@ -5780,7 +5914,10 @@ export interface components {
              */
             type: "source_fallback";
         };
-        /** TopStatusEvent */
+        /**
+         * TopStatusEvent
+         * @description Progress status update.
+         */
         TopStatusEvent: {
             /** Message */
             message: string;

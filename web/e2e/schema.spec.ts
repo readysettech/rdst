@@ -175,9 +175,14 @@ test('surfaces a semantic-layer status failure', async ({
   await configureTestTarget(page, { hasPassword: true })
 
   await page.goto('/schema')
+  // C-01's shared error handler (register_error_handlers) wraps every HTTP
+  // failure in the {code, message, detail} envelope, so the 503 body is no
+  // longer the bare {detail} FastAPI shape. The schema surface still renders
+  // the raw `Error: HTTP <status>: <body>` line, so the visible text now
+  // carries the full envelope.
   await expect(
     page.getByText(
-      'Error: HTTP 503: {"detail":"database introspection unavailable"}',
+      'Error: HTTP 503: {"code":"service_unavailable","message":"database introspection unavailable","detail":"database introspection unavailable"}',
       {
         exact: true,
       }

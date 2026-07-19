@@ -207,9 +207,14 @@ class TopService:
 
         except Exception as e:
             logger.debug("Error in get_top_queries", exc_info=True)
+            # Shared error envelope (B7/T24): humane message; the exception
+            # class name in detail; raw str(e) (may embed host/DSN) stays in
+            # the debug log only.
             yield TopErrorEvent(
                 type="error",
-                message=str(e),
+                message="The slow-query lookup could not be completed.",
+                code="internal_error",
+                detail=type(e).__name__,
                 stage="execution",
             )
 
@@ -390,9 +395,12 @@ class TopService:
 
         except Exception as e:
             logger.debug("Error in stream_realtime", exc_info=True)
+            # Shared error envelope (B7/T24) — see get_top_queries above.
             yield TopErrorEvent(
                 type="error",
-                message=str(e),
+                message="Slow-query monitoring stopped unexpectedly.",
+                code="internal_error",
+                detail=type(e).__name__,
                 stage="execution",
             )
         finally:

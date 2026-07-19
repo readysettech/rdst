@@ -47,6 +47,9 @@ class ReadysetCheckedEvent:
     confidence: Optional[Literal["high", "medium", "low", "unknown"]] = None
     method: Optional[str] = None
     explanation: Optional[str] = None
+    # Raw technical text (driver/client output) for the UI's details expander;
+    # `explanation` stays human-readable (P41).
+    detail: Optional[str] = None
     issues: Optional[List[str]] = None
     warnings: Optional[List[str]] = None
 

@@ -1,19 +1,113 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, TypeAdapter
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 class HealthResponse(BaseModel):
     status: str
+
+
+# Shared error envelope ------------------------------------------------------
+# Every HTTP failure surfaces one {code, message, detail} shape (B7/T24). The
+# same shape is emitted on SSE `error` events (see shared.service_events and the
+# per-feature SSE serializers) and normalized client-side in lib/sse.ts, so the
+# UI never has to parse an ad-hoc failure body or leak a raw ``str(e)``.
+_STATUS_CODE_MAP: dict[int, str] = {
+    400: "bad_request",
+    401: "unauthorized",
+    403: "forbidden",
+    404: "not_found",
+    405: "method_not_allowed",
+    409: "conflict",
+    413: "payload_too_large",
+    422: "invalid_request",
+    429: "rate_limited",
+    500: "internal_error",
+    502: "bad_gateway",
+    503: "service_unavailable",
+    504: "timeout",
+}
+
+
+def _error_envelope(
+    code: str, message: str, detail: Any | None = None
+) -> dict[str, Any]:
+    """Build the shared error envelope. ``detail`` carries the most technical
+    fragment (raw string, validation array, or exception type) for an expander;
+    ``message`` is always the human-facing summary."""
+    return {"code": code, "message": message, "detail": detail}
+
+
+def register_error_handlers(app: FastAPI) -> None:
+    """Attach the shared error-envelope handlers to ``app``.
+
+    Additive by design: HTTP handlers keep ``detail`` populated with the
+    original FastAPI value so existing clients that read ``detail`` keep
+    working, while ``code`` and ``message`` are added for the shared contract.
+    The catch-all handler never echoes ``str(exc)`` as the message.
+    """
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_exception_handler(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
+        code = _STATUS_CODE_MAP.get(exc.status_code, "error")
+        detail = exc.detail
+        if isinstance(detail, dict):
+            # A route already emitted a structured body — respect an explicit
+            # code/message and pass the rest through as detail.
+            code = str(detail.get("code", code))
+            message = str(detail.get("message") or detail.get("detail") or "Request failed")
+        elif isinstance(detail, str) and detail.strip():
+            message = detail
+        else:
+            message = "Request failed"
+        headers = getattr(exc, "headers", None)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_error_envelope(code, message, detail),
+            headers=headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        errors = exc.errors()
+        first = errors[0].get("msg") if errors else None
+        message = str(first) if first else "The request was invalid."
+        return JSONResponse(
+            status_code=422,
+            content=_error_envelope("invalid_request", message, errors),
+        )
+
+    @app.exception_handler(Exception)
+    async def _unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        # Never surface raw exception text (or even the class name) to the
+        # client: several consumers render ``detail`` directly, so it must stay
+        # humane. The class name and stack go to the server log for correlation.
+        logging.getLogger("rdst.api").exception(
+            "Unhandled %s on %s %s", type(exc).__name__, request.method, request.url.path
+        )
+        message = "An unexpected server error occurred."
+        return JSONResponse(
+            status_code=500,
+            content=_error_envelope("internal_error", message, message),
+        )
 
 
 @asynccontextmanager
@@ -173,6 +267,8 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    register_error_handlers(app)
 
     from features.agent.api import routes as agent
     from features.analyze.api import routes as analyze

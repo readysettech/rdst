@@ -82,10 +82,17 @@ class TopCompleteEvent:
 
 @dataclass
 class TopErrorEvent:
-    """Error occurred."""
+    """Error occurred.
+
+    ``code`` and ``detail`` mirror the shared error envelope (B7/T24):
+    ``message`` stays humane, ``detail`` carries the exception class name for
+    correlation — never the raw ``str(e)``, which can embed host/DSN material.
+    """
 
     type: Literal["error"]
     message: str
+    code: Optional[str] = None
+    detail: Optional[str] = None
     stage: Optional[str] = None
 
 

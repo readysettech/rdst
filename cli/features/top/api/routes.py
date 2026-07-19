@@ -167,7 +167,12 @@ def _event_to_sse(event: TopEvent) -> dict:
             ),
         }
     elif isinstance(event, TopErrorEvent):
-        error_data = {"message": event.message}
+        # Shared {code, message, detail} envelope (B7/T24).
+        error_data = {
+            "code": event.code,
+            "message": event.message,
+            "detail": event.detail,
+        }
         if event.stage:
             error_data["stage"] = event.stage
         return {
@@ -218,7 +223,17 @@ async def _realtime_generator(
                 run.success = True
         except Exception as e:
             run.error(e)
-            yield {"event": "error", "data": json.dumps({"message": str(e)})}
+            # Shared {code, message, detail} envelope (B7/T24); never raw str(e).
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {
+                        "code": "internal_error",
+                        "message": "The slow-query lookup could not be completed.",
+                        "detail": type(e).__name__,
+                    }
+                ),
+            }
 
 
 async def _historical_generator(
@@ -250,7 +265,17 @@ async def _historical_generator(
                 yield _event_to_sse(event)
         except Exception as e:
             run.error(e)
-            yield {"event": "error", "data": json.dumps({"message": str(e)})}
+            # Shared {code, message, detail} envelope (B7/T24); never raw str(e).
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {
+                        "code": "internal_error",
+                        "message": "The slow-query lookup could not be completed.",
+                        "detail": type(e).__name__,
+                    }
+                ),
+            }
 
 
 @router.get("/top", response_model=TopHistoricalResponse)

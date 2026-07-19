@@ -20,16 +20,22 @@ type ResultsSearch = {
 };
 
 export const Route = createFileRoute('/results')({
-  validateSearch: (search: Record<string, unknown>): ResultsSearch => {
-    if (!search.query || typeof search.query !== 'string') {
+  // Parse-only: never throw here. Throwing `redirect` from `validateSearch` is
+  // wrapped by TanStack Router as a `SearchParamError` that bubbles to the root
+  // boundary and replaces the whole app with a chrome-less error screen (B1).
+  validateSearch: (search: Record<string, unknown>): ResultsSearch => ({
+    query: typeof search.query === 'string' ? search.query : '',
+    target: typeof search.target === 'string' ? search.target : undefined,
+    fast: search.fast === true || search.fast === 'true',
+    params: typeof search.params === 'string' ? search.params : undefined,
+  }),
+  // `throw redirect` IS honored in `beforeLoad`, so the missing-query guard
+  // lives here — a bare `/results` cleanly redirects to the editor with the
+  // app shell intact, instead of crashing.
+  beforeLoad: ({ search }) => {
+    if (!search.query) {
       throw redirect({ to: '/analyze' });
     }
-    return {
-      query: search.query,
-      target: typeof search.target === 'string' ? search.target : undefined,
-      fast: search.fast === true || search.fast === 'true',
-      params: typeof search.params === 'string' ? search.params : undefined,
-    };
   },
   component: ResultsRouteComponent,
 });
@@ -49,7 +55,7 @@ export function ResultsPage({ search }: ResultsPageProps) {
       return undefined;
     }
   }, [paramsJson]);
-  const { analyze, state, progress, results, rewriteTesting, readysetCacheability, error } = useAnalyze();
+  const { analyze, state, progress, results, rewriteTesting, readysetCacheability, error, errorEnvelope } = useAnalyze();
   const passwordLock = useTargetPasswordLock(target);
   const [isInteractiveOpen, setIsInteractiveOpen] = useState(false);
 
@@ -61,6 +67,27 @@ export function ResultsPage({ search }: ResultsPageProps) {
       cacheQuery(query, query);
     }
   }, [query, target, cacheQuery]);
+
+  // Route an error-state recovery action to a known destination (type-safe
+  // navigation; the shared contract only ever hands back these routes).
+  const handleRecover = useCallback(
+    (to: string) => {
+      if (to === '/cache') {
+        navigate({ to: '/cache' });
+      } else if (to === '/configure') {
+        navigate({ to: '/configure' });
+      } else {
+        navigate({ to: '/analyze' });
+      }
+    },
+    [navigate]
+  );
+
+  const handleRetryAnalyze = useCallback(() => {
+    if (query) {
+      analyze({ query, target, fast });
+    }
+  }, [analyze, query, target, fast]);
   const [hasExistingChat, setHasExistingChat] = useState(false);
 
   // Check if query has parameters that need substitution
@@ -229,9 +256,12 @@ export function ResultsPage({ search }: ResultsPageProps) {
         rewriteTesting={rewriteTesting}
         readysetCacheability={readysetCacheability}
         error={error}
+        errorEnvelope={errorEnvelope}
         target={target}
         cacheDeployed={true}
         onCacheQuery={handleCacheQuery}
+        onRecover={handleRecover}
+        onRetry={handleRetryAnalyze}
         isCaching={isCachePending}
       />
 

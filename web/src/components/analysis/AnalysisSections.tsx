@@ -4,12 +4,14 @@
  * Extracted from AnalysisResults.tsx so that both the standalone /results page
  * and the scan analysis modal can render rich analysis data without duplication.
  */
+import { useId } from "react";
 import { Tag } from "@rs/ui-new/tag";
 import { Text } from "@rs/ui-new/text";
 import { Card } from "@rs/ui-new/card";
 import { Icon } from "@rs/ui-new/icon";
 import { Button } from "@rs/ui-new/button";
 import { HStack, VStack } from "@rs/ui-new/stack";
+import { DetailExpander } from "@rs/ui-new/error-state";
 import { m } from "@rs/ui-new/motion";
 import { SQLDisplay } from "../SQLDisplay";
 import type {
@@ -936,11 +938,44 @@ export function ReadysetCacheabilitySection({
   onDeployNavigate?: () => void;
   isCaching?: boolean;
 }) {
+  const detailId = useId();
+  // A definitive "Not Cacheable / BLOCKED" verdict is only trustworthy when the
+  // check completed with a confident, clean answer. An errored or low-confidence
+  // result (a returned "no: db error" row, Readyset startup/timeout, unknown
+  // status) must read as "Not Verified / UNAVAILABLE", never a false definitive
+  // BLOCKED (P69). A genuine unsupported verdict (confidence "high", no error
+  // signal) still renders as BLOCKED.
+  const CHECK_ERROR =
+    /db error|connection|timeout|timed out|unreachable|refused|startup|unavailable|pending|failed|\berror\b/i;
+  const verdictLooksUnreliable =
+    cacheability.cacheable === false &&
+    (cacheability.confidence === "low" ||
+      cacheability.confidence === "unknown" ||
+      CHECK_ERROR.test(cacheability.explanation ?? "") ||
+      (cacheability.issues ?? []).some((issue) => CHECK_ERROR.test(issue)));
   const isVerified =
     cacheability.checked &&
     cacheability.method !== "static_analysis" &&
-    cacheability.method !== "readyset_unavailable";
+    cacheability.method !== "readyset_unavailable" &&
+    !verdictLooksUnreliable;
   const isCacheable = isVerified && cacheability.cacheable === true;
+  // Keep raw driver/client text out of the primary copy (P41): the backend now
+  // sends a human `explanation` plus raw `detail`; if a raw-looking explanation
+  // still arrives (legacy payload / unreliable verdict), swap it for a generic
+  // line and move the raw text behind the technical-details expander.
+  const rawDetail =
+    (cacheability as ReadysetCacheability & { detail?: string | null }).detail ??
+    undefined;
+  const explanationLooksRaw =
+    !isVerified &&
+    Boolean(cacheability.explanation) &&
+    CHECK_ERROR.test(cacheability.explanation ?? "");
+  const bodyText =
+    explanationLooksRaw && rawDetail === undefined
+      ? "Readyset could not complete the cacheability check, so this query's cacheability has not been verified."
+      : cacheability.explanation;
+  const technicalDetail =
+    rawDetail ?? (explanationLooksRaw ? cacheability.explanation ?? undefined : undefined);
   const variant: StyleVariant = !isVerified
     ? "warning"
     : isCacheable
@@ -1008,13 +1043,18 @@ export function ReadysetCacheabilitySection({
               />
             </HStack>
           </HStack>
-          {cacheability.explanation && (
+          {bodyText && (
             <Text
               level="body-small"
               className="text-content-layout-2 leading-relaxed"
             >
-              {cacheability.explanation}
+              {bodyText}
             </Text>
+          )}
+          {technicalDetail && (
+            <div className="mt-3">
+              <DetailExpander detail={technicalDetail} id={detailId} />
+            </div>
           )}
 
           {/* Cache action buttons */}

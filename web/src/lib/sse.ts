@@ -11,6 +11,12 @@ import {
   BenchmarkRequest,
   BenchmarkState,
 } from './api';
+import {
+  type ApiErrorEnvelope,
+  friendlySqlError,
+  normalizeHttpError,
+  normalizeSseError,
+} from './errorContract';
 
 // Benchmark SSE event types are derived from the backend-generated discriminated union.
 // Backend source of truth: rdst/features/query_registry/events.py (QueryBenchmarkEvent).
@@ -36,6 +42,7 @@ interface UseAnalyzeReturn {
   rewriteTesting: RewriteTesting | undefined;
   readysetCacheability: ReadysetCacheability | undefined;
   error: string | undefined;
+  errorEnvelope: ApiErrorEnvelope | undefined;
   reset: () => void;
 }
 
@@ -79,9 +86,16 @@ export function useAnalyze(): UseAnalyzeReturn {
   const [rewriteTesting, setRewriteTesting] = useState<RewriteTesting | undefined>(undefined);
   const [readysetCacheability, setReadysetCacheability] = useState<ReadysetCacheability | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
-  
+  const [errorEnvelope, setErrorEnvelope] = useState<ApiErrorEnvelope | undefined>(undefined);
+
   const abortControllerRef = useRef<AbortController | null>(null);
   useTargetSwitchLock('analyze', state === 'analyzing');
+
+  const failWith = useCallback((envelope: ApiErrorEnvelope) => {
+    setError(envelope.message);
+    setErrorEnvelope(envelope);
+    setState('error');
+  }, []);
 
   const reset = useCallback(() => {
     if (abortControllerRef.current) {
@@ -94,6 +108,7 @@ export function useAnalyze(): UseAnalyzeReturn {
     setRewriteTesting(undefined);
     setReadysetCacheability(undefined);
     setError(undefined);
+    setErrorEnvelope(undefined);
   }, []);
 
   const analyze = useCallback(async (request: AnalyzeRequest) => {
@@ -113,6 +128,7 @@ export function useAnalyze(): UseAnalyzeReturn {
     setRewriteTesting(undefined);
     setReadysetCacheability(undefined);
     setError(undefined);
+    setErrorEnvelope(undefined);
 
     try {
       console.log('[SSE] Sending POST to /api/analyze');
@@ -128,9 +144,16 @@ export function useAnalyze(): UseAnalyzeReturn {
       console.log('[SSE] Response status:', response.status);
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[SSE] HTTP error response body:', errorText);
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+        // Normalize the HTTP failure into the shared envelope rather than
+        // surfacing a raw status/body string to the UI (B7/T24).
+        let parsedBody: unknown;
+        try {
+          parsedBody = await response.clone().json();
+        } catch {
+          parsedBody = await response.text().catch(() => undefined);
+        }
+        failWith(normalizeHttpError(response.status, parsedBody));
+        return;
       }
       
       if (!response.body) {
@@ -194,9 +217,25 @@ export function useAnalyze(): UseAnalyzeReturn {
                   setReadysetCacheability(data as ReadysetCacheability);
                   break;
 
-                case 'complete':
+                case 'complete': {
                   console.log('[SSE] Analysis complete:', data);
-                  setResults(data as CompleteEvent);
+                  const completeData = data as CompleteEvent;
+                  // A failed EXPLAIN (e.g. invalid SQL) comes back on the
+                  // `complete` event as top-level success with
+                  // explain_results.success === false. Render it as a real
+                  // error, never a zero-score "success" (B3/T3).
+                  if (completeData.explain_results?.success === false) {
+                    const explainError = completeData.explain_results?.error as
+                      | string
+                      | undefined;
+                    failWith({
+                      code: 'invalid_sql',
+                      message: friendlySqlError(explainError),
+                      detail: explainError,
+                    });
+                    break;
+                  }
+                  setResults(completeData);
                   setRewriteTesting(
                     normalizeRewriteTesting(data.rewrite_testing) ??
                       normalizeRewriteTesting(data.formatted?.rewrite_testing)
@@ -206,11 +245,11 @@ export function useAnalyze(): UseAnalyzeReturn {
                   }
                   setState('complete');
                   break;
+                }
 
                 case 'error':
                   console.log('[SSE] Error:', data.message);
-                  setError(data.message);
-                  setState('error');
+                  failWith(normalizeSseError(data));
                   break;
 
                 default: {
@@ -234,14 +273,18 @@ export function useAnalyze(): UseAnalyzeReturn {
         console.log('[SSE] Request aborted by user');
         return;
       }
-      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
       console.error('[SSE] Error during analysis:', err);
-      setError(errorMessage);
-      setState('error');
+      // Transport-level failure (network down, stream aborted mid-flight):
+      // normalize into the shared envelope instead of a raw err.message.
+      failWith({
+        code: 'network_error',
+        message: 'Could not reach the analysis service. Check that it is running and try again.',
+        detail: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       abortControllerRef.current = null;
     }
-  }, []);
+  }, [failWith]);
 
   return {
     analyze,
@@ -251,6 +294,7 @@ export function useAnalyze(): UseAnalyzeReturn {
     rewriteTesting,
     readysetCacheability,
     error,
+    errorEnvelope,
     reset
   };
 }

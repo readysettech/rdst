@@ -106,7 +106,13 @@ async def test_clear_keyring_rejects_mismatched_origin_host(app, tmp_rdst_home):
             headers={"origin": "http://localhost:8787"},
         )
     assert response.status_code == 403
-    assert response.json() == {"detail": "Origin/Referer host mismatch"}
+    # B7/T24 additive error envelope: the original `detail` is preserved, with
+    # `code`/`message` added for the shared contract.
+    assert response.json() == {
+        "code": "forbidden",
+        "message": "Origin/Referer host mismatch",
+        "detail": "Origin/Referer host mismatch",
+    }
 
 
 async def test_clear_keyring_rejects_non_loopback_client(app, tmp_rdst_home):
@@ -119,4 +125,10 @@ async def test_clear_keyring_rejects_non_loopback_client(app, tmp_rdst_home):
             headers={"origin": "http://127.0.0.1:8787"},
         )
     assert response.status_code == 403
-    assert response.json() == {"detail": "Forbidden"}
+    # B7/T24 additive error envelope (see above): `detail` preserved, `code`/
+    # `message` added.
+    assert response.json() == {
+        "code": "forbidden",
+        "message": "Forbidden",
+        "detail": "Forbidden",
+    }

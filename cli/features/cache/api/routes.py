@@ -171,9 +171,17 @@ def _event_to_sse(event: CacheEvent) -> dict:
             }),
         }
     if isinstance(event, ErrorEvent):
+        # Shared {code, message, detail} envelope (B7/T24).
+        error_data: dict = {
+            "code": event.code,
+            "message": event.message,
+            "detail": event.detail,
+        }
+        if event.stage:
+            error_data["stage"] = event.stage
         return {
             "event": "error",
-            "data": json.dumps({"message": event.message}),
+            "data": json.dumps(error_data),
         }
     # Fallback
     return {

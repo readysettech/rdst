@@ -29,7 +29,9 @@ const routeConfig: Record<string, RouteConfig> = {
   "/fleet": { label: "Fleet", icon: "building" },
   "/readyset": { label: "Readyset Testing", icon: "test-tube" },
   "/configure": { label: "Configure", icon: "settings" },
+  "/onboarding": { label: "Get Started", icon: "querypilot" },
   "/dev-settings": { label: "Dev Settings", icon: "adjustment-horizontal" },
+  "/test": { label: "Test", icon: "adjustment-horizontal" },
 };
 
 interface HeaderProps {
@@ -44,8 +46,10 @@ export function Header({
   const router = useRouterState();
   const currentPath = router.location.pathname;
   const config = routeConfig[currentPath];
-  const currentLabel = config?.label || "RDST";
-  const currentIcon = config?.icon || "speedometer";
+  // An unknown path is a 404 (the branded notFoundComponent renders below the
+  // breadcrumb). Show "Not Found" rather than a redundant "RDST › RDST" (QW7).
+  const currentLabel = config?.label || "Not Found";
+  const currentIcon = config?.icon || "search";
   const parentPath = config?.parent;
   const parentConfig = parentPath ? routeConfig[parentPath] : null;
 

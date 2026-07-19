@@ -524,6 +524,7 @@ class AnalyzeService:
                     "error": explain_result.get(
                         "error", "Readyset cacheability verification failed."
                     ),
+                    "error_detail": explain_result.get("error_detail"),
                     "explain_cache_result": explain_result,
                 }
 
@@ -603,7 +604,13 @@ class AnalyzeService:
             }
 
         except Exception as e:
-            return {"success": False, "error": f"Readyset analysis failed: {str(e)}"}
+            # Human message as the primary text; raw exception only in detail
+            # so the UI never renders a driver/connection dump verbatim (P41).
+            return {
+                "success": False,
+                "error": "The Readyset cacheability check could not be completed.",
+                "error_detail": str(e),
+            }
 
     async def _process_results(
         self,
@@ -701,6 +708,9 @@ class AnalyzeService:
                 "explanation": readyset_result.get(
                     "error", "Readyset cacheability verification was unavailable."
                 ),
+                # Raw driver/client text stays out of the primary message; the
+                # UI shows it behind a technical-details expander (P41).
+                "detail": readyset_result.get("error_detail"),
                 "issues": [],
                 "warnings": [],
             }

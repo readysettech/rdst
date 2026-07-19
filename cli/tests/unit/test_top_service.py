@@ -324,7 +324,10 @@ class TestTopServiceGetTopQueries:
 
         # Should have status then error
         assert events[-1].type == "error"
-        assert "Test exception" in events[-1].message
+        # Envelope (B7/T24): humane message; class name in detail; raw stays out.
+        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].detail == "Exception"
+        assert "Test exception" not in events[-1].message
 
 
 class TestTopServiceSourceSelection:
@@ -645,7 +648,9 @@ class TestTopServiceErrorHandling:
                 events.append(event)
 
         assert events[-1].type == "error"
-        assert "Config file corrupted" in events[-1].message
+        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].detail == "RuntimeError"
+        assert "Config file corrupted" not in events[-1].message
 
     @pytest.mark.asyncio
     async def test_database_connection_error(self, service, input_data, options):
@@ -668,7 +673,9 @@ class TestTopServiceErrorHandling:
                     events.append(event)
 
         assert events[-1].type == "error"
-        assert "Connection refused" in events[-1].message
+        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].detail == "ConnectionError"
+        assert "Connection refused" not in events[-1].message
 
     @pytest.mark.asyncio
     async def test_query_execution_returns_failed_result(
@@ -727,7 +734,9 @@ class TestTopServiceErrorHandling:
                         events.append(event)
 
         assert events[-1].type == "error"
-        assert "Invalid data format" in events[-1].message
+        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].detail == "ValueError"
+        assert "Invalid data format" not in events[-1].message
 
     @pytest.mark.asyncio
     async def test_empty_target_config_keys(self, service, options):
@@ -831,10 +840,8 @@ class TestTopServiceTimeoutScenarios:
                 events.append(event)
 
         assert events[-1].type == "error"
-        assert (
-            "timed out" in events[-1].message.lower()
-            or "timeout" in events[-1].message.lower()
-        )
+        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].detail == "TimeoutError"
 
     @pytest.mark.asyncio
     async def test_database_query_timeout(self, service, input_data, options):
@@ -925,7 +932,9 @@ class TestTopServiceNetworkFailures:
                     events.append(event)
 
         assert events[-1].type == "error"
-        assert "unreachable" in events[-1].message.lower()
+        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].detail == "OSError"
+        assert "unreachable" not in events[-1].message.lower()
 
     @pytest.mark.asyncio
     async def test_connection_reset(self, service, input_data, options):
@@ -992,7 +1001,9 @@ class TestTopServiceNetworkFailures:
                     events.append(event)
 
         assert events[-1].type == "error"
-        assert "SSL" in events[-1].message or "CERTIFICATE" in events[-1].message
+        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].detail == "Exception"
+        assert "CERTIFICATE" not in events[-1].message
 
     @pytest.mark.asyncio
     async def test_authentication_failure(self, service, input_data, options):
@@ -1015,7 +1026,9 @@ class TestTopServiceNetworkFailures:
                     events.append(event)
 
         assert events[-1].type == "error"
-        assert "authentication" in events[-1].message.lower()
+        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].detail == "Exception"
+        assert "authentication" not in events[-1].message.lower()
 
     @pytest.mark.asyncio
     async def test_registry_save_network_error(self, service, input_data):
@@ -1067,4 +1080,6 @@ class TestTopServiceNetworkFailures:
 
         # Registry save failure causes error event (currently fatal)
         assert events[-1].type == "error"
-        assert "Network error" in events[-1].message
+        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].detail == "OSError"
+        assert "Network error" not in events[-1].message

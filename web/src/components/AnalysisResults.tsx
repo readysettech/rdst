@@ -2,6 +2,7 @@ import { Spinner } from "@rs/ui-new/spinner";
 import { Text } from "@rs/ui-new/text";
 import { Icon } from "@rs/ui-new/icon";
 import { HStack, VStack } from "@rs/ui-new/stack";
+import { ErrorState } from "@rs/ui-new/error-state";
 import { m } from "@rs/ui-new/motion";
 import type {
   AnalysisState,
@@ -10,6 +11,12 @@ import type {
   RewriteTesting,
   ReadysetCacheability,
 } from "../lib/api";
+import {
+  type ApiErrorEnvelope,
+  classifyError,
+  recoveryFor,
+  retryHelps,
+} from "../lib/errorContract";
 import {
   type ValidIconName,
   resolveRewriteTesting,
@@ -27,10 +34,15 @@ interface AnalysisResultsProps {
   rewriteTesting?: RewriteTesting;
   readysetCacheability?: ReadysetCacheability;
   error?: string;
+  errorEnvelope?: ApiErrorEnvelope;
   target?: string;
   cacheDeployed?: boolean;
   onCacheQuery?: () => void;
   onDeployNavigate?: () => void;
+  /** Navigate to a recovery destination (e.g. back to `/analyze`). */
+  onRecover?: (to: string) => void;
+  /** Re-run the analysis; only surfaced when a retry can plausibly help. */
+  onRetry?: () => void;
   isCaching?: boolean;
 }
 
@@ -152,10 +164,13 @@ export function AnalysisResults({
   rewriteTesting,
   readysetCacheability,
   error,
+  errorEnvelope,
   target,
   cacheDeployed,
   onCacheQuery,
   onDeployNavigate,
+  onRecover,
+  onRetry,
   isCaching,
 }: AnalysisResultsProps) {
   if (state === "idle") {
@@ -358,34 +373,43 @@ export function AnalysisResults({
   }
 
   if (state === "error") {
+    // Route the failure through the shared error contract: friendly cause, a
+    // recovery action to the right screen, retry only when it can help, and the
+    // raw driver text tucked behind an expander (retires the P41 leak).
+    const envelope: ApiErrorEnvelope = errorEnvelope ?? {
+      code: "error",
+      message:
+        error ||
+        "An unknown error occurred while analyzing the query. Please try again.",
+    };
+    const errorClass = classifyError(envelope);
+    const isInvalidSql = envelope.code === "invalid_sql";
+    const title = isInvalidSql ? "Analysis Failed" : "Analysis could not complete";
+
+    let action: { label: string; onClick: () => void } | undefined;
+    if (isInvalidSql && onRecover) {
+      action = { label: "Edit query", onClick: () => onRecover("/analyze") };
+    } else {
+      const rec = recoveryFor(errorClass);
+      if (rec && onRecover) {
+        action = { label: rec.label, onClick: () => onRecover(rec.to) };
+      }
+    }
+
     return (
       <m.div
-        className="bg-surface-negative-soft/50 border border-border-negative-soft rounded-xl p-6"
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3 }}
       >
-        <HStack className="gap-4 items-start">
-          <div className="w-12 h-12 rounded-xl bg-surface-negative-soft flex items-center justify-center shrink-0">
-            <Icon
-              name="alert"
-              label="Error"
-              className="w-6 h-6 text-content-negative-soft"
-            />
-          </div>
-          <VStack className="gap-2 items-start flex-1">
-            <Text level="headline-4" className="text-content-negative-soft">
-              Analysis Failed
-            </Text>
-            <Text
-              level="body-small"
-              className="text-content-layout-2 leading-relaxed"
-            >
-              {error ||
-                "An unknown error occurred while analyzing the query. Please try again."}
-            </Text>
-          </VStack>
-        </HStack>
+        <ErrorState
+          errorClass={errorClass}
+          title={title}
+          message={envelope.message}
+          action={action}
+          onRetry={retryHelps(errorClass) && onRetry ? onRetry : undefined}
+          detail={envelope.detail}
+        />
       </m.div>
     );
   }
@@ -394,6 +418,17 @@ export function AnalysisResults({
     const { llm_analysis, explain_results, formatted } = results;
     const perf =
       llm_analysis?.performance_assessment || formatted?.analysis_summary;
+    // Suppress the Performance hero when there is no real assessment (score 0
+    // AND rating unknown/absent) — a zero-score hero reads as a false verdict
+    // (B3/T3). A genuine low-but-rated score still renders.
+    const perfScore =
+      typeof perf?.efficiency_score === "number" ? perf.efficiency_score : undefined;
+    const perfRating = (perf as { overall_rating?: string } | undefined)
+      ?.overall_rating;
+    const perfIsUnknown =
+      (!perfRating || perfRating.toLowerCase() === "unknown") &&
+      (perfScore === undefined || perfScore <= 0);
+    const showPerformanceHero = Boolean(perf) && !perfIsUnknown;
     const testing = resolveRewriteTesting(
       rewriteTesting,
       results.rewrite_testing ?? undefined,
@@ -419,7 +454,7 @@ export function AnalysisResults({
         <AnalysisHeader results={results} target={target} />
 
         {/* Performance Summary - Hero Section */}
-        {perf && (
+        {showPerformanceHero && perf && (
           <PerformanceSummarySection
             perf={perf}
             explainResults={explain_results ?? undefined}

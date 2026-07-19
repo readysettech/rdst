@@ -174,7 +174,17 @@ async def _ask_generator(
                 yield _event_to_sse(event)
         except Exception as exc:
             run.error(exc)
-            yield {"event": "error", "data": json.dumps({"message": str(exc)})}
+            # Shared {code, message, detail} envelope (B7/T24); never raw str(e).
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {
+                        "code": "internal_error",
+                        "message": "The question could not be answered.",
+                        "detail": type(exc).__name__,
+                    }
+                ),
+            }
 
 
 @router.post("/ask")

@@ -948,6 +948,7 @@
         "type": "object"
       },
       "AskClarificationNeededEvent": {
+        "description": "Clarification needed from the user.",
         "properties": {
           "interpretations": {
             "items": {
@@ -983,6 +984,7 @@
         "type": "object"
       },
       "AskClarificationQuestion": {
+        "description": "A clarification question for the user.",
         "properties": {
           "id": {
             "title": "Id",
@@ -1009,6 +1011,7 @@
         "type": "object"
       },
       "AskErrorEvent": {
+        "description": "Ask encountered an error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1065,6 +1068,7 @@
         ]
       },
       "AskInterpretation": {
+        "description": "A possible interpretation of the user's question.",
         "properties": {
           "assumptions": {
             "items": {
@@ -1174,6 +1178,7 @@
         "type": "object"
       },
       "AskResultEvent": {
+        "description": "Ask completed with results.",
         "properties": {
           "columns": {
             "items": {
@@ -1242,6 +1247,7 @@
         "type": "object"
       },
       "AskSchemaLoadedEvent": {
+        "description": "Schema has been loaded.",
         "properties": {
           "source": {
             "title": "Source",
@@ -1274,6 +1280,7 @@
         "type": "object"
       },
       "AskSqlGeneratedEvent": {
+        "description": "SQL has been generated.",
         "properties": {
           "explanation": {
             "anyOf": [
@@ -1305,6 +1312,7 @@
         "type": "object"
       },
       "AskStatusEvent": {
+        "description": "Status update during ask execution.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2684,6 +2692,7 @@
         "type": "object"
       },
       "ChatToolResultEvent": {
+        "description": "Result of one tool execution.\n\nFor query_database, `data` carries sql/columns/rows/row_count/\nexecution_time_ms/truncated/query_hash/query_tag; for get_schema it\ncarries tables/source.",
         "properties": {
           "content": {
             "title": "Content",
@@ -3310,7 +3319,30 @@
         "type": "object"
       },
       "ErrorEvent": {
+        "description": "Error event for service workflows.\n\n``code`` and ``detail`` mirror the shared HTTP error envelope\n(``shared.api.app._error_envelope``) so an SSE failure carries the same\n{code, message, detail} shape the client normalizes in ``lib/sse.ts``.\nBoth stay optional so existing producers that only set ``message`` keep\nworking; the client derives a code when one is absent.",
         "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Code"
+          },
+          "detail": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -5473,6 +5505,7 @@
         "type": "object"
       },
       "ProgressEvent": {
+        "description": "Progress update during a multi-step operation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -5502,6 +5535,7 @@
         "type": "object"
       },
       "QueryBenchmarkCompleteEvent": {
+        "description": "Benchmark finished; carries the final tally.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -5549,6 +5583,7 @@
         "type": "object"
       },
       "QueryBenchmarkErrorEvent": {
+        "description": "Benchmark failed before completion.",
         "properties": {
           "error": {
             "title": "Error",
@@ -5581,6 +5616,7 @@
         ]
       },
       "QueryBenchmarkProgressEvent": {
+        "description": "Benchmark progress tick.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -5628,6 +5664,7 @@
         "type": "object"
       },
       "QueryBenchmarkStats": {
+        "description": "Statistics for a single benchmarked query.",
         "properties": {
           "avg_ms": {
             "title": "Avg Ms",
@@ -5953,6 +5990,18 @@
             "default": null,
             "title": "Confidence"
           },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
           "explanation": {
             "anyOf": [
               {
@@ -6049,6 +6098,18 @@
             ],
             "default": null,
             "title": "Confidence"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
           },
           "explanation": {
             "anyOf": [
@@ -6742,6 +6803,7 @@
         "type": "object"
       },
       "ScanCompleteEvent": {
+        "description": "Scan completed.",
         "properties": {
           "success": {
             "title": "Success",
@@ -6767,6 +6829,7 @@
         "type": "object"
       },
       "ScanErrorEvent": {
+        "description": "Scan error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -6826,6 +6889,7 @@
         ]
       },
       "ScanFilesFoundEvent": {
+        "description": "Files with ORM patterns discovered.",
         "properties": {
           "files": {
             "items": {
@@ -6921,6 +6985,7 @@
         "type": "string"
       },
       "ScanProgressEvent": {
+        "description": "Progress update within a scan phase.",
         "properties": {
           "current": {
             "title": "Current",
@@ -6962,6 +7027,7 @@
         "type": "object"
       },
       "ScanQueryResultEvent": {
+        "description": "Individual query result from scan.",
         "properties": {
           "query": {
             "additionalProperties": true,
@@ -6982,6 +7048,7 @@
         "type": "object"
       },
       "ScanRegistryEvent": {
+        "description": "Registry save results.",
         "properties": {
           "new_queries": {
             "title": "New Queries",
@@ -7097,6 +7164,7 @@
         "type": "object"
       },
       "ScanStatusEvent": {
+        "description": "Status update during scan.",
         "properties": {
           "message": {
             "title": "Message",
@@ -8397,6 +8465,7 @@
         "type": "object"
       },
       "TopCompleteEvent": {
+        "description": "Operation completed.",
         "properties": {
           "newly_saved": {
             "title": "Newly Saved",
@@ -8434,6 +8503,7 @@
         "type": "object"
       },
       "TopConnectedEvent": {
+        "description": "Database connection established.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -8491,6 +8561,7 @@
         "type": "object"
       },
       "TopDbLimitWarningEvent": {
+        "description": "Database query size limit is below recommended threshold.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -8525,7 +8596,32 @@
         "type": "object"
       },
       "TopErrorEvent": {
+        "description": "Error occurred.\n\n``code`` and ``detail`` mirror the shared error envelope (B7/T24):\n``message`` stays humane, ``detail`` carries the exception class name for\ncorrelation \u2014 never the raw ``str(e)``, which can embed host/DSN material.",
         "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Code"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -8664,6 +8760,7 @@
         "type": "object"
       },
       "TopQueriesEvent": {
+        "description": "Batch of top queries.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -8725,6 +8822,7 @@
         "type": "object"
       },
       "TopQueryData": {
+        "description": "Individual query data.",
         "properties": {
           "avg_time": {
             "title": "Avg Time",
@@ -8903,6 +9001,7 @@
         "type": "object"
       },
       "TopQuerySavedEvent": {
+        "description": "Query saved to registry.",
         "properties": {
           "is_new": {
             "title": "Is New",
@@ -8927,6 +9026,7 @@
         "type": "object"
       },
       "TopSourceFallbackEvent": {
+        "description": "Source fallback occurred.",
         "properties": {
           "from_source": {
             "title": "From Source",
@@ -8956,6 +9056,7 @@
         "type": "object"
       },
       "TopStatusEvent": {
+        "description": "Progress status update.",
         "properties": {
           "message": {
             "title": "Message",

@@ -91,6 +91,7 @@ packages = ["features", "shared"]
 dev = [
     "httpx>=0.28.1",
     "pytest-asyncio>=0.23.0",
+    "dnspython>=2.6.0",
 ]
 
 [tool.pytest.ini_options]

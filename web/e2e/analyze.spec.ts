@@ -205,14 +205,32 @@ test('shows a streamed failure and can retry from query history', async ({
   await fillCodeMirror(page.locator('.cm-editor'), query)
   await page.getByRole('button', { name: 'Analyze Query' }).click()
 
-  await expect(page.getByText('Analysis Failed', { exact: true })).toBeVisible()
+  // C-01 rebuilt the analyze failure surface on the shared ErrorState. The
+  // title is now reserved for invalid-SQL ("Analysis Failed"); every other
+  // failure (a timeout classifies as `database`) titles "Analysis could not
+  // complete". The streamed message is the humane summary and stays visible;
+  // no technical-details expander renders here because the SSE error carried
+  // no separate `detail`. Retry-from-history still runs through the page's
+  // "Back" affordance (the ErrorState's own action routes to Settings).
+  // Match the visible title paragraph by role: the branded ErrorState also
+  // exposes the title as the status icon's accessible label, so a plain text
+  // match collides with that second node. Scoping to the paragraph keeps the
+  // assertion stable across the error-surface's mid-stack refinements.
+  await expect(
+    page
+      .getByRole('paragraph')
+      .filter({ hasText: /^Analysis could not complete$/ })
+  ).toBeVisible()
   await expect(
     page.getByText('EXPLAIN ANALYZE timed out after 30 seconds')
   ).toBeVisible()
 
   await page.getByRole('button', { name: 'Back', exact: true }).click()
   await expect(page).toHaveURL(/\/analyze$/)
-  await page.getByRole('button', { name: 'Use query' }).click()
+  // The query-history row is itself a role="button" card whose accessible name
+  // includes the nested "Use query" label, so match the explicit button exactly
+  // to avoid a strict-mode collision with the card.
+  await page.getByRole('button', { name: 'Use query', exact: true }).click()
   await expect(page.locator('.cm-content[contenteditable="true"]')).toHaveText(
     /SELECT id, total FROM orders WHERE customer_id = :p1 ORDER BY created_at DESC/
   )

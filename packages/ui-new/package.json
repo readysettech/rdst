@@ -24,6 +24,7 @@
     "./data-display": "./src/components/element/data-display.tsx",
     "./script-card": "./src/components/element/script-card.tsx",
     "./alert": "./src/components/feedback/alert.tsx",
+    "./error-state": "./src/components/feedback/error-state.tsx",
     "./page": "./src/components/element/page.tsx",
     "./circular-progress": "./src/components/feedback/circular-progress.tsx",
     "./spinner": "./src/components/feedback/spinner.tsx",

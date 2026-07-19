@@ -24,6 +24,7 @@ import { Modal, ModalContent, ModalContentContainer, ModalTitle } from '@rs/ui-n
 import { SQLDisplay } from '../SQLDisplay';
 import { useFormatSql } from '../../lib/useFormatSql';
 import { collapseWhitespace } from '../../lib/collapseWhitespace';
+import { sanitizeWebError } from '../../lib/errorContract';
 import type { ScanAnalysisSummary, ScanAnalyzedQuery, ScanRawAnalysis } from '../../types/scan';
 import {
   resolveRewriteTesting,
@@ -496,7 +497,7 @@ function FailedQueryRow({ query, idx }: FailedQueryRowProps) {
         {sqlPreview}
       </Text>
       <Text level="caption" className="text-content-negative-soft mt-1 block">
-        {query.error}
+        {sanitizeWebError(query.error)}
       </Text>
     </m.div>
   );
