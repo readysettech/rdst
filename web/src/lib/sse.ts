@@ -23,7 +23,6 @@ import {
 type QueryBenchmarkEvent = components['schemas']['QueryBenchmarkEvent'];
 type QueryBenchmarkProgressEvent = Extract<QueryBenchmarkEvent, { type: 'progress' }>;
 type QueryBenchmarkCompleteEvent = Extract<QueryBenchmarkEvent, { type: 'complete' }>;
-type QueryBenchmarkErrorEvent = Extract<QueryBenchmarkEvent, { type: 'error' }>;
 // Progress state stores only counter-bearing variants; errors go to the `error` field.
 export type BenchmarkProgress = QueryBenchmarkProgressEvent | QueryBenchmarkCompleteEvent;
 
@@ -429,9 +428,11 @@ export function useBenchmark(): UseBenchmarkReturn {
                   break;
 
                 case 'error': {
-                  const errEvt = data as QueryBenchmarkErrorEvent;
-                  console.log('[Benchmark SSE] Error:', errEvt.error);
-                  setError(errEvt.error || 'Unknown error');
+                  // Shared error envelope (B7/T24): normalize {code, message,
+                  // detail} — including the read-only / over-cap safety rails
+                  // (B5) — instead of reading a raw `error` string.
+                  const envelope = normalizeSseError(data);
+                  setError(envelope.message);
                   setState('error');
                   break;
                 }

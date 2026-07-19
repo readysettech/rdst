@@ -21,6 +21,7 @@ import {
   SchemaMetricsList,
   SchemaEmptyState,
   SchemaInitButton,
+  SchemaReinitDialog,
   SchemaExportButton,
   SchemaEditColumnDialog,
   SchemaEditTableDialog,
@@ -104,6 +105,7 @@ function SchemaPage() {
   const [annotateLoading, setAnnotateLoading] = useState(false);
   const [annotateProgress, setAnnotateProgress] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [reinitConfirmOpen, setReinitConfirmOpen] = useState(false);
 
   // Dialog state
   const [editingColumn, setEditingColumn] = useState<{
@@ -150,7 +152,7 @@ function SchemaPage() {
     }
   }, [target, status?.exists, loadSchema, passwordLock.isLocked]);
 
-  const handleInit = async () => {
+  const runInit = async () => {
     if (passwordLock.isLocked) return;
     if (!target) return;
     setInitLoading(true);
@@ -162,6 +164,26 @@ function SchemaPage() {
       await loadSchema(target);
     }
     setInitLoading(false);
+  };
+
+  // Entry point for both the toolbar "Re-init" and the empty-state "Initialize".
+  // Re-init on an existing layer is destructive — the backend force path
+  // re-introspects and overwrites without merging annotations (B4) — so it must
+  // pass through an explicit confirmation. First-time init has nothing to
+  // destroy, so it runs immediately.
+  const handleInit = () => {
+    if (passwordLock.isLocked) return;
+    if (!target) return;
+    if (status?.exists) {
+      setReinitConfirmOpen(true);
+      return;
+    }
+    void runInit();
+  };
+
+  const handleConfirmReinit = async () => {
+    await runInit();
+    setReinitConfirmOpen(false);
   };
 
   const handleDelete = async () => {
@@ -465,7 +487,7 @@ function SchemaPage() {
                   label="Refresh"
                   onClick={handleRefresh}
                   loading={refreshLoading}
-                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || loading}
+                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || annotateLoading || initLoading || loading}
                 />
                 <Button
                   variant="primary"
@@ -475,7 +497,7 @@ function SchemaPage() {
                   label="Profile"
                   onClick={handleProfile}
                   loading={profileLoading}
-                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || loading}
+                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || annotateLoading || initLoading || loading}
                 />
                 <Button
                   variant="rising"
@@ -485,7 +507,7 @@ function SchemaPage() {
                   label={annotateProgress || "AI Annotate"}
                   onClick={handleAnnotateWithLLM}
                   loading={annotateLoading}
-                  disabled={passwordLock.isLocked || annotateLoading || loading}
+                  disabled={passwordLock.isLocked || annotateLoading || refreshLoading || profileLoading || initLoading || loading}
                 />
                 <SchemaExportButton
                   onExport={handleExport}
@@ -495,7 +517,7 @@ function SchemaPage() {
                   onInit={handleInit}
                   isLoading={initLoading}
                   hasExistingSchema={status?.exists ?? false}
-                  disabled={passwordLock.isLocked}
+                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || annotateLoading || loading}
                 />
               </HStack>
             </Show>
@@ -751,6 +773,15 @@ function SchemaPage() {
             </m.div>
           </div>
         )}
+
+        {/* Destructive Re-init confirmation (B4/T4) */}
+        <SchemaReinitDialog
+          isOpen={reinitConfirmOpen}
+          target={target ?? ""}
+          isLoading={initLoading}
+          onConfirm={handleConfirmReinit}
+          onClose={() => setReinitConfirmOpen(false)}
+        />
 
         {/* Edit dialogs */}
         <SchemaEditColumnDialog

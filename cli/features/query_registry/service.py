@@ -27,6 +27,129 @@ from .models import (
     QueryCommandInput,
 )
 
+# ---------------------------------------------------------------------------
+# Benchmark safety rails (B5 / code-backend F4)
+#
+# The web benchmark path executes raw client SQL in a tight loop against the
+# selected target. These server-side rails bound a *UI-bypassing* caller — they
+# are enforced here regardless of what the confirm dialog does, so a direct POST
+# to /api/query-registry/benchmark cannot run writes or an unbounded loop.
+# ---------------------------------------------------------------------------
+
+MAX_BENCHMARK_DURATION_SECONDS = 300
+MAX_BENCHMARK_MAX_COUNT = 100_000
+
+# DML/DDL keywords that must never appear anywhere in a benchmarked statement —
+# scanned even mid-statement to defeat data-modifying CTEs, e.g.
+# ``WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x``.
+_BENCHMARK_WRITE_KEYWORDS = frozenset(
+    {
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "MERGE",
+        "REPLACE",
+        "UPSERT",
+        "CREATE",
+        "DROP",
+        "ALTER",
+        "TRUNCATE",
+        "RENAME",
+        "GRANT",
+        "REVOKE",
+        "COMMENT",
+    }
+)
+
+
+class BenchmarkValidationError(Exception):
+    """A benchmark request rejected before/at execution for a reason that is
+    safe to show the user (read-only violation, over-cap, unresolved
+    parameters, unknown query, missing target).
+
+    Distinguished from unexpected exceptions so the humane message survives to
+    the client while raw driver / ``str(e)`` text stays hidden (B7/T24)."""
+
+    def __init__(self, message: str, code: str = "benchmark_rejected") -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+
+
+def set_session_read_only(conn: Any, engine: str) -> None:
+    """Make the benchmark's DB session read-only at the database level.
+
+    The lexical classifier (`benchmark_read_only_reason`) is a humane
+    pre-flight, but it cannot catch SELECT-invoked write functions —
+    ``SELECT setval('seq', 42)``, ``dblink_exec(...)``, DML-bearing UDFs —
+    which parse as plain reads. Setting the session read-only means any such
+    write fails **at execution inside the database**, regardless of what the
+    SQL looks like. PostgreSQL: every autocommit statement runs under
+    ``default_transaction_read_only = on``; MySQL: subsequent transactions in
+    the session are READ ONLY.
+    """
+    statement = (
+        "SET SESSION TRANSACTION READ ONLY"
+        if "mysql" in (engine or "").lower()
+        else "SET default_transaction_read_only = on"
+    )
+    cursor = conn.cursor()
+    try:
+        cursor.execute(statement)
+    finally:
+        cursor.close()
+
+
+def benchmark_read_only_reason(sql: str) -> Optional[str]:
+    """Return a human reason if ``sql`` is not a single read-only statement,
+    else ``None``.
+
+    Rejects: empty input, multiple ``;``-separated statements, a lead keyword
+    other than ``SELECT`` / ``WITH``, ``SELECT ... INTO`` (which writes a new
+    table), and any DML/DDL keyword anywhere (data-modifying CTEs). The parser
+    tokenizes first, so keywords inside string literals or identifiers are not
+    matched.
+    """
+    import sqlparse
+    from sqlparse.tokens import DDL, DML, Keyword
+
+    statements = [
+        s
+        for s in sqlparse.parse(sql or "")
+        if s.token_first(skip_cm=True) is not None
+    ]
+    if not statements:
+        return "The benchmark query is empty."
+    if len(statements) > 1:
+        return (
+            "Benchmark runs a single read-only statement per query; "
+            "multiple statements are not allowed."
+        )
+
+    stmt = statements[0]
+    first = stmt.token_first(skip_cm=True)
+    first_kw = (first.value or "").upper() if first is not None else ""
+    if first_kw not in ("SELECT", "WITH"):
+        label = first_kw or "This statement"
+        return (
+            f"Benchmark only executes read-only SELECT queries; "
+            f"'{label}' is not allowed."
+        )
+
+    for token in stmt.flatten():
+        value = (token.value or "").upper()
+        if token.ttype in (DML, DDL) and value in _BENCHMARK_WRITE_KEYWORDS:
+            return (
+                f"Benchmark rejected: '{value}' is a write operation, but the "
+                "benchmark is read-only."
+            )
+        if token.ttype is Keyword and value == "INTO":
+            return (
+                "Benchmark rejected: 'SELECT ... INTO' writes a new table, but "
+                "the benchmark is read-only."
+            )
+    return None
+
 
 class QueryService:
     """Stateless query service for shared CLI + Web usage."""
@@ -178,6 +301,29 @@ class QueryService:
             return False
 
         try:
+            # Cap rail: reject an over-cap request outright (do not silently
+            # clamp) so a UI-bypassing caller cannot request an unbounded run.
+            if (
+                duration_seconds is not None
+                and duration_seconds > MAX_BENCHMARK_DURATION_SECONDS
+            ):
+                raise BenchmarkValidationError(
+                    f"Benchmark duration is capped at {MAX_BENCHMARK_DURATION_SECONDS}s "
+                    f"({duration_seconds}s requested).",
+                    code="benchmark_duration_capped",
+                )
+            if max_count is not None and max_count > MAX_BENCHMARK_MAX_COUNT:
+                raise BenchmarkValidationError(
+                    f"Benchmark execution count is capped at {MAX_BENCHMARK_MAX_COUNT:,} "
+                    f"({max_count:,} requested).",
+                    code="benchmark_count_capped",
+                )
+            # Even when the caller omits max_count, bound the loop so a tight
+            # loop (interval 0) can never run unbounded.
+            effective_max_count = (
+                max_count if max_count is not None else MAX_BENCHMARK_MAX_COUNT
+            )
+
             from shared.config.targets import create_targets_config
             from shared.db_connection import close_connection, create_direct_connection
             from shared.query_registry import QueryRegistry
@@ -227,7 +373,10 @@ class QueryService:
                 if not entry:
                     entry = registry.get_query(spec_str)
                 if not entry:
-                    raise ValueError(f"Query not found: {spec_str}")
+                    raise BenchmarkValidationError(
+                        f"Query not found: {spec_str}",
+                        code="benchmark_query_not_found",
+                    )
 
                 sql = registry.get_executable_query(entry.hash, interactive=False)
                 if not sql:
@@ -248,13 +397,24 @@ class QueryService:
                 )
 
             if skipped_queries and not resolved_queries:
-                raise ValueError(
+                raise BenchmarkValidationError(
                     f"All queries have unresolved parameters: {', '.join(skipped_queries)}. "
-                    "Benchmark requires queries with concrete values, not placeholders."
+                    "Benchmark requires queries with concrete values, not placeholders.",
+                    code="benchmark_unresolved_params",
                 )
 
             if not resolved_queries:
-                raise ValueError("No queries to run")
+                raise BenchmarkValidationError(
+                    "No queries to run", code="benchmark_no_queries"
+                )
+
+            # Read-only rail: reject the whole run if any resolved query is not a
+            # single read-only statement — enforced server-side regardless of the
+            # UI, before opening a DB connection.
+            for rq in resolved_queries:
+                reason = benchmark_read_only_reason(rq.sql)
+                if reason:
+                    raise BenchmarkValidationError(reason, code="benchmark_read_only")
 
             cfg = create_targets_config()
             cfg.load()
@@ -263,11 +423,16 @@ class QueryService:
                 target = cfg.get_default()
 
             if not target:
-                raise ValueError("No target specified")
+                raise BenchmarkValidationError(
+                    "No target specified", code="benchmark_no_target"
+                )
 
             target_config = cfg.get(target)
             if not target_config:
-                raise ValueError(f"Target '{target}' not found. Run 'rdst configure add' to set one up.")
+                raise BenchmarkValidationError(
+                    f"Target '{target}' not found. Run 'rdst configure add' to set one up.",
+                    code="benchmark_target_not_found",
+                )
 
             query_stats: dict[str, _QueryStats] = {}
             stats_lock = Lock()
@@ -327,6 +492,19 @@ class QueryService:
             query_index = 0
 
             try:
+                # Session-level read-only rail (B5 must-fix): even a write that
+                # slips past the lexical classifier (SELECT-invoked functions
+                # like setval()) fails at execution inside the DB. Fail closed:
+                # if the session cannot be made read-only, do not run at all.
+                try:
+                    set_session_read_only(conn, str(target_config.get("engine", "")))
+                except Exception as exc:
+                    raise BenchmarkValidationError(
+                        "Could not establish a read-only session on the target; "
+                        "benchmark aborted.",
+                        code="benchmark_read_only_session",
+                    ) from exc
+
                 last_progress_time = 0.0
                 progress_interval = 0.25
 
@@ -337,7 +515,7 @@ class QueryService:
                         break
 
                     total_exec = sum(s.executions for s in query_stats.values())
-                    if max_count and total_exec >= max_count:
+                    if effective_max_count and total_exec >= effective_max_count:
                         break
 
                     rq = resolved_queries[query_index]
@@ -381,10 +559,27 @@ class QueryService:
                 progress_queue.put_nowait(final)
             except Exception:
                 pass
-        except Exception as e:
+        except BenchmarkValidationError as e:
+            # Safe-to-show rejection (read-only, over-cap, bad target/query):
+            # surface the humane message + stable code via the shared envelope.
             error_progress = QueryBenchmarkErrorEvent(
                 type="error",
-                error=str(e),
+                message=e.message,
+                code=e.code,
+                detail=None,
+            )
+            try:
+                progress_queue.put_nowait(error_progress)
+            except Exception:
+                pass
+        except Exception as e:
+            # Unexpected failure: keep the message generic and put only the
+            # exception class name in detail — never raw str(e) (B7/T24).
+            error_progress = QueryBenchmarkErrorEvent(
+                type="error",
+                message="The benchmark could not be completed.",
+                code="internal_error",
+                detail=type(e).__name__,
             )
             try:
                 progress_queue.put_nowait(error_progress)

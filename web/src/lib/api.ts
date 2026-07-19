@@ -54,6 +54,20 @@ export async function fetchStatus(): Promise<StatusResponse> {
   return response.json();
 }
 
+export type TargetSummary = apiComponents['schemas']['TargetSummaryResponse'];
+export type TargetListResponse = apiComponents['schemas']['TargetListResponse'];
+
+/**
+ * List configured targets with their connection details (host/port). Used by
+ * the benchmark rail to flag non-local/remote destinations (B5).
+ */
+export async function fetchTargets(): Promise<TargetSummary[]> {
+  const { data, response } = await typedClient.GET('/api/configure/targets');
+  await throwIfNotOk(response, 'Failed to list targets');
+  if (data && 'targets' in data) return data.targets;
+  return [];
+}
+
 export type EnvRequirement = apiComponents['schemas']['EnvRequirement'];
 export type EnvRequirementKind = EnvRequirement['kind'];
 export type EnvRequirementSource = EnvRequirement['source'];

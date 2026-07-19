@@ -14,6 +14,7 @@ import { HStack, VStack } from "@rs/ui-new/stack";
 import { m, AnimatePresence } from "@rs/ui-new/motion";
 
 import { TargetLockNotice } from "../components";
+import { BenchmarkConfirmDialog } from "../components/BenchmarkConfirmDialog";
 import { useQueryRegistry } from "../lib/useQueryRegistry";
 import { useTarget } from "../hooks/useTarget";
 import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
@@ -21,7 +22,8 @@ import { useBenchmark } from "../lib/sse";
 import { hasParameters, detectParameters, substituteParameters, resolveInitialValue } from "../lib/sqlParameters";
 import { SQLDisplay } from "../components/SQLDisplay";
 import type { BenchmarkMode, QueryBenchmarkStats, BenchmarkQueryInput, TargetInfo } from "../lib/api";
-import { fetchSchema } from "../lib/api";
+import { fetchSchema, fetchTargets } from "../lib/api";
+import { isRemoteTargetHost } from "../lib/targetHost";
 import { useSystemStatus } from "../lib/useSystemStatus";
 
 export const Route = createFileRoute("/benchmark")({
@@ -29,6 +31,11 @@ export const Route = createFileRoute("/benchmark")({
 });
 
 type WizardStep = "configure" | "running";
+
+// Mirror of the server-side benchmark execution cap (query_registry/service.py
+// MAX_BENCHMARK_MAX_COUNT) — used only to describe the tight-loop bound in the
+// confirmation dialog. The real rail is enforced server-side.
+const BENCHMARK_EXECUTION_CAP = 100_000;
 
 function formatDuration(ms: number): string {
   if (ms < 1) return "<1ms";
@@ -146,6 +153,7 @@ export function BenchmarkPage() {
   const [concurrency, setConcurrency] = useState(1);
   const [durationSeconds, setDurationSeconds] = useState(30);
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const uniqueQueryTargets = useMemo(() => {
     const set = new Set<string>();
@@ -166,10 +174,33 @@ export function BenchmarkPage() {
   const normalizedSourceFilter = sourceOptions.some((option) => option.value === sourceFilter)
     ? sourceFilter
     : "all";
+  // Connection details (host/port) for every target, so a non-local (remote)
+  // destination can be flagged before it is benchmarked (B5).
+  const { data: targetDetails } = useQuery({
+    queryKey: ["configure-targets-hosts"],
+    queryFn: fetchTargets,
+    staleTime: 60_000,
+  });
+  const remoteTargetNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of targetDetails ?? []) {
+      if (isRemoteTargetHost(t.host)) set.add(t.name);
+    }
+    return set;
+  }, [targetDetails]);
+
   const destinationOptions = useMemo(
-    () => availableTargets.map((item: TargetInfo) => ({ value: item.name, label: item.name })),
-    [availableTargets],
+    () =>
+      availableTargets.map((item: TargetInfo) => ({
+        value: item.name,
+        label: remoteTargetNames.has(item.name) ? `${item.name} · remote` : item.name,
+      })),
+    [availableTargets, remoteTargetNames],
   );
+
+  const destinationIsRemote = destinationTarget
+    ? remoteTargetNames.has(destinationTarget)
+    : false;
 
   const queryById = useMemo(() => {
     const map = new Map<string, (typeof queries)[number]>();
@@ -279,7 +310,25 @@ export function BenchmarkPage() {
     setParamValues((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleStart = () => {
+  // The confirmation dialog gates every real run: it names the target + planned
+  // load, and a remote target additionally requires a typed confirmation (B5).
+  const loadSummary =
+    mode === "interval"
+      ? `${intervalMs === 0 ? "tight loop" : `${intervalMs}ms interval`} · ${durationSeconds}s`
+      : `${concurrency} ${concurrency === 1 ? "worker" : "workers"} · ${durationSeconds}s`;
+  const estimatedExecutions = useMemo(() => {
+    if (mode === "interval") {
+      if (intervalMs <= 0) return null; // tight loop → bounded only by the cap
+      // The benchmark loop executes ONE query per tick, round-robin across the
+      // selection — so the total is duration/interval regardless of how many
+      // queries are selected (they share the ticks, not multiply them).
+      const total = Math.ceil((durationSeconds * 1000) / intervalMs);
+      return Math.min(total, BENCHMARK_EXECUTION_CAP);
+    }
+    return null; // concurrency mode depends on live latency
+  }, [mode, intervalMs, durationSeconds]);
+
+  const runBenchmark = () => {
     if (destinationLock.isLocked) return;
     if (!canStart || !runTarget) return;
 
@@ -307,17 +356,45 @@ export function BenchmarkPage() {
     });
   };
 
+  const handleStart = () => {
+    if (destinationLock.isLocked) return;
+    if (!canStart || !runTarget) return;
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmRun = () => {
+    setConfirmOpen(false);
+    runBenchmark();
+  };
+
   const handleStop = () => stop();
   const handleBack = () => { reset(); setStep("configure"); };
   const handleRunAgain = () => {
     if (destinationLock.isLocked) return;
-    handleStart();
+    // "Run Again" re-fires the same real load — gate it behind the same confirm.
+    setConfirmOpen(true);
   };
+
+  // Rendered in both wizard steps (Start on configure, Run Again on running).
+  const confirmDialog = (
+    <BenchmarkConfirmDialog
+      isOpen={confirmOpen}
+      target={runTarget ?? destinationTarget ?? ""}
+      isRemote={destinationIsRemote}
+      queryCount={selectedQueries.length}
+      loadSummary={loadSummary}
+      estimatedExecutions={estimatedExecutions}
+      executionCap={BENCHMARK_EXECUTION_CAP}
+      onConfirm={handleConfirmRun}
+      onClose={() => setConfirmOpen(false)}
+    />
+  );
 
   // ========== CONFIGURE STEP ==========
   if (step === "configure") {
     return (
       <div className="space-y-6 w-full">
+        {confirmDialog}
         {/* Hero Header */}
         <m.div
           className="space-y-4"
@@ -458,9 +535,19 @@ export function BenchmarkPage() {
 
                   {/* Destination Target */}
                   <VStack className="gap-2 items-start">
-                    <Text level="label-small" className="text-content-layout-2">
-                      Run benchmark against
-                    </Text>
+                    <HStack className="gap-2 items-center">
+                      <Text level="label-small" className="text-content-layout-2">
+                        Run benchmark against
+                      </Text>
+                      {destinationIsRemote && (
+                        <Tag
+                          size="small"
+                          variant="negative"
+                          modifier="solid"
+                          label="remote-target"
+                        />
+                      )}
+                    </HStack>
                     {destinationOptions.length > 0 ? (
                       <BaseInputSelect
                         name="destination-target"
@@ -475,7 +562,9 @@ export function BenchmarkPage() {
                       </Text>
                     )}
                     <Text level="caption" className="text-content-layout-3">
-                      Queries will execute against this database.
+                      {destinationIsRemote
+                        ? "This is a remote database — real load will run against it."
+                        : "Queries will execute against this database."}
                     </Text>
                     {destinationLock.isLocked && (
                       <Text level="caption" className="text-content-negative-soft">
@@ -761,6 +850,7 @@ export function BenchmarkPage() {
 
   return (
     <div className="space-y-6 w-full">
+      {confirmDialog}
       {/* Hero Header */}
       <m.div
         className="space-y-4"

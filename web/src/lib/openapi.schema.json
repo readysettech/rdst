@@ -5583,10 +5583,34 @@
         "type": "object"
       },
       "QueryBenchmarkErrorEvent": {
-        "description": "Benchmark failed before completion.",
+        "description": "Benchmark failed (or was rejected by a safety rail) before completion.\n\nCarries the shared error envelope ({code, message, detail}, B7/T24) so the\nclient normalizes a benchmark failure exactly like every other SSE error.\n``message`` stays humane and safe to show; ``detail`` holds only the\nexception class name for correlation \u2014 never the raw ``str(e)``, which can\nembed host / DSN / SQL material.",
         "properties": {
-          "error": {
-            "title": "Error",
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Code"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "message": {
+            "title": "Message",
             "type": "string"
           },
           "type": {
@@ -5597,7 +5621,7 @@
         },
         "required": [
           "type",
-          "error"
+          "message"
         ],
         "title": "QueryBenchmarkErrorEvent",
         "type": "object"

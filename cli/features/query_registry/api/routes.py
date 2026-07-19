@@ -359,7 +359,17 @@ def _progress_to_sse(progress: Any) -> dict:
     if isinstance(progress, BaseModel):
         payload = progress.model_dump_json()
     elif event_name == "error":
-        payload = json.dumps({"type": "error", "error": progress.error})
+        # Shared error envelope {code, message, detail} (B7/T24) so the client
+        # normalizes a benchmark failure like every other SSE error.
+        payload = json.dumps(
+            {
+                "type": "error",
+                "code": getattr(progress, "code", None) or "error",
+                "message": getattr(progress, "message", None)
+                or "The benchmark could not be completed.",
+                "detail": getattr(progress, "detail", None),
+            }
+        )
     else:
         payload = json.dumps(
             {

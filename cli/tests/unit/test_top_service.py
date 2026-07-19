@@ -545,6 +545,90 @@ class TestTopServiceCommandSets:
 
         assert result == []
 
+class TestTopServiceUnitConversion:
+    """B2 — Slow-Queries ms->s unit fix.
+
+    `pg_stat_statements` reports timings in milliseconds; the historical web
+    path used to append an "s" suffix without dividing by 1000, so a
+    ``153.183 ms`` average rendered as ``153.183s`` (1000x too large). The
+    MySQL ``digest`` path is genuinely seconds and must be left unchanged.
+    """
+
+    @pytest.fixture
+    def service(self):
+        return TopService()
+
+    def test_pg_stat_milliseconds_converted_to_seconds(self, service):
+        """A 1225.465 ms pg_stat total renders as 1.225s, not 1225.465s."""
+        df = pd.DataFrame(
+            [
+                {
+                    "query_text": "SELECT * FROM votes GROUP BY user_id",
+                    "calls": 42,
+                    "total_time": 1225.465,  # milliseconds, per pg_stat_statements
+                    "mean_time": 153.183,  # milliseconds
+                }
+            ]
+        )
+
+        result = service._process_top_data(
+            {"success": True, "data": df},
+            "pg_stat",
+            TopOptions(limit=10, sort="total_time"),
+        )
+
+        assert len(result) == 1
+        # 1225.465 ms -> 1.225 s ; 153.183 ms -> 0.153 s
+        assert result[0]["total_time"] == "1.225s"
+        assert result[0]["avg_time"] == "0.153s"
+
+    def test_mysql_digest_seconds_not_divided(self, service):
+        """The MySQL digest path is already seconds and must not be converted."""
+        df = pd.DataFrame(
+            [
+                {
+                    "query_text": "SELECT 1",
+                    "count_star": 10,
+                    "sum_timer_wait": 2.5,  # already seconds on the digest path
+                    "avg_timer_wait": 0.25,  # already seconds
+                }
+            ]
+        )
+
+        result = service._process_top_data(
+            {"success": True, "data": df},
+            "digest",
+            TopOptions(limit=10, sort="total_time"),
+        )
+
+        assert len(result) == 1
+        assert result[0]["total_time"] == "2.500s"
+        assert result[0]["avg_time"] == "0.250s"
+
+    def test_pg_stat_min_total_time_filter_uses_seconds(self, service):
+        """min_total_time_s must compare against seconds, not raw ms.
+
+        A 500 ms query (0.5 s) is below a 1 s floor and must be filtered out;
+        before the ms->s fix the raw 500 (ms) compared > 1 and leaked through.
+        """
+        df = pd.DataFrame(
+            [
+                {"query_text": "SELECT slow", "calls": 5, "total_time": 5000.0, "mean_time": 1000.0},
+                {"query_text": "SELECT fast", "calls": 5, "total_time": 500.0, "mean_time": 100.0},
+            ]
+        )
+
+        result = service._process_top_data(
+            {"success": True, "data": df},
+            "pg_stat",
+            TopOptions(limit=10, sort="total_time", min_total_time_s=1.0),
+        )
+
+        texts = [r["query_text"] for r in result]
+        assert "SELECT slow" in texts  # 5.0 s >= 1 s floor
+        assert "SELECT fast" not in texts  # 0.5 s < 1 s floor
+
+
 class TestTopServiceEventTypes:
     """Tests for event type structure."""
 

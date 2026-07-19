@@ -4515,11 +4515,27 @@ export interface components {
         };
         /**
          * QueryBenchmarkErrorEvent
-         * @description Benchmark failed before completion.
+         * @description Benchmark failed (or was rejected by a safety rail) before completion.
+         *
+         *     Carries the shared error envelope ({code, message, detail}, B7/T24) so the
+         *     client normalizes a benchmark failure exactly like every other SSE error.
+         *     ``message`` stays humane and safe to show; ``detail`` holds only the
+         *     exception class name for correlation — never the raw ``str(e)``, which can
+         *     embed host / DSN / SQL material.
          */
         QueryBenchmarkErrorEvent: {
-            /** Error */
-            error: string;
+            /**
+             * Code
+             * @default null
+             */
+            code?: string | null;
+            /**
+             * Detail
+             * @default null
+             */
+            detail?: string | null;
+            /** Message */
+            message: string;
             /**
              * Type
              * @constant

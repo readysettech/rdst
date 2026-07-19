@@ -761,6 +761,19 @@ class TopService:
                 df["avg_time"] = df["mean_time"]
             elif "avg_timer_wait" in df.columns:
                 df["avg_time"] = df["avg_timer_wait"]
+
+            # Per-source unit convention (B2): pg_stat_statements reports
+            # total_exec_time/mean_exec_time in MILLISECONDS, while the MySQL
+            # `digest` path is already in seconds. The realtime builder divides
+            # by 1000 before the "s" suffix; the historical path did not, so
+            # pg_stat rows rendered ~1000x too large (a 153 ms average shown as
+            # "153.183s"). Convert ms->s once here so sorting, the
+            # min_total_time_s filter, and the "s" suffix added at format time
+            # all agree on seconds. (Activity sources are converted below.)
+            if source == "pg_stat":
+                for _time_col in ("total_time", "total_time_sort", "avg_time"):
+                    if _time_col in df.columns:
+                        df[_time_col] = df[_time_col].astype(float) / 1000.0
         else:
             # Activity sources
             if "time" in df.columns:

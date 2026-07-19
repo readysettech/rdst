@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Union
+from typing import Any, Literal, Optional, Union
 
 from .models import QueryBenchmarkStats
 
@@ -61,10 +61,19 @@ class QueryBenchmarkCompleteEvent:
 
 @dataclass
 class QueryBenchmarkErrorEvent:
-    """Benchmark failed before completion."""
+    """Benchmark failed (or was rejected by a safety rail) before completion.
+
+    Carries the shared error envelope ({code, message, detail}, B7/T24) so the
+    client normalizes a benchmark failure exactly like every other SSE error.
+    ``message`` stays humane and safe to show; ``detail`` holds only the
+    exception class name for correlation — never the raw ``str(e)``, which can
+    embed host / DSN / SQL material.
+    """
 
     type: Literal["error"]
-    error: str
+    message: str
+    code: Optional[str] = None
+    detail: Optional[str] = None
 
 
 QueryEvent = Union[QueryStatusEvent, QueryCompleteEvent, QueryErrorEvent]
