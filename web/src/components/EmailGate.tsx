@@ -66,11 +66,22 @@ async function pollVerification(): Promise<boolean> {
   return Boolean(body.verified);
 }
 
-export function EmailGate() {
+interface EmailGateProps {
+  /**
+   * 'gate' (default): blocking full-screen modal. 'panel' (rdst-dma.3): a
+   * non-blocking, dismissible card for reciprocity-timed capture — shown after
+   * the user has seen value, never before. Same email + inbox-verify flow.
+   */
+  variant?: 'gate' | 'panel';
+  onDismiss?: () => void;
+}
+
+export function EmailGate({ variant = 'gate', onDismiss }: EmailGateProps = {}) {
   const [state, setState] = useState<GateState>('checking');
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
   const pollTimer = useRef<number | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -171,13 +182,32 @@ export function EmailGate() {
   // Render nothing until the settings check says the gate is needed, so
   // users with a stored email never see the overlay flash on page load.
   if (state === 'ready' || state === 'checking') return null;
+  if (variant === 'panel' && dismissed) return null;
+
+  const panel = variant === 'panel';
 
   const inputClass =
     'mt-2 h-11 w-full rounded-lg border border-border-layout-1 bg-surface-layout-soft px-3 text-sm text-content-layout-1 outline-none focus:border-border-primary-soft disabled:opacity-60';
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" role="presentation">
-      <div role="dialog" aria-modal="true" aria-labelledby="email-gate-title" className="w-full max-w-md rounded-lg border border-border-layout-1 bg-surface-layout-1 p-6 shadow-xl">
+    <div
+      role="presentation"
+      className={
+        panel
+          ? 'fixed bottom-4 right-4 z-50 w-full max-w-sm'
+          : 'fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm'
+      }
+    >
+      <div
+        role="dialog"
+        aria-modal={panel ? undefined : true}
+        aria-labelledby="email-gate-title"
+        className={
+          panel
+            ? 'w-full rounded-xl border border-border-primary-soft bg-surface-raised p-5 shadow-elevation-2'
+            : 'w-full max-w-md rounded-lg border border-border-layout-1 bg-surface-layout-1 p-6 shadow-xl'
+        }
+      >
         {state === 'verifying' ? (
           <>
             <h2 id="email-gate-title" className="text-xl font-medium text-content-layout-1">Check your inbox</h2>
@@ -210,10 +240,23 @@ export function EmailGate() {
           </>
         ) : (
           <>
-            <h2 id="email-gate-title" className="text-xl font-medium text-content-layout-1">Enter your email to start the demo</h2>
+            <h2 id="email-gate-title" className="text-xl font-medium text-content-layout-1">
+              {panel ? 'Set RDST up on your own database' : 'Enter your email to start the demo'}
+            </h2>
             <p className="mt-2 text-sm leading-relaxed text-content-layout-2">
-              We use your email to send the verification link and to understand
-              product usage — no spam.{' '}
+              {panel ? (
+                <>
+                  You just watched Readyset cache these queries live. Verify
+                  your email for free AI credits and point RDST at your own
+                  database — the same speedup, your data. No spam; usage is
+                  disclosed.{' '}
+                </>
+              ) : (
+                <>
+                  We use your email to send the verification link and to
+                  understand product usage — no spam.{' '}
+                </>
+              )}
               <a
                 href="https://readyset.io/privacy"
                 target="_blank"
@@ -247,8 +290,21 @@ export function EmailGate() {
               onClick={() => void submit()}
               className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg bg-surface-primary-solid px-4 text-sm font-medium text-content-primary-solid disabled:opacity-50"
             >
-              {saving ? 'Saving...' : 'Get started'}
+              {saving ? 'Saving...' : panel ? 'Get free credits' : 'Get started'}
             </button>
+            {panel && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setDismissed(true);
+                  onDismiss?.();
+                }}
+                className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-lg px-4 text-sm font-medium text-content-layout-3 hover:text-content-layout-1 disabled:opacity-50"
+              >
+                Keep exploring
+              </button>
+            )}
           </>
         )}
       </div>

@@ -183,6 +183,11 @@ def _detect_theme_from_osc_11_response(response: str) -> Optional[ThemeName]:
 
 def _detect_theme_from_terminal() -> Optional[ThemeName]:
     """Query the active terminal background color via OSC 11 when available."""
+    # A server (e.g. `rdst web`) has no interactive terminal to theme, and under
+    # --reload its respawned workers would race each other on /dev/tty. The web
+    # entrypoint sets this so worker imports never open the terminal.
+    if os.getenv("RDST_NO_TTY_THEME_PROBE"):
+        return None
     try:
         if not sys.stdout.isatty() or os.name != "posix":
             return None
@@ -202,6 +207,7 @@ def _detect_theme_from_terminal() -> Optional[ThemeName]:
         tty_fd = tty_stream.fileno()
         saved_state = termios.tcgetattr(tty_fd)
         tty.setcbreak(tty_fd)
+        os.set_blocking(tty_fd, False)
         os.write(tty_fd, _OSC_11_QUERY)
 
         response_parts: list[str] = []
@@ -212,7 +218,13 @@ def _detect_theme_from_terminal() -> Optional[ThemeName]:
             if not ready:
                 break
 
-            chunk = os.read(tty_fd, 256)
+            try:
+                chunk = os.read(tty_fd, 256)
+            except BlockingIOError:
+                # select() reported the fd readable, but another reader (e.g. a
+                # concurrent reload worker) drained it first. Bail rather than
+                # block or spin the deadline out on a raced read.
+                break
             if not chunk:
                 break
 

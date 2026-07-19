@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AskPanel } from "./AskPanel";
 import { useAsk, type AskResultEvent } from '../lib/ask';
 import { createCsvFilename, downloadCsv, toCsv } from '../lib/csv';
+import { fetchAskHistory } from '../lib/api';
 
 vi.mock("../lib/ask", () => ({
   useAsk: vi.fn(),
@@ -38,6 +39,16 @@ vi.mock("../lib/api", async (importOriginal) => ({
   fetchAskExamples: vi.fn(async () => ({
     examples: [],
     source: "introspection",
+  })),
+  fetchAskHistory: vi.fn(async () => ({ items: [] })),
+  fetchSchemaStatus: vi.fn(async () => ({
+    target: "imdb",
+    exists: true,
+    tables: 7,
+    columns: 41,
+    relationships: 0,
+    terminology: 0,
+    updated_at: null,
   })),
 }));
 
@@ -85,6 +96,42 @@ describe("AskPanel", () => {
     renderPanel(<AskPanel />);
 
     expect(screen.queryByRole("button", { name: /Download CSV/i })).toBeNull();
+  });
+
+  it("lists past questions for the target and re-asks one on click (e7s.17)", async () => {
+    const askSpy = vi.fn();
+    vi.mocked(useAsk).mockReturnValue({
+      ...baseUseAskState,
+      ask: askSpy,
+      state: "idle",
+      result: undefined,
+    });
+    vi.mocked(fetchAskHistory).mockResolvedValue({
+      items: [
+        {
+          question: "How many titles rated above 9.5?",
+          sql: "SELECT count(*) FROM title_ratings WHERE averagerating > 9.5",
+          hash: "h1",
+          tag: "titles_rated_above",
+          target: "imdb",
+          last_used: "",
+        },
+      ],
+    });
+
+    renderPanel(<AskPanel target="imdb" />);
+
+    const reask = await screen.findByRole("button", {
+      name: /How many titles rated above 9.5/,
+    });
+    fireEvent.click(reask);
+
+    expect(askSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: "How many titles rated above 9.5?",
+        target: "imdb",
+      }),
+    );
   });
 
   it("disables submission when panel is password-locked", () => {

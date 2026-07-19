@@ -30,7 +30,17 @@ export const Scrollable = ({
       'overflow-hidden',
     ])}
   >
-    <ScrollArea.Viewport className={cn('w-full', 'h-full', className)}>
+    {/* Radix ScrollArea's viewport sets display:table, which ignores
+        descendants' min-w-0; force block so vertical scrollables can wrap and
+        inner overflow-x containers can scroll instead of clipping. */}
+    <ScrollArea.Viewport
+      className={cn(
+        'w-full',
+        'h-full',
+        orientation === 'vertical' && '[&>div]:!block',
+        className,
+      )}
+    >
       {children}
     </ScrollArea.Viewport>
     <ScrollArea.Scrollbar

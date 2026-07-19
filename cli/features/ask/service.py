@@ -301,6 +301,7 @@ class AskService:
                 target=ctx.target or "",
                 tag=tag,
                 question=ctx.question or "",
+                ask_target=ctx.target or "",
             )
             return query_hash, tag
         except Exception:

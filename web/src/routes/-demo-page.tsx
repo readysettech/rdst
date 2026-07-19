@@ -30,6 +30,7 @@ import {
   useState,
 } from 'react'
 import { buildParameterHighlights } from '../components/parameterHighlighting'
+import { EmailGate } from '../components/EmailGate'
 import { SQLDisplay } from '../components/SQLDisplay'
 import {
   type ContainerProgress,
@@ -2516,6 +2517,11 @@ export function DemoPage() {
           get as QueryPilot automatically chooses the right queries to cache.
         </Text>
       </header>
+
+      {/* Reciprocity-timed identity capture (rdst-dma.3): a non-blocking panel
+          that appears only once the comparison is running and showing the
+          speedup — never before proof. Grandfathered/dismissible internally. */}
+      {d.phase === 'ready' && d.events.length > 0 && <EmailGate variant="panel" />}
 
       {d.phase === 'idle' && <StartCard onStart={d.provision} />}
 

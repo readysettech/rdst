@@ -590,6 +590,11 @@ class QueryEntry:
     frequency: int = 0
     source: str = "manual"  # "manual", "top", "file", "stdin"
     last_target: str = ""  # Last target used for analysis
+    # Immutable target a question was FIRST asked against (ask-sourced only).
+    # last_target is mutable: any re-add of the same SQL hash from another
+    # target steals it, which leaked Ask history across databases. History
+    # scopes by this stable field instead (rdst-e7s.26).
+    ask_target: str = ""
     # SQLGlot-extracted parameters as dict: {'p1': {'value': 'x', 'type': 'string'}, ...}
     parameters: Dict[str, dict] = field(default_factory=dict)
     # Most recent runtime parameter values (for auto-substitution when re-running queries)
@@ -747,6 +752,7 @@ class QueryRegistry:
         frequency: int = 0,
         target: str = "",
         question: str = "",
+        ask_target: str = "",
         dialect: str = None,
         max_duration_ms: float = 0.0,
         avg_duration_ms: float = 0.0,
@@ -853,6 +859,10 @@ class QueryRegistry:
                 entry.original_sql = canonical_sql
             if target:  # Update last target used
                 entry.last_target = target
+            # Set once, at first ask; never stolen by a later re-add from
+            # another target (the cross-target Ask-history leak).
+            if ask_target and not entry.ask_target:
+                entry.ask_target = ask_target
 
             # Update parameters with new SQLGlot format
             entry.parameters = params
@@ -876,6 +886,7 @@ class QueryRegistry:
                 tag=tag,
                 original_sql=canonical_sql,  # Faithful, un-normalized submitted SQL
                 question=question,
+                ask_target=ask_target,
                 first_analyzed=now,
                 last_analyzed=now,
                 frequency=frequency,

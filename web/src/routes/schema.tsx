@@ -15,8 +15,10 @@ import { toast } from "@rs/ui-new/use-toast";
 import { useTarget } from "../hooks/useTarget";
 import { useSchema } from "../lib/useSchema";
 import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
+import { useTrialSource } from "../lib/trialQueries";
+import { useAnthropicValidity } from "../lib/useAnthropicValidity";
 import {
-  SchemaReadinessBand,
+  SchemaGuidedSequence,
   SchemaManageMenu,
   SchemaTableTree,
   SchemaTerminologyList,
@@ -31,6 +33,7 @@ import {
   SchemaAddMetricDialog,
 } from "../components/schema";
 import { TargetLockNotice } from "../components/TargetLockNotice";
+import { RoutableNotice } from "../components/RoutableNotice";
 import { TargetDropdown } from "../components/TargetDropdown";
 import type {
   SchemaTable,
@@ -105,6 +108,16 @@ function SchemaPage() {
     annotateWithLLM,
     clearError,
   } = useSchema();
+
+  // AI Annotate needs a *working* Anthropic key. Presence isn't enough — a
+  // saved key can be stale/rejected — so probe validity when a key is present.
+  // Both a missing key and a rejected one route to /configure up front rather
+  // than run-then-error on the activation path (dma.7 req #3, rdst-0yy.11).
+  const { anthropicRequirement } = useTrialSource();
+  const needsApiKey = anthropicRequirement ? !anthropicRequirement.satisfied : false;
+  const keyValidity = useAnthropicValidity(!needsApiKey).data;
+  const keyRejected = keyValidity?.valid === false && keyValidity.reason === "rejected";
+  const annotateKeyBlocked = needsApiKey || keyRejected;
 
   const [initLoading, setInitLoading] = useState(false);
   const [refreshLoading, setRefreshLoading] = useState(false);
@@ -229,6 +242,7 @@ function SchemaPage() {
 
   const handleAnnotateWithLLM = async () => {
     if (passwordLock.isLocked) return;
+    if (annotateKeyBlocked) return;
     if (!target) return;
     setAnnotateLoading(true);
     setAnnotateProgress('Starting...');
@@ -513,7 +527,7 @@ function SchemaPage() {
                   label={annotateProgress || "Annotate with AI"}
                   onClick={handleAnnotateWithLLM}
                   loading={annotateLoading}
-                  disabled={passwordLock.isLocked || annotateLoading || refreshLoading || profileLoading || initLoading || loading}
+                  disabled={passwordLock.isLocked || annotateKeyBlocked || annotateLoading || refreshLoading || profileLoading || initLoading || loading}
                 />
                 <SchemaManageMenu
                   onRefresh={handleRefresh}
@@ -534,6 +548,23 @@ function SchemaPage() {
             requirements={passwordLock.missingTargetRequirements}
             keyringAvailable={passwordLock.keyringAvailable}
           />
+        </Show>
+
+        {/* AI Annotate prerequisite: coax to /configure up front rather than
+            letting a missing- or rejected-key run fail after the click, on the
+            compelled activation path (rdst-dma.7, rdst-0yy.11). */}
+        <Show when={status?.exists && annotateKeyBlocked}>
+          <div className="mb-6">
+            {keyRejected ? (
+              <RoutableNotice
+                kind="key-needed"
+                title="Anthropic key rejected"
+                message="Anthropic rejected the configured key. Update it with a valid one to run AI Annotate."
+              />
+            ) : (
+              <RoutableNotice kind="key-needed" />
+            )}
+          </div>
         </Show>
 
         {/* Error alert */}
@@ -592,19 +623,26 @@ function SchemaPage() {
         {/* Schema exists - show content */}
         {status?.exists && schema && (
           <div className="space-y-6">
-            {/* Region B — readiness band (prominent while under-documented, then a
-                quiet line). Absorbs the old separate Summary stat card. */}
+            {/* Region B — the discovery pipeline as a guided sequence (dma.7):
+                Structure -> Column profile -> AI descriptions, each explained,
+                collapsing to a quiet line once well-documented. */}
             <m.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.1 }}
             >
-              <SchemaReadinessBand
+              <SchemaGuidedSequence
                 schema={schema!}
                 status={status!}
+                onRefresh={handleRefresh}
+                onProfile={handleProfile}
                 onAnnotate={handleAnnotateWithLLM}
+                refreshing={refreshLoading}
+                profiling={profileLoading}
                 annotating={annotateLoading}
                 annotateLabel={annotateProgress}
+                annotateBlocked={annotateKeyBlocked}
+                annotateBlockedLabel={keyRejected ? "Key rejected" : "Needs a key"}
                 disabled={passwordLock.isLocked || annotateLoading || refreshLoading || profileLoading || initLoading || loading}
               />
             </m.div>

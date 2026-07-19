@@ -384,6 +384,26 @@ export async function fetchAskHistory(
   return data;
 }
 
+export type SchemaStatusResponse = apiComponents['schemas']['SchemaStatusResponse'];
+
+// Read-only schema status for a target. Takes react-query's AbortSignal so a
+// superseded fetch is cancelled by react-query itself and never overwrites good
+// data with a null. useSchema.checkStatus, whose shared AbortController aborts
+// every prior fetch, made the Ask/Home "semantic layer" badge flap to "no
+// semantic layer" on a target switch (rdst-e7s.27).
+export async function fetchSchemaStatus(
+  target: string,
+  signal?: AbortSignal
+): Promise<SchemaStatusResponse> {
+  const { data, response } = await typedClient.GET('/api/semantic-layer/status', {
+    params: { query: { target } },
+    signal,
+  });
+  await throwIfNotOk(response, 'Failed to fetch schema status');
+  if (!data) throw new Error('Missing response body');
+  return data;
+}
+
 export async function clearKeyring(): Promise<ClearKeyringResponse> {
   const response = await fetch('/api/dev/clear-keyring', { method: 'POST' });
 

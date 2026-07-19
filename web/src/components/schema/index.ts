@@ -1,4 +1,4 @@
-export { SchemaReadinessBand } from './SchemaReadinessBand'
+export { SchemaGuidedSequence } from './SchemaGuidedSequence'
 export { SchemaManageMenu } from './SchemaManageMenu'
 export { SchemaTableTree } from './SchemaTableTree'
 export { SchemaTerminologyList } from './SchemaTerminologyList'

@@ -90,3 +90,34 @@ def test_history_filters_by_target(client, monkeypatch, tmp_path):
     assert resp.status_code == 200
     items = resp.json()["items"]
     assert [i["question"] for i in items] == ["qb"]
+
+
+def test_history_scopes_by_ask_origin_not_stolen_target(client, monkeypatch, tmp_path):
+    # A question first asked on imdb, then the SAME SQL re-added while tpcds is
+    # active (which steals the mutable last_target), must stay in imdb history
+    # and never leak into tpcds (rdst-e7s.26 cross-target leak).
+    registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+    registry.add_query(
+        "SELECT primaryname FROM name_basics",
+        source="ask",
+        tag="nolan",
+        target="imdb",
+        question="which actors worked with Nolan?",
+        ask_target="imdb",
+    )
+    registry.add_query(
+        "SELECT primaryname FROM name_basics",
+        source="ask",
+        target="tpcds",
+        ask_target="tpcds",
+    )
+
+    import shared.query_registry as sqr
+
+    monkeypatch.setattr(sqr, "QueryRegistry", lambda *a, **k: registry)
+
+    imdb = client.get("/api/ask/history", params={"target": "imdb"}).json()["items"]
+    tpcds = client.get("/api/ask/history", params={"target": "tpcds"}).json()["items"]
+
+    assert [i["question"] for i in imdb] == ["which actors worked with Nolan?"]
+    assert tpcds == []

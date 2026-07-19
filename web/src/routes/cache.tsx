@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { TargetLockNotice } from '../components'
+import { HandRaiser } from '../components/HandRaiser'
 import { SQLDisplay } from '../components/SQLDisplay'
 import { SQLInput } from '../components/SQLInput'
 import { hasParameters, ParameterDialog } from '../components/top'
@@ -2059,6 +2060,19 @@ function CachePage() {
                   </m.div>
                 )}
               </AnimatePresence>
+
+              {/* PQL hand-raiser (dma.4): first cache on the user's own target.
+                  The demo runs its own isolated flow, so any target here is an
+                  own target — no extra guard needed. */}
+              {createMutation.isSuccess && target && (
+                <div className="px-4 pb-4">
+                  <HandRaiser
+                    signal="cache_created"
+                    tone="positive"
+                    message={`This cache is live on ${target}. Running it beyond one instance (replicas, HA, a fleet)? We help teams run Readyset in production.`}
+                  />
+                </div>
+              )}
 
               {/* Create error */}
               <AnimatePresence>

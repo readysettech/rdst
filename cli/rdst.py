@@ -836,6 +836,10 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
             return RdstResult(False, f"Invalid UI mode: {ui_mode}")
 
         os.environ["RDST_WEB_SERVE_STATIC"] = "1" if serve_static else "0"
+        # The web server has no interactive terminal to theme; suppress the
+        # OSC-11 /dev/tty probe so --reload worker respawns (which inherit this
+        # env) never contend for the terminal on import.
+        os.environ["RDST_NO_TTY_THEME_PROBE"] = "1"
         if serve_static and dist_dir:
             os.environ["RDST_WEB_DIST_DIR"] = str(dist_dir)
         else:

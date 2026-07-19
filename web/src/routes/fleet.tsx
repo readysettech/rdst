@@ -24,6 +24,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PathPicker } from '../components/PathPicker'
+import { HandRaiser } from '../components/HandRaiser'
 import { formatTimestamp } from '../lib/formatters'
 import type {
   FleetAuditSummary,
@@ -1530,6 +1531,15 @@ function FleetPage() {
                   </Show>
                 </HStack>
                 {auditSummary && <FleetInsights summary={auditSummary} />}
+                {/* PQL hand-raiser (dma.4): a completed audit across more than
+                    one instance is fleet intent. */}
+                <Show when={scoreboard.total > 1}>
+                  <HandRaiser
+                    signal="fleet_audit"
+                    tone="info"
+                    message={`Audit complete across ${scoreboard.total} instances. Rolling out caching across a fleet is exactly what we help with.`}
+                  />
+                </Show>
               </VStack>
             </div>
           </Show>

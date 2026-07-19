@@ -15,8 +15,8 @@ import { CopyButton } from "@rs/ui-new/copy-button";
 import { m } from "@rs/ui-new/motion";
 import { useAsk } from "../lib/ask";
 import type { AskClarificationQuestion, AskStatusEvent, AskSchemaLoadedEvent } from "../lib/ask";
-import { useSchema } from "../lib/useSchema";
-import { fetchAskExamples } from "../lib/api";
+import { fetchAskExamples, fetchAskHistory, fetchSchemaStatus, type AskHistoryItem } from "../lib/api";
+import { formatTimestamp } from "../lib/formatters";
 import { classifyError } from "../lib/errorContract";
 import { RoutableNotice } from "./RoutableNotice";
 import { TargetDropdown } from "./TargetDropdown";
@@ -34,6 +34,59 @@ function sourceLabel(source: string | undefined): string {
   return source === "semantic" ? "semantic layer" : "live introspection";
 }
 
+// Per-target rail of past questions (rdst-e7s.17). Every answered ask is
+// auto-saved with its original question text; this lists them newest-first,
+// searchable, and re-asks one on click. The caller renders it only when there
+// is history, so there is no inert empty state here.
+function HistoryRail({
+  items,
+  onReask,
+  disabled,
+}: {
+  items: AskHistoryItem[];
+  onReask: (question: string) => void;
+  disabled: boolean;
+}) {
+  const [filter, setFilter] = useState("");
+  const shown = filter.trim()
+    ? items.filter((i) => i.question.toLowerCase().includes(filter.toLowerCase()))
+    : items;
+
+  return (
+    <VStack className="gap-3 items-stretch">
+      <BaseInputText
+        name="ask-history-search"
+        placeholder="Search your questions"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
+      <VStack className="gap-2 items-stretch max-h-80 overflow-y-auto">
+        {shown.map((item) => (
+          <button
+            type="button"
+            key={item.hash}
+            disabled={disabled}
+            onClick={() => onReask(item.question)}
+            className="text-left rounded-lg border border-border-layout-1 bg-surface-layout-1 p-3 hover:border-border-primary-soft transition-colors disabled:opacity-50"
+          >
+            <Text level="label-small" className="text-content-layout-1 line-clamp-2">
+              {item.question}
+            </Text>
+            <HStack className="gap-2 items-center mt-1.5">
+              <Text level="caption" className="text-content-layout-3">
+                {item.last_used ? formatTimestamp(item.last_used) : ""}
+              </Text>
+              <Text level="caption" className="text-content-primary-soft ml-auto">
+                re-ask &rarr;
+              </Text>
+            </HStack>
+          </button>
+        ))}
+      </VStack>
+    </VStack>
+  );
+}
+
 export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelProps) {
   const [question, setQuestion] = useState("");
   // The post-validation SQL is trust evidence, not the headline: collapsed by
@@ -46,7 +99,6 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
   // submit-time stamp is the fallback for streams that never emit it.
   const [askedTarget, setAskedTarget] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { checkStatus } = useSchema();
   const {
     ask,
     resumeWithAnswers,
@@ -64,7 +116,7 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
   // knows whether answers carry business context (ports readiness from CL 14059).
   const { data: schemaStatus } = useQuery({
     queryKey: ["ask", "schema-status", target],
-    queryFn: () => checkStatus(target!),
+    queryFn: ({ signal }) => fetchSchemaStatus(target!, signal),
     staleTime: 60_000,
     enabled: !!target,
   });
@@ -80,6 +132,14 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
     enabled: !!target,
   });
   const exampleQuestions = examples?.examples ?? [];
+
+  // Past questions for this target, newest-first (rdst-e7s.17).
+  const { data: history } = useQuery({
+    queryKey: ["ask", "history", target],
+    queryFn: () => fetchAskHistory(target, 50),
+    enabled: !!target,
+  });
+  const historyItems = history?.items ?? [];
 
   const handleSubmit = useCallback(async () => {
     if (disabled) return;
@@ -125,6 +185,16 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
     if (disabled) return;
     setQuestion(example);
   }, [disabled]);
+
+  // Re-ask a past question: fill the input and answer it immediately
+  // (rdst-e7s.17), unlike an example which only fills.
+  const handleReask = useCallback(async (past: string) => {
+    if (disabled || !past.trim()) return;
+    setQuestion(past);
+    setShowSql(false);
+    setAskedTarget(target ?? null);
+    await ask({ question: past.trim(), target: target || undefined });
+  }, [disabled, target, ask]);
 
   // Hand off the EXACT post-validation SQL that ran (not the pre-validation
   // generated text) so /results does not force a spurious ParameterDialog and
@@ -296,6 +366,24 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
                       </m.button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Per-target question history (rdst-e7s.17): only shown once there
+                  is history, mirroring the examples' no-inert-affordances rule. */}
+              {!!target && historyItems.length > 0 && (
+                <div className="border-t border-border-layout-1 bg-surface-layout-2/50 p-4">
+                  <Text
+                    level="overline"
+                    className="text-content-layout-3 uppercase tracking-wider mb-3"
+                  >
+                    Recent questions
+                  </Text>
+                  <HistoryRail
+                    items={historyItems}
+                    onReask={handleReask}
+                    disabled={disabled}
+                  />
                 </div>
               )}
             </Card.Content>
