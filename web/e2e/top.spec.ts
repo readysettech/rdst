@@ -63,8 +63,9 @@ async function prepareTopPage(page: Parameters<typeof configureTestTarget>[0]) {
   await expect(
     page.getByRole('heading', { name: 'Slow Queries' })
   ).toBeVisible()
+  // C-09 moved the idle CTA into the empty state and renamed it.
   await expect(
-    page.getByRole('button', { name: 'Get Top Queries' })
+    page.getByRole('button', { name: 'Find slow queries' })
   ).toBeEnabled()
 }
 
@@ -133,6 +134,8 @@ test('filters, refreshes, expands, and analyzes historical slow queries', async 
     if (new URL(request.url()).pathname === '/api/top') topRequests += 1
   })
 
+  // The filter inputs live behind the collapsed "Filters" disclosure now.
+  await page.getByRole('button', { name: 'Filters' }).click()
   await page.locator('[name="filter"]').fill('orders')
   await page.locator('[name="min-freq"]').fill('50')
   await page.locator('[name="min-load"]').fill('5')
@@ -140,7 +143,7 @@ test('filters, refreshes, expands, and analyzes historical slow queries', async 
   const firstRequest = page.waitForRequest(
     (request) => new URL(request.url()).pathname === '/api/top'
   )
-  await page.getByRole('button', { name: 'Get Top Queries' }).click()
+  await page.getByRole('button', { name: 'Find slow queries' }).click()
   const requestUrl = new URL((await firstRequest).url())
   expect(Object.fromEntries(requestUrl.searchParams)).toMatchObject({
     auto_save: 'true',
@@ -159,23 +162,25 @@ test('filters, refreshes, expands, and analyzes historical slow queries', async 
     'data-query-hash',
     'orders-historical-001'
   )
-  await expect(queryRows.first()).toContainText('Freq: 3200')
-  await expect(queryRows.first()).toContainText('Total: 48.0s')
+  await expect(queryRows.first()).toContainText('3200×')
+  await expect(queryRows.first()).toContainText('48.0s')
   await expect(page.getByText('Low Database Query Size Limit')).toBeVisible()
   await expect(page.getByText('2 saved', { exact: true })).toBeVisible()
 
-  const firstSql = queryRows.first().locator('button[title]')
+  // Within a row, only the expandable SQL preview carries a title attribute
+  // (a div[role=button] at C-09, a real button after the QueryCard polish).
+  const firstSql = queryRows.first().locator('[title]')
   await firstSql.click()
   await expect(firstSql).toContainText(firstHistoricalQueries[0].query_text)
 
-  await page.getByRole('button', { name: 'Get Top Queries' }).click()
+  await page.getByRole('button', { name: 'Find slow queries' }).click()
   queryRows = page.getByTestId('top-query-row')
   await expect(queryRows).toHaveCount(1)
   await expect(queryRows).toHaveAttribute(
     'data-query-hash',
     refreshedQuery.query_hash
   )
-  await expect(queryRows).toContainText('Load: 42.0%')
+  await expect(queryRows).toContainText('load 42.0%')
   expect(topRequests).toBe(2)
 
   await queryRows.getByRole('button', { name: 'Analyze' }).click()
@@ -212,10 +217,10 @@ test('shows the historical empty state', async ({ page }) => {
   })
   await prepareTopPage(page)
 
-  await page.getByRole('button', { name: 'Get Top Queries' }).click()
+  await page.getByRole('button', { name: 'Find slow queries' }).click()
   await expect(
     page.getByText(
-      'No queries found. Try adjusting the filter or waiting for more activity.',
+      'No queries matched. Loosen the filters or wait for more traffic.',
       { exact: true }
     )
   ).toBeVisible()
@@ -299,6 +304,9 @@ test('shows a realtime connection failure and retries the stream', async ({
     }
   })
 
+  // Fill the shared thresholds behind the Filters disclosure while the mode
+  // is still historical (the values persist across the mode switch).
+  await page.getByRole('button', { name: 'Filters' }).click()
   await page.locator('[name="min-freq"]').fill('3')
   await page.locator('[name="min-load"]').fill('2')
   await page.getByRole('button', { name: 'Realtime Realtime' }).click()
@@ -308,7 +316,7 @@ test('shows a realtime connection failure and retries the stream', async ({
       url.pathname === '/api/top' && url.searchParams.get('realtime') === 'true'
     )
   })
-  await page.getByRole('button', { name: 'Start Monitoring' }).click()
+  await page.getByRole('button', { name: 'Start live monitoring' }).click()
   const realtimeUrl = new URL((await firstRealtimeRequest).url())
   expect(Object.fromEntries(realtimeUrl.searchParams)).toMatchObject({
     min_freq: '3',
@@ -322,13 +330,13 @@ test('shows a realtime connection failure and retries the stream', async ({
     })
   ).toBeVisible()
 
-  await page.getByRole('button', { name: 'Start Monitoring' }).click()
+  await page.getByRole('button', { name: 'Start live monitoring' }).click()
   const liveRow = page.getByTestId('top-query-row')
   await expect(liveRow).toHaveCount(1)
   await expect(liveRow).toContainText('2 running')
-  await expect(liveRow).toContainText('Freq: 17')
-  await expect(liveRow).toContainText('Max: 92.4ms')
-  await expect(liveRow).toContainText('QPS: 4.25')
+  await expect(liveRow).toContainText('17×')
+  await expect(liveRow).toContainText('92.4ms')
+  await expect(liveRow).toContainText('qps 4.25')
   await expect(
     page.getByText('Fallback: pg_stat → activity', { exact: true })
   ).toBeVisible()

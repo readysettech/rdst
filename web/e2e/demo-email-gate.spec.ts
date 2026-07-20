@@ -9,7 +9,11 @@ test('requires signup on the demo page only', async ({ page }) => {
   await configureTestTarget(page)
 
   await page.goto('/')
-  await expect(page.getByText('What do you want to do?')).toBeVisible()
+  await expect(
+    page.getByRole('heading', {
+      name: 'Understand, diagnose, and speed up your database',
+    })
+  ).toBeVisible()
   await expect(gate).toHaveCount(0)
 
   await page.goto('/demo')

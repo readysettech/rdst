@@ -2,6 +2,7 @@ import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { CopyButton } from '@rs/ui-new/copy-button'
+import { Dropdown } from '@rs/ui-new/dropdown'
 import { Icon } from '@rs/ui-new/icon'
 import { AnimatePresence, m } from '@rs/ui-new/motion'
 import { Scrollable } from '@rs/ui-new/scrollable'
@@ -11,6 +12,7 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
+import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
@@ -137,188 +139,238 @@ function EndpointCard({
     >
       <Card className="w-full overflow-hidden">
         <Card.Content className="p-0">
-          <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
-            <HStack className="justify-between items-center">
-              <HStack className="gap-2 items-center">
-                <StatusDot running={running} />
-                <Text
-                  level="overline"
-                  className="text-content-layout-3 uppercase tracking-wider"
-                >
-                  {needsEndpoint
-                    ? 'Endpoint Required'
-                    : running
-                      ? 'Cache Running'
-                      : 'Cache Stopped'}
-                </Text>
-              </HStack>
-              <HStack className="gap-2">
-                {!running && !needsEndpoint && onLifecycle && (
-                  <Button
-                    variant="primary"
-                    modifier="ghost"
-                    size="small"
-                    label="Start"
-                    icon="play"
-                    iconPosition="left"
-                    onClick={() => onLifecycle('start')}
-                    loading={pendingLifecycleOp === 'start'}
-                  />
-                )}
-                {!running && !needsEndpoint && onRedeploy && (
-                  <Button
-                    variant="primary"
-                    modifier="ghost"
-                    size="small"
-                    label="Redeploy"
-                    icon="database-settings"
-                    iconPosition="left"
-                    onClick={onRedeploy}
-                    loading={isRedeploying}
-                  />
-                )}
-                {running && !needsEndpoint && onLifecycle && (
-                  <>
-                    <Button
-                      variant="primary"
-                      modifier="ghost"
-                      size="small"
-                      label="Restart"
-                      icon="database-settings"
-                      iconPosition="left"
-                      onClick={() => onLifecycle('restart')}
-                      loading={pendingLifecycleOp === 'restart'}
-                    />
-                    <Button
-                      variant="primary"
-                      modifier="ghost"
-                      size="small"
-                      label="Stop"
-                      onClick={() => onLifecycle('stop')}
-                      loading={pendingLifecycleOp === 'stop'}
-                    />
-                  </>
-                )}
-                {onRemove && !confirmRemove && (
-                  <Button
-                    variant="negative"
-                    modifier="ghost"
-                    size="small"
-                    label="Remove"
-                    icon="trash"
-                    iconPosition="left"
-                    onClick={() => setConfirmRemove(true)}
-                  />
-                )}
-                {confirmRemove && (
-                  <HStack className="gap-1">
-                    <Button
-                      variant="primary"
-                      modifier="ghost"
-                      size="small"
-                      label="Cancel"
-                      onClick={() => setConfirmRemove(false)}
-                    />
+          {needsEndpoint ? (
+            <>
+              <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
+                <HStack className="justify-between items-center">
+                  <HStack className="gap-2 items-center">
+                    <StatusDot running={running} />
+                    <Text
+                      level="overline"
+                      className="text-content-layout-3 uppercase tracking-wider"
+                    >
+                      Endpoint Required
+                    </Text>
+                  </HStack>
+                  {onRemove && !confirmRemove && (
                     <Button
                       variant="negative"
-                      modifier="solid"
+                      modifier="ghost"
                       size="small"
-                      label="Confirm Remove"
+                      label="Remove"
                       icon="trash"
                       iconPosition="left"
-                      loading={isRemoving}
-                      onClick={() => {
-                        onRemove?.()
-                        setConfirmRemove(false)
-                      }}
+                      onClick={() => setConfirmRemove(true)}
                     />
-                  </HStack>
-                )}
-              </HStack>
-            </HStack>
-          </div>
-          <div className="p-5">
-            {needsEndpoint ? (
-              <VStack className="gap-3 items-start">
-                <Text level="body-small" className="text-content-layout-2">
-                  ReadySet was deployed. Enter the host and port where RDST can
-                  reach it.
-                </Text>
-                <div className="grid grid-cols-[2fr_1fr_auto] gap-3 w-full items-end">
-                  <div>
-                    <Text
-                      level="caption"
-                      className="text-content-layout-3 mb-1 block"
-                    >
-                      ReadySet Host
-                    </Text>
-                    <BaseInputText
-                      name="endpoint-host"
-                      value={endpointHost}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        setEndpointHost(e.target.value)
-                      }
-                      placeholder="host or IP"
+                  )}
+                  {confirmRemove && (
+                    <HStack className="gap-1">
+                      <Button
+                        variant="primary"
+                        modifier="ghost"
+                        size="small"
+                        label="Cancel"
+                        onClick={() => setConfirmRemove(false)}
+                      />
+                      <Button
+                        variant="negative"
+                        modifier="solid"
+                        size="small"
+                        label="Confirm Remove"
+                        icon="trash"
+                        iconPosition="left"
+                        loading={isRemoving}
+                        onClick={() => {
+                          onRemove?.()
+                          setConfirmRemove(false)
+                        }}
+                      />
+                    </HStack>
+                  )}
+                </HStack>
+              </div>
+              <div className="p-5">
+                <VStack className="gap-3 items-start">
+                  <Text level="body-small" className="text-content-layout-2">
+                    ReadySet was deployed. Enter the host and port where RDST
+                    can reach it.
+                  </Text>
+                  <div className="grid grid-cols-[2fr_1fr_auto] gap-3 w-full items-end">
+                    <div>
+                      <Text
+                        level="caption"
+                        className="text-content-layout-3 mb-1 block"
+                      >
+                        ReadySet Host
+                      </Text>
+                      <BaseInputText
+                        name="endpoint-host"
+                        value={endpointHost}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setEndpointHost(e.target.value)
+                        }
+                        placeholder="host or IP"
+                      />
+                    </div>
+                    <div>
+                      <Text
+                        level="caption"
+                        className="text-content-layout-3 mb-1 block"
+                      >
+                        Port
+                      </Text>
+                      <BaseInputText
+                        name="endpoint-port"
+                        value={endpointPort}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setEndpointPort(e.target.value)
+                        }
+                        placeholder="5433"
+                      />
+                    </div>
+                    <Button
+                      variant="primary"
+                      modifier="solid"
+                      label="Connect"
+                      icon="connect"
+                      iconPosition="left"
+                      onClick={() => registerMutation.mutate()}
+                      loading={registerMutation.isPending}
+                      disabled={!endpointHost.trim()}
                     />
                   </div>
-                  <div>
+                </VStack>
+              </div>
+            </>
+          ) : (
+            /* Calm health strip: status + reachability, the connection string
+               demoted to a compact copyable field, and lifecycle Restart /
+               Stop / Remove collapsed into one "···" overflow menu so the
+               destructive action no longer competes at rest (VIS-011,
+               VIS-022/023; redesign rows 5–6). */
+            <div className="px-5 py-3 bg-surface-layout-2/50">
+              <HStack className="justify-between items-center gap-3 flex-wrap">
+                <HStack className="gap-3 items-center min-w-0">
+                  <StatusDot running={running} />
+                  <VStack className="gap-0 items-start min-w-0">
                     <Text
-                      level="caption"
-                      className="text-content-layout-3 mb-1 block"
+                      level="overline"
+                      className="text-content-layout-3 uppercase tracking-wider"
                     >
-                      Port
+                      {running ? 'Cache Running' : 'Cache Stopped'}
                     </Text>
-                    <BaseInputText
-                      name="endpoint-port"
-                      value={endpointPort}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        setEndpointPort(e.target.value)
-                      }
-                      placeholder="5433"
-                    />
-                  </div>
-                  <Button
-                    variant="primary"
-                    modifier="solid"
-                    label="Connect"
-                    icon="connect"
-                    iconPosition="left"
-                    onClick={() => registerMutation.mutate()}
-                    loading={registerMutation.isPending}
-                    disabled={!endpointHost.trim()}
-                  />
-                </div>
-              </VStack>
-            ) : (
-              <VStack className="gap-3 items-start">
-                {running ? (
-                  <Text level="body-small" className="text-content-layout-3">
-                    Point your application to this endpoint to route queries
-                    through ReadySet.
-                  </Text>
-                ) : (
-                  <Text
-                    level="body-small"
-                    className="text-content-warning-soft"
-                  >
-                    The cache is not reachable. Check that ReadySet is running
-                    and the endpoint is correct.
-                  </Text>
-                )}
-                <HStack className="gap-3 items-center w-full">
-                  <div className="flex-1 bg-surface-layout-2 rounded-lg px-4 py-3 border border-border-layout-1">
+                    <Text level="caption" className="text-content-layout-3">
+                      {running
+                        ? 'Reachable — point your app at the endpoint'
+                        : 'Not reachable — start the cache to route queries'}
+                    </Text>
+                  </VStack>
+                </HStack>
+                <HStack className="gap-2 items-center min-w-0">
+                  <div className="flex items-center gap-1 bg-surface-layout-2 rounded-lg pl-3 pr-1 py-1 border border-border-layout-1 min-w-0 max-w-[16rem]">
                     <Text
                       level="mono-small"
-                      className="text-content-layout-1 break-all"
+                      className="text-content-layout-2 truncate"
                     >
                       {endpoint}
                     </Text>
+                    <CopyButton text={endpoint} />
                   </div>
-                  <CopyButton text={endpoint} />
+                  {pendingLifecycleOp && <Spinner size="base" />}
+                  {confirmRemove ? (
+                    <HStack className="gap-1">
+                      <Button
+                        variant="primary"
+                        modifier="ghost"
+                        size="small"
+                        label="Cancel"
+                        onClick={() => setConfirmRemove(false)}
+                      />
+                      <Button
+                        variant="negative"
+                        modifier="solid"
+                        size="small"
+                        label="Confirm Remove"
+                        icon="trash"
+                        iconPosition="left"
+                        loading={isRemoving}
+                        onClick={() => {
+                          onRemove?.()
+                          setConfirmRemove(false)
+                        }}
+                      />
+                    </HStack>
+                  ) : (
+                    (onLifecycle || onRedeploy || onRemove) && (
+                      <Dropdown>
+                        <Dropdown.Trigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Cache actions"
+                            className="flex items-center justify-center h-8 w-8 rounded-lg text-content-layout-3 hover:text-content-layout-1 hover:bg-surface-layout-2 transition-colors cursor-pointer"
+                          >
+                            <Icon
+                              name="more"
+                              label="Cache actions"
+                              className="w-4 h-4"
+                            />
+                          </button>
+                        </Dropdown.Trigger>
+                        <Dropdown.Content align="end">
+                          {running ? (
+                            onLifecycle && (
+                              <>
+                                <Dropdown.Item
+                                  leftIcon="database-settings"
+                                  label="Restart"
+                                  disabled={!!pendingLifecycleOp}
+                                  onClick={() => onLifecycle('restart')}
+                                />
+                                <Dropdown.Item
+                                  leftIcon="minus"
+                                  label="Stop"
+                                  disabled={!!pendingLifecycleOp}
+                                  onClick={() => onLifecycle('stop')}
+                                />
+                              </>
+                            )
+                          ) : (
+                            <>
+                              {onLifecycle && (
+                                <Dropdown.Item
+                                  leftIcon="play"
+                                  label="Start"
+                                  disabled={!!pendingLifecycleOp}
+                                  onClick={() => onLifecycle('start')}
+                                />
+                              )}
+                              {onRedeploy && (
+                                <Dropdown.Item
+                                  leftIcon="database-settings"
+                                  label="Redeploy"
+                                  disabled={isRedeploying || !!pendingLifecycleOp}
+                                  onClick={onRedeploy}
+                                />
+                              )}
+                            </>
+                          )}
+                          {onRemove && <Dropdown.Separator />}
+                          {onRemove && (
+                            <Dropdown.Item
+                              leftIcon="trash"
+                              label="Remove…"
+                              disabled={!!pendingLifecycleOp}
+                              onClick={() => setConfirmRemove(true)}
+                            />
+                          )}
+                        </Dropdown.Content>
+                      </Dropdown>
+                    )
+                  )}
                 </HStack>
-              </VStack>
-            )}
-          </div>
+              </HStack>
+            </div>
+          )}
         </Card.Content>
       </Card>
     </m.div>
@@ -1011,6 +1063,9 @@ function CachePage() {
   const [k8sNamespace, setK8sNamespace] = useState('readyset')
   const [remoteDest, setRemoteDest] = useState('') // user@host format
   const [remoteRuntime, setRemoteRuntime] = useState<RemoteRuntime>('docker')
+  // Systemd / Kubernetes / Remote defer behind one collapsed disclosure so the
+  // recommended Docker path reads as the single decision (redesign rows 2–4).
+  const [otherDeployOpen, setOtherDeployOpen] = useDisclosure({})
 
   // Clear deploy state when switching modes
   const switchMode = (mode: DeployMode) => {
@@ -1088,18 +1143,58 @@ function CachePage() {
   // user-initiated deploy remains. [diagnose-to-fix MoT 3; caching HIGH]
   const carriedQuery = Boolean(pendingQuery) && !isDeployed
 
+  // One deploy action, rendered in whichever zone owns the current mode: with
+  // the recommended Docker card (primary) or, for a selected Systemd/K8s/Remote
+  // mode, on its own row OUTSIDE the disclosure (so collapsing it never hides the
+  // deploy button). Handlers stay wired identically; only where it renders changes.
+  const deployCostLine =
+    deployMode === 'docker' || deployMode === 'remote'
+      ? 'Starts a ReadySet container (~4 GB RAM, 2 CPUs) · ~1–2 min'
+      : deployMode === 'systemd'
+        ? 'Installs a ReadySet systemd service (~4 GB RAM, 2 CPUs) · ~1–2 min'
+        : 'Provisions a ReadySet pod in your cluster · ~1–2 min'
+  const deployLabel =
+    deployMode === 'kubernetes'
+      ? 'Deploy to Kubernetes'
+      : deployMode === 'remote'
+        ? 'Deploy to Remote'
+        : deployMode === 'systemd'
+          ? 'Deploy with Systemd'
+          : `Deploy cache for "${target}"`
+  const deployActionRow = (
+    <HStack className="justify-between items-center gap-3 flex-wrap">
+      <HStack className="gap-2 items-center">
+        <Icon
+          name="info"
+          label="Cost"
+          className="w-3.5 h-3.5 text-content-layout-3 shrink-0"
+        />
+        <Text level="caption" className="text-content-layout-3">
+          {deployCostLine}
+        </Text>
+      </HStack>
+      <Button
+        variant="primary"
+        modifier="solid"
+        label={deployLabel}
+        icon="play"
+        iconPosition="left"
+        onClick={handleDeploy}
+        loading={isDeploying}
+        disabled={isDeploying || !canDeploy}
+      />
+    </HStack>
+  )
+
   return (
     <div className="space-y-6 w-full">
-      {/* Hero Header */}
-      <m.div
-        className="space-y-4"
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
+      {/* Hero Header — renders at full opacity from first paint (no entrance
+          fade) so navigating to /cache never shows a dimmed-blank flash before
+          content settles (caching LOW: first-paint jank; VIS-102). */}
+      <div className="space-y-4">
         <HStack className="justify-between items-start">
           <HStack className="gap-4 items-center">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-positive-soft to-surface-info-soft flex items-center justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
               <Icon
                 name="database-settings"
                 label="Cache"
@@ -1130,7 +1225,7 @@ function CachePage() {
             </VStack>
           </HStack>
         </HStack>
-      </m.div>
+      </div>
 
       {/* Password lock */}
       {passwordLock.isLocked && (
@@ -1191,291 +1286,311 @@ function CachePage() {
           )}
           <Card className="w-full overflow-hidden">
             <Card.Content className="p-0">
-              {/* Explanation banner */}
+              {/* Explanation banner — the value prop collapses from three
+                  competing feature cards to one calm, de-emphasized line so the
+                  deploy decision wins by quiet neighbors, not by shouting louder
+                  (redesign row 1; VIS-016, VIS-114, VIS-011). */}
               <div className="p-8 border-b border-border-layout-1">
-                <VStack className="gap-5 items-start max-w-2xl">
-                  <VStack className="gap-2 items-start">
-                    <Text
-                      as="h2"
-                      level="headline-4"
-                      className="text-content-layout-1"
-                    >
-                      Deploy a cache for "{target}"
-                    </Text>
-                    <Text
-                      level="body-medium"
-                      className="text-content-layout-2 leading-relaxed"
-                    >
-                      ReadySet sits between your application and database,
-                      serving cached queries in under 1ms. Uncached queries pass
-                      through transparently to your database.
-                    </Text>
-                  </VStack>
-
-                  {/* Feature bullets */}
-                  <div className="grid grid-cols-1 tablet:grid-cols-3 gap-4 w-full">
-                    {[
-                      {
-                        icon: 'speedometer' as const,
-                        title: 'Sub-millisecond reads',
-                        desc: 'Cached queries return in ~1ms from memory',
-                      },
-                      {
-                        icon: 'database' as const,
-                        title: 'Transparent proxy',
-                        desc: 'Uncached queries pass through to your database',
-                      },
-                      {
-                        icon: 'tick-double' as const,
-                        title: 'Wire-compatible',
-                        desc: 'Drop-in replacement, no code changes needed',
-                      },
-                    ].map((feature) => (
-                      <div
-                        key={feature.title}
-                        className="bg-surface-layout-2/50 rounded-xl p-4 border border-border-layout-1"
-                      >
-                        <HStack className="gap-3 items-start">
-                          <div className="w-8 h-8 rounded-lg bg-surface-positive-soft flex items-center justify-center shrink-0">
-                            <Icon
-                              name={feature.icon}
-                              label={feature.title}
-                              className="w-4 h-4 text-content-positive-soft"
-                            />
-                          </div>
-                          <VStack className="gap-1 items-start">
-                            <Text
-                              level="label-small"
-                              className="text-content-layout-1"
-                            >
-                              {feature.title}
-                            </Text>
-                            <Text
-                              level="caption"
-                              className="text-content-layout-3"
-                            >
-                              {feature.desc}
-                            </Text>
-                          </VStack>
-                        </HStack>
-                      </div>
-                    ))}
-                  </div>
+                <VStack className="gap-2 items-start max-w-2xl">
+                  <Text
+                    as="h2"
+                    level="headline-4"
+                    className="text-content-layout-1"
+                  >
+                    Deploy a cache for "{target}"
+                  </Text>
+                  <Text level="body-small" className="text-content-layout-2">
+                    Serves cached queries in ~1&nbsp;ms; everything else passes
+                    straight through to your database — no app changes.
+                  </Text>
                 </VStack>
               </div>
 
               {/* Deploy mode selector + action */}
               <div className="p-6 bg-surface-layout-2/30">
-                {/* Mode cards */}
-                <div className="grid grid-cols-4 gap-3 mb-5">
-                  {[
-                    {
-                      mode: 'docker' as DeployMode,
-                      icon: 'database' as const,
-                      title: 'Docker',
-                      desc: 'Local container',
-                    },
-                    {
-                      mode: 'systemd' as DeployMode,
-                      icon: 'settings' as const,
-                      title: 'Systemd',
-                      desc: 'Local service (Linux)',
-                    },
-                    {
-                      mode: 'kubernetes' as DeployMode,
-                      icon: 'connect' as const,
-                      title: 'Kubernetes',
-                      desc: 'Deploy to k8s cluster',
-                    },
-                    {
-                      mode: 'remote' as DeployMode,
-                      icon: 'arrow-up-right' as const,
-                      title: 'Remote Host',
-                      desc: 'Deploy via SSH',
-                    },
-                  ].map((opt) => (
-                    <button
-                      key={opt.mode}
-                      type="button"
-                      onClick={() => switchMode(opt.mode)}
-                      className={`text-left p-4 rounded-xl border-2 transition-all cursor-pointer ${
-                        deployMode === opt.mode
-                          ? 'border-surface-primary-solid bg-surface-primary-soft/10'
-                          : 'border-border-layout-1 hover:border-border-layout-2 bg-transparent'
+                {/* PRIMARY: recommended Docker path — one pre-selected card
+                    with a [Recommended] tag + border-primary accent so the
+                    normal choice reads first; the other three modes defer into
+                    the disclosure below (redesign rows 1–4; VIS-011, VIS-125). */}
+                <button
+                  type="button"
+                  onClick={() => switchMode('docker')}
+                  className={`w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer shadow-soft ${
+                    deployMode === 'docker'
+                      ? 'border-border-primary-solid bg-surface-primary-soft/10'
+                      : 'border-border-layout-1 hover:border-border-layout-2 bg-transparent'
+                  }`}
+                >
+                  <HStack className="gap-3 items-start">
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        deployMode === 'docker'
+                          ? 'bg-surface-primary-soft'
+                          : 'bg-surface-layout-2'
                       }`}
                     >
-                      <HStack className="gap-3 items-start">
-                        <div
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                            deployMode === opt.mode
-                              ? 'bg-surface-primary-soft'
-                              : 'bg-surface-layout-2'
-                          }`}
-                        >
-                          <Icon
-                            name={opt.icon}
-                            label={opt.title}
-                            className={`w-4 h-4 ${
-                              deployMode === opt.mode
-                                ? 'text-content-primary-soft'
-                                : 'text-content-layout-3'
-                            }`}
-                          />
-                        </div>
-                        <VStack className="gap-0.5 items-start">
-                          <Text
-                            level="label-small"
-                            className={
-                              deployMode === opt.mode
-                                ? 'text-content-layout-1'
-                                : 'text-content-layout-2'
-                            }
-                          >
-                            {opt.title}
-                          </Text>
-                          <Text
-                            level="caption"
-                            className="text-content-layout-3"
-                          >
-                            {opt.desc}
-                          </Text>
-                        </VStack>
-                      </HStack>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Conditional inputs */}
-                <AnimatePresence mode="wait">
-                  {deployMode === 'kubernetes' && (
-                    <m.div
-                      key="k8s-inputs"
-                      // overflow-hidden clips the content to the animated
-                      // height so it can't spill past the box and let the
-                      // Deploy row ride up over these inputs (P60).
-                      className="mb-5 space-y-3 overflow-hidden"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <div className="max-w-xs">
+                      <Icon
+                        name="database"
+                        label="Docker"
+                        className={`w-4 h-4 ${
+                          deployMode === 'docker'
+                            ? 'text-content-primary-soft'
+                            : 'text-content-layout-3'
+                        }`}
+                      />
+                    </div>
+                    <VStack className="gap-0.5 items-start min-w-0">
+                      <HStack className="gap-2 items-center">
                         <Text
-                          level="caption"
-                          className="text-content-layout-3 mb-1 block"
+                          level="label-small"
+                          className="text-content-layout-1"
                         >
-                          Namespace
+                          Docker
                         </Text>
-                        <BaseInputText
-                          name="k8s-namespace"
-                          value={k8sNamespace}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setK8sNamespace(e.target.value)
-                          }
-                          placeholder="readyset"
+                        <Tag
+                          size="small"
+                          variant="informative"
+                          modifier="ghost"
+                          label="Recommended"
                         />
-                      </div>
+                      </HStack>
                       <Text level="caption" className="text-content-layout-3">
-                        Requires kubectl configured with cluster access on this
-                        machine.
+                        Local container — the standard choice on this machine
                       </Text>
-                    </m.div>
-                  )}
-                  {deployMode === 'remote' && (
-                    <m.div
-                      key="remote-inputs"
-                      // Clip to the animated height so the SSH/Runtime inputs
-                      // (incl. the Systemd toggle) can't overflow and be
-                      // overlapped by the Deploy button below (P60, functional).
-                      className="mb-5 space-y-3 overflow-hidden"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
-                        <div>
-                          <Text
-                            level="caption"
-                            className="text-content-layout-3 mb-1 block"
-                          >
-                            SSH Destination
-                          </Text>
-                          <BaseInputText
-                            name="remote-dest"
-                            value={remoteDest}
-                            onChange={(
-                              e: React.ChangeEvent<HTMLInputElement>
-                            ) => setRemoteDest(e.target.value)}
-                            placeholder="user@hostname"
-                          />
-                        </div>
-                        <div>
-                          <Text
-                            level="caption"
-                            className="text-content-layout-3 mb-1 block"
-                          >
-                            Runtime
-                          </Text>
-                          <HStack className="gap-1 h-10">
-                            {(['docker', 'systemd'] as const).map((rt) => (
+                    </VStack>
+                  </HStack>
+                </button>
+
+                {/* Primary CTA, grouped with the recommended Docker card */}
+                {deployMode === 'docker' && (
+                  <div className="mt-5">{deployActionRow}</div>
+                )}
+
+                {/* TERTIARY: other deploy modes behind one collapsed disclosure
+                    (use-disclosure). Systemd / Kubernetes / Remote keep their
+                    exact controls inside; the deploy action for the selected
+                    non-docker mode renders just below, OUTSIDE the disclosure, so
+                    it survives collapse (redesign rows 2–4; USE-008). */}
+                <div className="mt-5 border-t border-border-layout-1 pt-5">
+                  <button
+                    type="button"
+                    onClick={() => setOtherDeployOpen(!otherDeployOpen)}
+                    aria-expanded={otherDeployOpen}
+                    className="flex items-center gap-2 text-content-layout-2 hover:text-content-layout-1 transition-colors cursor-pointer"
+                  >
+                    <Icon
+                      name="chevron-down"
+                      label="Toggle other deploy options"
+                      className={`w-4 h-4 transition-transform ${
+                        otherDeployOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                    <Text level="label-small" className="text-content-layout-2">
+                      Other deploy options (Systemd · Kubernetes · Remote)
+                    </Text>
+                  </button>
+
+                  <AnimatePresence initial={false}>
+                    {otherDeployOpen && (
+                      <m.div
+                        key="other-deploy"
+                        className="overflow-hidden"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <div className="pt-5">
+                          {/* Responsive grid for the deferred modes (was a fixed
+                              4-col grid — caching LOW). */}
+                          <div className="grid grid-cols-1 tablet:grid-cols-3 gap-3 mb-5">
+                            {[
+                              {
+                                mode: 'systemd' as DeployMode,
+                                icon: 'settings' as const,
+                                title: 'Systemd',
+                                desc: 'Local service (Linux)',
+                              },
+                              {
+                                mode: 'kubernetes' as DeployMode,
+                                icon: 'connect' as const,
+                                title: 'Kubernetes',
+                                desc: 'Deploy to k8s cluster',
+                              },
+                              {
+                                mode: 'remote' as DeployMode,
+                                icon: 'arrow-up-right' as const,
+                                title: 'Remote Host',
+                                desc: 'Deploy via SSH',
+                              },
+                            ].map((opt) => (
                               <button
-                                key={rt}
+                                key={opt.mode}
                                 type="button"
-                                onClick={() => setRemoteRuntime(rt)}
-                                className={`flex-1 h-full px-4 rounded-lg text-sm font-medium transition-all cursor-pointer ${
-                                  remoteRuntime === rt
-                                    ? 'bg-surface-primary-soft/30 text-content-layout-1 border border-surface-primary-solid'
-                                    : 'bg-surface-layout-2 text-content-layout-3 border border-border-layout-1 hover:border-border-layout-2'
+                                onClick={() => switchMode(opt.mode)}
+                                className={`text-left p-4 rounded-xl border-2 transition-all cursor-pointer ${
+                                  deployMode === opt.mode
+                                    ? 'border-surface-primary-solid bg-surface-primary-soft/10'
+                                    : 'border-border-layout-1 hover:border-border-layout-2 bg-transparent'
                                 }`}
                               >
-                                {rt === 'docker' ? 'Docker' : 'Systemd'}
+                                <HStack className="gap-3 items-start">
+                                  <div
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                                      deployMode === opt.mode
+                                        ? 'bg-surface-primary-soft'
+                                        : 'bg-surface-layout-2'
+                                    }`}
+                                  >
+                                    <Icon
+                                      name={opt.icon}
+                                      label={opt.title}
+                                      className={`w-4 h-4 ${
+                                        deployMode === opt.mode
+                                          ? 'text-content-primary-soft'
+                                          : 'text-content-layout-3'
+                                      }`}
+                                    />
+                                  </div>
+                                  <VStack className="gap-0.5 items-start">
+                                    <Text
+                                      level="label-small"
+                                      className={
+                                        deployMode === opt.mode
+                                          ? 'text-content-layout-1'
+                                          : 'text-content-layout-2'
+                                      }
+                                    >
+                                      {opt.title}
+                                    </Text>
+                                    <Text
+                                      level="caption"
+                                      className="text-content-layout-3"
+                                    >
+                                      {opt.desc}
+                                    </Text>
+                                  </VStack>
+                                </HStack>
                               </button>
                             ))}
-                          </HStack>
-                        </div>
-                      </div>
-                    </m.div>
-                  )}
-                </AnimatePresence>
+                          </div>
 
-                {/* Deploy button + inline cost disclosure. Naming the resource
-                    cost before the click turns the deploy into a mindless
-                    confirm, not a leap. [diagnose-to-fix MoT 3; USE-065] */}
-                <HStack className="justify-between items-center gap-3 flex-wrap">
-                  <HStack className="gap-2 items-center">
-                    <Icon
-                      name="info"
-                      label="Cost"
-                      className="w-3.5 h-3.5 text-content-layout-3 shrink-0"
-                    />
-                    <Text level="caption" className="text-content-layout-3">
-                      {deployMode === 'docker' || deployMode === 'remote'
-                        ? 'Starts a ReadySet container (~4 GB RAM, 2 CPUs) · ~1–2 min'
-                        : deployMode === 'systemd'
-                          ? 'Installs a ReadySet systemd service (~4 GB RAM, 2 CPUs) · ~1–2 min'
-                          : 'Provisions a ReadySet pod in your cluster · ~1–2 min'}
-                    </Text>
-                  </HStack>
-                  <Button
-                    variant="primary"
-                    modifier="solid"
-                    label={
-                      deployMode === 'kubernetes'
-                        ? 'Deploy to Kubernetes'
-                        : deployMode === 'remote'
-                          ? 'Deploy to Remote'
-                          : deployMode === 'systemd'
-                            ? 'Deploy with Systemd'
-                            : 'Deploy with Docker'
-                    }
-                    icon="play"
-                    iconPosition="left"
-                    onClick={handleDeploy}
-                    loading={isDeploying}
-                    disabled={isDeploying || !canDeploy}
-                  />
-                </HStack>
+                          {/* Conditional inputs */}
+                          <AnimatePresence mode="wait">
+                            {deployMode === 'kubernetes' && (
+                              <m.div
+                                key="k8s-inputs"
+                                // overflow-hidden clips the content to the
+                                // animated height so it can't spill past the box
+                                // and let the Deploy row ride up over these
+                                // inputs (P60).
+                                className="mb-5 space-y-3 overflow-hidden"
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ duration: 0.2 }}
+                              >
+                                <div className="max-w-xs">
+                                  <Text
+                                    level="caption"
+                                    className="text-content-layout-3 mb-1 block"
+                                  >
+                                    Namespace
+                                  </Text>
+                                  <BaseInputText
+                                    name="k8s-namespace"
+                                    value={k8sNamespace}
+                                    onChange={(
+                                      e: React.ChangeEvent<HTMLInputElement>
+                                    ) => setK8sNamespace(e.target.value)}
+                                    placeholder="readyset"
+                                  />
+                                </div>
+                                <Text
+                                  level="caption"
+                                  className="text-content-layout-3"
+                                >
+                                  Requires kubectl configured with cluster access
+                                  on this machine.
+                                </Text>
+                              </m.div>
+                            )}
+                            {deployMode === 'remote' && (
+                              <m.div
+                                key="remote-inputs"
+                                // Clip to the animated height so the SSH/Runtime
+                                // inputs (incl. the Systemd toggle) can't
+                                // overflow and be overlapped by the Deploy button
+                                // below (P60, functional).
+                                className="mb-5 space-y-3 overflow-hidden"
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ duration: 0.2 }}
+                              >
+                                <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
+                                  <div>
+                                    <Text
+                                      level="caption"
+                                      className="text-content-layout-3 mb-1 block"
+                                    >
+                                      SSH Destination
+                                    </Text>
+                                    <BaseInputText
+                                      name="remote-dest"
+                                      value={remoteDest}
+                                      onChange={(
+                                        e: React.ChangeEvent<HTMLInputElement>
+                                      ) => setRemoteDest(e.target.value)}
+                                      placeholder="user@hostname"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Text
+                                      level="caption"
+                                      className="text-content-layout-3 mb-1 block"
+                                    >
+                                      Runtime
+                                    </Text>
+                                    <HStack className="gap-1 h-10">
+                                      {(['docker', 'systemd'] as const).map(
+                                        (rt) => (
+                                          <button
+                                            key={rt}
+                                            type="button"
+                                            onClick={() => setRemoteRuntime(rt)}
+                                            className={`flex-1 h-full px-4 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                                              remoteRuntime === rt
+                                                ? 'bg-surface-primary-soft/30 text-content-layout-1 border border-surface-primary-solid'
+                                                : 'bg-surface-layout-2 text-content-layout-3 border border-border-layout-1 hover:border-border-layout-2'
+                                            }`}
+                                          >
+                                            {rt === 'docker'
+                                              ? 'Docker'
+                                              : 'Systemd'}
+                                          </button>
+                                        )
+                                      )}
+                                    </HStack>
+                                  </div>
+                                </div>
+                              </m.div>
+                            )}
+                          </AnimatePresence>
+
+                        </div>
+                      </m.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Deploy action for the selected non-docker mode renders
+                      OUTSIDE the disclosure, so collapsing "Other deploy options"
+                      never leaves the mode selected with no deploy button. The
+                      cost line + label stay mode-aware. */}
+                  {deployMode !== 'docker' && (
+                    <div className="mt-5">{deployActionRow}</div>
+                  )}
+                </div>
 
                 {/* Deploy progress */}
                 <AnimatePresence>

@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ResultsPage, Route } from "./results";
+import { Route } from "./results";
+import { ResultsPage } from "./-results-page";
 import { useAnalyze } from "../lib/sse";
 import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
 

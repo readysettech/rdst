@@ -10,6 +10,10 @@ import type {
 const textStyles = tv({
   variants: {
     level: {
+      // Display-size numeral for the single hero stat per screen (the /analyze
+      // score, /demo multiplier). Maps --text-stat-hero (48/500), tabular so
+      // digits line up. [design-system §3/§8 #11; VIS-012, VIS-116]
+      'stat-hero': ['text-stat-hero', 'tabular-nums'],
       'display-large': 'text-display-large',
       'display-medium': 'text-display-medium',
       'display-small': 'text-display-small',

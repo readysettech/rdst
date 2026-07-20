@@ -52,17 +52,30 @@ function guessOrmLanguage(ormType: string): 'js' | 'python' {
   return pythonOrms.some((o) => ormType.toLowerCase().includes(o)) ? 'python' : 'js';
 }
 
-function EmptyState({ message, icon }: { message: string; icon: 'search' | 'folder-file' }) {
+function EmptyState({
+  message,
+  hint,
+  icon,
+}: {
+  message: string;
+  hint?: string;
+  icon: 'search' | 'folder-file';
+}) {
   return (
     <Card className="w-full">
       <Card.Content className="py-16">
-        <VStack className="gap-4 items-center">
+        <VStack className="gap-3 items-center">
           <div className="w-14 h-14 rounded-2xl bg-surface-layout-2 flex items-center justify-center">
             <Icon name={icon} label="Empty" className="w-7 h-7 text-content-layout-3" />
           </div>
-          <Text level="body-small" className="text-content-layout-3 text-center max-w-md">
+          <Text level="body-small" className="text-content-layout-2 text-center max-w-md">
             {message}
           </Text>
+          {hint && (
+            <Text level="caption" className="text-content-layout-3 text-center max-w-md">
+              {hint}
+            </Text>
+          )}
         </VStack>
       </Card.Content>
     </Card>
@@ -82,7 +95,7 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
   return (
     <Modal open={!!query} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={!!query}>
-        <ModalContent size="large" className="p-0 gap-0">
+        <ModalContent size="large" className="p-0 gap-0 shadow-elevation-3">
           <ModalTitle className="sr-only">
             {query ? `${query.function || query.class || 'Query'} details` : 'Query details'}
           </ModalTitle>
@@ -116,9 +129,9 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
                       {query.issues.length > 0 && (
                         <Tag
                           size="small"
-                          variant="warning"
+                          variant="informative"
                           modifier="ghost"
-                          label={`${query.issues.length} issue${query.issues.length === 1 ? '' : 's'}`}
+                          label={`${query.issues.length} lint`}
                         />
                       )}
                     </HStack>
@@ -171,7 +184,7 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
                         level="label-small"
                         className="text-content-layout-3 uppercase tracking-wider block mb-2"
                       >
-                        Issues
+                        Lint issues
                       </Text>
                       <div className="space-y-1.5">
                         {query.issues.map((issue, i) => (
@@ -280,9 +293,9 @@ function QueryRow({ query, qIdx, onViewDetail, onAnalyze, onCache, isCaching }: 
           {query.issues.length > 0 && (
             <Tag
               size="small"
-              variant="warning"
+              variant="informative"
               modifier="ghost"
-              label={`${query.issues.length} issue${query.issues.length === 1 ? '' : 's'}`}
+              label={`${query.issues.length} lint`}
             />
           )}
         </HStack>
@@ -401,6 +414,7 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
         <EmptyState
           icon="folder-file"
           message="No ORM queries found in the scanned directory."
+          hint="Scan checks .py and .ts files for SQLAlchemy, Django, Prisma, and Drizzle queries."
         />
       </m.div>
     );
@@ -416,7 +430,7 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
         <Card className="w-full overflow-hidden">
           <Card.Content className="p-0">
             {/* Section header */}
-            <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
+            <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50 space-y-1.5">
               <HStack className="justify-between items-center">
                 <HStack className="gap-2 items-center">
                   <Icon name="layers" label="Results" className="w-4 h-4 text-content-layout-3" />
@@ -438,6 +452,13 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
                     label={`${fileGroups.length} file${fileGroups.length === 1 ? '' : 's'}`}
                   />
                 </HStack>
+              </HStack>
+              {/* Honesty caveat at the point the converted SQL is shown */}
+              <HStack className="gap-1.5 items-center">
+                <Icon name="alert" label="Experimental" className="w-3 h-3 text-content-warning-soft shrink-0" />
+                <Text level="caption" className="text-content-warning-soft">
+                  Experimental · AI-converted SQL — verify before use
+                </Text>
               </HStack>
             </div>
 

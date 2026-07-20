@@ -266,7 +266,7 @@ export function ReportDialog({
               </Text>
               <Dropdown open={dropdownOpen} onOpenChange={setDropdownOpen}>
                 <Dropdown.Trigger asChild>
-                  <div className="flex justify-between items-center bg-surface-layout-2 border border-border-layout-1 rounded-xl px-4 py-3 cursor-pointer hover:border-border-layout-2 hover:bg-surface-layout-3 transition-all duration-200 group">
+                  <div className="flex justify-between items-center bg-surface-layout-2 border border-border-layout-1 rounded-xl px-4 py-3 cursor-pointer hover:border-border-layout-2 hover:bg-surface-raised transition-all duration-200 group">
                     <div className="flex-1 min-w-0">
                       {selectedQuery ? (
                         <HStack className="gap-3 items-center">
@@ -295,7 +295,7 @@ export function ReportDialog({
                         </HStack>
                       ) : (
                         <HStack className="gap-3 items-center">
-                          <div className="w-8 h-8 rounded-lg bg-surface-layout-3 flex items-center justify-center shrink-0">
+                          <div className="w-8 h-8 rounded-lg bg-surface-raised flex items-center justify-center shrink-0">
                             <Icon
                               name="sparkles"
                               label="General"

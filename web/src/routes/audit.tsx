@@ -1,4 +1,6 @@
+import { cn } from '@rs/tailwind-base'
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
+import { BaseInputSelect } from '@rs/ui-new/base-input-select'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { CopyButton } from '@rs/ui-new/copy-button'
@@ -10,13 +12,16 @@ import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
+import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { toast } from '@rs/ui-new/use-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { TargetLockNotice } from '../components'
 import { SQLDisplay } from '../components/SQLDisplay'
 import { useTarget } from '../hooks/useTarget'
+import { useTrialSource } from '../lib/trialQueries'
+import { useAnthropicValidity } from '../lib/useAnthropicValidity'
 import {
   fetchAuditRuns,
   fetchRunDetail,
@@ -28,6 +33,7 @@ import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 import type {
   AuditReport,
   AuditRunSummary,
+  HealthAnalysis,
   HealthFinding,
   WorkloadAnalysis,
   WorkloadQuery,
@@ -35,11 +41,15 @@ import type {
   WorkloadSummary,
 } from '../types/audit'
 
-const CAPTURE_DURATIONS: Array<{ label: string; seconds: number }> = [
-  { label: '30s', seconds: 30 },
-  { label: '1m', seconds: 60 },
-  { label: '5m', seconds: 300 },
-  { label: '15m', seconds: 900 },
+const CAPTURE_DURATIONS: Array<{
+  label: string
+  long: string
+  seconds: number
+}> = [
+  { label: '30s', long: '30 seconds', seconds: 30 },
+  { label: '1m', long: '1 minute', seconds: 60 },
+  { label: '5m', long: '5 minutes', seconds: 300 },
+  { label: '15m', long: '15 minutes', seconds: 900 },
 ]
 
 export const Route = createFileRoute('/audit')({
@@ -180,6 +190,43 @@ function SectionCard({
   )
 }
 
+/**
+ * A quiet, secondary metric card for the report's supporting-scores row —
+ * lighter than a SectionCard, lets each card compose its own body. Sits at
+ * content-layout weight so the raised verdict card stays the one focal point
+ * (VIS-011, VIS-017).
+ */
+function SupportingCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: IconStrokeName
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="bg-surface-layout-1 rounded-xl p-4 border border-border-layout-1">
+      <VStack className="gap-2 items-start">
+        <HStack className="gap-2 items-center">
+          <Icon
+            name={icon}
+            label={title}
+            className="w-3.5 h-3.5 text-content-layout-3"
+          />
+          <Text
+            level="overline"
+            className="text-content-layout-3 uppercase tracking-wider"
+          >
+            {title}
+          </Text>
+        </HStack>
+        {children}
+      </VStack>
+    </div>
+  )
+}
+
 function FindingsList({ findings }: { findings: HealthFinding[] }) {
   return (
     // gap-4 BETWEEN findings > gap-3 WITHIN a finding row (§1 grouping).
@@ -208,162 +255,253 @@ function FindingsList({ findings }: { findings: HealthFinding[] }) {
   )
 }
 
+/**
+ * PRIMARY of the report view: the verdict, raised via the elevation-token scale
+ * (VIS-075/076/080/105) — depth by a lightness step + a dark-tuned shadow, not
+ * a border or a raw shadow-xl. The AI health-score badge is the single accent
+ * of the report state (VIS-013/016/097). Degrades gracefully with no key: the
+ * sizing verdict leads and a muted note points at Configure (H-4).
+ */
+function VerdictCard({ report }: { report: AuditReport }) {
+  const sizing = report.sizing || {}
+  const health = report.health_analysis
+  const healthOk =
+    !!health && !health.error && health.health_score !== undefined
+  const verdict =
+    VERDICT_LABELS[sizing.verdict || 'unknown'] || VERDICT_LABELS.unknown
+  const summary =
+    health?.health_score_rationale ||
+    health?.executive_summary ||
+    sizing.explanation
+
+  return (
+    <div className="rounded-[1.25rem] bg-surface-raised shadow-elevation-1 p-6">
+      <VStack className="gap-4 items-stretch">
+        <Text
+          level="overline"
+          className="text-content-layout-2 uppercase tracking-wider"
+        >
+          Verdict
+        </Text>
+        <HStack className="gap-3 items-center flex-wrap">
+          {healthOk && (
+            <HStack className="gap-2 items-baseline">
+              <Text
+                level="headline-1"
+                className={`tabular-nums ${healthScoreColor(health!.health_score!)}`}
+              >
+                {health!.health_score}
+              </Text>
+              <Text level="body-small" className="text-content-layout-2">
+                / 100
+              </Text>
+              <Tag
+                variant={
+                  health!.health_score! >= 75
+                    ? 'positive'
+                    : health!.health_score! >= 60
+                      ? 'warning'
+                      : 'negative'
+                }
+                modifier="ghost"
+                label={health!.health_label || 'SCORE'}
+              />
+            </HStack>
+          )}
+          <Tag variant={verdict.variant} modifier="ghost" label={verdict.label} />
+          {report.instance_class && (
+            <Text level="mono-small" className="text-content-layout-2">
+              {report.instance_class}
+            </Text>
+          )}
+        </HStack>
+        {summary && (
+          <Text level="body-small" className="text-content-layout-2">
+            {summary}
+          </Text>
+        )}
+        {!healthOk && (
+          <HStack className="gap-1.5 items-center flex-wrap">
+            <Icon
+              name="sparkles"
+              label=""
+              aria-hidden="true"
+              className="w-3.5 h-3.5 text-content-layout-2 shrink-0"
+            />
+            <Text level="caption" className="text-content-layout-2">
+              AI health score unavailable
+              {health?.error ? ` — ${health.error}` : ''}.
+            </Text>
+            <Link to="/configure" className="hover:underline">
+              <Text level="caption" className="text-content-primary-soft">
+                Configure
+              </Text>
+            </Link>
+          </HStack>
+        )}
+      </VStack>
+    </div>
+  )
+}
+
+/**
+ * SECONDARY of the report view: the AI findings + recommended actions. Only
+ * renders when a credential resolved (the score itself lives in the verdict
+ * hero, so it is not repeated here).
+ */
+function HealthDetailSection({ health }: { health: HealthAnalysis }) {
+  return (
+    <SectionCard icon="document-validation" title="AI Analysis">
+      <div className="p-5">
+        <VStack className="gap-4 items-start min-w-0">
+          {health.executive_summary && (
+            <Text level="body-small" className="text-content-layout-2">
+              {health.executive_summary}
+            </Text>
+          )}
+          {(health.findings?.length || 0) > 0 && (
+            <FindingsList findings={health.findings!} />
+          )}
+        </VStack>
+        {(health.recommended_actions?.length || 0) > 0 && (
+          <div className="mt-5 pt-5 border-t border-border-layout-1">
+            <Text
+              level="overline"
+              className="text-content-layout-3 uppercase tracking-wider block mb-3"
+            >
+              Recommended Actions
+            </Text>
+            {/* gap-4 BETWEEN actions > gap-3 WITHIN a row (§1 grouping). */}
+            <VStack className="gap-4 items-stretch">
+              {health.recommended_actions!.map((action, index) => (
+                <HStack key={index} className="gap-3 items-start">
+                  <div className="w-6 h-6 rounded-md bg-surface-primary-soft flex items-center justify-center shrink-0">
+                    <Text
+                      level="caption"
+                      className="text-content-primary-soft font-semibold"
+                    >
+                      {action.rank ?? index + 1}
+                    </Text>
+                  </div>
+                  <VStack className="gap-0.5 items-start min-w-0">
+                    <Text level="label-small" className="text-content-layout-1">
+                      {action.title}
+                    </Text>
+                    <Text level="body-small" className="text-content-layout-2">
+                      {action.body}
+                    </Text>
+                  </VStack>
+                </HStack>
+              ))}
+            </VStack>
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  )
+}
+
 function AuditReportView({ report }: { report: AuditReport }) {
   const metrics = report.metrics || {}
   const sizing = report.sizing || {}
   const cacheOpp = report.cache_opportunity || {}
   const health = report.health_analysis
-  const healthOk = health && !health.error && health.health_score !== undefined
+  const healthOk =
+    !!health && !health.error && health.health_score !== undefined
   const verdict =
     VERDICT_LABELS[sizing.verdict || 'unknown'] || VERDICT_LABELS.unknown
   const topQueries = report.top_queries || []
+  const [detailsOpen, setDetailsOpen] = useDisclosure({})
 
   return (
     <VStack className="gap-6 items-stretch w-full">
-      {/* Overview */}
-      <SectionCard icon="database" title="Overview">
-        <div className="p-5 grid grid-cols-2 tablet:grid-cols-4 gap-4">
-          <StatCard
-            label="Engine"
-            value={report.engine || '-'}
-            hint={metrics.server_version}
-          />
-          <StatCard
-            label="Database Size"
-            value={formatSizeMb(metrics.database_size_mb)}
-            hint={metrics.storage_type || undefined}
-          />
-          <StatCard
-            label="Uptime"
-            value={formatUptime(metrics.uptime_seconds)}
-          />
-          <StatCard
-            label="Connections"
-            value={`${metrics.active_connections ?? '-'} / ${metrics.max_connections ?? '-'}`}
-            hint={
-              metrics.connection_utilization_pct !== undefined
-                ? `${metrics.connection_utilization_pct.toFixed(0)}% utilized`
-                : undefined
-            }
-          />
-          <StatCard
-            label="Cache Hit Rate"
-            value={
-              metrics.cache_hit_rate !== undefined
-                ? `${metrics.cache_hit_rate.toFixed(1)}%`
-                : '-'
-            }
-          />
-          <StatCard
-            label="Read / Write"
-            value={
-              metrics.read_pct !== undefined
-                ? `${metrics.read_pct.toFixed(0)}% / ${(metrics.write_pct ?? 0).toFixed(0)}%`
-                : '-'
-            }
-          />
-          <StatCard
-            label="Tracked Queries"
-            value={`${metrics.tracked_query_count ?? '-'}`}
-          />
-          <StatCard
-            label="Storage"
-            value={
-              metrics.storage_allocated_gb
-                ? `${metrics.storage_allocated_gb.toFixed(0)} GB`
-                : '-'
-            }
-            hint={
-              metrics.storage_used_pct != null
-                ? `${metrics.storage_used_pct}% used`
-                : undefined
-            }
-          />
-        </div>
-      </SectionCard>
+      {/* PRIMARY — the verdict (raised) */}
+      <VerdictCard report={report} />
 
-      {/* Health analysis */}
-      {healthOk && (
-        <SectionCard icon="document-validation" title="Health Analysis">
-          <div className="p-5">
-            <div className="grid grid-cols-[auto_1fr] gap-6 items-start">
-              <VStack className="gap-1 items-center px-4">
-                <Text
-                  level="headline-1"
-                  className={`tabular-nums ${healthScoreColor(health.health_score!)}`}
-                >
-                  {health.health_score}
-                </Text>
-                <Tag
-                  variant={
-                    health.health_score! >= 75
-                      ? 'positive'
-                      : health.health_score! >= 60
-                        ? 'warning'
-                        : 'negative'
-                  }
-                  modifier="ghost"
-                  label={health.health_label || 'SCORE'}
-                />
-              </VStack>
-              <VStack className="gap-4 items-start min-w-0">
-                {health.health_score_rationale && (
-                  <Text level="body-small" className="text-content-layout-2">
-                    {health.health_score_rationale}
-                  </Text>
-                )}
-                {health.executive_summary && (
-                  <Text level="body-small" className="text-content-layout-3">
-                    {health.executive_summary}
-                  </Text>
-                )}
-                {(health.findings?.length || 0) > 0 && (
-                  <FindingsList findings={health.findings!} />
-                )}
-              </VStack>
-            </div>
-            {(health.recommended_actions?.length || 0) > 0 && (
-              <div className="mt-5 pt-5 border-t border-border-layout-1">
-                <Text
-                  level="overline"
-                  className="text-content-layout-3 uppercase tracking-wider block mb-3"
-                >
-                  Recommended Actions
-                </Text>
-                {/* gap-4 BETWEEN actions > gap-3 WITHIN a row (§1 grouping). */}
-                <VStack className="gap-4 items-stretch">
-                  {health.recommended_actions!.map((action, index) => (
-                    <HStack key={index} className="gap-3 items-start">
-                      <div className="w-6 h-6 rounded-md bg-surface-primary-soft flex items-center justify-center shrink-0">
-                        <Text
-                          level="caption"
-                          className="text-content-primary-soft font-semibold"
-                        >
-                          {action.rank ?? index + 1}
-                        </Text>
-                      </div>
-                      <VStack className="gap-0.5 items-start min-w-0">
-                        <Text
-                          level="label-small"
-                          className="text-content-layout-1"
-                        >
-                          {action.title}
-                        </Text>
-                        <Text
-                          level="body-small"
-                          className="text-content-layout-2"
-                        >
-                          {action.body}
-                        </Text>
-                      </VStack>
-                    </HStack>
-                  ))}
-                </VStack>
-              </div>
+      {/* SECONDARY — three supporting scores */}
+      <div className="grid grid-cols-1 tablet:grid-cols-3 gap-4">
+        <SupportingCard icon="sparkles" title="Cache Opportunity">
+          <HStack className="gap-2 items-baseline">
+            <Text
+              level="headline-4"
+              className="text-content-layout-1 tabular-nums"
+            >
+              {cacheOpp.score ?? '-'}
+            </Text>
+            <Tag
+              size="small"
+              variant={
+                cacheOpp.level === 'high'
+                  ? 'positive'
+                  : cacheOpp.level === 'medium'
+                    ? 'warning'
+                    : 'informative'
+              }
+              modifier="ghost"
+              label={(cacheOpp.level || 'unknown').toUpperCase()}
+            />
+          </HStack>
+          {cacheOpp.explanation && (
+            <Text
+              level="caption"
+              className="text-content-layout-3 line-clamp-2"
+            >
+              {cacheOpp.explanation}
+            </Text>
+          )}
+        </SupportingCard>
+
+        <SupportingCard icon="adjustment-horizontal" title="Sizing">
+          <HStack className="gap-2 items-center flex-wrap">
+            <Tag
+              size="small"
+              variant={verdict.variant}
+              modifier="ghost"
+              label={verdict.label}
+            />
+            {report.instance_class && (
+              <Text level="mono-small" className="text-content-layout-3">
+                {report.instance_class}
+              </Text>
             )}
-          </div>
-        </SectionCard>
-      )}
+          </HStack>
+          {sizing.potential_savings_usd != null &&
+          sizing.potential_savings_usd > 0 ? (
+            <Text level="caption" className="text-content-positive-soft">
+              Save ~${sizing.potential_savings_usd.toFixed(0)}/mo
+              {sizing.suggested_instance_class
+                ? ` on ${sizing.suggested_instance_class}`
+                : ''}
+            </Text>
+          ) : sizing.explanation ? (
+            <Text
+              level="caption"
+              className="text-content-layout-3 line-clamp-2"
+            >
+              {sizing.explanation}
+            </Text>
+          ) : null}
+        </SupportingCard>
+
+        <SupportingCard icon="observe" title="Top Queries">
+          <HStack className="gap-2 items-baseline">
+            <Text
+              level="headline-4"
+              className="text-content-layout-1 tabular-nums"
+            >
+              {topQueries.length}
+            </Text>
+            <Text level="caption" className="text-content-layout-3">
+              {topQueries.length === 1 ? 'hot spot' : 'hot spots'}
+            </Text>
+          </HStack>
+        </SupportingCard>
+      </div>
+
+      {/* SECONDARY — AI findings + actions (only with a credential) */}
+      {healthOk && <HealthDetailSection health={health!} />}
+
+      {/* Health analysis degradation (no-key path) */}
       {health?.error && (
         <div className="px-5 py-3 bg-surface-warning-soft/20 border border-border-warning-soft rounded-xl">
           <HStack className="gap-2 items-center">
@@ -379,149 +517,170 @@ function AuditReportView({ report }: { report: AuditReport }) {
         </div>
       )}
 
-      {/* Sizing + Cache opportunity */}
-      <div className="grid grid-cols-1 tablet:grid-cols-2 gap-6">
-        <SectionCard icon="adjustment-horizontal" title="Sizing">
-          <div className="p-5">
-            <VStack className="gap-3 items-start">
-              <HStack className="gap-2 items-center">
-                <Tag
-                  variant={verdict.variant}
-                  modifier="ghost"
-                  label={verdict.label}
-                />
-                {report.instance_class && (
-                  <Text level="mono-small" className="text-content-layout-3">
-                    {report.instance_class}
-                  </Text>
-                )}
-              </HStack>
-              {sizing.explanation && (
-                <Text level="body-small" className="text-content-layout-2">
-                  {sizing.explanation}
-                </Text>
-              )}
-              {sizing.potential_savings_usd != null &&
-                sizing.potential_savings_usd > 0 && (
-                  <Text
-                    level="body-small"
-                    className="text-content-positive-soft"
-                  >
-                    Potential savings: $
-                    {sizing.potential_savings_usd.toFixed(0)}/mo
-                    {sizing.suggested_instance_class
-                      ? ` on ${sizing.suggested_instance_class}`
-                      : ''}
-                  </Text>
-                )}
-            </VStack>
-          </div>
-        </SectionCard>
-
-        <SectionCard icon="sparkles" title="Cache Opportunity">
-          <div className="p-5">
-            <VStack className="gap-3 items-start">
-              <HStack className="gap-3 items-center">
-                <Text
-                  level="headline-4"
-                  className="text-content-layout-1 tabular-nums"
-                >
-                  {cacheOpp.score ?? '-'}
-                </Text>
-                <Tag
-                  variant={
-                    cacheOpp.level === 'high'
-                      ? 'positive'
-                      : cacheOpp.level === 'medium'
-                        ? 'warning'
-                        : 'informative'
-                  }
-                  modifier="ghost"
-                  label={(cacheOpp.level || 'unknown').toUpperCase()}
-                />
-              </HStack>
-              {cacheOpp.explanation && (
-                <Text level="body-small" className="text-content-layout-2">
-                  {cacheOpp.explanation}
-                </Text>
-              )}
-            </VStack>
-          </div>
-        </SectionCard>
-      </div>
-
-      {/* Top queries */}
-      <Show when={topQueries.length > 0}>
-        <SectionCard
-          icon="observe"
-          title={`Top Queries (${topQueries.length})`}
+      {/* TERTIARY — raw numbers behind a Details disclosure */}
+      <div className="border-t border-border-layout-1 pt-4">
+        <button
+          type="button"
+          aria-expanded={detailsOpen}
+          onClick={() => setDetailsOpen(!detailsOpen)}
+          className="group flex items-center gap-2 text-content-layout-2 hover:text-content-layout-1 transition-colors"
         >
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-surface-layout-2/30">
-                  <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium">
-                    Query
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
-                    Calls
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
-                    Avg
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
-                    % Time
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border-layout-1">
-                {topQueries.map((query, index) => (
-                  <tr
-                    key={query.query_hash || index}
-                    className="hover:bg-surface-layout-2/50 transition-colors"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="bg-surface-layout-2 rounded-lg max-w-2xl">
-                        <Scrollable className="max-h-24">
-                          <div className="px-3 py-2">
-                            <SQLDisplay sql={query.query_text || ''} wrap />
-                          </div>
-                        </Scrollable>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Text
-                        level="mono-small"
-                        className="text-content-layout-2 tabular-nums"
-                      >
-                        {query.calls?.toLocaleString() ?? '-'}
-                      </Text>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Text
-                        level="mono-small"
-                        className="text-content-layout-2 tabular-nums"
-                      >
-                        {formatMs(query.avg_time_ms)}
-                      </Text>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Text
-                        level="mono-small"
-                        className="text-content-layout-2 tabular-nums"
-                      >
-                        {query.pct_total_time != null
-                          ? `${query.pct_total_time}%`
-                          : '-'}
-                      </Text>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      </Show>
+          <Icon
+            name="chevron-right"
+            label=""
+            aria-hidden="true"
+            className={`w-4 h-4 transition-transform ${
+              detailsOpen ? 'rotate-90' : ''
+            }`}
+          />
+          <Text level="label-small">
+            {detailsOpen ? 'Hide details' : 'Details'} — overview metrics, full
+            query list
+          </Text>
+        </button>
+
+        {detailsOpen && (
+          <VStack className="gap-6 items-stretch mt-4">
+            {/* Overview */}
+            <SectionCard icon="database" title="Overview">
+              <div className="p-5 grid grid-cols-2 tablet:grid-cols-4 gap-4">
+                <StatCard
+                  label="Engine"
+                  value={report.engine || '-'}
+                  hint={metrics.server_version}
+                />
+                <StatCard
+                  label="Database Size"
+                  value={formatSizeMb(metrics.database_size_mb)}
+                  hint={metrics.storage_type || undefined}
+                />
+                <StatCard
+                  label="Uptime"
+                  value={formatUptime(metrics.uptime_seconds)}
+                />
+                <StatCard
+                  label="Connections"
+                  value={`${metrics.active_connections ?? '-'} / ${metrics.max_connections ?? '-'}`}
+                  hint={
+                    metrics.connection_utilization_pct !== undefined
+                      ? `${metrics.connection_utilization_pct.toFixed(0)}% utilized`
+                      : undefined
+                  }
+                />
+                <StatCard
+                  label="Cache Hit Rate"
+                  value={
+                    metrics.cache_hit_rate !== undefined
+                      ? `${metrics.cache_hit_rate.toFixed(1)}%`
+                      : '-'
+                  }
+                />
+                <StatCard
+                  label="Read / Write"
+                  value={
+                    metrics.read_pct !== undefined
+                      ? `${metrics.read_pct.toFixed(0)}% / ${(metrics.write_pct ?? 0).toFixed(0)}%`
+                      : '-'
+                  }
+                />
+                <StatCard
+                  label="Tracked Queries"
+                  value={`${metrics.tracked_query_count ?? '-'}`}
+                />
+                <StatCard
+                  label="Storage"
+                  value={
+                    metrics.storage_allocated_gb
+                      ? `${metrics.storage_allocated_gb.toFixed(0)} GB`
+                      : '-'
+                  }
+                  hint={
+                    metrics.storage_used_pct != null
+                      ? `${metrics.storage_used_pct}% used`
+                      : undefined
+                  }
+                />
+              </div>
+            </SectionCard>
+
+            {/* Top queries */}
+            <Show when={topQueries.length > 0}>
+              <SectionCard
+                icon="observe"
+                title={`Top Queries (${topQueries.length})`}
+              >
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-surface-layout-2/30">
+                        <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium">
+                          Query
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
+                          Calls
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
+                          Avg
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
+                          % Time
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-layout-1">
+                      {topQueries.map((query, index) => (
+                        <tr
+                          key={query.query_hash || index}
+                          className="hover:bg-surface-layout-2/50 transition-colors"
+                        >
+                          <td className="px-4 py-3">
+                            <div className="bg-surface-layout-2 rounded-lg max-w-2xl">
+                              <Scrollable className="max-h-24">
+                                <div className="px-3 py-2">
+                                  <SQLDisplay
+                                    sql={query.query_text || ''}
+                                    wrap
+                                  />
+                                </div>
+                              </Scrollable>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Text
+                              level="mono-small"
+                              className="text-content-layout-2 tabular-nums"
+                            >
+                              {query.calls?.toLocaleString() ?? '-'}
+                            </Text>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Text
+                              level="mono-small"
+                              className="text-content-layout-2 tabular-nums"
+                            >
+                              {formatMs(query.avg_time_ms)}
+                            </Text>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Text
+                              level="mono-small"
+                              className="text-content-layout-2 tabular-nums"
+                            >
+                              {query.pct_total_time != null
+                                ? `${query.pct_total_time}%`
+                                : '-'}
+                            </Text>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </SectionCard>
+            </Show>
+          </VStack>
+        )}
+      </div>
     </VStack>
   )
 }
@@ -861,6 +1020,306 @@ function WorkloadRunView({ run }: { run: WorkloadRun }) {
 }
 
 // ---------------------------------------------------------------------------
+// Idle-view launcher
+// ---------------------------------------------------------------------------
+
+/**
+ * Pre-run status: the AI-insights dependency, surfaced up front instead of
+ * after a wasted run (H-4; USE-065, USE-077). Renders the *actual* key state,
+ * not a static "needs a key": a valid key reads "ready", the pre-resolve window
+ * reads "Checking…", and only a missing/rejected key shows the config-needed
+ * warning + Configure link. Reuses the cached `useAnthropicValidity` probe
+ * (C-04) gated on key presence — no new endpoint. [C-09]
+ */
+function AiInsightsBadge() {
+  const { anthropicRequirement, isTrialSource, trialStatus } = useTrialSource()
+  const isTrialExhausted =
+    isTrialSource &&
+    (trialStatus?.status === 'exhausted' || trialStatus?.active === false)
+  // Presence gates the probe so we never ping the provider without a key.
+  const hasKey =
+    (Boolean(anthropicRequirement?.satisfied) || isTrialSource) &&
+    !isTrialExhausted
+  const validityQuery = useAnthropicValidity(hasKey)
+  const validity = validityQuery.data
+  // Enabled-but-unresolved is the neutral "unknown" window, not a green claim.
+  const checking = hasKey && validityQuery.isFetching && !validity
+
+  // Valid → say so (accent positive); unknown → neutral "Checking…".
+  if (validity?.valid) {
+    return (
+      <HStack className="gap-2 items-center rounded-xl border border-border-positive-soft bg-surface-positive-soft/30 px-3 py-1.5">
+        <Icon
+          name="sparkles"
+          label=""
+          aria-hidden="true"
+          className="w-3.5 h-3.5 text-content-positive-soft shrink-0"
+        />
+        <Text level="caption" className="text-content-positive-soft">
+          AI insights: ready
+        </Text>
+      </HStack>
+    )
+  }
+
+  if (checking) {
+    return (
+      <HStack className="gap-2 items-center rounded-xl border border-border-layout-1 bg-surface-layout-2/40 px-3 py-1.5">
+        <Icon
+          name="sparkles"
+          label=""
+          aria-hidden="true"
+          className="w-3.5 h-3.5 text-content-layout-3 shrink-0"
+        />
+        <Text level="caption" className="text-content-layout-3">
+          AI insights: checking…
+        </Text>
+      </HStack>
+    )
+  }
+
+  // Missing or rejected → the original config-needed copy + Configure link.
+  return (
+    <HStack className="gap-2 items-center rounded-xl border border-border-warning-soft bg-surface-warning-soft/30 px-3 py-1.5">
+      <Icon
+        name="sparkles"
+        label=""
+        aria-hidden="true"
+        className="w-3.5 h-3.5 text-content-warning-soft shrink-0"
+      />
+      <Text level="caption" className="text-content-warning-soft">
+        AI insights: needs a key
+      </Text>
+      <Text level="caption" className="text-content-layout-3">
+        ·
+      </Text>
+      <Link
+        to="/configure"
+        className="hover:underline inline-flex items-center gap-0.5"
+      >
+        <Text level="caption" className="text-content-warning-soft">
+          Configure
+        </Text>
+        <Icon
+          name="chevron-right"
+          label=""
+          aria-hidden="true"
+          className="w-3 h-3 text-content-warning-soft"
+        />
+      </Link>
+    </HStack>
+  )
+}
+
+/**
+ * Data-handling disclosure, adjacent to the actions (H-1; USE-065, USE-066).
+ * Corrects the discovery-era fear that audit emails the report — the web path
+ * does not. (Presentational only: the queries_saved event stays untouched.)
+ */
+function DataHandlingNote() {
+  return (
+    <HStack className="gap-2 items-start">
+      <Icon
+        name="info"
+        label=""
+        aria-hidden="true"
+        className="w-3.5 h-3.5 mt-0.5 text-content-layout-3 shrink-0"
+      />
+      <Text level="caption" className="text-content-layout-3">
+        Runs locally on your machine. The report is saved here — nothing is
+        emailed. Captured queries are added to your Saved Queries.
+      </Text>
+    </HStack>
+  )
+}
+
+/**
+ * One path (icon, title, meta, optional controls, action). The emphasized card
+ * is raised via the elevation token and holds the single primary action; the
+ * quieter card recedes to content-layout weight. Emphasis is bought by
+ * de-emphasizing the neighbor, not by adding colour (VIS-016, VIS-108/109).
+ */
+function ModeCard({
+  emphasized = false,
+  icon,
+  title,
+  meta,
+  controls,
+  action,
+}: {
+  emphasized?: boolean
+  icon: IconStrokeName
+  title: string
+  meta: string
+  controls?: React.ReactNode
+  action: React.ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        'rounded-[1.25rem] p-5 h-full',
+        emphasized
+          ? 'bg-surface-raised shadow-elevation-1 border border-border-primary-soft'
+          : 'bg-surface-layout-1 border border-border-layout-1'
+      )}
+    >
+      <VStack className="gap-4 items-stretch h-full justify-between">
+        <VStack className="gap-3 items-start">
+          <div
+            className={cn(
+              'w-10 h-10 rounded-xl flex items-center justify-center',
+              emphasized ? 'bg-surface-primary-soft' : 'bg-surface-layout-2'
+            )}
+          >
+            <Icon
+              name={icon}
+              label=""
+              aria-hidden="true"
+              className={cn(
+                'w-5 h-5',
+                emphasized
+                  ? 'text-content-primary-soft'
+                  : 'text-content-layout-2'
+              )}
+            />
+          </div>
+          <VStack className="gap-1 items-start">
+            <Text level="subtitle-2" className="text-content-layout-1">
+              {title}
+            </Text>
+            <Text level="body-small" className="text-content-layout-2">
+              {meta}
+            </Text>
+          </VStack>
+          {controls}
+        </VStack>
+        {action}
+      </VStack>
+    </div>
+  )
+}
+
+/**
+ * The idle-view launcher: two self-explanatory mode cards. `hero` renders the
+ * polished empty-state above them (illustration + one-line job); the compact
+ * form ("Run another check") sits under a report so both paths stay reachable
+ * without a second wall of controls (VIS-102, VIS-011; H-2).
+ */
+function RunLauncher({
+  hero,
+  target,
+  disabled,
+  runLoading,
+  runLabel,
+  onRun,
+  onCapture,
+  captureDuration,
+  onDurationChange,
+}: {
+  hero: boolean
+  target: string | null
+  disabled: boolean
+  runLoading: boolean
+  runLabel: string
+  onRun: () => void
+  onCapture: () => void
+  captureDuration: number
+  onDurationChange: (seconds: number) => void
+}) {
+  const durationOptions = CAPTURE_DURATIONS.map((d) => ({
+    value: String(d.seconds),
+    label: d.long,
+  }))
+
+  return (
+    <VStack className="gap-6 items-stretch">
+      {hero ? (
+        <VStack className="gap-3 items-center text-center pt-2">
+          <div className="w-14 h-14 rounded-2xl bg-surface-primary-soft flex items-center justify-center">
+            <Icon
+              name="document-validation"
+              label=""
+              aria-hidden="true"
+              className="w-7 h-7 text-content-primary-soft"
+            />
+          </div>
+          <Text level="headline-4" className="text-content-layout-1 max-w-md">
+            One check. A plain-English verdict on how "{target}" is sized, where
+            it's slow, and what to cache.
+          </Text>
+        </VStack>
+      ) : (
+        <Text
+          level="overline"
+          className="text-content-layout-3 uppercase tracking-wider"
+        >
+          Run another check
+        </Text>
+      )}
+
+      <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
+        {/* PRIMARY — instant snapshot */}
+        <ModeCard
+          emphasized
+          icon="speedometer"
+          title="Instant snapshot"
+          meta="~10s · reads current metrics now"
+          action={
+            <Button
+              variant="primary"
+              modifier="solid"
+              label={runLabel}
+              icon="play"
+              iconPosition="left"
+              onClick={onRun}
+              loading={runLoading}
+              disabled={disabled}
+              fullWidth
+            />
+          }
+        />
+
+        {/* SECONDARY — live capture */}
+        <ModeCard
+          icon="observe"
+          title="Live capture"
+          meta="records real traffic, then analyzes what ran"
+          controls={
+            <VStack className="gap-1.5 items-start w-full">
+              <Text level="caption" className="text-content-layout-3">
+                Record for
+              </Text>
+              <BaseInputSelect
+                name="capture-duration"
+                options={durationOptions}
+                value={String(captureDuration)}
+                onValueChange={(v) => onDurationChange(Number(v))}
+                disabled={disabled}
+                triggerClassName="h-9"
+              />
+            </VStack>
+          }
+          action={
+            <Button
+              variant="rising"
+              modifier="outline"
+              label="Start capture"
+              icon="observe"
+              iconPosition="left"
+              onClick={onCapture}
+              disabled={disabled}
+              fullWidth
+            />
+          }
+        />
+      </div>
+
+      <DataHandlingNote />
+    </VStack>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -961,6 +1420,18 @@ function AuditPage() {
     }
   }
 
+  // A capture result currently occupies the stage (live, not a loaded run).
+  const captureComplete =
+    captureState === 'complete' && !!captureResult && !loadedRunId
+  // Something already fills the stage (report / capture result / loaded run).
+  const showStageResult =
+    (!!report && !loadedWorkload) || captureComplete || !!loadedWorkload
+  // Idle, pre-run: the empty-state hero + the AI-insights badge belong here.
+  const isIdle = !busy && !showStageResult
+
+  const launcherDisabled = busy || !target || passwordLock.isLocked
+  const runActionLabel = report ? 'Run new audit' : 'Run audit'
+
   return (
     <div className="space-y-6 w-full">
       {/* Hero Header */}
@@ -970,9 +1441,9 @@ function AuditPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <HStack className="justify-between items-start">
+        <HStack className="justify-between items-start gap-4 flex-wrap">
           <HStack className="gap-4 items-center">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-info-soft to-surface-primary-soft flex items-center justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
               <Icon
                 name="document-validation"
                 label="Health Check"
@@ -993,57 +1464,8 @@ function AuditPage() {
               </Text>
             </VStack>
           </HStack>
-          <HStack className="gap-3 items-center">
-            <HStack className="gap-2 items-center rounded-2xl border border-border-layout-1 bg-surface-layout-2/50 px-2 py-1.5">
-              <HStack className="gap-1 items-center">
-                {CAPTURE_DURATIONS.map((option) => (
-                  <button
-                    key={option.seconds}
-                    type="button"
-                    onClick={() => setCaptureDuration(option.seconds)}
-                    disabled={busy}
-                    className={`px-2.5 py-1 rounded-lg text-xs tabular-nums transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                      captureDuration === option.seconds
-                        ? 'bg-surface-primary-soft text-content-primary-soft'
-                        : 'text-content-layout-3 hover:bg-surface-layout-2'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </HStack>
-              {isCapturing ? (
-                <Button
-                  variant="negative"
-                  modifier="outline"
-                  label="Cancel"
-                  icon="close"
-                  iconPosition="left"
-                  onClick={cancelCapture}
-                />
-              ) : (
-                <Button
-                  variant="rising"
-                  modifier="outline"
-                  label="Capture Workload"
-                  icon="observe"
-                  iconPosition="left"
-                  onClick={handleCapture}
-                  disabled={busy || !target || passwordLock.isLocked}
-                />
-              )}
-            </HStack>
-            <Button
-              variant="primary"
-              modifier="solid"
-              label={report ? 'Run New Audit' : 'Run Audit'}
-              icon="play"
-              iconPosition="left"
-              onClick={handleRun}
-              loading={isRunning}
-              disabled={busy || !target || passwordLock.isLocked}
-            />
-          </HStack>
+          {/* Status slot: pre-run AI-insights dependency (H-4). */}
+          {isIdle && <AiInsightsBadge />}
         </HStack>
       </m.div>
 
@@ -1070,7 +1492,7 @@ function AuditPage() {
                 <HStack className="gap-3 items-center p-2">
                   <Spinner size="base" />
                   <Text level="body-small" className="text-content-layout-2">
-                    {statusMessage || 'Running audit...'}
+                    {statusMessage || 'Auditing ' + (target ?? '') + '…'}
                   </Text>
                 </HStack>
               </Card.Content>
@@ -1107,7 +1529,7 @@ function AuditPage() {
             <Card className="w-full">
               <Card.Content>
                 <VStack className="gap-4 items-stretch p-2">
-                  <HStack className="gap-3 items-center justify-between">
+                  <HStack className="gap-3 items-center justify-between flex-wrap">
                     <HStack className="gap-3 items-center">
                       <Spinner size="base" />
                       <Text
@@ -1119,17 +1541,28 @@ function AuditPage() {
                           : captureStatus || 'Capturing live workload...'}
                       </Text>
                     </HStack>
-                    {captureProgress && (
-                      <Text
-                        level="mono-small"
-                        className="text-content-layout-3 tabular-nums shrink-0"
-                      >
-                        {Math.round(captureProgress.elapsedSeconds)}s
-                        {captureProgress.totalSeconds
-                          ? ` / ${captureProgress.totalSeconds}s`
-                          : ''}
-                      </Text>
-                    )}
+                    <HStack className="gap-3 items-center">
+                      {captureProgress && (
+                        <Text
+                          level="mono-small"
+                          className="text-content-layout-3 tabular-nums shrink-0"
+                        >
+                          {Math.round(captureProgress.elapsedSeconds)}s
+                          {captureProgress.totalSeconds
+                            ? ` / ${captureProgress.totalSeconds}s`
+                            : ''}
+                        </Text>
+                      )}
+                      <Button
+                        variant="negative"
+                        modifier="outline"
+                        size="small"
+                        label="Cancel"
+                        icon="close"
+                        iconPosition="left"
+                        onClick={cancelCapture}
+                      />
+                    </HStack>
                   </HStack>
 
                   {captureProgress?.totalSeconds ? (
@@ -1212,8 +1645,29 @@ function AuditPage() {
         </div>
       </Show>
 
+      {/* Idle empty-state hero + two mode cards (the launcher) */}
+      {isIdle && (
+        <m.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <RunLauncher
+            hero
+            target={target}
+            disabled={launcherDisabled}
+            runLoading={isRunning}
+            runLabel={runActionLabel}
+            onRun={handleRun}
+            onCapture={handleCapture}
+            captureDuration={captureDuration}
+            onDurationChange={setCaptureDuration}
+          />
+        </m.div>
+      )}
+
       {/* Live capture result */}
-      {captureState === 'complete' && captureResult && !loadedRunId && (
+      {captureComplete && (
         <m.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1225,15 +1679,15 @@ function AuditPage() {
                 level="overline"
                 className="text-content-layout-3 uppercase tracking-wider"
               >
-                Latest capture: {captureResult.runId}
+                Latest capture: {captureResult!.runId}
               </Text>
             </HStack>
             <WorkloadReportView
-              summary={captureResult.summary}
-              analysis={captureResult.analysis}
-              queries={captureResult.summary?.queries || []}
+              summary={captureResult!.summary}
+              analysis={captureResult!.analysis}
+              queries={captureResult!.summary?.queries || []}
               durationSeconds={
-                captureResult.summary?.duration_seconds ?? captureDuration
+                captureResult!.summary?.duration_seconds ?? captureDuration
               }
             />
           </VStack>
@@ -1283,7 +1737,7 @@ function AuditPage() {
                   {loadedRunId ? `Saved run: ${loadedRunId}` : 'Latest audit'}
                 </Text>
                 <Text level="caption" className="text-content-layout-3">
-                  {formatDate(report.audited_at)}
+                  Saved · {formatDate(report.audited_at)}
                 </Text>
               </HStack>
             </HStack>
@@ -1292,7 +1746,22 @@ function AuditPage() {
         </m.div>
       )}
 
-      {/* Past runs */}
+      {/* Run another check — keeps both paths reachable after a result. */}
+      {!busy && showStageResult && (
+        <RunLauncher
+          hero={false}
+          target={target}
+          disabled={launcherDisabled}
+          runLoading={isRunning}
+          runLabel={runActionLabel}
+          onRun={handleRun}
+          onCapture={handleCapture}
+          captureDuration={captureDuration}
+          onDurationChange={setCaptureDuration}
+        />
+      )}
+
+      {/* Past runs — hidden entirely until at least one run exists (VIS-103). */}
       <Show when={runs.length > 0}>
         <SectionCard icon="folder-file" title={`Past Runs (${runs.length})`}>
           <div className="divide-y divide-border-layout-1">

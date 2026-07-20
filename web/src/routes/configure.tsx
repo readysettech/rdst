@@ -12,6 +12,7 @@ import { HStack, VStack } from "@rs/ui-new/stack";
 import { Show } from "@rs/ui-new/show";
 import { Alert } from "@rs/ui-new/alert";
 import { CopyButton } from "@rs/ui-new/copy-button";
+import { useDisclosure } from "@rs/ui-new/use-disclosure";
 import { m } from "@rs/ui-new/motion";
 import { useConfigure } from "../lib/useConfigure";
 import { EnvSecretsDialog } from "../components/EnvSecretsDialog";
@@ -21,7 +22,6 @@ import { useSystemStatus } from "../lib/useSystemStatus";
 import {
   ConfigureForm,
   ConfigureTargetList,
-  ConfigureConnectionTest,
 } from "../components/configure";
 import type { ConfigureFormData, ConfigureTargetDetail } from "../types/configure";
 import { invalidateTrialRelatedQueries, useTrialSource } from "../lib/trialQueries";
@@ -72,6 +72,11 @@ function ConfigurePage() {
   const [showForm, setShowForm] = useState(false);
   const [editingTarget, setEditingTarget] = useState<ConfigureTargetDetail | null>(null);
   const [showAnthropicDialog, setShowAnthropicDialog] = useState(false);
+  // Which connection is being tested (drives the inline per-row spinner), and
+  // whether the current inline result has been dismissed.
+  const [testingTarget, setTestingTarget] = useState<string | null>(null);
+  const [testDismissed, setTestDismissed] = useState(false);
+  const [storageOpen, setStorageOpen] = useDisclosure({});
   const deepLinkHandledRef = useRef(false);
 
   const {
@@ -92,7 +97,7 @@ function ConfigurePage() {
   const { data: statusData } = useSystemStatus();
   const dataDirectory = statusData?.data_directory ?? null;
 
-  const { envRequirements, anthropicRequirement, anthropicSource, isTrialSource: trialSourceDetected, trialStatus } = useTrialSource();
+  const { envRequirements, anthropicRequirement, isTrialSource: trialSourceDetected, trialStatus } = useTrialSource();
 
   const isTrialExhausted =
     trialSourceDetected && (trialStatus?.status === "exhausted" || trialStatus?.active === false);
@@ -221,10 +226,9 @@ function ConfigurePage() {
     setEditingTarget(null);
   };
 
+  // Confirmation is handled by the styled ConfirmDialog inside the list.
   const handleDelete = async (targetName: string) => {
-    if (confirm(`Are you sure you want to delete target "${targetName}"?`)) {
-      await removeTarget(targetName);
-    }
+    await removeTarget(targetName);
   };
 
   const handleSetDefault = async (targetName: string) => {
@@ -232,8 +236,20 @@ function ConfigurePage() {
   };
 
   const handleTest = (targetName: string) => {
+    setTestingTarget(targetName);
+    setTestDismissed(false);
     testConnection(targetName);
   };
+
+  // Drop the per-row spinner once the test settles (a result arrived, or it
+  // errored without one). Render-gates the loading state to the tested row.
+  useEffect(() => {
+    if (connectionTestResult || state === "error") {
+      setTestingTarget(null);
+    }
+  }, [connectionTestResult, state]);
+
+  const visibleTestResult = testDismissed ? null : connectionTestResult;
 
   const handleTestKey = () => {
     void keyValidityQuery.refetch();
@@ -253,6 +269,10 @@ function ConfigurePage() {
       }
     : undefined;
 
+  // The polished empty state is the hero — the supporting AI-key card and the
+  // storage disclosure stay hidden until a connection exists. [VIS-102, VIS-103]
+  const heroEmpty = !loading && targets.length === 0 && !showForm;
+
   return (
     <div className="space-y-6 w-full">
       {/* Header */}
@@ -263,7 +283,7 @@ function ConfigurePage() {
       >
         <HStack className="justify-between items-start">
           <HStack className="gap-4 items-center">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-positive-soft flex items-center justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
               <Icon name="settings" label="Configure" className="w-6 h-6 text-content-primary-soft" />
             </div>
             <VStack className="gap-1 items-start">
@@ -271,7 +291,7 @@ function ConfigurePage() {
                 Database Targets
               </Text>
               <Text level="body-small" className="text-content-layout-3">
-                Manage database connection profiles for RDST
+                The databases RDST can analyze. Add one and test it connects.
               </Text>
             </VStack>
           </HStack>
@@ -289,41 +309,63 @@ function ConfigurePage() {
         </HStack>
       </m.div>
 
-      {/* Data Storage Info */}
-      <Show when={!!dataDirectory}>
+      {/* Error Display */}
+      <Show when={!!error}>
         <m.div
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
         >
-          <div className="rounded-xl border border-border-layout-1 bg-surface-layout-2/50 p-4">
-            <HStack className="gap-3 items-start">
-              <div className="w-9 h-9 rounded-xl bg-surface-info-soft flex items-center justify-center shrink-0">
-                <Icon name="info" label="Storage" className="w-4 h-4 text-content-info-soft" />
-              </div>
-              <VStack className="gap-1 items-start flex-1 min-w-0">
-                <Text level="label-small" className="text-content-layout-1">
-                  Data Storage
-                </Text>
-                <Text level="body-small" className="text-content-layout-3">
-                  All RDST data is stored locally on your machine. Nothing is sent to external servers.
-                </Text>
-                <HStack className="gap-2 items-center mt-1">
-                  <code className="text-xs bg-surface-layout-3 px-2 py-1 rounded font-mono text-content-layout-2">
-                    {dataDirectory}
-                  </code>
-                  <CopyButton text={dataDirectory || ""} />
-                </HStack>
-                <Text level="caption" className="text-content-layout-3 mt-0.5">
-                  Contains connection configs, saved queries, semantic layer, and analysis history. Passwords are stored in your system keyring, never in plain text.
-                </Text>
-              </VStack>
-            </HStack>
-          </div>
+          <Alert
+            variant="negative"
+            modifier="outline"
+            label={`Error: ${error}`}
+          />
         </m.div>
       </Show>
 
-      <Show when={showAnthropicAction}>
+      {/* Form */}
+      <Show when={showForm}>
+        <m.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <ConfigureForm
+            key={editingTarget ? `edit-${editingTarget.name}` : 'new-target'}
+            initialData={editingInitialData}
+            onSubmit={handleFormSubmit}
+            onCancel={handleFormCancel}
+            isLoading={loading}
+          />
+        </m.div>
+      </Show>
+
+      {/* Connections — the primary region. The connection-test result and its
+          loading spinner render inline beneath the tested row. */}
+      <Show when={!showForm}>
+        <m.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
+        >
+          <ConfigureTargetList
+            targets={targets}
+            onEdit={(target) => void handleEditClick(target.name)}
+            onTest={handleTest}
+            onDelete={handleDelete}
+            onSetDefault={handleSetDefault}
+            onAdd={handleAddClick}
+            isLoading={loading}
+            connectionTestResult={visibleTestResult}
+            testingTargetName={testingTarget}
+            onDismissTestResult={() => setTestDismissed(true)}
+          />
+        </m.div>
+      </Show>
+
+      {/* Anthropic API key — secondary credential card (below the list). The
+          process-env override note now lives in the Update-key dialog. */}
+      <Show when={showAnthropicAction && !heroEmpty}>
         <m.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -342,11 +384,6 @@ function ConfigurePage() {
                   <Text level="body-small" className="text-content-layout-3">
                     {anthropicStatusDescription}
                   </Text>
-                  {anthropicSource === "process_env" && anthropicRequirement?.source ? (
-                    <Text level="caption" className="text-content-layout-3">
-                      Note: if ANTHROPIC_API_KEY is also set in the RDST web process environment, that value is used by default.
-                    </Text>
-                  ) : null}
                   {trialSourceDetected && trialStatus?.remaining_tokens_display && trialStatus?.limit_tokens_display ? (
                     <Text level="caption" className="text-content-layout-3">
                       Trial balance: {trialStatus.remaining_tokens_display} / {trialStatus.limit_tokens_display}
@@ -387,65 +424,46 @@ function ConfigurePage() {
         </m.div>
       </Show>
 
-      {/* Error Display */}
-      <Show when={!!error}>
-        <m.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <Alert
-            variant="negative"
-            modifier="outline"
-            label={`Error: ${error}`}
-          />
-        </m.div>
-      </Show>
-
-      {/* Form */}
-      <Show when={showForm}>
-        <m.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
-          <ConfigureForm
-            key={editingTarget ? `edit-${editingTarget.name}` : 'new-target'}
-            initialData={editingInitialData}
-            onSubmit={handleFormSubmit}
-            onCancel={handleFormCancel}
-            isLoading={loading}
-          />
-        </m.div>
-      </Show>
-
-      {/* Connection Test Result — also render while a test is in flight so the
-          loading card shows instead of a dead-looking button. [QW17] */}
-      <Show when={!!connectionTestResult || state === "loading"}>
-        <m.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          <ConfigureConnectionTest result={connectionTestResult} isLoading={state === "loading"} />
-        </m.div>
-      </Show>
-
-      {/* Target List */}
-      <Show when={!showForm}>
-        <m.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.1 }}
-        >
-          <ConfigureTargetList
-            targets={targets}
-            onEdit={(target) => void handleEditClick(target.name)}
-            onTest={handleTest}
-            onDelete={handleDelete}
-            onSetDefault={handleSetDefault}
-            isLoading={loading}
-          />
-        </m.div>
+      {/* Storage & privacy — tertiary disclosure at the page foot. Read-only
+          reassurance (data dir + "nothing leaves your machine"), collapsed. */}
+      <Show when={!!dataDirectory && !heroEmpty}>
+        <div className="rounded-xl border border-border-layout-1 overflow-hidden">
+          <button
+            type="button"
+            aria-expanded={storageOpen}
+            aria-controls="cfg-storage-privacy"
+            onClick={() => setStorageOpen(!storageOpen)}
+            className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-surface-layout-2/50 transition-colors cursor-pointer"
+          >
+            <Icon
+              name={storageOpen ? 'chevron-up' : 'chevron-right'}
+              label={storageOpen ? 'Collapse' : 'Expand'}
+              className="w-4 h-4 text-content-layout-3 shrink-0"
+            />
+            <Text as="span" level="label-small" className="text-content-layout-2">
+              Storage &amp; privacy
+            </Text>
+            <Text as="span" level="caption" className="text-content-layout-3">
+              — where your data lives, what stays local
+            </Text>
+          </button>
+          <div id="cfg-storage-privacy" hidden={!storageOpen} className="px-4 pb-4 pt-1">
+            <VStack className="gap-2 items-start">
+              <Text level="body-small" className="text-content-layout-3">
+                All RDST data is stored locally on your machine. Nothing is sent to external servers.
+              </Text>
+              <HStack className="gap-2 items-center">
+                <code className="text-xs bg-surface-raised px-2 py-1 rounded font-mono text-content-layout-2">
+                  {dataDirectory}
+                </code>
+                <CopyButton text={dataDirectory || ""} />
+              </HStack>
+              <Text level="caption" className="text-content-layout-3">
+                Contains connection configs, saved queries, semantic layer, and analysis history. Passwords are stored in your system keyring, never in plain text.
+              </Text>
+            </VStack>
+          </div>
+        </div>
       </Show>
 
       <EnvSecretsDialog

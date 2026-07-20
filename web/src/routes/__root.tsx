@@ -7,7 +7,9 @@ import {
   useNavigate,
 } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
-import { ConfigWarning } from '../components'
+// Direct import: the components barrel re-exports the SQL editor stack,
+// which would statically pull CodeMirror into the eager entry chunk.
+import { ConfigWarning } from '../components/ConfigWarning'
 import { Header } from '../layout/Header'
 import { Main } from '../layout/Main'
 import { Sidebar } from '../layout/Sidebar'

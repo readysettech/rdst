@@ -50,8 +50,10 @@ test('completes first-run onboarding and persists the target', async ({
   await page.locator('[name="password_env"]').fill('TEST_DB_PASSWORD')
   await page.getByRole('button', { name: 'Test & connect' }).click()
 
+  // Landing on the design-system home with the job launcher proves the
+  // target persisted (the launcher only renders when targets exist).
   await expect(page).toHaveURL('/')
-  await expect(page.getByText('What do you want to do?')).toBeVisible()
+  await expect(page.getByText('Run a health check')).toBeVisible()
 
   // ConnectPage promotes the first target to default (addTarget →
   // setDefaultTarget → completeInit), unlike the retired wizard.
@@ -63,5 +65,5 @@ test('completes first-run onboarding and persists the target', async ({
   })
 
   await page.reload()
-  await expect(page.getByText('What do you want to do?')).toBeVisible()
+  await expect(page.getByText('Run a health check')).toBeVisible()
 })

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { TopPage } from "./top";
+import { TopPage } from "./-top-page";
 import { useTop } from "../lib/useTop";
 import { useQueryRegistry } from "../lib/useQueryRegistry";
 import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";

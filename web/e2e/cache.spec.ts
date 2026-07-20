@@ -216,6 +216,9 @@ test('deploys remotely, creates, benchmarks, restarts, and deletes a cache', asy
   ).toBeVisible()
   await expect(page.getByText('Deploy a cache for "e2e-guard"')).toBeVisible()
 
+  // C-09 collapsed the non-Docker deploy modes behind the "Other deploy
+  // options" disclosure; open it before selecting Remote Host.
+  await page.getByRole('button', { name: /Other deploy options/ }).click()
   await page.getByRole('button', { name: /Remote Host/ }).click()
   await expect(
     page.getByRole('button', { name: 'Deploy to Remote' })
@@ -263,7 +266,10 @@ test('deploys remotely, creates, benchmarks, restarts, and deletes a cache', asy
     warmup: 5,
   })
 
-  await page.getByRole('button', { name: 'Restart' }).click()
+  // Lifecycle actions collapsed into the "Cache actions" overflow menu at
+  // C-09; Restart is a menuitem there now.
+  await page.getByRole('button', { name: 'Cache actions' }).click()
+  await page.getByRole('menuitem', { name: 'Restart' }).click()
   await expect(page.getByText('Cache restarted', { exact: true })).toBeVisible()
   expect(lifecycleRequest).toEqual({ target: 'e2e-guard' })
 

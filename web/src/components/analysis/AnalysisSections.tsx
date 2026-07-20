@@ -5,6 +5,7 @@
  * and the scan analysis modal can render rich analysis data without duplication.
  */
 import { useId } from "react";
+import { useDisclosure } from "@rs/ui-new/use-disclosure";
 import { Tag } from "@rs/ui-new/tag";
 import { Text } from "@rs/ui-new/text";
 import { Card } from "@rs/ui-new/card";
@@ -115,25 +116,25 @@ export const variantStyles: Record<
     bg: "bg-surface-positive-soft",
     text: "text-content-positive-soft",
     border: "border-border-positive-soft",
-    glow: "shadow-[0_0_20px_rgba(34,197,94,0.15)]",
+    glow: "shadow-glow-positive",
   },
   info: {
     bg: "bg-surface-info-soft",
     text: "text-content-info-soft",
     border: "border-border-info-soft",
-    glow: "shadow-[0_0_20px_rgba(59,130,246,0.15)]",
+    glow: "shadow-glow-info",
   },
   warning: {
     bg: "bg-surface-warning-soft",
     text: "text-content-warning-soft",
     border: "border-border-warning-soft",
-    glow: "shadow-[0_0_20px_rgba(234,179,8,0.15)]",
+    glow: "shadow-glow-warning",
   },
   negative: {
     bg: "bg-surface-negative-soft",
     text: "text-content-negative-soft",
     border: "border-border-negative-soft",
-    glow: "shadow-[0_0_20px_rgba(239,68,68,0.15)]",
+    glow: "shadow-glow-negative",
   },
 };
 
@@ -236,7 +237,7 @@ export function ScoreGauge({
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
         <m.span
-          className={`text-xl font-bold tabular-nums ${style.text}`}
+          className={`${size >= 96 ? "text-stat-hero" : "text-xl font-bold"} tabular-nums ${style.text}`}
           initial={{ opacity: 0, scale: 0.5 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.4, delay: 0.5 }}
@@ -363,7 +364,7 @@ export function PerformanceSummarySection({
 
   return (
     <m.div
-      className="bg-surface-layout-1 rounded-2xl border border-border-layout-1 overflow-hidden"
+      className="bg-surface-raised rounded-2xl shadow-elevation-1 overflow-hidden"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: 0.1 }}
@@ -375,7 +376,7 @@ export function PerformanceSummarySection({
             {perf.efficiency_score !== undefined && (
               <ScoreGauge
                 score={perf.efficiency_score}
-                size={80}
+                size={104}
                 variant={ratingVariant === "informative" ? "info" : (ratingVariant as StyleVariant)}
               />
             )}
@@ -857,25 +858,20 @@ export function IndexRecommendationsSection({
 
 export function AdditionalRecommendationsSection({
   opportunities,
+  collapsible = false,
 }: {
   opportunities: NonNullable<CompleteEvent["llm_analysis"]>["optimization_opportunities"];
+  /** On /results these are the *other* recs — collapse them behind a
+   *  "More recommendations (N) ▾" disclosure so they sit under Details rather
+   *  than as a full peer section. Scan modal keeps the default (expanded). */
+  collapsible?: boolean;
 }) {
+  const [open, setOpen] = useDisclosure({});
   if (!opportunities || opportunities.length === 0) return null;
 
-  return (
-    <m.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay: 0.4 }}
-    >
-      <SectionHeader
-        icon="sparkles"
-        title="Additional Recommendations"
-        subtitle="Other optimization opportunities identified"
-      />
-      <div className="bg-surface-layout-1 rounded-xl border border-border-layout-1 overflow-hidden">
-        {opportunities.map((opp, i) => {
+  const list = (
+    <div className="bg-surface-layout-1 rounded-xl border border-border-layout-1 overflow-hidden">
+      {opportunities.map((opp, i) => {
           const priorityVariant: StyleVariant =
             opp.priority?.toLowerCase() === "high"
               ? "negative"
@@ -924,7 +920,57 @@ export function AdditionalRecommendationsSection({
             </m.div>
           );
         })}
-      </div>
+    </div>
+  );
+
+  // Collapsed variant: a quiet "More recommendations (N) ▾" disclosure that
+  // keeps these off the default view until asked for. [brief, VIS-107]
+  if (collapsible) {
+    return (
+      <m.div
+        className="space-y-3"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.4 }}
+      >
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-2 text-content-layout-2 hover:text-content-layout-1 transition-colors"
+        >
+          <Icon
+            name="sparkles"
+            label="More recommendations"
+            className="w-4 h-4 text-content-layout-3"
+          />
+          <Text as="span" level="label-medium">
+            More recommendations ({opportunities.length})
+          </Text>
+          <Icon
+            name="chevron-down"
+            label=""
+            className={`w-4 h-4 text-content-layout-3 transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+        {open && list}
+      </m.div>
+    );
+  }
+
+  return (
+    <m.div
+      className="space-y-4"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.4 }}
+    >
+      <SectionHeader
+        icon="sparkles"
+        title="Additional Recommendations"
+        subtitle="Other optimization opportunities identified"
+      />
+      {list}
     </m.div>
   );
 }

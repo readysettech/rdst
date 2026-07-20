@@ -98,9 +98,16 @@ test('loads guard details, checks SQL, and creates a guard', async ({
     .fill('Requires bounded reporting queries')
   await page.getByRole('button', { name: 'Add pattern' }).click()
   await page.locator('[name="mask-pattern-0"]').fill('customers.email')
+  // Advanced sections are collapsed-by-default disclosures now [C-09 guards
+  // migration] — open each before filling the fields inside it.
+  await page
+    .getByRole('button', { name: /Table & column restrictions/ })
+    .click()
   await page.locator('[name="denied-columns"]').fill('users.password')
   await page.locator('[name="allowed-tables"]').fill('customers\norders')
+  await page.getByRole('button', { name: /Rules/ }).click()
   await page.getByRole('switch', { name: 'Require WHERE' }).click()
+  await page.getByRole('button', { name: /Limits/ }).click()
   await page.locator('[name="max-rows"]').fill('500')
   await page.getByRole('button', { name: 'Create Guard' }).click()
 

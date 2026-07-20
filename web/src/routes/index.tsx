@@ -26,16 +26,56 @@ interface JobCardProps {
   description: string;
   chip?: {
     label: string;
-    variant: "positive" | "warning" | "informative" | "primary";
+    variant: "positive" | "warning" | "informative" | "primary" | "neutral";
     modifier?: "solid" | "outline" | "ghost";
   };
+  /** The single "start here" action: full-width, raised (elevation-1), one
+   *  primary accent — the page's visual anchor [VIS-012, VIS-097; home target]. */
+  featured?: boolean;
 }
 
-function JobCard({ to, icon, title, description, chip }: JobCardProps) {
+function JobCard({ to, icon, title, description, chip, featured }: JobCardProps) {
+  if (featured) {
+    return (
+      <Link
+        to={to}
+        className="group block rounded-2xl border border-border-primary-soft bg-surface-raised p-6 shadow-elevation-1 transition-shadow hover:shadow-elevation-2"
+      >
+        <VStack className="gap-3 items-start">
+          <HStack className="gap-3 items-center w-full">
+            <div className="w-11 h-11 rounded-xl bg-surface-primary-soft flex items-center justify-center shrink-0">
+              <Icon name={icon} label="" className="w-6 h-6 text-content-primary-soft" />
+            </div>
+            <Text level="headline-5" className="text-content-layout-1 flex-1">
+              {title}
+            </Text>
+            <Show when={!!chip}>
+              <Tag
+                size="small"
+                variant={chip!.variant}
+                modifier={chip!.modifier ?? "ghost"}
+                label={chip!.label}
+              />
+            </Show>
+          </HStack>
+          <HStack className="gap-3 items-center w-full">
+            <Text level="body-medium" className="text-content-layout-2 flex-1">
+              {description}
+            </Text>
+            <Icon
+              name="arrow-right"
+              label=""
+              className="w-5 h-5 text-content-primary-soft shrink-0 transition-transform group-hover:translate-x-0.5"
+            />
+          </HStack>
+        </VStack>
+      </Link>
+    );
+  }
   return (
     <Link
       to={to}
-      className="group rounded-xl border border-border-layout-1 bg-surface-layout-1 p-5 hover:border-border-layout-2 hover:bg-surface-layout-2/50 transition-colors"
+      className="group rounded-xl bg-surface-layout-1 p-5 transition-all hover:bg-surface-raised hover:shadow-elevation-1"
     >
       <VStack className="gap-3 items-start h-full">
         <HStack className="gap-3 items-center w-full">
@@ -90,9 +130,15 @@ function HomePage() {
 
   const lastAudit = auditRuns?.runs?.[0];
   const savedCount = registry?.total ?? 0;
-  // The requirement descriptor is always present; `satisfied` says whether a
-  // key actually exists (env var, keyring, or active trial).
-  const needsApiKey = anthropicRequirement ? !anthropicRequirement.satisfied : false;
+  // The Ask readiness chip: while the requirement is still resolving, show a
+  // neutral "Checking…" — never an optimistic green "Ready" before data
+  // confirms a key exists [USE-014, USE-063; home target].
+  const askChip =
+    anthropicRequirement === undefined
+      ? { label: "Checking…", variant: "neutral" as const }
+      : anthropicRequirement.satisfied
+        ? { label: "Ready", variant: "positive" as const }
+        : { label: "Needs an Anthropic API key", variant: "warning" as const };
 
   return (
     <div className="space-y-8 w-full">
@@ -105,10 +151,10 @@ function HomePage() {
           </div>
           <VStack className="gap-1 items-start">
             <Text as="h1" level="headline-3" className="text-content-layout-1">
-              Welcome to RDST
+              Understand, diagnose, and speed up your database
             </Text>
             <Text level="body-small" className="text-content-layout-3">
-              Understand, diagnose, and speed up your database.
+              For Postgres and MySQL.
             </Text>
           </VStack>
         </HStack>
@@ -149,47 +195,29 @@ function HomePage() {
         </m.div>
       </Show>
 
-      {/* Job launcher */}
+      {/* Job launcher — render at full opacity (no entrance fade on a hub you
+          revisit constantly) [USE-008]. Hierarchy: 1 primary → 3 secondary →
+          tertiary, so the eye lands on the one "start here" action. */}
       <Show when={hasTargets}>
-        <m.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.1 }}
-        >
-          <VStack className="gap-4 items-stretch">
-            <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
-              What do you want to do?
-            </Text>
-            <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
-              <JobCard
-                to="/demo"
-                icon="querypilot"
-                title="See Readyset Platform in action"
-                description="See QueryPilot cache your hottest queries in real time as Readyset and Postgres run the same workload side by side. Local containers, one-click cleanup."
-                chip={{ label: "Try it", variant: "positive", modifier: "solid" }}
-              />
-              <JobCard
-                to="/ask"
-                icon="sparkles"
-                title="Ask a question"
-                description="Ask in plain English and get answers straight from your data."
-                chip={
-                  needsApiKey
-                    ? { label: "Needs an Anthropic API key", variant: "warning" }
-                    : { label: "Ready", variant: "positive" }
-                }
-              />
-              <JobCard
-                to="/audit"
-                icon="document-validation"
-                title="Run a health check"
-                description="A full audit of your database: sizing, slow spots, and cache opportunities."
-                chip={
-                  lastAudit
-                    ? { label: `Last run ${formatTimestamp(lastAudit.started_at)}`, variant: "informative" }
-                    : { label: "Never run - start here", variant: "primary" }
-                }
-              />
+        <m.div initial={false}>
+          <VStack className="gap-6 items-stretch">
+            {/* Region B — the single primary action: the broadest diagnostic */}
+            <JobCard
+              featured
+              to="/audit"
+              icon="document-validation"
+              title="Run a health check"
+              description="A full audit of your database: sizing, slow spots, and cache opportunities."
+              chip={
+                lastAudit
+                  ? { label: `Last run ${formatTimestamp(lastAudit.started_at)}`, variant: "informative" }
+                  : { label: "Never run — start here", variant: "primary" }
+              }
+            />
+
+            {/* Region C — the rest of the work-on-my-database loop: three equal,
+                quieter cards so the primary stays primary [VIS-016, VIS-111]. */}
+            <div className="grid grid-cols-1 tablet:grid-cols-3 gap-4">
               <JobCard
                 to="/top"
                 icon="observe"
@@ -212,11 +240,35 @@ function HomePage() {
                     : { label: "No saved queries yet", variant: "primary" }
                 }
               />
+              <JobCard
+                to="/ask"
+                icon="sparkles"
+                title="Ask a question"
+                description="Ask in plain English and get answers straight from your data."
+                chip={askChip}
+              />
             </div>
-            <Text level="caption" className="text-content-layout-3">
-              Looking for Agents, Guards, Fleet, or Benchmark? They live under
-              Advanced in the sidebar.
-            </Text>
+
+            {/* Region D — tertiary: evaluate-Readyset + advanced-tools pointer,
+                separated by space not a divider, kept the quietest [VIS-114]. */}
+            <VStack className="gap-2 items-start pt-2">
+              <Link
+                to="/demo"
+                className="group inline-flex items-center gap-1.5 text-content-layout-2 transition-colors hover:text-content-layout-1"
+              >
+                <Text as="span" level="body-small">
+                  Evaluating Readyset?{" "}
+                  <span className="text-content-layout-1 group-hover:underline">
+                    Try the live demo
+                  </span>
+                </Text>
+                <Icon name="arrow-right" label="" className="w-4 h-4 shrink-0" />
+              </Link>
+              <Text level="caption" className="text-content-layout-3">
+                More tools (Agents, Guards, Fleet, Benchmark…) live under Advanced
+                in the sidebar.
+              </Text>
+            </VStack>
           </VStack>
         </m.div>
       </Show>

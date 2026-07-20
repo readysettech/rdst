@@ -50,54 +50,34 @@ const SCAN_DIRS = [
 // Keyed by file suffix + exact utility so a line move never breaks the check;
 // each MUST cite the wave that removes it. New arbitrary values are NOT welcome.
 // Pre-existing undefined-token drift the §4.6 audit under-counted (present at
-// HEAD before C-07). These render no color today and live in screen/component
-// files that the later waves migrate — fixing them here would break C-07's
-// mandated isolation. COUNT-PINNED: the value is the baseline usage count
-// measured at C-07; the check FAILS if a name's count ever exceeds its
-// baseline (no silent growth) and asks for a pin-lower when migrations shrink
-// it. Each name is slated for its correct token during the screen migrations:
-//   surface-layout-3 → surface-raised / surface-layout-soft   (T19–T22)
-//   border-negative  → border-border-negative-soft            (T20–T22)
-//   border-warning   → border-border-warning-soft             (T20–T22)
-const KNOWN_UNDEFINED = new Map([
-  // Lowered in C-08 (T19/T20): 2× surface-layout-3 (benchmark/cache) and
-  // 2× border-negative/30 (benchmark/cache) migrated to real tokens.
-  ['surface-layout-3', 12], // was 14
-  ['border-negative', 3], // was 5 — now 1× /30 + 2× bare
-  ['border-warning', 2],
-])
+// HEAD before C-07). These rendered no color and lived in screen/component
+// files migrated across the launch stack. COUNT-PINNED: the check FAILS if a
+// name's count exceeds its baseline (no silent growth).
+//   surface-layout-3 → surface-raised / surface-layout-disabled  (C-09/T21–T22)
+//   border-negative  → border-border-negative-soft               (C-09/T21–T23)
+//   border-warning   → border-border-warning-soft                (C-09/T21–T23)
+// DRIVEN TO ZERO in C-09 (T21–T23 screen migrations): all three families now
+// consume real tokens, so the ledger is empty. The map stays (empty) so the
+// ratchet is documented and any re-introduction of these undefined tokens
+// fails as new drift, not as a pinned baseline.
+const KNOWN_UNDEFINED = new Map([])
 
 // COUNT-PINNED like KNOWN_UNDEFINED: `count` is the exact number of matches
-// allowed for that value in that file — a duplicated allowlisted glow fails.
+// allowed for that value in that file — a duplicated allowlisted value fails.
+//
+// The AnalysisSections verdict-card glows (4×) folded into the shadow-glow-*
+// tokens in C-09 (T21 analyze migration) and left the allowlist. What remains
+// are two STRUCTURAL app-chrome shadows that carry no semantic-role meaning
+// (so no shadow-glow-*/elevation-* token fits) and are not screen-migration
+// surfaces — the minimal, justified allowlist the plan permits.
 const ALLOWLIST = [
-  // AnalysisSections verdict-card glows → fold into shadow-glow-* in T21 (analyze migration).
-  {
-    file: 'analysis/AnalysisSections.tsx',
-    value: 'shadow-[0_0_20px_rgba(34,197,94,0.15)]',
-    count: 1,
-  },
-  {
-    file: 'analysis/AnalysisSections.tsx',
-    value: 'shadow-[0_0_20px_rgba(59,130,246,0.15)]',
-    count: 1,
-  },
-  {
-    file: 'analysis/AnalysisSections.tsx',
-    value: 'shadow-[0_0_20px_rgba(234,179,8,0.15)]',
-    count: 1,
-  },
-  {
-    file: 'analysis/AnalysisSections.tsx',
-    value: 'shadow-[0_0_20px_rgba(239,68,68,0.15)]',
-    count: 1,
-  },
-  // Sidebar raised-edge hairline (structural top-lit inset) → app-chrome, T19.
+  // Sidebar raised-edge hairline (structural top-lit right-edge inset) → app-chrome, T19/C-08.
   {
     file: 'layout/Sidebar.tsx',
     value: 'shadow-[inset_-1px_0_0_rgba(255,255,255,0.06)]',
     count: 1,
   },
-  // Branded root boundary overlay shadow → app-chrome, T19.
+  // Branded root boundary overlay shadow (full-page error card lift) → app-chrome, T19/C-08.
   {
     file: 'routes/__root.tsx',
     value: 'shadow-[0_20px_48px_rgba(0,0,0,0.35)]',

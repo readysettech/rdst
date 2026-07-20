@@ -8,7 +8,6 @@ import { VStack, HStack } from "@rs/ui-new/stack";
 import { Icon } from "@rs/ui-new/icon";
 import { Spinner } from "@rs/ui-new/spinner";
 import { BaseInputTextarea } from "@rs/ui-new/base-input-textarea";
-import { BaseInputRadioGroup } from "@rs/ui-new/base-input-radio-group";
 import { BaseInputText } from "@rs/ui-new/base-input-text";
 import { Card } from "@rs/ui-new/card";
 import { Tag } from "@rs/ui-new/tag";
@@ -204,10 +203,25 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
-          <Card className="w-full overflow-hidden">
+          {/* The Ask card reads as raised above the page — the single focal
+              region of the idle state [VIS-075, VIS-080, VIS-105]. */}
+          <Card className="w-full overflow-hidden bg-surface-raised shadow-elevation-1">
             <Card.Content className="p-0">
-              {/* Input area */}
-              <div className="p-5">
+              {/* Light sparkle identity motif at low contrast — the empty state
+                  as a designed first impression, decorative/AT-hidden
+                  [VIS-102, VIS-115]. */}
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -right-5 -top-5 opacity-5"
+              >
+                <Icon
+                  name="sparkles"
+                  label=""
+                  className="h-28 w-28 text-content-primary-soft"
+                />
+              </div>
+              {/* Input area — sits above the motif [paint order via relative]. */}
+              <div className="relative p-5">
                 <div className="relative">
                   <BaseInputTextarea
                     placeholder="Ask a question about your data..."
@@ -224,11 +238,14 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
                     }}
                   />
                 </div>
-                <HStack className="gap-1.5 items-center mt-3">
+                {/* Persistent read-only assurance on the info-soft surface, with
+                    the target surfaced — trust stays visible up-front [F2;
+                    USE-065, VIS-014]. */}
+                <HStack className="gap-2 items-center mt-3 w-fit max-w-full rounded-lg bg-surface-info-soft px-3 py-1.5">
                   <Icon name="user-shield" label="Read-only" className="w-3.5 h-3.5 text-content-info-soft shrink-0" />
-                  <Text level="caption" className="text-content-layout-3">
-                    Runs a read-only query against{" "}
-                    <span className="font-medium text-content-layout-2">{runsAgainst}</span>
+                  <Text level="caption" className="text-content-info-soft">
+                    Read-only against{" "}
+                    <span className="font-semibold">{runsAgainst}</span>
                     {" "}· writes blocked · capped at 1,000 rows
                   </Text>
                 </HStack>
@@ -633,7 +650,9 @@ function ResultsTable({
   const hasRows = result.rows.length > 0;
 
   return (
-    <Card className="w-full overflow-hidden">
+    // The Answer card is the answer-state focal region — raised above the page
+    // so the results table leads [VIS-011, VIS-075, VIS-105].
+    <Card className="w-full overflow-hidden bg-surface-raised shadow-elevation-1">
       <Card.Header className="border-b border-border-layout-1">
         <HStack className="justify-between items-center w-full">
           <HStack className="gap-3 items-center">
@@ -872,6 +891,53 @@ function buildAnswers(
   return answers;
 }
 
+// Selectable radio-card for a clarification option. The decision the user must
+// make must not be the faintest text on screen: unselected options render at
+// content-layout-2 (≥4.5:1) as bordered cards; only the selected card carries
+// the single purple accent. Replaces the faint labeled-circle radio stack.
+// NEEDS VARIANT (design-system): a shared `radio-card` — inlined here for now,
+// same convention as SqlDisclosure. [F4; VIS-011, VIS-108, VIS-109, USE-004]
+function ClarificationOption({
+  label,
+  selected,
+  onSelect,
+  disabled,
+}: {
+  label: string;
+  selected: boolean;
+  onSelect: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      disabled={disabled}
+      className={`flex w-full items-center gap-3 rounded-xl border-(length:--border-base) px-4 py-3 text-left transition-colors duration-fast ease-base focus-visible:outline-none focus-visible:shadow-focus disabled:cursor-not-allowed disabled:opacity-50 ${
+        selected
+          ? "border-border-primary-solid bg-surface-primary-soft"
+          : "border-border-layout-1 bg-surface-layout-1 hover:border-border-primary-soft"
+      }`}
+    >
+      <span
+        className={`flex size-4 shrink-0 items-center justify-center rounded-full border-(length:--border-base) ${
+          selected ? "border-border-primary-solid" : "border-border-layout-2"
+        }`}
+      >
+        {selected && <span className="size-2 rounded-full bg-content-primary-soft" />}
+      </span>
+      <Text
+        level="label-medium"
+        className={selected ? "text-content-primary-soft" : "text-content-layout-2"}
+      >
+        {label}
+      </Text>
+    </button>
+  );
+}
+
 function ClarificationPanel({
   question,
   questions,
@@ -1006,20 +1072,30 @@ function ClarificationPanel({
 
             <div className="w-full">
               <VStack className="gap-3 w-full">
-                <BaseInputRadioGroup
-                  options={[
-                    ...currentQuestion.options.map((option) => ({
-                      value: option,
-                      label: option,
-                    })),
-                    {
-                      value: CUSTOM_OPTION_VALUE,
-                      label: "Something else (let me type it)",
-                    },
-                  ]}
-                  value={selectedValue || ""}
-                  onValueChange={(value) => handleSelect(currentQuestion.id, value)}
-                />
+                {/* Selectable radio-cards, not faint radio text [F4]. */}
+                <div
+                  role="radiogroup"
+                  aria-label={questionText}
+                  className="grid w-full gap-2"
+                >
+                  {currentQuestion.options.map((option) => (
+                    <ClarificationOption
+                      key={option}
+                      label={option}
+                      selected={selectedValue === option}
+                      onSelect={() => handleSelect(currentQuestion.id, option)}
+                      disabled={disabled}
+                    />
+                  ))}
+                  <ClarificationOption
+                    label="Something else (let me type it)"
+                    selected={selectedValue === CUSTOM_OPTION_VALUE}
+                    onSelect={() =>
+                      handleSelect(currentQuestion.id, CUSTOM_OPTION_VALUE)
+                    }
+                    disabled={disabled}
+                  />
+                </div>
                 <Show when={selectedValue === CUSTOM_OPTION_VALUE}>
                   <BaseInputText
                     name={`custom-${currentQuestion.id}`}

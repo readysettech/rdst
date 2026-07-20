@@ -36,7 +36,10 @@ test('adds, updates, defaults, and deletes a database target', async ({
   await expect(targetRow).toBeVisible()
   await expect(targetRow.getByText('Default', { exact: true })).toHaveCount(0)
 
-  await targetRow.getByRole('button', { name: 'Set Default' }).click()
+  // Row management actions live in the ⋯ overflow menu now [C-09 configure
+  // migration]: Set as default / Edit connection / Delete….
+  await targetRow.getByRole('button', { name: /More actions/ }).click()
+  await page.getByRole('menuitem', { name: 'Set as default' }).click()
   await expect(targetRow.getByText('Default', { exact: true })).toBeVisible()
 
   await expect
@@ -56,7 +59,8 @@ test('adds, updates, defaults, and deletes a database target', async ({
       primary: { name: 'primary-db', is_default: true },
     })
 
-  await targetRow.getByRole('button', { name: 'Edit' }).click()
+  await targetRow.getByRole('button', { name: /More actions/ }).click()
+  await page.getByRole('menuitem', { name: 'Edit connection' }).click()
   await expect(page.getByText('Edit Target', { exact: true })).toBeVisible()
   await expect(page.locator('[name="name"]')).toBeDisabled()
   await page.locator('[name="host"]').fill('db-updated.internal')
@@ -81,8 +85,10 @@ test('adds, updates, defaults, and deletes a database target', async ({
       is_default: true,
     })
 
-  page.once('dialog', (dialog) => dialog.accept())
-  await targetRow.getByRole('button', { name: 'Delete' }).click()
+  // Native confirm() replaced by the shared styled ConfirmDialog [C-09].
+  await targetRow.getByRole('button', { name: /More actions/ }).click()
+  await page.getByRole('menuitem', { name: 'Delete…' }).click()
+  await page.getByRole('button', { name: 'Delete connection' }).click()
   await expect(targetRow).toHaveCount(0)
   await expect(seedRow).toBeVisible()
 

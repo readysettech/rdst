@@ -29,18 +29,22 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
 
   let queryRow = page.getByTestId('query-registry-row')
   await expect(queryRow).toHaveCount(1)
-  await expect(queryRow).toContainText('(unnamed)')
+  // Unnamed queries now show a derived readable name (verb · table), not the
+  // literal "(unnamed)" [C-09 saved-queries migration].
+  await expect(queryRow).toContainText('Select · users')
 
-  await queryRow.hover()
-  await queryRow.getByRole('button', { name: 'Rename' }).click()
+  // Row management actions live in the always-visible ⋯ overflow menu now
+  // (Rename / Edit SQL / Delete), with Analyze the one visible button.
+  await queryRow.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Rename' }).click()
   await queryRow.locator('[name^="edit-tag-"]').fill('active-users')
   await queryRow.getByRole('button', { name: 'Save' }).click()
   await expect(
     queryRow.getByText('active-users', { exact: true })
   ).toBeVisible()
 
-  await queryRow.hover()
-  await queryRow.getByRole('button', { name: 'Edit SQL' }).click()
+  await queryRow.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Edit SQL' }).click()
   await fillCodeMirror(queryRow, updatedSql)
   await queryRow.getByRole('button', { name: 'Save' }).click()
 
@@ -84,8 +88,8 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   await page.goto('/query-registry')
   queryRow = page.getByTestId('query-registry-row')
   await expect(queryRow).toHaveCount(1)
-  await queryRow.hover()
-  await queryRow.getByRole('button', { name: 'Delete' }).click()
+  await queryRow.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Delete' }).click()
   await expect(queryRow.getByText('Delete this query?')).toBeVisible()
   await queryRow.getByRole('button', { name: 'Delete' }).click()
 

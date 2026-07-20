@@ -71,12 +71,16 @@ export function ConnectPage({
   }
 
   return (
-    <div className="min-h-dvh w-full overflow-y-auto bg-surface-layout-1">
-      {/* Utility row: brand mark + exit */}
-      <HStack className="justify-between items-center px-6 py-4">
+    // Not a fixed takeover: a normal, exitable page inside the app shell. A
+    // subtle accent-tinted hero surface (fading to the base plane) gives depth
+    // and personality without a bespoke token, so the raised form card below
+    // reads as elevated against it. [VIS-075, VIS-099, VIS-101, VIS-102]
+    <div className="w-full bg-gradient-to-b from-surface-primary-soft/10 to-transparent">
+      {/* Utility row: one canonical brand mark + exit */}
+      <HStack className="justify-between items-center py-2">
         <HStack className="gap-2 items-center">
           <Icon
-            name="speedometer"
+            name="querypilot"
             label="RDST"
             className="w-5 h-5 text-content-primary-soft"
           />
@@ -94,7 +98,7 @@ export function ConnectPage({
         </button>
       </HStack>
 
-      <div className="mx-auto w-full max-w-xl px-6 pb-16 pt-8">
+      <div className="mx-auto w-full max-w-xl pb-16 pt-8">
         {fromDemo && (
           // One-line bridge from the demo→conviction hand-off: acknowledges the
           // watched win and carries the scent of information forward. The email
@@ -114,12 +118,12 @@ export function ConnectPage({
         )}
 
         <VStack className="gap-2 items-start mb-6">
-          <Text as="h1" level="headline-2" className="text-content-layout-1">
+          <Text as="h1" level="headline-1" className="text-content-layout-1">
             Connect your database
           </Text>
           <Text
             level="body-medium"
-            className="text-content-layout-3 leading-relaxed"
+            className="text-content-layout-2 leading-relaxed"
           >
             RDST — the Readyset Data &amp; SQL Toolkit. Point it at your
             Postgres or MySQL to find slow queries, health issues, and caching
@@ -127,11 +131,17 @@ export function ConnectPage({
           </Text>
         </VStack>
 
-        <ConfigureForm
-          onSubmit={handleSubmit}
-          isLoading={loading}
-          submitLabel="Test & connect"
-        />
+        {/* One raised card on the hero surface: the form, its inline test
+            state, and its single primary CTA read as one grouped unit — no dead
+            band, no floating second list card. [VIS-036, VIS-111, VIS-022] */}
+        <div className="rounded-[1.25rem] shadow-elevation-1">
+          <ConfigureForm
+            onSubmit={handleSubmit}
+            isLoading={loading}
+            submitLabel="Test & connect"
+            submitSize="large"
+          />
+        </div>
 
         <VStack className="gap-3 items-center mt-6">
           <button

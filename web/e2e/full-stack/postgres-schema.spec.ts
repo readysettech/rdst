@@ -31,7 +31,10 @@ test('configures Postgres and introspects its schema through the UI', async ({
   const targetRow = page
     .getByTestId('target-row')
     .filter({ hasText: 'postgres-e2e' })
-  await targetRow.getByRole('button', { name: 'Set Default' }).click()
+  // Set-default lives in the row's ⋯ overflow menu now [C-09 configure
+  // migration].
+  await targetRow.getByRole('button', { name: /More actions/ }).click()
+  await page.getByRole('menuitem', { name: 'Set as default' }).click()
   await expect(targetRow.getByText('Default', { exact: true })).toBeVisible()
 
   const schemaResponse = await page.request.get(

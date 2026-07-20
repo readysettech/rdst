@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
+import { cn } from '@rs/tailwind-base';
 import { Button } from '@rs/ui-new/button';
 import { Card } from '@rs/ui-new/card';
 import { Icon } from '@rs/ui-new/icon';
@@ -14,7 +15,9 @@ import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea';
 import { BaseInputSelect } from '@rs/ui-new/base-input-select';
 import { BaseInputSwitch } from '@rs/ui-new/base-input-switch';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
+import { useDisclosure } from '@rs/ui-new/use-disclosure';
 import { toast } from '@rs/ui-new/use-toast';
+import { RoutableNotice } from '../components/RoutableNotice';
 import { useSystemStatus } from '../lib/useSystemStatus';
 import { useTarget } from '../hooks/useTarget';
 import {
@@ -316,6 +319,102 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Collapsed-by-default section wrapper. Secondary guard settings (restrictions,
+// filters, rules, limits) sit behind these so the primary "What to mask" section
+// leads the editor; the underlying form state is lifted to GuardsPage, so
+// collapsing a section never discards its values. [USE-093, VIS-017, VIS-103]
+function Disclosure({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useDisclosure({});
+  return (
+    <div className="rounded-xl border border-border-layout-1 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="w-full text-left px-4 py-3 hover:bg-surface-layout-2/50 transition-colors cursor-pointer"
+      >
+        <HStack className="gap-2 items-center">
+          <Icon
+            name={open ? 'chevron-down' : 'chevron-right'}
+            label="Toggle section"
+            className="w-4 h-4 text-content-layout-3 shrink-0"
+          />
+          <Text level="label-small" className="text-content-layout-2">
+            {title}
+          </Text>
+          <Show when={!!hint}>
+            <Text level="caption" className="text-content-layout-3 truncate">
+              {hint}
+            </Text>
+          </Show>
+        </HStack>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <m.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden border-t border-border-layout-1"
+          >
+            <div className="p-4">{children}</div>
+          </m.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// Segmented control that merges the former "New Guard" / "Describe Intent" heroes
+// into one create flow. Accent discipline: the selected segment is a raised,
+// greyscale surface; only the "Describe with AI" glyph carries the rising accent.
+// [VIS-022, USE-056, VIS-121, VIS-097, VIS-114]
+function ModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: 'manual' | 'intent';
+  onChange: (mode: 'manual' | 'intent') => void;
+}) {
+  const segment = (active: boolean) =>
+    cn(
+      'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-label-small transition-colors cursor-pointer',
+      active
+        ? 'bg-surface-raised text-content-layout-1 shadow-elevation-1'
+        : 'text-content-layout-3 hover:text-content-layout-2',
+    );
+  return (
+    <div className="inline-flex items-center gap-1 self-start rounded-xl bg-surface-layout-2 p-1">
+      <button
+        type="button"
+        onClick={() => onChange('manual')}
+        aria-pressed={mode === 'manual'}
+        className={segment(mode === 'manual')}
+      >
+        Build manually
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange('intent')}
+        aria-pressed={mode === 'intent'}
+        className={segment(mode === 'intent')}
+      >
+        <Icon name="sparkles" label="" aria-hidden="true" className="w-3.5 h-3.5 text-content-rising-soft" />
+        Describe with AI
+      </button>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Guard detail view (read-only expansion)
 // ---------------------------------------------------------------------------
@@ -511,10 +610,10 @@ function GuardEditor({
         </VStack>
       </div>
 
-      {/* Masking */}
+      {/* What to mask — the primary section, always open */}
       <VStack className="gap-2 items-stretch">
         <HStack className="justify-between items-center">
-          <FieldLabel>Masking Patterns</FieldLabel>
+          <FieldLabel>What to mask</FieldLabel>
           <Button
             label="Add pattern"
             icon="add"
@@ -570,7 +669,8 @@ function GuardEditor({
         ))}
       </VStack>
 
-      {/* Restrictions: denied columns + allowed tables */}
+      {/* Restrictions: denied columns + allowed tables — collapsed by default */}
+      <Disclosure title="Table & column restrictions" hint="denied columns · allowed tables">
       <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
         <VStack className="gap-1.5 items-start">
           <FieldLabel>Denied Columns</FieldLabel>
@@ -603,8 +703,10 @@ function GuardEditor({
           </Text>
         </VStack>
       </div>
+      </Disclosure>
 
-      {/* Required filters */}
+      {/* Required filters — collapsed by default */}
+      <Disclosure title="Required filters">
       <VStack className="gap-2 items-stretch">
         <HStack className="justify-between items-center">
           <FieldLabel>Required Filters</FieldLabel>
@@ -663,10 +765,11 @@ function GuardEditor({
           </HStack>
         ))}
       </VStack>
+      </Disclosure>
 
-      {/* Rule toggles */}
+      {/* Rule toggles — collapsed by default */}
+      <Disclosure title="Rules" hint="require WHERE / require LIMIT / no SELECT *">
       <VStack className="gap-3 items-stretch">
-        <FieldLabel>Rules</FieldLabel>
         <div className="grid grid-cols-1 tablet:grid-cols-3 gap-3">
           <HStack className="gap-2 items-center">
             <BaseInputSwitch
@@ -706,8 +809,10 @@ function GuardEditor({
           </HStack>
         </div>
       </VStack>
+      </Disclosure>
 
-      {/* Numeric limits */}
+      {/* Numeric limits — collapsed by default */}
+      <Disclosure title="Limits" hint="rows, tables, cost, est. rows">
       <div className="grid grid-cols-2 tablet:grid-cols-5 gap-4">
         <VStack className="gap-1.5 items-start">
           <FieldLabel>Max Tables</FieldLabel>
@@ -768,6 +873,7 @@ function GuardEditor({
           />
         </VStack>
       </div>
+      </Disclosure>
     </VStack>
   );
 }
@@ -899,32 +1005,59 @@ function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
   );
 }
 
+// The verdict banner surfaces severity with icon + label + count (never color
+// alone): a passed check that carries warn-level findings reads "ALLOWED — N
+// warning(s)" on a warning tint, so a scanning user never mistakes a warned
+// result for clean. [VIS-117, USE-005]
+function ResultBanner({ result }: { result: GuardCheckResponse }) {
+  const warnCount = result.results.filter(
+    (r) => !r.passed && checkLevel(r.level) === 'warn',
+  ).length;
+  const severity: 'clean' | 'warn' | 'blocked' = !result.passed
+    ? 'blocked'
+    : warnCount > 0
+      ? 'warn'
+      : 'clean';
+  const banner: Record<
+    'clean' | 'warn' | 'blocked',
+    { surface: string; text: string; icon: IconStrokeName; label: string }
+  > = {
+    clean: {
+      surface: 'bg-surface-positive-soft/20 border-border-positive-soft',
+      text: 'text-content-positive-soft',
+      icon: 'tick-double',
+      label: `ALLOWED by ${result.guard}`,
+    },
+    warn: {
+      surface: 'bg-surface-warning-soft/20 border-border-warning-soft',
+      text: 'text-content-warning-soft',
+      icon: 'alert',
+      label: `ALLOWED — ${warnCount} warning${warnCount === 1 ? '' : 's'} · ${result.guard}`,
+    },
+    blocked: {
+      surface: 'bg-surface-negative-soft/30 border-border-negative-soft',
+      text: 'text-content-negative-soft',
+      icon: 'close',
+      label: `BLOCKED by ${result.guard}`,
+    },
+  };
+  const { surface, text, icon, label } = banner[severity];
+  return (
+    <div role="status" className={cn('px-4 py-3 rounded-xl border', surface)}>
+      <HStack className="gap-2 items-center">
+        <Icon name={icon} label="" aria-hidden="true" className={cn('w-5 h-5 shrink-0', text)} />
+        <Text level="label-medium" className={text}>
+          {label}
+        </Text>
+      </HStack>
+    </div>
+  );
+}
+
 function CheckResultView({ result }: { result: GuardCheckResponse }) {
   return (
     <VStack className="gap-3 items-stretch">
-      <div
-        className={`px-4 py-3 rounded-xl border ${
-          result.passed
-            ? 'bg-surface-positive-soft/20 border-border-positive-soft'
-            : 'bg-surface-negative-soft/30 border-border-negative-soft'
-        }`}
-      >
-        <HStack className="gap-2 items-center">
-          <Icon
-            name={result.passed ? 'tick-double' : 'close'}
-            label={result.passed ? 'Allowed' : 'Blocked'}
-            className={`w-5 h-5 ${
-              result.passed ? 'text-content-positive-soft' : 'text-content-negative-soft'
-            }`}
-          />
-          <Text
-            level="label-medium"
-            className={result.passed ? 'text-content-positive-soft' : 'text-content-negative-soft'}
-          >
-            {result.passed ? 'ALLOWED' : 'BLOCKED'} by {result.guard}
-          </Text>
-        </HStack>
-      </div>
+      <ResultBanner result={result} />
 
       <Show when={result.results.length === 0}>
         <Text level="body-small" className="text-content-layout-3">
@@ -1139,21 +1272,27 @@ function GuardsPage() {
   const [form, setForm] = useState<GuardForm>(emptyForm);
   const [deriving, setDeriving] = useState(false);
   const [deriveError, setDeriveError] = useState<string | null>(null);
+  // Holds the hero CTA back until the editor's exit animation finishes, so the
+  // single CTA never flashes back in mid-collapse (former doubled-CTA flash).
+  const [panelExiting, setPanelExiting] = useState(false);
 
   const isEditing = editorMode === 'edit';
   const editorOpen = editorMode !== 'closed';
+  const createMode = editorMode === 'manual' || editorMode === 'intent';
 
-  const openIntent = () => {
-    setForm(emptyForm());
-    setDeriveError(null);
-    setEditorMode('intent');
-  };
-  const openManual = () => {
+  // One create entry point, opening in manual mode; the in-editor ModeToggle
+  // switches to the AI "Describe with AI" path without discarding form input.
+  const openCreate = () => {
     setForm(emptyForm());
     setDeriveError(null);
     setEditorMode('manual');
   };
+  const switchMode = (mode: 'manual' | 'intent') => {
+    setDeriveError(null);
+    setEditorMode(mode);
+  };
   const closeEditor = () => {
+    setPanelExiting(true);
     setEditorMode('closed');
     setForm(emptyForm());
     setDeriveError(null);
@@ -1249,42 +1388,35 @@ function GuardsPage() {
       >
         <HStack className="justify-between items-start">
           <HStack className="gap-4 items-center">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-info-soft to-surface-primary-soft flex items-center justify-center">
-              <Icon name="user-shield" label="Guards" className="w-6 h-6 text-content-info-soft" />
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
+              <Icon name="user-shield" label="Guards" className="w-6 h-6 text-content-primary-soft" />
             </div>
             <VStack className="gap-1 items-start">
               <Text as="h1" level="headline-3" className="text-content-layout-1">
                 Query Guards
               </Text>
-              <Text level="body-small" className="text-content-layout-3">
-                Policies that mask columns, restrict tables, and enforce query rules.
+              <Text level="body-small" className="text-content-layout-2">
+                Rules that decide what an assistant may read — and what it must hide.
               </Text>
             </VStack>
           </HStack>
-          <Show when={!editorOpen}>
-            <HStack className="gap-2 items-center">
-              <Button
-                label="Describe Intent"
-                icon="sparkles"
-                iconPosition="left"
-                variant="rising"
-                modifier="outline"
-                onClick={openIntent}
-              />
-              <Button
-                label="New Guard"
-                icon="add"
-                iconPosition="left"
-                variant="primary"
-                onClick={openManual}
-              />
-            </HStack>
+          {/* One primary CTA; hidden in the empty state so the empty-state CTA
+              is the sole "create" primary, and held back until the editor's
+              exit animation completes to avoid a re-show flash. */}
+          <Show when={!editorOpen && !panelExiting && guards.length > 0}>
+            <Button
+              label="New guard"
+              icon="add"
+              iconPosition="left"
+              variant="primary"
+              onClick={openCreate}
+            />
           </Show>
         </HStack>
       </m.div>
 
       {/* Create / edit panel */}
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={() => setPanelExiting(false)}>
         {editorOpen && (
           <m.div
             initial={{ opacity: 0, height: 0 }}
@@ -1293,14 +1425,8 @@ function GuardsPage() {
             transition={{ duration: 0.25 }}
           >
             <SectionCard
-              icon={isEditing ? 'edit' : editorMode === 'intent' ? 'sparkles' : 'add'}
-              title={
-                isEditing
-                  ? `Edit Guard: ${form.name}`
-                  : editorMode === 'intent'
-                    ? 'Describe Intent'
-                    : 'New Guard'
-              }
+              icon={isEditing ? 'edit' : 'add'}
+              title={isEditing ? `Edit guard: ${form.name}` : 'New guard'}
               action={
                 <Button
                   label="Cancel"
@@ -1312,10 +1438,23 @@ function GuardsPage() {
                 />
               }
             >
+              {/* Mode toggle — merges the former "New Guard" / "Describe Intent"
+                  heroes into one create flow (hidden while editing). */}
+              <Show when={createMode}>
+                <div className="px-5 pt-5">
+                  <ModeToggle mode={editorMode === 'intent' ? 'intent' : 'manual'} onChange={switchMode} />
+                </div>
+              </Show>
+
               {/* Intent mode: name + intent + derive */}
               <Show when={editorMode === 'intent'}>
                 <div className="px-5 pt-5">
                   <VStack className="gap-4 items-stretch">
+                    <RoutableNotice
+                      kind="key-needed"
+                      title="Describe with AI uses an Anthropic key"
+                      message="Deriving a guard from intent needs an Anthropic key or an active trial."
+                    />
                     <VStack className="gap-1.5 items-start">
                       <FieldLabel>Name</FieldLabel>
                       <BaseInputText
@@ -1378,7 +1517,7 @@ function GuardsPage() {
                 <HStack className="justify-end gap-2">
                   <Button label="Cancel" modifier="ghost" onClick={closeEditor} />
                   <Button
-                    label={isEditing ? 'Save Changes' : 'Create Guard'}
+                    label={isEditing ? 'Save changes' : 'Create guard'}
                     icon="tick"
                     iconPosition="left"
                     variant="primary"
@@ -1417,20 +1556,27 @@ function GuardsPage() {
             <Show
               when={guards.length > 0}
               fallback={
-                <div className="p-8">
-                  <VStack className="gap-3 items-center">
-                    <Icon name="user-shield" label="No guards" className="w-8 h-8 text-content-layout-3" />
-                    <Text level="body-small" className="text-content-layout-3">
-                      No guards yet. Create one manually or describe your intent.
-                    </Text>
+                <div className="p-10">
+                  <VStack className="gap-4 items-center text-center">
+                    <div className="w-14 h-14 rounded-2xl bg-surface-layout-2 shadow-elevation-1 flex items-center justify-center">
+                      <Icon name="user-shield" label="" aria-hidden="true" className="w-7 h-7 text-content-layout-2" />
+                    </div>
+                    <VStack className="gap-1 items-center">
+                      <Text level="label-large" className="text-content-layout-1">
+                        No guards yet
+                      </Text>
+                      <Text level="body-small" className="text-content-layout-2 max-w-sm">
+                        Create a guard to mask columns, restrict tables, and set the rules an
+                        assistant must follow.
+                      </Text>
+                    </VStack>
                     <Show when={!editorOpen}>
                       <Button
-                        label="New Guard"
+                        label="Create a guard"
                         icon="add"
                         iconPosition="left"
                         variant="primary"
-                        size="small"
-                        onClick={openManual}
+                        onClick={openCreate}
                       />
                     </Show>
                   </VStack>
@@ -1457,8 +1603,11 @@ function GuardsPage() {
         </Show>
       </SectionCard>
 
-      {/* Test SQL */}
-      <TestSqlPanel guardNames={guardNames} />
+      {/* Test SQL — the verification tool only appears once there is a guard to
+          test, so the empty state never shows a dead, unusable panel. [VIS-103] */}
+      <Show when={guards.length > 0}>
+        <TestSqlPanel guardNames={guardNames} />
+      </Show>
     </div>
   );
 }

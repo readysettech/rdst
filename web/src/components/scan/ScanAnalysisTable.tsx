@@ -130,7 +130,7 @@ function AnalysisDetailModal({ query, onClose, onAnalyze }: AnalysisDetailModalP
   return (
     <Modal open={!!query} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={!!query}>
-        <ModalContent size="large" className="p-0 gap-0">
+        <ModalContent size="large" className="p-0 gap-0 shadow-elevation-3">
           <ModalTitle className="sr-only">
             {query ? `${query.function || 'Query'} analysis details` : 'Query analysis details'}
           </ModalTitle>
@@ -426,7 +426,7 @@ function AnalysisRow({ query, idx, onViewDetail }: AnalysisRowProps) {
               size="small"
               variant="warning"
               modifier="ghost"
-              label={`${query.issues.length} issue${query.issues.length === 1 ? '' : 's'}`}
+              label={`${query.issues.length} ${query.issues.length === 1 ? 'finding' : 'findings'}`}
             />
           )}
           <Text as="span" level="caption" className="text-content-layout-3">

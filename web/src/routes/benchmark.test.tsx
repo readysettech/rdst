@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { BenchmarkPage } from "./benchmark";
+import { BenchmarkPage } from "./-benchmark-page";
 import { useBenchmark } from "../lib/sse";
 import { useQueryRegistry } from "../lib/useQueryRegistry";
 import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";

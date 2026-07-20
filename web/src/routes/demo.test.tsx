@@ -15,7 +15,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 });
 
 import { toast } from '@rs/ui-new/use-toast';
-import { DemoPage, windowLiftRatio, eventDescription, parameterizeSql, clipToScrollAncestors } from './demo';
+import { DemoPage, windowLiftRatio, eventDescription, parameterizeSql, clipToScrollAncestors } from './-demo-page';
 import * as useDemoMod from '../lib/useDemo';
 import type { LoadSample, PatternRow } from '../lib/useDemo';
 

@@ -57,7 +57,7 @@ function AnalyzePage() {
               Analyze Query
             </Text>
             <Text level="body-small" className="text-content-layout-3">
-              Analyze SQL performance and get AI-powered optimization recommendations
+              Paste SQL to see how fast it runs and how to speed it up.
             </Text>
           </VStack>
         </HStack>

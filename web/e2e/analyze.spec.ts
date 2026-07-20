@@ -119,6 +119,9 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
   await prepareAnalysisPage(page)
 
   await fillCodeMirror(page.locator('.cm-editor'), query)
+  // C-09 moved the fast-mode switch behind the editor's "Options" popover;
+  // open it first — the switch only mounts while the popover is open.
+  await page.getByRole('button', { name: 'Options' }).click()
   const fastMode = page.getByRole('switch')
   await fastMode.click()
   await expect(fastMode).toHaveAttribute('data-state', 'checked')
@@ -137,7 +140,11 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
     target: 'e2e-guard',
   })
   await expect(page).toHaveURL(/\/results(?:\?|$)/)
-  await expect(page.getByText('Preparing', { exact: true })).toBeVisible()
+  // The analyzing view now shows "Preparing" twice (stage caption + current
+  // stage headline), so pick the first match.
+  await expect(
+    page.getByText('Preparing', { exact: true }).first()
+  ).toBeVisible()
 
   await expect(
     page.getByText('Performance Summary', { exact: true })
@@ -148,8 +155,12 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
   await expect(
     page.getByRole('heading', { name: 'Index Recommendations' })
   ).toBeVisible()
+  // The optimization-opportunities section collapsed into a quiet
+  // "More recommendations (N)" disclosure on the results page; open it and
+  // check the recommendation text it reveals.
+  await page.getByRole('button', { name: /More recommendations/ }).click()
   await expect(
-    page.getByRole('heading', { name: 'Additional Recommendations' })
+    page.getByText('Return only columns needed by the caller.')
   ).toBeVisible()
   await expect(
     page.getByRole('heading', { name: 'Readyset Cacheability' })

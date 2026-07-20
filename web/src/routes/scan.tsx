@@ -15,6 +15,7 @@ import { m, AnimatePresence } from '@rs/ui-new/motion';
 import { TargetLockNotice } from '../components';
 import { useTarget } from '../hooks/useTarget';
 import { useRecentScanDirs } from '../hooks/useRecentScanDirs';
+import { sanitizeWebError } from '../lib/errorContract';
 import { useScan } from '../lib/useScan';
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
 import { useCacheAction } from '../lib/useCacheAction';
@@ -124,7 +125,7 @@ function ScanPage() {
       <ScanHeader state={state} queriesCount={queries.length} />
 
       <Show when={!target}>
-        <div className="bg-surface-warning-soft rounded-xl border border-border-warning p-4">
+        <div className="bg-surface-warning-soft rounded-xl border border-border-warning-soft p-4">
           <Text level="body-small" className="text-content-warning-soft">
             Please select a target database from the sidebar to continue.
           </Text>
@@ -173,6 +174,7 @@ function ScanPage() {
               onStart={handleStart}
               onCancel={cancel}
               hasTarget={!!target && !passwordLock.isLocked}
+              targetName={target}
             />
           </m.div>
         ) : (
@@ -237,9 +239,9 @@ function ScanPage() {
             )}
 
             {error !== null && (
-              <div className="bg-surface-negative-soft rounded-xl border border-border-negative p-4">
+              <div className="bg-surface-negative-soft rounded-xl border border-border-negative-soft p-4">
                 <Text level="body-small" className="text-content-negative-soft">
-                  Error: {error}
+                  Error: {sanitizeWebError(error, 'The scan could not be completed.')}
                 </Text>
               </div>
             )}

@@ -16,6 +16,18 @@ interface SchemaTableTreeProps {
   onEditRelationship?: (tableName: string, relationship: SchemaTableRelationship) => void
 }
 
+// An enum value counts as documented only when it carries a real meaning. The
+// profiler seeds un-curated values with a dev placeholder ("TODO: describe
+// '<v>'"); that string must never surface in primary content (audit HIGH). Bare
+// or placeholder meanings render as the bare value in a muted "unlabeled" tone
+// instead of raw dev text.
+const isDocumentedMeaning = (meaning?: string | null): boolean => {
+  if (!meaning) return false
+  const trimmed = meaning.trim()
+  if (trimmed.length === 0) return false
+  return !/^todo\b/i.test(trimmed)
+}
+
 export function SchemaTableTree({
   tables,
   onEditColumn,
@@ -182,14 +194,25 @@ export function SchemaTableTree({
                                     <div className="flex flex-wrap gap-1.5">
                                       {Object.entries(col.enum_values || {})
                                         .slice(0, 8)
-                                        .map(([value, meaning]) => (
-                                          <Tag
-                                            key={value}
-                                            size="small"
-                                            modifier="outline"
-                                            label={meaning ? `${value}: ${meaning}` : value}
-                                          />
-                                        ))}
+                                        .map(([value, meaning]) =>
+                                          isDocumentedMeaning(meaning) ? (
+                                            <Tag
+                                              key={value}
+                                              size="small"
+                                              modifier="outline"
+                                              label={`${value}: ${meaning}`}
+                                            />
+                                          ) : (
+                                            <Tag
+                                              key={value}
+                                              size="small"
+                                              variant="muted"
+                                              modifier="outline"
+                                              label={value}
+                                              title="Value meaning not documented yet"
+                                            />
+                                          ),
+                                        )}
                                       <Show when={Object.keys(col.enum_values || {}).length > 8}>
                                         <Tag
                                           size="small"
@@ -202,7 +225,7 @@ export function SchemaTableTree({
                                 </Show>
                               </div>
                               <HStack className="gap-1 shrink-0">
-                                <Show when={!!onEditEnum && (Object.keys(col.enum_values ?? {}).length > 0 || col.data_type?.includes('enum'))}>
+                                <Show when={!!onEditEnum && (Object.keys(col.enum_values ?? {}).length > 0 || col.data_type === 'enum')}>
                                   <Button
                                     modifier="ghost"
                                     size="small"

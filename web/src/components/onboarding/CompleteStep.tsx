@@ -16,7 +16,7 @@ const nextSteps = [
   {
     icon: "querypilot" as const,
     title: "Analyze a Query",
-    description: "Paste SQL on the home page to get execution plans and suggestions.",
+    description: "Open Analyze Query and paste your SQL to get execution plans and suggestions.",
   },
   {
     icon: "observe" as const,
@@ -92,7 +92,7 @@ export function CompleteStep({ defaultTarget, onComplete, onBack, isLoading }: C
               transition={{ delay: 0.5 + index * 0.1 }}
               className="flex items-start gap-4 p-4 rounded-xl bg-surface-layout-2/50 border border-border-layout-1"
             >
-              <div className="w-10 h-10 rounded-xl bg-surface-layout-3 flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-surface-raised flex items-center justify-center shrink-0">
                 <Icon
                   name={step.icon}
                   label={step.title}
@@ -122,7 +122,7 @@ export function CompleteStep({ defaultTarget, onComplete, onBack, isLoading }: C
             <Icon name="folder-file" label="CLI" className="w-5 h-5 text-content-layout-3" />
             <Text level="body-small" className="text-content-layout-3">
               <span className="text-content-layout-2">Pro tip:</span> Run{" "}
-              <code className="px-1.5 py-0.5 rounded bg-surface-layout-3 text-content-layout-2 font-mono text-xs">
+              <code className="px-1.5 py-0.5 rounded bg-surface-raised text-content-layout-2 font-mono text-xs">
                 rdst top
               </code>{" "}
               in your terminal to monitor slow queries.

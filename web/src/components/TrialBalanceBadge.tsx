@@ -63,7 +63,7 @@ export function TrialBalanceBadge() {
             {remaining_tokens_display}/{limit_tokens_display}
           </Text>
         </HStack>
-        <div className="w-full h-1 rounded-full bg-surface-layout-3 overflow-hidden">
+        <div className="w-full h-1 rounded-full bg-surface-raised overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-300 ${barClass}`}
             style={{ width: `${Math.max(percent_remaining, 0)}%` }}

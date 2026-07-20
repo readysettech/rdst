@@ -110,7 +110,7 @@ export function ValidateStep({
       badgeLabel: "Setup Needed",
     },
     pending: {
-      badge: "bg-surface-layout-3 text-content-layout-2",
+      badge: "bg-surface-raised text-content-layout-2",
       container: "bg-surface-layout-2/50 border-border-layout-1",
       icon: "info",
       iconClass: "text-content-layout-3",

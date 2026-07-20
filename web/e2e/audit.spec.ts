@@ -178,8 +178,10 @@ test('runs a streamed health check and reopens it from history', async ({
   ).toBeVisible()
 
   await expect(page.getByText('Latest audit', { exact: true })).toBeVisible()
+  // C-09 redesigned the report: the AI findings section is titled "AI Analysis"
+  // (the score itself moved into the Verdict hero).
   await expect(
-    page.getByRole('paragraph').filter({ hasText: /^Health Analysis$/ })
+    page.getByRole('paragraph').filter({ hasText: /^AI Analysis$/ })
   ).toBeVisible()
   await expect(page.getByText('58', { exact: true })).toBeVisible()
   await expect(
@@ -191,12 +193,16 @@ test('runs a streamed health check and reopens it from history', async ({
   await expect(
     page.getByText('Reduce connection pressure', { exact: true })
   ).toBeVisible()
-  await expect(page.getByText('Oversized', { exact: true })).toBeVisible()
+  // "Oversized" now renders twice (Verdict hero tag + Sizing card tag).
+  await expect(page.getByText('Oversized', { exact: true }).first()).toBeVisible()
   await expect(
     page.getByText('Repeated read-heavy queries are strong cache candidates.', {
       exact: true,
     })
   ).toBeVisible()
+  // The "Top Queries (N)" table moved behind the collapsed Details disclosure;
+  // open it to keep the exact-count assertion.
+  await page.getByRole('button', { name: /overview metrics/ }).click()
   await expect(
     page.getByRole('paragraph').filter({ hasText: /^Top Queries \(1\)$/ })
   ).toBeVisible()
@@ -255,7 +261,7 @@ test('shows a streamed audit failure and retries successfully', async ({
   await page.getByRole('button', { name: 'Run Audit' }).click()
   await expect(page.getByText('Latest audit', { exact: true })).toBeVisible()
   await expect(
-    page.getByRole('paragraph').filter({ hasText: /^Health Analysis$/ })
+    page.getByRole('paragraph').filter({ hasText: /^AI Analysis$/ })
   ).toBeVisible()
   expect(auditCalls).toBe(2)
 })

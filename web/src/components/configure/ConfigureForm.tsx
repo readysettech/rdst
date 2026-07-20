@@ -12,6 +12,7 @@ import { Icon } from '@rs/ui-new/icon';
 import { Card } from '@rs/ui-new/card';
 import { HStack, VStack } from '@rs/ui-new/stack';
 import { Show } from '@rs/ui-new/show';
+import { useDisclosure } from '@rs/ui-new/use-disclosure';
 import type { ConfigureFormData } from '../../types/configure';
 
 interface ConfigureFormProps {
@@ -21,6 +22,9 @@ interface ConfigureFormProps {
   isLoading?: boolean;
   /** Override the add-mode submit label (e.g. "Test & connect" on first run). */
   submitLabel?: string;
+  /** Size of the primary submit button; first run uses a large hero CTA
+   *  [VIS-022, VIS-035]. Defaults to `base` so other callers are unchanged. */
+  submitSize?: 'base' | 'large';
 }
 
 const engineOptions = [
@@ -47,6 +51,59 @@ function FieldLabel({
         {children}
       </Text>
     </label>
+  );
+}
+
+/**
+ * Progressive-disclosure section (built on the shared `use-disclosure` hook).
+ * The panel stays mounted and toggles visibility via `hidden`, so collapsing a
+ * section never unmounts its fields (form state is preserved, and pre-filled
+ * values survive a collapse). [VIS-114, USE-088]
+ */
+function Disclosure({
+  id,
+  title,
+  subtitle,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  subtitle?: string;
+  open: boolean;
+  onToggle: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border-layout-1 overflow-hidden">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => onToggle(!open)}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-layout-2/50 transition-colors cursor-pointer"
+      >
+        <VStack className="gap-0.5 items-start">
+          <Text as="span" level="label-small" className="text-content-layout-1">
+            {title}
+          </Text>
+          <Show when={!!subtitle}>
+            <Text as="span" level="caption" className="text-content-layout-3">
+              {subtitle}
+            </Text>
+          </Show>
+        </VStack>
+        <Icon
+          name={open ? 'chevron-up' : 'chevron-down'}
+          label={open ? 'Collapse' : 'Expand'}
+          className="w-4 h-4 text-content-layout-3 shrink-0"
+        />
+      </button>
+      <div id={id} hidden={!open} className="px-4 pb-4 pt-1">
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -121,7 +178,7 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
   }
 }
 
-export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, submitLabel }: ConfigureFormProps) {
+export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, submitLabel, submitSize = 'base' }: ConfigureFormProps) {
   const isAddMode = !initialData?.name;
   const [connectionUrl, setConnectionUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -141,6 +198,17 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
   );
   const [tls, setTls] = useState(initialData?.tls ?? false);
   const [readOnly, setReadOnly] = useState(initialData?.read_only ?? false);
+
+  // "Connection details" holds the fields the connection needs, so it opens by
+  // default; "Advanced" (TLS / read-only) stays collapsed until asked for. A
+  // paste reveals both so the auto-filled values — including the inferred TLS —
+  // are visible for review. [VIS-114, USE-067]
+  const [detailsOpenState, setDetailsOpenState] = useState(true);
+  const [detailsOpen, setDetailsOpen] = useDisclosure({
+    open: detailsOpenState,
+    onOpenChange: setDetailsOpenState,
+  });
+  const [advancedOpen, setAdvancedOpen] = useDisclosure({});
 
   const handleParseUrl = () => {
     setUrlError(null);
@@ -172,6 +240,10 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
         setPasswordEnv(defaultPasswordEnv(parsed.database));
       }
     }
+
+    // Reveal the pre-filled fields (and the inferred TLS in Advanced) for review.
+    setDetailsOpen(true);
+    setAdvancedOpen(true);
 
     // Clear the URL field after successful parse
     setConnectionUrl('');
@@ -219,174 +291,170 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
       <Card className="w-full">
         <Card.Header>
           <HStack className="gap-2 items-center">
-            <Icon name="add" label="Add" className="w-4 h-4 text-content-layout-3" />
+            <Icon
+              name={isAddMode ? 'add' : 'edit'}
+              label={isAddMode ? 'Add' : 'Edit'}
+              className="w-4 h-4 text-content-layout-3"
+            />
             <Text level="label-medium" className="text-content-layout-1">
               {initialData?.name ? 'Edit Target' : 'New Target'}
             </Text>
           </HStack>
         </Card.Header>
       <Card.Content>
-          <div className="space-y-6">
-            {/* Connection URL */}
-            <div className="rounded-xl bg-surface-layout-2/50 p-4">
-              <HStack className="gap-2 items-center mb-3">
-                <Icon name="connect" label="Quick setup" className="w-4 h-4 text-content-primary-soft" />
-                <label htmlFor="cfg-connection-url">
-                  <Text as="span" level="label-small" className="text-content-primary-soft">
-                    Quick Setup
+          <div className="space-y-5">
+            {/* Quick Setup — the primary path. Hidden when editing a known
+                connection (there's no string to paste). The parser itself stays
+                intact for add mode. [USE-067, VIS-121] */}
+            {isAddMode && (
+              <div className="rounded-xl bg-surface-layout-2/50 p-4">
+                <HStack className="gap-2 items-center mb-3">
+                  <Icon name="connect" label="Quick setup" className="w-4 h-4 text-content-primary-soft" />
+                  <label htmlFor="cfg-connection-url">
+                    <Text as="span" level="label-small" className="text-content-primary-soft">
+                      Quick Setup
+                    </Text>
+                  </label>
+                </HStack>
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <BaseInputText
+                        id="cfg-connection-url"
+                        name="connectionUrl"
+                        value={connectionUrl}
+                        onChange={(e) => {
+                          setConnectionUrl(e.target.value);
+                          setUrlError(null);
+                        }}
+                        placeholder="postgresql://user@host:5432/database"
+                        disabled={isLoading}
+                      />
+                    </div>
+                    <Button
+                      variant="primary"
+                      modifier="outline"
+                      label="Parse"
+                      type="button"
+                      onClick={handleParseUrl}
+                      disabled={isLoading || !connectionUrl.trim()}
+                    />
+                  </div>
+                  <Show when={!!urlError}>
+                    <Text level="body-small" className="text-content-negative-soft">
+                      {urlError}
+                    </Text>
+                  </Show>
+                  <Text level="caption" className="text-content-layout-3">
+                    Paste a connection URL to auto-fill the form fields
                   </Text>
-                </label>
-              </HStack>
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <BaseInputText
-                      id="cfg-connection-url"
-                      name="connectionUrl"
-                      value={connectionUrl}
-                      onChange={(e) => {
-                        setConnectionUrl(e.target.value);
-                        setUrlError(null);
-                      }}
-                      placeholder="postgresql://user@host:5432/database"
+                </div>
+              </div>
+            )}
+
+            {/* Name — always visible; it's the identity you'll pick the
+                connection by. */}
+            <div>
+              <FieldLabel htmlFor="cfg-name">Target Name *</FieldLabel>
+              <BaseInputText
+                id="cfg-name"
+                name="name"
+                value={name}
+                onChange={(e) => {
+                  const nextName = e.target.value;
+                  setName(nextName);
+                  if (isAddMode && !passwordEnvCustomized) {
+                    setPasswordEnv(defaultPasswordEnv(nextName));
+                  }
+                }}
+                placeholder="my-database"
+                disabled={isLoading || !!initialData?.name}
+                required
+              />
+              <Show when={!isAddMode}>
+                <Text level="caption" className="text-content-layout-3 mt-1">
+                  The name can't be changed after a connection is created.
+                </Text>
+              </Show>
+            </div>
+
+            {/* Connection details — the manual field grid, deferred behind a
+                disclosure that opens pre-filled after a paste. [USE-067, VIS-114] */}
+            <Disclosure
+              id="cfg-connection-details"
+              title="Connection details"
+              subtitle="Engine, host, port, database, user, password"
+              open={detailsOpen}
+              onToggle={setDetailsOpen}
+            >
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel htmlFor="cfg-engine">Database Engine *</FieldLabel>
+                    <BaseInputSelect
+                      id="cfg-engine"
+                      name="engine"
+                      options={engineOptions}
+                      value={engine}
+                      onValueChange={setEngine}
                       disabled={isLoading}
                     />
                   </div>
-                  <Button
-                    variant="primary"
-                    modifier="outline"
-                    label="Parse"
-                    type="button"
-                    onClick={handleParseUrl}
-                    disabled={isLoading || !connectionUrl.trim()}
-                  />
-                </div>
-                <Show when={!!urlError}>
-                  <Text level="body-small" className="text-content-negative-soft">
-                    {urlError}
-                  </Text>
-                </Show>
-                <Text level="caption" className="text-content-layout-3">
-                  Paste a connection URL to auto-fill the form fields
-                </Text>
-              </div>
-            </div>
 
-            {/* Basic Information */}
-            <div>
-              <HStack className="gap-2 items-center mb-4">
-                <Icon name="info" label="Basic" className="w-4 h-4 text-content-layout-3" />
-                <Text level="label-small" className="text-content-layout-2 uppercase tracking-wider">
-                  Basic Information
-                </Text>
-              </HStack>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel htmlFor="cfg-name">Target Name *</FieldLabel>
-                  <BaseInputText
-                    id="cfg-name"
-                    name="name"
-                    value={name}
-                    onChange={(e) => {
-                      const nextName = e.target.value;
-                      setName(nextName);
-                      if (isAddMode && !passwordEnvCustomized) {
-                        setPasswordEnv(defaultPasswordEnv(nextName));
-                      }
-                    }}
-                    placeholder="my-database"
-                    disabled={isLoading || !!initialData?.name}
-                    required
-                  />
-                </div>
+                  <div>
+                    <FieldLabel htmlFor="cfg-host">Host *</FieldLabel>
+                    <BaseInputText
+                      id="cfg-host"
+                      name="host"
+                      value={host}
+                      onChange={(e) => setHost(e.target.value)}
+                      placeholder="localhost"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
 
-                <div>
-                  <FieldLabel htmlFor="cfg-engine">Database Engine *</FieldLabel>
-                  <BaseInputSelect
-                    id="cfg-engine"
-                    name="engine"
-                    options={engineOptions}
-                    value={engine}
-                    onValueChange={setEngine}
-                    disabled={isLoading}
-                  />
-                </div>
-              </div>
-            </div>
+                  <div>
+                    <FieldLabel htmlFor="cfg-port">Port *</FieldLabel>
+                    <BaseInputText
+                      id="cfg-port"
+                      name="port"
+                      type="number"
+                      value={String(port)}
+                      onChange={(e) => setPort(Number(e.target.value) || 5432)}
+                      placeholder="5432"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
 
-            {/* Connection Details */}
-            <div>
-              <HStack className="gap-2 items-center mb-4">
-                <Icon name="database" label="Connection" className="w-4 h-4 text-content-layout-3" />
-                <Text level="label-small" className="text-content-layout-2 uppercase tracking-wider">
-                  Connection
-                </Text>
-              </HStack>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel htmlFor="cfg-host">Host *</FieldLabel>
-                  <BaseInputText
-                    id="cfg-host"
-                    name="host"
-                    value={host}
-                    onChange={(e) => setHost(e.target.value)}
-                    placeholder="localhost"
-                    disabled={isLoading}
-                    required
-                  />
+                  <div>
+                    <FieldLabel htmlFor="cfg-database">Database *</FieldLabel>
+                    <BaseInputText
+                      id="cfg-database"
+                      name="database"
+                      value={database}
+                      onChange={(e) => setDatabase(e.target.value)}
+                      placeholder="myapp"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <FieldLabel htmlFor="cfg-user">User *</FieldLabel>
+                    <BaseInputText
+                      id="cfg-user"
+                      name="user"
+                      value={user}
+                      onChange={(e) => setUser(e.target.value)}
+                      placeholder="postgres"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <FieldLabel htmlFor="cfg-port">Port *</FieldLabel>
-                  <BaseInputText
-                    id="cfg-port"
-                    name="port"
-                    type="number"
-                    value={String(port)}
-                    onChange={(e) => setPort(Number(e.target.value) || 5432)}
-                    placeholder="5432"
-                    disabled={isLoading}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <FieldLabel htmlFor="cfg-database">Database *</FieldLabel>
-                  <BaseInputText
-                    id="cfg-database"
-                    name="database"
-                    value={database}
-                    onChange={(e) => setDatabase(e.target.value)}
-                    placeholder="myapp"
-                    disabled={isLoading}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <FieldLabel htmlFor="cfg-user">User *</FieldLabel>
-                  <BaseInputText
-                    id="cfg-user"
-                    name="user"
-                    value={user}
-                    onChange={(e) => setUser(e.target.value)}
-                    placeholder="postgres"
-                    disabled={isLoading}
-                    required
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Security */}
-            <div>
-              <HStack className="gap-2 items-center mb-4">
-                <Icon name="key" label="Security" className="w-4 h-4 text-content-layout-3" />
-                <Text level="label-small" className="text-content-layout-2 uppercase tracking-wider">
-                  Security
-                </Text>
-              </HStack>
-              <div className="space-y-4">
                 <div>
                   <FieldLabel htmlFor="cfg-password">
                     Database Password {isAddMode ? '*' : ''}
@@ -427,7 +495,18 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                     Advanced: the name RDST uses to look up this password
                   </Text>
                 </div>
+              </div>
+            </Disclosure>
 
+            {/* Advanced — TLS + read-only, collapsed until asked for. [VIS-114] */}
+            <Disclosure
+              id="cfg-advanced"
+              title="Advanced"
+              subtitle="TLS, read-only"
+              open={advancedOpen}
+              onToggle={setAdvancedOpen}
+            >
+              <div className="space-y-4">
                 <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
                   <label htmlFor="cfg-tls" className="cursor-pointer">
                     <VStack className="gap-0.5 items-start">
@@ -470,7 +549,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                   />
                 </div>
               </div>
-            </div>
+            </Disclosure>
           </div>
         </Card.Content>
         <Card.Footer>
@@ -486,6 +565,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
             <Button
               variant="rising"
               modifier="solid"
+              size={submitSize}
               label={initialData?.name ? 'Update Target' : submitLabel ?? 'Add Target'}
               type="submit"
               loading={isLoading}

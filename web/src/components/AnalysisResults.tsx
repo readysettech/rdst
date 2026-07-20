@@ -1,8 +1,10 @@
+import { useId } from "react";
 import { Spinner } from "@rs/ui-new/spinner";
 import { Text } from "@rs/ui-new/text";
 import { Icon } from "@rs/ui-new/icon";
 import { HStack, VStack } from "@rs/ui-new/stack";
 import { ErrorState } from "@rs/ui-new/error-state";
+import { useDisclosure } from "@rs/ui-new/use-disclosure";
 import { m } from "@rs/ui-new/motion";
 import type {
   AnalysisState,
@@ -47,20 +49,33 @@ interface AnalysisResultsProps {
   /** Re-run the analysis; only surfaced when a retry can plausibly help. */
   onRetry?: () => void;
   isCaching?: boolean;
+  /** Open the interactive chat drawer — surfaced as a quiet footer link. */
+  onAskFollowUp?: () => void;
+  /** Whether a prior conversation exists (changes the footer link label). */
+  hasExistingChat?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// AnalysisHeader — metadata bar (target, engine, analysis ID, LLM info)
+// AnalysisFooter — quiet tertiary footer: cost/model metadata, the raw EXPLAIN
+// plan (behind a disclosure), and the "Ask a follow-up" chat entry point.
+// Demoted out of the top so nothing competes with the verdict. [VIS-011, USE-065]
 // Specific to the /results page, not shared.
 // ---------------------------------------------------------------------------
 
-function AnalysisHeader({
+function AnalysisFooter({
   results,
   target: targetProp,
+  onAskFollowUp,
+  hasExistingChat,
 }: {
   results: CompleteEvent;
   target?: string;
+  onAskFollowUp?: () => void;
+  hasExistingChat?: boolean;
 }) {
+  const [planOpen, setPlanOpen] = useDisclosure({});
+  const planId = useId();
+
   const formatted = results.formatted;
   const metadata = formatted?.metadata;
   const tokenUsage = results.llm_analysis?.token_usage;
@@ -69,89 +84,90 @@ function AnalysisHeader({
   const target = metadata?.target || targetProp;
   const databaseEngine =
     metadata?.database_engine || results.explain_results?.database_engine;
-  const analysisId = metadata?.analysis_id || results.analysis_id;
-
-  if (!target && !databaseEngine && !analysisId) return null;
 
   const model = llmInfo?.model || "claude";
   const tokens = llmInfo?.tokens || tokenUsage?.total || 0;
   const cost = llmInfo?.cost || tokenUsage?.estimated_cost_usd || 0;
+  const hasCost = Boolean(llmInfo || tokenUsage);
+
+  // Preserve the model/token/cost transparency the old header carried, plus
+  // target/engine — just demoted to one quiet caption line. [USE-065]
+  const metaSegments = [
+    target,
+    databaseEngine ? databaseEngine.toUpperCase() : null,
+    hasCost ? model : null,
+    hasCost ? `${tokens.toLocaleString()} tokens` : null,
+    hasCost ? `$${cost.toFixed(3)}` : null,
+  ].filter(Boolean) as string[];
+
+  const explainPlan = results.explain_results?.explain_plan;
+  const hasPlan =
+    explainPlan != null && Object.keys(explainPlan).length > 0;
+  const planText = hasPlan ? JSON.stringify(explainPlan, null, 2) : "";
+
+  const canAsk = Boolean(results.query_hash && onAskFollowUp);
+
+  if (metaSegments.length === 0 && !hasPlan && !canAsk) return null;
 
   return (
     <m.div
-      className="bg-gradient-to-r from-surface-layout-1 to-surface-layout-2 rounded-xl p-4 border border-border-layout-1"
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
+      className="pt-5 border-t border-border-layout-1"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3, delay: 0.2 }}
     >
       <HStack className="justify-between items-center flex-wrap gap-3">
-        <HStack className="gap-6 flex-wrap">
-          {target && (
-            <HStack className="gap-2 items-center">
+        {metaSegments.length > 0 && (
+          <Text as="span" level="caption" className="text-content-layout-3">
+            {metaSegments.join(" · ")}
+          </Text>
+        )}
+        <HStack className="gap-4 items-center flex-wrap">
+          {hasPlan && (
+            <button
+              type="button"
+              aria-expanded={planOpen}
+              aria-controls={planId}
+              onClick={() => setPlanOpen(!planOpen)}
+              className="flex items-center gap-1.5 text-content-layout-3 hover:text-content-layout-2 transition-colors text-label-small"
+            >
               <Icon
-                name="database"
-                label="Target"
-                className="w-4 h-4 text-content-layout-3"
+                name="querypilot"
+                label=""
+                className="w-3.5 h-3.5"
               />
-              <Text
-                as="span"
-                level="mono-small"
-                className="text-content-layout-1"
-              >
-                {target}
-              </Text>
-            </HStack>
+              View EXPLAIN plan
+              <Icon
+                name="chevron-down"
+                label=""
+                className={`w-3.5 h-3.5 transition-transform ${planOpen ? "rotate-180" : ""}`}
+              />
+            </button>
           )}
-          {databaseEngine && (
-            <HStack className="gap-2 items-center">
+          {canAsk && (
+            <button
+              type="button"
+              onClick={onAskFollowUp}
+              className="flex items-center gap-1.5 text-content-primary-soft hover:text-content-primary-solid transition-colors text-label-small"
+            >
               <Icon
-                name="database-settings"
-                label="Engine"
-                className="w-4 h-4 text-content-layout-3"
+                name={hasExistingChat ? "message-multiple" : "sparkles"}
+                label=""
+                className="w-3.5 h-3.5"
               />
-              <Text
-                as="span"
-                level="mono-small"
-                className="text-content-layout-1 uppercase"
-              >
-                {databaseEngine}
-              </Text>
-            </HStack>
-          )}
-          {analysisId && (
-            <HStack className="gap-2 items-center">
-              <Icon
-                name="key"
-                label="Analysis ID"
-                className="w-4 h-4 text-content-layout-3"
-              />
-              <Text
-                as="span"
-                level="mono-small"
-                className="text-content-layout-2"
-              >
-                {analysisId.slice(0, 12)}
-              </Text>
-            </HStack>
+              {hasExistingChat ? "Continue conversation" : "Ask a follow-up"}
+            </button>
           )}
         </HStack>
-        {(llmInfo || tokenUsage) && (
-          <HStack className="gap-2 items-center px-3 py-1.5 bg-surface-layout-1/50 rounded-lg">
-            <Icon
-              name="sparkles"
-              label="AI Analysis"
-              className="w-3.5 h-3.5 text-content-primary-soft"
-            />
-            <Text
-              as="span"
-              level="caption"
-              className="text-content-layout-3"
-            >
-              {model} · {tokens.toLocaleString()} tokens · ${cost.toFixed(3)}
-            </Text>
-          </HStack>
-        )}
       </HStack>
+      {hasPlan && planOpen && (
+        <pre
+          id={planId}
+          className="mt-3 whitespace-pre-wrap break-words rounded-lg border border-border-layout-1 bg-surface-layout-2/60 p-3 text-content-layout-3 text-mono-small max-h-96 overflow-auto"
+        >
+          {planText}
+        </pre>
+      )}
     </m.div>
   );
 }
@@ -176,6 +192,8 @@ export function AnalysisResults({
   onRecover,
   onRetry,
   isCaching,
+  onAskFollowUp,
+  hasExistingChat,
 }: AnalysisResultsProps) {
   if (state === "idle") {
     return (
@@ -261,52 +279,68 @@ export function AnalysisResults({
         transition={{ duration: 0.3 }}
       >
         <div className="max-w-lg mx-auto">
-          {/* Stage indicators */}
-          <div className="flex items-center justify-center mb-10">
+          {/* Stage indicators — every stage carries a caption (Preparing →
+              Executing → Analyzing) with the active one emphasized, so users
+              can preview the steps and see how many remain. [USE-008, USE-022] */}
+          <div className="flex items-start justify-center mb-10">
             {stages.map((stage, index) => {
               const isComplete = index < currentStageIndex;
               const isCurrent = index === currentStageIndex;
               const isPending = index > currentStageIndex;
 
               return (
-                <div key={stage.id} className="flex items-center">
-                  <m.div
-                    className={`
-                      relative w-12 h-12 rounded-xl flex items-center justify-center transition-all
-                      ${isComplete ? "bg-surface-positive-soft" : ""}
-                      ${isCurrent ? "bg-surface-primary-soft ring-2 ring-border-primary-soft" : ""}
-                      ${isPending ? "bg-surface-layout-1 border border-border-layout-1" : ""}
-                    `}
-                    initial={false}
-                    animate={
-                      isCurrent ? { scale: [1, 1.05, 1] } : { scale: 1 }
-                    }
-                    transition={{
-                      duration: 1.5,
-                      repeat: isCurrent
-                        ? Number.POSITIVE_INFINITY
-                        : 0,
-                      ease: "easeInOut",
-                    }}
-                  >
-                    {isComplete ? (
-                      <Icon
-                        name="tick-double"
-                        label="Complete"
-                        className="w-5 h-5 text-content-positive-soft"
-                      />
-                    ) : isCurrent ? (
-                      <Spinner size="base" />
-                    ) : (
-                      <Icon
-                        name={stage.icon}
-                        label={stage.label}
-                        className="w-5 h-5 text-content-layout-3"
-                      />
-                    )}
-                  </m.div>
+                <div key={stage.id} className="flex items-start">
+                  <VStack className="gap-2.5 items-center">
+                    <m.div
+                      className={`
+                        relative w-12 h-12 rounded-xl flex items-center justify-center transition-all
+                        ${isComplete ? "bg-surface-positive-soft" : ""}
+                        ${isCurrent ? "bg-surface-primary-soft ring-2 ring-border-primary-soft" : ""}
+                        ${isPending ? "bg-surface-layout-1 border border-border-layout-1" : ""}
+                      `}
+                      initial={false}
+                      animate={
+                        isCurrent ? { scale: [1, 1.05, 1] } : { scale: 1 }
+                      }
+                      transition={{
+                        duration: 1.5,
+                        repeat: isCurrent
+                          ? Number.POSITIVE_INFINITY
+                          : 0,
+                        ease: "easeInOut",
+                      }}
+                    >
+                      {isComplete ? (
+                        <Icon
+                          name="tick-double"
+                          label="Complete"
+                          className="w-5 h-5 text-content-positive-soft"
+                        />
+                      ) : isCurrent ? (
+                        <Spinner size="base" />
+                      ) : (
+                        <Icon
+                          name={stage.icon}
+                          label={stage.label}
+                          className="w-5 h-5 text-content-layout-3"
+                        />
+                      )}
+                    </m.div>
+                    <Text
+                      level="caption"
+                      className={
+                        isCurrent
+                          ? "text-content-layout-1 font-medium"
+                          : isComplete
+                            ? "text-content-positive-soft"
+                            : "text-content-layout-3"
+                      }
+                    >
+                      {stage.label}
+                    </Text>
+                  </VStack>
                   {index < stages.length - 1 && (
-                    <div className="w-12 mx-1.5 h-0.5 rounded-full overflow-hidden bg-surface-layout-1">
+                    <div className="w-12 mx-1.5 mt-6 h-0.5 rounded-full overflow-hidden bg-surface-layout-1">
                       <m.div
                         className="h-full bg-content-positive-soft"
                         initial={{ width: "0%" }}
@@ -455,8 +489,6 @@ export function AnalysisResults({
         animate={{ opacity: 1 }}
         transition={{ duration: 0.4 }}
       >
-        <AnalysisHeader results={results} target={target} />
-
         {/* Performance Summary - Hero Section */}
         {showPerformanceHero && perf && (
           <PerformanceSummarySection
@@ -478,6 +510,7 @@ export function AnalysisResults({
           llm_analysis.optimization_opportunities.length > 0 && (
             <AdditionalRecommendationsSection
               opportunities={llm_analysis.optimization_opportunities}
+              collapsible
             />
           )}
 
@@ -525,6 +558,13 @@ export function AnalysisResults({
             </HStack>
           </m.div>
         )}
+
+        <AnalysisFooter
+          results={results}
+          target={target}
+          onAskFollowUp={onAskFollowUp}
+          hasExistingChat={hasExistingChat}
+        />
       </m.div>
     );
   }

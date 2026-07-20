@@ -180,9 +180,12 @@ export function friendlySqlError(raw: string | undefined): string {
  * (`Run 'rdst init'`, `rdst configure …`) that has no meaning in a browser with
  * no terminal, keeping the substantive cause (P47).
  */
-export function sanitizeWebError(raw: string | undefined): string {
+export function sanitizeWebError(
+  raw: string | undefined,
+  fallback = 'This query could not be analyzed.'
+): string {
   let text = (raw ?? '').trim()
-  if (!text) return 'This query could not be analyzed.'
+  if (!text) return fallback
   // "Run 'rdst init'." / "Run `rdst configure add`" and bare `rdst <cmd> …`.
   text = text.replace(/\bRun\s+['"`]?rdst\b[^'"`.\n]*['"`]?\.?/gi, '').trim()
   text = text
@@ -192,7 +195,7 @@ export function sanitizeWebError(raw: string | undefined): string {
     .replace(/\s{2,}/g, ' ')
     .replace(/\s+([.,;])/g, '$1')
     .trim()
-  return text || 'This query could not be analyzed.'
+  return text || fallback
 }
 
 /**

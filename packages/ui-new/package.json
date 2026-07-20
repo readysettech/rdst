@@ -27,6 +27,7 @@
     "./error-state": "./src/components/feedback/error-state.tsx",
     "./page": "./src/components/element/page.tsx",
     "./circular-progress": "./src/components/feedback/circular-progress.tsx",
+    "./progress": "./src/components/feedback/progress.tsx",
     "./spinner": "./src/components/feedback/spinner.tsx",
     "./toaster": "./src/components/feedback/toast/index.ts",
     "./field": "./src/components/form/_parts/field.tsx",

@@ -41,6 +41,7 @@ interface ScanFiltersProps {
   onStart: () => void;
   onCancel: () => void;
   hasTarget: boolean;
+  targetName?: string | null;
 }
 
 export function ScanFilters({
@@ -69,6 +70,7 @@ export function ScanFilters({
   onStart,
   onCancel,
   hasTarget,
+  targetName,
 }: ScanFiltersProps) {
   const isScanning = state === 'scanning';
   const isDisabled = isScanning;
@@ -110,21 +112,48 @@ export function ScanFilters({
               </Show>
             </div>
 
-            {/* Advanced toggle */}
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center gap-1.5 text-content-layout-3 hover:text-content-layout-2 transition-colors cursor-pointer"
-            >
-              <Icon
-                name={showAdvanced ? 'chevron-down' : 'chevron-right'}
-                label="Toggle"
-                className="w-3 h-3"
-              />
-              <Text level="caption" className="inherit">
-                Advanced options
-              </Text>
-            </button>
+            {/* Secondary — the DB context the analysis runs against */}
+            <Show when={!!targetName}>
+              <HStack className="gap-1.5 items-center">
+                <Text level="label-small" className="text-content-layout-3">
+                  Analyze against
+                </Text>
+                <Text level="mono-small" className="text-content-layout-2">
+                  {targetName}
+                </Text>
+              </HStack>
+            </Show>
+
+            {/* Tertiary — advanced disclosure + experimental caveat */}
+            <VStack className="gap-2.5 items-start">
+              {/* Advanced toggle */}
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex items-center gap-1.5 text-content-layout-3 hover:text-content-layout-2 transition-colors cursor-pointer"
+              >
+                <Icon
+                  name={showAdvanced ? 'chevron-down' : 'chevron-right'}
+                  label="Toggle"
+                  className="w-3 h-3"
+                />
+                <Text level="caption" className="inherit">
+                  Advanced options
+                </Text>
+              </button>
+
+              {/* Honesty caveat — the converted SQL is AI-generated */}
+              <HStack className="gap-1.5 items-center">
+                <Icon
+                  name="alert"
+                  label="Experimental"
+                  className="w-3.5 h-3.5 text-content-warning-soft shrink-0"
+                />
+                <Text level="caption" className="text-content-warning-soft">
+                  Experimental · AI-converted SQL — verify before use
+                </Text>
+              </HStack>
+            </VStack>
           </div>
 
           {/* Advanced settings */}
@@ -138,63 +167,95 @@ export function ScanFilters({
                 className="overflow-hidden"
               >
                 <div className="px-5 pb-5 space-y-5 border-t border-border-layout-1 pt-4">
-                  {/* Text inputs row */}
-                  <div className="flex flex-wrap gap-4 items-end">
-                    <VStack className="gap-1.5 items-start flex-1 min-w-40">
-                      <Text as="label" level="label-small" className="text-content-layout-2">
-                        Git diff ref
-                      </Text>
-                      <BaseInputText
-                        name="diff"
-                        value={diff}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDiff(e.target.value)}
-                        placeholder="e.g., HEAD, main, HEAD~1"
-                        disabled={isDisabled}
-                      />
-                    </VStack>
+                  {/* ── Scope ── which files and revisions to look at */}
+                  <VStack className="gap-3 items-stretch">
+                    <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                      Scope
+                    </Text>
+                    <div className="flex flex-wrap gap-4 items-end">
+                      <VStack className="gap-1.5 items-start flex-1 min-w-40">
+                        <Text as="label" level="label-small" className="text-content-layout-2">
+                          File pattern
+                        </Text>
+                        <BaseInputText
+                          name="file-pattern"
+                          value={filePattern}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilePattern(e.target.value)}
+                          placeholder="e.g., *.py, services/*.ts"
+                          disabled={isDisabled}
+                        />
+                      </VStack>
 
-                    <VStack className="gap-1.5 items-start flex-1 min-w-40">
-                      <Text as="label" level="label-small" className="text-content-layout-2">
-                        File pattern
-                      </Text>
-                      <BaseInputText
-                        name="file-pattern"
-                        value={filePattern}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilePattern(e.target.value)}
-                        placeholder="e.g., *.py, services/*.ts"
-                        disabled={isDisabled}
-                      />
-                    </VStack>
-                  </div>
+                      <VStack className="gap-1.5 items-start flex-1 min-w-40">
+                        <Text as="label" level="label-small" className="text-content-layout-2">
+                          Only changed vs. git ref
+                        </Text>
+                        <BaseInputText
+                          name="diff"
+                          value={diff}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDiff(e.target.value)}
+                          placeholder="e.g., HEAD, main, HEAD~1"
+                          disabled={isDisabled}
+                        />
+                      </VStack>
+                    </div>
+                  </VStack>
 
-                  {/* Toggle row */}
-                  <div className="flex flex-wrap gap-6 items-center">
-                    <HStack className="gap-2 items-center">
-                      <BaseInputSwitch
-                        name="analyze"
-                        checked={analyze}
-                        onCheckedChange={(checked) => setAnalyze(checked === true)}
-                        disabled={isDisabled}
-                      />
-                      <Text level="label-small" className="text-content-layout-2">
-                        Analyze performance
-                      </Text>
-                    </HStack>
+                  {/* ── After scanning ── what to do with the extracted queries */}
+                  <VStack className="gap-3 items-stretch border-t border-border-layout-1 pt-4">
+                    <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                      After scanning
+                    </Text>
 
-                    <Show when={analyze}>
+                    {/* Analyze performance + cost disclosure */}
+                    <VStack className="gap-1 items-start">
                       <HStack className="gap-2 items-center">
                         <BaseInputSwitch
-                          name="shallow"
-                          checked={shallow}
-                          onCheckedChange={(checked) => setShallow(checked === true)}
+                          name="analyze"
+                          checked={analyze}
+                          onCheckedChange={(checked) => setAnalyze(checked === true)}
                           disabled={isDisabled}
                         />
                         <Text level="label-small" className="text-content-layout-2">
-                          Shallow (schema-only)
+                          Analyze performance
                         </Text>
                       </HStack>
-                    </Show>
+                      <Show when={analyze}>
+                        <Text level="caption" className="text-content-layout-3 pl-11">
+                          Runs EXPLAIN and spins a temporary Readyset container.
+                        </Text>
+                      </Show>
+                    </VStack>
 
+                    {/* Shallow — analysis depth (schema-only vs deep EXPLAIN) */}
+                    <HStack className="gap-2 items-center">
+                      <BaseInputSwitch
+                        name="shallow"
+                        checked={shallow}
+                        onCheckedChange={(checked) => setShallow(checked === true)}
+                        disabled={isDisabled}
+                      />
+                      <Text level="label-small" className="text-content-layout-2">
+                        Shallow (schema-only)
+                      </Text>
+                    </HStack>
+
+                    {/* Save findings — positive reframe of the `nosave` flag.
+                        Display only: checked = save (nosave === false); the
+                        underlying value/behavior is unchanged. */}
+                    <HStack className="gap-2 items-center">
+                      <BaseInputSwitch
+                        name="nosave"
+                        checked={!nosave}
+                        onCheckedChange={(checked) => setNosave(checked !== true)}
+                        disabled={isDisabled}
+                      />
+                      <Text level="label-small" className="text-content-layout-2">
+                        Save findings to Saved Queries
+                      </Text>
+                    </HStack>
+
+                    {/* Dry run */}
                     <HStack className="gap-2 items-center">
                       <BaseInputSwitch
                         name="dry-run"
@@ -203,21 +264,16 @@ export function ScanFilters({
                         disabled={isDisabled}
                       />
                       <Text level="label-small" className="text-content-layout-2">
-                        Dry run
+                        Dry run (preview, change nothing)
                       </Text>
                     </HStack>
+                  </VStack>
 
-                    <HStack className="gap-2 items-center">
-                      <BaseInputSwitch
-                        name="nosave"
-                        checked={nosave}
-                        onCheckedChange={(checked) => setNosave(checked === true)}
-                        disabled={isDisabled}
-                      />
-                      <Text level="label-small" className="text-content-layout-2">
-                        Skip registry save
-                      </Text>
-                    </HStack>
+                  {/* ── CI gate ── fail the build on a low score */}
+                  <VStack className="gap-3 items-stretch border-t border-border-layout-1 pt-4">
+                    <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                      CI gate
+                    </Text>
 
                     <HStack className="gap-2 items-center">
                       <BaseInputSwitch
@@ -227,42 +283,42 @@ export function ScanFilters({
                         disabled={isDisabled}
                       />
                       <Text level="label-small" className="text-content-layout-2">
-                        CI check mode
+                        Fail build below score
                       </Text>
                     </HStack>
-                  </div>
 
-                  {/* Threshold controls (shown when check mode is on) */}
-                  <Show when={check}>
-                    <div className="flex gap-4 items-end">
-                      <VStack className="gap-1.5 items-start w-32">
-                        <Text as="label" level="label-small" className="text-content-layout-2">
-                          Warn threshold
-                        </Text>
-                        <BaseInputText
-                          name="warn-threshold"
-                          value={String(warnThreshold)}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setWarnThreshold(Number(e.target.value) || 60)
-                          }
-                          disabled={isDisabled}
-                        />
-                      </VStack>
-                      <VStack className="gap-1.5 items-start w-32">
-                        <Text as="label" level="label-small" className="text-content-layout-2">
-                          Fail threshold
-                        </Text>
-                        <BaseInputText
-                          name="fail-threshold"
-                          value={String(failThreshold)}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setFailThreshold(Number(e.target.value) || 40)
-                          }
-                          disabled={isDisabled}
-                        />
-                      </VStack>
-                    </div>
-                  </Show>
+                    {/* Thresholds — only when the gate is on */}
+                    <Show when={check}>
+                      <div className="flex gap-4 items-end">
+                        <VStack className="gap-1.5 items-start w-32">
+                          <Text as="label" level="label-small" className="text-content-layout-2">
+                            Warn threshold
+                          </Text>
+                          <BaseInputText
+                            name="warn-threshold"
+                            value={String(warnThreshold)}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setWarnThreshold(Number(e.target.value) || 60)
+                            }
+                            disabled={isDisabled}
+                          />
+                        </VStack>
+                        <VStack className="gap-1.5 items-start w-32">
+                          <Text as="label" level="label-small" className="text-content-layout-2">
+                            Fail threshold
+                          </Text>
+                          <BaseInputText
+                            name="fail-threshold"
+                            value={String(failThreshold)}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setFailThreshold(Number(e.target.value) || 40)
+                            }
+                            disabled={isDisabled}
+                          />
+                        </VStack>
+                      </div>
+                    </Show>
+                  </VStack>
                 </div>
               </m.div>
             )}

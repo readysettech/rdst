@@ -10,10 +10,10 @@ export interface TopQuery {
   total_time: string;
   avg_time: string;
   pct_load: string;
-  qps?: number;
-  max_duration_ms?: number;
-  current_instances_running?: number;
-  observation_count?: number;
+  qps?: number | null;
+  max_duration_ms?: number | null;
+  current_instances_running?: number | null;
+  observation_count?: number | null;
 }
 
 export interface TopOptions {

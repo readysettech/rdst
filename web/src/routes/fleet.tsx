@@ -106,14 +106,54 @@ const VERDICT_LABELS: Record<
   unknown: { label: 'Unknown', variant: 'informative' },
 }
 
+// A target "needs attention" when it can't be reached or its last sizing
+// verdict is off-target (oversized / under-provisioned). Right-sized and
+// not-yet-audited targets do not. Drives the scoreboard's accent count.
+const PROBLEM_VERDICTS = new Set(['oversized', 'under_provisioned'])
+
 // Proper engine display names — the backend emits lowercase enum values, which
-// CSS `capitalize` renders as "Postgresql"/"Mysql". [QW19]
+// CSS `capitalize` renders as "Postgresql"/"Mysql". [QW19 / F8]
 const ENGINE_LABELS: Record<string, string> = {
   postgresql: 'PostgreSQL',
   mysql: 'MySQL',
 }
 const engineLabel = (engine: string | null | undefined) =>
   engine ? (ENGINE_LABELS[engine.toLowerCase()] ?? engine) : '-'
+
+// A dashboard stat: prominent tabular value over a subordinated label. At most
+// one tile per scoreboard carries the accent (VIS-017, VIS-061, VIS-110).
+function StatTile({
+  value,
+  label,
+  accent = false,
+}: {
+  value: React.ReactNode
+  label: string
+  accent?: boolean
+}) {
+  return (
+    <VStack className="gap-0.5 items-start">
+      <Text
+        as="span"
+        level="headline-2"
+        className={
+          accent
+            ? 'text-content-rising-soft tabular-nums'
+            : 'text-content-layout-1 tabular-nums'
+        }
+      >
+        {value}
+      </Text>
+      <Text
+        as="span"
+        level="caption"
+        className="text-content-layout-2 uppercase tracking-wider"
+      >
+        {label}
+      </Text>
+    </VStack>
+  )
+}
 
 function StatusCell({
   result,
@@ -159,9 +199,11 @@ function StatusCell({
         label="Unreachable"
       />
       {result.error && (
+        // Failure reason is the single most useful string in the row: promote
+        // it out of muted grey into legible negative-content (F6, USE-100).
         <Text
           level="caption"
-          className="text-content-layout-3 truncate max-w-48"
+          className="text-content-negative-soft max-w-48"
         >
           {result.error}
         </Text>
@@ -170,31 +212,25 @@ function StatusCell({
   )
 }
 
-function LastAuditCell({
+function SizingCell({
   verdict,
 }: {
   verdict: FleetTargetVerdict | undefined
 }) {
   if (!verdict?.verdict) {
+    // "Not audited yet" is an actionable state, not a bare dash (F11, USE-002).
     return (
-      <Text level="caption" className="text-content-layout-3">
-        -
-      </Text>
+      <Tag
+        size="small"
+        variant="muted"
+        modifier="ghost"
+        label="Not audited yet"
+      />
     )
   }
   const info = VERDICT_LABELS[verdict.verdict] || VERDICT_LABELS.unknown
   return (
-    <VStack className="gap-0.5 items-start">
-      <Tag
-        size="small"
-        variant={info.variant}
-        modifier="ghost"
-        label={info.label}
-      />
-      <Text level="caption" className="text-content-layout-3">
-        cache {verdict.cacheScore ?? '-'}/100
-      </Text>
-    </VStack>
+    <Tag size="small" variant={info.variant} modifier="ghost" label={info.label} />
   )
 }
 
@@ -207,67 +243,106 @@ function MemberRow({
   status: FleetConnectivityEvent | undefined
   verdict: FleetTargetVerdict | undefined
 }) {
+  const [expanded, setExpanded] = useState(false)
   const hasBadges = !!member.group || (member.tags?.length ?? 0) > 0
+  // Engine / host / database collapse into one muted identity line so the two
+  // scan-for columns (connectivity, sizing) carry the weight (VIS-110, VIS-017).
+  const identity = [
+    engineLabel(member.engine),
+    `${member.host}:${member.port}`,
+    member.database || null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
-    <tr className="hover:bg-surface-layout-2/50 transition-colors">
-      <td className="px-4 py-3">
-        <VStack className="gap-1 items-start">
-          <Text level="label-small" className="text-content-layout-1">
-            {member.name}
-          </Text>
-          {member.instance_class && (
-            <Text level="caption" className="text-content-layout-3">
-              {member.instance_class}
+    <>
+      <tr className="hover:bg-surface-layout-2/50 transition-colors">
+        <td className="px-4 py-3">
+          <VStack className="gap-1 items-start">
+            <Text level="label-small" className="text-content-layout-1">
+              {member.name}
             </Text>
-          )}
-          {hasBadges && (
-            <HStack className="gap-1 flex-wrap">
-              {member.group && (
-                <Tag
-                  size="small"
-                  variant="primary"
-                  modifier="ghost"
-                  label={member.group}
-                />
-              )}
-              {(member.tags || []).map((tag) => (
-                <Tag
-                  key={tag}
-                  size="small"
-                  variant="informative"
-                  modifier="ghost"
-                  label={tag}
-                />
-              ))}
+            <Text level="caption" className="text-content-layout-2 break-all">
+              {identity}
+            </Text>
+            {hasBadges && (
+              <HStack className="gap-1 flex-wrap">
+                {member.group && (
+                  <Tag
+                    size="small"
+                    variant="primary"
+                    modifier="ghost"
+                    label={member.group}
+                  />
+                )}
+                {(member.tags || []).map((tag) => (
+                  <Tag
+                    key={tag}
+                    size="small"
+                    variant="informative"
+                    modifier="ghost"
+                    label={tag}
+                  />
+                ))}
+              </HStack>
+            )}
+          </VStack>
+        </td>
+        <td className="px-4 py-3 align-top">
+          <StatusCell result={status} />
+        </td>
+        <td className="px-4 py-3 align-top">
+          <SizingCell verdict={verdict} />
+        </td>
+        <td className="px-4 py-3 align-top text-right w-10">
+          <Button
+            variant="primary"
+            modifier="ghost"
+            size="small"
+            icon={expanded ? 'chevron-up' : 'chevron-down'}
+            iconPosition="icon"
+            label={expanded ? 'Hide details' : 'Show details'}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          />
+        </td>
+      </tr>
+      <Show when={expanded}>
+        <tr className="bg-surface-layout-2/30">
+          <td colSpan={4} className="px-4 py-3">
+            <HStack className="gap-8 items-start flex-wrap">
+              <VStack className="gap-0.5 items-start">
+                <Text
+                  level="caption"
+                  className="text-content-layout-3 uppercase tracking-wider"
+                >
+                  Cacheability
+                </Text>
+                <Text level="label-small" className="text-content-layout-1">
+                  {verdict?.cacheScore != null
+                    ? `${verdict.cacheScore}/100`
+                    : 'Not audited yet'}
+                </Text>
+              </VStack>
+              <Show when={!!member.instance_class}>
+                <VStack className="gap-0.5 items-start">
+                  <Text
+                    level="caption"
+                    className="text-content-layout-3 uppercase tracking-wider"
+                  >
+                    Instance class
+                  </Text>
+                  <Text level="label-small" className="text-content-layout-1">
+                    {member.instance_class}
+                  </Text>
+                </VStack>
+              </Show>
             </HStack>
-          )}
-        </VStack>
-      </td>
-      <td className="px-4 py-3">
-        <Tag
-          size="small"
-          variant="informative"
-          modifier="ghost"
-          label={engineLabel(member.engine)}
-        />
-      </td>
-      <td className="px-4 py-3">
-        <Text level="mono-small" className="text-content-layout-2 break-all">
-          {member.host}:{member.port}
-        </Text>
-      </td>
-      <td className="px-4 py-3">
-        <Text level="mono-small" className="text-content-layout-2">
-          {member.database || '-'}
-        </Text>
-      </td>
-      <td className="px-4 py-3">
-        <LastAuditCell verdict={verdict} />
-      </td>
-      <td className="px-4 py-3">
-        <StatusCell result={status} />
-      </td>
-    </tr>
+          </td>
+        </tr>
+      </Show>
+    </>
   )
 }
 
@@ -403,7 +478,7 @@ function SnapshotDiff({ diff }: { diff: FleetDiffResponse }) {
                         </Text>
                       ) : (
                         // A cost/size diff is magnitude, not good/bad — neutral
-                        // tag + a direction arrow, never sign-colored (§4.4).
+                        // tag + a direction arrow, never sign-colored (§4.4, F4).
                         <Tag
                           size="small"
                           variant="neutral"
@@ -438,14 +513,22 @@ function SnapshotDiff({ diff }: { diff: FleetDiffResponse }) {
   )
 }
 
-function SnapshotsSection() {
+// TERTIARY region: drift-over-time is a separate analysis job (compare row,
+// snapshot list, diff table) — deferred behind a collapsed disclosure so it
+// stops competing with monitoring (VIS-103, USE-021). "last audit {ts}" moves
+// here from the Targets header.
+function HistoryDriftSection() {
   const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
   const { data, isLoading } = useQuery({
     queryKey: ['fleet-snapshots'],
     queryFn: fetchFleetSnapshots,
     staleTime: 30_000,
   })
   const snapshots = data?.snapshots || []
+  const lastAuditLabel = snapshots[0]
+    ? formatTimestamp(snapshots[0].created_at)
+    : undefined
 
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [baselineId, setBaselineId] = useState<string>('')
@@ -502,187 +585,229 @@ function SnapshotsSection() {
   }
 
   return (
-    <SectionCard icon="package" title={`Snapshots (${snapshots.length})`}>
-      <Show when={showCompareRow}>
-        <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
-          <HStack className="gap-2 items-center flex-wrap">
-            <Text
-              level="label-small"
-              className="text-content-layout-2 shrink-0"
-            >
-              Compare:
-            </Text>
-            <div className="w-56">
-              <BaseInputSelect
-                name="snapshot-baseline"
-                placeholder="Baseline"
-                value={baselineId}
-                onValueChange={(value) => {
-                  setBaselineId(value)
-                  setDiff(null)
-                }}
-                options={options}
-              />
-            </div>
-            <Text level="caption" className="text-content-layout-3 shrink-0">
-              vs
-            </Text>
-            <div className="w-56">
-              <BaseInputSelect
-                name="snapshot-current"
-                placeholder="Current"
-                value={currentId}
-                onValueChange={(value) => {
-                  setCurrentId(value)
-                  setDiff(null)
-                }}
-                options={options}
-              />
-            </div>
-            <Button
-              variant="primary"
-              modifier="solid"
-              size="small"
-              label="Compare"
-              icon="connect"
-              iconPosition="left"
-              disabled={!canCompare || diffMutation.isPending}
-              loading={diffMutation.isPending}
-              onClick={() => {
-                if (canCompare)
-                  diffMutation.mutate({
-                    baseline: baselineId,
-                    current: currentId,
-                  })
-              }}
+    <Card className="w-full overflow-hidden">
+      <Card.Content className="p-0">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="w-full px-5 py-3 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-surface-layout-2/50 transition-colors"
+        >
+          <HStack className="gap-2 items-center">
+            <Icon
+              name={open ? 'chevron-down' : 'chevron-right'}
+              label=""
+              className="w-4 h-4 text-content-layout-3"
             />
-            <Show when={!!diff}>
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                label="Clear"
-                onClick={() => setDiff(null)}
-              />
-            </Show>
-          </HStack>
-        </div>
-      </Show>
-
-      <Show when={!!diff}>
-        <SnapshotDiff diff={diff!} />
-      </Show>
-
-      <Show when={isLoading}>
-        <div className="p-12">
-          <VStack className="gap-3 items-center">
-            <Spinner size="base" />
-            <Text level="body-small" className="text-content-layout-3">
-              Loading snapshots...
-            </Text>
-          </VStack>
-        </div>
-      </Show>
-
-      <Show when={!isLoading && snapshots.length === 0}>
-        <div className="p-12">
-          <VStack className="gap-3 items-center">
-            <div className="w-14 h-14 rounded-2xl bg-surface-layout-2 flex items-center justify-center">
-              <Icon
-                name="package"
-                label="No snapshots"
-                className="w-7 h-7 text-content-layout-3"
-              />
-            </div>
             <Text
-              level="body-small"
-              className="text-content-layout-3 text-center max-w-md"
+              level="overline"
+              className="text-content-layout-3 uppercase tracking-wider"
             >
-              No snapshots yet. Run a fleet audit to capture one.
+              History &amp; drift
             </Text>
-          </VStack>
-        </div>
-      </Show>
+            <Text level="caption" className="text-content-layout-3">
+              · {snapshots.length} snapshot{snapshots.length === 1 ? '' : 's'}
+            </Text>
+          </HStack>
+          <Show when={!!lastAuditLabel}>
+            <Text level="caption" className="text-content-layout-3">
+              last audit {lastAuditLabel}
+            </Text>
+          </Show>
+        </button>
 
-      <Show when={!isLoading && snapshots.length > 0}>
-        <div className="divide-y divide-border-layout-1">
-          {snapshots.map((snapshot: FleetSnapshotSummary) => (
-            <div
-              key={snapshot.snapshot_id}
-              className="px-5 py-3 hover:bg-surface-layout-2/50 transition-colors"
-            >
-              {confirmingId === snapshot.snapshot_id ? (
-                <HStack className="justify-between items-center gap-4">
-                  <HStack className="gap-2 items-center">
-                    <Icon
-                      name="alert"
-                      label="Warning"
-                      className="w-4 h-4 text-content-negative-soft"
+        <Show when={open}>
+          <div className="border-t border-border-layout-1">
+            <Show when={showCompareRow}>
+              <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
+                <HStack className="gap-2 items-center flex-wrap">
+                  <Text
+                    level="label-small"
+                    className="text-content-layout-2 shrink-0"
+                  >
+                    Compare:
+                  </Text>
+                  <div className="w-56">
+                    <BaseInputSelect
+                      name="snapshot-baseline"
+                      placeholder="Baseline"
+                      value={baselineId}
+                      onValueChange={(value) => {
+                        setBaselineId(value)
+                        setDiff(null)
+                      }}
+                      options={options}
                     />
-                    <Text level="body-small" className="text-content-layout-1">
-                      Delete snapshot "{snapshot.name}"?
-                    </Text>
-                  </HStack>
-                  <HStack className="gap-2 shrink-0">
+                  </div>
+                  <Text
+                    level="caption"
+                    className="text-content-layout-3 shrink-0"
+                  >
+                    vs
+                  </Text>
+                  <div className="w-56">
+                    <BaseInputSelect
+                      name="snapshot-current"
+                      placeholder="Current"
+                      value={currentId}
+                      onValueChange={(value) => {
+                        setCurrentId(value)
+                        setDiff(null)
+                      }}
+                      options={options}
+                    />
+                  </div>
+                  <Button
+                    variant="primary"
+                    modifier="solid"
+                    size="small"
+                    label="Compare"
+                    icon="connect"
+                    iconPosition="left"
+                    disabled={!canCompare || diffMutation.isPending}
+                    loading={diffMutation.isPending}
+                    onClick={() => {
+                      if (canCompare)
+                        diffMutation.mutate({
+                          baseline: baselineId,
+                          current: currentId,
+                        })
+                    }}
+                  />
+                  <Show when={!!diff}>
                     <Button
                       variant="primary"
                       modifier="ghost"
                       size="small"
-                      label="Cancel"
-                      onClick={() => setConfirmingId(null)}
+                      label="Clear"
+                      onClick={() => setDiff(null)}
                     />
-                    <Button
-                      variant="negative"
-                      modifier="solid"
-                      size="small"
-                      label="Confirm Delete"
-                      icon="trash"
-                      iconPosition="left"
-                      loading={deleteMutation.isPending}
-                      onClick={() => handleDelete(snapshot.snapshot_id)}
+                  </Show>
+                </HStack>
+              </div>
+            </Show>
+
+            <Show when={!!diff}>
+              <SnapshotDiff diff={diff!} />
+            </Show>
+
+            <Show when={isLoading}>
+              <div className="p-12">
+                <VStack className="gap-3 items-center">
+                  <Spinner size="base" />
+                  <Text level="body-small" className="text-content-layout-3">
+                    Loading snapshots...
+                  </Text>
+                </VStack>
+              </div>
+            </Show>
+
+            <Show when={!isLoading && snapshots.length === 0}>
+              <div className="p-12">
+                <VStack className="gap-3 items-center">
+                  <div className="w-14 h-14 rounded-2xl bg-surface-layout-2 flex items-center justify-center">
+                    <Icon
+                      name="package"
+                      label="No snapshots"
+                      className="w-7 h-7 text-content-layout-3"
                     />
-                  </HStack>
-                </HStack>
-              ) : (
-                <HStack className="justify-between items-center gap-3">
-                  <VStack className="gap-1 items-start min-w-0">
-                    <HStack className="gap-2 items-center flex-wrap">
-                      <Text
-                        level="label-small"
-                        className="text-content-layout-1"
-                      >
-                        Fleet audit — {formatTimestamp(snapshot.created_at)}
-                      </Text>
-                      <Tag
-                        size="small"
-                        variant="informative"
-                        modifier="ghost"
-                        label={`${snapshot.targets_audited} targets`}
-                      />
-                    </HStack>
-                    <Text
-                      level="mono-small"
-                      className="text-content-layout-3 truncate"
-                    >
-                      {snapshot.snapshot_id}
-                    </Text>
-                  </VStack>
-                  <Button
-                    variant="negative"
-                    modifier="ghost"
-                    size="small"
-                    icon="trash"
-                    iconPosition="icon"
-                    label="Delete"
-                    onClick={() => setConfirmingId(snapshot.snapshot_id)}
-                  />
-                </HStack>
-              )}
-            </div>
-          ))}
-        </div>
-      </Show>
-    </SectionCard>
+                  </div>
+                  <Text
+                    level="body-small"
+                    className="text-content-layout-3 text-center max-w-md"
+                  >
+                    No snapshots yet — run Audit fleet to capture drift over
+                    time.
+                  </Text>
+                </VStack>
+              </div>
+            </Show>
+
+            <Show when={!isLoading && snapshots.length > 0}>
+              <div className="divide-y divide-border-layout-1">
+                {snapshots.map((snapshot: FleetSnapshotSummary) => (
+                  <div
+                    key={snapshot.snapshot_id}
+                    className="px-5 py-3 hover:bg-surface-layout-2/50 transition-colors"
+                  >
+                    {confirmingId === snapshot.snapshot_id ? (
+                      <HStack className="justify-between items-center gap-4">
+                        <HStack className="gap-2 items-center">
+                          <Icon
+                            name="alert"
+                            label="Warning"
+                            className="w-4 h-4 text-content-negative-soft"
+                          />
+                          <Text
+                            level="body-small"
+                            className="text-content-layout-1"
+                          >
+                            Delete snapshot "{snapshot.name}"?
+                          </Text>
+                        </HStack>
+                        <HStack className="gap-2 shrink-0">
+                          <Button
+                            variant="primary"
+                            modifier="ghost"
+                            size="small"
+                            label="Cancel"
+                            onClick={() => setConfirmingId(null)}
+                          />
+                          <Button
+                            variant="negative"
+                            modifier="solid"
+                            size="small"
+                            label="Confirm Delete"
+                            icon="trash"
+                            iconPosition="left"
+                            loading={deleteMutation.isPending}
+                            onClick={() => handleDelete(snapshot.snapshot_id)}
+                          />
+                        </HStack>
+                      </HStack>
+                    ) : (
+                      <HStack className="justify-between items-center gap-3">
+                        <VStack className="gap-1 items-start min-w-0">
+                          <HStack className="gap-2 items-center flex-wrap">
+                            <Text
+                              level="label-small"
+                              className="text-content-layout-1"
+                            >
+                              Fleet audit — {formatTimestamp(snapshot.created_at)}
+                            </Text>
+                            <Tag
+                              size="small"
+                              variant="informative"
+                              modifier="ghost"
+                              label={`${snapshot.targets_audited} targets`}
+                            />
+                          </HStack>
+                          <Text
+                            level="mono-small"
+                            className="text-content-layout-3 truncate"
+                          >
+                            {snapshot.snapshot_id}
+                          </Text>
+                        </VStack>
+                        <Button
+                          variant="negative"
+                          modifier="ghost"
+                          size="small"
+                          icon="trash"
+                          iconPosition="icon"
+                          label="Delete"
+                          onClick={() => setConfirmingId(snapshot.snapshot_id)}
+                        />
+                      </HStack>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Show>
+          </div>
+        </Show>
+      </Card.Content>
+    </Card>
   )
 }
 
@@ -732,9 +857,11 @@ function AuditTargetRow({
                 label="Failed"
               />
               {state.error && (
+                // Audit failure reason in legible negative-content, not muted
+                // grey (F6, USE-100).
                 <Text
                   level="caption"
-                  className="text-content-layout-3 truncate max-w-64 text-right"
+                  className="text-content-negative-soft max-w-64 text-right"
                 >
                   {state.error}
                 </Text>
@@ -944,6 +1071,57 @@ function AddTargetsTab({
   )
 }
 
+// Progressive disclosure inside the drawer: rarely-touched fields (Group,
+// Password Env, Dry run) fold behind a toggle so the primary path (path/regions)
+// leads (USE-025, VIS-103).
+function AdvancedOptions({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="border-t border-border-layout-1 pt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 cursor-pointer"
+      >
+        <Icon
+          name={open ? 'chevron-down' : 'chevron-right'}
+          label=""
+          className="w-4 h-4 text-content-layout-2"
+        />
+        <Text level="label-small" className="text-content-layout-2">
+          Advanced options
+        </Text>
+      </button>
+      <Show when={open}>
+        <div className="pt-3">{children}</div>
+      </Show>
+    </div>
+  )
+}
+
+function DryRunToggle({
+  active,
+  onToggle,
+}: {
+  active: boolean
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
+        data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
+        data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
+      data-active={active}
+    >
+      Dry run
+    </button>
+  )
+}
+
 function FleetPage() {
   const queryClient = useQueryClient()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -962,6 +1140,7 @@ function FleetPage() {
     staleTime: 30_000,
   })
   const latestSnapshot = snapshotsData?.snapshots?.[0]
+  const snapshotCount = snapshotsData?.snapshots?.length ?? 0
 
   const { data: latestDetail } = useQuery({
     queryKey: ['fleet-snapshot-detail', latestSnapshot?.snapshot_id],
@@ -1003,6 +1182,27 @@ function FleetPage() {
   const auditTargetNames = Object.keys(auditTargets)
   const showAudit =
     isAuditing || auditState === 'complete' || auditState === 'error'
+
+  // Scoreboard aggregation (VIS-011): pre-process the per-target connectivity +
+  // sizing signal the table already shows into "is my fleet OK?" — no new data.
+  // Mirrors StatusCell exactly: 'ok' → reachable; any settled non-'ok'/'checking'
+  // status (backend emits 'failed') is the "Unreachable" row → needs attention.
+  const scoreboard = useMemo(() => {
+    let reachable = 0
+    let needAttention = 0
+    for (const member of members) {
+      const connStatus = statusResults[member.name]?.status
+      const verdict = verdictMap[member.name]
+      if (connStatus === 'ok') reachable += 1
+      const unreachable =
+        !!connStatus && connStatus !== 'ok' && connStatus !== 'checking'
+      const offTarget = verdict?.verdict
+        ? PROBLEM_VERDICTS.has(verdict.verdict)
+        : false
+      if (unreachable || offTarget) needAttention += 1
+    }
+    return { total: members.length, reachable, needAttention }
+  }, [members, statusResults, verdictMap])
 
   const handleAudit = async () => {
     await runAudit()
@@ -1080,60 +1280,27 @@ function FleetPage() {
     }
   }
 
+  const populated = !isLoading && members.length > 0
+  const empty = !isLoading && members.length === 0
+
   return (
     <div className="space-y-6 w-full">
-      {/* Hero Header */}
-      <m.div
-        className="space-y-4"
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
-        <HStack className="justify-between items-start">
-          <HStack className="gap-4 items-center">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
-              <Icon
-                name="dashboard"
-                label="Fleet"
-                className="w-6 h-6 text-content-primary-soft"
-              />
-            </div>
-            <VStack className="gap-1 items-start">
-              <Text
-                as="h1"
-                level="headline-3"
-                className="text-content-layout-1"
-              >
-                Fleet
-              </Text>
-              <Text level="body-small" className="text-content-layout-3">
-                Health and sizing at a glance across all configured database
-                targets.
-              </Text>
-            </VStack>
-          </HStack>
-          <HStack className="gap-2 items-center">
-            <Button
-              variant="primary"
-              modifier="ghost"
-              label="Add Targets"
-              icon="add"
-              iconPosition="left"
-              onClick={() => setDrawerOpen(true)}
-            />
-            <Button
-              variant="primary"
-              modifier="solid"
-              label="Audit Fleet"
-              icon="document-validation"
-              iconPosition="left"
-              onClick={handleAudit}
-              loading={isAuditing}
-              disabled={isAuditing || members.length === 0}
-            />
-          </HStack>
-        </HStack>
-      </m.div>
+      {/* Region A — Page head: name = heading, secondary action on the right */}
+      <HStack className="justify-between items-center">
+        <Text as="h1" level="headline-3" className="text-content-layout-1">
+          Fleet
+        </Text>
+        <Show when={populated}>
+          <Button
+            variant="primary"
+            modifier="ghost"
+            label="Add targets"
+            icon="add"
+            iconPosition="left"
+            onClick={() => setDrawerOpen(true)}
+          />
+        </Show>
+      </HStack>
 
       {/* Status error */}
       <Show when={!!statusError}>
@@ -1151,20 +1318,98 @@ function FleetPage() {
         </div>
       </Show>
 
-      {/* Targets (hero) */}
-      <SectionCard
-        icon="database"
-        title={`Targets (${members.length})`}
-        actions={
-          <HStack className="gap-3 items-center">
-            <Show when={!!latestSnapshot}>
-              <Text level="caption" className="text-content-layout-3">
-                last audit{' '}
-                {latestSnapshot
-                  ? formatTimestamp(latestSnapshot.created_at)
-                  : ''}
-              </Text>
-            </Show>
+      {/* Loading */}
+      <Show when={isLoading}>
+        <div className="rounded-2xl bg-surface-raised shadow-elevation-1 p-12">
+          <VStack className="gap-3 items-center">
+            <Spinner size="base" />
+            <Text level="body-small" className="text-content-layout-2">
+              Loading fleet…
+            </Text>
+          </VStack>
+        </div>
+      </Show>
+
+      {/* Region B — PRIMARY: health scoreboard (highest elevation + accent bar) */}
+      <Show when={populated}>
+        <div className="relative overflow-hidden rounded-2xl bg-surface-raised shadow-elevation-1">
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1 bg-surface-rising-solid"
+            aria-hidden="true"
+          />
+          <div className="pl-6 pr-5 py-5">
+            <HStack className="justify-between items-center gap-6 flex-wrap">
+              <HStack className="gap-10 items-center">
+                <StatTile value={scoreboard.total} label="targets" />
+                <StatTile value={scoreboard.reachable} label="reachable" />
+                <StatTile
+                  value={scoreboard.needAttention}
+                  label="need attention"
+                  accent
+                />
+              </HStack>
+              <Button
+                variant="primary"
+                modifier="solid"
+                label="Audit fleet"
+                icon="document-validation"
+                iconPosition="left"
+                onClick={handleAudit}
+                loading={isAuditing}
+                disabled={isAuditing || members.length === 0}
+              />
+            </HStack>
+          </div>
+        </div>
+      </Show>
+
+      {/* Empty state — illustrated hero, table chrome hidden (VIS-102, VIS-103) */}
+      <Show when={empty}>
+        <div className="relative overflow-hidden rounded-2xl bg-surface-raised shadow-elevation-1">
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1 bg-surface-rising-solid"
+            aria-hidden="true"
+          />
+          <div className="px-8 py-14">
+            <VStack className="gap-4 items-center text-center">
+              <div className="w-16 h-16 rounded-2xl bg-surface-rising-soft flex items-center justify-center">
+                <Icon
+                  name="dashboard"
+                  label="Fleet"
+                  className="w-8 h-8 text-content-rising-soft"
+                />
+              </div>
+              <VStack className="gap-1 items-center">
+                <Text level="headline-4" className="text-content-layout-1">
+                  No databases in your fleet yet.
+                </Text>
+                <Text
+                  level="body-small"
+                  className="text-content-layout-2 max-w-md"
+                >
+                  Add your databases to track reachability and right-sizing
+                  across the whole fleet at a glance.
+                </Text>
+              </VStack>
+              <Button
+                variant="primary"
+                modifier="solid"
+                label="Add your first target"
+                icon="add"
+                iconPosition="left"
+                onClick={() => setDrawerOpen(true)}
+              />
+            </VStack>
+          </div>
+        </div>
+      </Show>
+
+      {/* Region C — SECONDARY: signal-led targets table */}
+      <Show when={populated}>
+        <SectionCard
+          icon="database"
+          title={`Targets (${members.length})`}
+          actions={
             <Button
               variant="primary"
               modifier="ghost"
@@ -1176,51 +1421,13 @@ function FleetPage() {
               loading={isChecking}
               disabled={isChecking || members.length === 0}
             />
-          </HStack>
-        }
-      >
-        <Show when={isLoading}>
-          <div className="p-12">
-            <VStack className="gap-3 items-center">
-              <Spinner size="base" />
-              <Text level="body-small" className="text-content-layout-3">
-                Loading fleet targets...
-              </Text>
-            </VStack>
-          </div>
-        </Show>
-
-        <Show when={!isLoading && members.length === 0}>
-          <div className="p-12">
-            <VStack className="gap-3 items-center">
-              <div className="w-14 h-14 rounded-2xl bg-surface-layout-2 flex items-center justify-center">
-                <Icon
-                  name="dashboard"
-                  label="No targets"
-                  className="w-7 h-7 text-content-layout-3"
-                />
-              </div>
-              <Text level="body-small" className="text-content-layout-3">
-                No fleet targets configured. Use Add Targets to import a CSV or
-                discover from AWS.
-              </Text>
-            </VStack>
-          </div>
-        </Show>
-
-        <Show when={!isLoading && members.length > 0}>
+          }
+        >
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="bg-surface-layout-2/30">
-                  {[
-                    'Name',
-                    'Engine',
-                    'Host',
-                    'Database',
-                    'Last Audit',
-                    'Status',
-                  ].map((header) => (
+                  {['Target', 'Connectivity', 'Sizing'].map((header) => (
                     <th
                       key={header}
                       className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium"
@@ -1228,6 +1435,7 @@ function FleetPage() {
                       {header}
                     </th>
                   ))}
+                  <th className="px-4 py-3 w-10" aria-hidden="true" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-layout-1">
@@ -1242,8 +1450,8 @@ function FleetPage() {
               </tbody>
             </table>
           </div>
-        </Show>
-      </SectionCard>
+        </SectionCard>
+      </Show>
 
       {/* Audit progress / results */}
       <Show when={showAudit}>
@@ -1328,8 +1536,10 @@ function FleetPage() {
         </SectionCard>
       </Show>
 
-      {/* Snapshots */}
-      <SnapshotsSection />
+      {/* Region D — TERTIARY: History & drift (collapsed disclosure) */}
+      <Show when={populated || snapshotCount > 0}>
+        <HistoryDriftSection />
+      </Show>
 
       {/* Add Targets drawer */}
       <Drawer open={drawerOpen} onOpenChange={setDrawerOpen} direction="right">
@@ -1363,71 +1573,70 @@ function FleetPage() {
                       Bulk-add targets from a CSV file with columns: name, host,
                       engine (plus optional port, database, user, group, tags).
                     </Text>
-                    <div className="grid grid-cols-1 gap-3 items-end">
-                      <PathPicker
-                        value={csvPath}
-                        onChange={setCsvPath}
-                        fileExt="csv"
-                        label="CSV Path"
-                        disabled={isImporting}
+                    <PathPicker
+                      value={csvPath}
+                      onChange={setCsvPath}
+                      fileExt="csv"
+                      label="CSV Path"
+                      disabled={isImporting}
+                    />
+                    <AdvancedOptions>
+                      <VStack className="gap-3 items-stretch">
+                        <div className="grid grid-cols-1 laptop:grid-cols-2 gap-3 items-end">
+                          <div>
+                            <Text
+                              level="caption"
+                              className="text-content-layout-3 mb-1 block"
+                            >
+                              Group
+                            </Text>
+                            <BaseInputText
+                              name="fleet-import-group"
+                              value={importGroup}
+                              onChange={(
+                                e: React.ChangeEvent<HTMLInputElement>
+                              ) => setImportGroup(e.target.value)}
+                              placeholder="optional"
+                            />
+                          </div>
+                          <div>
+                            <Text
+                              level="caption"
+                              className="text-content-layout-3 mb-1 block"
+                            >
+                              Password Env
+                            </Text>
+                            <BaseInputText
+                              name="fleet-password-env"
+                              value={passwordEnv}
+                              onChange={(
+                                e: React.ChangeEvent<HTMLInputElement>
+                              ) => setPasswordEnv(e.target.value)}
+                              placeholder="FLEET_PASS"
+                            />
+                          </div>
+                        </div>
+                        <HStack className="justify-start">
+                          <DryRunToggle
+                            active={dryRun}
+                            onToggle={() => setDryRun(!dryRun)}
+                          />
+                        </HStack>
+                      </VStack>
+                    </AdvancedOptions>
+
+                    <HStack className="gap-3 items-center justify-end">
+                      <Button
+                        variant="primary"
+                        modifier="solid"
+                        label={dryRun ? 'Preview Import' : 'Import'}
+                        icon="add"
+                        iconPosition="left"
+                        onClick={handleImport}
+                        loading={isImporting}
+                        disabled={!csvPath.trim() || isImporting}
                       />
-                      <div className="grid grid-cols-1 laptop:grid-cols-2 gap-3 items-end">
-                        <div>
-                          <Text
-                            level="caption"
-                            className="text-content-layout-3 mb-1 block"
-                          >
-                            Group
-                          </Text>
-                          <BaseInputText
-                            name="fleet-import-group"
-                            value={importGroup}
-                            onChange={(
-                              e: React.ChangeEvent<HTMLInputElement>
-                            ) => setImportGroup(e.target.value)}
-                            placeholder="optional"
-                          />
-                        </div>
-                        <div>
-                          <Text
-                            level="caption"
-                            className="text-content-layout-3 mb-1 block"
-                          >
-                            Password Env
-                          </Text>
-                          <BaseInputText
-                            name="fleet-password-env"
-                            value={passwordEnv}
-                            onChange={(
-                              e: React.ChangeEvent<HTMLInputElement>
-                            ) => setPasswordEnv(e.target.value)}
-                            placeholder="FLEET_PASS"
-                          />
-                        </div>
-                      </div>
-                      <HStack className="gap-3 items-center justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setDryRun(!dryRun)}
-                          className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
-                            data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
-                            data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
-                          data-active={dryRun}
-                        >
-                          Dry run
-                        </button>
-                        <Button
-                          variant="primary"
-                          modifier="solid"
-                          label={dryRun ? 'Preview Import' : 'Import'}
-                          icon="add"
-                          iconPosition="left"
-                          onClick={handleImport}
-                          loading={isImporting}
-                          disabled={!csvPath.trim() || isImporting}
-                        />
-                      </HStack>
-                    </div>
+                    </HStack>
 
                     <StreamLog
                       progress={importProgress}
@@ -1445,126 +1654,123 @@ function FleetPage() {
                       credentials (~/.aws, env, or SSO). No credentials are
                       entered here.
                     </Text>
-                    <div className="grid grid-cols-1 gap-3 items-end">
-                      <div>
-                        <Text
-                          level="caption"
-                          className="text-content-layout-3 mb-1 block"
-                        >
-                          Regions (comma-separated)
-                        </Text>
-                        <BaseInputText
-                          name="fleet-discover-regions"
-                          value={regionsInput}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setRegionsInput(e.target.value)
-                          }
-                          placeholder="us-east-1, us-west-2"
-                        />
-                      </div>
-                      <div>
-                        <Text
-                          level="caption"
-                          className="text-content-layout-3 mb-1 block"
-                        >
-                          Engine
-                        </Text>
-                        <HStack className="gap-1">
-                          {(['all', 'postgresql', 'mysql'] as const).map(
-                            (engine) => (
-                              <button
-                                key={engine}
-                                type="button"
-                                onClick={() => setEngineFilter(engine)}
-                                className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
+                    <div>
+                      <Text
+                        level="caption"
+                        className="text-content-layout-3 mb-1 block"
+                      >
+                        Regions (comma-separated)
+                      </Text>
+                      <BaseInputText
+                        name="fleet-discover-regions"
+                        value={regionsInput}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setRegionsInput(e.target.value)
+                        }
+                        placeholder="us-east-1, us-west-2"
+                      />
+                    </div>
+                    <div>
+                      <Text
+                        level="caption"
+                        className="text-content-layout-3 mb-1 block"
+                      >
+                        Engine
+                      </Text>
+                      <HStack className="gap-1">
+                        {(['all', 'postgresql', 'mysql'] as const).map(
+                          (engine) => (
+                            <button
+                              key={engine}
+                              type="button"
+                              onClick={() => setEngineFilter(engine)}
+                              className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
                                 data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
                                 data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
-                                data-active={engineFilter === engine}
-                              >
-                                {engine === 'all' ? 'All' : engineLabel(engine)}
-                              </button>
-                            )
-                          )}
-                        </HStack>
-                      </div>
-                      <div className="grid grid-cols-1 laptop:grid-cols-2 gap-3 items-end">
-                        <div>
-                          <Text
-                            level="caption"
-                            className="text-content-layout-3 mb-1 block"
-                          >
-                            Name Pattern
-                          </Text>
-                          <BaseInputText
-                            name="fleet-discover-name-pattern"
-                            value={namePattern}
-                            onChange={(
-                              e: React.ChangeEvent<HTMLInputElement>
-                            ) => setNamePattern(e.target.value)}
-                            placeholder="prod-* (optional glob)"
-                          />
-                        </div>
-                        <div>
-                          <Text
-                            level="caption"
-                            className="text-content-layout-3 mb-1 block"
-                          >
-                            Group
-                          </Text>
-                          <BaseInputText
-                            name="fleet-discover-group"
-                            value={discoverGroup}
-                            onChange={(
-                              e: React.ChangeEvent<HTMLInputElement>
-                            ) => setDiscoverGroup(e.target.value)}
-                            placeholder="optional"
-                          />
-                        </div>
-                        <div>
-                          <Text
-                            level="caption"
-                            className="text-content-layout-3 mb-1 block"
-                          >
-                            Password Env
-                          </Text>
-                          <BaseInputText
-                            name="fleet-discover-password-env"
-                            value={discoverPasswordEnv}
-                            onChange={(
-                              e: React.ChangeEvent<HTMLInputElement>
-                            ) => setDiscoverPasswordEnv(e.target.value)}
-                            placeholder="FLEET_PASS"
-                          />
-                        </div>
-                      </div>
-                      <HStack className="gap-3 items-center justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setDiscoverDryRun(!discoverDryRun)}
-                          className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
-                            data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
-                            data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
-                          data-active={discoverDryRun}
-                        >
-                          Dry run
-                        </button>
-                        <Button
-                          variant="primary"
-                          modifier="solid"
-                          label={
-                            discoverDryRun ? 'Preview Discover' : 'Discover'
-                          }
-                          icon="search"
-                          iconPosition="left"
-                          onClick={handleDiscover}
-                          loading={isDiscovering}
-                          disabled={
-                            parseRegions(regionsInput).length === 0 ||
-                            isDiscovering
-                          }
-                        />
+                              data-active={engineFilter === engine}
+                            >
+                              {engine === 'all' ? 'All' : engineLabel(engine)}
+                            </button>
+                          )
+                        )}
                       </HStack>
                     </div>
+                    <div>
+                      <Text
+                        level="caption"
+                        className="text-content-layout-3 mb-1 block"
+                      >
+                        Name Pattern
+                      </Text>
+                      <BaseInputText
+                        name="fleet-discover-name-pattern"
+                        value={namePattern}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setNamePattern(e.target.value)
+                        }
+                        placeholder="prod-* (optional glob)"
+                      />
+                    </div>
+                    <AdvancedOptions>
+                      <VStack className="gap-3 items-stretch">
+                        <div className="grid grid-cols-1 laptop:grid-cols-2 gap-3 items-end">
+                          <div>
+                            <Text
+                              level="caption"
+                              className="text-content-layout-3 mb-1 block"
+                            >
+                              Group
+                            </Text>
+                            <BaseInputText
+                              name="fleet-discover-group"
+                              value={discoverGroup}
+                              onChange={(
+                                e: React.ChangeEvent<HTMLInputElement>
+                              ) => setDiscoverGroup(e.target.value)}
+                              placeholder="optional"
+                            />
+                          </div>
+                          <div>
+                            <Text
+                              level="caption"
+                              className="text-content-layout-3 mb-1 block"
+                            >
+                              Password Env
+                            </Text>
+                            <BaseInputText
+                              name="fleet-discover-password-env"
+                              value={discoverPasswordEnv}
+                              onChange={(
+                                e: React.ChangeEvent<HTMLInputElement>
+                              ) => setDiscoverPasswordEnv(e.target.value)}
+                              placeholder="FLEET_PASS"
+                            />
+                          </div>
+                        </div>
+                        <HStack className="justify-start">
+                          <DryRunToggle
+                            active={discoverDryRun}
+                            onToggle={() => setDiscoverDryRun(!discoverDryRun)}
+                          />
+                        </HStack>
+                      </VStack>
+                    </AdvancedOptions>
+
+                    <HStack className="gap-3 items-center justify-end">
+                      <Button
+                        variant="primary"
+                        modifier="solid"
+                        label={discoverDryRun ? 'Preview Discover' : 'Discover'}
+                        icon="search"
+                        iconPosition="left"
+                        onClick={handleDiscover}
+                        loading={isDiscovering}
+                        disabled={
+                          parseRegions(regionsInput).length === 0 ||
+                          isDiscovering
+                        }
+                      />
+                    </HStack>
 
                     <StreamLog
                       progress={discoverProgress}

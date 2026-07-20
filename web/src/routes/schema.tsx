@@ -10,19 +10,19 @@ import { HStack, VStack } from "@rs/ui-new/stack";
 import { Show } from "@rs/ui-new/show";
 import { m } from "@rs/ui-new/motion";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@rs/ui-new/tooltip";
+import { ConfirmDialog } from "@rs/ui-new/confirm-dialog";
 import { toast } from "@rs/ui-new/use-toast";
 import { useTarget } from "../hooks/useTarget";
 import { useSchema } from "../lib/useSchema";
 import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
 import {
-  SchemaSummaryCard,
+  SchemaReadinessBand,
+  SchemaManageMenu,
   SchemaTableTree,
   SchemaTerminologyList,
   SchemaMetricsList,
   SchemaEmptyState,
-  SchemaInitButton,
   SchemaReinitDialog,
-  SchemaExportButton,
   SchemaEditColumnDialog,
   SchemaEditTableDialog,
   SchemaEditEnumDialog,
@@ -52,6 +52,13 @@ export const Route = createFileRoute("/schema")({
 
 const SEMANTIC_LAYER_TOOLTIP_LABEL =
   "The semantic layer lets you document business logic that isn't obvious from the schema alone, like enum meanings, domain terms, and relationships, so RDST can provide better AI recommendations.";
+
+// Promotes the tooltip's explanation into a persistent, self-evident value prop
+// (redesign §Copy #1) — the one sentence that says why this screen matters.
+const SEMANTIC_LAYER_SUBTITLE =
+  "Teach RDST's AI what your data means, so Ask and Analyze write better SQL for this database.";
+
+type SchemaContentTab = "tables" | "terminology" | "metrics";
 
 function SemanticLayerInfoTooltip() {
   return (
@@ -106,6 +113,10 @@ function SchemaPage() {
   const [annotateProgress, setAnnotateProgress] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [reinitConfirmOpen, setReinitConfirmOpen] = useState(false);
+
+  // Content-region tab (Tables default). Terminology + Metrics defer behind
+  // this segmented control instead of stacking as always-on cards.
+  const [activeTab, setActiveTab] = useState<SchemaContentTab>("tables");
 
   // Dialog state
   const [editingColumn, setEditingColumn] = useState<{
@@ -196,10 +207,24 @@ function SchemaPage() {
     }
   };
 
-  const handleExport = async (format: "yaml" | "json") => {
-    if (passwordLock.isLocked) return null;
-    if (!target) return null;
-    return exportSchema(target, format);
+  // Export moved into the Manage (⋯) menu's system submenu; the download plumbing
+  // that lived in the bespoke SchemaExportButton lives here now.
+  const handleExportDownload = async (format: "yaml" | "json") => {
+    if (passwordLock.isLocked) return;
+    if (!target) return;
+    const content = await exportSchema(target, format);
+    if (!content) return;
+    const blob = new Blob([content], {
+      type: format === "yaml" ? "text/yaml" : "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `semantic-layer.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleAnnotateWithLLM = async () => {
@@ -409,8 +434,8 @@ function SchemaPage() {
                 </Text>
                 <SemanticLayerInfoTooltip />
               </HStack>
-              <Text level="body-small" className="text-content-layout-3">
-                Schema annotations for AI-powered queries
+              <Text level="body-small" className="text-content-layout-3 max-w-2xl">
+                {SEMANTIC_LAYER_SUBTITLE}
               </Text>
             </VStack>
           </HStack>
@@ -471,53 +496,32 @@ function SchemaPage() {
                     modifier="ghost"
                   />
                 </HStack>
-                <Text level="body-small" className="text-content-layout-3">
-                  Schema annotations for AI-powered queries
+                <Text level="body-small" className="text-content-layout-3 max-w-2xl">
+                  {SEMANTIC_LAYER_SUBTITLE}
                 </Text>
               </VStack>
             </HStack>
 
+            {/* One primary action + one overflow trigger (redesign §A / VIS-022). */}
             <Show when={status?.exists}>
               <HStack className="gap-2 items-center">
-                <Button
-                  variant="primary"
-                  modifier="outline"
-                  icon="database-settings"
-                  iconPosition="left"
-                  label="Refresh"
-                  onClick={handleRefresh}
-                  loading={refreshLoading}
-                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || annotateLoading || initLoading || loading}
-                />
-                <Button
-                  variant="primary"
-                  modifier="outline"
-                  icon="speedometer"
-                  iconPosition="left"
-                  label="Profile"
-                  onClick={handleProfile}
-                  loading={profileLoading}
-                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || annotateLoading || initLoading || loading}
-                />
                 <Button
                   variant="rising"
                   modifier="solid"
                   icon="sparkles"
                   iconPosition="left"
-                  label={annotateProgress || "AI Annotate"}
+                  label={annotateProgress || "Annotate with AI"}
                   onClick={handleAnnotateWithLLM}
                   loading={annotateLoading}
                   disabled={passwordLock.isLocked || annotateLoading || refreshLoading || profileLoading || initLoading || loading}
                 />
-                <SchemaExportButton
-                  onExport={handleExport}
-                  disabled={passwordLock.isLocked || loading}
-                />
-                <SchemaInitButton
-                  onInit={handleInit}
-                  isLoading={initLoading}
-                  hasExistingSchema={status?.exists ?? false}
-                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || annotateLoading || loading}
+                <SchemaManageMenu
+                  onRefresh={handleRefresh}
+                  onProfile={handleProfile}
+                  onExport={handleExportDownload}
+                  onReinit={handleInit}
+                  onDelete={() => setDeleteConfirm(true)}
+                  disabled={passwordLock.isLocked || refreshLoading || profileLoading || annotateLoading || initLoading || loading}
                 />
               </HStack>
             </Show>
@@ -588,186 +592,120 @@ function SchemaPage() {
         {/* Schema exists - show content */}
         {status?.exists && schema && (
           <div className="space-y-6">
-            {/* Summary card */}
+            {/* Region B — readiness band (prominent while under-documented, then a
+                quiet line). Absorbs the old separate Summary stat card. */}
             <m.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.1 }}
             >
-              <SchemaSummaryCard status={status!} />
+              <SchemaReadinessBand
+                schema={schema!}
+                status={status!}
+                onAnnotate={handleAnnotateWithLLM}
+                annotating={annotateLoading}
+                annotateLabel={annotateProgress}
+                disabled={passwordLock.isLocked || annotateLoading || refreshLoading || profileLoading || initLoading || loading}
+              />
             </m.div>
 
-            {/* Tables section */}
+            {/* Region C — one tabbed card: Tables (default) · Terminology · Metrics.
+                Counts live on the tabs; only the active tab renders. */}
             <m.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: 0.2 }}
             >
-              <Card className="w-full overflow-hidden">
+              <Card className="w-full overflow-hidden border-transparent shadow-small">
                 <Card.Header>
-                  <HStack className="justify-between items-center w-full">
-                    <HStack className="gap-2 items-center">
-                      <Icon name="layers" label="Tables" className="w-4 h-4 text-content-layout-3" />
-                      <Text level="label-medium" className="text-content-layout-1">
-                        Tables
-                      </Text>
-                      <Tag
-                        size="small"
-                        variant="informative"
-                        modifier="ghost"
-                        label={String(schema!.tables.length)}
-                      />
-                    </HStack>
-                    <Button
-                      modifier="ghost"
-                      size="small"
-                      icon="connect"
-                      iconPosition="left"
-                      label="Add Relationship"
-                      onClick={() => handleAddRelationship()}
-                      disabled={passwordLock.isLocked}
-                    />
-                  </HStack>
-                </Card.Header>
-                <Card.Content className="p-0">
-                  <SchemaTableTree
-                    tables={schema!.tables}
-                    onEditColumn={handleEditColumn}
-                    onEditTable={handleEditTable}
-                    onEditEnum={handleEditEnum}
-                    onEditRelationship={handleEditRelationship}
-                  />
-                </Card.Content>
-              </Card>
-            </m.div>
+                  <HStack className="justify-between items-center w-full flex-wrap gap-3">
+                    <div
+                      role="tablist"
+                      aria-label="Semantic layer sections"
+                      className="inline-flex items-center gap-1 rounded-xl bg-surface-layout-2 p-1"
+                    >
+                      {([
+                        { id: "tables", label: "Tables", count: schema!.tables.length },
+                        { id: "terminology", label: "Terminology", count: schema!.terminology.length },
+                        { id: "metrics", label: "Metrics", count: schema!.metrics.length },
+                      ] as const).map((tab) => {
+                        const isActive = activeTab === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={isActive}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:shadow-focus ${
+                              isActive
+                                ? "bg-surface-raised text-content-layout-1 shadow-small"
+                                : "text-content-layout-3 hover:text-content-layout-1"
+                            }`}
+                          >
+                            <Text level="label-small">{tab.label}</Text>
+                            <Tag
+                              size="small"
+                              variant={isActive ? "informative" : "muted"}
+                              modifier="ghost"
+                              label={String(tab.count)}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
 
-            {/* Terminology section */}
-            <m.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.3 }}
-            >
-              <Card className="w-full overflow-hidden">
-                <Card.Header>
-                  <HStack className="justify-between items-center w-full">
-                    <HStack className="gap-2 items-center">
-                      <Icon name="folder-file" label="Terminology" className="w-4 h-4 text-content-layout-3" />
-                      <Text level="label-medium" className="text-content-layout-1">
-                        Business Terminology
-                      </Text>
-                      <Tag
-                        size="small"
-                        variant="informative"
-                        modifier="ghost"
-                        label={String(schema!.terminology.length)}
-                      />
-                    </HStack>
-                    <Button
-                      modifier="ghost"
-                      size="small"
-                      icon="add"
-                      iconPosition="left"
-                      label="Add Term"
-                      onClick={handleAddTerm}
-                      disabled={passwordLock.isLocked}
-                    />
-                  </HStack>
-                </Card.Header>
-                <Card.Content className="p-0">
-                  <SchemaTerminologyList terminology={schema!.terminology} onEdit={handleEditTerm} />
-                </Card.Content>
-              </Card>
-            </m.div>
-
-            {/* Metrics section */}
-            <m.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.4 }}
-            >
-              <Card className="w-full overflow-hidden">
-                <Card.Header>
-                  <HStack className="justify-between items-center w-full">
-                    <HStack className="gap-2 items-center">
-                      <Icon name="speedometer" label="Metrics" className="w-4 h-4 text-content-layout-3" />
-                      <Text level="label-medium" className="text-content-layout-1">
-                        Metrics
-                      </Text>
-                      <Tag
-                        size="small"
-                        variant="informative"
-                        modifier="ghost"
-                        label={String(schema!.metrics.length)}
-                      />
-                    </HStack>
-                    <Button
-                      modifier="ghost"
-                      size="small"
-                      icon="add"
-                      iconPosition="left"
-                      label="Add Metric"
-                      onClick={handleAddMetric}
-                      disabled={passwordLock.isLocked}
-                    />
-                  </HStack>
-                </Card.Header>
-                <Card.Content className="p-0">
-                  <SchemaMetricsList metrics={schema!.metrics} onEdit={handleEditMetric} />
-                </Card.Content>
-              </Card>
-            </m.div>
-
-            {/* Danger zone */}
-            <m.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.5 }}
-            >
-              <Card className="w-full border-border-negative-soft/30">
-                <Card.Header className="border-b-border-negative-soft/30">
-                  <HStack className="gap-2 items-center">
-                    <Icon name="alert" label="Danger" className="w-4 h-4 text-content-negative-soft" />
-                    <Text level="label-medium" className="text-content-negative-soft">
-                      Danger Zone
-                    </Text>
-                  </HStack>
-                </Card.Header>
-                <Card.Content>
-                  <VStack className="gap-4 items-start">
-                    <Text level="body-small" className="text-content-layout-2">
-                      Deleting the semantic layer will remove all table descriptions, column annotations,
-                      and business terminology for this target.
-                    </Text>
-                    <Show when={deleteConfirm}>
-                      <HStack className="gap-3 items-center">
-                        <Text level="body-small" className="text-content-negative-soft">
-                          Are you sure?
-                        </Text>
-                        <Button
-                          variant="negative"
-                          label="Yes, Delete"
-                          onClick={handleDelete}
-                          loading={loading}
-                          disabled={passwordLock.isLocked}
-                        />
-                        <Button
-                          modifier="ghost"
-                          label="Cancel"
-                          onClick={() => setDeleteConfirm(false)}
-                          disabled={passwordLock.isLocked}
-                        />
-                      </HStack>
-                    </Show>
-                    <Show when={!deleteConfirm}>
+                    <Show when={activeTab === "tables"}>
                       <Button
-                        variant="negative"
-                        modifier="outline"
-                        label="Delete Semantic Layer"
-                        onClick={() => setDeleteConfirm(true)}
+                        modifier="ghost"
+                        size="small"
+                        icon="connect"
+                        iconPosition="left"
+                        label="Add relationship"
+                        onClick={() => handleAddRelationship()}
                         disabled={passwordLock.isLocked}
                       />
                     </Show>
-                  </VStack>
+                    <Show when={activeTab === "terminology"}>
+                      <Button
+                        modifier="ghost"
+                        size="small"
+                        icon="add"
+                        iconPosition="left"
+                        label="Add term"
+                        onClick={handleAddTerm}
+                        disabled={passwordLock.isLocked}
+                      />
+                    </Show>
+                    <Show when={activeTab === "metrics"}>
+                      <Button
+                        modifier="ghost"
+                        size="small"
+                        icon="add"
+                        iconPosition="left"
+                        label="Add metric"
+                        onClick={handleAddMetric}
+                        disabled={passwordLock.isLocked}
+                      />
+                    </Show>
+                  </HStack>
+                </Card.Header>
+                <Card.Content className="p-0">
+                  <Show when={activeTab === "tables"}>
+                    <SchemaTableTree
+                      tables={schema!.tables}
+                      onEditColumn={handleEditColumn}
+                      onEditTable={handleEditTable}
+                      onEditEnum={handleEditEnum}
+                      onEditRelationship={handleEditRelationship}
+                    />
+                  </Show>
+                  <Show when={activeTab === "terminology"}>
+                    <SchemaTerminologyList terminology={schema!.terminology} onEdit={handleEditTerm} />
+                  </Show>
+                  <Show when={activeTab === "metrics"}>
+                    <SchemaMetricsList metrics={schema!.metrics} onEdit={handleEditMetric} />
+                  </Show>
                 </Card.Content>
               </Card>
             </m.div>
@@ -781,6 +719,28 @@ function SchemaPage() {
           isLoading={initLoading}
           onConfirm={handleConfirmReinit}
           onClose={() => setReinitConfirmOpen(false)}
+        />
+
+        {/* Destructive Delete confirmation — the former Danger-Zone Delete now
+            lives in the Manage menu and confirms through the shared primitive
+            (the red lives in the confirm). */}
+        <ConfirmDialog
+          isOpen={deleteConfirm}
+          onClose={() => setDeleteConfirm(false)}
+          onConfirm={handleDelete}
+          title="Delete semantic layer?"
+          subtitle={`Target: ${target ?? ""}`}
+          notice={{
+            accent: "negative",
+            icon: "alert",
+            title: "This removes every annotation",
+            message:
+              "Deleting the semantic layer removes all table and column descriptions, enum meanings, business terminology, metrics, and relationships for this target. This cannot be undone.",
+          }}
+          confirmLabel="Delete semantic layer"
+          confirmVariant="negative"
+          loading={loading}
+          blockCloseWhileLoading
         />
 
         {/* Edit dialogs */}

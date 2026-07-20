@@ -200,7 +200,7 @@ function KeyboardHint({ keys, label }: { keys: string[]; label?: string }) {
           {i > 0 && (
             <span className="text-content-layout-3 text-[10px]">+</span>
           )}
-          <kbd className="min-w-[20px] px-1.5 py-0.5 rounded-md bg-surface-layout-3 text-content-layout-2 text-[11px] font-medium border border-border-layout-1 shadow-sm text-center">
+          <kbd className="min-w-[20px] px-1.5 py-0.5 rounded-md bg-surface-raised text-content-layout-2 text-[11px] font-medium border border-border-layout-1 shadow-sm text-center">
             {key}
           </kbd>
         </span>

@@ -1,4 +1,3 @@
-import { useState, useMemo } from 'react';
 import { Button } from '@rs/ui-new/button';
 import { Scrollable } from '@rs/ui-new/scrollable';
 import { Show } from '@rs/ui-new/show';
@@ -7,7 +6,6 @@ import { Text } from '@rs/ui-new/text';
 import { Icon } from '@rs/ui-new/icon';
 import { HStack, VStack } from '@rs/ui-new/stack';
 import { Card } from '@rs/ui-new/card';
-import { BaseInputText } from '@rs/ui-new/base-input-text';
 import { m } from '@rs/ui-new/motion';
 import { Link } from '@tanstack/react-router';
 import { SQLDisplay } from './SQLDisplay';
@@ -19,26 +17,15 @@ interface QueryHistoryProps {
   onSelect: (sql: string) => void;
 }
 
-const PAGE_SIZE = 10;
+// Recent is a quiet, tertiary list: only the 5 most recent stay in the default
+// view; everything else is one click away behind "View all →". [VIS-011, USE-014]
+const RECENT_LIMIT = 5;
 
 export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const displayQueries = queries.slice(0, RECENT_LIMIT);
 
-  const filteredQueries = useMemo(() => {
-    if (!searchTerm.trim()) return queries;
-    const term = searchTerm.toLowerCase();
-    return queries.filter(
-      (q) =>
-        q.sql.toLowerCase().includes(term) ||
-        q.tag?.toLowerCase().includes(term) ||
-        q.target?.toLowerCase().includes(term)
-    );
-  }, [queries, searchTerm]);
-
-  const displayQueries = filteredQueries.slice(0, visibleCount);
-  const hasMore = filteredQueries.length > visibleCount;
-
+  // First-run / empty state: no inert "Recent" header — just an illustrated
+  // block so the feature reads as intentional, not a blank slot. [VIS-102, VIS-103]
   if (queries.length === 0) {
     return (
       <Card className="w-full">
@@ -49,10 +36,10 @@ export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
             </div>
             <VStack className="gap-1 items-center">
               <Text level="headline-5" className="text-content-layout-2">
-                No recent queries
+                Your analyzed queries will show up here
               </Text>
               <Text level="body-small" className="text-content-layout-3 text-center max-w-sm">
-                Your analyzed queries will appear here for quick access
+                Paste a query above and hit Analyze — recent runs land here for quick re-use.
               </Text>
             </VStack>
           </VStack>
@@ -63,38 +50,26 @@ export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
 
   return (
     <div className="space-y-3 w-full">
-      {/* Header */}
+      {/* Header — only shown once there is content to act on */}
       <HStack className="justify-between items-center px-1">
         <HStack className="gap-2 items-center">
           <Icon name="folder-file" label="Recent queries" className="w-4 h-4 text-content-layout-3" />
           <Text level="label-small" className="text-content-layout-2">
-            Recent Queries
+            Recent
           </Text>
           <Tag
             size="small"
             variant="informative"
             modifier="ghost"
-            label={searchTerm ? `${filteredQueries.length} of ${queries.length}` : `${queries.length}`}
+            label={`${queries.length}`}
           />
         </HStack>
-        <HStack className="gap-3 items-center">
-          <div className="w-52">
-            <BaseInputText
-              name="history-search"
-              placeholder="Search queries..."
-              icon="search"
-              iconPosition="left"
-              value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setVisibleCount(PAGE_SIZE); }}
-            />
-          </div>
-          <Link
-            to="/query-registry"
-            className="text-sm text-content-primary-soft hover:underline whitespace-nowrap"
-          >
-            View all
-          </Link>
-        </HStack>
+        <Link
+          to="/query-registry"
+          className="text-sm text-content-primary-soft hover:underline whitespace-nowrap"
+        >
+          View all →
+        </Link>
       </HStack>
 
       {/* Query list */}
@@ -190,26 +165,6 @@ export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
           </m.div>
         ))}
       </div>
-
-      <Show when={hasMore}>
-        <div className="flex justify-center pt-1">
-          <Button
-            variant="primary"
-            modifier="ghost"
-            size="small"
-            label={`Show more (${filteredQueries.length - visibleCount} remaining)`}
-            onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
-          />
-        </div>
-      </Show>
-
-      <Show when={searchTerm.trim().length > 0 && filteredQueries.length === 0}>
-        <div className="text-center py-6">
-          <Text level="body-small" className="text-content-layout-3">
-            No queries match "{searchTerm}"
-          </Text>
-        </div>
-      </Show>
     </div>
   );
 }

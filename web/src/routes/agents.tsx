@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { Button } from '@rs/ui-new/button';
 import { Card } from '@rs/ui-new/card';
 import { Icon } from '@rs/ui-new/icon';
@@ -16,6 +16,8 @@ import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea';
 import { BaseInputSelect } from '@rs/ui-new/base-input-select';
 import { m, AnimatePresence } from '@rs/ui-new/motion';
 import { toast } from '@rs/ui-new/use-toast';
+import { useDisclosure } from '@rs/ui-new/use-disclosure';
+import { InlineNotice } from '@rs/ui-new/error-state';
 import { useSystemStatus } from '../lib/useSystemStatus';
 import { fetchGuards } from '../lib/useGuards';
 import {
@@ -86,6 +88,60 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Collapsible "Advanced" section (progressive disclosure). Presentation-only:
+// the deferred fields keep their values whether the section is open or not, so
+// collapsing never changes what gets submitted. Tertiary trigger — greyscale,
+// chevron + label + one-line summary of what's inside.
+function Disclosure({
+  title,
+  summary,
+  children,
+}: {
+  title: string;
+  summary?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useDisclosure({});
+  return (
+    <VStack className="gap-0 items-stretch border-t border-border-layout-1 pt-4">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="group flex items-center gap-2 py-1 text-left rounded-md outline-none focus-visible:shadow-focus"
+      >
+        <Icon
+          name={open ? 'chevron-down' : 'chevron-right'}
+          label=""
+          aria-hidden="true"
+          className="w-4 h-4 shrink-0 text-content-layout-3 transition-colors group-hover:text-content-layout-2"
+        />
+        <Text level="label-small" className="text-content-layout-2">
+          {title}
+        </Text>
+        <Show when={!!summary}>
+          <Text level="caption" className="text-content-layout-3 truncate min-w-0">
+            — {summary}
+          </Text>
+        </Show>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <m.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="pt-4">{children}</div>
+          </m.div>
+        )}
+      </AnimatePresence>
+    </VStack>
+  );
+}
+
 // Chat responses are untrusted LLM output: render markdown with the design
 // system component but never raw HTML.
 function MarkdownText({ text }: { text: string }) {
@@ -144,22 +200,17 @@ function CreateAgentForm({ onClose }: { onClose: () => void }) {
 
   const targets = status?.targets ?? [];
   const [form, setForm] = useState<AgentForm>(() => emptyForm(targets[0]?.name ?? ''));
-  const [guardOptions, setGuardOptions] = useState<{ value: string; label: string }[]>([
-    { value: NO_GUARD, label: 'No guard' },
-  ]);
+  const [guardNames, setGuardNames] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     fetchGuards()
       .then((res) => {
         if (cancelled) return;
-        setGuardOptions([
-          { value: NO_GUARD, label: 'No guard' },
-          ...res.guards.map((g) => ({ value: g.name, label: g.name })),
-        ]);
+        setGuardNames(res.guards.map((g) => g.name));
       })
       .catch(() => {
-        // Guards are optional; leave the "No guard" default in place.
+        // Guards are optional; leave the "no guard" default in place.
       });
     return () => {
       cancelled = true;
@@ -171,6 +222,20 @@ function CreateAgentForm({ onClose }: { onClose: () => void }) {
 
   const nameValid = !form.name.trim() || AGENT_NAME_PATTERN.test(form.name.trim());
   const targetOptions = targets.map((t) => ({ value: t.name, label: t.name }));
+
+  // Plain-language "Can see" options: no-guard reads as full access to the
+  // chosen database; a guard reads as its name. Values are unchanged, so the
+  // request body is identical to before.
+  const guardOptions = useMemo(
+    () => [
+      {
+        value: NO_GUARD,
+        label: form.target ? `Everything in ${form.target}` : 'Everything (no guard)',
+      },
+      ...guardNames.map((name) => ({ value: name, label: name })),
+    ],
+    [guardNames, form.target]
+  );
 
   const handleCreate = async () => {
     const name = form.name.trim();
@@ -230,6 +295,9 @@ function CreateAgentForm({ onClose }: { onClose: () => void }) {
       }
     >
       <VStack className="gap-5 items-stretch p-5">
+        {/* Default view = the three decisions that matter: name, database, and
+            what the agent is allowed to see. Everything else is deferred to
+            Advanced below. */}
         <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
           <VStack className="gap-1.5 items-start">
             <FieldLabel>Name</FieldLabel>
@@ -247,98 +315,111 @@ function CreateAgentForm({ onClose }: { onClose: () => void }) {
             </Show>
           </VStack>
           <VStack className="gap-1.5 items-start">
-            <FieldLabel>Target</FieldLabel>
+            <FieldLabel>Database</FieldLabel>
             <BaseInputSelect
               name="agent-target"
               options={targetOptions}
               value={form.target}
               onValueChange={(value) => update('target', value)}
-              placeholder="Select a target"
+              placeholder="Select a database"
               disabled={targetOptions.length === 0}
             />
           </VStack>
         </div>
 
-        <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
-          <VStack className="gap-1.5 items-start">
-            <FieldLabel>Guard (optional)</FieldLabel>
+        <VStack className="gap-1.5 items-start">
+          <FieldLabel>Can see</FieldLabel>
+          <div className="w-full">
             <BaseInputSelect
               name="agent-guard"
               options={guardOptions}
               value={form.guard}
               onValueChange={(value) => update('guard', value)}
             />
-          </VStack>
-          <VStack className="gap-1.5 items-start">
-            <FieldLabel>Description</FieldLabel>
-            <BaseInputText
-              name="agent-description"
-              value={form.description}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                update('description', e.target.value)
-              }
-              placeholder="Answers questions about orders and customers"
-            />
-          </VStack>
-        </div>
+          </div>
+          <Text level="caption" className="text-content-layout-3">
+            Bind a guard to restrict what this agent may read.
+          </Text>
+        </VStack>
 
-        <div className="grid grid-cols-2 tablet:grid-cols-4 gap-4">
-          <VStack className="gap-1.5 items-start">
-            <FieldLabel>Max Rows</FieldLabel>
-            <BaseInputText
-              name="agent-max-rows"
-              type="number"
-              value={form.maxRows}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => update('maxRows', e.target.value)}
-              placeholder="1000"
-            />
-          </VStack>
-          <VStack className="gap-1.5 items-start">
-            <FieldLabel>Timeout (s)</FieldLabel>
-            <BaseInputText
-              name="agent-timeout"
-              type="number"
-              value={form.timeoutSeconds}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                update('timeoutSeconds', e.target.value)
-              }
-              placeholder="30"
-            />
-          </VStack>
-        </div>
+        <Disclosure
+          title="Advanced"
+          summary="description, row & time limits, table/column overrides"
+        >
+          <VStack className="gap-5 items-stretch">
+            <VStack className="gap-1.5 items-start">
+              <FieldLabel>Description</FieldLabel>
+              <BaseInputText
+                name="agent-description"
+                value={form.description}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  update('description', e.target.value)
+                }
+                placeholder="Answers questions about orders and customers"
+              />
+            </VStack>
 
-        <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
-          <VStack className="gap-1.5 items-start">
-            <FieldLabel>Denied Columns (optional)</FieldLabel>
-            <BaseInputTextarea
-              name="agent-denied-columns"
-              value={form.deniedColumns}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                update('deniedColumns', e.target.value)
-              }
-              placeholder={'users.password\nusers.ssn'}
-              rows={3}
-            />
-            <Text level="caption" className="text-content-layout-3">
-              One per line (or comma-separated).
-            </Text>
+            <div className="grid grid-cols-2 tablet:grid-cols-4 gap-4">
+              <VStack className="gap-1.5 items-start">
+                <FieldLabel>Max Rows</FieldLabel>
+                <BaseInputText
+                  name="agent-max-rows"
+                  type="number"
+                  value={form.maxRows}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    update('maxRows', e.target.value)
+                  }
+                  placeholder="1000"
+                />
+              </VStack>
+              <VStack className="gap-1.5 items-start">
+                <FieldLabel>Timeout (s)</FieldLabel>
+                <BaseInputText
+                  name="agent-timeout"
+                  type="number"
+                  value={form.timeoutSeconds}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    update('timeoutSeconds', e.target.value)
+                  }
+                  placeholder="30"
+                />
+              </VStack>
+            </div>
+
+            <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
+              <VStack className="gap-1.5 items-start">
+                <FieldLabel>Denied Columns (optional)</FieldLabel>
+                <BaseInputTextarea
+                  name="agent-denied-columns"
+                  value={form.deniedColumns}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    update('deniedColumns', e.target.value)
+                  }
+                  placeholder={'users.password\nusers.ssn'}
+                  rows={3}
+                />
+                <Text level="caption" className="text-content-layout-3">
+                  One per line (or comma-separated).
+                </Text>
+              </VStack>
+              <VStack className="gap-1.5 items-start">
+                <FieldLabel>Allowed Tables (optional)</FieldLabel>
+                <BaseInputTextarea
+                  name="agent-allowed-tables"
+                  value={form.allowedTables}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    update('allowedTables', e.target.value)
+                  }
+                  placeholder={'orders\nline_items'}
+                  rows={3}
+                />
+                <Text level="caption" className="text-content-layout-3">
+                  Empty means all tables are allowed.
+                </Text>
+              </VStack>
+            </div>
           </VStack>
-          <VStack className="gap-1.5 items-start">
-            <FieldLabel>Allowed Tables (optional)</FieldLabel>
-            <BaseInputTextarea
-              name="agent-allowed-tables"
-              value={form.allowedTables}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                update('allowedTables', e.target.value)
-              }
-              placeholder={'orders\nline_items'}
-              rows={3}
-            />
-            <Text level="caption" className="text-content-layout-3">
-              Empty means all tables are allowed.
-            </Text>
-          </VStack>
-        </div>
+        </Disclosure>
       </VStack>
 
       <div className="px-5 py-4 border-t border-border-layout-1 bg-surface-layout-2/30">
@@ -376,10 +457,13 @@ function AgentListRow({
   deleting: boolean;
 }) {
   // A native <button> may not wrap the delete Button (nested buttons are
-  // invalid HTML), so the row is a clickable div with a keyboard handler.
+  // invalid HTML), so the row is a clickable div. It is a listbox option
+  // (role="option" + aria-selected, valid where role="button" was not) with a
+  // keyboard handler. Selected = three cues: left accent bar, a one-step-lighter
+  // raised surface, and elevation — never colour alone.
   return (
     <div
-      role="button"
+      role="option"
       tabIndex={0}
       aria-selected={selected}
       onClick={onSelect}
@@ -389,24 +473,26 @@ function AgentListRow({
           onSelect();
         }
       }}
-      className={`px-5 py-3 transition-colors cursor-pointer outline-none ${
+      className={`group relative px-5 py-3 border-l-2 transition-[background,box-shadow,border-color] cursor-pointer outline-none focus-visible:shadow-focus ${
         selected
-          ? 'bg-surface-primary-soft hover:bg-surface-primary-soft-hover'
-          : 'hover:bg-surface-layout-2/50'
+          ? 'border-l-border-primary-solid bg-surface-raised shadow-elevation-1'
+          : 'border-l-transparent hover:bg-surface-layout-2/50'
       }`}
     >
       <VStack className="gap-1 items-stretch min-w-0">
-        {/* Line 1: name + delete button */}
+        {/* Line 1: name + delete affordance (tertiary — revealed on hover,
+            keyboard focus, or when the row is selected). */}
         <HStack className="justify-between items-start gap-2">
-          <Text
-            level="label-medium"
-            className={`truncate min-w-0 ${
-              selected ? 'text-content-primary-soft' : 'text-content-layout-1'
-            }`}
-          >
+          <Text level="label-medium" className="truncate min-w-0 text-content-layout-1">
             {agent.name}
           </Text>
-          <div className="shrink-0 -mt-1 -mr-1.5">
+          <div
+            className={`shrink-0 -mt-1 -mr-1.5 transition-opacity ${
+              selected || deleting
+                ? 'opacity-100'
+                : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+            }`}
+          >
             <Button
               label=""
               aria-label={`Delete agent ${agent.name}`}
@@ -699,6 +785,7 @@ function TranscriptRow({ item, target }: { item: TranscriptItem; target: string 
 
 function ChatPanel({ agent }: { agent: AgentSummary | null }) {
   const chat = useAgentChat(agent?.name ?? null);
+  const navigate = useNavigate();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -725,7 +812,11 @@ function ChatPanel({ agent }: { agent: AgentSummary | null }) {
 
   if (!agent) {
     return (
-      <SectionCard icon="message-multiple" title="Chat" className="min-h-[520px]">
+      <SectionCard
+        icon="message-multiple"
+        title="Chat"
+        className="min-h-[520px] shadow-elevation-1"
+      >
         <div className="p-12">
           <VStack className="gap-3 items-center">
             <Icon
@@ -733,7 +824,7 @@ function ChatPanel({ agent }: { agent: AgentSummary | null }) {
               label="Select an agent"
               className="w-10 h-10 text-content-layout-3"
             />
-            <Text level="body-medium" className="text-content-layout-3">
+            <Text level="body-medium" className="text-content-layout-2">
               Select an agent to start a conversation.
             </Text>
           </VStack>
@@ -746,7 +837,7 @@ function ChatPanel({ agent }: { agent: AgentSummary | null }) {
     <SectionCard
       icon="message-multiple"
       title={`Chat: ${agent.name}`}
-      className="flex flex-col"
+      className="flex flex-col shadow-elevation-1"
       action={
         <HStack className="gap-2 items-center">
           <Show when={chat.messageCount > 0}>
@@ -785,7 +876,7 @@ function ChatPanel({ agent }: { agent: AgentSummary | null }) {
                       label="Start chatting"
                       className="w-8 h-8 text-content-layout-3"
                     />
-                    <Text level="body-small" className="text-content-layout-3">
+                    <Text level="body-small" className="text-content-layout-2">
                       Ask a question about {agent.target}. History is kept in memory and clears when the
                       server restarts.
                     </Text>
@@ -815,6 +906,35 @@ function ChatPanel({ agent }: { agent: AgentSummary | null }) {
         </ScrollArea.Root>
 
         <div className="px-5 py-4 border-t border-border-layout-1 bg-surface-layout-2/30">
+          {/* Upfront precondition: chatting runs an LLM, so surface the
+              requirement before the user types and submits, not after it fails.
+              Shown until the first message; a neutral info notice (state can't
+              be probed here without an extra request). */}
+          <Show when={chat.transcript.length === 0}>
+            <InlineNotice
+              errorClass="valid-negative"
+              accent="info"
+              icon="key"
+              title="Chatting uses AI"
+              message="Needs an Anthropic key or an active trial."
+              action={{
+                label: 'Configure',
+                icon: 'arrow-right',
+                onClick: () =>
+                  navigate({
+                    to: '/configure',
+                    search: {
+                      section: 'ai',
+                      returnTo:
+                        typeof window !== 'undefined'
+                          ? `${window.location.pathname}${window.location.search}`
+                          : undefined,
+                    },
+                  }),
+              }}
+              className="mb-3"
+            />
+          </Show>
           <HStack className="gap-2 items-end">
             <div className="flex-1">
               <BaseInputTextarea
@@ -847,6 +967,52 @@ function ChatPanel({ agent }: { agent: AgentSummary | null }) {
 }
 
 // ---------------------------------------------------------------------------
+// Empty state
+// ---------------------------------------------------------------------------
+
+// The empty account's first impression: an illustrated card with one emphasized
+// CTA in the primary slot. The list, chat panel and composer are not rendered
+// until an agent exists, so no inert UI competes with "create your first agent".
+function EmptyAgentsState({ onCreate }: { onCreate: () => void }) {
+  return (
+    <Card className="w-full">
+      <Card.Content className="py-16">
+        <VStack className="gap-6 items-center text-center">
+          <m.div
+            initial={{ scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            className="w-20 h-20 rounded-3xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center shadow-elevation-1"
+          >
+            <Icon
+              name="message-multiple"
+              label=""
+              aria-hidden="true"
+              className="w-10 h-10 text-content-primary-soft"
+            />
+          </m.div>
+          <VStack className="gap-2 items-center">
+            <Text as="h2" level="headline-4" className="text-content-layout-1">
+              No agents yet
+            </Text>
+            <Text level="body-medium" className="text-content-layout-2 max-w-sm">
+              Create a read-only assistant for a database, then ask it questions in plain English.
+            </Text>
+          </VStack>
+          <Button
+            label="Create your first agent"
+            icon="add"
+            iconPosition="left"
+            variant="primary"
+            onClick={onCreate}
+          />
+        </VStack>
+      </Card.Content>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -857,9 +1023,22 @@ function AgentsPage() {
   const agents = useMemo(() => agentsQuery.data?.agents ?? [], [agentsQuery.data]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // Kept true from the moment the create panel opens until its exit animation
+  // finishes, so the header CTA / empty-state re-appear only after the panel has
+  // fully collapsed — no doubled-CTA flash mid-animation.
+  const [ctaSuppressed, setCtaSuppressed] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   const selectedAgent = agents.find((a) => a.name === selectedName) ?? null;
+
+  // Loaded, no error, zero agents → the illustrated empty state owns the page.
+  const showEmptyState =
+    !agentsQuery.isLoading && !agentsQuery.isError && agents.length === 0;
+
+  const openForm = () => {
+    setCreating(true);
+    setCtaSuppressed(true);
+  };
 
   const handleDelete = async (name: string) => {
     setPendingDelete(name);
@@ -889,7 +1068,7 @@ function AgentsPage() {
       >
         <HStack className="justify-between items-start">
           <HStack className="gap-4 items-center">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-rising-soft flex items-center justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
               <Icon
                 name="message-multiple"
                 label="Agents"
@@ -900,25 +1079,27 @@ function AgentsPage() {
               <Text as="h1" level="headline-3" className="text-content-layout-1">
                 Agents
               </Text>
-              <Text level="body-small" className="text-content-layout-3">
-                Scoped, read-only assistants that answer questions about a target in plain English.
+              <Text level="body-small" className="text-content-layout-2">
+                Ask your database questions in plain English — read-only.
               </Text>
             </VStack>
           </HStack>
-          <Show when={!creating}>
+          {/* Hidden in the empty state (the empty-state CTA is the single primary
+              action there) and while the create panel is open or closing. */}
+          <Show when={!ctaSuppressed && !showEmptyState}>
             <Button
-              label="New Agent"
+              label="New agent"
               icon="add"
               iconPosition="left"
               variant="primary"
-              onClick={() => setCreating(true)}
+              onClick={openForm}
             />
           </Show>
         </HStack>
       </m.div>
 
       {/* Create panel */}
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={() => setCtaSuppressed(false)}>
         {creating && (
           <m.div
             initial={{ opacity: 0, height: 0 }}
@@ -931,61 +1112,45 @@ function AgentsPage() {
         )}
       </AnimatePresence>
 
-      {/* Two-column layout: agent list + chat */}
-      <div className="grid grid-cols-1 laptop:grid-cols-[minmax(280px,340px)_1fr] gap-6 items-start">
-        <SectionCard icon="user-group" title={`Agents (${agents.length})`}>
-          <Show
-            when={!agentsQuery.isLoading}
-            fallback={
-              <div className="p-5">
-                <HStack className="gap-2 items-center">
-                  <Spinner size="base" />
-                  <Text level="body-small" className="text-content-layout-3">
-                    Loading agents…
-                  </Text>
-                </HStack>
-              </div>
-            }
-          >
+      {showEmptyState ? (
+        // Suppressed while the create panel is present/closing so the empty
+        // state doesn't flash back in over the collapsing form.
+        ctaSuppressed ? null : (
+          <EmptyAgentsState onCreate={openForm} />
+        )
+      ) : (
+        // Two-column layout: agent list (secondary) + chat (primary).
+        <div className="grid grid-cols-1 laptop:grid-cols-[minmax(280px,340px)_1fr] gap-6 items-start">
+          <SectionCard icon="user-group" title={`Agents (${agents.length})`}>
             <Show
-              when={!agentsQuery.isError}
+              when={!agentsQuery.isLoading}
               fallback={
                 <div className="p-5">
-                  <Text level="body-small" className="text-content-negative-soft">
-                    Failed to load agents:{' '}
-                    {agentsQuery.error instanceof Error ? agentsQuery.error.message : ''}
-                  </Text>
+                  <HStack className="gap-2 items-center">
+                    <Spinner size="base" />
+                    <Text level="body-small" className="text-content-layout-3">
+                      Loading agents…
+                    </Text>
+                  </HStack>
                 </div>
               }
             >
               <Show
-                when={agents.length > 0}
+                when={!agentsQuery.isError}
                 fallback={
-                  <div className="p-8">
-                    <VStack className="gap-3 items-center">
-                      <Icon
-                        name="message-multiple"
-                        label="No agents"
-                        className="w-8 h-8 text-content-layout-3"
-                      />
-                      <Text level="body-small" className="text-content-layout-3">
-                        No agents yet. Create one to start chatting.
-                      </Text>
-                      <Show when={!creating}>
-                        <Button
-                          label="New Agent"
-                          icon="add"
-                          iconPosition="left"
-                          variant="primary"
-                          size="small"
-                          onClick={() => setCreating(true)}
-                        />
-                      </Show>
-                    </VStack>
+                  <div className="p-5">
+                    <Text level="body-small" className="text-content-negative-soft">
+                      Failed to load agents:{' '}
+                      {agentsQuery.error instanceof Error ? agentsQuery.error.message : ''}
+                    </Text>
                   </div>
                 }
               >
-                <div className="divide-y divide-border-layout-1">
+                <div
+                  role="listbox"
+                  aria-label="Your agents"
+                  className="divide-y divide-border-layout-1"
+                >
                   {agents.map((agent) => (
                     <AgentListRow
                       key={agent.name}
@@ -999,12 +1164,12 @@ function AgentsPage() {
                 </div>
               </Show>
             </Show>
-          </Show>
-        </SectionCard>
+          </SectionCard>
 
-        {/* Keyed by agent so switching agents starts a fresh transcript and session. */}
-        <ChatPanel key={selectedAgent?.name ?? 'none'} agent={selectedAgent} />
-      </div>
+          {/* Keyed by agent so switching agents starts a fresh transcript and session. */}
+          <ChatPanel key={selectedAgent?.name ?? 'none'} agent={selectedAgent} />
+        </div>
+      )}
     </div>
   );
 }

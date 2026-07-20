@@ -87,7 +87,7 @@ function DevSettingsPage() {
         transition={{ duration: 0.3 }}
       >
         <HStack className="gap-4 items-center">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-warning-soft flex items-center justify-center">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
             <Icon name="test-tube" label="Developer Settings" className="w-6 h-6 text-content-primary-soft" />
           </div>
           <VStack className="gap-1 items-start">

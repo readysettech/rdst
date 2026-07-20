@@ -141,7 +141,8 @@ test('initializes, explores, refreshes, and deletes a semantic layer', async ({
   ).toBeVisible()
   await expect(page.getByText('PII', { exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Refresh' }).click()
+  await page.getByRole('button', { name: 'Manage semantic layer' }).click()
+  await page.getByRole('menuitem', { name: 'Refresh structure' }).click()
   await expect(
     page.getByText('Schema refreshed', { exact: true })
   ).toBeVisible()
@@ -150,8 +151,9 @@ test('initializes, explores, refreshes, and deletes a semantic layer', async ({
   ).toBeVisible()
   expect(refreshRequests).toEqual([{ target: 'e2e-guard' }])
 
-  await page.getByRole('button', { name: 'Delete Semantic Layer' }).click()
-  await page.getByRole('button', { name: 'Yes, Delete' }).click()
+  await page.getByRole('button', { name: 'Manage semantic layer' }).click()
+  await page.getByRole('menuitem', { name: 'Delete semantic layer' }).click()
+  await page.getByRole('button', { name: 'Delete semantic layer' }).click()
   await expect(
     page.getByText('Initialize Semantic Layer', { exact: true })
   ).toBeVisible()
