@@ -244,16 +244,13 @@ test('shows a streamed failure and can retry from query history', async ({
   // query" — target the real <button> element (the card is a div) to dodge both
   // the doubled name and the strict-mode collision with the card.
   await page.locator('button', { hasText: 'Use query' }).click()
+  // "Use query" reloads the saved query with its captured parameter values
+  // applied (rdst-e7s.28), so :p1 comes back pre-filled with the 42 it last ran
+  // with — re-analyzing prompts for no parameters and runs directly.
   await expect(page.locator('.cm-content[contenteditable="true"]')).toHaveText(
-    /SELECT id, total FROM orders WHERE customer_id = :p1 ORDER BY created_at DESC/
+    /SELECT id, total FROM orders WHERE customer_id = 42 ORDER BY created_at DESC/
   )
   await page.getByRole('button', { name: 'Analyze Query' }).click()
-  const parameters = page.getByRole('dialog')
-  await expect(
-    parameters.getByRole('heading', { name: 'Enter Parameter Values' })
-  ).toBeVisible()
-  await parameters.getByRole('textbox', { name: 'Enter value' }).fill('42')
-  await parameters.getByRole('button', { name: /Analyze Query/ }).click()
 
   await expect(
     page.getByText('Performance Summary', { exact: true })

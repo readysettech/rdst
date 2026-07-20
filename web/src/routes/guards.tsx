@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
+import { ExperimentalBanner } from '../components/ExperimentalBanner';
 import { cn } from '@rs/tailwind-base';
 import { Button } from '@rs/ui-new/button';
 import { Card } from '@rs/ui-new/card';
@@ -1460,6 +1461,7 @@ function GuardsPage() {
 
   return (
     <div className="space-y-6 w-full">
+      <ExperimentalBanner name="Guards" />
       {/* Hero */}
       <m.div
         className="space-y-4"

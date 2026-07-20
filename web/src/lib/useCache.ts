@@ -48,6 +48,22 @@ export async function fetchCacheList(target: string): Promise<CacheListResponse>
   return data;
 }
 
+/**
+ * Registry hashes served by the live cache list. The backend correlates each
+ * cache to its registry entry by ReadySet's canonical query_id and reports the
+ * registry hash, so cached-ness is matched by hash. Shared by useCacheAction
+ * (per-row "Cached" state) and the Home cached count.
+ */
+export function cachedRegistryHashes(
+  cacheList: CacheListResponse | undefined,
+): Set<string> {
+  const set = new Set<string>();
+  for (const cache of cacheList?.caches ?? []) {
+    if (cache.registry_hash) set.add(cache.registry_hash);
+  }
+  return set;
+}
+
 // Returns the raw union. Callers narrow via `'error' in result` to tell a
 // transient backend failure (CacheErrorResponse) apart from a structured
 // "unsupported query" response (CacheAddResponse with supported: false).

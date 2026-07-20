@@ -145,3 +145,27 @@ export function resolveInitialValue(
   const value = storedParams[backendKey]
   return value != null ? String(value) : ''
 }
+
+/**
+ * Substitute captured parameter values into a query, best-effort: every
+ * placeholder with a stored value is filled; any placeholder without one is
+ * left as-is so a downstream parameter dialog can still collect it. Returns the
+ * SQL unchanged when it has no parameters. Used when handing a saved query to
+ * Analyze so the values that ran it are not lost.
+ */
+export function fillCapturedParams(
+  sql: string,
+  storedParams: Record<string, unknown> | undefined
+): string {
+  const params = detectParameters(sql)
+  if (params.length === 0) return sql
+  const values: Record<string, string> = {}
+  const toFill = params.filter((p) => {
+    const value = resolveInitialValue(p, storedParams)
+    if (value === '') return false
+    values[p.placeholder] = value
+    return true
+  })
+  if (toFill.length === 0) return sql
+  return substituteParameters(sql, toFill, values)
+}

@@ -21,8 +21,15 @@ vi.mock('../components', () => ({
       <span data-testid="editor-value">{value}</span>
     </div>
   ),
-  QueryHistory: ({ onSelect }: { onSelect: (sql: string) => void }) => (
-    <button type="button" onClick={() => onSelect('SELECT picked FROM t')}>
+  QueryHistory: ({
+    onSelect,
+  }: {
+    onSelect: (entry: { sql: string; most_recent_params: Record<string, unknown> }) => void
+  }) => (
+    <button
+      type="button"
+      onClick={() => onSelect({ sql: 'SELECT picked FROM t', most_recent_params: {} })}
+    >
       pick recent
     </button>
   ),

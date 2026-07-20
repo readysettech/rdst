@@ -4,14 +4,20 @@ import { fetchQueryRegistry, addQueryToRegistry, removeQueryFromRegistry, update
 
 export type { QueryRegistryEntry };
 
-export function useQueryRegistry(initialLimit = 100) {
+export function useQueryRegistry(initialLimit = 100, target?: string | null) {
   const queryClient = useQueryClient();
   const [limit, setLimit] = useState(initialLimit);
   const [offset, setOffset] = useState(0);
 
+  // Scope the list to the selected database when a target is given, and reset
+  // pagination when it changes so a stale offset never spans a smaller list.
+  useEffect(() => {
+    setOffset(0);
+  }, [target]);
+
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['queryRegistry', limit, offset],
-    queryFn: () => fetchQueryRegistry(limit, offset),
+    queryKey: ['queryRegistry', limit, offset, target ?? null],
+    queryFn: () => fetchQueryRegistry(limit, offset, target),
     staleTime: 30 * 1000,
     placeholderData: keepPreviousData,
   });

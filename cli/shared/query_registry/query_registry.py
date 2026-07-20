@@ -610,6 +610,14 @@ class QueryEntry:
     last_cache_target: str = ""           # cache target where readyset_query_id was last observed
     readyset_last_observed_at: str = ""   # ISO 8601 timestamp
 
+    @property
+    def home_target(self) -> str:
+        """The database this query belongs to: where it was first asked
+        (immutable ask_target) or, failing that, last run. Per-database lists
+        scope by this rather than the mutable last_target, which leaked queries
+        across databases (rdst-e7s.26, rdst-e7s.31)."""
+        return self.ask_target or self.last_target
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for TOML serialization."""
         return asdict(self)

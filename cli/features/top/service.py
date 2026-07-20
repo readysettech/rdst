@@ -363,6 +363,10 @@ class TopService:
                                 {
                                     "query_hash": registry_hash,
                                     "query_text": q.query_text,
+                                    # Metrics for registry impact ranking (already ms).
+                                    "avg_duration_ms": q.avg_duration,
+                                    "observation_count": q.observation_count,
+                                    "max_duration_ms": q.max_duration_seen,
                                 },
                                 target_name,
                                 "top",
@@ -848,6 +852,10 @@ class TopService:
                     "avg_time": f"{float(row.get('avg_time', 0)):.3f}s",
                     "pct_load": f"{float(row.get('pct_load', 0)):.1f}%",
                     "qps": float(row.get("qps_value", 0.0)),
+                    # Numeric metrics for registry impact ranking (rdst-41p.2).
+                    # avg_time is normalized to seconds above; store as ms.
+                    "avg_duration_ms": float(row.get("avg_time", 0)) * 1000,
+                    "observation_count": int(row.get("freq", 0)),
                 }
             )
 
@@ -944,10 +952,16 @@ class TopService:
             from shared.query_registry import QueryRegistry
 
             registry = QueryRegistry()
+            # Persist the runtime metrics so the registry can rank queries by
+            # impact (avg latency x observations). Without these the Queries
+            # workbench has nothing to sort on (rdst-41p.2).
             query_hash, is_new = registry.add_query(
                 sql=query_data["query_text"],
                 source=source,
                 target=target_name,
+                avg_duration_ms=float(query_data.get("avg_duration_ms", 0.0) or 0.0),
+                observation_count=int(query_data.get("observation_count", 0) or 0),
+                max_duration_ms=float(query_data.get("max_duration_ms", 0.0) or 0.0),
             )
             return is_new
         except ValueError as e:

@@ -133,7 +133,7 @@ test('asks a question and renders the answer first with the post-validation SQL 
 
   // The silent auto-save is surfaced with the returned registry label.
   await expect(
-    page.getByText('Saved to Saved Queries as top customers')
+    page.getByText('Saved to Queries as top customers')
   ).toBeVisible()
 
   // Only "Ask another" clears the input.

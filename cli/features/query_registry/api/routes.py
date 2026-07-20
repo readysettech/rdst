@@ -32,6 +32,13 @@ class QueryRegistryEntry(BaseModel):
     observation_count: int = 0
     original_sql: str = ""
     question: str = ""
+    # Readyset cache identity, populated once a query has been cache-checked.
+    # Empty for queries never touched by caching (the Queries workbench reads
+    # these to show per-query cacheability/cache status without SQL-text
+    # matching against SHOW CACHES). rdst-41p.1.
+    readyset_query_id: str = ""
+    readyset_supported: str = ""
+    last_cache_target: str = ""
 
 
 class QueryRegistryResponse(BaseModel):
@@ -60,9 +67,9 @@ class RemoveQueryResponse(BaseModel):
 
 @router.get("/query-registry")
 async def get_query_registry(
-    limit: Optional[int] = 200, offset: int = 0
+    limit: Optional[int] = 200, offset: int = 0, target: Optional[str] = None
 ) -> QueryRegistryResponse:
-    """Get queries from the shared query registry."""
+    """Get queries from the shared query registry, optionally scoped to a target."""
     try:
         from shared.query_registry import QueryRegistry
 
@@ -70,6 +77,11 @@ async def get_query_registry(
         registry.load()
 
         all_queries = registry.list_queries(limit=None)
+        if target:
+            # Scope to the selected database by the query's home target. Without
+            # this the list leaks cross-dialect queries, e.g. a Postgres query
+            # shown and cached against a MySQL target.
+            all_queries = [q for q in all_queries if q.home_target == target]
         total = len(all_queries)
 
         if offset < 0:
@@ -93,7 +105,10 @@ async def get_query_registry(
                         hash=q.hash,
                         tag=q.tag,
                         last_analyzed=q.last_analyzed,
-                        target=q.last_target,
+                        # Clients treat target as the DB a query belongs to; the
+                        # mutable last_target alone leaked queries into the wrong
+                        # per-DB list (rdst-e7s.31).
+                        target=q.home_target,
                         frequency=q.frequency,
                         source=q.source,
                         most_recent_params=q.most_recent_params,
@@ -103,6 +118,9 @@ async def get_query_registry(
                         observation_count=q.observation_count,
                         original_sql=q.original_sql,
                         question=q.question,
+                        readyset_query_id=q.readyset_query_id,
+                        readyset_supported=q.readyset_supported,
+                        last_cache_target=q.last_cache_target,
                     )
                 )
             except Exception:

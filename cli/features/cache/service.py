@@ -391,13 +391,9 @@ class CacheService:
                 self._build_registry_maps
             )
             for cache in caches:
-                qid = cache.get("query_id", "") or cache.get("id", "")
-                query_text = cache.get("query", "")
-                registry_hash = (
-                    registry_map_by_qid.get(qid)
-                    or self._lookup_registry_hash(query_text, registry_map_by_sql)
+                cache["registry_hash"] = self._correlate_registry_hash(
+                    cache, registry_map_by_qid, registry_map_by_sql
                 )
-                cache["registry_hash"] = registry_hash or ""
 
             yield CacheListEvent(
                 type="cache_list", success=True, caches=caches, count=len(caches),
@@ -447,6 +443,29 @@ class CacheService:
             return registry_map.get(key)
         except Exception:
             return None
+
+    @staticmethod
+    def _correlate_registry_hash(
+        cache: Dict[str, str],
+        by_qid: Dict[str, str],
+        by_sql: Dict[str, str],
+    ) -> str:
+        """Map a parsed cache to its registry hash.
+
+        Matches on ReadySet's canonical query_id first (`cache_id`, the
+        `q_<hash>` from SHOW CACHES), which is exact even when the cached
+        query's parameters are reordered (`:p2 ... :p1` becomes `$1 ... $2`).
+        Falls back to normalized-SQL matching only for caches with no stored
+        query_id; that fallback maps `$N -> :pN` by number, so it rescues
+        literal-SQL orphans but not parameterized ones with reordered
+        placeholders. Returns "" when nothing correlates.
+        """
+        qid = cache.get("cache_id", "")
+        return (
+            by_qid.get(qid)
+            or CacheService._lookup_registry_hash(cache.get("query", ""), by_sql)
+            or ""
+        )
 
     # ------------------------------------------------------------------
     # Add cache

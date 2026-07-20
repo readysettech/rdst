@@ -442,7 +442,7 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
                 <HStack className="gap-2 items-center">
                   <Icon name="tick-double" label="Saved" className="w-4 h-4 text-content-positive-soft shrink-0" />
                   <Text level="caption" className="text-content-layout-3">
-                    Saved to Saved Queries as{" "}
+                    Saved to Queries as{" "}
                     <span className="font-medium text-content-layout-2">{savedTag}</span>
                   </Text>
                   <button

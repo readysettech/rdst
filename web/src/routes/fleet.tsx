@@ -23,6 +23,7 @@ import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
+import { ExperimentalBanner } from '../components/ExperimentalBanner'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PathPicker } from '../components/PathPicker'
 import { HandRaiser } from '../components/HandRaiser'
@@ -1284,6 +1285,7 @@ function FleetPage() {
 
   return (
     <div className="space-y-6 w-full">
+      <ExperimentalBanner name="Fleet" />
       {/* Region A — Page head: name = heading, secondary action on the right */}
       <HStack className="justify-between items-center">
         <Text as="h1" level="headline-3" className="text-content-layout-1">

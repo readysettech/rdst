@@ -1,43 +1,25 @@
-// Cache page component — moved out of the route config into this route-ignored
-// sibling (TanStack skips `-`-prefixed files) so the code-splitter can relocate
-// its QueryCard → SQLDisplay/SQLInput imports (the CodeMirror SQL-editor stack)
-// out of the eager entry chunk. Referencing an exported page as the route
-// `component:` pins it (and its transitive CodeMirror imports) into the eager
-// entry; the non-exported wrapper in `cache.tsx` owns the `Route` (incl.
-// `validateSearch`) and feeds the `?query=` param in as the `pendingQuery` prop,
-// and the tests import `CachePage` from here. [FIX-1 / Defect D-1]
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { CopyButton } from '@rs/ui-new/copy-button'
 import { Dropdown } from '@rs/ui-new/dropdown'
 import { Icon } from '@rs/ui-new/icon'
-import {
-  Modal,
-  ModalContent,
-  ModalContentContainer,
-  ModalTitle,
-} from '@rs/ui-new/modal'
 import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { Scrollable } from '@rs/ui-new/scrollable'
 import { Show } from '@rs/ui-new/show'
 import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { toast } from '@rs/ui-new/use-toast'
+import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { TargetLockNotice } from '../components'
-import { HandRaiser } from '../components/HandRaiser'
-import { QueryCard } from '../components/QueryCard'
-import { SQLInput } from '../components/SQLInput'
-import { hasParameters, ParameterDialog } from '../components/top'
+import { SQLDisplay } from '../components/SQLDisplay'
 import { useTarget } from '../hooks/useTarget'
-import { formatMeta, formatMs } from '../lib/formatters'
 import {
-  addCacheQuery,
   cacheLifecycle,
   deleteCacheQuery,
   dropAllCacheQueries,
@@ -45,14 +27,11 @@ import {
   fetchCacheStatus,
   removeCacheTarget,
   useCacheDeploy,
-  useCacheRun,
 } from '../lib/useCache'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 import type {
-  CacheAddResponse,
   CacheEntry,
   CacheLifecycleOperation,
-  CacheRunResult,
 } from '../types/cache'
 
 // ---------------------------------------------------------------------------
@@ -352,9 +331,7 @@ function EndpointCard({
                                 <Dropdown.Item
                                   leftIcon="database-settings"
                                   label="Redeploy"
-                                  disabled={
-                                    isRedeploying || !!pendingLifecycleOp
-                                  }
+                                  disabled={isRedeploying || !!pendingLifecycleOp}
                                   onClick={onRedeploy}
                                 />
                               )}
@@ -383,323 +360,28 @@ function EndpointCard({
   )
 }
 
-/** Visual latency bar — width proportional to value relative to max. */
-function LatencyBar({
-  label,
-  value,
-  maxValue,
-  variant,
-  delay = 0,
-}: {
-  label: string
-  value: number
-  maxValue: number
-  variant: 'origin' | 'cache-win' | 'cache-lose'
-  delay?: number
-}) {
-  const pct = maxValue > 0 ? Math.max((value / maxValue) * 100, 2) : 2
-  const barColor =
-    variant === 'cache-win'
-      ? 'bg-surface-positive-solid'
-      : variant === 'origin'
-        ? 'bg-content-layout-3/40'
-        : 'bg-surface-warning-solid/70'
-  const textColor =
-    variant === 'cache-win'
-      ? 'text-content-positive-soft'
-      : 'text-content-layout-1'
-
-  return (
-    <div className="flex items-center gap-3">
-      <Text
-        level="caption"
-        className="text-content-layout-3 w-8 text-right shrink-0"
-      >
-        {label}
-      </Text>
-      <div className="flex-1 h-6 bg-surface-layout-2/50 rounded-md overflow-hidden relative">
-        <m.div
-          className={`h-full rounded-md ${barColor}`}
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.6, delay, ease: [0.22, 1, 0.36, 1] }}
-        />
-      </div>
-      <Text
-        level="mono-small"
-        className={`w-16 text-right shrink-0 tabular-nums ${textColor}`}
-      >
-        {formatMs(value)}
-      </Text>
-    </div>
-  )
-}
-
-function ComparisonResult({
-  result,
-  onDismiss,
-}: {
-  result: CacheRunResult
-  onDismiss: () => void
-}) {
-  const isWinner = result.winner === 'readyset'
-  const maxLatency = Math.max(
-    result.origin_stats.mean,
-    result.origin_stats.p50,
-    result.origin_stats.p95,
-    result.cache_stats.mean,
-    result.cache_stats.p50,
-    result.cache_stats.p95
-  )
-  const speedupDisplay = isWinner
-    ? `${result.speedup_mean.toFixed(1)}x`
-    : `${Math.abs(result.improvement_pct).toFixed(0)}%`
-
-  return (
-    <m.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-    >
-      <m.div
-        className="rounded-xl border border-border-layout-1 bg-surface-layout-1/80 overflow-hidden"
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-      >
-        {/* Header strip */}
-        <div
-          className={`px-5 py-3 flex items-center justify-between ${
-            isWinner
-              ? 'bg-surface-positive-soft/15 border-b border-border-positive-soft/30'
-              : 'bg-surface-warning-soft/10 border-b border-border-warning-soft/30'
-          }`}
-        >
-          <HStack className="gap-3 items-center">
-            {/* Speedup badge */}
-            <m.div
-              className={`flex items-center justify-center rounded-lg px-3 py-1.5 font-mono text-sm font-medium tracking-tight ${
-                isWinner
-                  ? 'bg-surface-positive-solid text-white'
-                  : 'bg-surface-warning-solid text-white'
-              }`}
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.3, delay: 0.2 }}
-            >
-              {isWinner ? (
-                <>{speedupDisplay} faster</>
-              ) : (
-                <>{speedupDisplay} slower</>
-              )}
-            </m.div>
-            <Text level="label-small" className="text-content-layout-2">
-              {isWinner
-                ? 'ReadySet cache outperforms origin'
-                : 'Origin is faster — cache may need warming'}
-            </Text>
-          </HStack>
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="p-1 rounded-md hover:bg-surface-layout-2 transition-colors text-content-layout-3 hover:text-content-layout-1 cursor-pointer"
-          >
-            <Icon name="close" label="Dismiss" className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Comparison bars */}
-        <div className="px-5 py-4 grid grid-cols-2 gap-6">
-          {/* Origin column */}
-          <div className="space-y-2">
-            <HStack className="gap-2 items-center mb-1">
-              <div className="w-2 h-2 rounded-full bg-content-layout-3/40" />
-              <Text
-                level="overline"
-                className="text-content-layout-3 uppercase tracking-widest text-[10px]"
-              >
-                Origin
-              </Text>
-            </HStack>
-            <LatencyBar
-              label="Mean"
-              value={result.origin_stats.mean}
-              maxValue={maxLatency}
-              variant="origin"
-              delay={0.1}
-            />
-            <LatencyBar
-              label="P50"
-              value={result.origin_stats.p50}
-              maxValue={maxLatency}
-              variant="origin"
-              delay={0.15}
-            />
-            <LatencyBar
-              label="P95"
-              value={result.origin_stats.p95}
-              maxValue={maxLatency}
-              variant="origin"
-              delay={0.2}
-            />
-          </div>
-
-          {/* Cache column */}
-          <div className="space-y-2">
-            <HStack className="gap-2 items-center mb-1">
-              <div
-                className={`w-2 h-2 rounded-full ${isWinner ? 'bg-surface-positive-solid' : 'bg-surface-warning-solid/70'}`}
-              />
-              <Text
-                level="overline"
-                className="text-content-layout-3 uppercase tracking-widest text-[10px]"
-              >
-                ReadySet
-              </Text>
-            </HStack>
-            <LatencyBar
-              label="Mean"
-              value={result.cache_stats.mean}
-              maxValue={maxLatency}
-              variant={isWinner ? 'cache-win' : 'cache-lose'}
-              delay={0.25}
-            />
-            <LatencyBar
-              label="P50"
-              value={result.cache_stats.p50}
-              maxValue={maxLatency}
-              variant={isWinner ? 'cache-win' : 'cache-lose'}
-              delay={0.3}
-            />
-            <LatencyBar
-              label="P95"
-              value={result.cache_stats.p95}
-              maxValue={maxLatency}
-              variant={isWinner ? 'cache-win' : 'cache-lose'}
-              delay={0.35}
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-2 border-t border-border-layout-1/50 flex items-center justify-between">
-          <Text level="caption" className="text-content-layout-3">
-            {result.iterations} iterations &middot; min{' '}
-            {formatMs(
-              Math.min(result.origin_stats.min, result.cache_stats.min)
-            )}{' '}
-            &middot; max{' '}
-            {formatMs(
-              Math.max(result.origin_stats.max, result.cache_stats.max)
-            )}
-          </Text>
-          <HStack className="gap-4">
-            {(['min', 'max', 'p99'] as const).map((stat) => (
-              <HStack key={stat} className="gap-1.5 items-center">
-                <Text
-                  level="caption"
-                  className="text-content-layout-3 uppercase text-[10px]"
-                >
-                  {stat}
-                </Text>
-                <Text
-                  level="mono-small"
-                  className="text-content-layout-2 tabular-nums text-xs"
-                >
-                  {formatMs(result.cache_stats[stat])}
-                </Text>
-              </HStack>
-            ))}
-          </HStack>
-        </div>
-      </m.div>
-    </m.div>
-  )
-}
-
 function CachedQueryRow({
   entry,
   onDelete,
-  onRun,
   isDeleting,
-  isRunning,
-  isBenchBusy,
-  runProgressMessage,
-  runResult,
-  onDismissResult,
 }: {
   entry: CacheEntry
   onDelete: (id: string) => void
-  onRun: (query: string) => void
   isDeleting: boolean
-  isRunning: boolean
-  isBenchBusy: boolean
-  runProgressMessage: string | undefined
-  runResult: CacheRunResult | undefined
-  onDismissResult: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
 
-  // /cache was the last surface still on a `<table>`; it now renders the same
-  // canonical card as every other query list (owner: "tablo görünümüne gerek
-  // kalmayacak, liste olacak"). Comfortable density = the full SQL is the row's
-  // identity; the cache name + type are the header, TTL is the spec-sheet, and
-  // Bench/Delete live in the footer action bar. [feedback-triage-2 §1.1 /cache]
-  return (
-    <m.div
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      transition={{ duration: 0.2 }}
-      className="space-y-2"
-    >
-      <QueryCard
+  if (confirming) {
+    return (
+      <m.tr
+        key={entry.cache_id}
         data-testid="cache-query-row"
         data-cache-id={entry.cache_id}
-        sql={entry.query}
-        title={
-          <Text level="mono-small" className="text-content-layout-2 truncate">
-            {entry.cache_name}
-          </Text>
-        }
-        badges={
-          <Tag
-            size="small"
-            variant="informative"
-            modifier="ghost"
-            label={entry.type}
-          />
-        }
-        // TTL folds into the single muted meta line (neutral value, §4.4).
-        meta={formatMeta([`TTL ${entry.ttl}`])}
-        actions={
-          confirming ? undefined : (
-            <>
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                icon="speedometer"
-                iconPosition="left"
-                label="Bench"
-                onClick={() => onRun(entry.query)}
-                loading={isRunning}
-                disabled={isBenchBusy}
-              />
-              <Button
-                variant="negative"
-                modifier="ghost"
-                size="small"
-                icon="trash"
-                iconPosition="icon"
-                label="Delete"
-                onClick={() => setConfirming(true)}
-              />
-            </>
-          )
-        }
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="bg-surface-negative-soft/10"
       >
-        {confirming ? (
+        <td colSpan={4} className="px-4 py-4">
           <div className="flex items-center justify-between gap-4 bg-surface-negative-soft/20 rounded-lg p-4 border border-border-negative-soft">
             <HStack className="gap-3 items-center flex-1 min-w-0">
               <Icon
@@ -739,31 +421,66 @@ function CachedQueryRow({
               />
             </HStack>
           </div>
-        ) : undefined}
-      </QueryCard>
+        </td>
+      </m.tr>
+    )
+  }
 
-      <AnimatePresence>
-        {isRunning && runProgressMessage && (
-          <m.div
-            key="progress"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="px-1"
-          >
-            <HStack className="gap-2 items-center">
-              <Spinner size="base" />
-              <Text level="caption" className="text-content-layout-3">
-                {runProgressMessage}
-              </Text>
-            </HStack>
-          </m.div>
-        )}
-        {runResult && (
-          <ComparisonResult result={runResult} onDismiss={onDismissResult} />
-        )}
-      </AnimatePresence>
-    </m.div>
+  return (
+    <m.tr
+      key={entry.cache_id}
+      data-testid="cache-query-row"
+      data-cache-id={entry.cache_id}
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      transition={{ duration: 0.2 }}
+      className="group hover:bg-surface-layout-2/50 transition-colors"
+    >
+      <td className="px-4 py-3">
+        <VStack className="gap-1 items-start">
+          <Text level="mono-small" className="text-content-layout-2">
+            {entry.cache_name}
+          </Text>
+          <Tag size="small" variant="informative" modifier="ghost" label={entry.type} />
+        </VStack>
+      </td>
+      <td className="px-4 py-3">
+        <div className="bg-surface-layout-2 rounded-lg max-w-lg">
+          <Scrollable className="max-h-24">
+            <div className="px-3 py-2">
+              <SQLDisplay sql={entry.query} wrap />
+            </div>
+          </Scrollable>
+        </div>
+      </td>
+      <td className="px-4 py-3 text-center">
+        {/* TTL is a neutral value, not info/warn: grey Tag. */}
+        <Tag size="small" variant="neutral" modifier="ghost" label={entry.ttl} />
+      </td>
+      <td className="px-4 py-3 text-right">
+        <HStack className="gap-2 justify-end items-center">
+          <Show when={!!entry.registry_hash}>
+            <Link
+              to="/query-registry"
+              search={{ hash: entry.registry_hash ?? undefined }}
+              className="text-sm text-content-primary-soft hover:underline whitespace-nowrap"
+            >
+              View in Queries
+            </Link>
+          </Show>
+          <Button
+            variant="negative"
+            modifier="ghost"
+            size="small"
+            icon="trash"
+            iconPosition="icon"
+            label="Delete"
+            onClick={() => setConfirming(true)}
+          />
+        </HStack>
+      </td>
+    </m.tr>
   )
 }
 
@@ -771,7 +488,7 @@ function CachedQueryRow({
 // Main component
 // ---------------------------------------------------------------------------
 
-export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
+export function CachePage() {
   const queryClient = useQueryClient()
   const { target } = useTarget()
   const passwordLock = useTargetPasswordLock(target)
@@ -787,86 +504,7 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
     reset: resetDeploy,
   } = useCacheDeploy()
 
-  // Run comparison hook
-  const {
-    run: runComparison,
-    state: runState,
-    progress: runProgress,
-    result: runResult,
-    error: runError,
-    reset: resetRun,
-  } = useCacheRun()
-  const [runningCacheId, setRunningCacheId] = useState<string | null>(null)
-  const [runResults, setRunResults] = useState<Record<string, CacheRunResult>>(
-    {}
-  )
-
-  // Parameter dialog state for queries that need parameter values
-  const [paramDialog, setParamDialog] = useState<{
-    cacheId: string
-    sql: string
-  } | null>(null)
-
-  // When a run completes, stash the result keyed by cache ID
-  useEffect(() => {
-    if (runState === 'complete' && runResult && runningCacheId) {
-      setRunResults((prev) => ({ ...prev, [runningCacheId]: runResult }))
-      setRunningCacheId(null)
-    } else if (runState === 'error') {
-      setRunningCacheId(null)
-    }
-  }, [runState, runResult, runningCacheId])
-
-  const executeRun = (cacheId: string, sql: string) => {
-    if (!target) return
-    setRunningCacheId(cacheId)
-    setRunResults((prev) => {
-      const next = { ...prev }
-      delete next[cacheId]
-      return next
-    })
-    resetRun()
-    runComparison({ query: sql, target, iterations: 15, warmup: 5 })
-  }
-
-  const handleRun = (cacheId: string, query: string) => {
-    if (!target) return
-    // Acting on the list supersedes the just-created hand-raiser. [FIX-5]
-    setCacheJustCreated(false)
-    if (hasParameters(query)) {
-      // Query has parameters — show dialog to collect values
-      setParamDialog({ cacheId, sql: query })
-    } else {
-      // No parameters — run directly
-      executeRun(cacheId, query)
-    }
-  }
-
-  // Add cache form state — pre-fill from search param
-  const [addQuery, setAddQuery] = useState(pendingQuery || '')
-  const [dryRunResult, setDryRunResult] = useState<CacheAddResponse | null>(
-    null
-  )
-  // Bumped after a successful cache so the CodeMirror editor fully remounts
-  // (clears its buffer/history), not just its controlled value. [QW16]
-  const [editorResetKey, setEditorResetKey] = useState(0)
   const [showDropAllConfirm, setShowDropAllConfirm] = useState(false)
-  // Add Cache is a dialog opened from the list header now, not an inline section
-  // that drifts off-screen as the list grows (owner: Caching#1). [triage §1.4]
-  const [showAddModal, setShowAddModal] = useState(false)
-  // Ref mirror of the modal's open state so the async dry-run callback reads the
-  // *current* value, not the value captured when the check fired. A dry-run that
-  // resolves after the user cancels/ESCs must not chain into a create. [FIX-3]
-  const showAddModalRef = useRef(showAddModal)
-  useEffect(() => {
-    showAddModalRef.current = showAddModal
-  }, [showAddModal])
-  // One-shot flag for the page-level "this cache is live" hand-raiser: set on a
-  // successful create, cleared when the user next acts on the list or reopens the
-  // modal, so it doesn't linger after unrelated actions or after the cache is
-  // deleted. [FIX-5]
-  const [cacheJustCreated, setCacheJustCreated] = useState(false)
-  const autoCacheTriggered = useRef(false)
 
   // Cache status
   const { data: cacheStatus, isLoading: isLoadingStatus } = useQuery({
@@ -890,56 +528,6 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
     enabled:
       !!target && !passwordLock.isLocked && cacheStatus?.deployed === true,
     staleTime: 10_000,
-  })
-
-  // Dry-run check mutation — auto-creates cache if supported
-  const checkMutation = useMutation({
-    mutationFn: async (query: string): Promise<CacheAddResponse> => {
-      const result = await addCacheQuery({
-        query,
-        target: target!,
-        dry_run: true,
-      })
-      if ('error' in result) {
-        throw new Error(result.error)
-      }
-      return result
-    },
-    onSuccess: (data) => {
-      setDryRunResult(data)
-      // Only auto-chain the create while the modal is still open. If the user
-      // cancelled/ESC'd while the dry-run was in flight, the modal is closed and
-      // creating a cache silently would be a surprise. [FIX-3 / triage §1.4]
-      if (data.supported && showAddModalRef.current) {
-        const sql = data.query || addQuery.trim()
-        if (sql && target) {
-          createMutation.mutate(sql)
-        }
-      }
-    },
-  })
-
-  // Create cache mutation
-  const createMutation = useMutation({
-    mutationFn: async (query: string): Promise<CacheAddResponse> => {
-      const result = await addCacheQuery({
-        query,
-        target: target!,
-        dry_run: false,
-      })
-      if ('error' in result) {
-        throw new Error(result.error)
-      }
-      return result
-    },
-    onSuccess: () => {
-      setAddQuery('')
-      setDryRunResult(null)
-      setEditorResetKey((k) => k + 1)
-      // Arm the one-shot "this cache is live" hand-raiser for this create. [FIX-5]
-      setCacheJustCreated(true)
-      queryClient.invalidateQueries({ queryKey: ['cache-list', target] })
-    },
   })
 
   // Delete single cache
@@ -1011,48 +599,6 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
     },
   })
 
-  // Auto-cache pending query after deploy completes
-  useEffect(() => {
-    if (
-      deployState === 'complete' &&
-      pendingQuery &&
-      target &&
-      !autoCacheTriggered.current
-    ) {
-      autoCacheTriggered.current = true
-      // Small delay to let status query refetch and confirm deployed
-      const timer = setTimeout(async () => {
-        try {
-          const check = await addCacheQuery({
-            query: pendingQuery,
-            target,
-            dry_run: true,
-          })
-          if ('error' in check) {
-            // Silently fail — user can still manually cache
-            return
-          }
-          if (check.supported) {
-            await addCacheQuery({ query: pendingQuery, target, dry_run: false })
-            queryClient.invalidateQueries({ queryKey: ['cache-list', target] })
-            setAddQuery('')
-            setDryRunResult({
-              success: true,
-              supported: true,
-              query: pendingQuery,
-              detail: 'Cache deployed and query cached automatically.',
-            })
-          } else {
-            setDryRunResult(check)
-          }
-        } catch {
-          // Silently fail — user can still manually cache
-        }
-      }, 1500)
-      return () => clearTimeout(timer)
-    }
-  }, [deployState, pendingQuery, target, queryClient])
-
   // Deploy mode state
   type DeployMode = 'docker' | 'systemd' | 'kubernetes' | 'remote'
   type RemoteRuntime = 'docker' | 'systemd'
@@ -1073,7 +619,6 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
   const handleDeploy = async () => {
     if (!target) return
     resetDeploy()
-    autoCacheTriggered.current = false
     if (deployMode === 'kubernetes') {
       await deploy({ target, mode: 'kubernetes', namespace: k8sNamespace })
     } else if (deployMode === 'remote') {
@@ -1119,64 +664,10 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
 
   const canDeploy = deployMode !== 'remote' || remoteDest.trim() !== ''
 
-  const handleCheckAndCache = () => {
-    if (!addQuery.trim() || !target) return
-    // Clear any stale success/error from a previous run so a fresh check never
-    // shows a green "success" beside a new red error. [QW16]
-    checkMutation.reset()
-    createMutation.reset()
-    setDryRunResult(null)
-    checkMutation.mutate(addQuery.trim())
-  }
-
-  // Open the Add Cache dialog from a clean slate: clear any dry-run / error from
-  // a previous session so the modal never opens showing stale feedback.
-  const openAddModal = () => {
-    checkMutation.reset()
-    createMutation.reset()
-    setDryRunResult(null)
-    // Reopening the add flow supersedes the previous "cache is live" nudge. [FIX-5]
-    setCacheJustCreated(false)
-    showAddModalRef.current = true
-    setShowAddModal(true)
-  }
-
-  // Close the Add Cache dialog and tear down mutation state so an in-flight
-  // dry-run/create can't leave the modal (or the page) showing stale feedback,
-  // and — together with the modal-open guard in checkMutation.onSuccess — a
-  // cancel mid-check can't silently create a cache. [FIX-3 / triage §1.4]
-  const closeAddModal = () => {
-    showAddModalRef.current = false
-    setShowAddModal(false)
-    checkMutation.reset()
-    createMutation.reset()
-    setDryRunResult(null)
-  }
-
-  // A successful cache closes the dialog and confirms with a toast; the list is
-  // already invalidated in createMutation.onSuccess, so it refreshes underneath.
-  // Dry-run "not cacheable" and error paths stay in the open modal. [triage §1.4]
-  useEffect(() => {
-    if (createMutation.isSuccess && showAddModal) {
-      setShowAddModal(false)
-      toast({
-        title: 'Cache created',
-        description: 'Your query is now served from ReadySet.',
-        variant: 'positive',
-      })
-    }
-  }, [createMutation.isSuccess, showAddModal])
-
   const isDeployed = cacheStatus?.deployed === true
   const isRunning = cacheStatus?.running === true
   const caches = cacheList?.caches || []
   const isDeploying = deployState === 'deploying'
-
-  // A query carried from Analyze/Ask pre-loads the editor but must NOT silently
-  // fire a ~4 GB container deploy on arrival. The deploy stays an explicit,
-  // cost-disclosed, cancelable confirm below; only the auto-cache after a
-  // user-initiated deploy remains. [diagnose-to-fix MoT 3; caching HIGH]
-  const carriedQuery = Boolean(pendingQuery) && !isDeployed
 
   // One deploy action, rendered in whichever zone owns the current mode: with
   // the recommended Docker card (primary) or, for a selected Systemd/K8s/Remote
@@ -1294,31 +785,6 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
         >
-          {/* A query carried from Analyze/Ask: tell the user it's held and will
-              be cached once a cache exists — no re-paste. [T13] */}
-          {carriedQuery && (
-            <div className="mb-4 rounded-xl border border-border-info-soft bg-surface-info-soft/40 p-4">
-              <HStack className="gap-3 items-start">
-                <Icon
-                  name="querypilot"
-                  label="Carried query"
-                  className="w-5 h-5 text-content-info-soft mt-0.5 shrink-0"
-                />
-                <VStack className="gap-1 items-start min-w-0">
-                  <Text level="label-medium" className="text-content-layout-1">
-                    Your query is ready to cache
-                  </Text>
-                  <Text level="body-small" className="text-content-layout-2">
-                    Carried over from Analyze — deploy a cache below and it will
-                    be cached automatically. Nothing to re-paste.
-                  </Text>
-                  <code className="mt-1 block max-w-full truncate font-mono text-caption text-content-layout-3">
-                    {pendingQuery}
-                  </code>
-                </VStack>
-              </HStack>
-            </div>
-          )}
           <Card className="w-full overflow-hidden">
             <Card.Content className="p-0">
               {/* Explanation banner — the value prop collapses from three
@@ -1545,8 +1011,8 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
                                   level="caption"
                                   className="text-content-layout-3"
                                 >
-                                  Requires kubectl configured with cluster
-                                  access on this machine.
+                                  Requires kubectl configured with cluster access
+                                  on this machine.
                                 </Text>
                               </m.div>
                             )}
@@ -1612,6 +1078,7 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
                               </m.div>
                             )}
                           </AnimatePresence>
+
                         </div>
                       </m.div>
                     )}
@@ -1729,57 +1196,39 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
                       label={`${caches.length}`}
                     />
                   </HStack>
-                  {/* Primary "Add cache" always in the header top-right (owner:
-                      Caching#1) so the most frequent action never scrolls off
-                      the bottom; Drop All stays a quiet secondary next to it. */}
-                  <HStack className="gap-2 items-center">
-                    <Button
-                      variant="primary"
-                      modifier="solid"
-                      size="small"
-                      label="Add cache"
-                      icon="add"
-                      iconPosition="left"
-                      onClick={openAddModal}
-                    />
-                    <Show when={caches.length > 0}>
-                      {showDropAllConfirm ? (
-                        <HStack className="gap-2">
-                          <Button
-                            variant="primary"
-                            modifier="ghost"
-                            size="small"
-                            label="Cancel"
-                            onClick={() => setShowDropAllConfirm(false)}
-                          />
-                          <Button
-                            variant="negative"
-                            modifier="solid"
-                            size="small"
-                            label="Confirm Drop All"
-                            icon="trash"
-                            iconPosition="left"
-                            loading={dropAllMutation.isPending}
-                            onClick={() => {
-                              // Dropping all caches supersedes the hand-raiser. [FIX-5]
-                              setCacheJustCreated(false)
-                              dropAllMutation.mutate()
-                            }}
-                          />
-                        </HStack>
-                      ) : (
+                  <Show when={caches.length > 0}>
+                    {showDropAllConfirm ? (
+                      <HStack className="gap-2">
                         <Button
-                          variant="negative"
+                          variant="primary"
                           modifier="ghost"
                           size="small"
-                          label="Drop All"
+                          label="Cancel"
+                          onClick={() => setShowDropAllConfirm(false)}
+                        />
+                        <Button
+                          variant="negative"
+                          modifier="solid"
+                          size="small"
+                          label="Confirm Drop All"
                           icon="trash"
                           iconPosition="left"
-                          onClick={() => setShowDropAllConfirm(true)}
+                          loading={dropAllMutation.isPending}
+                          onClick={() => dropAllMutation.mutate()}
                         />
-                      )}
-                    </Show>
-                  </HStack>
+                      </HStack>
+                    ) : (
+                      <Button
+                        variant="negative"
+                        modifier="ghost"
+                        size="small"
+                        label="Drop All"
+                        icon="trash"
+                        iconPosition="left"
+                        onClick={() => setShowDropAllConfirm(true)}
+                      />
+                    )}
+                  </Show>
                 </HStack>
               </div>
 
@@ -1817,64 +1266,51 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
                         level="body-small"
                         className="text-content-layout-3 text-center max-w-sm"
                       >
-                        Add a cache to serve a slow query in ~1&nbsp;ms, or go
-                        to the{' '}
+                        Go to{' '}
                         <Link
                           to="/query-registry"
                           className="text-content-primary-soft hover:underline"
                         >
-                          Query Registry
+                          Queries
                         </Link>{' '}
-                        to cache saved queries.
+                        to find and cache slow queries.
                       </Text>
                     </VStack>
-                    {/* Empty state still invites adding — same modal as the
-                        header trigger. [Caching#1; VIS-102 empty states] */}
-                    <Button
-                      variant="primary"
-                      modifier="solid"
-                      label="Add cache"
-                      icon="add"
-                      iconPosition="left"
-                      onClick={openAddModal}
-                    />
                   </VStack>
                 </div>
               </Show>
 
-              {/* Cached queries — a vertical list of canonical cards (no table). */}
+              {/* Cached queries table */}
               <Show when={!isLoadingList && caches.length > 0}>
-                <div className="p-3 space-y-3 bg-surface-layout-1">
-                  <AnimatePresence mode="popLayout">
-                    {caches.map((entry) => (
-                      <CachedQueryRow
-                        key={entry.cache_id}
-                        entry={entry}
-                        onDelete={(id) => {
-                          // Deleting/uncaching supersedes the hand-raiser. [FIX-5]
-                          setCacheJustCreated(false)
-                          deleteMutation.mutate(id)
-                        }}
-                        onRun={(query) => handleRun(entry.cache_id, query)}
-                        isDeleting={deletingId === entry.cache_id}
-                        isRunning={runningCacheId === entry.cache_id}
-                        isBenchBusy={runningCacheId !== null}
-                        runProgressMessage={
-                          runningCacheId === entry.cache_id
-                            ? runProgress?.message
-                            : undefined
-                        }
-                        runResult={runResults[entry.cache_id]}
-                        onDismissResult={() =>
-                          setRunResults((prev) => {
-                            const next = { ...prev }
-                            delete next[entry.cache_id]
-                            return next
-                          })
-                        }
-                      />
-                    ))}
-                  </AnimatePresence>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-surface-layout-2/30">
+                        <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium w-48">
+                          Cache
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium">
+                          Query
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
+                          TTL
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-16" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-layout-1">
+                      <AnimatePresence mode="popLayout">
+                        {caches.map((entry) => (
+                          <CachedQueryRow
+                            key={entry.cache_id}
+                            entry={entry}
+                            onDelete={(id) => deleteMutation.mutate(id)}
+                            isDeleting={deletingId === entry.cache_id}
+                          />
+                        ))}
+                      </AnimatePresence>
+                    </tbody>
+                  </table>
                 </div>
               </Show>
 
@@ -1898,280 +1334,39 @@ export function CachePage({ pendingQuery }: { pendingQuery?: string } = {}) {
                 </div>
               </Show>
 
-              {/* Run comparison error */}
-              <Show when={runState === 'error' && !!runError}>
-                <div className="px-5 py-3 bg-surface-negative-soft/30 border-t border-border-negative-soft">
-                  <HStack className="gap-2 items-center">
-                    <Icon
-                      name="alert"
-                      label="Error"
-                      className="w-4 h-4 text-content-negative-soft"
-                    />
-                    <Text
-                      level="body-small"
-                      className="text-content-negative-soft"
-                    >
-                      {runError}
-                    </Text>
-                  </HStack>
-                </div>
-              </Show>
             </Card.Content>
           </Card>
         </m.div>
 
-        {/* PQL hand-raiser (dma.4): first cache on the user's own target. The
-            Add Cache flow now lives in a modal that closes on success, so this
-            lands on the page (below the list) rather than inside the closed
-            dialog — the signal survives. Gated on a one-shot flag (not the
-            long-lived createMutation.isSuccess) so it clears the moment the user
-            acts on the list or reopens the modal, instead of lingering after
-            unrelated actions or after the cache is deleted. [FIX-5] */}
-        {cacheJustCreated && target && (
-          <m.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <HandRaiser
-              signal="cache_created"
-              tone="positive"
-              message={`This cache is live on ${target}. Running it beyond one instance (replicas, HA, a fleet)? We help teams run Readyset in production.`}
-            />
-          </m.div>
-        )}
+        {/* Caching lives on the Queries workbench (rdst-41p.5) */}
+        <m.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
+        >
+          <Card className="w-full overflow-hidden">
+            <Card.Content>
+              <HStack className="gap-4 items-center justify-between flex-wrap">
+                <VStack className="gap-1 items-start min-w-0">
+                  <Text level="label-medium" className="text-content-layout-1">
+                    Choose what to cache in Queries
+                  </Text>
+                  <Text level="body-small" className="text-content-layout-2">
+                    Find slow queries, cache them, and prove the speedup from the
+                    Queries workbench.
+                  </Text>
+                </VStack>
+                <Link
+                  to="/query-registry"
+                  className="text-sm text-content-primary-soft hover:underline whitespace-nowrap shrink-0"
+                >
+                  Open Queries
+                </Link>
+              </HStack>
+            </Card.Content>
+          </Card>
+        </m.div>
       </Show>
-
-      {/* Add Cache modal — the whole add flow (editor + dry-run + cache) moved
-          off the bottom of the page into a dialog opened from the list header /
-          empty-state CTA (owner: Caching#1). Every semantic is preserved: the
-          same handleCheckAndCache, checkMutation/createMutation, dry-run and
-          error surfaces. Dry-run "not cacheable" and errors stay in the modal;
-          a real (non-optimistic) success closes it + toasts. [triage §1.4;
-          §6.6 Modal; USE-008 apparent effort; VIS-113 clear zones] */}
-      <Modal
-        open={showAddModal}
-        onOpenChange={(open) => !open && closeAddModal()}
-      >
-        <ModalContentContainer open={showAddModal}>
-          <ModalContent
-            size="large"
-            className="p-0 gap-0"
-            description="Check whether a SQL query can be cached, then cache it."
-          >
-            {/* Header */}
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-border-layout-1 bg-surface-layout-1">
-              <div className="p-2 rounded-lg bg-surface-primary-soft">
-                <Icon
-                  name="add"
-                  label="Add cache"
-                  size="base"
-                  className="text-content-primary-soft"
-                />
-              </div>
-              <div>
-                <ModalTitle className="text-headline-5 h-auto">
-                  Add cache
-                </ModalTitle>
-                <Text level="body-small" className="text-content-layout-3">
-                  Cache a slow query for sub-millisecond reads.
-                </Text>
-              </div>
-            </div>
-
-            {/* Body — editor + dry-run / error feedback (scrolls if tall) */}
-            <div className="p-5 overflow-y-auto">
-              <VStack className="gap-4 items-stretch">
-                <SQLInput
-                  key={editorResetKey}
-                  value={addQuery}
-                  onChange={(val) => {
-                    setAddQuery(val)
-                    setDryRunResult(null)
-                  }}
-                  onSubmit={handleCheckAndCache}
-                  target={target}
-                  placeholder="Enter a SQL query to cache..."
-                  minHeight="8rem"
-                  showPrettify
-                />
-
-                {/* Dry-run result */}
-                <AnimatePresence>
-                  {dryRunResult && (
-                    <m.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      {dryRunResult.supported ? (
-                        <div className="rounded-lg p-4 bg-surface-positive-soft/30 border border-border-positive-soft">
-                          <HStack className="gap-3 items-center">
-                            <div className="w-8 h-8 rounded-lg bg-surface-positive-soft flex items-center justify-center shrink-0">
-                              {createMutation.isPending ? (
-                                <Spinner size="base" />
-                              ) : (
-                                <Icon
-                                  name="tick-double"
-                                  label="Cacheable"
-                                  className="w-4 h-4 text-content-positive-soft"
-                                />
-                              )}
-                            </div>
-                            <VStack className="gap-0.5 items-start">
-                              <Text
-                                level="label-small"
-                                className="text-content-positive-soft"
-                              >
-                                {createMutation.isPending
-                                  ? 'Caching query...'
-                                  : 'Query is cacheable'}
-                              </Text>
-                              {dryRunResult.detail && (
-                                <Text
-                                  level="caption"
-                                  className="text-content-layout-3"
-                                >
-                                  {dryRunResult.detail}
-                                </Text>
-                              )}
-                            </VStack>
-                          </HStack>
-                        </div>
-                      ) : (
-                        <div className="rounded-lg p-4 bg-surface-negative-soft/30 border border-border-negative-soft">
-                          <HStack className="gap-3 items-start">
-                            <div className="w-8 h-8 rounded-lg bg-surface-negative-soft flex items-center justify-center shrink-0">
-                              <Icon
-                                name="close"
-                                label="Not supported"
-                                className="w-4 h-4 text-content-negative-soft"
-                              />
-                            </div>
-                            <VStack className="gap-1 items-start">
-                              <Text
-                                level="label-small"
-                                className="text-content-negative-soft"
-                              >
-                                Query cannot be cached
-                              </Text>
-                              {dryRunResult.detail && (
-                                <Text
-                                  level="body-small"
-                                  className="text-content-layout-2"
-                                >
-                                  {dryRunResult.detail}
-                                </Text>
-                              )}
-                            </VStack>
-                          </HStack>
-                        </div>
-                      )}
-                    </m.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Check error */}
-                <AnimatePresence>
-                  {checkMutation.isError && (
-                    <m.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                    >
-                      <div className="rounded-lg p-4 bg-surface-negative-soft/30 border border-border-negative-soft">
-                        <HStack className="gap-2 items-center">
-                          <Icon
-                            name="alert"
-                            label="Error"
-                            className="w-4 h-4 text-content-negative-soft shrink-0"
-                          />
-                          <Text
-                            level="body-small"
-                            className="text-content-negative-soft"
-                          >
-                            {checkMutation.error?.message ||
-                              'Failed to check cacheability'}
-                          </Text>
-                        </HStack>
-                      </div>
-                    </m.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Create error */}
-                <AnimatePresence>
-                  {createMutation.isError && (
-                    <m.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                    >
-                      <div className="rounded-lg p-4 bg-surface-negative-soft/30 border border-border-negative-soft">
-                        <HStack className="gap-2 items-center">
-                          <Icon
-                            name="alert"
-                            label="Error"
-                            className="w-4 h-4 text-content-negative-soft shrink-0"
-                          />
-                          <Text
-                            level="body-small"
-                            className="text-content-negative-soft"
-                          >
-                            {createMutation.error?.message ||
-                              'Failed to create cache'}
-                          </Text>
-                        </HStack>
-                      </div>
-                    </m.div>
-                  )}
-                </AnimatePresence>
-              </VStack>
-            </div>
-
-            {/* Footer */}
-            <div className="flex justify-end gap-2 px-5 py-4 border-t border-border-layout-1 bg-surface-layout-1">
-              <Button
-                variant="primary"
-                modifier="ghost"
-                label="Cancel"
-                onClick={closeAddModal}
-              />
-              <Button
-                variant="primary"
-                modifier="solid"
-                label="Check & Cache"
-                icon="tick"
-                iconPosition="left"
-                onClick={handleCheckAndCache}
-                loading={checkMutation.isPending || createMutation.isPending}
-                disabled={
-                  !addQuery.trim() ||
-                  checkMutation.isPending ||
-                  createMutation.isPending
-                }
-              />
-            </div>
-          </ModalContent>
-        </ModalContentContainer>
-      </Modal>
-
-      {/* Parameter dialog for parameterized queries */}
-      {paramDialog && (
-        <ParameterDialog
-          isOpen
-          query={paramDialog.sql}
-          submitLabel="Run Comparison"
-          submitIcon="play"
-          onClose={() => setParamDialog(null)}
-          onSubmit={(substitutedSql) => {
-            const { cacheId } = paramDialog
-            setParamDialog(null)
-            executeRun(cacheId, substitutedSql)
-          }}
-        />
-      )}
     </div>
   )
 }

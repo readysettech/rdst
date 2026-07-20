@@ -251,7 +251,7 @@ export function ScanFilters({
                         disabled={isDisabled}
                       />
                       <Text level="label-small" className="text-content-layout-2">
-                        Save findings to Saved Queries
+                        Save findings to Queries
                       </Text>
                     </HStack>
 

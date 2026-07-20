@@ -156,7 +156,7 @@ function DataHandlingNote() {
       />
       <Text level="caption" className="text-content-layout-3">
         Runs locally on your machine. The report is saved here — nothing is
-        emailed. Captured queries are added to your Saved Queries.
+        emailed. Captured queries are added to your Queries.
       </Text>
     </HStack>
   )

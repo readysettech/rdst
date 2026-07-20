@@ -33,7 +33,7 @@ interface TopQueryTableProps {
   onAnalyze: (query: TopQuery) => void
   onCache?: (query: TopQuery) => void
   cachingHash?: string | null
-  isCached?: (sql: string) => boolean
+  isCached?: (registryHash: string) => boolean
   /** Results-header controls (region C). */
   sort?: string
   setSort?: (sort: string) => void
@@ -204,7 +204,7 @@ export function TopQueryTable({
           query,
           hasRunning: (query.current_instances_running ?? 0) > 0,
           meta,
-          cached: !!isCached?.(query.query_text),
+          cached: !!isCached?.(query.query_hash),
         }
       }),
     [queries, isRealtime, isCached]

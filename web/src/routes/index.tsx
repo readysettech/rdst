@@ -14,6 +14,8 @@ import { useSystemStatus } from "../lib/useSystemStatus";
 import { useTrialSource } from "../lib/trialQueries";
 import { fetchAuditRuns } from "../lib/useAudit";
 import { fetchQueryRegistry, fetchSchemaStatus } from "../lib/api";
+import { cachedRegistryHashes, fetchCacheList } from "../lib/useCache";
+import { fillCapturedParams } from "../lib/sqlParameters";
 import { HandRaiser } from "../components/HandRaiser";
 import {
   continueItems,
@@ -476,7 +478,10 @@ function ActiveHome({
                     if (item.nextAction === "Analyze") {
                       navigate({
                         to: "/results",
-                        search: { query: item.sql, target },
+                        search: {
+                          query: fillCapturedParams(item.sql, item.mostRecentParams),
+                          target,
+                        },
                       });
                     } else if (item.nextAction === "Cache") {
                       navigate({ to: "/cache" });
@@ -573,6 +578,16 @@ function HomePage() {
     enabled: hasTargets,
   });
 
+  // "Cached" reflects the live cache list for the selected target, shared with
+  // the Caching page via this query key. The registry's readyset_query_id is
+  // not a live signal -- it survives a DROP CACHE (rdst-e7s.32).
+  const { data: cacheList } = useQuery({
+    queryKey: ["cache-list", target],
+    queryFn: () => fetchCacheList(target!),
+    staleTime: 60_000,
+    enabled: hasTargets && !!target,
+  });
+
   const needsApiKey = anthropicRequirement ? !anthropicRequirement.satisfied : false;
   const lastAudit = auditRuns?.runs?.[0];
   const entries = registry?.queries ?? [];
@@ -584,9 +599,11 @@ function HomePage() {
     ? Math.floor((Date.now() - new Date(oldestAudit.started_at).getTime()) / 86_400_000)
     : null;
 
+  const cachedHashes = cachedRegistryHashes(cacheList);
+
   const homeState = deriveHomeState(targetCount, schemaStatus?.exists);
-  const counts = portfolioCounts(entries, target ?? undefined);
-  const recents = continueItems(entries, target ?? undefined);
+  const counts = portfolioCounts(entries, target ?? undefined, cachedHashes);
+  const recents = continueItems(entries, target ?? undefined, cachedHashes);
 
   // Until the status fetch resolves, render nothing state-specific: a wrong
   // guess would flash the first-run hero at every returning user.

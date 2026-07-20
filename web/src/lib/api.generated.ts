@@ -4745,6 +4745,11 @@ export interface components {
             /** Last Analyzed */
             last_analyzed: string;
             /**
+             * Last Cache Target
+             * @default
+             */
+            last_cache_target?: string;
+            /**
              * Max Duration Ms
              * @default 0
              */
@@ -4771,6 +4776,16 @@ export interface components {
              * @default
              */
             question?: string;
+            /**
+             * Readyset Query Id
+             * @default
+             */
+            readyset_query_id?: string;
+            /**
+             * Readyset Supported
+             * @default
+             */
+            readyset_supported?: string;
             /** Source */
             source: string;
             /** Sql */
@@ -8903,6 +8918,7 @@ export interface operations {
             query?: {
                 limit?: number | null;
                 offset?: number;
+                target?: string | null;
             };
             header?: never;
             path?: never;

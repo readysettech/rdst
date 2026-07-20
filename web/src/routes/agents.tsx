@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { ExperimentalBanner } from '../components/ExperimentalBanner';
 import { Button } from '@rs/ui-new/button';
 import { Card } from '@rs/ui-new/card';
 import { TableHeaderCell } from '../components/TableHeaderCell';
@@ -1119,6 +1120,7 @@ function AgentsPage() {
 
   return (
     <div className="space-y-6 w-full">
+      <ExperimentalBanner name="Agents" />
       {/* Hero */}
       <m.div
         className="space-y-4"

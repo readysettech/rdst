@@ -28,7 +28,7 @@ test('serves client-side routes directly', async ({ page }) => {
   await configureTestTarget(page, { hasPassword: true })
   await page.goto('/query-registry')
   await expect(
-    page.getByRole('heading', { name: 'Saved Queries' })
+    page.getByRole('heading', { name: 'Queries' })
   ).toBeVisible()
   await expect(page).toHaveURL(/\/query-registry$/)
 })

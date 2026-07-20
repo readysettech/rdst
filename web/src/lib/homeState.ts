@@ -1,20 +1,5 @@
 import type { QueryRegistryEntry } from './api';
 
-/**
- * Query-registry entry plus the Readyset cacheability fields the backend
- * populates. Optional here so the Home compiles against API types that don't
- * yet expose them — cache-status counts degrade to 0 rather than fail to build.
- */
-export type CacheAwareEntry = QueryRegistryEntry & {
-  readyset_query_id?: string | null;
-  readyset_supported?: string | null;
-};
-
-const rsQueryId = (e: QueryRegistryEntry): string | null | undefined =>
-  (e as CacheAwareEntry).readyset_query_id;
-const rsSupported = (e: QueryRegistryEntry): string | null | undefined =>
-  (e as CacheAwareEntry).readyset_supported;
-
 export type HomeState = 'first-run' | 'connected' | 'active';
 
 export interface PortfolioCounts {
@@ -35,6 +20,8 @@ export interface ContinueItem {
   kind: ContinueKind;
   nextAction: 'Analyze' | 'Cache' | 'Benchmark';
   sql: string;
+  /** Captured parameter values, applied when handing the query to Analyze. */
+  mostRecentParams?: Record<string, unknown>;
 }
 
 /**
@@ -58,24 +45,35 @@ function scoped(entries: QueryRegistryEntry[], target: string | undefined) {
   return entries.filter((e) => e.target === target);
 }
 
+/**
+ * cachedHashes holds the registry hashes currently served by Readyset, taken
+ * from the live cache list (correlated by registry_hash). "Cached" reflects
+ * that live set, not the registry's readyset_query_id -- that field records
+ * the last-known Readyset id for lifecycle ops and survives a DROP CACHE, so
+ * counting it kept dropped caches alive on the Home dashboard (rdst-e7s.32).
+ */
 export function portfolioCounts(
   entries: QueryRegistryEntry[],
   target: string | undefined,
+  cachedHashes: ReadonlySet<string> = new Set(),
 ): PortfolioCounts {
   const s = scoped(entries, target);
   return {
     asked: s.filter((e) => e.source === 'ask').length,
     analyzed: s.filter((e) => Boolean(e.last_analyzed)).length,
-    cached: s.filter((e) => Boolean(rsQueryId(e))).length,
+    cached: s.filter((e) => cachedHashes.has(e.hash)).length,
     candidates: s.filter(
-      (e) => rsSupported(e) === 'yes' && !rsQueryId(e),
+      (e) => e.readyset_supported === 'yes' && !cachedHashes.has(e.hash),
     ).length,
     benchmarked: null,
   };
 }
 
-function kindOf(e: QueryRegistryEntry): ContinueKind {
-  if (rsQueryId(e)) return 'cached';
+function kindOf(
+  e: QueryRegistryEntry,
+  cachedHashes: ReadonlySet<string>,
+): ContinueKind {
+  if (cachedHashes.has(e.hash)) return 'cached';
   if (e.last_analyzed) return 'analyzed';
   if (e.source === 'ask') return 'asked';
   return 'saved';
@@ -91,6 +89,7 @@ const NEXT_ACTION: Record<ContinueKind, ContinueItem['nextAction']> = {
 export function continueItems(
   entries: QueryRegistryEntry[],
   target: string | undefined,
+  cachedHashes: ReadonlySet<string> = new Set(),
   limit = 3,
 ): ContinueItem[] {
   return scoped(entries, target)
@@ -102,13 +101,14 @@ export function continueItems(
     )
     .slice(0, limit)
     .map((e) => {
-      const kind = kindOf(e);
+      const kind = kindOf(e, cachedHashes);
       return {
         hash: e.hash,
         label: e.tag || e.sql,
         kind,
         nextAction: NEXT_ACTION[kind],
         sql: e.sql,
+        mostRecentParams: e.most_recent_params,
       };
     });
 }

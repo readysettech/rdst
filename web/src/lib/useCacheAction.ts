@@ -9,15 +9,12 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@rs/ui-new/use-toast';
-import { deployAndCache, fetchCacheList } from './useCache';
-import { collapseWhitespace } from './collapseWhitespace';
-
-function normalizeSQL(sql: string): string {
-  return collapseWhitespace(sql).toLowerCase().replace(/;$/, '');
-}
+import { cachedRegistryHashes, deployAndCache, fetchCacheList } from './useCache';
 
 interface UseCacheActionOptions {
   target: string | null;
+  /** Fired after a cache is successfully created, e.g. to chain a perf test. */
+  onCached?: (sql: string, id: string) => void;
 }
 
 interface UseCacheActionReturn {
@@ -25,13 +22,13 @@ interface UseCacheActionReturn {
   cacheQuery: (sql: string, id: string) => void;
   /** Hash currently being cached (loading state). */
   cachingId: string | null;
-  /** Check if a query (by SQL text) is already cached. */
-  isCached: (sql: string) => boolean;
+  /** Check whether a query (by its registry hash) is already cached. */
+  isCached: (registryHash: string) => boolean;
   /** Whether a cache operation is in progress. */
   isPending: boolean;
 }
 
-export function useCacheAction({ target }: UseCacheActionOptions): UseCacheActionReturn {
+export function useCacheAction({ target, onCached }: UseCacheActionOptions): UseCacheActionReturn {
   const queryClient = useQueryClient();
   const [cachingId, setCachingId] = useState<string | null>(null);
   // Session-level cache for immediate feedback before the list refetches
@@ -45,34 +42,28 @@ export function useCacheAction({ target }: UseCacheActionOptions): UseCacheActio
     staleTime: 30_000,
   });
 
-  // Build a set of normalized cached SQL texts.
-  // Clear session cache when backend data arrives (it is now authoritative).
-  const cachedSqlSet = useMemo(() => {
-    const set = new Set<string>();
-    if (cacheList?.caches) {
-      for (const cache of cacheList.caches) {
-        if (cache.query) set.add(normalizeSQL(cache.query));
-      }
-      setSessionCached({});
-    }
-    return set;
+  // Cached-ness is matched by registry hash (see cachedRegistryHashes), not
+  // re-derived from SQL text which cannot see through ReadySet's parameter
+  // rewriting. Clear the optimistic session cache once the authoritative list
+  // arrives.
+  const cachedHashSet = useMemo(() => {
+    if (cacheList?.caches) setSessionCached({});
+    return cachedRegistryHashes(cacheList);
   }, [cacheList]);
 
   const isCached = useCallback(
-    (sql: string): boolean => {
-      const normalized = normalizeSQL(sql);
-      return cachedSqlSet.has(normalized) || !!sessionCached[normalized];
-    },
-    [cachedSqlSet, sessionCached],
+    (registryHash: string): boolean =>
+      cachedHashSet.has(registryHash) || !!sessionCached[registryHash],
+    [cachedHashSet, sessionCached],
   );
 
   const mutation = useMutation({
     mutationFn: async ({ sql }: { sql: string; id: string }) => {
       return deployAndCache(target!, sql);
     },
-    onSuccess: (_data, { sql }) => {
+    onSuccess: (_data, { sql, id }) => {
       setCachingId(null);
-      setSessionCached((prev) => ({ ...prev, [normalizeSQL(sql)]: true }));
+      setSessionCached((prev) => ({ ...prev, [id]: true }));
       queryClient.invalidateQueries({ queryKey: ['status'] });
       queryClient.invalidateQueries({ queryKey: ['cache-status', target] });
       queryClient.invalidateQueries({ queryKey: ['cache-list', target] });
@@ -81,6 +72,7 @@ export function useCacheAction({ target }: UseCacheActionOptions): UseCacheActio
         description: 'Query is now served from ReadySet cache.',
         variant: 'positive',
       });
+      onCached?.(sql, id);
     },
     onError: (err: Error) => {
       setCachingId(null);

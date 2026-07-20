@@ -13,7 +13,7 @@ import { QueryCard } from './QueryCard'
 
 interface QueryHistoryProps {
   queries: QueryRegistryEntry[]
-  onSelect: (sql: string) => void
+  onSelect: (entry: QueryRegistryEntry) => void
 }
 
 // Recent is a quiet, tertiary list: only the 5 most recent stay in the default
@@ -113,7 +113,7 @@ export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
                 <QueryCard
                   data-query-hash={entry.hash}
                   clickable
-                  onClick={() => onSelect(entry.sql)}
+                  onClick={() => onSelect(entry)}
                   sql={entry.sql}
                   badges={
                     <>
@@ -147,7 +147,7 @@ export function QueryHistory({ queries, onSelect }: QueryHistoryProps) {
                       className="shrink-0"
                       onClick={(e) => {
                         e.stopPropagation()
-                        onSelect(entry.sql)
+                        onSelect(entry)
                       }}
                     />
                   }

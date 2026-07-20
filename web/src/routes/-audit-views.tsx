@@ -662,17 +662,63 @@ export function formatDuration(seconds: number | undefined): string {
   return rem ? `${mins}m ${rem}s` : `${mins}m`
 }
 
-function BulletList({ items }: { items: string[] }) {
+// Bottleneck / caching-candidate / capacity lists come back from the LLM as
+// either plain strings or objects with varying keys. Pull a readable heading
+// (and optional detail) so a bullet never renders a raw object as a React
+// child (which throws and blanks the whole run view).
+function bulletContent(item: string | Record<string, unknown>): {
+  heading: string
+  detail: string | null
+} {
+  if (typeof item === 'string') return { heading: item, detail: null }
+  const pick = (...keys: string[]): string | null => {
+    for (const k of keys) {
+      const v = item[k]
+      if (typeof v === 'string' && v.trim()) return v
+    }
+    return null
+  }
+  const heading = pick(
+    'description',
+    'reason',
+    'recommendation',
+    'action',
+    'summary',
+    'title',
+    'category',
+  )
+  const detail = pick('recommendation', 'estimated_benefit', 'details', 'impact')
+  return {
+    heading: heading ?? JSON.stringify(item),
+    detail: detail && detail !== heading ? detail : null,
+  }
+}
+
+function BulletList({
+  items,
+}: {
+  items: (string | Record<string, unknown>)[]
+}) {
   return (
     <VStack className="gap-2 items-stretch">
-      {items.map((item, index) => (
-        <HStack key={index} className="gap-2 items-start">
-          <div className="w-1.5 h-1.5 rounded-full bg-content-layout-3 mt-2 shrink-0" />
-          <Text level="body-small" className="text-content-layout-2 min-w-0">
-            {item}
-          </Text>
-        </HStack>
-      ))}
+      {items.map((item, index) => {
+        const { heading, detail } = bulletContent(item)
+        return (
+          <HStack key={index} className="gap-2 items-start">
+            <div className="w-1.5 h-1.5 rounded-full bg-content-layout-3 mt-2 shrink-0" />
+            <VStack className="gap-0.5 items-start min-w-0">
+              <Text level="body-small" className="text-content-layout-2 min-w-0">
+                {heading}
+              </Text>
+              <Show when={!!detail}>
+                <Text level="caption" className="text-content-layout-3 min-w-0">
+                  {detail}
+                </Text>
+              </Show>
+            </VStack>
+          </HStack>
+        )
+      })}
     </VStack>
   )
 }
@@ -883,24 +929,72 @@ function WorkloadAnalysisView({ analysis }: { analysis: WorkloadAnalysis }) {
         <SectionCard icon="observe" title="Optimization Priorities">
           <div className="p-5">
             <VStack className="gap-3 items-stretch">
-              {priorities.map((item, index) => (
-                <HStack key={index} className="gap-3 items-start">
-                  <div className="w-6 h-6 rounded-md bg-surface-primary-soft flex items-center justify-center shrink-0">
-                    <Text
-                      level="caption"
-                      className="text-content-primary-soft font-semibold"
-                    >
-                      {index + 1}
-                    </Text>
-                  </div>
-                  <Text
-                    level="body-small"
-                    className="text-content-layout-2 min-w-0"
-                  >
-                    {item}
-                  </Text>
-                </HStack>
-              ))}
+              {priorities.map((item, index) => {
+                // optimization_priorities is an LLM-generated list; entries are
+                // a plain string or an object whose keys vary across audit
+                // versions. Read the closest field for each slot so any shape
+                // renders as text instead of crashing the run view.
+                const rank =
+                  typeof item === 'string'
+                    ? index + 1
+                    : (item.rank ?? item.priority ?? index + 1)
+                const heading =
+                  typeof item === 'string'
+                    ? item
+                    : item.action ||
+                      item.description ||
+                      item.recommendation ||
+                      item.category ||
+                      `Priority ${rank}`
+                const body =
+                  typeof item === 'string'
+                    ? null
+                    : ([item.details, item.recommendation, item.description].find(
+                        (d) => d && d !== heading,
+                      ) ?? null)
+                const caption =
+                  typeof item === 'string'
+                    ? ''
+                    : [
+                        item.impact ? `${item.impact} impact` : null,
+                        item.effort ? `${item.effort} effort` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(', ')
+                return (
+                  <HStack key={index} className="gap-3 items-start">
+                    <div className="w-6 h-6 rounded-md bg-surface-primary-soft flex items-center justify-center shrink-0">
+                      <Text
+                        level="caption"
+                        className="text-content-primary-soft font-semibold"
+                      >
+                        {rank}
+                      </Text>
+                    </div>
+                    <VStack className="gap-0.5 items-start min-w-0">
+                      <Text
+                        level="body-small"
+                        className="text-content-layout-1 min-w-0"
+                      >
+                        {heading}
+                      </Text>
+                      <Show when={!!body}>
+                        <Text
+                          level="body-small"
+                          className="text-content-layout-2 min-w-0"
+                        >
+                          {body}
+                        </Text>
+                      </Show>
+                      <Show when={!!caption}>
+                        <Text level="caption" className="text-content-layout-3">
+                          {caption}
+                        </Text>
+                      </Show>
+                    </VStack>
+                  </HStack>
+                )
+              })}
             </VStack>
           </div>
         </SectionCard>

@@ -160,7 +160,13 @@ describe('query-registry source filter chips', () => {
 
   it('single-selects a source and narrows the list', () => {
     setup()
-    fireEvent.click(screen.getByRole('button', { name: /Slow Queries/ }))
+    // Select the chip by its stable data-source (the page also has a "Slow
+    // Queries" CTA card whose name would collide with a role+name lookup).
+    fireEvent.click(
+      screen
+        .getAllByTestId('source-chip')
+        .find((c) => c.getAttribute('data-source') === 'Slow Queries')!,
+    )
     // Both top + top-historical rows match "Slow Queries".
     expect(rowCount()).toBe(2)
     const slow = screen

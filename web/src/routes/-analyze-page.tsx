@@ -14,7 +14,8 @@ import { useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { QueryEditor, QueryHistory, TargetLockNotice } from '../components'
 import { useTarget } from '../hooks/useTarget'
-import { useQueryRegistry } from '../lib/useQueryRegistry'
+import { fillCapturedParams } from '../lib/sqlParameters'
+import { useQueryRegistry, type QueryRegistryEntry } from '../lib/useQueryRegistry'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 
 export function AnalyzePage() {
@@ -23,7 +24,7 @@ export function AnalyzePage() {
   const [fast, setFast] = useState(false)
   const { target: selectedTarget } = useTarget()
   const passwordLock = useTargetPasswordLock(selectedTarget)
-  const { queries, addQuery } = useQueryRegistry()
+  const { queries, addQuery } = useQueryRegistry(undefined, selectedTarget)
 
   const handleAnalyze = useCallback(() => {
     if (passwordLock.isLocked) return
@@ -51,8 +52,10 @@ export function AnalyzePage() {
   // editor is already visible causes no jarring jump; the smooth behaviour is
   // dropped under reduced-motion. [triage §1.5; USE-043 ≥2 cues, USE-008 apparent
   // effort, USE-071 confusion-reducing sizzle]
-  const handleSelectHistory = useCallback((selectedQuery: string) => {
-    setQuery(selectedQuery)
+  const handleSelectHistory = useCallback((entry: QueryRegistryEntry) => {
+    // Load the query with its captured parameter values applied, so Analyze runs
+    // it as it actually ran (rdst-e7s.28).
+    setQuery(fillCapturedParams(entry.sql, entry.most_recent_params))
     const wrapper = editorRef.current
     if (wrapper) {
       const reduce =

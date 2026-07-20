@@ -14,6 +14,7 @@ import { m } from '@rs/ui-new/motion';
 import { AnalysisResults, SQLDisplay, InteractivePanel, TargetLockNotice } from '../components';
 import { useAnalyze } from '../lib/sse';
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
+import { useTarget } from '../hooks/useTarget';
 import { ParameterDialog, hasParameters } from '../components/top';
 import { useCacheAction } from '../lib/useCacheAction';
 import type { ResultsSearch } from './results';
@@ -34,6 +35,7 @@ export function ResultsPage({ search }: ResultsPageProps) {
     }
   }, [paramsJson]);
   const { analyze, state, progress, results, rewriteTesting, readysetCacheability, error, errorEnvelope } = useAnalyze();
+  const { setTarget } = useTarget();
   const passwordLock = useTargetPasswordLock(target);
   const [isInteractiveOpen, setIsInteractiveOpen] = useState(false);
 
@@ -46,14 +48,15 @@ export function ResultsPage({ search }: ResultsPageProps) {
     }
   }, [query, target, cacheQuery]);
 
-  // Hand the diagnosed query off to the cache flow, where the deploy is gated
-  // (cost disclosed + Cancel) and the editor is pre-loaded — no re-paste, no
-  // silent one-click deploy. [diagnose-to-fix Step 5b; T13]
+  // Hand the diagnosed query to the Queries workbench, focused on its row, where
+  // Cache & test caches it (the Cache page is deployment-only). rdst-41p.5. The
+  // Queries list is scoped to the selected database (rdst-e7s.30), so switch the
+  // target to the query's database first; otherwise the row isn't in the scoped
+  // list and there is nothing to focus (rdst-e7s.36).
   const handleSetUpCaching = useCallback(() => {
-    if (query) {
-      navigate({ to: '/cache', search: { query } });
-    }
-  }, [query, navigate]);
+    if (target) setTarget(target);
+    navigate({ to: '/query-registry', search: { hash: results?.query_hash ?? undefined } });
+  }, [navigate, results?.query_hash, target, setTarget]);
 
   // Route an error-state recovery action to a known destination (type-safe
   // navigation; the shared contract only ever hands back these routes).

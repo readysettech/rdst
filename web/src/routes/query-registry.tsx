@@ -8,9 +8,14 @@ import { createFileRoute } from '@tanstack/react-router'
 import { QueryRegistryPage } from './-query-registry-page'
 
 export const Route = createFileRoute('/query-registry')({
+  // Optional deep-link to focus one query (served-cache links, Analyze handoff).
+  validateSearch: (search: Record<string, unknown>): { hash?: string } => ({
+    hash: typeof search.hash === 'string' ? search.hash : undefined,
+  }),
   component: QueryRegistryPageRoute,
 })
 
 function QueryRegistryPageRoute() {
-  return <QueryRegistryPage />
+  const { hash } = Route.useSearch()
+  return <QueryRegistryPage deepLinkHash={hash} />
 }

@@ -927,3 +927,43 @@ class TestResolveCacheIdForDrop:
         monkeypatch.setattr(shared.constants, "rdst_data_dir", lambda: tmp_path)
         result = CacheService._resolve_cache_id_for_drop(h)
         assert result == "q_translated"
+
+
+class TestCorrelateRegistryHash:
+    """Map a SHOW CACHES entry back to its registry hash, keyed on ReadySet's
+    canonical query_id with normalized SQL as a legacy fallback (rdst-41p.7)."""
+
+    @staticmethod
+    def _corr(cache, by_qid, by_sql):
+        from features.cache.service import CacheService
+
+        return CacheService._correlate_registry_hash(cache, by_qid, by_sql)
+
+    def test_matches_by_query_id_with_reordered_params(self):
+        # The cached query renders parameters as `$1 ... $2` while the registry
+        # kept `:p2 ... :p1`; the query_id still matches exactly, where SQL text
+        # matching would not. This is the rdst-41p.7 regression.
+        cache = {
+            "cache_id": "q_69aa3dabff689911",
+            "query": "SELECT count(*) FROM t WHERE a > $1 LIMIT $2",
+        }
+        by_qid = {"q_69aa3dabff689911": "24c2418c81dc"}
+        assert self._corr(cache, by_qid, by_sql={}) == "24c2418c81dc"
+
+    def test_falls_back_to_normalized_sql(self):
+        from features.cache.service import _normalize_for_match
+
+        cache = {"cache_id": "q_orphan", "query": "SELECT 1"}
+        by_sql = {_normalize_for_match("SELECT 1"): "abc123"}
+        assert self._corr(cache, by_qid={}, by_sql=by_sql) == "abc123"
+
+    def test_query_id_takes_precedence_over_sql(self):
+        from features.cache.service import _normalize_for_match
+
+        cache = {"cache_id": "q_1", "query": "SELECT 1"}
+        by_qid = {"q_1": "hash_by_qid"}
+        by_sql = {_normalize_for_match("SELECT 1"): "hash_by_sql"}
+        assert self._corr(cache, by_qid, by_sql) == "hash_by_qid"
+
+    def test_returns_empty_when_nothing_correlates(self):
+        assert self._corr({"cache_id": "q_x", "query": "SELECT 2"}, {}, {}) == ""

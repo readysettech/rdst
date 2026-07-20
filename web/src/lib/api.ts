@@ -134,9 +134,9 @@ export async function fetchSchema(target?: string): Promise<SchemaResponse> {
 export type QueryRegistryEntry = apiComponents['schemas']['QueryRegistryEntry'];
 export type QueryRegistryResponse = apiComponents['schemas']['QueryRegistryResponse'];
 
-export async function fetchQueryRegistry(limit?: number, offset = 0): Promise<QueryRegistryResponse> {
+export async function fetchQueryRegistry(limit?: number, offset = 0, target?: string | null): Promise<QueryRegistryResponse> {
   const { data, response } = await typedClient.GET('/api/query-registry', {
-    params: { query: { limit: limit ?? null, offset } },
+    params: { query: { limit: limit ?? null, offset, target: target ?? undefined } },
   });
   await throwIfNotOk(response, 'Failed to fetch registry');
   if (!data) throw new Error('Missing response body');

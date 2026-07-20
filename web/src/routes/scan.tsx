@@ -4,6 +4,7 @@
  */
 
 import { createFileRoute } from '@tanstack/react-router';
+import { ExperimentalBanner } from '../components/ExperimentalBanner';
 import { useState, useCallback } from 'react';
 import { Button } from '@rs/ui-new/button';
 import { Text } from '@rs/ui-new/text';
@@ -122,6 +123,7 @@ function ScanPage() {
 
   return (
     <div className="space-y-6 w-full">
+      <ExperimentalBanner name="Code Scan" />
       <ScanHeader state={state} queriesCount={queries.length} />
 
       <Show when={!target}>

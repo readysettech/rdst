@@ -19,7 +19,7 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
 
   await page.goto('/query-registry')
   await expect(
-    page.getByRole('heading', { name: 'Saved Queries' })
+    page.getByRole('heading', { name: 'Queries' })
   ).toBeVisible()
   await expect(page.getByText('No saved queries')).toBeVisible()
 

@@ -1167,3 +1167,47 @@ class TestTopServiceNetworkFailures:
         assert events[-1].message == "The slow-query lookup could not be completed."
         assert events[-1].detail == "OSError"
         assert "Network error" not in events[-1].message
+
+
+class TestTopImpactMetrics:
+    """Impact telemetry must survive the trip into the registry so the Queries
+    workbench can rank by impact (rdst-41p.2)."""
+
+    @pytest.fixture
+    def service(self):
+        return TopService()
+
+    def test_process_top_data_carries_impact_metrics(self, service):
+        df = pd.DataFrame(
+            [{"query_text": "SELECT slow", "calls": 4200, "total_time": 100.0, "mean_time": 142.0}]
+        )
+        result = service._process_top_data(
+            {"success": True, "data": df},
+            "pg_stat",
+            TopOptions(limit=10, sort="total_time"),
+        )
+        row = result[0]
+        assert row["observation_count"] == 4200
+        # Persisted avg_duration_ms mirrors the displayed avg_time (seconds -> ms).
+        avg_time_s = float(row["avg_time"].rstrip("s"))
+        assert row["avg_duration_ms"] == pytest.approx(avg_time_s * 1000)
+        assert row["avg_duration_ms"] > 0
+
+    @pytest.mark.asyncio
+    async def test_save_query_to_registry_forwards_metrics(self, service):
+        with patch("shared.query_registry.QueryRegistry") as MockRegistry:
+            MockRegistry.return_value.add_query.return_value = ("h", True)
+            await service._save_query_to_registry(
+                {
+                    "query_text": "SELECT 1",
+                    "avg_duration_ms": 142.0,
+                    "observation_count": 4200,
+                    "max_duration_ms": 190.0,
+                },
+                "imdb",
+                "top",
+            )
+            _, kwargs = MockRegistry.return_value.add_query.call_args
+            assert kwargs["avg_duration_ms"] == 142.0
+            assert kwargs["observation_count"] == 4200
+            assert kwargs["max_duration_ms"] == 190.0

@@ -32,6 +32,11 @@ async def test_query_registry_post_strips_comments_and_persists_canonical_sql(cl
     assert payload["offset"] == 0
     assert queries[0]["hash"] == post_payload["hash"]
     assert queries[0]["sql"] == "SELECT * FROM users WHERE id = :p1"
+    # Readyset cache fields are exposed on every entry (rdst-41p.1); empty
+    # until the query has been cache-checked. The Queries workbench reads these.
+    assert queries[0]["readyset_supported"] == ""
+    assert queries[0]["readyset_query_id"] == ""
+    assert queries[0]["last_cache_target"] == ""
 
 
 async def test_list_normalizes_legacy_list_target_entry(client, tmp_rdst_home: Path):
@@ -67,6 +72,31 @@ async def test_list_normalizes_legacy_list_target_entry(client, tmp_rdst_home: P
     by_hash = {q["hash"]: q for q in payload["queries"]}
     assert by_hash["aaaa1111bbbb"]["target"] == ""
     assert by_hash["cccc2222dddd"]["target"] == "pgtest"
+
+
+async def test_list_target_uses_ask_origin_over_last_run(client, tmp_rdst_home: Path):
+    """The listed target is the query's home database (ask_target), not the
+    mutable last_target. A query asked on imdb but last run against tpcds must
+    list under imdb so it stays out of other databases' per-DB lists
+    (rdst-e7s.31)."""
+    (tmp_rdst_home / "queries.toml").write_text(
+        '[queries.eeee3333ffff]\n'
+        'sql = "SELECT tconst FROM title_basics"\n'
+        'hash = "eeee3333ffff"\n'
+        'tag = "highest_rated"\n'
+        'first_analyzed = "2026-07-07T10:00:00Z"\n'
+        'last_analyzed = "2026-07-07T10:00:00Z"\n'
+        'frequency = 1\n'
+        'source = "ask"\n'
+        'ask_target = "imdb"\n'
+        'last_target = "tpcds"\n'
+    )
+
+    listing = await client.get("/api/query-registry?limit=150")
+    assert listing.status_code == 200
+    payload = listing.json()
+    by_hash = {q["hash"]: q for q in payload["queries"]}
+    assert by_hash["eeee3333ffff"]["target"] == "imdb"
 
 
 async def test_register_then_delete_then_list_excludes_query(client):

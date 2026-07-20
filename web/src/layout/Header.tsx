@@ -36,7 +36,7 @@ const routeConfig: Record<string, RouteConfig> = {
   '/ask': { label: 'Ask', icon: 'sparkles' },
   '/top': { label: 'Slow Queries', icon: 'observe' },
   '/scan': { label: 'Code Scan', icon: 'search' },
-  '/query-registry': { label: 'Saved Queries', icon: 'folder-file' },
+  '/query-registry': { label: 'Queries', icon: 'folder-file' },
   '/cache': { label: 'Caching', icon: 'database-settings' },
   '/benchmark': { label: 'Benchmark', icon: 'play' },
   '/schema': { label: 'Schema', icon: 'layers' },

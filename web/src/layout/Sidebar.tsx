@@ -143,18 +143,18 @@ const sections: Array<{ title: string; items: NavItem[] }> = [
     title: 'Optimize',
     items: [
       { label: 'Caching', icon: 'database-settings', to: '/cache' },
-      { label: 'Saved Queries', icon: 'folder-file', to: '/query-registry' },
-      { label: 'Code Scan', icon: 'search', to: '/scan' },
+      { label: 'Queries', icon: 'folder-file', to: '/query-registry' },
     ],
   },
 ]
 
 const advancedItems: NavItem[] = [
+  { label: 'Benchmark', icon: 'play', to: '/benchmark' },
+  { label: 'Schema', icon: 'layers', to: '/schema' },
+  { label: 'Code Scan', icon: 'search', to: '/scan' },
   { label: 'Agents', icon: 'message-multiple', to: '/agents' },
   { label: 'Guards', icon: 'user-shield', to: '/guards' },
   { label: 'Fleet', icon: 'building', to: '/fleet' },
-  { label: 'Benchmark', icon: 'play', to: '/benchmark' },
-  { label: 'Schema', icon: 'layers', to: '/schema' },
 ]
 
 // Configuration recedes off the daily nav: after first connect the only global

@@ -259,16 +259,15 @@ async def ask_history(
             sql=e.original_sql or e.sql,
             hash=e.hash,
             tag=e.tag,
-            target=e.ask_target or e.last_target,
+            target=e.home_target,
             last_used=e.last_analyzed,
         )
         for e in registry.list_queries()
         if e.source == "ask"
         and e.question
-        # Scope by the immutable ask origin; last_target is mutable and leaked
-        # questions across databases (rdst-e7s.26). Fall back to last_target for
-        # entries saved before ask_target existed.
-        and (not target or (e.ask_target or e.last_target) == target)
+        # Scope by the query's home target; last_target is mutable and leaked
+        # questions across databases (rdst-e7s.26).
+        and (not target or e.home_target == target)
     ]
     return AskHistoryResponse(items=items[:limit])
 

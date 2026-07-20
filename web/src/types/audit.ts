@@ -43,15 +43,34 @@ export interface WorkloadIndexRecommendation {
   estimated_impact?: string;
 }
 
+// An optimization priority from the capture LLM. It is an untyped dict whose
+// keys vary across audit versions (e.g. rank/description/recommendation or
+// priority/action/details), so all fields are optional and consumers read
+// whichever are present. Some payloads use plain strings instead.
+export interface WorkloadOptimizationPriority {
+  rank?: number;
+  priority?: number;
+  category?: string;
+  description?: string;
+  action?: string;
+  details?: string;
+  impact?: string;
+  effort?: string;
+  affected_queries?: string[];
+  recommendation?: string;
+}
+
 export interface WorkloadAnalysis {
   health_score?: number;
   workload_characterization?: string;
   read_write_ratio?: string;
-  top_bottlenecks?: string[];
+  // LLM-generated; entries may be plain strings or objects with varying keys
+  // (rendered via bulletContent, which reads whichever fields are present).
+  top_bottlenecks?: (string | Record<string, unknown>)[];
   index_recommendations?: WorkloadIndexRecommendation[];
-  caching_candidates?: string[];
+  caching_candidates?: (string | Record<string, unknown>)[];
   capacity_insights?: string[];
-  optimization_priorities?: string[];
+  optimization_priorities?: (string | WorkloadOptimizationPriority)[];
 }
 
 export interface WorkloadSummary {
