@@ -6,9 +6,10 @@ export interface UpdateDownloadLink {
 }
 
 export interface UpdateStatePayload {
-  status: 'available' | 'ready'
+  status: 'available' | 'downloading' | 'ready'
   version: string
   downloadLinks: UpdateDownloadLink[]
+  progress?: number
 }
 
 // Must match the per-platform publish URLs in electron-builder.yml. Only
@@ -33,10 +34,8 @@ export interface UpdateEnvironment {
 /**
  * Picks how updates are delivered for this install.
  *
- * - AppImage installs update in place through electron-updater.
+ * - macOS and AppImage installs update in place through electron-updater.
  * - deb/rpm installs get a notification with download links.
- * - macOS is notification-only until builds are Developer ID signed and
- *   notarized; Squirrel.Mac refuses to install ad-hoc signed updates.
  */
 export function resolveUpdateMode(env: UpdateEnvironment): UpdateMode {
   if (!env.isPackaged || !env.updatesEnabled) return 'disabled'
@@ -44,7 +43,7 @@ export function resolveUpdateMode(env: UpdateEnvironment): UpdateMode {
     case 'linux':
       return env.appImagePath ? 'auto' : 'notify'
     case 'darwin':
-      return 'notify'
+      return 'auto'
     default:
       return 'disabled'
   }

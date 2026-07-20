@@ -9,8 +9,9 @@ test('configures Postgres and introspects its schema through the UI', async ({
   await clearTargets(page.request)
 
   await page.goto('/onboarding')
-  await page.getByRole('button', { name: 'Get Started' }).click()
-  await page.getByRole('button', { name: 'Add Your First Target' }).click()
+  await expect(
+    page.getByRole('heading', { name: 'Connect your database' })
+  ).toBeVisible()
   await page.locator('[name="name"]').fill('postgres-e2e')
   await page.locator('[name="host"]').fill(host)
   await page.locator('[name="port"]').fill(String(port))
@@ -20,22 +21,10 @@ test('configures Postgres and introspects its schema through the UI', async ({
     .locator('[name="password"]')
     .fill(process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password')
   await page.locator('[name="password_env"]').fill('RDST_E2E_DB_PASSWORD')
-  await page.getByRole('button', { name: 'Add Target' }).click()
-  await expect(page.getByText('1 target configured')).toBeVisible()
-  await page.getByRole('button', { name: 'Continue' }).click()
-  await expect(page.getByText('All Passed')).toBeVisible({ timeout: 30_000 })
-  await page.getByRole('button', { name: 'Continue' }).click()
-  await page.getByRole('button', { name: 'Start Using RDST' }).click()
+  await page.getByRole('button', { name: 'Test & connect' }).click()
 
-  await page.goto('/configure')
-  const targetRow = page
-    .getByTestId('target-row')
-    .filter({ hasText: 'postgres-e2e' })
-  // Set-default lives in the row's ⋯ overflow menu now [C-09 configure
-  // migration].
-  await targetRow.getByRole('button', { name: /More actions/ }).click()
-  await page.getByRole('menuitem', { name: 'Set as default' }).click()
-  await expect(targetRow.getByText('Default', { exact: true })).toBeVisible()
+  await expect(page).toHaveURL('/')
+  await expect(page.getByText('Run a health check')).toBeVisible()
 
   const schemaResponse = await page.request.get(
     '/api/schema?target=postgres-e2e'

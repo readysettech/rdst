@@ -1,94 +1,85 @@
-import { act, cleanup, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useToastStore } from "@rs/ui-new/use-toast";
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DesktopUpdateState } from "./desktop";
-import { useDesktopUpdates } from "./useDesktopUpdates";
+import type { DesktopUpdateState } from './desktop'
+import { useDesktopUpdates } from './useDesktopUpdates'
 
 function Probe() {
-  useDesktopUpdates();
-  return null;
+  const { state, install } = useDesktopUpdates()
+  return (
+    <button type="button" onClick={install}>
+      {state ? `${state.status}:${state.progress ?? ''}` : 'none'}
+    </button>
+  )
 }
 
-describe("useDesktopUpdates", () => {
-  let stateCallback: ((state: DesktopUpdateState) => void) | null = null;
-  const install = vi.fn();
+describe('useDesktopUpdates', () => {
+  let stateCallback: ((state: DesktopUpdateState) => void) | null = null
+  const install = vi.fn()
 
   beforeEach(() => {
-    useToastStore.setState({ toasts: [] });
-    stateCallback = null;
-    install.mockClear();
+    stateCallback = null
+    install.mockClear()
     window.rdstDesktop = {
       isDesktop: true,
-      platform: "linux",
+      platform: 'linux',
       updates: {
         getState: () => Promise.resolve(null),
         install,
         onStateChange: (callback) => {
-          stateCallback = callback;
+          stateCallback = callback
           return () => {
-            stateCallback = null;
-          };
+            stateCallback = null
+          }
         },
       },
-    };
-  });
+    }
+  })
 
   afterEach(() => {
-    cleanup();
-    delete window.rdstDesktop;
-  });
+    cleanup()
+    delete window.rdstDesktop
+  })
 
-  it("shows a restart toast when an update is ready", async () => {
-    render(<Probe />);
-    await act(async () => {});
-
-    act(() =>
-      stateCallback?.({ status: "ready", version: "1.0.9", downloadLinks: [] }),
-    );
-
-    const toasts = useToastStore.getState().toasts;
-    expect(toasts).toHaveLength(1);
-    expect(String(toasts[0]?.title)).toContain("1.0.9");
-    expect(toasts[0]?.action).toBeTruthy();
-  });
-
-  it("shows download links when the install needs a manual download", async () => {
-    render(<Probe />);
-    await act(async () => {});
+  it('tracks download progress and the ready state', async () => {
+    render(<Probe />)
+    await act(async () => {})
 
     act(() =>
       stateCallback?.({
-        status: "available",
-        version: "1.0.9",
-        downloadLinks: [
-          { label: ".deb", url: "https://example.invalid/a.deb" },
-          { label: ".rpm", url: "https://example.invalid/a.rpm" },
-        ],
-      }),
-    );
+        status: 'downloading',
+        version: '1.0.9',
+        downloadLinks: [],
+        progress: 47,
+      })
+    )
+    expect(screen.getByRole('button').textContent).toBe('downloading:47')
 
-    const toasts = useToastStore.getState().toasts;
-    expect(toasts).toHaveLength(1);
-    expect(String(toasts[0]?.title)).toContain("available");
-    expect(toasts[0]?.action).toBeFalsy();
-  });
+    act(() =>
+      stateCallback?.({
+        status: 'ready',
+        version: '1.0.9',
+        downloadLinks: [],
+        progress: 100,
+      })
+    )
+    expect(screen.getByRole('button').textContent).toBe('ready:100')
+  })
 
-  it("does not re-notify for the same version", async () => {
-    render(<Probe />);
-    await act(async () => {});
+  it('forwards the restart action to the desktop shell', async () => {
+    render(<Probe />)
+    await act(async () => {})
 
-    const state: DesktopUpdateState = {
-      status: "ready",
-      version: "1.0.9",
-      downloadLinks: [],
-    };
-    act(() => stateCallback?.(state));
-    const firstId = useToastStore.getState().toasts[0]?.id;
-    act(() => stateCallback?.(state));
+    fireEvent.click(screen.getByRole('button'))
+    expect(install).toHaveBeenCalledTimes(1)
+  })
 
-    const toasts = useToastStore.getState().toasts;
-    expect(toasts).toHaveLength(1);
-    expect(toasts[0]?.id).toBe(firstId);
-  });
-});
+  it('unsubscribes when the consumer unmounts', async () => {
+    const rendered = render(<Probe />)
+    await act(async () => {})
+    expect(stateCallback).not.toBeNull()
+
+    rendered.unmount()
+    expect(stateCallback).toBeNull()
+  })
+})

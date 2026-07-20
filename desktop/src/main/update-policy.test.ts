@@ -52,7 +52,7 @@ describe('resolveUpdateMode', () => {
     ).toBe('notify')
   })
 
-  it('notifies macOS installs', () => {
+  it('updates macOS installs in place', () => {
     expect(
       resolveUpdateMode({
         isPackaged: true,
@@ -60,7 +60,7 @@ describe('resolveUpdateMode', () => {
         platform: 'darwin',
         appImagePath: undefined,
       })
-    ).toBe('notify')
+    ).toBe('auto')
   })
 
   it('disables updates on unsupported platforms', () => {

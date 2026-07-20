@@ -34,6 +34,8 @@ function AppShell({ children }: { children: ReactNode }) {
   const isElectronMac = isDesktopMac()
   const isElectronLinux = isDesktopLinux()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const { state: desktopUpdateState, install: installDesktopUpdate } =
+    useDesktopUpdates()
 
   return (
     <div
@@ -62,6 +64,8 @@ function AppShell({ children }: { children: ReactNode }) {
         isElectronMac={isElectronMac}
         mobileOpen={mobileNavOpen}
         onMobileClose={() => setMobileNavOpen(false)}
+        desktopUpdateState={desktopUpdateState}
+        onInstallUpdate={installDesktopUpdate}
       />
       <Main isElectronMac={isElectronMac}>{children}</Main>
     </div>
@@ -69,8 +73,6 @@ function AppShell({ children }: { children: ReactNode }) {
 }
 
 function RootComponent() {
-  useDesktopUpdates()
-
   return (
     <AppShell>
       <ConfigWarning />

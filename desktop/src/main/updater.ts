@@ -52,18 +52,38 @@ function scheduleChecks(check: () => void): void {
   setInterval(check, CHECK_INTERVAL_MS).unref()
 }
 
-/** In-place updates through electron-updater; AppImage installs only. */
+/** In-place updates through electron-updater; macOS and AppImage installs. */
 function setupInPlaceUpdates(): void {
+  let downloadingVersion: string | null = null
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.on('error', (error) => {
     console.warn('[rdst-desktop] update error:', error.message)
   })
+  autoUpdater.on('update-available', (info) => {
+    downloadingVersion = info.version
+    broadcastState({
+      status: 'available',
+      version: info.version,
+      downloadLinks: [],
+    })
+  })
+  autoUpdater.on('download-progress', (progress) => {
+    if (!downloadingVersion) return
+    broadcastState({
+      status: 'downloading',
+      version: downloadingVersion,
+      downloadLinks: [],
+      progress: Math.min(100, Math.max(0, Math.round(progress.percent))),
+    })
+  })
   autoUpdater.on('update-downloaded', (info) => {
+    downloadingVersion = null
     broadcastState({
       status: 'ready',
       version: info.version,
       downloadLinks: [],
+      progress: 100,
     })
   })
 
@@ -77,8 +97,8 @@ function setupInPlaceUpdates(): void {
 
 /**
  * Notification-only updates: fetch the channel metadata directly and
- * surface download links. Used where in-place updates are unavailable --
- * deb/rpm installs, and macOS until builds are Developer ID signed.
+ * surface download links. Used where in-place updates are unavailable:
+ * deb/rpm installs.
  */
 function setupUpdateNotifications(env: UpdateEnvironment): void {
   const feedUrl = UPDATE_FEED_URLS[env.platform]

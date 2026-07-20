@@ -1,66 +1,37 @@
-import { useEffect, useRef } from "react";
-import { Button } from "@rs/ui-new/button";
-import { toast } from "@rs/ui-new/use-toast";
+import { useCallback, useEffect, useState } from 'react'
 
-import { getDesktopUpdates, type DesktopUpdateState } from "./desktop";
+import { type DesktopUpdateState, getDesktopUpdates } from './desktop'
 
 /**
- * Surfaces desktop shell update notifications as toasts: a restart action
- * when the shell downloaded the update in place, or download links when
- * the install format requires a manual download.
+ * Subscribes to desktop-shell update state. The shell owns checking,
+ * downloading, and installation; the renderer only presents progress and
+ * forwards the final restart action.
  */
-export function useDesktopUpdates(): void {
-  const notifiedVersion = useRef<string | null>(null);
+export function useDesktopUpdates(): {
+  state: DesktopUpdateState | null
+  install: () => void
+} {
+  const [state, setState] = useState<DesktopUpdateState | null>(null)
 
   useEffect(() => {
-    const updates = getDesktopUpdates();
-    if (!updates) return;
+    const updates = getDesktopUpdates()
+    if (!updates) return
 
-    const notify = (state: DesktopUpdateState | null) => {
-      if (!state || state.version === notifiedVersion.current) return;
-      notifiedVersion.current = state.version;
+    let mounted = true
+    void updates.getState().then((nextState) => {
+      if (mounted) setState(nextState)
+    })
+    const unsubscribe = updates.onStateChange((nextState) => {
+      if (mounted) setState(nextState)
+    })
 
-      if (state.status === "ready") {
-        toast({
-          title: `RDST Desktop ${state.version} is ready`,
-          description: "Restart the app to apply the update.",
-          duration: Infinity,
-          action: (
-            <Button
-              size="small"
-              label="Restart now"
-              onClick={() => updates.install()}
-            />
-          ),
-        });
-        return;
-      }
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
+  }, [])
 
-      toast({
-        title: `RDST Desktop ${state.version} is available`,
-        duration: Infinity,
-        description: (
-          <span>
-            Download:{" "}
-            {state.downloadLinks.map((link, index) => (
-              <span key={link.url}>
-                {index > 0 && ", "}
-                <a
-                  className="underline"
-                  href={link.url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {link.label}
-                </a>
-              </span>
-            ))}
-          </span>
-        ),
-      });
-    };
+  const install = useCallback(() => getDesktopUpdates()?.install(), [])
 
-    void updates.getState().then(notify);
-    return updates.onStateChange(notify);
-  }, []);
+  return { state, install }
 }

@@ -58,13 +58,7 @@ vi.mock('../lib/useSystemStatus', () => ({
 }))
 
 /** Wrapper with an external trigger so focus-return has a real target. */
-function Harness({
-  open,
-  onClose,
-}: {
-  open: boolean
-  onClose: () => void
-}) {
+function Harness({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <div>
       <button type="button" data-testid="hamburger">
@@ -120,5 +114,27 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
     // Shift+Tab from the scrim wraps back to the last element.
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(feedback)
+  })
+
+  it('shows the desktop update action without backend version data', () => {
+    const install = vi.fn()
+    render(
+      <Sidebar
+        desktopUpdateState={{
+          status: 'ready',
+          version: '1.0.9',
+          downloadLinks: [],
+          progress: 100,
+        }}
+        onInstallUpdate={install}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Restart: Version 1.0.9 is ready',
+      })
+    )
+    expect(install).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,43 +1,42 @@
 export interface DesktopWindowControls {
-  minimize: () => void;
-  toggleMaximize: () => void;
-  close: () => void;
-  isMaximized: () => Promise<boolean>;
-  onMaximizedChange: (callback: (maximized: boolean) => void) => () => void;
+  minimize: () => void
+  toggleMaximize: () => void
+  close: () => void
+  isMaximized: () => Promise<boolean>
+  onMaximizedChange: (callback: (maximized: boolean) => void) => () => void
 }
 
 export interface DesktopUpdateLink {
-  label: string;
-  url: string;
+  label: string
+  url: string
 }
 
 export interface DesktopUpdateState {
   /**
-   * "ready" means the shell downloaded the update and can install it on
-   * restart; "available" means the install format requires a manual
-   * download via the provided links.
+   * "downloading" and "ready" are in-place update states; "available"
+   * means the install format requires a manual download via the provided
+   * links.
    */
-  status: "available" | "ready";
-  version: string;
-  downloadLinks: DesktopUpdateLink[];
+  status: 'available' | 'downloading' | 'ready'
+  version: string
+  downloadLinks: DesktopUpdateLink[]
+  progress?: number
 }
 
 export interface DesktopUpdates {
-  getState: () => Promise<DesktopUpdateState | null>;
-  install: () => void;
-  onStateChange: (
-    callback: (state: DesktopUpdateState) => void,
-  ) => () => void;
+  getState: () => Promise<DesktopUpdateState | null>
+  install: () => void
+  onStateChange: (callback: (state: DesktopUpdateState) => void) => () => void
 }
 
 declare global {
   interface Window {
     rdstDesktop?: {
-      isDesktop: true;
-      platform: string;
-      windowControls?: DesktopWindowControls;
-      updates?: DesktopUpdates;
-    };
+      isDesktop: true
+      platform: string
+      windowControls?: DesktopWindowControls
+      updates?: DesktopUpdates
+    }
   }
 }
 
@@ -48,8 +47,8 @@ declare global {
 export function isDesktopMac(): boolean {
   return (
     window.rdstDesktop?.isDesktop === true &&
-    window.rdstDesktop.platform === "darwin"
-  );
+    window.rdstDesktop.platform === 'darwin'
+  )
 }
 
 /**
@@ -59,14 +58,14 @@ export function isDesktopMac(): boolean {
 export function isDesktopLinux(): boolean {
   return (
     window.rdstDesktop?.isDesktop === true &&
-    window.rdstDesktop.platform === "linux"
-  );
+    window.rdstDesktop.platform === 'linux'
+  )
 }
 
 export function getWindowControls(): DesktopWindowControls | undefined {
-  return window.rdstDesktop?.windowControls;
+  return window.rdstDesktop?.windowControls
 }
 
 export function getDesktopUpdates(): DesktopUpdates | undefined {
-  return window.rdstDesktop?.updates;
+  return window.rdstDesktop?.updates
 }

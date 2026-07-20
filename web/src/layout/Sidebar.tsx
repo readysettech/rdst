@@ -6,10 +6,12 @@ import { Text } from '@rs/ui-new/text'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
+import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ReportDialog } from '../components/ReportDialog'
 import { TargetDropdown } from '../components/TargetDropdown'
 import { TrialBalanceBadge } from '../components/TrialBalanceBadge'
 import { useTarget } from '../hooks/useTarget'
+import type { DesktopUpdateState } from '../lib/desktop'
 import { useSystemStatus } from '../lib/useSystemStatus'
 
 // Plain-text acknowledgement of who is signed in; deliberately not a control.
@@ -211,12 +213,16 @@ interface SidebarProps {
   mobileOpen?: boolean
   /** Dismiss the mobile drawer (backdrop tap, nav click, Escape). */
   onMobileClose?: () => void
+  desktopUpdateState?: DesktopUpdateState | null
+  onInstallUpdate?: () => void
 }
 
 export function Sidebar({
   isElectronMac = false,
   mobileOpen = false,
   onMobileClose,
+  desktopUpdateState = null,
+  onInstallUpdate = () => undefined,
 }: SidebarProps) {
   const router = useRouterState()
   const currentPath = router.location.pathname
@@ -270,7 +276,11 @@ export function Sidebar({
     const onKeyDown = (e: KeyboardEvent) => {
       // A dialog opened from the drawer (e.g. Give Feedback) brings its own
       // Radix focus trap — never fight it.
-      if ((document.activeElement as HTMLElement | null)?.closest('[role="dialog"]')) {
+      if (
+        (document.activeElement as HTMLElement | null)?.closest(
+          '[role="dialog"]'
+        )
+      ) {
         return
       }
       if (e.key === 'Escape') {
@@ -470,11 +480,24 @@ export function Sidebar({
             <span>Give Feedback</span>
           </button>
 
-          {status?.version && (
-            <div className="px-3 py-2">
-              <Text level="caption" className="text-content-layout-3">
-                v{status.version}
-              </Text>
+          {(status?.version || desktopUpdateState) && (
+            <div className="flex items-center justify-between gap-2 px-3 py-2">
+              {status?.version && (
+                <div className="min-w-0" title={`v${status.version}`}>
+                  <Text
+                    level="caption"
+                    className="truncate text-content-layout-3"
+                  >
+                    v{status.version}
+                  </Text>
+                </div>
+              )}
+              <div className="ml-auto">
+                <DesktopUpdateControl
+                  state={desktopUpdateState}
+                  install={onInstallUpdate}
+                />
+              </div>
             </div>
           )}
         </div>
