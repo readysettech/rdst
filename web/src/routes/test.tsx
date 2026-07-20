@@ -133,7 +133,7 @@ function MockComparisonResult({ result }: { result: CacheRunResult }) {
       }`}>
         <HStack className="gap-3 items-center">
           <m.div
-            className={`flex items-center justify-center rounded-lg px-3 py-1.5 font-mono text-sm font-semibold tracking-tight ${
+            className={`flex items-center justify-center rounded-lg px-3 py-1.5 font-mono text-sm font-medium tracking-tight ${
               isWinner ? 'bg-surface-positive-solid text-white' : 'bg-surface-warning-solid text-white'
             }`}
             initial={{ scale: 0.8, opacity: 0 }}

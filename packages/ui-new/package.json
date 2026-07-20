@@ -48,6 +48,7 @@
     "./controlled-input-switch": "./src/components/form/controlled/input-switch.tsx",
     "./controlled-input-text": "./src/components/form/controlled/input-text.tsx",
     "./controlled-input-textarea": "./src/components/form/controlled/input-textarea.tsx",
+    "./confirm-dialog": "./src/components/overlay/confirm-dialog.tsx",
     "./dialog": "./src/components/overlay/dialog.tsx",
     "./scroll": "./src/components/overlay/scroll.tsx",
     "./scrollable": "./src/components/overlay/scrollable.tsx",

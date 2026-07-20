@@ -20,7 +20,7 @@ import { Icon } from '../svg/icon'
 
 const drawerStyles = tv({
   slots: {
-    overlay: ['fixed', 'inset-0', 'z-50', 'backdrop-blur-sm', 'bg-[black]/50'],
+    overlay: ['fixed', 'inset-0', 'z-50', 'backdrop-blur-sm', 'bg-surface-scrim'],
     content: [
       'fixed',
       'z-50',

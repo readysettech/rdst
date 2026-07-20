@@ -15,7 +15,7 @@ export const popoverRecipe = tv({
       'inset-0',
       'z-50',
       'backdrop-blur-[8px]',
-      'bg-[black]/50',
+      'bg-surface-scrim',
     ],
     content: [
       'z-50',

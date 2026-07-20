@@ -1,89 +1,93 @@
-import { useState, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { Text } from "@rs/ui-new/text";
-import { Button } from "@rs/ui-new/button";
-import { BaseInputTextarea } from "@rs/ui-new/base-input-textarea";
-import { BaseInputText } from "@rs/ui-new/base-input-text";
-import { BaseInputSwitch } from "@rs/ui-new/base-input-switch";
-import { Dropdown } from "@rs/ui-new/dropdown";
-import { Icon } from "@rs/ui-new/icon";
-import { HStack, VStack } from "@rs/ui-new/stack";
-import { toast } from "@rs/ui-new/use-toast";
-import { Modal, ModalContent, ModalContentContainer } from "@rs/ui-new/modal";
-import { m, AnimatePresence } from "@rs/ui-new/motion";
+import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
+import { BaseInputText } from '@rs/ui-new/base-input-text'
+import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea'
+import { Button } from '@rs/ui-new/button'
+import { Dropdown } from '@rs/ui-new/dropdown'
+import { Icon } from '@rs/ui-new/icon'
+import { Modal, ModalContent, ModalContentContainer } from '@rs/ui-new/modal'
+import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import { toast } from '@rs/ui-new/use-toast'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import {
   fetchQueryRegistry,
-  submitReport,
   type QueryRegistryEntry,
   type ReportRequest,
   type ReportResponse,
   type ReportSentiment,
-} from "../lib/api";
+  submitReport,
+} from '../lib/api'
 
 interface ReportDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-  initialQueryHash?: string;
+  isOpen: boolean
+  onClose: () => void
+  initialQueryHash?: string
 }
 
 type SentimentOption = {
-  value: ReportSentiment;
-  label: string;
-  icon: string;
-  color: string;
-  bgColor: string;
-  borderColor: string;
-};
+  value: ReportSentiment
+  label: string
+  icon: string
+  color: string
+  bgColor: string
+  borderColor: string
+}
 
 const sentimentOptions: SentimentOption[] = [
   {
-    value: "positive",
-    label: "Great",
-    icon: "😊",
-    color: "text-emerald-400",
-    bgColor: "bg-emerald-500/10",
-    borderColor: "border-emerald-500/50",
+    value: 'positive',
+    label: 'Great',
+    icon: '😊',
+    color: 'text-emerald-400',
+    bgColor: 'bg-emerald-500/10',
+    borderColor: 'border-emerald-500/50',
   },
   {
-    value: "neutral",
-    label: "Okay",
-    icon: "😐",
-    color: "text-amber-400",
-    bgColor: "bg-amber-500/10",
-    borderColor: "border-amber-500/50",
+    value: 'neutral',
+    label: 'Okay',
+    icon: '😐',
+    color: 'text-amber-400',
+    bgColor: 'bg-amber-500/10',
+    borderColor: 'border-amber-500/50',
   },
   {
-    value: "negative",
-    label: "Poor",
-    icon: "😞",
-    color: "text-rose-400",
-    bgColor: "bg-rose-500/10",
-    borderColor: "border-rose-500/50",
+    value: 'negative',
+    label: 'Poor',
+    icon: '😞',
+    color: 'text-rose-400',
+    bgColor: 'bg-rose-500/10',
+    borderColor: 'border-rose-500/50',
   },
-];
+]
 
-export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialogProps) {
-  const [sentiment, setSentiment] = useState<ReportSentiment>("neutral");
+export function ReportDialog({
+  isOpen,
+  onClose,
+  initialQueryHash,
+}: ReportDialogProps) {
+  const [sentiment, setSentiment] = useState<ReportSentiment>('neutral')
   const [selectedQueryHash, setSelectedQueryHash] = useState<string | null>(
-    initialQueryHash || null,
-  );
-  const [includeQuery, setIncludeQuery] = useState(true);
-  const [includePlan, setIncludePlan] = useState(true);
-  const [reason, setReason] = useState("");
-  const [email, setEmail] = useState("");
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+    initialQueryHash || null
+  )
+  const [includeQuery, setIncludeQuery] = useState(true)
+  const [includePlan, setIncludePlan] = useState(true)
+  const [reason, setReason] = useState('')
+  const [email, setEmail] = useState('')
+  const [dropdownOpen, setDropdownOpen] = useState(false)
 
   // Reset form when dialog opens
   useEffect(() => {
     if (isOpen) {
-      setSentiment("neutral");
-      setSelectedQueryHash(initialQueryHash || null);
-      setIncludeQuery(true);
-      setIncludePlan(true);
-      setReason("");
-      setEmail("");
+      setSentiment('neutral')
+      setSelectedQueryHash(initialQueryHash || null)
+      setIncludeQuery(true)
+      setIncludePlan(true)
+      setReason('')
+      setEmail('')
     }
-  }, [isOpen, initialQueryHash]);
+  }, [isOpen, initialQueryHash])
 
   // Fetch recent queries for dropdown
   const { data: queries = [] } = useQuery<
@@ -91,49 +95,50 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
     Error,
     QueryRegistryEntry[]
   >({
-    queryKey: ["queryRegistry", 10],
+    queryKey: ['queryRegistry', 10],
     queryFn: () => fetchQueryRegistry(10),
     select: (data) => data.queries,
     enabled: isOpen,
     staleTime: 30000,
-  });
+  })
 
   // Find selected query details
-  const selectedQuery = queries.find((q) => q.hash === selectedQueryHash);
+  const selectedQuery = queries.find((q) => q.hash === selectedQueryHash)
 
   // Submit mutation
   const submitMutation = useMutation<ReportResponse, Error, ReportRequest>({
     mutationFn: (request: ReportRequest) =>
       submitReport(request).then((result) => {
         if (!result.success) {
-          throw new Error(result.error || "An error occurred");
+          throw new Error(result.error || 'An error occurred')
         }
-        return result;
+        return result
       }),
     onSuccess: () => {
       toast({
-        title: "Thank you for your feedback!",
-        description: "Your feedback helps us improve RDST.",
-        variant: "positive",
-      });
-      onClose();
+        title: 'Thank you for your feedback!',
+        description: 'Your feedback helps us improve RDST.',
+        variant: 'positive',
+      })
+      onClose()
     },
     onError: (error) => {
       toast({
-        title: "Failed to submit feedback",
-        description: error instanceof Error ? error.message : "An error occurred",
-        variant: "negative",
-      });
+        title: 'Failed to submit feedback',
+        description:
+          error instanceof Error ? error.message : 'An error occurred',
+        variant: 'negative',
+      })
     },
-  });
+  })
 
   const handleSubmit = () => {
     if (!reason.trim()) {
       toast({
-        title: "Please enter your feedback",
-        variant: "warning",
-      });
-      return;
+        title: 'Please enter your feedback',
+        variant: 'warning',
+      })
+      return
     }
 
     submitMutation.mutate({
@@ -143,16 +148,16 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
       email: email.trim() || undefined,
       include_query: selectedQueryHash ? includeQuery : undefined,
       include_plan: selectedQueryHash ? includePlan : undefined,
-    });
-  };
+    })
+  }
 
   const truncateSQL = (sql: string, maxLength = 50) => {
-    const singleLine = sql.replace(/\s+/g, " ").trim();
-    if (singleLine.length <= maxLength) return singleLine;
-    return singleLine.slice(0, maxLength) + "...";
-  };
+    const singleLine = sql.replace(/\s+/g, ' ').trim()
+    if (singleLine.length <= maxLength) return singleLine
+    return singleLine.slice(0, maxLength) + '...'
+  }
 
-  const currentSentiment = sentimentOptions.find((s) => s.value === sentiment);
+  const currentSentiment = sentimentOptions.find((s) => s.value === sentiment)
 
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -174,7 +179,7 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
             <HStack className="gap-4 items-center relative">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center shadow-lg">
                 <Icon
-                  name="message-multiple"
+                  name="customer-support"
                   label="Feedback"
                   className="w-6 h-6 text-content-primary-soft"
                 />
@@ -203,7 +208,7 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
               </Text>
               <div className="grid grid-cols-3 gap-3">
                 {sentimentOptions.map((option, index) => {
-                  const isSelected = sentiment === option.value;
+                  const isSelected = sentiment === option.value
                   return (
                     <m.button
                       key={option.value}
@@ -217,13 +222,15 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                       className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer ${
                         isSelected
                           ? `${option.bgColor} ${option.borderColor}`
-                          : "bg-surface-layout-2 border-transparent hover:border-border-layout-2"
+                          : 'bg-surface-layout-2 border-transparent hover:border-border-layout-2'
                       }`}
                     >
                       <span className="text-2xl">{option.icon}</span>
                       <Text
                         level="label-small"
-                        className={isSelected ? option.color : "text-content-layout-2"}
+                        className={
+                          isSelected ? option.color : 'text-content-layout-2'
+                        }
                       >
                         {option.label}
                       </Text>
@@ -240,7 +247,7 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                         </m.div>
                       )}
                     </m.button>
-                  );
+                  )
                 })}
               </div>
             </m.div>
@@ -252,8 +259,10 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
               transition={{ duration: 0.3, delay: 0.1 }}
             >
               <Text level="label-small" className="text-content-layout-2 mb-2">
-                Related query{" "}
-                <span className="text-content-layout-3 font-normal">(optional)</span>
+                Related query{' '}
+                <span className="text-content-layout-3 font-normal">
+                  (optional)
+                </span>
               </Text>
               <Dropdown open={dropdownOpen} onOpenChange={setDropdownOpen}>
                 <Dropdown.Trigger asChild>
@@ -269,8 +278,12 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                             />
                           </div>
                           <VStack className="gap-0 items-start min-w-0">
-                            <Text level="label-small" className="text-content-layout-1">
-                              {selectedQuery.tag || `Query ${selectedQuery.hash.slice(0, 8)}`}
+                            <Text
+                              level="label-small"
+                              className="text-content-layout-1"
+                            >
+                              {selectedQuery.tag ||
+                                `Query ${selectedQuery.hash.slice(0, 8)}`}
                             </Text>
                             <Text
                               level="mono-small"
@@ -289,7 +302,10 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                               className="w-4 h-4 text-content-layout-3"
                             />
                           </div>
-                          <Text level="body-small" className="text-content-layout-3">
+                          <Text
+                            level="body-small"
+                            className="text-content-layout-3"
+                          >
                             None — General feedback
                           </Text>
                         </HStack>
@@ -303,12 +319,15 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                     />
                   </div>
                 </Dropdown.Trigger>
-                <Dropdown.Content align="start" className="w-[calc(100%-2rem)] max-w-[468px]">
+                <Dropdown.Content
+                  align="start"
+                  className="w-[calc(100%-2rem)] max-w-[468px]"
+                >
                   <Dropdown.Item
                     label="None - General feedback"
                     onClick={() => {
-                      setSelectedQueryHash(null);
-                      setDropdownOpen(false);
+                      setSelectedQueryHash(null)
+                      setDropdownOpen(false)
                     }}
                   />
                   {queries.length > 0 && <Dropdown.Separator />}
@@ -316,12 +335,15 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                     <Dropdown.ItemWithChildren
                       key={query.hash}
                       onClick={() => {
-                        setSelectedQueryHash(query.hash);
-                        setDropdownOpen(false);
+                        setSelectedQueryHash(query.hash)
+                        setDropdownOpen(false)
                       }}
                     >
                       <div className="space-y-0.5 py-1">
-                        <Text level="label-small" className="text-content-layout-1">
+                        <Text
+                          level="label-small"
+                          className="text-content-layout-1"
+                        >
                           {query.tag || `Query ${query.hash.slice(0, 8)}`}
                         </Text>
                         <Text
@@ -335,7 +357,10 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                   ))}
                   {queries.length === 0 && (
                     <div className="px-3 py-2">
-                      <Text level="body-small" className="text-content-layout-3">
+                      <Text
+                        level="body-small"
+                        className="text-content-layout-3"
+                      >
                         No queries in registry
                       </Text>
                     </div>
@@ -349,7 +374,7 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
               {selectedQueryHash && (
                 <m.div
                   initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
+                  animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.2 }}
                   className="overflow-hidden"
@@ -361,7 +386,10 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                         label="Attachments"
                         className="w-4 h-4 text-content-layout-3"
                       />
-                      <Text level="label-small" className="text-content-layout-2">
+                      <Text
+                        level="label-small"
+                        className="text-content-layout-2"
+                      >
                         Include with feedback
                       </Text>
                     </HStack>
@@ -372,7 +400,10 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                           label="SQL"
                           className="w-4 h-4 text-content-layout-3"
                         />
-                        <Text level="body-small" className="text-content-layout-2">
+                        <Text
+                          level="body-small"
+                          className="text-content-layout-2"
+                        >
                           Query SQL
                         </Text>
                       </HStack>
@@ -385,8 +416,15 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
                     <div className="h-px bg-border-layout-1" />
                     <div className="flex items-center justify-between py-1">
                       <HStack className="gap-2 items-center">
-                        <Icon name="layers" label="Plan" className="w-4 h-4 text-content-layout-3" />
-                        <Text level="body-small" className="text-content-layout-2">
+                        <Icon
+                          name="layers"
+                          label="Plan"
+                          className="w-4 h-4 text-content-layout-3"
+                        />
+                        <Text
+                          level="body-small"
+                          className="text-content-layout-2"
+                        >
                           Execution plan
                         </Text>
                       </HStack>
@@ -408,11 +446,11 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
               transition={{ duration: 0.3, delay: 0.15 }}
             >
               <Text level="label-small" className="text-content-layout-2 mb-2">
-                {sentiment === "positive"
-                  ? "What did RDST do well?"
-                  : sentiment === "negative"
-                    ? "What went wrong? How can we improve?"
-                    : "Tell us about your experience"}
+                {sentiment === 'positive'
+                  ? 'What did RDST do well?'
+                  : sentiment === 'negative'
+                    ? 'What went wrong? How can we improve?'
+                    : 'Tell us about your experience'}
               </Text>
               <BaseInputTextarea
                 value={reason}
@@ -430,8 +468,10 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
               transition={{ duration: 0.3, delay: 0.2 }}
             >
               <Text level="label-small" className="text-content-layout-2 mb-2">
-                Email{" "}
-                <span className="text-content-layout-3 font-normal">(optional)</span>
+                Email{' '}
+                <span className="text-content-layout-3 font-normal">
+                  (optional)
+                </span>
               </Text>
               <BaseInputText
                 value={email}
@@ -459,8 +499,10 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
               disabled={submitMutation.isPending}
             />
             <Button
-              variant={currentSentiment?.value === "positive" ? "rising" : "primary"}
-              label={submitMutation.isPending ? "Sending..." : "Send Feedback"}
+              variant={
+                currentSentiment?.value === 'positive' ? 'rising' : 'primary'
+              }
+              label={submitMutation.isPending ? 'Sending...' : 'Send Feedback'}
               icon="arrow-up-right"
               iconPosition="right"
               onClick={handleSubmit}
@@ -471,5 +513,5 @@ export function ReportDialog({ isOpen, onClose, initialQueryHash }: ReportDialog
         </ModalContent>
       </ModalContentContainer>
     </Modal>
-  );
+  )
 }

@@ -1,53 +1,53 @@
-import { useState, useEffect, useRef } from 'react';
-import { createFileRoute, Link } from '@tanstack/react-router';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { BaseInputText } from '@rs/ui-new/base-input-text';
-import { Button } from '@rs/ui-new/button';
-import { Card } from '@rs/ui-new/card';
-import { Icon } from '@rs/ui-new/icon';
-import { Show } from '@rs/ui-new/show';
-import { Spinner } from '@rs/ui-new/spinner';
-import { Tag } from '@rs/ui-new/tag';
-import { Scrollable } from '@rs/ui-new/scrollable';
-import { Text } from '@rs/ui-new/text';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { m, AnimatePresence } from '@rs/ui-new/motion';
-import { CopyButton } from '@rs/ui-new/copy-button';
-import { toast } from '@rs/ui-new/use-toast';
-import { SQLInput } from '../components/SQLInput';
-import { SQLDisplay } from '../components/SQLDisplay';
-import { ParameterDialog, hasParameters } from '../components/top';
-import { TargetLockNotice } from '../components';
-import { useTarget } from '../hooks/useTarget';
-import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
+import { BaseInputText } from '@rs/ui-new/base-input-text'
+import { Button } from '@rs/ui-new/button'
+import { Card } from '@rs/ui-new/card'
+import { CopyButton } from '@rs/ui-new/copy-button'
+import { Icon } from '@rs/ui-new/icon'
+import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { Scrollable } from '@rs/ui-new/scrollable'
+import { Show } from '@rs/ui-new/show'
+import { Spinner } from '@rs/ui-new/spinner'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
+import { Text } from '@rs/ui-new/text'
+import { toast } from '@rs/ui-new/use-toast'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
+import { TargetLockNotice } from '../components'
+import { SQLDisplay } from '../components/SQLDisplay'
+import { SQLInput } from '../components/SQLInput'
+import { hasParameters, ParameterDialog } from '../components/top'
+import { useTarget } from '../hooks/useTarget'
 import {
-  fetchCacheStatus,
-  fetchCacheList,
   addCacheQuery,
   cacheLifecycle,
   deleteCacheQuery,
   dropAllCacheQueries,
+  fetchCacheList,
+  fetchCacheStatus,
   removeCacheTarget,
   useCacheDeploy,
   useCacheRun,
-} from '../lib/useCache';
+} from '../lib/useCache'
+import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 import type {
-  CacheEntry,
   CacheAddResponse,
+  CacheEntry,
   CacheLifecycleOperation,
   CacheRunResult,
-} from '../types/cache';
+} from '../types/cache'
 
 type CacheSearch = {
-  query?: string;
-};
+  query?: string
+}
 
 export const Route = createFileRoute('/cache')({
   validateSearch: (search: Record<string, unknown>): CacheSearch => ({
     query: typeof search.query === 'string' ? search.query : undefined,
   }),
   component: CachePage,
-});
+})
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -61,11 +61,11 @@ function StatusDot({ running }: { running: boolean }) {
       )}
       <span
         className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-          running ? 'bg-surface-positive-solid' : 'bg-surface-layout-3'
+          running ? 'bg-surface-positive-solid' : 'bg-surface-layout-soft'
         }`}
       />
     </span>
-  );
+  )
 }
 
 function EndpointCard({
@@ -80,21 +80,21 @@ function EndpointCard({
   isRedeploying,
   isRemoving,
 }: {
-  endpoint: string | null | undefined;
-  running: boolean;
-  target: string;
-  onRedeploy?: () => void;
-  onRemove?: () => void;
-  onEndpointRegistered?: () => void;
-  onLifecycle?: (operation: CacheLifecycleOperation) => void;
-  pendingLifecycleOp?: CacheLifecycleOperation | null;
-  isRedeploying?: boolean;
-  isRemoving?: boolean;
+  endpoint: string | null | undefined
+  running: boolean
+  target: string
+  onRedeploy?: () => void
+  onRemove?: () => void
+  onEndpointRegistered?: () => void
+  onLifecycle?: (operation: CacheLifecycleOperation) => void
+  pendingLifecycleOp?: CacheLifecycleOperation | null
+  isRedeploying?: boolean
+  isRemoving?: boolean
 }) {
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const [endpointHost, setEndpointHost] = useState('');
-  const [endpointPort, setEndpointPort] = useState('5433');
-  const needsEndpoint = !endpoint;
+  const [confirmRemove, setConfirmRemove] = useState(false)
+  const [endpointHost, setEndpointHost] = useState('')
+  const [endpointPort, setEndpointPort] = useState('5433')
+  const needsEndpoint = !endpoint
 
   const registerMutation = useMutation({
     mutationFn: async () => {
@@ -104,22 +104,30 @@ function EndpointCard({
         body: JSON.stringify({
           target,
           cache_host: endpointHost.trim(),
-          cache_port: parseInt(endpointPort, 10) || 5433,
+          cache_port: Number.parseInt(endpointPort, 10) || 5433,
         }),
-      });
-      if (!res.ok) throw new Error(`Failed: ${res.status}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      return data;
+      })
+      if (!res.ok) throw new Error(`Failed: ${res.status}`)
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      return data
     },
     onSuccess: () => {
-      toast({ title: 'Connected', description: 'Cache endpoint configured.', variant: 'positive' });
-      onEndpointRegistered?.();
+      toast({
+        title: 'Connected',
+        description: 'Cache endpoint configured.',
+        variant: 'positive',
+      })
+      onEndpointRegistered?.()
     },
     onError: (err: Error) => {
-      toast({ title: 'Connection failed', description: err.message, variant: 'negative' });
+      toast({
+        title: 'Connection failed',
+        description: err.message,
+        variant: 'negative',
+      })
     },
-  });
+  })
 
   return (
     <m.div
@@ -133,8 +141,15 @@ function EndpointCard({
             <HStack className="justify-between items-center">
               <HStack className="gap-2 items-center">
                 <StatusDot running={running} />
-                <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
-                  {needsEndpoint ? 'Endpoint Required' : running ? 'Cache Running' : 'Cache Stopped'}
+                <Text
+                  level="overline"
+                  className="text-content-layout-3 uppercase tracking-wider"
+                >
+                  {needsEndpoint
+                    ? 'Endpoint Required'
+                    : running
+                      ? 'Cache Running'
+                      : 'Cache Stopped'}
                 </Text>
               </HStack>
               <HStack className="gap-2">
@@ -213,8 +228,8 @@ function EndpointCard({
                       iconPosition="left"
                       loading={isRemoving}
                       onClick={() => {
-                        onRemove?.();
-                        setConfirmRemove(false);
+                        onRemove?.()
+                        setConfirmRemove(false)
                       }}
                     />
                   </HStack>
@@ -226,24 +241,39 @@ function EndpointCard({
             {needsEndpoint ? (
               <VStack className="gap-3 items-start">
                 <Text level="body-small" className="text-content-layout-2">
-                  ReadySet was deployed. Enter the host and port where RDST can reach it.
+                  ReadySet was deployed. Enter the host and port where RDST can
+                  reach it.
                 </Text>
                 <div className="grid grid-cols-[2fr_1fr_auto] gap-3 w-full items-end">
                   <div>
-                    <Text level="caption" className="text-content-layout-3 mb-1 block">ReadySet Host</Text>
+                    <Text
+                      level="caption"
+                      className="text-content-layout-3 mb-1 block"
+                    >
+                      ReadySet Host
+                    </Text>
                     <BaseInputText
                       name="endpoint-host"
                       value={endpointHost}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEndpointHost(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setEndpointHost(e.target.value)
+                      }
                       placeholder="host or IP"
                     />
                   </div>
                   <div>
-                    <Text level="caption" className="text-content-layout-3 mb-1 block">Port</Text>
+                    <Text
+                      level="caption"
+                      className="text-content-layout-3 mb-1 block"
+                    >
+                      Port
+                    </Text>
                     <BaseInputText
                       name="endpoint-port"
                       value={endpointPort}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEndpointPort(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setEndpointPort(e.target.value)
+                      }
                       placeholder="5433"
                     />
                   </div>
@@ -263,16 +293,24 @@ function EndpointCard({
               <VStack className="gap-3 items-start">
                 {running ? (
                   <Text level="body-small" className="text-content-layout-3">
-                    Point your application to this endpoint to route queries through ReadySet.
+                    Point your application to this endpoint to route queries
+                    through ReadySet.
                   </Text>
                 ) : (
-                  <Text level="body-small" className="text-content-warning-soft">
-                    The cache is not reachable. Check that ReadySet is running and the endpoint is correct.
+                  <Text
+                    level="body-small"
+                    className="text-content-warning-soft"
+                  >
+                    The cache is not reachable. Check that ReadySet is running
+                    and the endpoint is correct.
                   </Text>
                 )}
                 <HStack className="gap-3 items-center w-full">
                   <div className="flex-1 bg-surface-layout-2 rounded-lg px-4 py-3 border border-border-layout-1">
-                    <Text level="mono-small" className="text-content-layout-1 break-all">
+                    <Text
+                      level="mono-small"
+                      className="text-content-layout-1 break-all"
+                    >
                       {endpoint}
                     </Text>
                   </div>
@@ -284,13 +322,13 @@ function EndpointCard({
         </Card.Content>
       </Card>
     </m.div>
-  );
+  )
 }
 
 function formatMs(ms: number): string {
-  if (ms < 1) return '<1ms';
-  if (ms < 1000) return `${ms.toFixed(1)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
+  if (ms < 1) return '<1ms'
+  if (ms < 1000) return `${ms.toFixed(1)}ms`
+  return `${(ms / 1000).toFixed(2)}s`
 }
 
 /** Visual latency bar — width proportional to value relative to max. */
@@ -301,27 +339,30 @@ function LatencyBar({
   variant,
   delay = 0,
 }: {
-  label: string;
-  value: number;
-  maxValue: number;
-  variant: 'origin' | 'cache-win' | 'cache-lose';
-  delay?: number;
+  label: string
+  value: number
+  maxValue: number
+  variant: 'origin' | 'cache-win' | 'cache-lose'
+  delay?: number
 }) {
-  const pct = maxValue > 0 ? Math.max((value / maxValue) * 100, 2) : 2;
+  const pct = maxValue > 0 ? Math.max((value / maxValue) * 100, 2) : 2
   const barColor =
     variant === 'cache-win'
       ? 'bg-surface-positive-solid'
       : variant === 'origin'
         ? 'bg-content-layout-3/40'
-        : 'bg-surface-warning-solid/70';
+        : 'bg-surface-warning-solid/70'
   const textColor =
     variant === 'cache-win'
       ? 'text-content-positive-soft'
-      : 'text-content-layout-1';
+      : 'text-content-layout-1'
 
   return (
     <div className="flex items-center gap-3">
-      <Text level="caption" className="text-content-layout-3 w-8 text-right shrink-0">
+      <Text
+        level="caption"
+        className="text-content-layout-3 w-8 text-right shrink-0"
+      >
         {label}
       </Text>
       <div className="flex-1 h-6 bg-surface-layout-2/50 rounded-md overflow-hidden relative">
@@ -332,22 +373,35 @@ function LatencyBar({
           transition={{ duration: 0.6, delay, ease: [0.22, 1, 0.36, 1] }}
         />
       </div>
-      <Text level="mono-small" className={`w-16 text-right shrink-0 tabular-nums ${textColor}`}>
+      <Text
+        level="mono-small"
+        className={`w-16 text-right shrink-0 tabular-nums ${textColor}`}
+      >
         {formatMs(value)}
       </Text>
     </div>
-  );
+  )
 }
 
-function ComparisonResult({ result, onDismiss }: { result: CacheRunResult; onDismiss: () => void }) {
-  const isWinner = result.winner === 'readyset';
+function ComparisonResult({
+  result,
+  onDismiss,
+}: {
+  result: CacheRunResult
+  onDismiss: () => void
+}) {
+  const isWinner = result.winner === 'readyset'
   const maxLatency = Math.max(
-    result.origin_stats.mean, result.origin_stats.p50, result.origin_stats.p95,
-    result.cache_stats.mean, result.cache_stats.p50, result.cache_stats.p95,
-  );
+    result.origin_stats.mean,
+    result.origin_stats.p50,
+    result.origin_stats.p95,
+    result.cache_stats.mean,
+    result.cache_stats.p50,
+    result.cache_stats.p95
+  )
   const speedupDisplay = isWinner
     ? `${result.speedup_mean.toFixed(1)}x`
-    : `${Math.abs(result.improvement_pct).toFixed(0)}%`;
+    : `${Math.abs(result.improvement_pct).toFixed(0)}%`
 
   return (
     <m.tr
@@ -363,15 +417,17 @@ function ComparisonResult({ result, onDismiss }: { result: CacheRunResult; onDis
           transition={{ duration: 0.35 }}
         >
           {/* Header strip */}
-          <div className={`px-5 py-3 flex items-center justify-between ${
-            isWinner
-              ? 'bg-surface-positive-soft/15 border-b border-border-positive-soft/30'
-              : 'bg-surface-warning-soft/10 border-b border-border-warning-soft/30'
-          }`}>
+          <div
+            className={`px-5 py-3 flex items-center justify-between ${
+              isWinner
+                ? 'bg-surface-positive-soft/15 border-b border-border-positive-soft/30'
+                : 'bg-surface-warning-soft/10 border-b border-border-warning-soft/30'
+            }`}
+          >
             <HStack className="gap-3 items-center">
               {/* Speedup badge */}
               <m.div
-                className={`flex items-center justify-center rounded-lg px-3 py-1.5 font-mono text-sm font-semibold tracking-tight ${
+                className={`flex items-center justify-center rounded-lg px-3 py-1.5 font-mono text-sm font-medium tracking-tight ${
                   isWinner
                     ? 'bg-surface-positive-solid text-white'
                     : 'bg-surface-warning-solid text-white'
@@ -407,39 +463,98 @@ function ComparisonResult({ result, onDismiss }: { result: CacheRunResult; onDis
             <div className="space-y-2">
               <HStack className="gap-2 items-center mb-1">
                 <div className="w-2 h-2 rounded-full bg-content-layout-3/40" />
-                <Text level="overline" className="text-content-layout-3 uppercase tracking-widest text-[10px]">
+                <Text
+                  level="overline"
+                  className="text-content-layout-3 uppercase tracking-widest text-[10px]"
+                >
                   Origin
                 </Text>
               </HStack>
-              <LatencyBar label="Mean" value={result.origin_stats.mean} maxValue={maxLatency} variant="origin" delay={0.1} />
-              <LatencyBar label="P50" value={result.origin_stats.p50} maxValue={maxLatency} variant="origin" delay={0.15} />
-              <LatencyBar label="P95" value={result.origin_stats.p95} maxValue={maxLatency} variant="origin" delay={0.2} />
+              <LatencyBar
+                label="Mean"
+                value={result.origin_stats.mean}
+                maxValue={maxLatency}
+                variant="origin"
+                delay={0.1}
+              />
+              <LatencyBar
+                label="P50"
+                value={result.origin_stats.p50}
+                maxValue={maxLatency}
+                variant="origin"
+                delay={0.15}
+              />
+              <LatencyBar
+                label="P95"
+                value={result.origin_stats.p95}
+                maxValue={maxLatency}
+                variant="origin"
+                delay={0.2}
+              />
             </div>
 
             {/* Cache column */}
             <div className="space-y-2">
               <HStack className="gap-2 items-center mb-1">
-                <div className={`w-2 h-2 rounded-full ${isWinner ? 'bg-surface-positive-solid' : 'bg-surface-warning-solid/70'}`} />
-                <Text level="overline" className="text-content-layout-3 uppercase tracking-widest text-[10px]">
+                <div
+                  className={`w-2 h-2 rounded-full ${isWinner ? 'bg-surface-positive-solid' : 'bg-surface-warning-solid/70'}`}
+                />
+                <Text
+                  level="overline"
+                  className="text-content-layout-3 uppercase tracking-widest text-[10px]"
+                >
                   ReadySet
                 </Text>
               </HStack>
-              <LatencyBar label="Mean" value={result.cache_stats.mean} maxValue={maxLatency} variant={isWinner ? 'cache-win' : 'cache-lose'} delay={0.25} />
-              <LatencyBar label="P50" value={result.cache_stats.p50} maxValue={maxLatency} variant={isWinner ? 'cache-win' : 'cache-lose'} delay={0.3} />
-              <LatencyBar label="P95" value={result.cache_stats.p95} maxValue={maxLatency} variant={isWinner ? 'cache-win' : 'cache-lose'} delay={0.35} />
+              <LatencyBar
+                label="Mean"
+                value={result.cache_stats.mean}
+                maxValue={maxLatency}
+                variant={isWinner ? 'cache-win' : 'cache-lose'}
+                delay={0.25}
+              />
+              <LatencyBar
+                label="P50"
+                value={result.cache_stats.p50}
+                maxValue={maxLatency}
+                variant={isWinner ? 'cache-win' : 'cache-lose'}
+                delay={0.3}
+              />
+              <LatencyBar
+                label="P95"
+                value={result.cache_stats.p95}
+                maxValue={maxLatency}
+                variant={isWinner ? 'cache-win' : 'cache-lose'}
+                delay={0.35}
+              />
             </div>
           </div>
 
           {/* Footer */}
           <div className="px-5 py-2 border-t border-border-layout-1/50 flex items-center justify-between">
             <Text level="caption" className="text-content-layout-3">
-              {result.iterations} iterations &middot; min {formatMs(Math.min(result.origin_stats.min, result.cache_stats.min))} &middot; max {formatMs(Math.max(result.origin_stats.max, result.cache_stats.max))}
+              {result.iterations} iterations &middot; min{' '}
+              {formatMs(
+                Math.min(result.origin_stats.min, result.cache_stats.min)
+              )}{' '}
+              &middot; max{' '}
+              {formatMs(
+                Math.max(result.origin_stats.max, result.cache_stats.max)
+              )}
             </Text>
             <HStack className="gap-4">
               {(['min', 'max', 'p99'] as const).map((stat) => (
                 <HStack key={stat} className="gap-1.5 items-center">
-                  <Text level="caption" className="text-content-layout-3 uppercase text-[10px]">{stat}</Text>
-                  <Text level="mono-small" className="text-content-layout-2 tabular-nums text-xs">
+                  <Text
+                    level="caption"
+                    className="text-content-layout-3 uppercase text-[10px]"
+                  >
+                    {stat}
+                  </Text>
+                  <Text
+                    level="mono-small"
+                    className="text-content-layout-2 tabular-nums text-xs"
+                  >
                     {formatMs(result.cache_stats[stat])}
                   </Text>
                 </HStack>
@@ -449,7 +564,7 @@ function ComparisonResult({ result, onDismiss }: { result: CacheRunResult; onDis
         </m.div>
       </td>
     </m.tr>
-  );
+  )
 }
 
 function CachedQueryRow({
@@ -463,17 +578,17 @@ function CachedQueryRow({
   runResult,
   onDismissResult,
 }: {
-  entry: CacheEntry;
-  onDelete: (id: string) => void;
-  onRun: (query: string) => void;
-  isDeleting: boolean;
-  isRunning: boolean;
-  isBenchBusy: boolean;
-  runProgressMessage: string | undefined;
-  runResult: CacheRunResult | undefined;
-  onDismissResult: () => void;
+  entry: CacheEntry
+  onDelete: (id: string) => void
+  onRun: (query: string) => void
+  isDeleting: boolean
+  isRunning: boolean
+  isBenchBusy: boolean
+  runProgressMessage: string | undefined
+  runResult: CacheRunResult | undefined
+  onDismissResult: () => void
 }) {
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState(false)
 
   if (confirming) {
     return (
@@ -486,14 +601,21 @@ function CachedQueryRow({
         className="bg-surface-negative-soft/10"
       >
         <td colSpan={4} className="px-4 py-4">
-          <div className="flex items-center justify-between gap-4 bg-surface-negative-soft/20 rounded-lg p-4 border border-border-negative/30">
+          <div className="flex items-center justify-between gap-4 bg-surface-negative-soft/20 rounded-lg p-4 border border-border-negative-soft">
             <HStack className="gap-3 items-center flex-1 min-w-0">
-              <Icon name="alert" label="Warning" className="w-5 h-5 text-content-negative-soft shrink-0" />
+              <Icon
+                name="alert"
+                label="Warning"
+                className="w-5 h-5 text-content-negative-soft shrink-0"
+              />
               <VStack className="gap-1 items-start min-w-0">
                 <Text level="label-small" className="text-content-layout-1">
                   Remove this cached query?
                 </Text>
-                <Text level="mono-small" className="text-content-layout-3 truncate max-w-md">
+                <Text
+                  level="mono-small"
+                  className="text-content-layout-3 truncate max-w-md"
+                >
                   {entry.cache_name}
                 </Text>
               </VStack>
@@ -520,7 +642,7 @@ function CachedQueryRow({
           </div>
         </td>
       </m.tr>
-    );
+    )
   }
 
   return (
@@ -558,9 +680,10 @@ function CachedQueryRow({
           </div>
         </td>
         <td className="px-4 py-3 text-center">
+          {/* TTL is a neutral value, not info/warn — grey Tag (§4.4). */}
           <Tag
             size="small"
-            variant="informative"
+            variant="neutral"
             modifier="ghost"
             label={entry.ttl}
           />
@@ -613,7 +736,7 @@ function CachedQueryRow({
         )}
       </AnimatePresence>
     </>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -621,10 +744,10 @@ function CachedQueryRow({
 // ---------------------------------------------------------------------------
 
 function CachePage() {
-  const { query: pendingQuery } = Route.useSearch();
-  const queryClient = useQueryClient();
-  const { target } = useTarget();
-  const passwordLock = useTargetPasswordLock(target);
+  const { query: pendingQuery } = Route.useSearch()
+  const queryClient = useQueryClient()
+  const { target } = useTarget()
+  const passwordLock = useTargetPasswordLock(target)
 
   // Deploy hook
   const {
@@ -635,7 +758,7 @@ function CachePage() {
     result: deployResult,
     error: deployError,
     reset: resetDeploy,
-  } = useCacheDeploy();
+  } = useCacheDeploy()
 
   // Run comparison hook
   const {
@@ -645,63 +768,64 @@ function CachePage() {
     result: runResult,
     error: runError,
     reset: resetRun,
-  } = useCacheRun();
-  const [runningCacheId, setRunningCacheId] = useState<string | null>(null);
-  const [runResults, setRunResults] = useState<Record<string, CacheRunResult>>({});
+  } = useCacheRun()
+  const [runningCacheId, setRunningCacheId] = useState<string | null>(null)
+  const [runResults, setRunResults] = useState<Record<string, CacheRunResult>>(
+    {}
+  )
 
   // Parameter dialog state for queries that need parameter values
   const [paramDialog, setParamDialog] = useState<{
-    cacheId: string;
-    sql: string;
-  } | null>(null);
+    cacheId: string
+    sql: string
+  } | null>(null)
 
   // When a run completes, stash the result keyed by cache ID
   useEffect(() => {
     if (runState === 'complete' && runResult && runningCacheId) {
-      setRunResults((prev) => ({ ...prev, [runningCacheId]: runResult }));
-      setRunningCacheId(null);
+      setRunResults((prev) => ({ ...prev, [runningCacheId]: runResult }))
+      setRunningCacheId(null)
     } else if (runState === 'error') {
-      setRunningCacheId(null);
+      setRunningCacheId(null)
     }
-  }, [runState, runResult, runningCacheId]);
+  }, [runState, runResult, runningCacheId])
 
   const executeRun = (cacheId: string, sql: string) => {
-    if (!target) return;
-    setRunningCacheId(cacheId);
+    if (!target) return
+    setRunningCacheId(cacheId)
     setRunResults((prev) => {
-      const next = { ...prev };
-      delete next[cacheId];
-      return next;
-    });
-    resetRun();
-    runComparison({ query: sql, target, iterations: 15, warmup: 5 });
-  };
+      const next = { ...prev }
+      delete next[cacheId]
+      return next
+    })
+    resetRun()
+    runComparison({ query: sql, target, iterations: 15, warmup: 5 })
+  }
 
   const handleRun = (cacheId: string, query: string) => {
-    if (!target) return;
+    if (!target) return
     if (hasParameters(query)) {
       // Query has parameters — show dialog to collect values
-      setParamDialog({ cacheId, sql: query });
+      setParamDialog({ cacheId, sql: query })
     } else {
       // No parameters — run directly
-      executeRun(cacheId, query);
+      executeRun(cacheId, query)
     }
-  };
+  }
 
   // Add cache form state — pre-fill from search param
-  const [addQuery, setAddQuery] = useState(pendingQuery || '');
-  const [dryRunResult, setDryRunResult] = useState<CacheAddResponse | null>(null);
+  const [addQuery, setAddQuery] = useState(pendingQuery || '')
+  const [dryRunResult, setDryRunResult] = useState<CacheAddResponse | null>(
+    null
+  )
   // Bumped after a successful cache so the CodeMirror editor fully remounts
   // (clears its buffer/history), not just its controlled value. [QW16]
-  const [editorResetKey, setEditorResetKey] = useState(0);
-  const [showDropAllConfirm, setShowDropAllConfirm] = useState(false);
-  const autoCacheTriggered = useRef(false);
+  const [editorResetKey, setEditorResetKey] = useState(0)
+  const [showDropAllConfirm, setShowDropAllConfirm] = useState(false)
+  const autoCacheTriggered = useRef(false)
 
   // Cache status
-  const {
-    data: cacheStatus,
-    isLoading: isLoadingStatus,
-  } = useQuery({
+  const { data: cacheStatus, isLoading: isLoadingStatus } = useQuery({
     queryKey: ['cache-status', target],
     queryFn: () => fetchCacheStatus(target!),
     enabled: !!target && !passwordLock.isLocked,
@@ -710,116 +834,133 @@ function CachePage() {
     // endpoint. Poll quickly while deployed-but-unreachable so users do not
     // have to press Start repeatedly, then return to the normal slow cadence.
     refetchInterval: (query) => {
-      const status = query.state.data;
-      return status?.deployed && !status.running ? 1_000 : 60_000;
+      const status = query.state.data
+      return status?.deployed && !status.running ? 1_000 : 60_000
     },
-  });
+  })
 
   // Cache list (only when deployed)
-  const {
-    data: cacheList,
-    isLoading: isLoadingList,
-  } = useQuery({
+  const { data: cacheList, isLoading: isLoadingList } = useQuery({
     queryKey: ['cache-list', target],
     queryFn: () => fetchCacheList(target!),
-    enabled: !!target && !passwordLock.isLocked && cacheStatus?.deployed === true,
+    enabled:
+      !!target && !passwordLock.isLocked && cacheStatus?.deployed === true,
     staleTime: 10_000,
-  });
+  })
 
   // Dry-run check mutation — auto-creates cache if supported
   const checkMutation = useMutation({
     mutationFn: async (query: string): Promise<CacheAddResponse> => {
-      const result = await addCacheQuery({ query, target: target!, dry_run: true });
+      const result = await addCacheQuery({
+        query,
+        target: target!,
+        dry_run: true,
+      })
       if ('error' in result) {
-        throw new Error(result.error);
+        throw new Error(result.error)
       }
-      return result;
+      return result
     },
     onSuccess: (data) => {
-      setDryRunResult(data);
+      setDryRunResult(data)
       if (data.supported) {
-        const sql = data.query || addQuery.trim();
+        const sql = data.query || addQuery.trim()
         if (sql && target) {
-          createMutation.mutate(sql);
+          createMutation.mutate(sql)
         }
       }
     },
-  });
+  })
 
   // Create cache mutation
   const createMutation = useMutation({
     mutationFn: async (query: string): Promise<CacheAddResponse> => {
-      const result = await addCacheQuery({ query, target: target!, dry_run: false });
+      const result = await addCacheQuery({
+        query,
+        target: target!,
+        dry_run: false,
+      })
       if ('error' in result) {
-        throw new Error(result.error);
+        throw new Error(result.error)
       }
-      return result;
+      return result
     },
     onSuccess: () => {
-      setAddQuery('');
-      setDryRunResult(null);
-      setEditorResetKey((k) => k + 1);
-      queryClient.invalidateQueries({ queryKey: ['cache-list', target] });
+      setAddQuery('')
+      setDryRunResult(null)
+      setEditorResetKey((k) => k + 1)
+      queryClient.invalidateQueries({ queryKey: ['cache-list', target] })
     },
-  });
+  })
 
   // Delete single cache
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const deleteMutation = useMutation({
     mutationFn: (cacheId: string) => {
-      setDeletingId(cacheId);
-      return deleteCacheQuery(cacheId, target!);
+      setDeletingId(cacheId)
+      return deleteCacheQuery(cacheId, target!)
     },
     onSuccess: () => {
-      setDeletingId(null);
-      queryClient.invalidateQueries({ queryKey: ['cache-list', target] });
+      setDeletingId(null)
+      queryClient.invalidateQueries({ queryKey: ['cache-list', target] })
     },
     onError: () => setDeletingId(null),
-  });
+  })
 
   // Drop all caches
   const dropAllMutation = useMutation({
     mutationFn: () => dropAllCacheQueries(target!),
     onSuccess: () => {
-      setShowDropAllConfirm(false);
-      queryClient.invalidateQueries({ queryKey: ['cache-list', target] });
+      setShowDropAllConfirm(false)
+      queryClient.invalidateQueries({ queryKey: ['cache-list', target] })
     },
-  });
+  })
 
   // Container lifecycle (start / stop / restart)
   const lifecycleMutation = useMutation({
-    mutationFn: (operation: CacheLifecycleOperation) => cacheLifecycle(target!, operation),
+    mutationFn: (operation: CacheLifecycleOperation) =>
+      cacheLifecycle(target!, operation),
     onSuccess: (data, operation) => {
       const titles: Record<CacheLifecycleOperation, string> = {
         start: 'Cache started',
         stop: 'Cache stopped',
         restart: 'Cache restarted',
-      };
-      toast({ title: titles[operation], description: data.detail || undefined, variant: 'positive' });
-      queryClient.invalidateQueries({ queryKey: ['cache-status', target] });
+      }
+      toast({
+        title: titles[operation],
+        description: data.detail || undefined,
+        variant: 'positive',
+      })
+      queryClient.invalidateQueries({ queryKey: ['cache-status', target] })
       if (operation !== 'stop') {
         // ReadySet binds its SQL port a few seconds after the container
         // starts; refetch again once it has had time to come up.
         setTimeout(() => {
-          queryClient.invalidateQueries({ queryKey: ['cache-status', target] });
-        }, 5000);
+          queryClient.invalidateQueries({ queryKey: ['cache-status', target] })
+        }, 5000)
       }
     },
     onError: (err: Error, operation) => {
-      toast({ title: `Cache ${operation} failed`, description: err.message, variant: 'negative' });
+      toast({
+        title: `Cache ${operation} failed`,
+        description: err.message,
+        variant: 'negative',
+      })
     },
-  });
-  const pendingLifecycleOp = lifecycleMutation.isPending ? lifecycleMutation.variables : null;
+  })
+  const pendingLifecycleOp = lifecycleMutation.isPending
+    ? lifecycleMutation.variables
+    : null
 
   // Remove cache target (undeploy)
   const removeMutation = useMutation({
     mutationFn: () => removeCacheTarget(target!),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['status'] });
-      queryClient.invalidateQueries({ queryKey: ['cache-status', target] });
-      queryClient.invalidateQueries({ queryKey: ['cache-list', target] });
+      queryClient.invalidateQueries({ queryKey: ['status'] })
+      queryClient.invalidateQueries({ queryKey: ['cache-status', target] })
+      queryClient.invalidateQueries({ queryKey: ['cache-list', target] })
     },
-  });
+  })
 
   // Auto-cache pending query after deploy completes
   useEffect(() => {
@@ -829,105 +970,123 @@ function CachePage() {
       target &&
       !autoCacheTriggered.current
     ) {
-      autoCacheTriggered.current = true;
+      autoCacheTriggered.current = true
       // Small delay to let status query refetch and confirm deployed
       const timer = setTimeout(async () => {
         try {
-          const check = await addCacheQuery({ query: pendingQuery, target, dry_run: true });
+          const check = await addCacheQuery({
+            query: pendingQuery,
+            target,
+            dry_run: true,
+          })
           if ('error' in check) {
             // Silently fail — user can still manually cache
-            return;
+            return
           }
           if (check.supported) {
-            await addCacheQuery({ query: pendingQuery, target, dry_run: false });
-            queryClient.invalidateQueries({ queryKey: ['cache-list', target] });
-            setAddQuery('');
+            await addCacheQuery({ query: pendingQuery, target, dry_run: false })
+            queryClient.invalidateQueries({ queryKey: ['cache-list', target] })
+            setAddQuery('')
             setDryRunResult({
-              success: true, supported: true, query: pendingQuery,
+              success: true,
+              supported: true,
+              query: pendingQuery,
               detail: 'Cache deployed and query cached automatically.',
-            });
+            })
           } else {
-            setDryRunResult(check);
+            setDryRunResult(check)
           }
         } catch {
           // Silently fail — user can still manually cache
         }
-      }, 1500);
-      return () => clearTimeout(timer);
+      }, 1500)
+      return () => clearTimeout(timer)
     }
-  }, [deployState, pendingQuery, target, queryClient]);
+  }, [deployState, pendingQuery, target, queryClient])
 
   // Deploy mode state
-  type DeployMode = 'docker' | 'systemd' | 'kubernetes' | 'remote';
-  type RemoteRuntime = 'docker' | 'systemd';
-  const [deployMode, setDeployMode] = useState<DeployMode>('docker');
-  const [k8sNamespace, setK8sNamespace] = useState('readyset');
-  const [remoteDest, setRemoteDest] = useState('');  // user@host format
-  const [remoteRuntime, setRemoteRuntime] = useState<RemoteRuntime>('docker');
+  type DeployMode = 'docker' | 'systemd' | 'kubernetes' | 'remote'
+  type RemoteRuntime = 'docker' | 'systemd'
+  const [deployMode, setDeployMode] = useState<DeployMode>('docker')
+  const [k8sNamespace, setK8sNamespace] = useState('readyset')
+  const [remoteDest, setRemoteDest] = useState('') // user@host format
+  const [remoteRuntime, setRemoteRuntime] = useState<RemoteRuntime>('docker')
 
   // Clear deploy state when switching modes
   const switchMode = (mode: DeployMode) => {
-    resetDeploy();
-    setDeployMode(mode);
-  };
+    resetDeploy()
+    setDeployMode(mode)
+  }
 
   const handleDeploy = async () => {
-    if (!target) return;
-    resetDeploy();
-    autoCacheTriggered.current = false;
+    if (!target) return
+    resetDeploy()
+    autoCacheTriggered.current = false
     if (deployMode === 'kubernetes') {
-      await deploy({ target, mode: 'kubernetes', namespace: k8sNamespace });
+      await deploy({ target, mode: 'kubernetes', namespace: k8sNamespace })
     } else if (deployMode === 'remote') {
-      const parts = remoteDest.trim().split('@');
-      const sshUser = parts.length > 1 ? parts[0] : 'root';
-      const sshHost = parts.length > 1 ? parts[1] : parts[0];
-      await deploy({ target, mode: remoteRuntime, host: sshHost, ssh_user: sshUser });
+      const parts = remoteDest.trim().split('@')
+      const sshUser = parts.length > 1 ? parts[0] : 'root'
+      const sshHost = parts.length > 1 ? parts[1] : parts[0]
+      await deploy({
+        target,
+        mode: remoteRuntime,
+        host: sshHost,
+        ssh_user: sshUser,
+      })
     } else if (deployMode === 'systemd') {
-      await deploy({ target, mode: 'systemd' });
+      await deploy({ target, mode: 'systemd' })
     } else {
-      await deploy({ target, mode: 'docker' });
+      await deploy({ target, mode: 'docker' })
     }
-    queryClient.invalidateQueries({ queryKey: ['cache-status', target] });
-  };
+    queryClient.invalidateQueries({ queryKey: ['cache-status', target] })
+  }
 
   // Toast on deploy error
   useEffect(() => {
     if (deployState === 'error' && deployError) {
-      toast({ title: 'Deploy failed', description: deployError, variant: 'negative' });
-      resetDeploy();
+      toast({
+        title: 'Deploy failed',
+        description: deployError,
+        variant: 'negative',
+      })
+      resetDeploy()
     }
-  }, [deployState, deployError, resetDeploy]);
+  }, [deployState, deployError, resetDeploy])
 
   // Toast on deploy success
   useEffect(() => {
     if (deployState === 'complete') {
-      toast({ title: 'Cache deployed', description: 'ReadySet is running.', variant: 'positive' });
+      toast({
+        title: 'Cache deployed',
+        description: 'ReadySet is running.',
+        variant: 'positive',
+      })
     }
-  }, [deployState]);
+  }, [deployState])
 
-  const canDeploy = deployMode !== 'remote' || remoteDest.trim() !== '';
-
+  const canDeploy = deployMode !== 'remote' || remoteDest.trim() !== ''
 
   const handleCheckAndCache = () => {
-    if (!addQuery.trim() || !target) return;
+    if (!addQuery.trim() || !target) return
     // Clear any stale success/error from a previous run so a fresh check never
     // shows a green "success" beside a new red error. [QW16]
-    checkMutation.reset();
-    createMutation.reset();
-    setDryRunResult(null);
-    checkMutation.mutate(addQuery.trim());
-  };
+    checkMutation.reset()
+    createMutation.reset()
+    setDryRunResult(null)
+    checkMutation.mutate(addQuery.trim())
+  }
 
-  const isDeployed = cacheStatus?.deployed === true;
-  const isRunning = cacheStatus?.running === true;
-  const caches = cacheList?.caches || [];
-  const isDeploying = deployState === 'deploying';
+  const isDeployed = cacheStatus?.deployed === true
+  const isRunning = cacheStatus?.running === true
+  const caches = cacheList?.caches || []
+  const isDeploying = deployState === 'deploying'
 
   // A query carried from Analyze/Ask pre-loads the editor but must NOT silently
   // fire a ~4 GB container deploy on arrival. The deploy stays an explicit,
   // cost-disclosed, cancelable confirm below; only the auto-cache after a
   // user-initiated deploy remains. [diagnose-to-fix MoT 3; caching HIGH]
-  const carriedQuery = Boolean(pendingQuery) && !isDeployed;
+  const carriedQuery = Boolean(pendingQuery) && !isDeployed
 
   return (
     <div className="space-y-6 w-full">
@@ -941,11 +1100,19 @@ function CachePage() {
         <HStack className="justify-between items-start">
           <HStack className="gap-4 items-center">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-positive-soft to-surface-info-soft flex items-center justify-center">
-              <Icon name="database-settings" label="Cache" className="w-6 h-6 text-content-positive-soft" />
+              <Icon
+                name="database-settings"
+                label="Cache"
+                className="w-6 h-6 text-content-positive-soft"
+              />
             </div>
             <VStack className="gap-1 items-start">
               <HStack className="gap-3 items-center">
-                <Text as="h1" level="headline-3" className="text-content-layout-1">
+                <Text
+                  as="h1"
+                  level="headline-3"
+                  className="text-content-layout-1"
+                >
                   ReadySet Cache
                 </Text>
                 {isDeployed && (
@@ -957,7 +1124,8 @@ function CachePage() {
                 )}
               </HStack>
               <Text level="body-small" className="text-content-layout-3">
-                Cache slow queries for sub-millisecond response times with ReadySet.
+                Cache slow queries for sub-millisecond response times with
+                ReadySet.
               </Text>
             </VStack>
           </HStack>
@@ -1001,14 +1169,18 @@ function CachePage() {
           {carriedQuery && (
             <div className="mb-4 rounded-xl border border-border-info-soft bg-surface-info-soft/40 p-4">
               <HStack className="gap-3 items-start">
-                <Icon name="querypilot" label="Carried query" className="w-5 h-5 text-content-info-soft mt-0.5 shrink-0" />
+                <Icon
+                  name="querypilot"
+                  label="Carried query"
+                  className="w-5 h-5 text-content-info-soft mt-0.5 shrink-0"
+                />
                 <VStack className="gap-1 items-start min-w-0">
                   <Text level="label-medium" className="text-content-layout-1">
                     Your query is ready to cache
                   </Text>
                   <Text level="body-small" className="text-content-layout-2">
-                    Carried over from Analyze — deploy a cache below and it will be
-                    cached automatically. Nothing to re-paste.
+                    Carried over from Analyze — deploy a cache below and it will
+                    be cached automatically. Nothing to re-paste.
                   </Text>
                   <code className="mt-1 block max-w-full truncate font-mono text-caption text-content-layout-3">
                     {pendingQuery}
@@ -1023,12 +1195,20 @@ function CachePage() {
               <div className="p-8 border-b border-border-layout-1">
                 <VStack className="gap-5 items-start max-w-2xl">
                   <VStack className="gap-2 items-start">
-                    <Text as="h2" level="headline-4" className="text-content-layout-1">
+                    <Text
+                      as="h2"
+                      level="headline-4"
+                      className="text-content-layout-1"
+                    >
                       Deploy a cache for "{target}"
                     </Text>
-                    <Text level="body-medium" className="text-content-layout-2 leading-relaxed">
-                      ReadySet sits between your application and database, serving cached queries
-                      in under 1ms. Uncached queries pass through transparently to your database.
+                    <Text
+                      level="body-medium"
+                      className="text-content-layout-2 leading-relaxed"
+                    >
+                      ReadySet sits between your application and database,
+                      serving cached queries in under 1ms. Uncached queries pass
+                      through transparently to your database.
                     </Text>
                   </VStack>
 
@@ -1057,13 +1237,23 @@ function CachePage() {
                       >
                         <HStack className="gap-3 items-start">
                           <div className="w-8 h-8 rounded-lg bg-surface-positive-soft flex items-center justify-center shrink-0">
-                            <Icon name={feature.icon} label={feature.title} className="w-4 h-4 text-content-positive-soft" />
+                            <Icon
+                              name={feature.icon}
+                              label={feature.title}
+                              className="w-4 h-4 text-content-positive-soft"
+                            />
                           </div>
                           <VStack className="gap-1 items-start">
-                            <Text level="label-small" className="text-content-layout-1">
+                            <Text
+                              level="label-small"
+                              className="text-content-layout-1"
+                            >
                               {feature.title}
                             </Text>
-                            <Text level="caption" className="text-content-layout-3">
+                            <Text
+                              level="caption"
+                              className="text-content-layout-3"
+                            >
                               {feature.desc}
                             </Text>
                           </VStack>
@@ -1078,7 +1268,7 @@ function CachePage() {
               <div className="p-6 bg-surface-layout-2/30">
                 {/* Mode cards */}
                 <div className="grid grid-cols-4 gap-3 mb-5">
-                  {([
+                  {[
                     {
                       mode: 'docker' as DeployMode,
                       icon: 'database' as const,
@@ -1103,7 +1293,7 @@ function CachePage() {
                       title: 'Remote Host',
                       desc: 'Deploy via SSH',
                     },
-                  ]).map((opt) => (
+                  ].map((opt) => (
                     <button
                       key={opt.mode}
                       type="button"
@@ -1115,11 +1305,13 @@ function CachePage() {
                       }`}
                     >
                       <HStack className="gap-3 items-start">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                          deployMode === opt.mode
-                            ? 'bg-surface-primary-soft'
-                            : 'bg-surface-layout-2'
-                        }`}>
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                            deployMode === opt.mode
+                              ? 'bg-surface-primary-soft'
+                              : 'bg-surface-layout-2'
+                          }`}
+                        >
                           <Icon
                             name={opt.icon}
                             label={opt.title}
@@ -1131,14 +1323,20 @@ function CachePage() {
                           />
                         </div>
                         <VStack className="gap-0.5 items-start">
-                          <Text level="label-small" className={
-                            deployMode === opt.mode
-                              ? 'text-content-layout-1'
-                              : 'text-content-layout-2'
-                          }>
+                          <Text
+                            level="label-small"
+                            className={
+                              deployMode === opt.mode
+                                ? 'text-content-layout-1'
+                                : 'text-content-layout-2'
+                            }
+                          >
                             {opt.title}
                           </Text>
-                          <Text level="caption" className="text-content-layout-3">
+                          <Text
+                            level="caption"
+                            className="text-content-layout-3"
+                          >
                             {opt.desc}
                           </Text>
                         </VStack>
@@ -1152,30 +1350,44 @@ function CachePage() {
                   {deployMode === 'kubernetes' && (
                     <m.div
                       key="k8s-inputs"
-                      className="mb-5 space-y-3"
+                      // overflow-hidden clips the content to the animated
+                      // height so it can't spill past the box and let the
+                      // Deploy row ride up over these inputs (P60).
+                      className="mb-5 space-y-3 overflow-hidden"
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
                       transition={{ duration: 0.2 }}
                     >
                       <div className="max-w-xs">
-                        <Text level="caption" className="text-content-layout-3 mb-1 block">Namespace</Text>
+                        <Text
+                          level="caption"
+                          className="text-content-layout-3 mb-1 block"
+                        >
+                          Namespace
+                        </Text>
                         <BaseInputText
                           name="k8s-namespace"
                           value={k8sNamespace}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setK8sNamespace(e.target.value)}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            setK8sNamespace(e.target.value)
+                          }
                           placeholder="readyset"
                         />
                       </div>
                       <Text level="caption" className="text-content-layout-3">
-                        Requires kubectl configured with cluster access on this machine.
+                        Requires kubectl configured with cluster access on this
+                        machine.
                       </Text>
                     </m.div>
                   )}
                   {deployMode === 'remote' && (
                     <m.div
                       key="remote-inputs"
-                      className="mb-5 space-y-3"
+                      // Clip to the animated height so the SSH/Runtime inputs
+                      // (incl. the Systemd toggle) can't overflow and be
+                      // overlapped by the Deploy button below (P60, functional).
+                      className="mb-5 space-y-3 overflow-hidden"
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
@@ -1183,16 +1395,28 @@ function CachePage() {
                     >
                       <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
                         <div>
-                          <Text level="caption" className="text-content-layout-3 mb-1 block">SSH Destination</Text>
+                          <Text
+                            level="caption"
+                            className="text-content-layout-3 mb-1 block"
+                          >
+                            SSH Destination
+                          </Text>
                           <BaseInputText
                             name="remote-dest"
                             value={remoteDest}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRemoteDest(e.target.value)}
+                            onChange={(
+                              e: React.ChangeEvent<HTMLInputElement>
+                            ) => setRemoteDest(e.target.value)}
                             placeholder="user@hostname"
                           />
                         </div>
                         <div>
-                          <Text level="caption" className="text-content-layout-3 mb-1 block">Runtime</Text>
+                          <Text
+                            level="caption"
+                            className="text-content-layout-3 mb-1 block"
+                          >
+                            Runtime
+                          </Text>
                           <HStack className="gap-1 h-10">
                             {(['docker', 'systemd'] as const).map((rt) => (
                               <button
@@ -1220,7 +1444,11 @@ function CachePage() {
                     confirm, not a leap. [diagnose-to-fix MoT 3; USE-065] */}
                 <HStack className="justify-between items-center gap-3 flex-wrap">
                   <HStack className="gap-2 items-center">
-                    <Icon name="info" label="Cost" className="w-3.5 h-3.5 text-content-layout-3 shrink-0" />
+                    <Icon
+                      name="info"
+                      label="Cost"
+                      className="w-3.5 h-3.5 text-content-layout-3 shrink-0"
+                    />
                     <Text level="caption" className="text-content-layout-3">
                       {deployMode === 'docker' || deployMode === 'remote'
                         ? 'Starts a ReadySet container (~4 GB RAM, 2 CPUs) · ~1–2 min'
@@ -1233,9 +1461,12 @@ function CachePage() {
                     variant="primary"
                     modifier="solid"
                     label={
-                      deployMode === 'kubernetes' ? 'Deploy to Kubernetes'
-                        : deployMode === 'remote' ? 'Deploy to Remote'
-                          : deployMode === 'systemd' ? 'Deploy with Systemd'
+                      deployMode === 'kubernetes'
+                        ? 'Deploy to Kubernetes'
+                        : deployMode === 'remote'
+                          ? 'Deploy to Remote'
+                          : deployMode === 'systemd'
+                            ? 'Deploy with Systemd'
                             : 'Deploy with Docker'
                     }
                     icon="play"
@@ -1259,7 +1490,10 @@ function CachePage() {
                       <HStack className="gap-3 items-center mb-3 justify-between">
                         <HStack className="gap-3 items-center min-w-0">
                           <Spinner size="base" />
-                          <Text level="body-small" className="text-content-layout-2">
+                          <Text
+                            level="body-small"
+                            className="text-content-layout-2"
+                          >
                             {deployProgress.message}
                           </Text>
                         </HStack>
@@ -1288,7 +1522,6 @@ function CachePage() {
                     </m.div>
                   )}
                 </AnimatePresence>
-
               </div>
             </Card.Content>
           </Card>
@@ -1306,7 +1539,11 @@ function CachePage() {
           target={target!}
           onRedeploy={handleDeploy}
           onRemove={() => removeMutation.mutate()}
-          onEndpointRegistered={() => queryClient.invalidateQueries({ queryKey: ['cache-status', target] })}
+          onEndpointRegistered={() =>
+            queryClient.invalidateQueries({
+              queryKey: ['cache-status', target],
+            })
+          }
           onLifecycle={(operation) => lifecycleMutation.mutate(operation)}
           pendingLifecycleOp={pendingLifecycleOp}
           isRedeploying={isDeploying}
@@ -1325,8 +1562,15 @@ function CachePage() {
               <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
                 <HStack className="justify-between items-center gap-4">
                   <HStack className="gap-2 items-center">
-                    <Icon name="layers" label="Caches" className="w-4 h-4 text-content-layout-3" />
-                    <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                    <Icon
+                      name="layers"
+                      label="Caches"
+                      className="w-4 h-4 text-content-layout-3"
+                    />
+                    <Text
+                      level="overline"
+                      className="text-content-layout-3 uppercase tracking-wider"
+                    >
                       Cached Queries
                     </Text>
                     <Tag
@@ -1389,21 +1633,31 @@ function CachePage() {
                 <div className="p-12">
                   <VStack className="gap-4 items-center">
                     <div className="w-14 h-14 rounded-2xl bg-surface-layout-2 flex items-center justify-center">
-                      <Icon name="layers" label="No caches" className="w-7 h-7 text-content-layout-3" />
+                      <Icon
+                        name="layers"
+                        label="No caches"
+                        className="w-7 h-7 text-content-layout-3"
+                      />
                     </div>
                     <VStack className="gap-2 items-center">
-                      <Text level="headline-5" className="text-content-layout-2">
+                      <Text
+                        level="headline-5"
+                        className="text-content-layout-2"
+                      >
                         No queries cached yet
                       </Text>
-                      <Text level="body-small" className="text-content-layout-3 text-center max-w-sm">
+                      <Text
+                        level="body-small"
+                        className="text-content-layout-3 text-center max-w-sm"
+                      >
                         Add a cache below, or go to the{' '}
                         <Link
                           to="/query-registry"
                           className="text-content-primary-soft hover:underline"
                         >
                           Query Registry
-                        </Link>
-                        {' '}to cache saved queries.
+                        </Link>{' '}
+                        to cache saved queries.
                       </Text>
                     </VStack>
                   </VStack>
@@ -1439,13 +1693,17 @@ function CachePage() {
                             isDeleting={deletingId === entry.cache_id}
                             isRunning={runningCacheId === entry.cache_id}
                             isBenchBusy={runningCacheId !== null}
-                            runProgressMessage={runningCacheId === entry.cache_id ? runProgress?.message : undefined}
+                            runProgressMessage={
+                              runningCacheId === entry.cache_id
+                                ? runProgress?.message
+                                : undefined
+                            }
                             runResult={runResults[entry.cache_id]}
                             onDismissResult={() =>
                               setRunResults((prev) => {
-                                const next = { ...prev };
-                                delete next[entry.cache_id];
-                                return next;
+                                const next = { ...prev }
+                                delete next[entry.cache_id]
+                                return next
                               })
                             }
                           />
@@ -1460,9 +1718,17 @@ function CachePage() {
               <Show when={dropAllMutation.isError}>
                 <div className="px-5 py-3 bg-surface-negative-soft/30 border-t border-border-negative-soft">
                   <HStack className="gap-2 items-center">
-                    <Icon name="alert" label="Error" className="w-4 h-4 text-content-negative-soft" />
-                    <Text level="body-small" className="text-content-negative-soft">
-                      {dropAllMutation.error?.message || 'Failed to drop caches'}
+                    <Icon
+                      name="alert"
+                      label="Error"
+                      className="w-4 h-4 text-content-negative-soft"
+                    />
+                    <Text
+                      level="body-small"
+                      className="text-content-negative-soft"
+                    >
+                      {dropAllMutation.error?.message ||
+                        'Failed to drop caches'}
                     </Text>
                   </HStack>
                 </div>
@@ -1472,8 +1738,15 @@ function CachePage() {
               <Show when={runState === 'error' && !!runError}>
                 <div className="px-5 py-3 bg-surface-negative-soft/30 border-t border-border-negative-soft">
                   <HStack className="gap-2 items-center">
-                    <Icon name="alert" label="Error" className="w-4 h-4 text-content-negative-soft" />
-                    <Text level="body-small" className="text-content-negative-soft">
+                    <Icon
+                      name="alert"
+                      label="Error"
+                      className="w-4 h-4 text-content-negative-soft"
+                    />
+                    <Text
+                      level="body-small"
+                      className="text-content-negative-soft"
+                    >
                       {runError}
                     </Text>
                   </HStack>
@@ -1493,8 +1766,15 @@ function CachePage() {
             <Card.Content className="p-0">
               <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
                 <HStack className="gap-2 items-center">
-                  <Icon name="add" label="Add" className="w-4 h-4 text-content-layout-3" />
-                  <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                  <Icon
+                    name="add"
+                    label="Add"
+                    className="w-4 h-4 text-content-layout-3"
+                  />
+                  <Text
+                    level="overline"
+                    className="text-content-layout-3 uppercase tracking-wider"
+                  >
                     Add Cache
                   </Text>
                 </HStack>
@@ -1505,8 +1785,8 @@ function CachePage() {
                     key={editorResetKey}
                     value={addQuery}
                     onChange={(val) => {
-                      setAddQuery(val);
-                      setDryRunResult(null);
+                      setAddQuery(val)
+                      setDryRunResult(null)
                     }}
                     onSubmit={handleCheckAndCache}
                     target={target}
@@ -1546,15 +1826,29 @@ function CachePage() {
                             {createMutation.isPending ? (
                               <Spinner size="base" />
                             ) : (
-                              <Icon name="tick-double" label="Cached" className="w-4 h-4 text-content-positive-soft" />
+                              <Icon
+                                name="tick-double"
+                                label="Cached"
+                                className="w-4 h-4 text-content-positive-soft"
+                              />
                             )}
                           </div>
                           <VStack className="gap-0.5 items-start">
-                            <Text level="label-small" className="text-content-positive-soft">
-                              {createMutation.isPending ? 'Caching query...' : createMutation.isSuccess ? 'Query cached' : 'Query is cacheable'}
+                            <Text
+                              level="label-small"
+                              className="text-content-positive-soft"
+                            >
+                              {createMutation.isPending
+                                ? 'Caching query...'
+                                : createMutation.isSuccess
+                                  ? 'Query cached'
+                                  : 'Query is cacheable'}
                             </Text>
                             {dryRunResult.detail && (
-                              <Text level="caption" className="text-content-layout-3">
+                              <Text
+                                level="caption"
+                                className="text-content-layout-3"
+                              >
                                 {dryRunResult.detail}
                               </Text>
                             )}
@@ -1565,14 +1859,24 @@ function CachePage() {
                       <div className="p-5 bg-surface-negative-soft/30">
                         <HStack className="gap-3 items-start">
                           <div className="w-8 h-8 rounded-lg bg-surface-negative-soft flex items-center justify-center shrink-0">
-                            <Icon name="close" label="Not supported" className="w-4 h-4 text-content-negative-soft" />
+                            <Icon
+                              name="close"
+                              label="Not supported"
+                              className="w-4 h-4 text-content-negative-soft"
+                            />
                           </div>
                           <VStack className="gap-1 items-start">
-                            <Text level="label-small" className="text-content-negative-soft">
+                            <Text
+                              level="label-small"
+                              className="text-content-negative-soft"
+                            >
                               Query cannot be cached
                             </Text>
                             {dryRunResult.detail && (
-                              <Text level="body-small" className="text-content-layout-2">
+                              <Text
+                                level="body-small"
+                                className="text-content-layout-2"
+                              >
                                 {dryRunResult.detail}
                               </Text>
                             )}
@@ -1595,9 +1899,17 @@ function CachePage() {
                   >
                     <div className="p-5 bg-surface-negative-soft/30">
                       <HStack className="gap-2 items-center">
-                        <Icon name="alert" label="Error" className="w-4 h-4 text-content-negative-soft" />
-                        <Text level="body-small" className="text-content-negative-soft">
-                          {checkMutation.error?.message || 'Failed to check cacheability'}
+                        <Icon
+                          name="alert"
+                          label="Error"
+                          className="w-4 h-4 text-content-negative-soft"
+                        />
+                        <Text
+                          level="body-small"
+                          className="text-content-negative-soft"
+                        >
+                          {checkMutation.error?.message ||
+                            'Failed to check cacheability'}
                         </Text>
                       </HStack>
                     </div>
@@ -1616,8 +1928,15 @@ function CachePage() {
                   >
                     <div className="p-4 bg-surface-positive-soft/30">
                       <HStack className="gap-2 items-center">
-                        <Icon name="tick-double" label="Created" className="w-4 h-4 text-content-positive-soft" />
-                        <Text level="body-small" className="text-content-positive-soft">
+                        <Icon
+                          name="tick-double"
+                          label="Created"
+                          className="w-4 h-4 text-content-positive-soft"
+                        />
+                        <Text
+                          level="body-small"
+                          className="text-content-positive-soft"
+                        >
                           Cache created successfully.
                         </Text>
                       </HStack>
@@ -1637,9 +1956,17 @@ function CachePage() {
                   >
                     <div className="p-4 bg-surface-negative-soft/30">
                       <HStack className="gap-2 items-center">
-                        <Icon name="alert" label="Error" className="w-4 h-4 text-content-negative-soft" />
-                        <Text level="body-small" className="text-content-negative-soft">
-                          {createMutation.error?.message || 'Failed to create cache'}
+                        <Icon
+                          name="alert"
+                          label="Error"
+                          className="w-4 h-4 text-content-negative-soft"
+                        />
+                        <Text
+                          level="body-small"
+                          className="text-content-negative-soft"
+                        >
+                          {createMutation.error?.message ||
+                            'Failed to create cache'}
                         </Text>
                       </HStack>
                     </div>
@@ -1660,12 +1987,12 @@ function CachePage() {
           submitIcon="play"
           onClose={() => setParamDialog(null)}
           onSubmit={(substitutedSql) => {
-            const { cacheId } = paramDialog;
-            setParamDialog(null);
-            executeRun(cacheId, substitutedSql);
+            const { cacheId } = paramDialog
+            setParamDialog(null)
+            executeRun(cacheId, substitutedSql)
           }}
         />
       )}
     </div>
-  );
+  )
 }

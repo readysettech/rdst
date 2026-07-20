@@ -1,9 +1,9 @@
 'use client'
 
 import { tv, type VariantProps } from '@rs/tailwind-base'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { forwardRef, type HTMLAttributes, memo, type Ref } from 'react'
 import { Icon } from '../svg/icon'
-import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 
 const tagStyles = tv({
   base: [
@@ -36,6 +36,11 @@ const tagStyles = tv({
       informative: {},
       warning: {},
       positive: {},
+      // Grey, no semantic tone — for neutral values (TTL, diff magnitude,
+      // "waiting") that must stop borrowing warning-amber (§4.4, §6.7).
+      neutral: {},
+      // Low-contrast placeholder tone — un-annotated schema placeholders (§6.7).
+      muted: {},
     },
     modifier: {
       solid: {},
@@ -283,6 +288,46 @@ const tagStyles = tv({
         'active:bg-surface-positive-soft-active',
         '[&_#loader]:border-t-content-positive-soft',
       ],
+    },
+    {
+      variant: 'neutral',
+      modifier: 'solid',
+      class: ['text-content-layout-2', 'bg-surface-layout-soft'],
+    },
+    {
+      variant: 'neutral',
+      modifier: 'outline',
+      class: [
+        'text-content-layout-2',
+        'border',
+        'border-border-layout-1',
+        'bg-transparent',
+      ],
+    },
+    {
+      variant: 'neutral',
+      modifier: 'ghost',
+      class: ['text-content-layout-2', 'border-0', 'bg-surface-layout-soft'],
+    },
+    {
+      variant: 'muted',
+      modifier: 'solid',
+      class: ['text-content-layout-3', 'bg-surface-layout-soft/60'],
+    },
+    {
+      variant: 'muted',
+      modifier: 'outline',
+      class: [
+        'text-content-layout-3',
+        'border',
+        'border-border-layout-soft',
+        'bg-transparent',
+      ],
+    },
+    {
+      variant: 'muted',
+      modifier: 'ghost',
+      class: ['text-content-layout-3', 'border-0', 'bg-transparent'],
     },
   ],
   defaultVariants: {

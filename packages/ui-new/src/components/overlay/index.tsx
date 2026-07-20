@@ -1,3 +1,4 @@
+export * from './confirm-dialog'
 export * from './dialog'
 export * from './drawer'
 export { Dropdown as DropdownMenu } from './dropdown'

@@ -183,6 +183,9 @@
      the page, not by borders — the only depth cue that works on a dark canvas. */
   --color-surface-raised: var(--surface-raised);
   --color-surface-overlay: var(--surface-overlay);
+  /* Backdrop scrim behind overlays (modal/drawer/popover/mobile-nav) — the
+     §4.2 overlay family's dimming layer; replaces ad-hoc bg-[black]/50. */
+  --color-surface-scrim: var(--surface-scrim);
   --color-surface-primary-solid: var(--surface-primary-solid);
   --color-surface-primary-solid-hover: var(--surface-primary-solid-hover);
   --color-surface-primary-solid-active: var(--surface-primary-solid-active);
@@ -676,6 +679,8 @@
        (all apps ship data-color-mode="dark"); values kept for completeness. */
     --surface-raised: var(--sand-light-1);
     --surface-overlay: var(--sand-light-1);
+    /* Byte-identical to the retired ad-hoc bg-[black]/50 overlay backdrops. */
+    --surface-scrim: rgba(0, 0, 0, 0.5);
 
     --surface-primary-solid: var(--sand-dark-3);
     --surface-primary-solid-hover: var(--sand-dark-4);
@@ -807,6 +812,8 @@
        shadow-elevation-1 (raised) and -2/-3 (overlay). [VIS-080, VIS-104] */
     --surface-raised: var(--sand-dark-3);
     --surface-overlay: var(--sand-dark-4);
+    /* Byte-identical to the retired ad-hoc bg-[black]/50 overlay backdrops. */
+    --surface-scrim: rgba(0, 0, 0, 0.5);
 
     --surface-primary-solid: var(--sand-light-3);
     --surface-primary-solid-hover: var(--sand-light-4);

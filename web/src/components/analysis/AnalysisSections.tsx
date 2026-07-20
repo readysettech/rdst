@@ -672,7 +672,7 @@ export function TestedOptimizationsSection({
                       </div>
                       <Tag variant={status.variant} label={status.text} />
                       <span
-                        className={`${style.text} font-mono text-sm font-semibold`}
+                        className={`${style.text} font-mono text-sm font-medium`}
                       >
                         {improvement >= 0 ? "+" : ""}
                         {improvement.toFixed(1)}%

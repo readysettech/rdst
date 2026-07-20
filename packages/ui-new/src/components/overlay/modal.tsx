@@ -11,6 +11,7 @@ import {
   forwardRef,
   isValidElement,
   type ReactElement,
+  type ReactNode,
 } from 'react'
 import type { WithChildren } from '../../helpers/types'
 import { useDisclosure } from '../../hooks/use-disclosure'
@@ -25,7 +26,7 @@ const modalStyles = tv({
       'inset-0',
       'z-50',
       'backdrop-blur-[8px]',
-      'bg-[black]/50',
+      'bg-surface-scrim',
     ],
     content: [
       'fixed',
@@ -148,6 +149,23 @@ export const ModalContentContainer = ({
   <AnimatePresence>{open && children}</AnimatePresence>
 )
 
+// Every Radix `Dialog.Content` MUST carry a `Dialog.Title` or it (a) warns in
+// dev and (b) ships an unlabelled dialog to screen readers (QW4). The `title`
+// prop is opt-in, so omission was possible — a C-03 red-team note. Rather than
+// rely on every call site remembering, walk the authored child tree: if no
+// `ModalTitle`/`Dialog.Title` is present and no `title` prop was passed, inject
+// a screen-reader-only fallback so a titleless dialog is impossible. Doubling-
+// safe: when a visible title exists in the tree, no fallback is added.
+function treeHasTitle(node: ReactNode): boolean {
+  return Children.toArray(node).some((child) => {
+    if (!isValidElement(child)) return false
+    const type = child.type
+    if (type === ModalTitle || type === Dialog.Title) return true
+    const childProps = child.props as { children?: ReactNode }
+    return treeHasTitle(childProps.children)
+  })
+}
+
 export type ModalContentProps = {
   layoutId?: string
   hideClose?: boolean
@@ -158,6 +176,8 @@ export type ModalContentProps = {
    * Accessible dialog title. When the content has no visible `ModalTitle`,
    * pass this so Radix has a required `Dialog.Title` (rendered screen-reader
    * only) and stops warning "`DialogContent` requires a `DialogTitle`".
+   * If neither this prop nor a `ModalTitle`/`Dialog.Title` child is present,
+   * a screen-reader-only fallback title is injected automatically.
    */
   title?: string
   /**
@@ -190,6 +210,9 @@ export const ModalContent = forwardRef<
   ) => {
     const transition = getTransition()
     const styles = modalStyles({ size })
+    // Guarantee an accessible name: fall back to an sr-only title only when the
+    // author supplied neither a `title` prop nor a title element in the tree.
+    const needsFallbackTitle = !title && !treeHasTitle(children)
 
     return (
       <Dialog.Portal forceMount>
@@ -222,6 +245,8 @@ export const ModalContent = forwardRef<
           >
             {title ? (
               <Dialog.Title className="sr-only">{title}</Dialog.Title>
+            ) : needsFallbackTitle ? (
+              <Dialog.Title className="sr-only">Dialog</Dialog.Title>
             ) : null}
             {description ? (
               <Dialog.Description className="sr-only">

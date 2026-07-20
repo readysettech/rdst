@@ -6,7 +6,7 @@ import {
   Outlet,
   useNavigate,
 } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { ConfigWarning } from '../components'
 import { Header } from '../layout/Header'
 import { Main } from '../layout/Main'
@@ -31,6 +31,7 @@ export const Route = createRootRoute({
 function AppShell({ children }: { children: ReactNode }) {
   const isElectronMac = isDesktopMac()
   const isElectronLinux = isDesktopLinux()
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   return (
     <div
@@ -41,8 +42,25 @@ function AppShell({ children }: { children: ReactNode }) {
           : 'bg-surface-layout-2'
       )}
     >
-      <Header isElectronMac={isElectronMac} isElectronLinux={isElectronLinux} />
-      <Sidebar isElectronMac={isElectronMac} />
+      {/* Skip-to-content: the first focusable element, hidden until focused
+          (USE-089). Jumps keyboard users past the chrome to the content. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-surface-overlay focus:px-4 focus:py-2 focus:text-label-small focus:text-content-layout-1 focus:shadow-elevation-2"
+      >
+        Skip to content
+      </a>
+      <Header
+        isElectronMac={isElectronMac}
+        isElectronLinux={isElectronLinux}
+        onMenuClick={() => setMobileNavOpen(true)}
+        mobileNavOpen={mobileNavOpen}
+      />
+      <Sidebar
+        isElectronMac={isElectronMac}
+        mobileOpen={mobileNavOpen}
+        onMobileClose={() => setMobileNavOpen(false)}
+      />
       <Main isElectronMac={isElectronMac}>{children}</Main>
     </div>
   )

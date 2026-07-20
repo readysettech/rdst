@@ -60,8 +60,10 @@ const SCAN_DIRS = [
 //   border-negative  → border-border-negative-soft            (T20–T22)
 //   border-warning   → border-border-warning-soft             (T20–T22)
 const KNOWN_UNDEFINED = new Map([
-  ['surface-layout-3', 14],
-  ['border-negative', 5], // 3× with /30 opacity + 2× bare
+  // Lowered in C-08 (T19/T20): 2× surface-layout-3 (benchmark/cache) and
+  // 2× border-negative/30 (benchmark/cache) migrated to real tokens.
+  ['surface-layout-3', 12], // was 14
+  ['border-negative', 3], // was 5 — now 1× /30 + 2× bare
   ['border-warning', 2],
 ])
 
@@ -101,12 +103,7 @@ const ALLOWLIST = [
     value: 'shadow-[0_20px_48px_rgba(0,0,0,0.35)]',
     count: 1,
   },
-  // Toast focus ring (raw #ccc) → toast component polish, T19.
-  {
-    file: 'feedback/toast/toast.tsx',
-    value: 'shadow-[0_0_0_2px_#ccc]',
-    count: 1,
-  },
+  // (Toast focus ring raw #ccc → migrated to focus-visible:shadow-focus in T19/C-08.)
 ]
 
 // ---- 1. Parse the valid token names out of style.css -----------------------
@@ -216,9 +213,16 @@ for (const file of files) {
       let name = m[2]
       const full = `${family}-${name}`
 
-      // Arbitrary bracket value carrying a raw color?
+      // Arbitrary bracket value carrying a raw color? Named CSS colors count
+      // too — bg-[black]/50 slipped the hex/rgba-only pattern (C-08 fix; the
+      // scrim backdrops now use the surface-scrim token).
       if (name.startsWith('[')) {
-        if (!/#[0-9a-fA-F]{3,8}|rgba?\(/.test(name)) continue // e.g. shadow-[inset_…] w/o color, w-[12px]
+        if (
+          !/#[0-9a-fA-F]{3,8}|rgba?\(|(?<![\w-])(?:black|white)(?![\w-])/.test(
+            name
+          )
+        )
+          continue // e.g. shadow-[inset_…] w/o color, w-[12px]
         const entry = ALLOWLIST.find(
           (a) => file.endsWith(a.file) && a.value === full
         )

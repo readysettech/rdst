@@ -1,13 +1,13 @@
-import { useNavigate, useRouter } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
-import { Text } from '@rs/ui-new/text';
-import { Icon } from '@rs/ui-new/icon';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { toast } from '@rs/ui-new/use-toast';
-import { ConfigureForm } from '../configure';
-import { useConfigure } from '../../lib/useConfigure';
-import { useOnboarding } from '../../lib/useOnboarding';
-import type { ConfigureFormData } from '../../types/configure';
+import { Icon } from '@rs/ui-new/icon'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import { toast } from '@rs/ui-new/use-toast'
+import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useRouter } from '@tanstack/react-router'
+import { useConfigure } from '../../lib/useConfigure'
+import { useOnboarding } from '../../lib/useOnboarding'
+import type { ConfigureFormData } from '../../types/configure'
+import { ConfigureForm } from '../configure'
 
 /**
  * First-run "Connect your database" — a single, exitable page that replaces the
@@ -17,59 +17,69 @@ import type { ConfigureFormData } from '../../types/configure';
  * route inside the app shell — skippable, never a takeover.
  * [USE-006, USE-008, USE-068, USE-050/052, VIS-011, VIS-116]
  */
-export function ConnectPage({ redirectTo, from }: { redirectTo?: string; from?: string }) {
-  const fromDemo = from === 'demo';
-  const navigate = useNavigate();
-  const router = useRouter();
-  const queryClient = useQueryClient();
-  const { addTarget, setDefaultTarget, loading } = useConfigure();
-  const { completeInit } = useOnboarding();
+export function ConnectPage({
+  redirectTo,
+  from,
+}: {
+  redirectTo?: string
+  from?: string
+}) {
+  const fromDemo = from === 'demo'
+  const navigate = useNavigate()
+  const router = useRouter()
+  const queryClient = useQueryClient()
+  const { addTarget, setDefaultTarget, loading } = useConfigure()
+  const { completeInit } = useOnboarding()
 
   const leave = () => {
     // Return to where the user was headed when routed here, else Home.
     if (redirectTo && redirectTo !== '/onboarding') {
-      router.history.push(redirectTo);
+      router.history.push(redirectTo)
     } else {
-      navigate({ to: '/' });
+      navigate({ to: '/' })
     }
-  };
+  }
 
   const finishToHome = () => {
     queryClient.setQueryData(
       ['init-status'],
       (previous: { initialized?: boolean } | undefined) =>
-        previous ? { ...previous, initialized: true } : previous,
-    );
-    queryClient.invalidateQueries({ queryKey: ['init-status'] });
-    queryClient.invalidateQueries({ queryKey: ['status'] });
-    leave();
-  };
+        previous ? { ...previous, initialized: true } : previous
+    )
+    queryClient.invalidateQueries({ queryKey: ['init-status'] })
+    queryClient.invalidateQueries({ queryKey: ['status'] })
+    leave()
+  }
 
   const handleSubmit = async (data: ConfigureFormData) => {
     try {
-      await addTarget(data);
-      await setDefaultTarget(data.name);
-      await completeInit();
+      await addTarget(data)
+      await setDefaultTarget(data.name)
+      await completeInit()
     } catch {
       // useConfigure surfaces the failure inline; stay on the page so the
       // user can fix the connection details instead of dead-ending.
-      return;
+      return
     }
-    toast({ title: `Connected to ${data.name}`, variant: 'positive' });
-    finishToHome();
-  };
+    toast({ title: `Connected to ${data.name}`, variant: 'positive' })
+    finishToHome()
+  }
 
   const skip = () => {
     // Already-configured returning users (or "I'll do it later") can leave.
-    leave();
-  };
+    leave()
+  }
 
   return (
     <div className="min-h-dvh w-full overflow-y-auto bg-surface-layout-1">
       {/* Utility row: brand mark + exit */}
       <HStack className="justify-between items-center px-6 py-4">
         <HStack className="gap-2 items-center">
-          <Icon name="speedometer" label="RDST" className="w-5 h-5 text-content-primary-soft" />
+          <Icon
+            name="speedometer"
+            label="RDST"
+            className="w-5 h-5 text-content-primary-soft"
+          />
           <Text level="label-medium" className="text-content-layout-1">
             RDST
           </Text>
@@ -90,10 +100,15 @@ export function ConnectPage({ redirectTo, from }: { redirectTo?: string; from?: 
           // watched win and carries the scent of information forward. The email
           // collected at the demo gate already persists, so nothing re-gates.
           // [demo-to-conviction step 7, USE-022, MET-008]
-          <div className="mb-5 flex items-start gap-2 rounded-lg border border-border-primary-soft bg-surface-primary-soft/50 px-4 py-3">
-            <Icon name="tick" label="" className="mt-0.5 h-4 w-4 shrink-0 text-content-primary-soft" />
+          <div className="mb-6 flex items-start gap-2 rounded-lg border border-border-primary-soft bg-surface-primary-soft/50 px-4 py-3">
+            <Icon
+              name="tick"
+              label=""
+              className="mt-0.5 h-4 w-4 shrink-0 text-content-primary-soft"
+            />
             <Text level="body-small" className="text-content-layout-2">
-              You&rsquo;ve seen the demo — now connect your own database to find your caching wins.
+              You&rsquo;ve seen the demo — now connect your own database to find
+              your caching wins.
             </Text>
           </div>
         )}
@@ -102,9 +117,13 @@ export function ConnectPage({ redirectTo, from }: { redirectTo?: string; from?: 
           <Text as="h1" level="headline-2" className="text-content-layout-1">
             Connect your database
           </Text>
-          <Text level="body-medium" className="text-content-layout-3 leading-relaxed">
-            RDST — the Readyset Data &amp; SQL Toolkit. Point it at your Postgres
-            or MySQL to find slow queries, health issues, and caching wins.
+          <Text
+            level="body-medium"
+            className="text-content-layout-3 leading-relaxed"
+          >
+            RDST — the Readyset Data &amp; SQL Toolkit. Point it at your
+            Postgres or MySQL to find slow queries, health issues, and caching
+            wins.
           </Text>
         </VStack>
 
@@ -129,5 +148,5 @@ export function ConnectPage({ redirectTo, from }: { redirectTo?: string; from?: 
         </VStack>
       </div>
     </div>
-  );
+  )
 }

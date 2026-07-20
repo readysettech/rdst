@@ -1,30 +1,30 @@
-import { useState } from 'react';
-import { createFileRoute } from '@tanstack/react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button } from '@rs/ui-new/button';
-import { Card } from '@rs/ui-new/card';
-import { Icon } from '@rs/ui-new/icon';
-import type { IconStrokeName } from '@rs/ui-icons/icon-name';
-import { Show } from '@rs/ui-new/show';
-import { Spinner } from '@rs/ui-new/spinner';
-import { Tag } from '@rs/ui-new/tag';
-import { Scrollable } from '@rs/ui-new/scrollable';
-import { Text } from '@rs/ui-new/text';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { m, AnimatePresence } from '@rs/ui-new/motion';
-import { toast } from '@rs/ui-new/use-toast';
-import { CopyButton } from '@rs/ui-new/copy-button';
-import { SQLDisplay } from '../components/SQLDisplay';
-import { TargetLockNotice } from '../components';
-import { useTarget } from '../hooks/useTarget';
-import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
+import { Button } from '@rs/ui-new/button'
+import { Card } from '@rs/ui-new/card'
+import { CopyButton } from '@rs/ui-new/copy-button'
+import { Icon } from '@rs/ui-new/icon'
+import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { Scrollable } from '@rs/ui-new/scrollable'
+import { Show } from '@rs/ui-new/show'
+import { Spinner } from '@rs/ui-new/spinner'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
+import { Text } from '@rs/ui-new/text'
+import { toast } from '@rs/ui-new/use-toast'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { createFileRoute } from '@tanstack/react-router'
+import { useState } from 'react'
+import { TargetLockNotice } from '../components'
+import { SQLDisplay } from '../components/SQLDisplay'
+import { useTarget } from '../hooks/useTarget'
 import {
   fetchAuditRuns,
   fetchRunDetail,
   isWorkloadRun,
   useAuditCapture,
   useAuditRun,
-} from '../lib/useAudit';
+} from '../lib/useAudit'
+import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 import type {
   AuditReport,
   AuditRunSummary,
@@ -33,82 +33,105 @@ import type {
   WorkloadQuery,
   WorkloadRun,
   WorkloadSummary,
-} from '../types/audit';
+} from '../types/audit'
 
 const CAPTURE_DURATIONS: Array<{ label: string; seconds: number }> = [
   { label: '30s', seconds: 30 },
   { label: '1m', seconds: 60 },
   { label: '5m', seconds: 300 },
   { label: '15m', seconds: 900 },
-];
+]
 
 export const Route = createFileRoute('/audit')({
   component: AuditPage,
-});
+})
 
 // ---------------------------------------------------------------------------
 // Formatters
 // ---------------------------------------------------------------------------
 
 function formatSizeMb(mb: number | undefined): string {
-  if (mb === undefined || mb === null) return '-';
-  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
-  return `${Math.round(mb)} MB`;
+  if (mb === undefined || mb === null) return '-'
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
+  return `${Math.round(mb)} MB`
 }
 
 function formatUptime(seconds: number | undefined): string {
-  if (!seconds) return '-';
-  const days = Math.floor(seconds / 86400);
-  if (days >= 1) return `${days}d ${Math.floor((seconds % 86400) / 3600)}h`;
-  const hours = Math.floor(seconds / 3600);
-  if (hours >= 1) return `${hours}h ${Math.floor((seconds % 3600) / 60)}m`;
-  return `${Math.floor(seconds / 60)}m`;
+  if (!seconds) return '-'
+  const days = Math.floor(seconds / 86400)
+  if (days >= 1) return `${days}d ${Math.floor((seconds % 86400) / 3600)}h`
+  const hours = Math.floor(seconds / 3600)
+  if (hours >= 1) return `${hours}h ${Math.floor((seconds % 3600) / 60)}m`
+  return `${Math.floor(seconds / 60)}m`
 }
 
 function formatMs(ms: number | undefined): string {
-  if (ms === undefined || ms === null) return '-';
-  if (ms < 1) return '<1ms';
-  if (ms < 1000) return `${ms.toFixed(1)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
+  if (ms === undefined || ms === null) return '-'
+  if (ms < 1) return '<1ms'
+  if (ms < 1000) return `${ms.toFixed(1)}ms`
+  return `${(ms / 1000).toFixed(2)}s`
 }
 
 function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '-';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+  if (!iso) return '-'
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
 }
 
-function severityVariant(severity: string | undefined): 'negative' | 'warning' | 'positive' | 'informative' {
+function severityVariant(
+  severity: string | undefined
+): 'negative' | 'warning' | 'positive' | 'informative' {
   switch (severity) {
-    case 'crit': return 'negative';
-    case 'warn': return 'warning';
-    case 'ok': return 'positive';
-    default: return 'informative';
+    case 'crit':
+      return 'negative'
+    case 'warn':
+      return 'warning'
+    case 'ok':
+      return 'positive'
+    default:
+      return 'informative'
   }
 }
 
 function healthScoreColor(score: number): string {
-  if (score >= 75) return 'text-content-positive-soft';
-  if (score >= 60) return 'text-content-warning-soft';
-  return 'text-content-negative-soft';
+  if (score >= 75) return 'text-content-positive-soft'
+  if (score >= 60) return 'text-content-warning-soft'
+  return 'text-content-negative-soft'
 }
 
-const VERDICT_LABELS: Record<string, { label: string; variant: 'positive' | 'warning' | 'negative' | 'informative' }> = {
+const VERDICT_LABELS: Record<
+  string,
+  {
+    label: string
+    variant: 'positive' | 'warning' | 'negative' | 'informative'
+  }
+> = {
   right_sized: { label: 'Right-sized', variant: 'positive' },
   oversized: { label: 'Oversized', variant: 'warning' },
   under_provisioned: { label: 'Under-provisioned', variant: 'negative' },
   unknown: { label: 'Unknown', variant: 'informative' },
-};
+}
 
 // ---------------------------------------------------------------------------
 // Report sub-components
 // ---------------------------------------------------------------------------
 
-function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function StatCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string
+  value: string
+  hint?: string
+}) {
   return (
     <div className="bg-surface-layout-2/50 rounded-xl p-4 border border-border-layout-1">
       <VStack className="gap-1 items-start">
-        <Text level="caption" className="text-content-layout-3 uppercase tracking-wider">
+        <Text
+          level="caption"
+          className="text-content-layout-3 uppercase tracking-wider"
+        >
           {label}
         </Text>
         <Text level="headline-5" className="text-content-layout-1 tabular-nums">
@@ -121,7 +144,7 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
         )}
       </VStack>
     </div>
-  );
+  )
 }
 
 function SectionCard({
@@ -129,17 +152,24 @@ function SectionCard({
   title,
   children,
 }: {
-  icon: IconStrokeName;
-  title: string;
-  children: React.ReactNode;
+  icon: IconStrokeName
+  title: string
+  children: React.ReactNode
 }) {
   return (
     <Card className="w-full overflow-hidden">
       <Card.Content className="p-0">
         <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50">
           <HStack className="gap-2 items-center">
-            <Icon name={icon} label={title} className="w-4 h-4 text-content-layout-3" />
-            <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+            <Icon
+              name={icon}
+              label={title}
+              className="w-4 h-4 text-content-layout-3"
+            />
+            <Text
+              level="overline"
+              className="text-content-layout-3 uppercase tracking-wider"
+            >
               {title}
             </Text>
           </HStack>
@@ -147,12 +177,13 @@ function SectionCard({
         {children}
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 function FindingsList({ findings }: { findings: HealthFinding[] }) {
   return (
-    <VStack className="gap-2 items-stretch">
+    // gap-4 BETWEEN findings > gap-3 WITHIN a finding row (§1 grouping).
+    <VStack className="gap-4 items-stretch">
       {findings.map((finding, index) => (
         <HStack key={index} className="gap-3 items-start">
           <Tag
@@ -174,34 +205,54 @@ function FindingsList({ findings }: { findings: HealthFinding[] }) {
         </HStack>
       ))}
     </VStack>
-  );
+  )
 }
 
 function AuditReportView({ report }: { report: AuditReport }) {
-  const metrics = report.metrics || {};
-  const sizing = report.sizing || {};
-  const cacheOpp = report.cache_opportunity || {};
-  const health = report.health_analysis;
-  const healthOk = health && !health.error && health.health_score !== undefined;
-  const verdict = VERDICT_LABELS[sizing.verdict || 'unknown'] || VERDICT_LABELS.unknown;
-  const topQueries = report.top_queries || [];
+  const metrics = report.metrics || {}
+  const sizing = report.sizing || {}
+  const cacheOpp = report.cache_opportunity || {}
+  const health = report.health_analysis
+  const healthOk = health && !health.error && health.health_score !== undefined
+  const verdict =
+    VERDICT_LABELS[sizing.verdict || 'unknown'] || VERDICT_LABELS.unknown
+  const topQueries = report.top_queries || []
 
   return (
     <VStack className="gap-6 items-stretch w-full">
       {/* Overview */}
       <SectionCard icon="database" title="Overview">
         <div className="p-5 grid grid-cols-2 tablet:grid-cols-4 gap-4">
-          <StatCard label="Engine" value={report.engine || '-'} hint={metrics.server_version} />
-          <StatCard label="Database Size" value={formatSizeMb(metrics.database_size_mb)} hint={metrics.storage_type || undefined} />
-          <StatCard label="Uptime" value={formatUptime(metrics.uptime_seconds)} />
+          <StatCard
+            label="Engine"
+            value={report.engine || '-'}
+            hint={metrics.server_version}
+          />
+          <StatCard
+            label="Database Size"
+            value={formatSizeMb(metrics.database_size_mb)}
+            hint={metrics.storage_type || undefined}
+          />
+          <StatCard
+            label="Uptime"
+            value={formatUptime(metrics.uptime_seconds)}
+          />
           <StatCard
             label="Connections"
             value={`${metrics.active_connections ?? '-'} / ${metrics.max_connections ?? '-'}`}
-            hint={metrics.connection_utilization_pct !== undefined ? `${metrics.connection_utilization_pct.toFixed(0)}% utilized` : undefined}
+            hint={
+              metrics.connection_utilization_pct !== undefined
+                ? `${metrics.connection_utilization_pct.toFixed(0)}% utilized`
+                : undefined
+            }
           />
           <StatCard
             label="Cache Hit Rate"
-            value={metrics.cache_hit_rate !== undefined ? `${metrics.cache_hit_rate.toFixed(1)}%` : '-'}
+            value={
+              metrics.cache_hit_rate !== undefined
+                ? `${metrics.cache_hit_rate.toFixed(1)}%`
+                : '-'
+            }
           />
           <StatCard
             label="Read / Write"
@@ -211,11 +262,22 @@ function AuditReportView({ report }: { report: AuditReport }) {
                 : '-'
             }
           />
-          <StatCard label="Tracked Queries" value={`${metrics.tracked_query_count ?? '-'}`} />
+          <StatCard
+            label="Tracked Queries"
+            value={`${metrics.tracked_query_count ?? '-'}`}
+          />
           <StatCard
             label="Storage"
-            value={metrics.storage_allocated_gb ? `${metrics.storage_allocated_gb.toFixed(0)} GB` : '-'}
-            hint={metrics.storage_used_pct != null ? `${metrics.storage_used_pct}% used` : undefined}
+            value={
+              metrics.storage_allocated_gb
+                ? `${metrics.storage_allocated_gb.toFixed(0)} GB`
+                : '-'
+            }
+            hint={
+              metrics.storage_used_pct != null
+                ? `${metrics.storage_used_pct}% used`
+                : undefined
+            }
           />
         </div>
       </SectionCard>
@@ -226,11 +288,20 @@ function AuditReportView({ report }: { report: AuditReport }) {
           <div className="p-5">
             <div className="grid grid-cols-[auto_1fr] gap-6 items-start">
               <VStack className="gap-1 items-center px-4">
-                <Text level="headline-1" className={`tabular-nums ${healthScoreColor(health.health_score!)}`}>
+                <Text
+                  level="headline-1"
+                  className={`tabular-nums ${healthScoreColor(health.health_score!)}`}
+                >
                   {health.health_score}
                 </Text>
                 <Tag
-                  variant={health.health_score! >= 75 ? 'positive' : health.health_score! >= 60 ? 'warning' : 'negative'}
+                  variant={
+                    health.health_score! >= 75
+                      ? 'positive'
+                      : health.health_score! >= 60
+                        ? 'warning'
+                        : 'negative'
+                  }
                   modifier="ghost"
                   label={health.health_label || 'SCORE'}
                 />
@@ -246,27 +317,42 @@ function AuditReportView({ report }: { report: AuditReport }) {
                     {health.executive_summary}
                   </Text>
                 )}
-                {(health.findings?.length || 0) > 0 && <FindingsList findings={health.findings!} />}
+                {(health.findings?.length || 0) > 0 && (
+                  <FindingsList findings={health.findings!} />
+                )}
               </VStack>
             </div>
             {(health.recommended_actions?.length || 0) > 0 && (
               <div className="mt-5 pt-5 border-t border-border-layout-1">
-                <Text level="overline" className="text-content-layout-3 uppercase tracking-wider block mb-3">
+                <Text
+                  level="overline"
+                  className="text-content-layout-3 uppercase tracking-wider block mb-3"
+                >
                   Recommended Actions
                 </Text>
-                <VStack className="gap-3 items-stretch">
+                {/* gap-4 BETWEEN actions > gap-3 WITHIN a row (§1 grouping). */}
+                <VStack className="gap-4 items-stretch">
                   {health.recommended_actions!.map((action, index) => (
                     <HStack key={index} className="gap-3 items-start">
                       <div className="w-6 h-6 rounded-md bg-surface-primary-soft flex items-center justify-center shrink-0">
-                        <Text level="caption" className="text-content-primary-soft font-semibold">
+                        <Text
+                          level="caption"
+                          className="text-content-primary-soft font-semibold"
+                        >
                           {action.rank ?? index + 1}
                         </Text>
                       </div>
                       <VStack className="gap-0.5 items-start min-w-0">
-                        <Text level="label-small" className="text-content-layout-1">
+                        <Text
+                          level="label-small"
+                          className="text-content-layout-1"
+                        >
                           {action.title}
                         </Text>
-                        <Text level="body-small" className="text-content-layout-2">
+                        <Text
+                          level="body-small"
+                          className="text-content-layout-2"
+                        >
                           {action.body}
                         </Text>
                       </VStack>
@@ -281,7 +367,11 @@ function AuditReportView({ report }: { report: AuditReport }) {
       {health?.error && (
         <div className="px-5 py-3 bg-surface-warning-soft/20 border border-border-warning-soft rounded-xl">
           <HStack className="gap-2 items-center">
-            <Icon name="alert" label="Warning" className="w-4 h-4 text-content-warning-soft" />
+            <Icon
+              name="alert"
+              label="Warning"
+              className="w-4 h-4 text-content-warning-soft"
+            />
             <Text level="body-small" className="text-content-warning-soft">
               Health analysis unavailable: {health.error}
             </Text>
@@ -295,7 +385,11 @@ function AuditReportView({ report }: { report: AuditReport }) {
           <div className="p-5">
             <VStack className="gap-3 items-start">
               <HStack className="gap-2 items-center">
-                <Tag variant={verdict.variant} modifier="ghost" label={verdict.label} />
+                <Tag
+                  variant={verdict.variant}
+                  modifier="ghost"
+                  label={verdict.label}
+                />
                 {report.instance_class && (
                   <Text level="mono-small" className="text-content-layout-3">
                     {report.instance_class}
@@ -307,12 +401,19 @@ function AuditReportView({ report }: { report: AuditReport }) {
                   {sizing.explanation}
                 </Text>
               )}
-              {sizing.potential_savings_usd != null && sizing.potential_savings_usd > 0 && (
-                <Text level="body-small" className="text-content-positive-soft">
-                  Potential savings: ${sizing.potential_savings_usd.toFixed(0)}/mo
-                  {sizing.suggested_instance_class ? ` on ${sizing.suggested_instance_class}` : ''}
-                </Text>
-              )}
+              {sizing.potential_savings_usd != null &&
+                sizing.potential_savings_usd > 0 && (
+                  <Text
+                    level="body-small"
+                    className="text-content-positive-soft"
+                  >
+                    Potential savings: $
+                    {sizing.potential_savings_usd.toFixed(0)}/mo
+                    {sizing.suggested_instance_class
+                      ? ` on ${sizing.suggested_instance_class}`
+                      : ''}
+                  </Text>
+                )}
             </VStack>
           </div>
         </SectionCard>
@@ -321,11 +422,20 @@ function AuditReportView({ report }: { report: AuditReport }) {
           <div className="p-5">
             <VStack className="gap-3 items-start">
               <HStack className="gap-3 items-center">
-                <Text level="headline-4" className="text-content-layout-1 tabular-nums">
+                <Text
+                  level="headline-4"
+                  className="text-content-layout-1 tabular-nums"
+                >
                   {cacheOpp.score ?? '-'}
                 </Text>
                 <Tag
-                  variant={cacheOpp.level === 'high' ? 'positive' : cacheOpp.level === 'medium' ? 'warning' : 'informative'}
+                  variant={
+                    cacheOpp.level === 'high'
+                      ? 'positive'
+                      : cacheOpp.level === 'medium'
+                        ? 'warning'
+                        : 'informative'
+                  }
                   modifier="ghost"
                   label={(cacheOpp.level || 'unknown').toUpperCase()}
                 />
@@ -342,7 +452,10 @@ function AuditReportView({ report }: { report: AuditReport }) {
 
       {/* Top queries */}
       <Show when={topQueries.length > 0}>
-        <SectionCard icon="observe" title={`Top Queries (${topQueries.length})`}>
+        <SectionCard
+          icon="observe"
+          title={`Top Queries (${topQueries.length})`}
+        >
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -363,7 +476,10 @@ function AuditReportView({ report }: { report: AuditReport }) {
               </thead>
               <tbody className="divide-y divide-border-layout-1">
                 {topQueries.map((query, index) => (
-                  <tr key={query.query_hash || index} className="hover:bg-surface-layout-2/50 transition-colors">
+                  <tr
+                    key={query.query_hash || index}
+                    className="hover:bg-surface-layout-2/50 transition-colors"
+                  >
                     <td className="px-4 py-3">
                       <div className="bg-surface-layout-2 rounded-lg max-w-2xl">
                         <Scrollable className="max-h-24">
@@ -374,18 +490,29 @@ function AuditReportView({ report }: { report: AuditReport }) {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Text level="mono-small" className="text-content-layout-2 tabular-nums">
+                      <Text
+                        level="mono-small"
+                        className="text-content-layout-2 tabular-nums"
+                      >
                         {query.calls?.toLocaleString() ?? '-'}
                       </Text>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Text level="mono-small" className="text-content-layout-2 tabular-nums">
+                      <Text
+                        level="mono-small"
+                        className="text-content-layout-2 tabular-nums"
+                      >
                         {formatMs(query.avg_time_ms)}
                       </Text>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Text level="mono-small" className="text-content-layout-2 tabular-nums">
-                        {query.pct_total_time != null ? `${query.pct_total_time}%` : '-'}
+                      <Text
+                        level="mono-small"
+                        className="text-content-layout-2 tabular-nums"
+                      >
+                        {query.pct_total_time != null
+                          ? `${query.pct_total_time}%`
+                          : '-'}
                       </Text>
                     </td>
                   </tr>
@@ -396,7 +523,7 @@ function AuditReportView({ report }: { report: AuditReport }) {
         </SectionCard>
       </Show>
     </VStack>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -404,11 +531,11 @@ function AuditReportView({ report }: { report: AuditReport }) {
 // ---------------------------------------------------------------------------
 
 function formatDuration(seconds: number | undefined): string {
-  if (!seconds) return '-';
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const mins = Math.floor(seconds / 60);
-  const rem = Math.round(seconds % 60);
-  return rem ? `${mins}m ${rem}s` : `${mins}m`;
+  if (!seconds) return '-'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const mins = Math.floor(seconds / 60)
+  const rem = Math.round(seconds % 60)
+  return rem ? `${mins}m ${rem}s` : `${mins}m`
 }
 
 function BulletList({ items }: { items: string[] }) {
@@ -423,7 +550,7 @@ function BulletList({ items }: { items: string[] }) {
         </HStack>
       ))}
     </VStack>
-  );
+  )
 }
 
 function WorkloadQueriesTable({ queries }: { queries: WorkloadQuery[] }) {
@@ -448,29 +575,46 @@ function WorkloadQueriesTable({ queries }: { queries: WorkloadQuery[] }) {
         </thead>
         <tbody className="divide-y divide-border-layout-1">
           {queries.map((query, index) => (
-            <tr key={query.query_hash || index} className="hover:bg-surface-layout-2/50 transition-colors">
+            <tr
+              key={query.query_hash || index}
+              className="hover:bg-surface-layout-2/50 transition-colors"
+            >
               <td className="px-4 py-3">
                 <div className="bg-surface-layout-2 rounded-lg max-w-2xl">
                   <Scrollable className="max-h-24">
                     <div className="px-3 py-2">
-                      <SQLDisplay sql={query.query_text || query.normalized_query || ''} wrap />
+                      <SQLDisplay
+                        sql={query.query_text || query.normalized_query || ''}
+                        wrap
+                      />
                     </div>
                   </Scrollable>
                 </div>
               </td>
               <td className="px-4 py-3 text-right">
-                <Text level="mono-small" className="text-content-layout-2 tabular-nums">
+                <Text
+                  level="mono-small"
+                  className="text-content-layout-2 tabular-nums"
+                >
                   {query.calls?.toLocaleString() ?? '-'}
                 </Text>
               </td>
               <td className="px-4 py-3 text-right">
-                <Text level="mono-small" className="text-content-layout-2 tabular-nums">
+                <Text
+                  level="mono-small"
+                  className="text-content-layout-2 tabular-nums"
+                >
                   {formatMs(query.avg_time_ms)}
                 </Text>
               </td>
               <td className="px-4 py-3 text-right">
-                <Text level="mono-small" className="text-content-layout-2 tabular-nums">
-                  {query.pct_total_time != null ? `${query.pct_total_time.toFixed(1)}%` : '-'}
+                <Text
+                  level="mono-small"
+                  className="text-content-layout-2 tabular-nums"
+                >
+                  {query.pct_total_time != null
+                    ? `${query.pct_total_time.toFixed(1)}%`
+                    : '-'}
                 </Text>
               </td>
             </tr>
@@ -478,16 +622,17 @@ function WorkloadQueriesTable({ queries }: { queries: WorkloadQuery[] }) {
         </tbody>
       </table>
     </div>
-  );
+  )
 }
 
 function WorkloadAnalysisView({ analysis }: { analysis: WorkloadAnalysis }) {
-  const bottlenecks = analysis.top_bottlenecks || [];
-  const indexRecs = analysis.index_recommendations || [];
-  const cachingCandidates = analysis.caching_candidates || [];
-  const capacityInsights = analysis.capacity_insights || [];
-  const priorities = analysis.optimization_priorities || [];
-  const hasScore = analysis.health_score !== undefined && analysis.health_score !== null;
+  const bottlenecks = analysis.top_bottlenecks || []
+  const indexRecs = analysis.index_recommendations || []
+  const cachingCandidates = analysis.caching_candidates || []
+  const capacityInsights = analysis.capacity_insights || []
+  const priorities = analysis.optimization_priorities || []
+  const hasScore =
+    analysis.health_score !== undefined && analysis.health_score !== null
 
   return (
     <VStack className="gap-6 items-stretch w-full">
@@ -496,11 +641,20 @@ function WorkloadAnalysisView({ analysis }: { analysis: WorkloadAnalysis }) {
           <div className="grid grid-cols-[auto_1fr] gap-6 items-start">
             {hasScore && (
               <VStack className="gap-1 items-center px-4">
-                <Text level="headline-1" className={`tabular-nums ${healthScoreColor(analysis.health_score!)}`}>
+                <Text
+                  level="headline-1"
+                  className={`tabular-nums ${healthScoreColor(analysis.health_score!)}`}
+                >
                   {analysis.health_score}
                 </Text>
                 <Tag
-                  variant={analysis.health_score! >= 75 ? 'positive' : analysis.health_score! >= 60 ? 'warning' : 'negative'}
+                  variant={
+                    analysis.health_score! >= 75
+                      ? 'positive'
+                      : analysis.health_score! >= 60
+                        ? 'warning'
+                        : 'negative'
+                  }
                   modifier="ghost"
                   label="SCORE"
                 />
@@ -514,10 +668,18 @@ function WorkloadAnalysisView({ analysis }: { analysis: WorkloadAnalysis }) {
               )}
               {analysis.read_write_ratio && (
                 <HStack className="gap-2 items-center">
-                  <Text level="caption" className="text-content-layout-3 uppercase tracking-wider">
+                  <Text
+                    level="caption"
+                    className="text-content-layout-3 uppercase tracking-wider"
+                  >
                     Read / Write
                   </Text>
-                  <Tag size="small" variant="informative" modifier="ghost" label={analysis.read_write_ratio} />
+                  <Tag
+                    size="small"
+                    variant="informative"
+                    modifier="ghost"
+                    label={analysis.read_write_ratio}
+                  />
                 </HStack>
               )}
             </VStack>
@@ -534,7 +696,10 @@ function WorkloadAnalysisView({ analysis }: { analysis: WorkloadAnalysis }) {
       )}
 
       {indexRecs.length > 0 && (
-        <SectionCard icon="adjustment-horizontal" title={`Index Recommendations (${indexRecs.length})`}>
+        <SectionCard
+          icon="adjustment-horizontal"
+          title={`Index Recommendations (${indexRecs.length})`}
+        >
           <div className="p-5">
             <VStack className="gap-4 items-stretch">
               {indexRecs.map((rec, index) => (
@@ -542,7 +707,10 @@ function WorkloadAnalysisView({ analysis }: { analysis: WorkloadAnalysis }) {
                   {rec.sql && (
                     <div className="bg-surface-layout-2 rounded-lg overflow-hidden">
                       <HStack className="justify-between items-center px-3 py-2 border-b border-border-layout-1">
-                        <Text level="caption" className="text-content-layout-3 uppercase tracking-wider">
+                        <Text
+                          level="caption"
+                          className="text-content-layout-3 uppercase tracking-wider"
+                        >
                           {rec.table ? rec.table : 'DDL'}
                         </Text>
                         <CopyButton text={rec.sql} />
@@ -558,7 +726,10 @@ function WorkloadAnalysisView({ analysis }: { analysis: WorkloadAnalysis }) {
                     </Text>
                   )}
                   {rec.estimated_impact && (
-                    <Text level="caption" className="text-content-positive-soft">
+                    <Text
+                      level="caption"
+                      className="text-content-positive-soft"
+                    >
                       Estimated impact: {rec.estimated_impact}
                     </Text>
                   )}
@@ -593,11 +764,17 @@ function WorkloadAnalysisView({ analysis }: { analysis: WorkloadAnalysis }) {
               {priorities.map((item, index) => (
                 <HStack key={index} className="gap-3 items-start">
                   <div className="w-6 h-6 rounded-md bg-surface-primary-soft flex items-center justify-center shrink-0">
-                    <Text level="caption" className="text-content-primary-soft font-semibold">
+                    <Text
+                      level="caption"
+                      className="text-content-primary-soft font-semibold"
+                    >
                       {index + 1}
                     </Text>
                   </div>
-                  <Text level="body-small" className="text-content-layout-2 min-w-0">
+                  <Text
+                    level="body-small"
+                    className="text-content-layout-2 min-w-0"
+                  >
                     {item}
                   </Text>
                 </HStack>
@@ -607,7 +784,7 @@ function WorkloadAnalysisView({ analysis }: { analysis: WorkloadAnalysis }) {
         </SectionCard>
       )}
     </VStack>
-  );
+  )
 }
 
 /**
@@ -621,45 +798,58 @@ function WorkloadReportView({
   queries,
   durationSeconds,
 }: {
-  summary?: WorkloadSummary | null;
-  analysis?: WorkloadAnalysis | null;
-  queries: WorkloadQuery[];
-  durationSeconds: number | undefined;
+  summary?: WorkloadSummary | null
+  analysis?: WorkloadAnalysis | null
+  queries: WorkloadQuery[]
+  durationSeconds: number | undefined
 }) {
   return (
     <VStack className="gap-6 items-stretch w-full">
       <SectionCard icon="observe" title="Capture Summary">
         <div className="p-5 grid grid-cols-2 tablet:grid-cols-4 gap-4">
           <StatCard label="Duration" value={formatDuration(durationSeconds)} />
-          <StatCard label="Unique Queries" value={`${summary?.unique_queries ?? queries.length}`} />
+          <StatCard
+            label="Unique Queries"
+            value={`${summary?.unique_queries ?? queries.length}`}
+          />
           <StatCard
             label="Executions"
-            value={summary?.total_executions != null ? summary.total_executions.toLocaleString() : '-'}
+            value={
+              summary?.total_executions != null
+                ? summary.total_executions.toLocaleString()
+                : '-'
+            }
           />
-          <StatCard label="Total Query Time" value={formatMs(summary?.total_query_time_ms)} />
+          <StatCard
+            label="Total Query Time"
+            value={formatMs(summary?.total_query_time_ms)}
+          />
         </div>
       </SectionCard>
 
       {analysis && <WorkloadAnalysisView analysis={analysis} />}
 
       <Show when={queries.length > 0}>
-        <SectionCard icon="observe" title={`Captured Queries (${queries.length})`}>
+        <SectionCard
+          icon="observe"
+          title={`Captured Queries (${queries.length})`}
+        >
           <WorkloadQueriesTable queries={queries} />
         </SectionCard>
       </Show>
     </VStack>
-  );
+  )
 }
 
 function WorkloadRunView({ run }: { run: WorkloadRun }) {
-  const queries = run.queries || [];
+  const queries = run.queries || []
   const summary: WorkloadSummary = {
     unique_queries: run.total_queries ?? queries.length,
     total_executions: queries.reduce((acc, q) => acc + (q.calls ?? 0), 0),
     total_query_time_ms: run.total_query_time_ms,
     duration_seconds: run.duration_seconds,
     queries,
-  };
+  }
   return (
     <WorkloadReportView
       summary={summary}
@@ -667,7 +857,7 @@ function WorkloadRunView({ run }: { run: WorkloadRun }) {
       queries={queries}
       durationSeconds={run.duration_seconds}
     />
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -675,9 +865,9 @@ function WorkloadRunView({ run }: { run: WorkloadRun }) {
 // ---------------------------------------------------------------------------
 
 function AuditPage() {
-  const queryClient = useQueryClient();
-  const { target } = useTarget();
-  const passwordLock = useTargetPasswordLock(target);
+  const queryClient = useQueryClient()
+  const { target } = useTarget()
+  const passwordLock = useTargetPasswordLock(target)
 
   const {
     run,
@@ -686,7 +876,7 @@ function AuditPage() {
     report: liveReport,
     error: runError,
     reset,
-  } = useAuditRun();
+  } = useAuditRun()
 
   const {
     run: runCapture,
@@ -698,77 +888,78 @@ function AuditPage() {
     progress: captureProgress,
     result: captureResult,
     error: captureError,
-  } = useAuditCapture();
+  } = useAuditCapture()
 
-  const [captureDuration, setCaptureDuration] = useState<number>(60);
+  const [captureDuration, setCaptureDuration] = useState<number>(60)
 
   // A run loaded from history; cleared when a new live run starts.
-  const [loadedReport, setLoadedReport] = useState<AuditReport | null>(null);
-  const [loadedWorkload, setLoadedWorkload] = useState<WorkloadRun | null>(null);
-  const [loadedRunId, setLoadedRunId] = useState<string | null>(null);
-  const [loadingRunId, setLoadingRunId] = useState<string | null>(null);
+  const [loadedReport, setLoadedReport] = useState<AuditReport | null>(null)
+  const [loadedWorkload, setLoadedWorkload] = useState<WorkloadRun | null>(null)
+  const [loadedRunId, setLoadedRunId] = useState<string | null>(null)
+  const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
 
-  const isRunning = runState === 'running';
-  const isCapturing = captureState === 'capturing' || captureState === 'analyzing';
-  const busy = isRunning || isCapturing;
-  const report = loadedReport ?? liveReport;
+  const isRunning = runState === 'running'
+  const isCapturing =
+    captureState === 'capturing' || captureState === 'analyzing'
+  const busy = isRunning || isCapturing
+  const report = loadedReport ?? liveReport
 
   const { data: runsData, refetch: refetchRuns } = useQuery({
     queryKey: ['audit-runs', target],
     queryFn: () => fetchAuditRuns(target!),
     enabled: !!target,
     staleTime: 30_000,
-  });
-  const runs = runsData?.runs || [];
+  })
+  const runs = runsData?.runs || []
 
   const clearLoaded = () => {
-    setLoadedReport(null);
-    setLoadedWorkload(null);
-    setLoadedRunId(null);
-  };
+    setLoadedReport(null)
+    setLoadedWorkload(null)
+    setLoadedRunId(null)
+  }
 
   const handleRun = async () => {
-    if (!target) return;
-    clearLoaded();
-    resetCapture();
-    await run(target);
-    queryClient.invalidateQueries({ queryKey: ['audit-runs', target] });
-    refetchRuns();
-  };
+    if (!target) return
+    clearLoaded()
+    resetCapture()
+    await run(target)
+    queryClient.invalidateQueries({ queryKey: ['audit-runs', target] })
+    refetchRuns()
+  }
 
   const handleCapture = async () => {
-    if (!target) return;
-    clearLoaded();
-    reset();
-    await runCapture(target, { duration: captureDuration });
-    queryClient.invalidateQueries({ queryKey: ['audit-runs', target] });
-    refetchRuns();
-  };
+    if (!target) return
+    clearLoaded()
+    reset()
+    await runCapture(target, { duration: captureDuration })
+    queryClient.invalidateQueries({ queryKey: ['audit-runs', target] })
+    refetchRuns()
+  }
 
   const handleLoadRun = async (summary: AuditRunSummary) => {
-    setLoadingRunId(summary.run_id);
+    setLoadingRunId(summary.run_id)
     try {
-      const data = await fetchRunDetail(summary.run_id);
-      reset();
-      resetCapture();
+      const data = await fetchRunDetail(summary.run_id)
+      reset()
+      resetCapture()
       if (isWorkloadRun(data)) {
-        setLoadedReport(null);
-        setLoadedWorkload(data);
+        setLoadedReport(null)
+        setLoadedWorkload(data)
       } else {
-        setLoadedWorkload(null);
-        setLoadedReport(data as AuditReport);
+        setLoadedWorkload(null)
+        setLoadedReport(data as AuditReport)
       }
-      setLoadedRunId(summary.run_id);
+      setLoadedRunId(summary.run_id)
     } catch (err) {
       toast({
         title: 'Failed to load run',
         description: err instanceof Error ? err.message : String(err),
         variant: 'negative',
-      });
+      })
     } finally {
-      setLoadingRunId(null);
+      setLoadingRunId(null)
     }
-  };
+  }
 
   return (
     <div className="space-y-6 w-full">
@@ -782,14 +973,23 @@ function AuditPage() {
         <HStack className="justify-between items-start">
           <HStack className="gap-4 items-center">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-info-soft to-surface-primary-soft flex items-center justify-center">
-              <Icon name="document-validation" label="Health Check" className="w-6 h-6 text-content-info-soft" />
+              <Icon
+                name="document-validation"
+                label="Health Check"
+                className="w-6 h-6 text-content-info-soft"
+              />
             </div>
             <VStack className="gap-1 items-start">
-              <Text as="h1" level="headline-3" className="text-content-layout-1">
+              <Text
+                as="h1"
+                level="headline-3"
+                className="text-content-layout-1"
+              >
                 Health Check
               </Text>
               <Text level="body-small" className="text-content-layout-3">
-                Full audit of "{target}": sizing verdict, slow spots, and cache opportunities.
+                Full audit of "{target}": sizing verdict, slow spots, and cache
+                opportunities.
               </Text>
             </VStack>
           </HStack>
@@ -883,7 +1083,11 @@ function AuditPage() {
       <Show when={runState === 'error' && !!runError}>
         <div className="px-5 py-3 bg-surface-negative-soft/30 border border-border-negative-soft rounded-xl">
           <HStack className="gap-2 items-center">
-            <Icon name="alert" label="Error" className="w-4 h-4 text-content-negative-soft" />
+            <Icon
+              name="alert"
+              label="Error"
+              className="w-4 h-4 text-content-negative-soft"
+            />
             <Text level="body-small" className="text-content-negative-soft">
               {runError}
             </Text>
@@ -906,16 +1110,24 @@ function AuditPage() {
                   <HStack className="gap-3 items-center justify-between">
                     <HStack className="gap-3 items-center">
                       <Spinner size="base" />
-                      <Text level="body-small" className="text-content-layout-2">
+                      <Text
+                        level="body-small"
+                        className="text-content-layout-2"
+                      >
                         {captureState === 'analyzing'
                           ? captureStatus || 'Analyzing captured workload...'
                           : captureStatus || 'Capturing live workload...'}
                       </Text>
                     </HStack>
                     {captureProgress && (
-                      <Text level="mono-small" className="text-content-layout-3 tabular-nums shrink-0">
+                      <Text
+                        level="mono-small"
+                        className="text-content-layout-3 tabular-nums shrink-0"
+                      >
                         {Math.round(captureProgress.elapsedSeconds)}s
-                        {captureProgress.totalSeconds ? ` / ${captureProgress.totalSeconds}s` : ''}
+                        {captureProgress.totalSeconds
+                          ? ` / ${captureProgress.totalSeconds}s`
+                          : ''}
                       </Text>
                     )}
                   </HStack>
@@ -927,7 +1139,9 @@ function AuditPage() {
                         style={{
                           width: `${Math.min(
                             100,
-                            (captureProgress.elapsedSeconds / captureProgress.totalSeconds) * 100,
+                            (captureProgress.elapsedSeconds /
+                              captureProgress.totalSeconds) *
+                              100
                           )}%`,
                         }}
                       />
@@ -936,9 +1150,18 @@ function AuditPage() {
 
                   {captureProgress && (
                     <div className="grid grid-cols-2 tablet:grid-cols-4 gap-4">
-                      <StatCard label="Unique Queries" value={`${captureProgress.uniqueQueries}`} />
-                      <StatCard label="Executions" value={captureProgress.totalExecutions.toLocaleString()} />
-                      <StatCard label="TPS" value={captureProgress.tps.toFixed(1)} />
+                      <StatCard
+                        label="Unique Queries"
+                        value={`${captureProgress.uniqueQueries}`}
+                      />
+                      <StatCard
+                        label="Executions"
+                        value={captureProgress.totalExecutions.toLocaleString()}
+                      />
+                      <StatCard
+                        label="TPS"
+                        value={captureProgress.tps.toFixed(1)}
+                      />
                       <StatCard
                         label="Cache Hit"
                         value={
@@ -961,7 +1184,11 @@ function AuditPage() {
       <Show when={!!analysisWarning}>
         <div className="px-5 py-3 bg-surface-warning-soft/20 border border-border-warning-soft rounded-xl">
           <HStack className="gap-2 items-center">
-            <Icon name="alert" label="Warning" className="w-4 h-4 text-content-warning-soft" />
+            <Icon
+              name="alert"
+              label="Warning"
+              className="w-4 h-4 text-content-warning-soft"
+            />
             <Text level="body-small" className="text-content-warning-soft">
               {analysisWarning}
             </Text>
@@ -973,7 +1200,11 @@ function AuditPage() {
       <Show when={captureState === 'error' && !!captureError}>
         <div className="px-5 py-3 bg-surface-negative-soft/30 border border-border-negative-soft rounded-xl">
           <HStack className="gap-2 items-center">
-            <Icon name="alert" label="Error" className="w-4 h-4 text-content-negative-soft" />
+            <Icon
+              name="alert"
+              label="Error"
+              className="w-4 h-4 text-content-negative-soft"
+            />
             <Text level="body-small" className="text-content-negative-soft">
               {captureError}
             </Text>
@@ -990,7 +1221,10 @@ function AuditPage() {
         >
           <VStack className="gap-3 items-stretch">
             <HStack className="gap-2 items-center">
-              <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+              <Text
+                level="overline"
+                className="text-content-layout-3 uppercase tracking-wider"
+              >
                 Latest capture: {captureResult.runId}
               </Text>
             </HStack>
@@ -998,7 +1232,9 @@ function AuditPage() {
               summary={captureResult.summary}
               analysis={captureResult.analysis}
               queries={captureResult.summary?.queries || []}
-              durationSeconds={captureResult.summary?.duration_seconds ?? captureDuration}
+              durationSeconds={
+                captureResult.summary?.duration_seconds ?? captureDuration
+              }
             />
           </VStack>
         </m.div>
@@ -1014,7 +1250,10 @@ function AuditPage() {
           <VStack className="gap-3 items-stretch">
             <HStack className="justify-between items-center">
               <HStack className="gap-2 items-center">
-                <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                <Text
+                  level="overline"
+                  className="text-content-layout-3 uppercase tracking-wider"
+                >
                   Saved capture: {loadedRunId}
                 </Text>
                 <Text level="caption" className="text-content-layout-3">
@@ -1037,7 +1276,10 @@ function AuditPage() {
           <VStack className="gap-3 items-stretch">
             <HStack className="justify-between items-center">
               <HStack className="gap-2 items-center">
-                <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                <Text
+                  level="overline"
+                  className="text-content-layout-3 uppercase tracking-wider"
+                >
                   {loadedRunId ? `Saved run: ${loadedRunId}` : 'Latest audit'}
                 </Text>
                 <Text level="caption" className="text-content-layout-3">
@@ -1055,33 +1297,46 @@ function AuditPage() {
         <SectionCard icon="folder-file" title={`Past Runs (${runs.length})`}>
           <div className="divide-y divide-border-layout-1">
             {runs.map((summary) => {
-              const isCapture = (summary.duration_seconds ?? 0) > 0;
-              const runLabel = isCapture ? 'Workload capture' : 'Quick audit';
+              const isCapture = (summary.duration_seconds ?? 0) > 0
+              const runLabel = isCapture ? 'Workload capture' : 'Quick audit'
               return (
                 <button
                   key={summary.run_id}
                   type="button"
                   onClick={() => handleLoadRun(summary)}
                   className={`group w-full text-left px-5 py-3 hover:bg-surface-layout-2/50 transition-colors cursor-pointer ${
-                    loadedRunId === summary.run_id ? 'bg-surface-primary-soft/10' : ''
+                    loadedRunId === summary.run_id
+                      ? 'bg-surface-primary-soft/10'
+                      : ''
                   }`}
                 >
                   <HStack className="justify-between items-center gap-4">
                     <VStack className="gap-0.5 items-start min-w-0">
                       <HStack className="gap-2 items-baseline min-w-0">
-                        <Text level="label-medium" className="text-content-layout-1 shrink-0">
+                        <Text
+                          level="label-medium"
+                          className="text-content-layout-1 shrink-0"
+                        >
                           {runLabel}
                         </Text>
-                        <Text level="caption" className="text-content-layout-3 truncate">
+                        <Text
+                          level="caption"
+                          className="text-content-layout-3 truncate"
+                        >
                           {formatDate(summary.started_at)}
                         </Text>
                       </HStack>
-                      <Text level="mono-small" className="text-content-layout-3 truncate">
+                      <Text
+                        level="mono-small"
+                        className="text-content-layout-3 truncate"
+                      >
                         {summary.run_id}
                       </Text>
                     </VStack>
                     <HStack className="gap-2 items-center shrink-0">
-                      {loadingRunId === summary.run_id && <Spinner size="base" />}
+                      {loadingRunId === summary.run_id && (
+                        <Spinner size="base" />
+                      )}
                       {isCapture && (
                         <Tag
                           size="small"
@@ -1091,7 +1346,12 @@ function AuditPage() {
                         />
                       )}
                       {summary.has_analysis && (
-                        <Tag size="small" variant="positive" modifier="ghost" label="Analyzed" />
+                        <Tag
+                          size="small"
+                          variant="positive"
+                          modifier="ghost"
+                          label="Analyzed"
+                        />
                       )}
                       <Tag
                         size="small"
@@ -1107,11 +1367,11 @@ function AuditPage() {
                     </HStack>
                   </HStack>
                 </button>
-              );
+              )
             })}
           </div>
         </SectionCard>
       </Show>
     </div>
-  );
+  )
 }
