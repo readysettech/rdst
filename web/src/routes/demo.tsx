@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { Icon } from '@rs/ui-new/icon';
 import { Button } from '@rs/ui-new/button';
 import { Text } from '@rs/ui-new/text';
@@ -328,7 +328,10 @@ function ThroughputChart({ samples, events, windowMode, onWindowMode }: {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const W = 920;
   const H = 250;
-  const m = { left: 42, right: 42, top: 16, bottom: 40 };
+  // Wider right gutter reserves room for the end-of-line value labels that keep
+  // both series legible at high lift (the baseline would otherwise flatten onto
+  // the x-axis and vanish). [T16, audit LOW #9, VIS-011]
+  const m = { left: 42, right: 70, top: 16, bottom: 40 };
   const plotW = W - m.left - m.right;
   const plotH = H - m.top - m.bottom;
   const windowSeconds = windowMode === '1m' ? 60 : 300;
@@ -452,12 +455,44 @@ function ThroughputChart({ samples, events, windowMode, onWindowMode }: {
               <polyline points={points((p) => p.router.qps)} fill="none" stroke="var(--qpdemo-router)" strokeWidth="2.4" strokeLinejoin="round" />
             </>
           )}
-          {latest && (
-            <>
-              <circle cx={xFor(latest.t)} cy={yFor(latest.router.qps)} r="3.5" fill="var(--qpdemo-router)" />
-              <circle cx={xFor(latest.t)} cy={yFor(latest.direct.qps)} r="3.5" fill="var(--qpdemo-control)" />
-            </>
-          )}
+          {latest && (() => {
+            // Keep BOTH series legible even when the cached line rockets to
+            // ~3k qps and the ~16 qps baseline would otherwise collapse onto the
+            // x-axis. The polylines stay exact; the endpoint dot for the baseline
+            // is nudged just off the axis, and each series gets an end-of-line
+            // value label in the right gutter. The gap between the lines is the
+            // whole story, so the baseline must never vanish. [T16, LOW #9, VIS-011]
+            const axisY = m.top + plotH;
+            const labelX = W - m.right + 8;
+            const routerVal = latest.router.qps;
+            const directVal = latest.direct.qps;
+            const routerDotY = clamp(yFor(routerVal), m.top + 2, axisY);
+            const directDotY = Math.min(yFor(directVal), axisY - 4);
+            const MIN_GAP = 14;
+            let ry = clamp(yFor(routerVal), m.top + 6, axisY - 6);
+            let dy = clamp(yFor(directVal), m.top + 6, axisY - 6);
+            if (Math.abs(ry - dy) < MIN_GAP) {
+              if (routerVal >= directVal) {
+                dy = Math.min(axisY - 6, ry + MIN_GAP);
+                ry = dy - MIN_GAP;
+              } else {
+                ry = Math.min(axisY - 6, dy + MIN_GAP);
+                dy = ry - MIN_GAP;
+              }
+            }
+            const lifted = routerVal >= directVal * 1.5;
+            return (
+              <>
+                <circle cx={xFor(latest.t)} cy={routerDotY} r="3.5" fill="var(--qpdemo-router)" />
+                <circle cx={xFor(latest.t)} cy={directDotY} r="3.5" fill="var(--qpdemo-control)" />
+                <text className="endlabel" x={labelX} y={ry + 4} style={{ fill: 'var(--qpdemo-router)' }}>{formatQps(routerVal)} qps</text>
+                <text className="endlabel" x={labelX} y={dy + 4} style={{ fill: 'var(--qpdemo-control)' }}>{formatQps(directVal)} qps</text>
+                {lifted && (
+                  <text x={labelX} y={dy + 17} style={{ fill: 'var(--color-content-layout-3)' }}>baseline</text>
+                )}
+              </>
+            );
+          })()}
 
           {hover && (
             <g pointerEvents="none">
@@ -763,7 +798,7 @@ function StartCard({ onStart }: { onStart: () => void }) {
       <Text as="p" level="caption" className="mt-3 max-w-[58ch] rounded-lg border border-border-layout-1 bg-surface-layout-soft/40 p-2.5 text-content-layout-2">
         <span className="font-semibold text-[var(--qpdemo-router)]">Note:</span>{' '}
         the environment cleans itself up after an hour, or remove it
-        yourself anytime with Tear down.
+        yourself anytime with Shut down demo.
       </Text>
       <Button
         variant="primary"
@@ -835,16 +870,24 @@ function StatusPopover({
   row,
   mode,
   cacheBudget,
+  waiting,
   open,
   onOpenChange,
 }: {
   row: PatternRow;
   mode: DiscoveryMode;
   cacheBudget: number;
+  // Pre-traffic, a benign "no traffic yet" row is a neutral waiting state, not
+  // an amber "not eligible yet" warning. [T16, audit MEDIUM #3, VIS-102]
+  waiting: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const copy = popoverCopy(row, mode, cacheBudget);
+  const copy = waiting
+    ? { sentence: 'Waiting for traffic. This query is measured once the workload starts.', numbers: '' }
+    : popoverCopy(row, mode, cacheBudget);
+  const label = waiting ? 'waiting for traffic' : STATUS_LABEL[row.status];
+  const chipClass = waiting ? 'bg-[var(--qpdemo-chip)] text-content-layout-2' : statusClass(row.status);
   // Popovers open on hover with sensible delays as well as click; the pill gets
   // cursor, hover, and a subtle press affordance. The popover stays open while
   // hovered (trigger and content share the same open/close timers).
@@ -870,12 +913,12 @@ function StatusPopover({
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`${STATUS_LABEL[row.status]} details`}
+          aria-label={`${label} details`}
           onMouseEnter={hoverOpen}
           onMouseLeave={hoverClose}
-          className={`inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-label-small font-semibold transition-transform hover:brightness-105 active:scale-95 ${statusClass(row.status)}`}
+          className={`inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-label-small font-semibold transition-transform hover:brightness-105 active:scale-95 ${chipClass}`}
         >
-          {STATUS_LABEL[row.status]}
+          {label}
           <Icon name="info" label="" className="h-3 w-3 shrink-0 opacity-70" />
         </button>
       </PopoverTrigger>
@@ -891,7 +934,7 @@ function StatusPopover({
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <Text as="p" level="body-small" className="text-content-layout-1">{copy.sentence}</Text>
-        <Text as="p" level="mono-small" className="mt-2 block text-content-layout-3">{copy.numbers}</Text>
+        {copy.numbers && <Text as="p" level="mono-small" className="mt-2 block text-content-layout-3">{copy.numbers}</Text>}
       </PopoverContent>
     </Popover>
   );
@@ -1049,6 +1092,11 @@ function PatternTable({
             {sorted.map((row) => {
               const expanded = openSql.has(row.key);
               const isSuggested = suggestedKeys.has(row.key);
+              // A row that has never been hit and reads "not eligible yet" is a
+              // benign no-traffic state, not a warning: show it as a neutral
+              // "waiting for traffic" pill with no manual toggle, so the pre-load
+              // table isn't a wall of amber alarms. [T16, audit MEDIUM #3]
+              const isWaiting = row.hits === 0 && row.status === 'not_eligible';
               return (
                 <Fragment key={row.key}>
                   <tr
@@ -1083,10 +1131,10 @@ function PatternTable({
                       )}
                     </td>
                     <td className="px-3 py-2">
-                      <StatusPopover row={row} mode={mode} cacheBudget={cacheBudget} open={openPopover === row.key} onOpenChange={(o) => setPopover(row, o)} />
+                      <StatusPopover row={row} mode={mode} cacheBudget={cacheBudget} waiting={isWaiting} open={openPopover === row.key} onOpenChange={(o) => setPopover(row, o)} />
                     </td>
                     <td className="px-3 py-2">
-                      {row.status === 'cached_manual' || row.status === 'cached_querypilot' || canManualCache(row) ? (
+                      {!isWaiting && (row.status === 'cached_manual' || row.status === 'cached_querypilot' || canManualCache(row)) ? (
                         // Manual caching is the early hands-on beat. Once QueryPilot
                         // is on it owns all caching, so these switches gray out but
                         // stay visible, showing who currently caches each query.
@@ -1323,7 +1371,7 @@ function tourConfig(step: TourStepId): { anchor: string | null; copy: string; pr
     case 'modeWhyNot':
       return { anchor: 'uncached-rows', copy: 'Hover the status of an uncached query to see why QueryPilot passed on it.', primary: 'Next' };
     case 'finale':
-      return { anchor: null, copy: "That's the tour. QueryPilot keeps caching by the chosen policy, managing every cache automatically. Click Tear down anytime to remove the containers and the whole demo from your system.", primary: 'Finish' };
+      return { anchor: null, copy: "That's the tour. QueryPilot keeps caching by the chosen policy, managing every cache automatically. Use Shut down demo anytime to remove the containers and the whole demo from your system.", primary: 'Finish' };
   }
 }
 
@@ -1458,9 +1506,74 @@ function ModeConfirmDialog({ onConfirm, onCancel }: { onConfirm: () => void; onC
   );
 }
 
+// Generic in-page confirm for a destructive action, styled like the tour/mode
+// dialogs (no banned window.confirm). Used to guard demo teardown. [T16,
+// USE-077, VIS-022/023]
+function ConfirmDialog({ ariaLabel, body, confirmLabel, onConfirm, onCancel }: {
+  ariaLabel: string;
+  body: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <>
+      <div aria-hidden className="fixed inset-0 z-[65]" style={{ background: 'rgba(0, 0, 0, 0.55)' }} onClick={onCancel} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel}
+        className="fixed left-1/2 top-1/2 z-[66] w-[min(420px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border-layout-1 bg-surface-layout-1 p-5 shadow-xl"
+      >
+        <Text as="p" level="body-small" className="text-content-layout-1">{body}</Text>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="primary" modifier="ghost" size="small" label="Cancel" onClick={onCancel} />
+          <Button variant="negative" size="small" label={confirmLabel} onClick={onConfirm} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+// The demo's terminal "so-what" beat: the watched cache win is worth nothing if
+// the convinced evaluator has nowhere to go. This is the flow's principal new
+// contribution — a single conviction CTA that carries the already-collected
+// identity forward to "connect your own database" with no re-gating.
+// [demo-to-conviction step 7, MET-008, USE-022; VIS-102 reuse of the hero/empty
+// block pattern — NEEDS VARIANT: conviction hand-off panel, folds into C-07/C-09]
+function BridgePanel({ onConnect }: { onConnect: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-3 rounded-lg border border-border-primary-soft bg-surface-primary-soft/50 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="max-w-[62ch]">
+        <Text as="h2" level="subtitle-2" className="text-content-layout-1">Ready to see this on your data?</Text>
+        <Text as="p" level="body-small" className="mt-1 text-content-layout-2">
+          You just saw it on a sample Orders database — point RDST at your own Postgres or MySQL to find the queries worth caching.
+        </Text>
+      </div>
+      <Button
+        variant="primary"
+        size="base"
+        icon="arrow-right"
+        iconPosition="right"
+        label="Get this for your database"
+        className="shrink-0"
+        onClick={onConnect}
+      />
+    </div>
+  );
+}
+
 export function DemoPage() {
   const d = useDemo();
+  const navigate = useNavigate();
   const showTeardown = d.phase !== 'idle';
+  // Carry the demo identity forward: the email collected at the gate persists in
+  // settings, and Connect (a normal in-shell route) never re-gates. `from=demo`
+  // lets Connect acknowledge the hand-off in one line. [T16, USE-008, USE-022]
+  const goConnect = useCallback(() => {
+    void navigate({ to: '/onboarding', search: { from: 'demo' } });
+  }, [navigate]);
+  const [confirmingTeardown, setConfirmingTeardown] = useState(false);
   const [modeResetting, setModeResetting] = useState(false);
   const [pendingMode, setPendingMode] = useState<DiscoveryMode | null>(null);
   const [windowMode, setWindowMode] = useState<WindowMode>('5m');
@@ -1499,6 +1612,10 @@ export function DemoPage() {
   // Live Readyset-vs-Postgres throughput multiple over the recent window, for
   // the permanent ratio line. Always computed, never gated.
   const liftRatio = windowLiftRatio(d.samples, 15);
+  // A multiplier is only meaningful once real traffic exists on the direct
+  // path. Before that, the line shows an honest prompt instead of a fabricated
+  // "0.0x" (which reads as "Readyset does zero"). [T16, audit MEDIUM #2]
+  const hasComparison = d.samples.some((s) => s.direct.qps > 0);
 
   const noticeRef = useRef<string | null | undefined>(undefined);
   const errorRef = useRef<string | null | undefined>(undefined);
@@ -1687,7 +1804,11 @@ export function DemoPage() {
             <Button variant="primary" modifier="ghost" size="small" icon="filter-reset" iconPosition="left" label="Replay tour" onClick={openTour} />
           )}
           {showTeardown && (
-            <Button variant="negative" size="small" icon="trash" iconPosition="left" label="Tear down" onClick={d.tearDown} />
+            // Demoted from a prominent solid-red action to a quiet tertiary, and
+            // guarded by a confirm — teardown wipes 4 containers + ~2 GB of
+            // images, so a mis-click must not fire silently. [T16, audit MEDIUM
+            // #4, USE-077, VIS-022]
+            <Button variant="negative" modifier="ghost" size="small" icon="trash" iconPosition="left" label="Shut down demo" onClick={() => setConfirmingTeardown(true)} />
           )}
         </div>
       </header>
@@ -1701,14 +1822,21 @@ export function DemoPage() {
       {d.phase === 'ready' && (
         <div className="qpdemo-enter flex flex-col gap-5">
           <ThroughputChart samples={d.samples} events={d.events} windowMode={windowMode} onWindowMode={setWindowMode} />
-          {/* Permanent, fixed-height ratio line: always rendered from the live
-              window ratio, so it never mounts/unmounts and jumps the layout. */}
+          {/* Permanent, fixed-height ratio line: always rendered, so it never
+              mounts/unmounts and jumps the layout. Before any traffic it holds
+              an honest prompt instead of a false "0.0x". [T16, audit MEDIUM #2] */}
           <div className="flex h-7 items-center">
-            <Text as="p" level="body-small" data-testid="lift-ratio" className="font-medium tabular-nums text-content-layout-2">
-              Readyset throughput is{' '}
-              <span className={liftRatio >= 1.3 ? 'text-content-positive-soft' : 'text-content-layout-1'}>{formatLiftRatio(liftRatio)}</span>{' '}
-              Postgres direct
-            </Text>
+            {hasComparison ? (
+              <Text as="p" level="body-small" data-testid="lift-ratio" className="font-medium tabular-nums text-content-layout-2">
+                Readyset throughput is{' '}
+                <span className={liftRatio >= 1.3 ? 'text-content-positive-soft' : 'text-content-layout-1'}>{formatLiftRatio(liftRatio)}</span>{' '}
+                Postgres direct
+              </Text>
+            ) : (
+              <Text as="p" level="body-small" data-testid="lift-ratio" className="text-content-layout-3">
+                Start traffic to see how much faster Readyset serves cached queries.
+              </Text>
+            )}
           </div>
           <ControlsRow
             loadRunning={d.loadRunning}
@@ -1735,11 +1863,24 @@ export function DemoPage() {
           <Text as="p" level="caption" className="max-w-[78ch] text-content-layout-3">
             Hit counts and latency averages cover the current comparison window and reset whenever QueryPilot is toggled or the policy changes. The chart keeps its full history and marks each event.
           </Text>
+          <BridgePanel onConnect={goConnect} />
         </div>
       )}
 
       {modeResetting && <ResetOverlay />}
       {pendingMode && <ModeConfirmDialog onConfirm={confirmMode} onCancel={cancelMode} />}
+      {confirmingTeardown && (
+        <ConfirmDialog
+          ariaLabel="Shut down demo"
+          body="Remove all demo containers and data? You can start it again anytime."
+          confirmLabel="Shut down demo"
+          onConfirm={() => {
+            setConfirmingTeardown(false);
+            void d.tearDown();
+          }}
+          onCancel={() => setConfirmingTeardown(false)}
+        />
+      )}
       {!modeResetting && !pendingMode && tourStep && (
         <TourLayer
           step={tourStep}

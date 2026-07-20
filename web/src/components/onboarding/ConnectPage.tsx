@@ -17,7 +17,8 @@ import type { ConfigureFormData } from '../../types/configure';
  * route inside the app shell — skippable, never a takeover.
  * [USE-006, USE-008, USE-068, USE-050/052, VIS-011, VIS-116]
  */
-export function ConnectPage({ redirectTo }: { redirectTo?: string }) {
+export function ConnectPage({ redirectTo, from }: { redirectTo?: string; from?: string }) {
+  const fromDemo = from === 'demo';
   const navigate = useNavigate();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -84,6 +85,19 @@ export function ConnectPage({ redirectTo }: { redirectTo?: string }) {
       </HStack>
 
       <div className="mx-auto w-full max-w-xl px-6 pb-16 pt-8">
+        {fromDemo && (
+          // One-line bridge from the demo→conviction hand-off: acknowledges the
+          // watched win and carries the scent of information forward. The email
+          // collected at the demo gate already persists, so nothing re-gates.
+          // [demo-to-conviction step 7, USE-022, MET-008]
+          <div className="mb-5 flex items-start gap-2 rounded-lg border border-border-primary-soft bg-surface-primary-soft/50 px-4 py-3">
+            <Icon name="tick" label="" className="mt-0.5 h-4 w-4 shrink-0 text-content-primary-soft" />
+            <Text level="body-small" className="text-content-layout-2">
+              You&rsquo;ve seen the demo — now connect your own database to find your caching wins.
+            </Text>
+          </div>
+        )}
+
         <VStack className="gap-2 items-start mb-6">
           <Text as="h1" level="headline-2" className="text-content-layout-1">
             Connect your database

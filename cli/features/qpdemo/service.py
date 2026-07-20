@@ -43,18 +43,20 @@ API_KEY = "rdst-demo-key"
 CREDS = dict(user="sqp_user", password="sqp_pass", database="sqp_test")
 NAMES = {n: f"{PROJECT}-{n}" for n in ("pg", "readyset", "sqp", "qp-cron")}
 DISCOVERY_MODES = {"count_star", "sum_time"}
+# Initial cache-budget default, used only before the stack is provisioned; once
+# provisioning or a QueryPilot enable runs, the budget is set from MODE_BUDGETS
+# for the active policy (see below), so the visitor-facing budget is always 20.
 QP_NUMBER_OF_QUERIES = 10
-# QueryPilot opens on the most-expensive policy (the tour's first payoff), then
-# the visitor switches to most-frequent. Each policy carries its own budget:
-# top 10 by total time, top 20 by call count.
-# QueryPilot opens on the most-frequent policy: caching the queries the app runs
-# most often is where the throughput surge is dramatic (the cached ReadySet path
-# rockets past the direct baseline), so that is the demo's headline beat right
-# after turning QueryPilot on. The tour then switches to most-expensive.
+# QueryPilot opens on the most-frequent policy (count_star): caching the queries
+# the app runs most often is where the throughput surge is dramatic (the cached
+# ReadySet path rockets past the direct baseline), so that is the demo's headline
+# beat right after turning QueryPilot on. The tour then switches to most-expensive.
 QP_DEFAULT_MODE = "count_star"
-# Both policies cache their top 20. For most-expensive this reaches past the ~10
-# heaviest queries into the more frequent ones, so its throughput line climbs
-# more instead of being carried only by rare heavy queries.
+# Both policies cache their top 20 (single source of truth for every "top N"
+# claim in the UI — toast, popover, tour, and caption all derive from this). For
+# most-expensive the 20 reaches past the ~10 heaviest queries into the more
+# frequent ones, so its throughput line climbs more instead of being carried
+# only by rare heavy queries.
 MODE_BUDGETS = {"sum_time": 20, "count_star": 20}
 QP_CACHE_BUDGET_MIN = 1
 QP_CACHE_BUDGET_MAX = 40
@@ -1362,8 +1364,8 @@ class DemoService:
         if not self._ports or not self._qp:
             raise RuntimeError("demo is not provisioned")
         self._discovery_mode = mode
-        # Each policy carries its own budget: most-expensive caches the top 10 by
-        # total time, most-frequent the top 20 by call count.
+        # Both policies cache their top 20 (MODE_BUDGETS) — most-frequent by call
+        # count, most-expensive by total time.
         self._cache_budget = MODE_BUDGETS[mode]
         qdeploy.write_qp_config(
             QP_CONFIG_DIR, self._ports.admin, self._ports.readyset,

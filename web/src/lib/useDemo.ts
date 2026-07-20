@@ -612,15 +612,18 @@ export function useDemo() {
     setMode(nextMode);
     setPatterns((ps) => resetPatternStats(ps, true));
     addEvent('mode_change', `policy -> ${nextMode === 'sum_time' ? 'most expensive' : 'most frequent'}`);
-    setNotice(nextMode === 'sum_time'
-      ? 'QueryPilot dropped its picks — re-selecting the top 10 most expensive on the next pass.'
-      : 'QueryPilot dropped its picks — re-selecting the top 20 most frequent on the next pass.');
     await setDiscoveryModeApi(nextMode);
     setPatterns((ps) => resetPatternStats(ps, true));
-    await refreshStatus();
+    const status = await refreshStatus();
     await refreshPatterns();
     await refreshHistory();
-  }, [addEvent, mode, refreshHistory, refreshPatterns, refreshStatus]);
+    // Announce the real, server-confirmed budget for the new policy — never a
+    // hard-coded "top 10"/"top 20" that can contradict the actual cache budget
+    // (the backend caches the same top N under either policy). [T16]
+    const policy = nextMode === 'sum_time' ? 'most expensive' : 'most frequent';
+    const budget = status?.cache_budget ?? cacheBudget;
+    setNotice(`QueryPilot dropped its picks — re-selecting the top ${budget} ${policy} on the next pass.`);
+  }, [addEvent, cacheBudget, mode, refreshHistory, refreshPatterns, refreshStatus]);
 
   const setCacheBudget = useCallback(async (nextBudget: number) => {
     const clamped = Math.min(40, Math.max(1, Math.round(nextBudget)));

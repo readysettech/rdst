@@ -6,6 +6,14 @@ vi.mock('../components/SQLDisplay', () => ({
   SQLDisplay: ({ sql }: { sql: string }) => <div data-testid="sql-display">{sql}</div>,
 }));
 
+// DemoPage's bridge CTA navigates via useNavigate; stub it so the page can be
+// rendered in isolation (no RouterProvider) and the hand-off target asserted.
+const navigateSpy = vi.fn();
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-router')>();
+  return { ...actual, useNavigate: () => navigateSpy };
+});
+
 import { toast } from '@rs/ui-new/use-toast';
 import { DemoPage, windowLiftRatio, eventDescription, parameterizeSql, clipToScrollAncestors } from './demo';
 import * as useDemoMod from '../lib/useDemo';
@@ -512,6 +520,64 @@ describe('DemoPage', () => {
     mockDemo({ samples: [sample(at - 5, 100, 1000), sample(at, 100, 1000)] });
     rerender(<DemoPage />);
     expect(screen.getByTestId('lift-ratio').textContent).toContain('10x');
+  });
+
+  it('holds an honest prompt instead of a false "0.0x" before any traffic', () => {
+    markTourDone();
+    // No samples yet (the state the visitor lands on after provisioning): the
+    // permanent line must not read "0.0x" (which reads as "Readyset does zero").
+    mockDemo({ samples: [], loadRunning: false });
+    render(<DemoPage />);
+    const line = screen.getByTestId('lift-ratio');
+    expect(line.textContent).toContain('Start traffic to see');
+    expect(line.textContent).not.toContain('0.0x');
+  });
+
+  it('renders a benign no-traffic row as neutral "waiting for traffic", not an amber warning, and offers no manual toggle', () => {
+    markTourDone();
+    const waitingRow = row({
+      key: 'W01',
+      title: 'Idle workload query',
+      status: 'not_eligible',
+      hits: 0,
+      reason: { kind: 'below_min_execution', count: 0, threshold: 5 },
+    });
+    mockDemo({ patterns: [waitingRow], loadRunning: false, samples: [] });
+    render(<DemoPage />);
+    expect(screen.getByText('waiting for traffic')).toBeTruthy();
+    expect(screen.queryByText('not eligible yet')).toBeNull();
+    // No manual-cache switch is offered before the query has ever run.
+    expect(rowScope('Idle workload query').queryByRole('switch')).toBeNull();
+  });
+
+  it('shows the conviction bridge and hands off to Connect carrying the demo identity', () => {
+    markTourDone();
+    navigateSpy.mockClear();
+    mockDemo({});
+    render(<DemoPage />);
+    expect(screen.getByText('Ready to see this on your data?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Get this for your database/ }));
+    expect(navigateSpy).toHaveBeenCalledWith({ to: '/onboarding', search: { from: 'demo' } });
+  });
+
+  it('guards teardown behind a confirm dialog and only tears down on explicit confirm', () => {
+    markTourDone();
+    const tearDown = vi.fn();
+    mockDemo({ tearDown });
+    render(<DemoPage />);
+    // The destructive control is renamed and demoted; clicking it does not fire
+    // teardown — it opens a confirm with plain-words copy.
+    fireEvent.click(screen.getByRole('button', { name: /Shut down demo/ }));
+    expect(tearDown).not.toHaveBeenCalled();
+    expect(screen.getByText('Remove all demo containers and data? You can start it again anytime.')).toBeTruthy();
+    // Cancel backs out without tearing down.
+    fireEvent.click(screen.getByRole('button', { name: /Cancel/ }));
+    expect(tearDown).not.toHaveBeenCalled();
+    // Re-open and confirm: only now does teardown fire, exactly once.
+    fireEvent.click(screen.getByRole('button', { name: /Shut down demo/ }));
+    const buttons = screen.getAllByRole('button', { name: /Shut down demo/ });
+    fireEvent.click(buttons[buttons.length - 1]);
+    expect(tearDown).toHaveBeenCalledTimes(1);
   });
 
   it('shows the live cache budget in the popover, not the metric cutoff', () => {
