@@ -70,3 +70,4 @@ class AskResult:
     total_tokens: int
     query_hash: str = ""
     query_tag: str = ""
+    limit_added: bool = False

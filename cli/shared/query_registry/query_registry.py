@@ -578,6 +578,13 @@ class QueryEntry:
     sql: str  # Normalized SQL with :p1, :p2 placeholders
     hash: str
     tag: str = ""
+    # Original submitted SQL, before parameter normalization (e.g. positional
+    # `GROUP BY 1` is preserved, not rewritten to `:p1`). The dedupe `hash` is
+    # still computed from the canonical form, so it stays separate: this field
+    # only makes hand-offs (re-analyze / re-cache / history re-ask) faithful to
+    # what the user actually ran.
+    original_sql: str = ""
+    question: str = ""  # Original natural-language question (ask-sourced entries)
     first_analyzed: str = ""
     last_analyzed: str = ""
     frequency: int = 0
@@ -615,6 +622,11 @@ class QueryEntry:
             data["most_recent_params"] = {}
         if "parameters" not in data:
             data["parameters"] = {}
+        # Original-SQL / question persistence (hand-off faithfulness)
+        if "original_sql" not in data:
+            data["original_sql"] = ""
+        if "question" not in data:
+            data["question"] = ""
         # Runtime stats from rdst top (added in CLD-1645)
         if "max_duration_ms" not in data:
             data["max_duration_ms"] = 0.0
@@ -734,6 +746,7 @@ class QueryRegistry:
         source: str = "manual",
         frequency: int = 0,
         target: str = "",
+        question: str = "",
         dialect: str = None,
         max_duration_ms: float = 0.0,
         avg_duration_ms: float = 0.0,
@@ -832,6 +845,12 @@ class QueryRegistry:
             if tag:
                 entry.tag = tag
                 entry.source = source
+            if question:
+                entry.question = question
+            # Backfill the original SQL if this entry predates the field, so
+            # later hand-offs match what actually ran (dedupe hash unchanged).
+            if not entry.original_sql:
+                entry.original_sql = canonical_sql
             if target:  # Update last target used
                 entry.last_target = target
 
@@ -855,6 +874,8 @@ class QueryRegistry:
                 sql=normalized_sql,  # Store normalized SQL with :p1, :p2 placeholders
                 hash=query_hash,
                 tag=tag,
+                original_sql=canonical_sql,  # Faithful, un-normalized submitted SQL
+                question=question,
                 first_analyzed=now,
                 last_analyzed=now,
                 frequency=frequency,

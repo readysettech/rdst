@@ -8,7 +8,8 @@ from decimal import Decimal
 from typing import Any, AsyncGenerator
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from features.ask.events import (
@@ -74,6 +75,7 @@ def _event_to_sse(event: AskEvent) -> dict:
                     "source": event.source,
                     "table_count": event.table_count,
                     "tables": event.tables,
+                    "target": event.target,
                 }
             ),
         }
@@ -123,6 +125,9 @@ def _event_to_sse(event: AskEvent) -> dict:
                     "execution_time_ms": event.execution_time_ms,
                     "llm_calls": event.llm_calls,
                     "total_tokens": event.total_tokens,
+                    "query_hash": event.query_hash,
+                    "query_tag": event.query_tag,
+                    "limit_added": event.limit_added,
                 }
             ),
         }
@@ -185,6 +190,84 @@ async def _ask_generator(
                     }
                 ),
             }
+
+
+class AskExamplesResponse(BaseModel):
+    examples: list[str]
+    source: str  # "semantic" | "introspection"
+
+
+@router.get("/ask/examples", response_model=AskExamplesResponse)
+async def ask_examples(
+    target: str = Query(..., description="Target to generate examples for"),
+) -> AskExamplesResponse:
+    """Example questions grounded in the target's schema.
+
+    Uses the semantic layer's business context via the LLM when available,
+    caching per target; otherwise returns schema-safe fallbacks. Never surfaces
+    hardcoded generic prompts. (Ports schema-grounded examples from CL 14059.)
+    """
+    import asyncio
+
+    from features.ask.example_questions import get_example_questions
+    from features.schema.semantic_layer.manager import SemanticLayerManager
+
+    manager = SemanticLayerManager()
+    layer = None
+    table_names: list[str] = []
+    if manager.exists(target):
+        layer = manager.load(target)
+        table_names = list(layer.tables.keys())
+
+    result = await asyncio.to_thread(
+        get_example_questions, target, table_names, layer
+    )
+    return AskExamplesResponse(**result)
+
+
+class AskHistoryItem(BaseModel):
+    question: str
+    sql: str
+    hash: str
+    tag: str
+    target: str
+    last_used: str
+
+
+class AskHistoryResponse(BaseModel):
+    items: list[AskHistoryItem]
+
+
+@router.get("/ask/history", response_model=AskHistoryResponse)
+async def ask_history(
+    target: str | None = Query(None, description="Filter to one target"),
+    limit: int = Query(50, ge=1, le=200),
+) -> AskHistoryResponse:
+    """Past natural-language questions, newest first.
+
+    Draws on the query registry, which auto-saves every answered ask with its
+    original question text. Only ask-sourced entries that carry a question are
+    returned; entries saved before question persistence landed have none. The
+    SQL is the original submitted form when stored, so a re-ask is faithful.
+    """
+    from shared.query_registry import QueryRegistry
+
+    registry = QueryRegistry()
+    items = [
+        AskHistoryItem(
+            question=e.question,
+            sql=e.original_sql or e.sql,
+            hash=e.hash,
+            tag=e.tag,
+            target=e.last_target,
+            last_used=e.last_analyzed,
+        )
+        for e in registry.list_queries()
+        if e.source == "ask"
+        and e.question
+        and (not target or e.last_target == target)
+    ]
+    return AskHistoryResponse(items=items[:limit])
 
 
 @router.post("/ask")

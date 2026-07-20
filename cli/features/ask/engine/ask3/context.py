@@ -76,6 +76,7 @@ class Ask3Context:
     # === Validation (Phase 4) ===
     validation_errors: List[ValidationError] = field(default_factory=list)
     retry_count: int = 0
+    limit_added: bool = False  # True when validation injected a missing LIMIT
 
     # === Execution (Phase 5) ===
     execution_result: Optional[ExecutionResult] = None

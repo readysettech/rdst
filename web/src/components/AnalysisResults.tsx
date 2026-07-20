@@ -39,6 +39,9 @@ interface AnalysisResultsProps {
   cacheDeployed?: boolean;
   onCacheQuery?: () => void;
   onDeployNavigate?: () => void;
+  /** Hand the query to the gated cache flow ("Set up caching…"). Preferred over
+   *  the inline onCacheQuery/onDeployNavigate when present. */
+  onSetUpCaching?: () => void;
   /** Navigate to a recovery destination (e.g. back to `/analyze`). */
   onRecover?: (to: string) => void;
   /** Re-run the analysis; only surfaced when a retry can plausibly help. */
@@ -169,6 +172,7 @@ export function AnalysisResults({
   cacheDeployed,
   onCacheQuery,
   onDeployNavigate,
+  onSetUpCaching,
   onRecover,
   onRetry,
   isCaching,
@@ -483,6 +487,7 @@ export function AnalysisResults({
             cacheDeployed={cacheDeployed}
             onCacheQuery={onCacheQuery}
             onDeployNavigate={onDeployNavigate}
+            onSetUpCaching={onSetUpCaching}
             isCaching={isCaching}
           />
         )}

@@ -68,6 +68,15 @@ export function ResultsPage({ search }: ResultsPageProps) {
     }
   }, [query, target, cacheQuery]);
 
+  // Hand the diagnosed query off to the cache flow, where the deploy is gated
+  // (cost disclosed + Cancel) and the editor is pre-loaded — no re-paste, no
+  // silent one-click deploy. [diagnose-to-fix Step 5b; T13]
+  const handleSetUpCaching = useCallback(() => {
+    if (query) {
+      navigate({ to: '/cache', search: { query } });
+    }
+  }, [query, navigate]);
+
   // Route an error-state recovery action to a known destination (type-safe
   // navigation; the shared contract only ever hands back these routes).
   const handleRecover = useCallback(
@@ -240,7 +249,22 @@ export function ResultsPage({ search }: ResultsPageProps) {
               Query
             </Text>
           </HStack>
-          <CopyButton text={query} />
+          <HStack className="gap-2 items-center">
+            {/* In-place loop-back: re-run the SAME query to confirm a fix
+                helped, without re-typing. [diagnose-to-fix Step 6; T13] */}
+            {state === 'complete' && (
+              <Button
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                label="Re-analyze"
+                icon="arrow-left"
+                iconPosition="left"
+                onClick={handleRetryAnalyze}
+              />
+            )}
+            <CopyButton text={query} />
+          </HStack>
         </HStack>
         <SQLDisplay
           sql={query}
@@ -260,6 +284,7 @@ export function ResultsPage({ search }: ResultsPageProps) {
         target={target}
         cacheDeployed={true}
         onCacheQuery={handleCacheQuery}
+        onSetUpCaching={handleSetUpCaching}
         onRecover={handleRecover}
         onRetry={handleRetryAnalyze}
         isCaching={isCachePending}

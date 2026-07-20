@@ -79,6 +79,10 @@ def validate_sql(
         presenter.validation_error(ctx.validation_errors)
         return ctx
 
+    # Record whether validation injected a LIMIT the query lacked, so the
+    # streaming layer can surface an explicit "LIMIT added" note (T15).
+    ctx.limit_added = bool(validation_result.get('limit_added'))
+
     # Update SQL with LIMIT if it was added
     validated_sql = validation_result.get('validated_sql')
     if validated_sql and validated_sql != ctx.sql:

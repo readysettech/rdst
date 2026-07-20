@@ -138,16 +138,20 @@ def validate_sql_for_ask(
 
     # Step 5: Inject or validate LIMIT
     validated_sql = sql
+    limit_added = False
+    limit_reduced = False
     if not has_limit:
         # Inject default LIMIT
         validated_sql = _inject_limit(sql, default_limit)
         warnings.append(f'Added LIMIT {default_limit} to prevent unbounded results')
         limit_value = default_limit
+        limit_added = True
     elif limit_value and limit_value > max_limit:
         # Reduce excessive LIMIT
         validated_sql = _replace_limit(sql, max_limit)
         warnings.append(f'Reduced LIMIT from {limit_value} to maximum {max_limit}')
         limit_value = max_limit
+        limit_reduced = True
 
     # Step 6: Additional safety checks
     safety_warnings = _check_dangerous_patterns(validated_sql)
@@ -160,7 +164,9 @@ def validate_sql_for_ask(
         'issues': issues,
         'warnings': warnings,
         'has_limit': True,  # After injection
-        'limit_value': limit_value
+        'limit_value': limit_value,
+        'limit_added': limit_added,
+        'limit_reduced': limit_reduced,
     }
 
 

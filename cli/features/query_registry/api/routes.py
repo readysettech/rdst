@@ -30,6 +30,8 @@ class QueryRegistryEntry(BaseModel):
     max_duration_ms: float = 0.0
     avg_duration_ms: float = 0.0
     observation_count: int = 0
+    original_sql: str = ""
+    question: str = ""
 
 
 class QueryRegistryResponse(BaseModel):
@@ -99,6 +101,8 @@ async def get_query_registry(
                         max_duration_ms=q.max_duration_ms,
                         avg_duration_ms=q.avg_duration_ms,
                         observation_count=q.observation_count,
+                        original_sql=q.original_sql,
+                        question=q.question,
                     )
                 )
             except Exception:

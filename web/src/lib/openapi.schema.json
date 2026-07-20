@@ -1102,6 +1102,81 @@
           }
         ]
       },
+      "AskExamplesResponse": {
+        "properties": {
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Examples",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "examples",
+          "source"
+        ],
+        "title": "AskExamplesResponse",
+        "type": "object"
+      },
+      "AskHistoryItem": {
+        "properties": {
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "last_used": {
+            "title": "Last Used",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "sql",
+          "hash",
+          "tag",
+          "target",
+          "last_used"
+        ],
+        "title": "AskHistoryItem",
+        "type": "object"
+      },
+      "AskHistoryResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AskHistoryItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AskHistoryResponse",
+        "type": "object"
+      },
       "AskInterpretation": {
         "description": "A possible interpretation of the user's question.",
         "properties": {
@@ -1200,6 +1275,17 @@
             ],
             "title": "Session Id"
           },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
           "timeout": {
             "default": 30,
             "title": "Timeout",
@@ -1225,6 +1311,11 @@
           "execution_time_ms": {
             "title": "Execution Time Ms",
             "type": "number"
+          },
+          "limit_added": {
+            "default": false,
+            "title": "Limit Added",
+            "type": "boolean"
           },
           "llm_calls": {
             "title": "Llm Calls",
@@ -1298,6 +1389,11 @@
             },
             "title": "Tables",
             "type": "array"
+          },
+          "target": {
+            "default": "",
+            "title": "Target",
+            "type": "string"
           },
           "type": {
             "const": "schema_loaded",
@@ -5856,6 +5952,16 @@
             "default": 0,
             "title": "Observation Count",
             "type": "integer"
+          },
+          "original_sql": {
+            "default": "",
+            "title": "Original Sql",
+            "type": "string"
+          },
+          "question": {
+            "default": "",
+            "title": "Question",
+            "type": "string"
           },
           "source": {
             "title": "Source",
@@ -10490,6 +10596,115 @@
           }
         },
         "summary": "Ask",
+        "tags": [
+          "ask"
+        ]
+      }
+    },
+    "/api/ask/examples": {
+      "get": {
+        "description": "Example questions grounded in the target's schema.\n\nUses the semantic layer's business context via the LLM when available,\ncaching per target; otherwise returns schema-safe fallbacks. Never surfaces\nhardcoded generic prompts. (Ports schema-grounded examples from CL 14059.)",
+        "operationId": "ask_examples_api_ask_examples_get",
+        "parameters": [
+          {
+            "description": "Target to generate examples for",
+            "in": "query",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "description": "Target to generate examples for",
+              "title": "Target",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskExamplesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask Examples",
+        "tags": [
+          "ask"
+        ]
+      }
+    },
+    "/api/ask/history": {
+      "get": {
+        "description": "Past natural-language questions, newest first.\n\nDraws on the query registry, which auto-saves every answered ask with its\noriginal question text. Only ask-sourced entries that carry a question are\nreturned; entries saved before question persistence landed have none. The\nSQL is the original submitted form when stored, so a re-ask is faithful.",
+        "operationId": "ask_history_api_ask_history_get",
+        "parameters": [
+          {
+            "description": "Filter to one target",
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one target",
+              "title": "Target"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask History",
         "tags": [
           "ask"
         ]

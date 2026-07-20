@@ -355,6 +355,35 @@ function formatClearKeyringErrorMessage(
   return parts.join(' ').trim() || fallback;
 }
 
+// Ask: schema-grounded example questions + per-target question history.
+// Ports the /ask/examples and /ask/history endpoints from CL 14059.
+export type AskExamplesResponse = apiComponents['schemas']['AskExamplesResponse'];
+export type AskHistoryResponse = apiComponents['schemas']['AskHistoryResponse'];
+export type AskHistoryItem = apiComponents['schemas']['AskHistoryItem'];
+
+export async function fetchAskExamples(
+  target: string
+): Promise<AskExamplesResponse> {
+  const { data, response } = await typedClient.GET('/api/ask/examples', {
+    params: { query: { target } },
+  });
+  await throwIfNotOk(response, 'Failed to fetch ask examples');
+  if (!data) throw new Error('Missing response body');
+  return data;
+}
+
+export async function fetchAskHistory(
+  target?: string | null,
+  limit = 50
+): Promise<AskHistoryResponse> {
+  const { data, response } = await typedClient.GET('/api/ask/history', {
+    params: { query: { target: target ?? null, limit } },
+  });
+  await throwIfNotOk(response, 'Failed to fetch ask history');
+  if (!data) throw new Error('Missing response body');
+  return data;
+}
+
 export async function clearKeyring(): Promise<ClearKeyringResponse> {
   const response = await fetch('/api/dev/clear-keyring', { method: 'POST' });
 

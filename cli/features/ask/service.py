@@ -115,6 +115,7 @@ class AskService:
                 source=ctx.schema_source,
                 table_count=len(tables),
                 tables=tables[:10],
+                target=ctx.target or "",
             )
 
             yield AskStatusEvent(
@@ -274,6 +275,7 @@ class AskService:
                 total_tokens=ctx.total_tokens,
                 query_hash=qhash,
                 query_tag=qtag,
+                limit_added=bool(getattr(ctx, "limit_added", False)),
             )
             return
 
@@ -298,6 +300,7 @@ class AskService:
                 source="ask",
                 target=ctx.target or "",
                 tag=tag,
+                question=ctx.question or "",
             )
             return query_hash, tag
         except Exception:

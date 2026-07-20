@@ -77,6 +77,7 @@ class AskRequest(BaseModel):
     """Request for text-to-SQL conversion."""
 
     question: str
+    target: Optional[str] = None
     dry_run: bool = False
     timeout: int = 30
     agent_mode: bool = False

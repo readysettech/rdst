@@ -629,6 +629,7 @@ function CachePage() {
   // Deploy hook
   const {
     deploy,
+    cancel: cancelDeploy,
     state: deployState,
     progress: deployProgress,
     result: deployResult,
@@ -922,23 +923,11 @@ function CachePage() {
   const caches = cacheList?.caches || [];
   const isDeploying = deployState === 'deploying';
 
-  // Auto-deploy when arriving with a pending query and no cache deployed
-  const autoDeployTriggered = useRef(false);
-  useEffect(() => {
-    if (
-      pendingQuery &&
-      target &&
-      !isLoadingStatus &&
-      !isDeployed &&
-      !isDeploying &&
-      deployState === 'idle' &&
-      !autoDeployTriggered.current
-    ) {
-      autoDeployTriggered.current = true;
-      handleDeploy();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingQuery, target, isLoadingStatus, isDeployed, isDeploying, deployState]);
+  // A query carried from Analyze/Ask pre-loads the editor but must NOT silently
+  // fire a ~4 GB container deploy on arrival. The deploy stays an explicit,
+  // cost-disclosed, cancelable confirm below; only the auto-cache after a
+  // user-initiated deploy remains. [diagnose-to-fix MoT 3; caching HIGH]
+  const carriedQuery = Boolean(pendingQuery) && !isDeployed;
 
   return (
     <div className="space-y-6 w-full">
@@ -1007,6 +996,27 @@ function CachePage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
         >
+          {/* A query carried from Analyze/Ask: tell the user it's held and will
+              be cached once a cache exists — no re-paste. [T13] */}
+          {carriedQuery && (
+            <div className="mb-4 rounded-xl border border-border-info-soft bg-surface-info-soft/40 p-4">
+              <HStack className="gap-3 items-start">
+                <Icon name="querypilot" label="Carried query" className="w-5 h-5 text-content-info-soft mt-0.5 shrink-0" />
+                <VStack className="gap-1 items-start min-w-0">
+                  <Text level="label-medium" className="text-content-layout-1">
+                    Your query is ready to cache
+                  </Text>
+                  <Text level="body-small" className="text-content-layout-2">
+                    Carried over from Analyze — deploy a cache below and it will be
+                    cached automatically. Nothing to re-paste.
+                  </Text>
+                  <code className="mt-1 block max-w-full truncate font-mono text-caption text-content-layout-3">
+                    {pendingQuery}
+                  </code>
+                </VStack>
+              </HStack>
+            </div>
+          )}
           <Card className="w-full overflow-hidden">
             <Card.Content className="p-0">
               {/* Explanation banner */}
@@ -1205,8 +1215,20 @@ function CachePage() {
                   )}
                 </AnimatePresence>
 
-                {/* Deploy button */}
-                <HStack className="justify-end">
+                {/* Deploy button + inline cost disclosure. Naming the resource
+                    cost before the click turns the deploy into a mindless
+                    confirm, not a leap. [diagnose-to-fix MoT 3; USE-065] */}
+                <HStack className="justify-between items-center gap-3 flex-wrap">
+                  <HStack className="gap-2 items-center">
+                    <Icon name="info" label="Cost" className="w-3.5 h-3.5 text-content-layout-3 shrink-0" />
+                    <Text level="caption" className="text-content-layout-3">
+                      {deployMode === 'docker' || deployMode === 'remote'
+                        ? 'Starts a ReadySet container (~4 GB RAM, 2 CPUs) · ~1–2 min'
+                        : deployMode === 'systemd'
+                          ? 'Installs a ReadySet systemd service (~4 GB RAM, 2 CPUs) · ~1–2 min'
+                          : 'Provisions a ReadySet pod in your cluster · ~1–2 min'}
+                    </Text>
+                  </HStack>
                   <Button
                     variant="primary"
                     modifier="solid"
@@ -1234,11 +1256,24 @@ function CachePage() {
                       exit={{ opacity: 0, height: 0 }}
                       transition={{ duration: 0.3 }}
                     >
-                      <HStack className="gap-3 items-center mb-3">
-                        <Spinner size="base" />
-                        <Text level="body-small" className="text-content-layout-2">
-                          {deployProgress.message}
-                        </Text>
+                      <HStack className="gap-3 items-center mb-3 justify-between">
+                        <HStack className="gap-3 items-center min-w-0">
+                          <Spinner size="base" />
+                          <Text level="body-small" className="text-content-layout-2">
+                            {deployProgress.message}
+                          </Text>
+                        </HStack>
+                        {/* Cancel the in-flight deploy — wires the previously
+                            unused useCacheDeploy.cancel(). [caching HIGH; T13] */}
+                        <Button
+                          variant="primary"
+                          modifier="ghost"
+                          size="small"
+                          label="Cancel"
+                          icon="close"
+                          iconPosition="left"
+                          onClick={cancelDeploy}
+                        />
                       </HStack>
                       {deployProgress.percent > 0 && (
                         <div className="w-full h-1.5 bg-surface-layout-2 rounded-full overflow-hidden">

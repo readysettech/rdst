@@ -13,7 +13,7 @@ export const Route = createFileRoute("/ask")({
 });
 
 function AskPage() {
-  const { target } = useTarget();
+  const { target, setTarget } = useTarget();
   const passwordLock = useTargetPasswordLock(target);
 
   return (
@@ -31,10 +31,10 @@ function AskPage() {
           </div>
           <VStack className="gap-1 items-start">
             <Text as="h1" level="headline-3" className="text-content-layout-1">
-              Ask in Plain English
+              Ask
             </Text>
             <Text level="body-small" className="text-content-layout-3">
-              Ask questions about your data in natural language and get SQL results
+              Ask a question in plain English — get the answer.
             </Text>
           </VStack>
         </HStack>
@@ -48,7 +48,7 @@ function AskPage() {
         />
       )}
 
-      <AskPanel target={target} disabled={passwordLock.isLocked} />
+      <AskPanel target={target} onTargetChange={setTarget} disabled={passwordLock.isLocked} />
     </div>
   );
 }

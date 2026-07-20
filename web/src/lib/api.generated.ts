@@ -216,6 +216,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ask/examples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ask Examples
+         * @description Example questions grounded in the target's schema.
+         *
+         *     Uses the semantic layer's business context via the LLM when available,
+         *     caching per target; otherwise returns schema-safe fallbacks. Never surfaces
+         *     hardcoded generic prompts. (Ports schema-grounded examples from CL 14059.)
+         */
+        get: operations["ask_examples_api_ask_examples_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ask/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ask History
+         * @description Past natural-language questions, newest first.
+         *
+         *     Draws on the query registry, which auto-saves every answered ask with its
+         *     original question text. Only ask-sourced entries that carry a question are
+         *     returned; entries saved before question persistence landed have none. The
+         *     SQL is the original submitted form when stored, so a re-ask is faithful.
+         */
+        get: operations["ask_history_api_ask_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/audit": {
         parameters: {
             query?: never;
@@ -2676,6 +2725,33 @@ export interface components {
             type: "error";
         };
         AskEvent: components["schemas"]["AskStatusEvent"] | components["schemas"]["AskSchemaLoadedEvent"] | components["schemas"]["AskClarificationNeededEvent"] | components["schemas"]["AskSqlGeneratedEvent"] | components["schemas"]["AskResultEvent"] | components["schemas"]["AskErrorEvent"];
+        /** AskExamplesResponse */
+        AskExamplesResponse: {
+            /** Examples */
+            examples: string[];
+            /** Source */
+            source: string;
+        };
+        /** AskHistoryItem */
+        AskHistoryItem: {
+            /** Hash */
+            hash: string;
+            /** Last Used */
+            last_used: string;
+            /** Question */
+            question: string;
+            /** Sql */
+            sql: string;
+            /** Tag */
+            tag: string;
+            /** Target */
+            target: string;
+        };
+        /** AskHistoryResponse */
+        AskHistoryResponse: {
+            /** Items */
+            items: components["schemas"]["AskHistoryItem"][];
+        };
         /**
          * AskInterpretation
          * @description A possible interpretation of the user's question.
@@ -2720,6 +2796,8 @@ export interface components {
             selected_interpretation_id?: number | null;
             /** Session Id */
             session_id?: string | null;
+            /** Target */
+            target?: string | null;
             /**
              * Timeout
              * @default 30
@@ -2735,6 +2813,11 @@ export interface components {
             columns: string[];
             /** Execution Time Ms */
             execution_time_ms: number;
+            /**
+             * Limit Added
+             * @default false
+             */
+            limit_added?: boolean;
             /** Llm Calls */
             llm_calls: number;
             /**
@@ -2774,6 +2857,11 @@ export interface components {
             table_count: number;
             /** Tables */
             tables: string[];
+            /**
+             * Target
+             * @default
+             */
+            target?: string;
             /**
              * Type
              * @constant
@@ -4673,6 +4761,16 @@ export interface components {
              * @default 0
              */
             observation_count?: number;
+            /**
+             * Original Sql
+             * @default
+             */
+            original_sql?: string;
+            /**
+             * Question
+             * @default
+             */
+            question?: string;
             /** Source */
             source: string;
             /** Sql */
@@ -6695,6 +6793,71 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                     "text/event-stream": components["schemas"]["AskEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_examples_api_ask_examples_get: {
+        parameters: {
+            query: {
+                /** @description Target to generate examples for */
+                target: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskExamplesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_history_api_ask_history_get: {
+        parameters: {
+            query?: {
+                /** @description Filter to one target */
+                target?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskHistoryResponse"];
                 };
             };
             /** @description Validation Error */

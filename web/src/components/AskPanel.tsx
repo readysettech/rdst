@@ -1,4 +1,6 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@rs/ui-new/button";
 import { Show } from "@rs/ui-new/show";
 import { Text } from "@rs/ui-new/text";
@@ -12,27 +14,40 @@ import { Card } from "@rs/ui-new/card";
 import { Tag } from "@rs/ui-new/tag";
 import { CopyButton } from "@rs/ui-new/copy-button";
 import { m } from "@rs/ui-new/motion";
-import { useAsk, AskClarificationQuestion, AskStatusEvent, AskSchemaLoadedEvent } from "../lib/ask";
+import { useAsk } from "../lib/ask";
+import type { AskClarificationQuestion, AskStatusEvent, AskSchemaLoadedEvent } from "../lib/ask";
+import { useSchema } from "../lib/useSchema";
+import { fetchAskExamples } from "../lib/api";
 import { classifyError } from "../lib/errorContract";
 import { RoutableNotice } from "./RoutableNotice";
+import { TargetDropdown } from "./TargetDropdown";
 import { createCsvFilename, downloadCsv, toCsv } from "../lib/csv";
 import { SQLDisplay } from "./SQLDisplay";
 
 interface AskPanelProps {
   target?: string | null;
+  onTargetChange?: (target: string | null) => void;
   disabled?: boolean;
 }
 
-// Example questions to help users get started
-const exampleQuestions = [
-  "Show me the top 10 customers by revenue",
-  "What are the most popular products this month?",
-  "Find all orders placed in the last 7 days",
-  "Which users haven't logged in for 30 days?",
-];
+// Human wording for the internal SchemaSource enum ('semantic' | 'database').
+function sourceLabel(source: string | undefined): string {
+  return source === "semantic" ? "semantic layer" : "live introspection";
+}
 
-export function AskPanel({ target, disabled = false }: AskPanelProps) {
+export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelProps) {
   const [question, setQuestion] = useState("");
+  // The post-validation SQL is trust evidence, not the headline: collapsed by
+  // default so the answer table leads. [ask.md answer-first; VIS-011]
+  const [showSql, setShowSql] = useState(false);
+  // Target stamped at stream time: provenance on a rendered answer must name
+  // the target that ANSWERED it, never the live selector — after completion
+  // the target-switch lock releases, and switching must not relabel an
+  // existing answer. schema_loaded's backend-resolved target wins; this
+  // submit-time stamp is the fallback for streams that never emit it.
+  const [askedTarget, setAskedTarget] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const { checkStatus } = useSchema();
   const {
     ask,
     resumeWithAnswers,
@@ -46,13 +61,44 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
     reset,
   } = useAsk();
 
+  // Schema readiness for the current target, shown before asking so the user
+  // knows whether answers carry business context (ports readiness from CL 14059).
+  const { data: schemaStatus } = useQuery({
+    queryKey: ["ask", "schema-status", target],
+    queryFn: () => checkStatus(target!),
+    staleTime: 60_000,
+    enabled: !!target,
+  });
+  const hasSemanticLayer = schemaStatus?.exists === true;
+
+  // Example questions grounded in the current target's own schema, replacing
+  // the hardcoded e-commerce prompts (ports schema-grounded examples from
+  // CL 14059; the endpoint always returns a deterministic fallback). [USE-014]
+  const { data: examples } = useQuery({
+    queryKey: ["ask", "examples", target],
+    queryFn: () => fetchAskExamples(target!),
+    staleTime: 5 * 60_000,
+    enabled: !!target,
+  });
+  const exampleQuestions = examples?.examples ?? [];
+
   const handleSubmit = useCallback(async () => {
     if (disabled) return;
     if (!question.trim()) return;
+    setShowSql(false);
+    setAskedTarget(target ?? null);
     await ask({
       question: question.trim(),
       target: target || undefined,
     });
+  }, [disabled, question, target, ask]);
+
+  // True retry: re-run the SAME question, never wiping the input [USE-077, F11].
+  const handleRetry = useCallback(async () => {
+    if (disabled || !question.trim()) return;
+    setShowSql(false);
+    setAskedTarget(target ?? null);
+    await ask({ question: question.trim(), target: target || undefined });
   }, [disabled, question, target, ask]);
 
   const handleClarificationSubmit = useCallback(
@@ -63,9 +109,17 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
     [disabled, resumeWithAnswers],
   );
 
+  // Only "Ask another" clears the box [USE-077, F11].
   const handleNewQuestion = useCallback(() => {
     reset();
     setQuestion("");
+    setShowSql(false);
+  }, [reset]);
+
+  // Refine: reopen the current question, pre-filled, to tweak it.
+  const handleRefine = useCallback(() => {
+    reset();
+    setShowSql(false);
   }, [reset]);
 
   const handleExampleClick = useCallback((example: string) => {
@@ -73,24 +127,76 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
     setQuestion(example);
   }, [disabled]);
 
+  // Hand off the EXACT post-validation SQL that ran (not the pre-validation
+  // generated text) so /results does not force a spurious ParameterDialog and
+  // analyzes the query the user is looking at. [U4 adaptation; T13/T15]
+  const handleAnalyze = useCallback(() => {
+    const sql = result?.sql || sqlGenerated?.sql;
+    if (!sql) return;
+    navigate({ to: "/results", search: { query: sql, target: target || undefined } });
+  }, [result, sqlGenerated, target, navigate]);
+
+  const handleViewSaved = useCallback(() => {
+    navigate({ to: "/query-registry" });
+  }, [navigate]);
+
   const isLoading = state === "loading" || state === "generating";
 
-  // Show the SQL that actually ran (post-validation, from the result event),
-  // not the pre-validation generated SQL. The backend injects a LIMIT during
-  // validation but does not emit an explicit warning yet (T15) — derive it by
-  // comparing: a LIMIT present in the executed SQL but not the generated one
-  // means one was added. [QW13]
+  // Show the SQL that actually ran (post-validation, from the result event).
   const executedSql = result?.sql ?? sqlGenerated?.sql ?? "";
-  const limitAdded = Boolean(
-    result?.sql &&
-      sqlGenerated?.sql &&
-      /\blimit\b/i.test(result.sql) &&
-      !/\blimit\b/i.test(sqlGenerated.sql),
-  );
+  // Prefer the backend's explicit signal (T15); fall back to comparing the
+  // generated vs executed SQL for streams that predate the field. [QW13]
+  const limitAdded =
+    result?.limit_added ??
+    Boolean(
+      result?.sql &&
+        sqlGenerated?.sql &&
+        /\blimit\b/i.test(result.sql) &&
+        !/\blimit\b/i.test(sqlGenerated.sql),
+    );
+  // Live prop — used ONLY for the idle trust line (what the NEXT ask hits).
   const runsAgainst = target ?? "demo";
+  // Stream-stamped — used for everything that labels a rendered answer.
+  // Immutable once the answer renders: schemaLoaded/askedTarget only change
+  // when a new stream starts (which unmounts the answer first).
+  const answeredFrom = schemaLoaded?.target || askedTarget || "demo";
+  const provenanceSource = sourceLabel(schemaLoaded?.source);
+  const savedTag = result?.query_tag || "";
 
   return (
     <VStack className="gap-6 w-full">
+      {/* Context bar: which target Ask runs against + its schema readiness and
+          a keyboard-reachable target selector. [ports CL 14059 context bar] */}
+      <HStack className="gap-3 items-center w-full flex-wrap">
+        <Show when={!!target}>
+          <Tag
+            size="small"
+            variant={hasSemanticLayer ? "positive" : "warning"}
+            modifier="ghost"
+            label={
+              hasSemanticLayer
+                ? `Semantic layer · ${schemaStatus?.tables ?? 0} tables`
+                : "Live introspection — no semantic layer"
+            }
+          />
+          <Show when={!hasSemanticLayer}>
+            <button
+              type="button"
+              onClick={() => navigate({ to: "/schema" })}
+              className="text-content-primary-soft text-label-small hover:underline"
+            >
+              Discover schema →
+            </button>
+          </Show>
+        </Show>
+        <div className="ml-auto">
+          <TargetDropdown
+            selectedTarget={target ?? null}
+            onSelectTarget={(t) => onTargetChange?.(t)}
+          />
+        </div>
+      </HStack>
+
       {/* Question Input */}
       {state === "idle" && (
         <m.div
@@ -123,6 +229,7 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
                   <Text level="caption" className="text-content-layout-3">
                     Runs a read-only query against{" "}
                     <span className="font-medium text-content-layout-2">{runsAgainst}</span>
+                    {" "}· writes blocked · capped at 1,000 rows
                   </Text>
                 </HStack>
                 <HStack className="justify-between items-center mt-4">
@@ -144,32 +251,36 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
                 </HStack>
               </div>
 
-              {/* Example questions */}
-              <div className="border-t border-border-layout-1 bg-surface-layout-2/50 p-4">
-                <Text
-                  level="overline"
-                  className="text-content-layout-3 uppercase tracking-wider mb-3"
-                >
-                  Try an example
-                </Text>
-                <div className="flex flex-wrap gap-2">
-                  {exampleQuestions.map((example, i) => (
-                    <m.button
-                      key={i}
-                      className="px-3 py-1.5 rounded-lg bg-surface-layout-1 border border-border-layout-1 text-content-layout-2 text-label-small hover:border-border-primary-soft hover:text-content-primary-soft transition-colors"
-                      onClick={() => handleExampleClick(example)}
-                      disabled={disabled}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: 0.1 + i * 0.05 }}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      {example}
-                    </m.button>
-                  ))}
+              {/* Schema-derived example questions — only once a target exists
+                  and the backend returned some (hidden otherwise, no inert
+                  affordances). [VIS-103, USE-014] */}
+              {!!target && exampleQuestions.length > 0 && (
+                <div className="border-t border-border-layout-1 bg-surface-layout-2/50 p-4">
+                  <Text
+                    level="overline"
+                    className="text-content-layout-3 uppercase tracking-wider mb-3"
+                  >
+                    Try an example
+                  </Text>
+                  <div className="flex flex-wrap gap-2">
+                    {exampleQuestions.map((example, i) => (
+                      <m.button
+                        key={i}
+                        className="px-3 py-1.5 rounded-lg bg-surface-layout-1 border border-border-layout-1 text-content-layout-2 text-label-small hover:border-border-primary-soft hover:text-content-primary-soft transition-colors text-left"
+                        onClick={() => handleExampleClick(example)}
+                        disabled={disabled}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.1 + i * 0.05 }}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        {example}
+                      </m.button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </Card.Content>
           </Card>
         </m.div>
@@ -183,7 +294,7 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
         >
-          <LoadingState status={status} schemaLoaded={schemaLoaded} />
+          <LoadingState status={status} schemaLoaded={schemaLoaded} question={question} />
         </m.div>
       )}
 
@@ -195,59 +306,102 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
           transition={{ duration: 0.4 }}
         >
           <ClarificationPanel
+            question={question}
             questions={clarification.questions}
             onSubmit={handleClarificationSubmit}
+            onEditQuestion={handleRefine}
             disabled={disabled}
           />
         </m.div>
       )}
 
-      {/* Results */}
-      {(state === "complete" || sqlGenerated) && (
+      {/* Answer (success) — answer-first: table primary, SQL collapsed. */}
+      {state === "complete" && result && (
         <m.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.4 }}
-          className="overflow-x max-w-5xl"
+          className="w-full max-w-5xl"
         >
-          <VStack className="gap-6 items-start w-full">
-            {/* Generated SQL */}
-            {sqlGenerated && (
-              <m.div
-                className="w-full"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-              >
-                <SQLResultCard sql={executedSql} explanation={sqlGenerated.explanation} limitAdded={limitAdded} />
-              </m.div>
-            )}
+          <VStack className="gap-4 items-start w-full">
+            {/* Echoed question + provenance (2nd) [USE-077] */}
+            <VStack className="gap-1 items-start w-full">
+              {question && (
+                <Text level="headline-5" className="text-content-layout-1">
+                  {question}
+                </Text>
+              )}
+              <HStack className="gap-2 items-center flex-wrap">
+                <Icon name="database" label="Source" className="w-3.5 h-3.5 text-content-layout-3" />
+                <Text level="caption" className="text-content-layout-3">
+                  Answered from{" "}
+                  <span className="font-medium text-content-layout-2">{answeredFrom}</span>
+                  {" "}via {provenanceSource}
+                </Text>
+                {sqlGenerated?.explanation && (
+                  <>
+                    <span className="text-content-layout-3">·</span>
+                    <Text level="caption" className="text-content-layout-2">
+                      {sqlGenerated.explanation}
+                    </Text>
+                  </>
+                )}
+              </HStack>
+            </VStack>
 
-            {/* Query Results */}
-            {result && (
-              <m.div
-                className="w-full"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.1 }}
-              >
-                <ResultsTable result={result} />
-              </m.div>
-            )}
+            {/* Results table = PRIMARY [VIS-011, VIS-110] */}
+            <div className="w-full">
+              <ResultsTable result={result} target={answeredFrom} />
+            </div>
 
-            {/* Actions */}
-            {result && (
-              <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
+            {/* Collapsed post-validation SQL disclosure [ask.md item 3] */}
+            <SqlDisclosure
+              sql={executedSql}
+              open={showSql}
+              onToggle={() => setShowSql((v) => !v)}
+              limitAdded={limitAdded}
+            />
+
+            {/* Follow-through actions co-located with the answer [VIS-127] */}
+            <VStack className="gap-3 items-start w-full">
+              <HStack className="gap-3 items-center flex-wrap">
+                <Button
+                  onClick={handleAnalyze}
+                  variant="rising"
+                  modifier="solid"
+                  size="small"
+                  label="Analyze this query"
+                  icon="querypilot"
+                  iconPosition="left"
+                />
                 <Button
                   onClick={handleNewQuestion}
                   variant="primary"
                   modifier="outline"
-                  label="Ask another question"
+                  size="small"
+                  label="Ask another"
                   icon="add"
                   iconPosition="left"
                 />
-              </m.div>
-            )}
+              </HStack>
+              {/* Surface the otherwise-invisible auto-save [USE-065]. */}
+              {savedTag && (
+                <HStack className="gap-2 items-center">
+                  <Icon name="tick-double" label="Saved" className="w-4 h-4 text-content-positive-soft shrink-0" />
+                  <Text level="caption" className="text-content-layout-3">
+                    Saved to Saved Queries as{" "}
+                    <span className="font-medium text-content-layout-2">{savedTag}</span>
+                  </Text>
+                  <button
+                    type="button"
+                    onClick={handleViewSaved}
+                    className="text-content-primary-soft text-label-small hover:underline"
+                  >
+                    View →
+                  </button>
+                </HStack>
+              )}
+            </VStack>
           </VStack>
         </m.div>
       )}
@@ -259,7 +413,7 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.3 }}
         >
-          <ErrorState error={error} onRetry={handleNewQuestion} />
+          <ErrorState error={error} onRetry={handleRetry} onNewQuestion={handleNewQuestion} />
         </m.div>
       )}
     </VStack>
@@ -270,9 +424,11 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
 function LoadingState({
   status,
   schemaLoaded,
+  question,
 }: {
   status?: AskStatusEvent;
   schemaLoaded?: AskSchemaLoadedEvent;
+  question?: string;
 }) {
   const stages = [
     { id: "loading_schema", label: "Loading Schema", icon: "database" as const },
@@ -287,8 +443,14 @@ function LoadingState({
 
   return (
     <div className="max-w-md mx-auto">
+      {/* Echoed question stays in view while we work [USE-077]. */}
+      {question && (
+        <Text level="body-small" className="text-content-layout-3 text-center mb-6">
+          {question}
+        </Text>
+      )}
       {/* Stage indicators */}
-      <div className="flex items-center justify-center mb-10">
+      <div className="flex items-center justify-center mb-6">
         {stages.map((stage, index) => {
           const isComplete = index < currentStageIndex;
           const isCurrent = index === currentStageIndex;
@@ -296,35 +458,50 @@ function LoadingState({
 
           return (
             <div key={stage.id} className="flex items-center">
-              <m.div
-                className={`
-                  relative w-12 h-12 rounded-xl flex items-center justify-center transition-all
-                  ${isComplete ? "bg-surface-positive-soft" : ""}
-                  ${isCurrent ? "bg-surface-primary-soft ring-2 ring-border-primary-soft" : ""}
-                  ${isPending ? "bg-surface-layout-1 border border-border-layout-1" : ""}
-                `}
-                initial={false}
-                animate={isCurrent ? { scale: [1, 1.05, 1] } : { scale: 1 }}
-                transition={{ duration: 1.5, repeat: isCurrent ? Infinity : 0, ease: "easeInOut" }}
-              >
-                {isComplete ? (
-                  <Icon
-                    name="tick-double"
-                    label="Complete"
-                    className="w-5 h-5 text-content-positive-soft"
-                  />
-                ) : isCurrent ? (
-                  <Spinner size="base" />
-                ) : (
-                  <Icon
-                    name={stage.icon}
-                    label={stage.label}
-                    className="w-5 h-5 text-content-layout-3"
-                  />
-                )}
-              </m.div>
+              <div className="flex flex-col items-center gap-2">
+                <m.div
+                  className={`
+                    relative w-12 h-12 rounded-xl flex items-center justify-center transition-all
+                    ${isComplete ? "bg-surface-positive-soft" : ""}
+                    ${isCurrent ? "bg-surface-primary-soft ring-2 ring-border-primary-soft" : ""}
+                    ${isPending ? "bg-surface-layout-1 border border-border-layout-1" : ""}
+                  `}
+                  initial={false}
+                  animate={isCurrent ? { scale: [1, 1.05, 1] } : { scale: 1 }}
+                  transition={{ duration: 1.5, repeat: isCurrent ? Number.POSITIVE_INFINITY : 0, ease: "easeInOut" }}
+                >
+                  {isComplete ? (
+                    <Icon
+                      name="tick-double"
+                      label="Complete"
+                      className="w-5 h-5 text-content-positive-soft"
+                    />
+                  ) : isCurrent ? (
+                    <Spinner size="base" />
+                  ) : (
+                    <Icon
+                      name={stage.icon}
+                      label={stage.label}
+                      className="w-5 h-5 text-content-layout-3"
+                    />
+                  )}
+                </m.div>
+                {/* Visible stage caption, not icon-only [USE-012, F10]. */}
+                <Text
+                  level="caption"
+                  className={
+                    isCurrent
+                      ? "text-content-primary-soft"
+                      : isComplete
+                        ? "text-content-positive-soft"
+                        : "text-content-layout-3"
+                  }
+                >
+                  {stage.label}
+                </Text>
+              </div>
               {index < stages.length - 1 && (
-                <div className="w-12 mx-1.5 h-0.5 rounded-full overflow-hidden bg-surface-layout-1">
+                <div className="w-12 mx-1.5 h-0.5 rounded-full overflow-hidden bg-surface-layout-1 -mt-6">
                   <m.div
                     className="h-full bg-content-positive-soft"
                     initial={{ width: "0%" }}
@@ -346,7 +523,7 @@ function LoadingState({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <Text level="headline-4" className="text-content-layout-1 mb-2">
+          <Text level="body-medium" className="text-content-layout-2">
             {status?.message || "Processing your question..."}
           </Text>
         </m.div>
@@ -367,7 +544,7 @@ function LoadingState({
               <span className="text-content-layout-1 font-medium">
                 {schemaLoaded.table_count} tables
               </span>{" "}
-              from {schemaLoaded.source}
+              from {sourceLabel(schemaLoaded.source)}
             </Text>
           </HStack>
         </m.div>
@@ -376,78 +553,84 @@ function LoadingState({
   );
 }
 
-// SQL Result Card Component
-function SQLResultCard({
+// Collapsed disclosure for the post-validation SQL that actually ran.
+// NEEDS VARIANT (C-07/C-08): a shared Disclosure primitive with aria-expanded;
+// inlined here for now.
+function SqlDisclosure({
   sql,
-  explanation,
+  open,
+  onToggle,
   limitAdded,
 }: {
   sql: string;
-  explanation?: string | null;
+  open: boolean;
+  onToggle: () => void;
   limitAdded?: boolean;
 }) {
+  if (!sql) return null;
   return (
-    <Card className="w-full overflow-hidden">
-      <Card.Header className="border-b border-border-layout-1">
-        <HStack className="justify-between items-center w-full">
-          <HStack className="gap-3 items-center">
-            <div className="w-8 h-8 rounded-lg bg-surface-positive-soft flex items-center justify-center">
-              <Icon
-                name="tick-double"
-                label="Generated"
-                className="w-4 h-4 text-content-positive-soft"
-              />
-            </div>
-            <Card.Title>Generated SQL</Card.Title>
-          </HStack>
-          <CopyButton text={sql} />
-        </HStack>
-      </Card.Header>
-      <div className="bg-surface-layout-2">
-        <SQLDisplay sql={sql} className="p-4" />
+    <div className="w-full rounded-xl border border-border-layout-1 bg-surface-layout-1 overflow-hidden">
+      {/* Toggle and Copy are siblings — never nest a <button> in a <button>. */}
+      <div className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-surface-layout-2/50 transition-colors">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="flex items-center gap-2 text-left flex-1 min-w-0"
+        >
+          <Icon
+            name={open ? "arrow-down" : "arrow-right"}
+            label={open ? "Collapse" : "Expand"}
+            className="w-4 h-4 text-content-layout-3 shrink-0"
+          />
+          <Text level="label-small" className="text-content-layout-2">
+            Show the SQL that ran
+          </Text>
+          <Text level="caption" className="text-content-layout-3">
+            · read-only, capped at 1,000
+          </Text>
+        </button>
+        <CopyButton text={sql} />
       </div>
-      {limitAdded && (
-        <div className="p-4 border-t border-border-layout-1">
-          <HStack className="gap-2 items-start">
-            <Icon
-              name="info"
-              label="Note"
-              className="w-4 h-4 text-content-info-soft mt-0.5 shrink-0"
-            />
-            <Text level="body-small" className="text-content-layout-2 leading-relaxed">
-              A <code className="font-mono">LIMIT</code> was added to keep the result set bounded.
-            </Text>
-          </HStack>
+      {open && (
+        <div className="border-t border-border-layout-1">
+          <div className="bg-surface-layout-2">
+            <SQLDisplay sql={sql} className="p-4" />
+          </div>
+          {limitAdded && (
+            <div className="p-4 border-t border-border-layout-1">
+              <HStack className="gap-2 items-start">
+                <Icon
+                  name="info"
+                  label="Note"
+                  className="w-4 h-4 text-content-info-soft mt-0.5 shrink-0"
+                />
+                <Text level="body-small" className="text-content-layout-2 leading-relaxed">
+                  A <code className="font-mono">LIMIT</code> was added to keep the result set bounded.
+                </Text>
+              </HStack>
+            </div>
+          )}
         </div>
       )}
-      {explanation && (
-        <div className="p-4 border-t border-border-layout-1">
-          <HStack className="gap-2 items-start">
-            <Icon
-              name="info"
-              label="Explanation"
-              className="w-4 h-4 text-content-layout-3 mt-0.5 shrink-0"
-            />
-            <Text level="body-small" className="text-content-layout-2 leading-relaxed">
-              {explanation}
-            </Text>
-          </HStack>
-        </div>
-      )}
-    </Card>
+    </div>
   );
 }
 
 // Results Table Component
 function ResultsTable({
   result,
+  target,
 }: {
   result: { columns: string[]; rows: any[][]; row_count: number; execution_time_ms: number };
+  target?: string;
 }) {
   const handleDownloadCsv = useCallback(() => {
     const csv = toCsv(result.columns, result.rows);
     downloadCsv(csv, createCsvFilename());
   }, [result]);
+
+  const hasRows = result.rows.length > 0;
 
   return (
     <Card className="w-full overflow-hidden">
@@ -457,18 +640,20 @@ function ResultsTable({
             <div className="w-8 h-8 rounded-lg bg-surface-info-soft flex items-center justify-center">
               <Icon name="dashboard" label="Results" className="w-4 h-4 text-content-info-soft" />
             </div>
-            <Card.Title>Query Results</Card.Title>
+            <Card.Title>Answer</Card.Title>
           </HStack>
-          <HStack className="gap-3">
-            <Button
-              onClick={handleDownloadCsv}
-              variant="primary"
-              modifier="outline"
-              size="small"
-              label="Download CSV"
-              icon="arrow-down"
-              iconPosition="left"
-            />
+          <HStack className="gap-3 items-center">
+            {hasRows && (
+              <Button
+                onClick={handleDownloadCsv}
+                variant="primary"
+                modifier="outline"
+                size="small"
+                label="Download CSV"
+                icon="arrow-down"
+                iconPosition="left"
+              />
+            )}
             <Tag
               variant="informative"
               modifier="ghost"
@@ -481,11 +666,14 @@ function ResultsTable({
               size="small"
               label={`${result.execution_time_ms.toFixed(1)}ms`}
             />
+            {target && (
+              <Tag variant="informative" modifier="ghost" size="small" label={target} />
+            )}
           </HStack>
         </HStack>
       </Card.Header>
       <Card.Content className="p-0 overflow-hidden">
-        {result.rows.length > 0 ? (
+        {hasRows ? (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -527,14 +715,18 @@ function ResultsTable({
             </table>
           </div>
         ) : (
+          // Distinct 0-row state — no header-only CSV, a refine hint [VIS-102, F12].
           <div className="p-8 text-center">
             <Icon
               name="empty"
-              label="No results"
+              label="No rows"
               className="w-12 h-12 text-content-layout-3 mx-auto mb-3"
             />
-            <Text level="body-medium" className="text-content-layout-3">
-              No results returned
+            <Text level="body-medium" className="text-content-layout-2">
+              No rows matched
+            </Text>
+            <Text level="body-small" className="text-content-layout-3 mt-1">
+              Try broadening or rephrasing your question.
             </Text>
           </div>
         )}
@@ -557,9 +749,11 @@ function ResultsTable({
 function ErrorState({
   error,
   onRetry,
+  onNewQuestion,
 }: {
   error: { message: string; phase?: string | null };
   onRetry: () => void;
+  onNewQuestion: () => void;
 }) {
   // Route by structured error class, not a message regex: an AI-credential
   // failure (provider / trial keyservice) renders the routable credential
@@ -625,15 +819,26 @@ function ErrorState({
               label={`Failed while: ${phaseLabel}`}
             />
           )}
-          <Button
-            onClick={onRetry}
-            variant="primary"
-            modifier="outline"
-            size="small"
-            label="Try again"
-            icon="arrow-left"
-            iconPosition="left"
-          />
+          <HStack className="gap-3 items-center">
+            <Button
+              onClick={onRetry}
+              variant="primary"
+              modifier="outline"
+              size="small"
+              label="Try again"
+              icon="arrow-left"
+              iconPosition="left"
+            />
+            <Button
+              onClick={onNewQuestion}
+              variant="primary"
+              modifier="ghost"
+              size="small"
+              label="Ask another"
+              icon="add"
+              iconPosition="left"
+            />
+          </HStack>
         </VStack>
       </HStack>
     </div>
@@ -642,8 +847,10 @@ function ErrorState({
 
 // Clarification Panel Component
 interface ClarificationPanelProps {
+  question?: string;
   questions: AskClarificationQuestion[];
   onSubmit: (answers: Record<string, string>) => void;
+  onEditQuestion?: () => void;
   disabled?: boolean;
 }
 
@@ -666,8 +873,10 @@ function buildAnswers(
 }
 
 function ClarificationPanel({
+  question,
   questions,
   onSubmit,
+  onEditQuestion,
   disabled = false,
 }: ClarificationPanelProps) {
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
@@ -744,25 +953,17 @@ function ClarificationPanel({
 
   return (
     <VStack className="gap-5 items-start w-full">
-      {/* Info banner */}
-      <m.div
-        className="w-full rounded-xl border border-border-warning-soft bg-surface-warning-soft/50 p-4"
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <HStack className="gap-3 items-center">
-          <div className="w-8 h-8 rounded-lg bg-surface-warning-soft flex items-center justify-center shrink-0">
-            <Icon
-              name="alert"
-              label="Clarification needed"
-              className="w-4 h-4 text-content-warning-soft"
-            />
-          </div>
-          <Text level="body-small" className="text-content-warning-soft">
-            I need some clarification to better understand your question.
+      {/* Calm heading + echoed original question [USE-077, F5]. */}
+      <VStack className="gap-1 items-start w-full">
+        <Text level="headline-5" className="text-content-layout-1">
+          One quick question
+        </Text>
+        {question && (
+          <Text level="body-small" className="text-content-layout-3">
+            You asked: <span className="text-content-layout-2">{question}</span>
           </Text>
-        </HStack>
-      </m.div>
+        )}
+      </VStack>
 
       {/* Question card */}
       <Card className="w-full">
@@ -835,25 +1036,44 @@ function ClarificationPanel({
           </VStack>
         </Card.Content>
         <Card.Footer className="border-t border-border-layout-1">
-          <HStack className="justify-end items-center w-full">
-            <Button
-              onClick={handleSkip}
-              variant="primary"
-              modifier="ghost"
-              label="Skip question"
-              icon="arrow-right"
-              iconPosition="right"
-              disabled={disabled}
-            />
-            <Button
-              onClick={handleNext}
-              disabled={disabled || !hasAnswer}
-              variant="rising"
-              modifier="solid"
-              label={isLastQuestion ? "Ask" : "Continue"}
-              icon={isLastQuestion ? "sparkles" : "arrow-right"}
-              iconPosition="right"
-            />
+          <HStack className="justify-between items-center w-full">
+            {onEditQuestion ? (
+              <Button
+                onClick={onEditQuestion}
+                variant="primary"
+                modifier="ghost"
+                label="Edit question"
+                icon="arrow-left"
+                iconPosition="left"
+                disabled={disabled}
+              />
+            ) : (
+              <span />
+            )}
+            <HStack className="gap-2 items-center">
+              <Button
+                onClick={handleSkip}
+                variant="primary"
+                modifier="ghost"
+                label="Skip"
+                icon="arrow-right"
+                iconPosition="right"
+                disabled={disabled}
+              />
+              {/* Honest name: the last-question button SUBMITS the answers and
+                  resumes the ask — it must say the outcome, not read like a
+                  mere step advance ("Continue"). [USE-017 obvious, honest
+                  names] */}
+              <Button
+                onClick={handleNext}
+                disabled={disabled || !hasAnswer}
+                variant="rising"
+                modifier="solid"
+                label={isLastQuestion ? "Get answer" : "Next"}
+                icon={isLastQuestion ? "sparkles" : "arrow-right"}
+                iconPosition="right"
+              />
+            </HStack>
           </HStack>
         </Card.Footer>
       </Card>

@@ -14,7 +14,7 @@ function serviceEvents(events: AskEvent[]) {
   return events.map(({ data }) => data)
 }
 
-test('asks a question and renders generated SQL with query results', async ({
+test('asks a question and renders the answer first with the post-validation SQL behind a disclosure', async ({
   page,
 }) => {
   setBackendFixtures({
@@ -33,9 +33,10 @@ test('asks a question and renders generated SQL with query results', async ({
             event: 'schema_loaded',
             data: {
               type: 'schema_loaded',
-              source: 'semantic layer',
+              source: 'semantic',
               table_count: 2,
               tables: ['customers', 'orders'],
+              target: 'e2e-guard',
             },
           },
           {
@@ -59,7 +60,9 @@ test('asks a question and renders generated SQL with query results', async ({
             data: {
               type: 'result',
               success: true,
-              sql: 'SELECT customer, SUM(total) AS revenue FROM orders GROUP BY customer',
+              // Post-validation SQL: the LIMIT the backend injected is part of
+              // the query that actually ran, and limit_added says so.
+              sql: 'SELECT customer, SUM(total) AS revenue FROM orders GROUP BY customer LIMIT 100',
               columns: ['customer', 'revenue'],
               rows: [
                 ['Ada', 4200],
@@ -71,6 +74,7 @@ test('asks a question and renders generated SQL with query results', async ({
               total_tokens: 240,
               query_hash: 'ask-query-1',
               query_tag: 'top customers',
+              limit_added: true,
             },
           },
         ]),
@@ -89,21 +93,23 @@ test('asks a question and renders generated SQL with query results', async ({
   })
 
   await page.goto('/ask')
-  await expect(
-    page.getByRole('heading', { name: 'Ask in Plain English' })
-  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Ask' })).toBeVisible()
 
   const question = 'Who are our highest revenue customers?'
   await page
     .getByPlaceholder('Ask a question about your data...')
     .fill(question)
-  await page.getByRole('button', { name: 'Ask Ask' }).click()
+  await page.getByRole('button', { name: 'Ask' }).click()
 
-  await expect(page.getByText('Generated SQL', { exact: true })).toBeVisible()
+  // Answer-first: the results table leads, with provenance stamped from the
+  // stream's own target and the plain-English explanation beside it.
+  await expect(page.getByText('Answer', { exact: true })).toBeVisible()
   await expect(
-    page.getByText('Aggregates order totals by customer.', { exact: true })
+    page.getByText('Answered from e2e-guard via semantic layer')
   ).toBeVisible()
-  await expect(page.getByText('Query Results', { exact: true })).toBeVisible()
+  await expect(
+    page.getByText('Aggregates order totals by customer.')
+  ).toBeVisible()
   await expect(
     page.getByRole('columnheader', { name: 'customer' })
   ).toBeVisible()
@@ -111,7 +117,27 @@ test('asks a question and renders generated SQL with query results', async ({
   await expect(page.getByText('2 rows', { exact: true })).toBeVisible()
   expect(requests).toEqual([{ question, target: 'e2e-guard' }])
 
-  await page.getByRole('button', { name: 'Ask another question' }).click()
+  // The SQL is collapsed by default; toggling reveals the POST-VALIDATION
+  // query (with the injected LIMIT) plus the backend's LIMIT-added note.
+  await expect(page.locator('.cm-content')).toHaveCount(0)
+  const disclosure = page.getByRole('button', {
+    name: /Show the SQL that ran/,
+  })
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+  await disclosure.click()
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator('.cm-content')).toContainText('LIMIT 100')
+  await expect(
+    page.getByText('was added to keep the result set bounded')
+  ).toBeVisible()
+
+  // The silent auto-save is surfaced with the returned registry label.
+  await expect(
+    page.getByText('Saved to Saved Queries as top customers')
+  ).toBeVisible()
+
+  // Only "Ask another" clears the input.
+  await page.getByRole('button', { name: 'Ask another' }).click()
   await expect(
     page.getByPlaceholder('Ask a question about your data...')
   ).toHaveValue('')
@@ -194,18 +220,20 @@ test('answers a clarification and resumes the original ask session', async ({
   await page
     .getByPlaceholder('Ask a question about your data...')
     .fill(question)
-  await page.getByRole('button', { name: 'Ask Ask' }).click()
+  await page.getByRole('button', { name: 'Ask' }).click()
 
+  // Calm clarification heading with the original question echoed above the
+  // options — never dropped.
   await expect(
-    page.getByText(
-      'I need some clarification to better understand your question.'
-    )
+    page.getByText('One quick question', { exact: true })
   ).toBeVisible()
+  await expect(page.getByText(`You asked: ${question}`)).toBeVisible()
   await expect(
     page.getByText('Which revenue definition', { exact: true })
   ).toBeVisible()
   await page.getByRole('radio', { name: 'Gross revenue' }).check()
-  await page.getByRole('button', { name: 'Ask Ask' }).click()
+  // The submit button says the outcome ("Get answer"), not a step advance.
+  await page.getByRole('button', { name: 'Get answer' }).click()
 
   await expect(page.getByRole('cell', { name: '7300' })).toBeVisible()
   expect(requests).toEqual([
@@ -219,7 +247,7 @@ test('answers a clarification and resumes the original ask session', async ({
   ])
 })
 
-test('shows a streamed Ask failure and returns to a clean input', async ({
+test('a streamed Ask failure keeps the question and Try again re-runs it', async ({
   page,
 }) => {
   setBackendFixtures({
@@ -236,15 +264,38 @@ test('shows a streamed Ask failure and returns to a clean input', async ({
           },
         ]),
       },
+      // The true retry issues a second POST; it fails again in this fixture.
+      {
+        events: serviceEvents([
+          {
+            event: 'error',
+            data: {
+              type: 'error',
+              message: 'The SQL generator is temporarily unavailable',
+              phase: 'generate',
+            },
+          },
+        ]),
+      },
     ],
   })
   await configureTestTarget(page, { hasPassword: true })
+  const requests: Record<string, unknown>[] = []
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/ask'
+    ) {
+      requests.push(request.postDataJSON() as Record<string, unknown>)
+    }
+  })
 
   await page.goto('/ask')
+  const question = 'Show recent orders'
   await page
     .getByPlaceholder('Ask a question about your data...')
-    .fill('Show recent orders')
-  await page.getByRole('button', { name: 'Ask Ask' }).click()
+    .fill(question)
+  await page.getByRole('button', { name: 'Ask' }).click()
 
   await expect(
     page.getByText("Couldn't generate SQL", { exact: true })
@@ -258,11 +309,22 @@ test('shows a streamed Ask failure and returns to a clean input', async ({
     page.getByText('Failed while: Generating SQL', { exact: true })
   ).toBeVisible()
 
+  // TRUE retry: the SAME question is re-run — the input is never wiped.
   await page.getByRole('button', { name: 'Try again' }).click()
+  await expect(
+    page.getByText("Couldn't generate SQL", { exact: true })
+  ).toBeVisible()
+  expect(requests).toEqual([
+    { question, target: 'e2e-guard' },
+    { question, target: 'e2e-guard' },
+  ])
+
+  // Only "Ask another" clears the box and returns to a clean input.
+  await page.getByRole('button', { name: 'Ask another' }).click()
   await expect(
     page.getByPlaceholder('Ask a question about your data...')
   ).toHaveValue('')
   await expect(
-    page.getByRole('button', { name: 'Ask Ask' })
+    page.getByRole('button', { name: 'Ask' })
   ).toBeDisabled()
 })

@@ -938,12 +938,14 @@ export function ReadysetCacheabilitySection({
   cacheDeployed,
   onCacheQuery,
   onDeployNavigate,
+  onSetUpCaching,
   isCaching,
 }: {
   cacheability: ReadysetCacheability;
   cacheDeployed?: boolean;
   onCacheQuery?: () => void;
   onDeployNavigate?: () => void;
+  onSetUpCaching?: () => void;
   isCaching?: boolean;
 }) {
   const detailId = useId();
@@ -1066,35 +1068,49 @@ export function ReadysetCacheabilitySection({
           )}
 
           {/* Cache action buttons */}
-          {isVerified && isCacheable && (onCacheQuery || onDeployNavigate) && (
-            <m.div
-              className="mt-5 pt-5 border-t border-border-layout-1/30"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.6 }}
-            >
-              {cacheDeployed ? (
-                <Button
-                  variant="primary"
-                  modifier="solid"
-                  label="Cache This Query"
-                  icon="add"
-                  iconPosition="left"
-                  onClick={onCacheQuery}
-                  loading={isCaching}
-                />
-              ) : (
-                <Button
-                  variant="primary"
-                  modifier="outline"
-                  label="Deploy Cache First"
-                  icon="database-settings"
-                  iconPosition="left"
-                  onClick={onDeployNavigate}
-                />
-              )}
-            </m.div>
-          )}
+          {isVerified &&
+            isCacheable &&
+            (onSetUpCaching || onCacheQuery || onDeployNavigate) && (
+              <m.div
+                className="mt-5 pt-5 border-t border-border-layout-1/30"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.6 }}
+              >
+                {onSetUpCaching ? (
+                  // Honest verb + ellipsis: a real deploy is coming, gated on the
+                  // cache page (cost disclosed + Cancel), not a one-word disguise.
+                  // [analyze-query.md; diagnose-to-fix MoT 3; USE-008, USE-017]
+                  <Button
+                    variant="primary"
+                    modifier="solid"
+                    label="Set up caching…"
+                    icon="database-settings"
+                    iconPosition="left"
+                    onClick={onSetUpCaching}
+                  />
+                ) : cacheDeployed ? (
+                  <Button
+                    variant="primary"
+                    modifier="solid"
+                    label="Cache This Query"
+                    icon="add"
+                    iconPosition="left"
+                    onClick={onCacheQuery}
+                    loading={isCaching}
+                  />
+                ) : (
+                  <Button
+                    variant="primary"
+                    modifier="outline"
+                    label="Deploy Cache First"
+                    icon="database-settings"
+                    iconPosition="left"
+                    onClick={onDeployNavigate}
+                  />
+                )}
+              </m.div>
+            )}
         </div>
         {isVerified && cacheability.issues && cacheability.issues.length > 0 && (
           <div className="p-5 bg-surface-layout-1 border-t border-border-layout-1">

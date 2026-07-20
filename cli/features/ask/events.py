@@ -25,6 +25,7 @@ class AskSchemaLoadedEvent:
     source: str
     table_count: int
     tables: list[str]
+    target: str = ""
 
 
 @dataclass
@@ -61,6 +62,9 @@ class AskResultEvent:
     total_tokens: int
     query_hash: str = ""
     query_tag: str = ""
+    # True when validation injected a LIMIT the user's query did not have, so
+    # the UI can say the executed SQL was bounded (T15 explicit BE warning).
+    limit_added: bool = False
 
     @classmethod
     def from_result(cls, result: AskResult) -> "AskResultEvent":
@@ -76,6 +80,7 @@ class AskResultEvent:
             total_tokens=result.total_tokens,
             query_hash=result.query_hash,
             query_tag=result.query_tag,
+            limit_added=result.limit_added,
         )
 
 
