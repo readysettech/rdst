@@ -1,0 +1,346 @@
+#!/usr/bin/env node
+/**
+ * Design-system token guardrail (T18 / C-07).
+ *
+ * Grep of app class names against the @rs/tailwind-base token list, per the
+ * design-system §9 guardrail: "undefined-token drift cannot reappear". The
+ * highest-blast-radius CL of the launch stack is the token retarget; this check
+ * keeps every later CL honest.
+ *
+ * Two failing checks:
+ *   1. UNDEFINED TOKENS — every `bg-surface-*`, `text-content-*`,
+ *      `border-border-*` (and ring/fill/stroke/from/to/via… variants) class
+ *      must reference a token defined in style.css. Catches the exact drift the
+ *      spec names (`surface-informative-soft`, `content-negative-1`), plus our
+ *      new `shadow-glow-*` / `shadow-elevation-*` families.
+ *   2. AD-HOC VALUES — arbitrary Tailwind bracket utilities carrying a raw
+ *      color (`shadow-[…rgba…]`, `bg-[#…]`). New ones fail; a small, explicit
+ *      allowlist carries the values that landed CLs deferred to a named later
+ *      wave (each entry cites its migration ticket). Both the allowlist and
+ *      the known-drift ledger are COUNT-PINNED: any growth past the recorded
+ *      baseline fails (a 15th `bg-surface-layout-3` or a duplicated
+ *      allowlisted glow cannot land silently).
+ *   3. CONTRAST RISK — `text-content-layout-3` sharing a line with
+ *      `bg-surface-raised`/`bg-surface-overlay` fails: tertiary grey is below
+ *      AA-text on the raised tiers (4.22:1 on overlay) — AA-critical text
+ *      there uses `content-layout-2` (T19+ rule, evidence/token-contrast-table.md).
+ *
+ * Scope = the rdst dependency surface: apps/rdst/src + packages/ui-new/src.
+ * (.qpdemo raw hex in demo.tsx is a CSS-variable block, not a class utility, and
+ *  is migrated to content-viz-* in T22 — out of this className-scoped grep.)
+ *
+ * Run: `node packages/tailwind-base/scripts/check-tokens.mjs` (wired into
+ * `turbo lint` via tailwind-base's `lint` script). Exit 1 on any violation.
+ */
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const TW_BASE = join(HERE, '..') // packages/tailwind-base
+const WORKSPACE = join(TW_BASE, '..', '..') // web-apps
+const STYLE_CSS = join(TW_BASE, 'style.css')
+
+const SCAN_DIRS = [
+  join(WORKSPACE, 'apps', 'rdst', 'src'),
+  join(WORKSPACE, 'packages', 'ui-new', 'src'),
+]
+
+// Ad-hoc bracket values that landed CLs intentionally deferred to a later wave.
+// Keyed by file suffix + exact utility so a line move never breaks the check;
+// each MUST cite the wave that removes it. New arbitrary values are NOT welcome.
+// Pre-existing undefined-token drift the §4.6 audit under-counted (present at
+// HEAD before C-07). These render no color today and live in screen/component
+// files that the later waves migrate — fixing them here would break C-07's
+// mandated isolation. COUNT-PINNED: the value is the baseline usage count
+// measured at C-07; the check FAILS if a name's count ever exceeds its
+// baseline (no silent growth) and asks for a pin-lower when migrations shrink
+// it. Each name is slated for its correct token during the screen migrations:
+//   surface-layout-3 → surface-raised / surface-layout-soft   (T19–T22)
+//   border-negative  → border-border-negative-soft            (T20–T22)
+//   border-warning   → border-border-warning-soft             (T20–T22)
+const KNOWN_UNDEFINED = new Map([
+  ['surface-layout-3', 14],
+  ['border-negative', 5], // 3× with /30 opacity + 2× bare
+  ['border-warning', 2],
+])
+
+// COUNT-PINNED like KNOWN_UNDEFINED: `count` is the exact number of matches
+// allowed for that value in that file — a duplicated allowlisted glow fails.
+const ALLOWLIST = [
+  // AnalysisSections verdict-card glows → fold into shadow-glow-* in T21 (analyze migration).
+  {
+    file: 'analysis/AnalysisSections.tsx',
+    value: 'shadow-[0_0_20px_rgba(34,197,94,0.15)]',
+    count: 1,
+  },
+  {
+    file: 'analysis/AnalysisSections.tsx',
+    value: 'shadow-[0_0_20px_rgba(59,130,246,0.15)]',
+    count: 1,
+  },
+  {
+    file: 'analysis/AnalysisSections.tsx',
+    value: 'shadow-[0_0_20px_rgba(234,179,8,0.15)]',
+    count: 1,
+  },
+  {
+    file: 'analysis/AnalysisSections.tsx',
+    value: 'shadow-[0_0_20px_rgba(239,68,68,0.15)]',
+    count: 1,
+  },
+  // Sidebar raised-edge hairline (structural top-lit inset) → app-chrome, T19.
+  {
+    file: 'layout/Sidebar.tsx',
+    value: 'shadow-[inset_-1px_0_0_rgba(255,255,255,0.06)]',
+    count: 1,
+  },
+  // Branded root boundary overlay shadow → app-chrome, T19.
+  {
+    file: 'routes/__root.tsx',
+    value: 'shadow-[0_20px_48px_rgba(0,0,0,0.35)]',
+    count: 1,
+  },
+  // Toast focus ring (raw #ccc) → toast component polish, T19.
+  {
+    file: 'feedback/toast/toast.tsx',
+    value: 'shadow-[0_0_0_2px_#ccc]',
+    count: 1,
+  },
+]
+
+// ---- 1. Parse the valid token names out of style.css -----------------------
+const css = readFileSync(STYLE_CSS, 'utf8')
+const collect = (prefix) => {
+  const set = new Set()
+  // e.g. `--color-surface-raised:` → `surface-raised`. Skip the `--x--sub`
+  // metadata forms (line-height/font-weight) by rejecting a `-` right after.
+  const re = new RegExp(`--${prefix}-([a-z0-9-]+?)\\s*:`, 'g')
+  let m
+  while ((m = re.exec(css))) {
+    const name = m[1]
+    if (name.includes('--')) continue
+    set.add(name)
+  }
+  return set
+}
+const COLOR = collect('color') // surface-*, content-*, border-*, mono, …
+const SHADOW = collect('shadow') // elevation-1, glow-negative, small, focus, …
+
+// ---- 2. Walk the scan dirs -------------------------------------------------
+function walk(dir, out = []) {
+  let entries
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return out
+  }
+  for (const e of entries) {
+    const p = join(dir, e)
+    const s = statSync(p)
+    if (s.isDirectory()) {
+      if (e === 'node_modules' || e === 'dist' || e === '.output') continue
+      walk(p, out)
+    } else if (/\.(tsx?|css)$/.test(e) && !/\.test\.(tsx?)$/.test(e)) {
+      out.push(p)
+    }
+  }
+  return out
+}
+const files = SCAN_DIRS.flatMap((d) => walk(d))
+
+// Utility-class family prefixes that can carry a color / shadow token.
+const FAMILY = String.raw`(?:bg|text|border|border-[xytblr]|ring|ring-offset|fill|stroke|from|to|via|divide|outline|decoration|caret|accent|placeholder|shadow)`
+// A class token: optional variant prefixes, family, then the token name.
+const CLASS_RE = new RegExp(
+  String.raw`(?<![\w-])(?:[a-z][a-z0-9-]*:|(?:group|peer)-[a-z]+:|data-\[[^\]]*\]:|aria-\[[^\]]*\]:)*(` +
+    FAMILY +
+    String.raw`)-([a-z][a-z0-9./-]*|\[[^\]]*\])`,
+  'g'
+)
+
+// Strip `//` line comments and `/* */` block comments while preserving line
+// count, so class-like text in doc comments (e.g. this file's own
+// `shadow-glow-{…}` prose) is not scanned. Guards `://` in URLs.
+function stripComments(lines) {
+  let inBlock = false
+  return lines.map((line) => {
+    let out = ''
+    let i = 0
+    while (i < line.length) {
+      if (inBlock) {
+        const end = line.indexOf('*/', i)
+        if (end === -1) {
+          i = line.length
+        } else {
+          i = end + 2
+          inBlock = false
+        }
+        continue
+      }
+      if (line[i] === '/' && line[i + 1] === '/' && line[i - 1] !== ':') break
+      if (line[i] === '/' && line[i + 1] === '*') {
+        inBlock = true
+        i += 2
+        continue
+      }
+      out += line[i]
+      i++
+    }
+    return out
+  })
+}
+
+const undefinedTokens = [] // {file, line, cls} — NEW drift, fails
+const knownDrift = [] // {file, line, cls} — pre-existing, count-pinned
+const adhocValues = [] // {file, line, cls}
+const contrastRisk = [] // {file, line} — content-layout-3 on raised/overlay
+for (const a of ALLOWLIST) a.measured = 0
+
+// T19+ AA rule (evidence/token-contrast-table.md): content-layout-3 is only
+// 4.22:1 on surface-overlay / 4.50:1 on surface-raised — AA-critical text on
+// the raised tiers must use content-layout-2. Same-line co-occurrence is the
+// static approximation (one element's className); split-line recipes are the
+// review checklist's job.
+const RAISED_RE = /(?<![\w-])bg-surface-(?:raised|overlay)(?![\w-])/
+const TERTIARY_RE = /(?<![\w-])text-content-layout-3(?![\w-])/
+
+for (const file of files) {
+  const rel = relative(WORKSPACE, file)
+  const lines = stripComments(readFileSync(file, 'utf8').split('\n'))
+  lines.forEach((line, i) => {
+    let m
+    CLASS_RE.lastIndex = 0
+    while ((m = CLASS_RE.exec(line))) {
+      const family = m[1]
+      let name = m[2]
+      const full = `${family}-${name}`
+
+      // Arbitrary bracket value carrying a raw color?
+      if (name.startsWith('[')) {
+        if (!/#[0-9a-fA-F]{3,8}|rgba?\(/.test(name)) continue // e.g. shadow-[inset_…] w/o color, w-[12px]
+        const entry = ALLOWLIST.find(
+          (a) => file.endsWith(a.file) && a.value === full
+        )
+        if (entry) entry.measured += 1
+        else adhocValues.push({ file: rel, line: i + 1, cls: full })
+        continue
+      }
+
+      name = name.replace(/\/\d+$/, '') // strip opacity modifier
+
+      // Undefined semantic-color token? (surface-*, content-*, border-* families)
+      const isColorFamily =
+        name.startsWith('surface-') ||
+        name.startsWith('content-') ||
+        ((family === 'border' || /^border-[xytblr]$/.test(family)) &&
+          name.startsWith('border-'))
+      if (isColorFamily && !COLOR.has(name)) {
+        ;(KNOWN_UNDEFINED.has(name) ? knownDrift : undefinedTokens).push({
+          file: rel,
+          line: i + 1,
+          cls: full,
+          name,
+        })
+        continue
+      }
+      // Undefined shadow token in our semantic families?
+      if (
+        family === 'shadow' &&
+        (name.startsWith('elevation-') || name.startsWith('glow-')) &&
+        !SHADOW.has(name)
+      ) {
+        ;(KNOWN_UNDEFINED.has(name) ? knownDrift : undefinedTokens).push({
+          file: rel,
+          line: i + 1,
+          cls: full,
+          name,
+        })
+      }
+    }
+    // T19+ AA rule: tertiary text may not share an element with a raised tier.
+    if (RAISED_RE.test(line) && TERTIARY_RE.test(line)) {
+      contrastRisk.push({ file: rel, line: i + 1 })
+    }
+  })
+}
+
+// ---- 3. Report -------------------------------------------------------------
+let failed = false
+if (undefinedTokens.length) {
+  failed = true
+  console.error(
+    `\n✗ ${undefinedTokens.length} undefined-token class(es) — not in @rs/tailwind-base:`
+  )
+  for (const v of undefinedTokens)
+    console.error(`  ${v.file}:${v.line}  ${v.cls}`)
+}
+if (adhocValues.length) {
+  failed = true
+  console.error(
+    `\n✗ ${adhocValues.length} ad-hoc arbitrary color value(s) — use a token or add to the allowlist with a migration ticket:`
+  )
+  for (const v of adhocValues) console.error(`  ${v.file}:${v.line}  ${v.cls}`)
+}
+if (contrastRisk.length) {
+  failed = true
+  console.error(
+    `\n✗ ${contrastRisk.length} contrast-risk element(s) — text-content-layout-3 on bg-surface-raised/overlay is below AA-text (4.22:1 on overlay); use text-content-layout-2 (see evidence/token-contrast-table.md):`
+  )
+  for (const v of contrastRisk) console.error(`  ${v.file}:${v.line}`)
+}
+
+// Count-pin: known drift may never grow past its baseline…
+const driftByName = new Map()
+for (const v of knownDrift)
+  driftByName.set(v.name, (driftByName.get(v.name) || 0) + 1)
+const pinLower = []
+for (const [name, baseline] of KNOWN_UNDEFINED) {
+  const measured = driftByName.get(name) || 0
+  if (measured > baseline) {
+    failed = true
+    console.error(
+      `\n✗ known-drift token "${name}" grew: ${measured} usages > pinned baseline ${baseline}. New usages of an undefined token are not allowed — use a real token.`
+    )
+  } else if (measured < baseline) {
+    pinLower.push(`${name} ${measured}<${baseline}`)
+  }
+}
+// …and an allowlisted ad-hoc value may never be duplicated.
+const allowLower = []
+for (const a of ALLOWLIST) {
+  if (a.measured > a.count) {
+    failed = true
+    console.error(
+      `\n✗ allowlisted ad-hoc value duplicated: "${a.value}" in ${a.file} — ${a.measured} matches > pinned ${a.count}. Use the shadow-glow-*/elevation-* token instead.`
+    )
+  } else if (a.measured < a.count) {
+    allowLower.push(`${a.file} ${a.value} ${a.measured}<${a.count}`)
+  }
+}
+
+if (failed) {
+  console.error(
+    '\nDesign-system token check FAILED. See docs/launch-audit/redesign/design-system.md §9.\n'
+  )
+  process.exit(1)
+}
+console.log(
+  `✓ token check passed — ${files.length} files, ${COLOR.size} color + ${SHADOW.size} shadow tokens, 0 new undefined, 0 unlisted ad-hoc values, 0 contrast risks.`
+)
+if (knownDrift.length) {
+  const byToken = {}
+  for (const v of knownDrift) byToken[v.cls] = (byToken[v.cls] || 0) + 1
+  console.log(
+    `  note: ${knownDrift.length} pre-existing known-drift usage(s) within pinned baselines, pending screen migration: ` +
+      Object.entries(byToken)
+        .map(([k, n]) => `${k}×${n}`)
+        .join(', ')
+  )
+}
+for (const s of pinLower)
+  console.log(`  note: drift shrank — lower the KNOWN_UNDEFINED pin: ${s}`)
+for (const s of allowLower)
+  console.log(
+    `  note: allowlist entry now unused/partial — remove or lower it: ${s}`
+  )

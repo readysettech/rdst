@@ -10,6 +10,8 @@
     "./style.css": "./style.css"
   },
   "scripts": {
+    "lint": "node ./scripts/check-tokens.mjs",
+    "check:tokens": "node ./scripts/check-tokens.mjs",
     "clean": "git clean -xdf .cache .turbo node_modules"
   },
   "devDependencies": {

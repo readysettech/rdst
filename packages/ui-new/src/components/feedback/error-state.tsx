@@ -58,10 +58,8 @@ interface ErrorFields {
 // Accent recipes reuse the app's established stateful-card vocabulary: soft
 // surface + soft border + the same variant glow the analysis verdict cards use
 // (AnalysisSections.variantStyles) — deliberate depth, not a new elevation set.
-// NEEDS TOKEN (C-07/T18): the glow shadows below are arbitrary values repeated
-// from AnalysisSections.variantStyles — fold into @rs/tailwind-base as
-// shadow-glow-{positive|info|warning|negative} (or the planned elevation-* set)
-// and consume the token here and there.
+// The glow is now the shared shadow-glow-{negative|warning|info} token
+// (@rs/tailwind-base, landed in T18/C-07), no longer an arbitrary value.
 const surfaceRecipe = tv({
   base: ['rounded-xl', 'border'],
   variants: {
@@ -69,17 +67,17 @@ const surfaceRecipe = tv({
       negative: [
         'bg-surface-negative-soft/50',
         'border-border-negative-soft',
-        'shadow-[0_0_20px_rgba(239,68,68,0.15)]',
+        'shadow-glow-negative',
       ],
       warning: [
         'bg-surface-warning-soft/50',
         'border-border-warning-soft',
-        'shadow-[0_0_20px_rgba(234,179,8,0.15)]',
+        'shadow-glow-warning',
       ],
       info: [
         'bg-surface-info-soft/50',
         'border-border-info-soft',
-        'shadow-[0_0_20px_rgba(59,130,246,0.15)]',
+        'shadow-glow-info',
       ],
     },
   },
@@ -103,15 +101,9 @@ const pageBadgeRecipe = tv({
   base: ['rounded-2xl', 'flex', 'items-center', 'justify-center'],
   variants: {
     accent: {
-      negative: [
-        'bg-surface-negative-soft',
-        'shadow-[0_0_20px_rgba(239,68,68,0.15)]',
-      ],
-      warning: [
-        'bg-surface-warning-soft',
-        'shadow-[0_0_20px_rgba(234,179,8,0.15)]',
-      ],
-      info: ['bg-surface-info-soft', 'shadow-[0_0_20px_rgba(59,130,246,0.15)]'],
+      negative: ['bg-surface-negative-soft', 'shadow-glow-negative'],
+      warning: ['bg-surface-warning-soft', 'shadow-glow-warning'],
+      info: ['bg-surface-info-soft', 'shadow-glow-info'],
     },
   },
   defaultVariants: { accent: 'negative' },

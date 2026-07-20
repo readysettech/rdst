@@ -136,6 +136,15 @@
   --text-mono-small--font-weight: 400;
   --text-mono-small--letter-spacing: -0.025em;
 
+  /* Stat-hero numeral (T18 §3, resolution #11): a display-size numeral for the
+     /demo multiplier and /analyze score — the screen's single big number. Maps
+     to display-medium metrics (48/500); consumed as `Text level="stat-hero"`
+     with tabular-nums applied at the component. [VIS-012, VIS-116] */
+  --text-stat-hero: 3rem;
+  --text-stat-hero--line-height: 3.6rem;
+  --text-stat-hero--font-weight: 500;
+  --text-stat-hero--letter-spacing: 0em;
+
   /* Durations */
   --duration-fastest: 50ms;
   --duration-faster: 100ms;
@@ -170,6 +179,10 @@
   --color-surface-layout-2: var(--surface-layout-2);
   --color-surface-layout-soft: var(--surface-layout-soft);
   --color-surface-layout-disabled: var(--surface-layout-disabled);
+  /* Raised depth tiers (T18 §4.2): carry elevation by a lightness step above
+     the page, not by borders — the only depth cue that works on a dark canvas. */
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-overlay: var(--surface-overlay);
   --color-surface-primary-solid: var(--surface-primary-solid);
   --color-surface-primary-solid-hover: var(--surface-primary-solid-hover);
   --color-surface-primary-solid-active: var(--surface-primary-solid-active);
@@ -212,6 +225,11 @@
   --color-content-layout-2: var(--content-layout-2);
   --color-content-layout-3: var(--content-layout-3);
   --color-content-layout-disabled: var(--content-layout-disabled);
+  /* Data-viz series (T18 §4.5): the two compared series (Readyset/cached vs
+     Postgres/origin). Retires the raw .qpdemo hex; series differ by
+     contrast + label, not hue alone. */
+  --color-content-viz-cache: var(--content-viz-cache);
+  --color-content-viz-origin: var(--content-viz-origin);
   --color-content-primary-solid: var(--content-primary-solid);
   --color-content-primary-soft: var(--content-primary-soft);
   --color-content-primary-plain: var(--content-primary-plain);
@@ -263,6 +281,26 @@
     0px 2.1px 4.625px 0px rgba(84, 84, 84, 0.01);
   --shadow-inner: inset 0 2px 4px 0 rgb(0 0 0 / 0.05);
   --shadow-focus: 0px 0px 0px 1.5px var(--color-surface-primary-solid);
+
+  /* Elevation tiers (T18 §4.3): dark-tuned, short, low-blur, top-lit shadows
+     that replace the near-invisible light-tuned shadow-small/medium/large on
+     dark surfaces. Pair with the matching surface: elevation-1→surface-raised,
+     elevation-2/3→surface-overlay. elevation-0 = no shadow (resting cards).
+     One raised element per view. [VIS-070, VIS-075, VIS-076, VIS-081] */
+  --shadow-elevation-1: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+    0 2px 4px rgba(0, 0, 0, 0.4);
+  --shadow-elevation-2: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-elevation-3: 0 16px 40px rgba(0, 0, 0, 0.6);
+
+  /* Semantic glow (resolves C-01's NEEDS TOKEN in error-state.tsx): a soft,
+     low-opacity colored halo that marks a stateful focal card (the analyze
+     verdict card, the error card) — distinct from the neutral elevation set.
+     Folded 1:1 from the arbitrary values C-01 repeated across error-state.tsx
+     and AnalysisSections.variantStyles so the visual is unchanged. [VIS-075] */
+  --shadow-glow-positive: 0 0 20px rgba(34, 197, 94, 0.15);
+  --shadow-glow-info: 0 0 20px rgba(59, 130, 246, 0.15);
+  --shadow-glow-warning: 0 0 20px rgba(234, 179, 8, 0.15);
+  --shadow-glow-negative: 0 0 20px rgba(239, 68, 68, 0.15);
 
   /* Keyframes */
   @keyframes enter {
@@ -634,6 +672,10 @@
     --surface-layout-2: var(--sand-light-4);
     --surface-layout-soft: var(--sand-light-3);
     --surface-layout-disabled: var(--sand-light-5);
+    /* Raised tiers step whiter than the page (§4.2). Light theme is latent
+       (all apps ship data-color-mode="dark"); values kept for completeness. */
+    --surface-raised: var(--sand-light-1);
+    --surface-overlay: var(--sand-light-1);
 
     --surface-primary-solid: var(--sand-dark-3);
     --surface-primary-solid-hover: var(--sand-dark-4);
@@ -679,7 +721,10 @@
 
     --content-layout-1: var(--sand-light-12);
     --content-layout-2: var(--sand-light-11);
-    --content-layout-3: var(--sand-light-10);
+    /* WCAG AA (T18 §4.1): re-derived from sand-light-10 (#868482, 3.57:1) to
+       4.60:1 on surface-layout-1. Light theme is latent (rdst/cloud/admin/
+       tenant-cache all ship dark); this lands the also-fix. [USE-004/VIS-058] */
+    --content-layout-3: #737270;
     --content-layout-disabled: var(--sand-light-9);
 
     --content-primary-solid: var(--sand-dark-12);
@@ -705,6 +750,11 @@
     --content-info-solid: var(--indigo-light-1);
     --content-info-soft: var(--indigo-light-11);
     --content-info-plain: var(--indigo-light-11);
+
+    /* Data-viz series (§4.5). Light equivalents of the dark spec values, AA on
+       the light card (cache 5.18:1, origin 4.86:1). Latent (apps are dark). */
+    --content-viz-cache: var(--green-light-11);
+    --content-viz-origin: var(--amber-light-11);
 
     --border-layout-1: var(--sand-light-5);
     --border-layout-2: var(--sand-light-6);
@@ -751,6 +801,12 @@
     --surface-layout-2: var(--sand-dark-1);
     --surface-layout-soft: var(--sand-dark-1-a);
     --surface-layout-disabled: var(--sand-dark-3);
+    /* Raised depth tiers (§4.2): one lightness step above the resting card
+       (surface-layout-1 #1C1B1A). raised = hero / selected row / active panel;
+       overlay = dropdown / popover / modal (one step lighter still). Pair with
+       shadow-elevation-1 (raised) and -2/-3 (overlay). [VIS-080, VIS-104] */
+    --surface-raised: var(--sand-dark-3);
+    --surface-overlay: var(--sand-dark-4);
 
     --surface-primary-solid: var(--sand-light-3);
     --surface-primary-solid-hover: var(--sand-light-4);
@@ -828,6 +884,13 @@
     --content-info-solid: var(--indigo-dark-1);
     --content-info-soft: var(--indigo-dark-11);
     --content-info-plain: var(--indigo-dark-11);
+
+    /* Data-viz series (§4.5): cache = teal-green #4CC38A (green-dark-11, 7.76:1
+       on the card), origin = amber #F1A10D (amber-dark-11, 8.06:1). The two
+       chart series + status pills, distinguished by contrast + label. [VIS-001,
+       VIS-011, USE-005] */
+    --content-viz-cache: var(--green-dark-11);
+    --content-viz-origin: var(--amber-dark-11);
 
     --border-layout-1: var(--sand-dark-3);
     --border-layout-2: var(--sand-dark-4);
