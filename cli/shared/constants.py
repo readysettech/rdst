@@ -9,12 +9,17 @@ attribute access.
 
 from pathlib import Path
 
-__all__ = ["rdst_data_dir", "rdst_semantic_layer_dir"]
+__all__ = ["rdst_data_dir", "rdst_runs_dir", "rdst_semantic_layer_dir"]
 
 
 def rdst_data_dir() -> Path:
     """Return the RDST data directory (``~/.rdst`` by default)."""
     return Path.home() / ".rdst"
+
+
+def rdst_runs_dir() -> Path:
+    """Return the background-run event-log directory (``~/.rdst/runs``)."""
+    return rdst_data_dir() / "runs"
 
 
 def rdst_semantic_layer_dir() -> Path:
