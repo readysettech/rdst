@@ -1,51 +1,58 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { Text } from "@rs/ui-new/text";
-import { Icon } from "@rs/ui-new/icon";
-import type { IconStrokeName } from "@rs/ui-icons/icon-name";
-import { Tag } from "@rs/ui-new/tag";
-import { Button } from "@rs/ui-new/button";
-import { Show } from "@rs/ui-new/show";
-import { For } from "@rs/ui-new/for";
-import { HStack, VStack } from "@rs/ui-new/stack";
-import { m } from "@rs/ui-new/motion";
-import { useTarget } from "../hooks/useTarget";
-import { useSystemStatus } from "../lib/useSystemStatus";
-import { useTrialSource } from "../lib/trialQueries";
-import { fetchAuditRuns } from "../lib/useAudit";
-import { fetchQueryRegistry, fetchSchemaStatus } from "../lib/api";
-import { cachedRegistryHashes, fetchCacheList } from "../lib/useCache";
-import { fillCapturedParams } from "../lib/sqlParameters";
-import { HandRaiser } from "../components/HandRaiser";
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
+import { Button } from '@rs/ui-new/button'
+import { For } from '@rs/ui-new/for'
+import { Icon } from '@rs/ui-new/icon'
+import { m } from '@rs/ui-new/motion'
+import { Show } from '@rs/ui-new/show'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
+import { Text } from '@rs/ui-new/text'
+import { useQuery } from '@tanstack/react-query'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { HandRaiser } from '../components/HandRaiser'
+import { useTarget } from '../hooks/useTarget'
+import { fetchQueryRegistry, fetchSchemaStatus } from '../lib/api'
+import { formatTimestamp } from '../lib/formatters'
 import {
+  type ContinueItem,
   continueItems,
   deriveHomeState,
-  portfolioCounts,
-  type ContinueItem,
   type PortfolioCounts,
-} from "../lib/homeState";
-import { formatTimestamp } from "../lib/formatters";
+  portfolioCounts,
+} from '../lib/homeState'
+import { fillCapturedParams } from '../lib/sqlParameters'
+import { useTrialSource } from '../lib/trialQueries'
+import { fetchAuditRuns } from '../lib/useAudit'
+import { cachedRegistryHashes, fetchCacheList } from '../lib/useCache'
+import { useSystemStatus } from '../lib/useSystemStatus'
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute('/')({
   component: HomePage,
-});
+})
 
 interface JobCardProps {
-  to: string;
-  icon: IconStrokeName;
-  title: string;
-  description: string;
+  to: string
+  icon: IconStrokeName
+  title: string
+  description: string
   chip?: {
-    label: string;
-    variant: "positive" | "warning" | "informative" | "primary" | "neutral";
-    modifier?: "solid" | "outline" | "ghost";
-  };
+    label: string
+    variant: 'positive' | 'warning' | 'informative' | 'primary' | 'neutral'
+    modifier?: 'solid' | 'outline' | 'ghost'
+  }
   /** The single "start here" action: full-width, raised (elevation-1), one
    *  primary accent — the page's visual anchor. */
-  featured?: boolean;
+  featured?: boolean
 }
 
-function JobCard({ to, icon, title, description, chip, featured }: JobCardProps) {
+function JobCard({
+  to,
+  icon,
+  title,
+  description,
+  chip,
+  featured,
+}: JobCardProps) {
   if (featured) {
     return (
       <Link
@@ -55,14 +62,23 @@ function JobCard({ to, icon, title, description, chip, featured }: JobCardProps)
         <VStack className="gap-3 items-start">
           <HStack className="gap-3 items-center w-full">
             <div className="w-11 h-11 rounded-xl bg-surface-primary-soft flex items-center justify-center shrink-0">
-              <Icon name={icon} label="" className="w-6 h-6 text-content-primary-soft" />
+              <Icon
+                name={icon}
+                label=""
+                className="w-6 h-6 text-content-primary-soft"
+              />
             </div>
             <Text level="headline-5" className="text-content-layout-1 flex-1">
               {title}
             </Text>
             <Show when={chip}>
               {(c) => (
-                <Tag size="small" variant={c.variant} modifier={c.modifier ?? "ghost"} label={c.label} />
+                <Tag
+                  size="small"
+                  variant={c.variant}
+                  modifier={c.modifier ?? 'ghost'}
+                  label={c.label}
+                />
               )}
             </Show>
           </HStack>
@@ -78,7 +94,7 @@ function JobCard({ to, icon, title, description, chip, featured }: JobCardProps)
           </HStack>
         </VStack>
       </Link>
-    );
+    )
   }
   return (
     <Link
@@ -88,7 +104,11 @@ function JobCard({ to, icon, title, description, chip, featured }: JobCardProps)
       <VStack className="gap-3 items-start h-full">
         <HStack className="gap-3 items-center w-full">
           <div className="w-10 h-10 rounded-xl bg-surface-primary-soft/40 flex items-center justify-center shrink-0">
-            <Icon name={icon} label="" className="w-5 h-5 text-content-primary-soft" />
+            <Icon
+              name={icon}
+              label=""
+              className="w-5 h-5 text-content-primary-soft"
+            />
           </div>
           <Text level="label-large" className="text-content-layout-1 flex-1">
             {title}
@@ -104,12 +124,17 @@ function JobCard({ to, icon, title, description, chip, featured }: JobCardProps)
         </Text>
         <Show when={chip}>
           {(c) => (
-            <Tag size="small" variant={c.variant} modifier={c.modifier ?? "ghost"} label={c.label} />
+            <Tag
+              size="small"
+              variant={c.variant}
+              modifier={c.modifier ?? 'ghost'}
+              label={c.label}
+            />
           )}
         </Show>
       </VStack>
     </Link>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -118,30 +143,63 @@ function JobCard({ to, icon, title, description, chip, featured }: JobCardProps)
 // ---------------------------------------------------------------------------
 
 export function FirstRunHome({ needsApiKey }: { needsApiKey: boolean }) {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
   return (
-    <div className="max-w-3xl mx-auto pt-6">
-      <VStack className="gap-2 items-center mb-6">
-        <Text level="headline-4" className="text-content-layout-1 text-center">
-          Two steps, then RDST gets smart
-        </Text>
-        <Text level="body-small" className="text-content-layout-2 text-center max-w-lg">
-          Connect a database and add an AI key — that unlocks schema discovery,
-          which is what makes Ask and analysis actually understand your data.
-        </Text>
-      </VStack>
+    <div className="mx-auto pt-6">
+      <Link
+        to="/demo"
+        className="group flex items-start gap-3 rounded-2xl border border-border-rising-soft bg-surface-rising-soft p-5 shadow-elevation-1 transition-shadow hover:shadow-elevation-2 mb-4"
+      >
+        <div className="w-10 h-10 rounded-xl bg-surface-rising-solid/40 flex items-center justify-center shrink-0">
+          <Icon
+            name="layers"
+            label=""
+            className="w-5 h-5 text-content-primary-soft transition-[scale] group-hover:scale-110"
+          />
+        </div>
+
+        <div className="flex gap-2 justify-between w-full">
+          <div className="flex flex-col gap-0 justify-start items-start flex-1">
+            <Text level="label-medium" className="text-content-layout-1 flex-1">
+              See Readyset Platform in action — no setup, no sign-up
+            </Text>
+            <Text
+              level="body-small"
+              className="text-content-layout-2 flex-1 max-w-3xl"
+            >
+              See QueryPilot cache your hottest queries in real time as Readyset
+              and Postgres run the same workload side by side. Local containers,
+              one-click cleanup.
+            </Text>
+          </div>
+          <Tag
+            size="base"
+            fullWidth={false}
+            variant="rising"
+            modifier="solid"
+            label="Try it"
+          />
+        </div>
+      </Link>
       <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4 mb-4">
         <div className="relative rounded-2xl bg-surface-raised p-6 shadow-elevation-1">
-          <span className="absolute top-4 right-4 w-6 h-6 rounded-lg bg-surface-layout-2 text-content-layout-3 flex items-center justify-center text-xs">
+          <span className="absolute top-4 right-4 w-6 h-6 rounded-lg bg-surface-layout-1 text-content-layout-3 flex items-center justify-center text-body-small">
             1
           </span>
-          <div className="w-10 h-10 rounded-xl bg-surface-primary-soft/40 flex items-center justify-center mb-3">
-            <Icon name="database" label="" className="w-5 h-5 text-content-primary-soft" />
+          <div className="w-10 h-10 rounded-xl bg-surface-layout-1/50 flex items-center justify-center mb-3">
+            <Icon
+              name="database"
+              label=""
+              className="w-5 h-5 text-content-primary-soft"
+            />
           </div>
           <Text level="label-large" className="text-content-layout-1">
             Connect a database
           </Text>
-          <Text level="body-small" className="text-content-layout-2 mt-1 mb-4 min-h-14">
+          <Text
+            level="body-small"
+            className="text-content-layout-2 mt-1 mb-4 min-h-14"
+          >
             PostgreSQL or MySQL. The wizard connects and validates in about a
             minute. Read-only by default; nothing leaves your machine.
           </Text>
@@ -151,20 +209,27 @@ export function FirstRunHome({ needsApiKey }: { needsApiKey: boolean }) {
             label="Connect a database"
             icon="arrow-right"
             iconPosition="right"
-            onClick={() => navigate({ to: "/onboarding" })}
+            onClick={() => navigate({ to: '/onboarding' })}
           />
         </div>
         <div className="relative rounded-2xl bg-surface-raised p-6 shadow-elevation-1">
-          <span className="absolute top-4 right-4 w-6 h-6 rounded-lg bg-surface-layout-2 text-content-layout-3 flex items-center justify-center text-xs">
+          <span className="absolute top-4 right-4 w-6 h-6 rounded-lg bg-surface-layout-1 text-content-layout-3 flex items-center justify-center text-body-small">
             2
           </span>
-          <div className="w-10 h-10 rounded-xl bg-surface-primary-soft/40 flex items-center justify-center mb-3">
-            <Icon name="sparkles" label="" className="w-5 h-5 text-content-primary-soft" />
+          <div className="w-10 h-10 rounded-xl bg-surface-layout-1/50 flex items-center justify-center mb-3">
+            <Icon
+              name="sparkles"
+              label=""
+              className="w-5 h-5 text-content-primary-soft"
+            />
           </div>
           <Text level="label-large" className="text-content-layout-1">
             Add your Anthropic key
           </Text>
-          <Text level="body-small" className="text-content-layout-2 mt-1 mb-4 min-h-14">
+          <Text
+            level="body-small"
+            className="text-content-layout-2 mt-1 mb-4 min-h-14"
+          >
             Powers schema discovery, Ask, and analysis advice. No key yet? Start
             with a trial — it works the same and you can swap the key in later.
           </Text>
@@ -172,40 +237,29 @@ export function FirstRunHome({ needsApiKey }: { needsApiKey: boolean }) {
             <Button
               variant="primary"
               modifier="outline"
-              label={needsApiKey ? "Add key" : "Key configured"}
-              onClick={() => navigate({ to: "/configure" })}
+              label={needsApiKey ? 'Add key' : 'Key configured'}
+              onClick={() => navigate({ to: '/configure' })}
             />
             <Button
               variant="primary"
               modifier="ghost"
               label="Start trial"
-              onClick={() => navigate({ to: "/configure" })}
+              onClick={() => navigate({ to: '/configure' })}
             />
           </HStack>
         </div>
       </div>
-      <div className="rounded-2xl border border-border-primary-soft bg-surface-primary-soft/30 p-4 mb-4">
+      <div className="rounded-2xl border border-border-primary-soft/10 bg-surface-layout-1 p-4">
         <Text level="body-small" className="text-content-layout-2">
-          With both in place, the next screen offers one thing:{" "}
+          With both in place, the next screen offers one thing:{' '}
           <span className="text-content-layout-1">schema discovery</span> — RDST
           profiles your tables and writes the context that turns generic AI into
           an assistant that knows your column shapes, conventions, and business
           terms.
         </Text>
       </div>
-      <Link
-        to="/demo"
-        className="flex items-center gap-3 rounded-xl bg-surface-layout-1 p-4 transition-all hover:bg-surface-raised hover:shadow-elevation-1"
-      >
-        <Tag size="small" variant="positive" modifier="ghost" label="no setup · no sign-up" />
-        <Text level="body-small" className="text-content-layout-2 flex-1">
-          Not ready? The demo provisions a sandboxed database and shows Readyset
-          caching live — two minutes, one-click cleanup, nothing asked of you.
-        </Text>
-        <Icon name="arrow-right" label="" className="w-4 h-4 text-content-layout-3 shrink-0" />
-      </Link>
     </div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -220,10 +274,10 @@ export function ConnectedHome({
   target,
   needsApiKey,
 }: {
-  target: string;
-  needsApiKey: boolean;
+  target: string
+  needsApiKey: boolean
 }) {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
   return (
     <div className="space-y-4 w-full">
       <VStack className="gap-1 items-start">
@@ -251,13 +305,17 @@ export function ConnectedHome({
               when={!needsApiKey}
               fallback={
                 <HStack className="gap-2 items-center">
-                  <Tag size="small" variant="warning" label="Needs an Anthropic key" />
+                  <Tag
+                    size="small"
+                    variant="warning"
+                    label="Needs an Anthropic key"
+                  />
                   <Button
                     variant="primary"
                     modifier="outline"
                     size="small"
                     label="Add key"
-                    onClick={() => navigate({ to: "/configure" })}
+                    onClick={() => navigate({ to: '/configure' })}
                   />
                 </HStack>
               }
@@ -268,15 +326,19 @@ export function ConnectedHome({
                 label="Discover schema"
                 icon="arrow-right"
                 iconPosition="right"
-                onClick={() => navigate({ to: "/schema" })}
+                onClick={() => navigate({ to: '/schema' })}
               />
             </Show>
             <Text level="caption" className="text-content-layout-3">
-              Runs in the background · read-only queries · uses your Anthropic key
+              Runs in the background · read-only queries · uses your Anthropic
+              key
             </Text>
           </VStack>
           <VStack className="gap-2 items-start">
-            <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+            <Text
+              level="overline"
+              className="text-content-layout-3 uppercase tracking-wider"
+            >
               What discovery produces
             </Text>
             <VStack className="gap-2 items-stretch w-full">
@@ -321,7 +383,7 @@ export function ConnectedHome({
         />
       </div>
     </div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -337,20 +399,20 @@ function PortfolioTile({
   to,
   highlight,
 }: {
-  label: string;
-  value: string;
-  unit: string;
-  action: string;
-  to: string;
-  highlight?: boolean;
+  label: string
+  value: string
+  unit: string
+  action: string
+  to: string
+  highlight?: boolean
 }) {
   return (
     <Link
       to={to}
       className={
         highlight
-          ? "rounded-xl border border-border-primary-soft bg-surface-primary-soft/40 p-4 hover:bg-surface-primary-soft/60 transition-colors"
-          : "rounded-xl bg-surface-layout-1 p-4 transition-all hover:bg-surface-raised hover:shadow-elevation-1"
+          ? 'rounded-xl border border-border-primary-soft bg-surface-primary-soft/40 p-4 hover:bg-surface-primary-soft/60 transition-colors'
+          : 'rounded-xl bg-surface-layout-1 p-4 transition-all hover:bg-surface-raised hover:shadow-elevation-1'
       }
     >
       <VStack className="gap-0.5 items-start">
@@ -368,18 +430,18 @@ function PortfolioTile({
         </Text>
       </VStack>
     </Link>
-  );
+  )
 }
 
 const CONTINUE_TAG: Record<
-  ContinueItem["kind"],
-  { label: string; variant: "primary" | "informative" | "positive" }
+  ContinueItem['kind'],
+  { label: string; variant: 'primary' | 'informative' | 'positive' }
 > = {
-  asked: { label: "asked", variant: "primary" },
-  analyzed: { label: "analyzed", variant: "informative" },
-  cached: { label: "cached", variant: "positive" },
-  saved: { label: "saved", variant: "informative" },
-};
+  asked: { label: 'asked', variant: 'primary' },
+  analyzed: { label: 'analyzed', variant: 'informative' },
+  cached: { label: 'cached', variant: 'positive' },
+  saved: { label: 'saved', variant: 'informative' },
+}
 
 function ActiveHome({
   target,
@@ -388,15 +450,16 @@ function ActiveHome({
   lastAuditLabel,
   retentionDays,
 }: {
-  target: string;
-  counts: PortfolioCounts;
-  recents: ContinueItem[];
-  lastAuditLabel: string | null;
-  retentionDays: number | null;
+  target: string
+  counts: PortfolioCounts
+  recents: ContinueItem[]
+  lastAuditLabel: string | null
+  retentionDays: number | null
 }) {
-  const navigate = useNavigate();
-  const gapOnCache = counts.candidates > 0;
-  const sustainedUse = retentionDays !== null && retentionDays >= 30 && counts.cached > 0;
+  const navigate = useNavigate()
+  const gapOnCache = counts.candidates > 0
+  const sustainedUse =
+    retentionDays !== null && retentionDays >= 30 && counts.cached > 0
   return (
     <div className="space-y-4 w-full">
       <HStack className="gap-3 items-baseline">
@@ -409,7 +472,10 @@ function ActiveHome({
       </HStack>
 
       <div className="rounded-2xl border border-border-layout-1 bg-surface-layout-1 p-4">
-        <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+        <Text
+          level="overline"
+          className="text-content-layout-3 uppercase tracking-wider"
+        >
           Query portfolio
         </Text>
         <div className="grid grid-cols-2 tablet:grid-cols-4 gap-3 mt-3">
@@ -432,10 +498,10 @@ function ActiveHome({
             value={String(counts.cached)}
             unit={
               counts.candidates > 0
-                ? `${counts.candidates} candidate${counts.candidates === 1 ? "" : "s"} waiting`
-                : "serving from Readyset"
+                ? `${counts.candidates} candidate${counts.candidates === 1 ? '' : 's'} waiting`
+                : 'serving from Readyset'
             }
-            action={gapOnCache ? "Cache them" : "Manage caches"}
+            action={gapOnCache ? 'Cache them' : 'Manage caches'}
             to="/cache"
             highlight={gapOnCache}
           />
@@ -457,7 +523,7 @@ function ActiveHome({
               signal="retention_30d"
               tone="accent"
               showDismiss
-              message={`A month of RDST on ${target}, ${counts.cached} cache${counts.cached === 1 ? "" : "s"} serving. If this is heading to production, we'd like to help you size it.`}
+              message={`A month of RDST on ${target}, ${counts.cached} cache${counts.cached === 1 ? '' : 's'} serving. If this is heading to production, we'd like to help you size it.`}
             />
           </div>
         </Show>
@@ -465,7 +531,10 @@ function ActiveHome({
 
       <Show when={recents.length > 0}>
         <div className="rounded-2xl border border-border-layout-1 bg-surface-layout-1 p-4">
-          <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+          <Text
+            level="overline"
+            className="text-content-layout-3 uppercase tracking-wider"
+          >
             Continue where you left off
           </Text>
           <VStack className="gap-2 items-stretch mt-3">
@@ -475,18 +544,21 @@ function ActiveHome({
                   type="button"
                   key={item.hash}
                   onClick={() => {
-                    if (item.nextAction === "Analyze") {
+                    if (item.nextAction === 'Analyze') {
                       navigate({
-                        to: "/results",
+                        to: '/results',
                         search: {
-                          query: fillCapturedParams(item.sql, item.mostRecentParams),
+                          query: fillCapturedParams(
+                            item.sql,
+                            item.mostRecentParams
+                          ),
                           target,
                         },
-                      });
-                    } else if (item.nextAction === "Cache") {
-                      navigate({ to: "/cache" });
+                      })
+                    } else if (item.nextAction === 'Cache') {
+                      navigate({ to: '/cache' })
                     } else {
-                      navigate({ to: "/benchmark" });
+                      navigate({ to: '/benchmark' })
                     }
                   }}
                   className="flex items-center gap-3 rounded-lg border border-border-layout-1 bg-surface-layout-2/40 px-3 py-2.5 hover:border-border-layout-2 transition-colors text-left"
@@ -503,7 +575,10 @@ function ActiveHome({
                   >
                     {item.label}
                   </Text>
-                  <Text level="caption" className="text-content-primary-soft shrink-0">
+                  <Text
+                    level="caption"
+                    className="text-content-primary-soft shrink-0"
+                  >
                     {item.nextAction} →
                   </Text>
                 </button>
@@ -521,8 +596,8 @@ function ActiveHome({
           description="Sizing, slow spots, and cache opportunities."
           chip={
             lastAuditLabel
-              ? { label: `Last run ${lastAuditLabel}`, variant: "informative" }
-              : { label: "Never run", variant: "primary" }
+              ? { label: `Last run ${lastAuditLabel}`, variant: 'informative' }
+              : { label: 'Never run', variant: 'primary' }
           }
         />
         <JobCard
@@ -530,18 +605,18 @@ function ActiveHome({
           icon="observe"
           title="Slow queries"
           description="See which queries are eating your database time right now."
-          chip={{ label: `Against ${target}`, variant: "informative" }}
+          chip={{ label: `Against ${target}`, variant: 'informative' }}
         />
         <JobCard
           to="/demo"
           icon="querypilot"
           title="Demo"
           description="Sandboxed side-by-side — re-run anytime."
-          chip={{ label: "No sign-up", variant: "positive" }}
+          chip={{ label: 'No sign-up', variant: 'positive' }}
         />
       </div>
     </div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -550,65 +625,69 @@ function ActiveHome({
 // ---------------------------------------------------------------------------
 
 function HomePage() {
-  const { target } = useTarget();
-  const { data: status } = useSystemStatus();
-  const { anthropicRequirement } = useTrialSource();
+  const { target } = useTarget()
+  const { data: status } = useSystemStatus()
+  const { anthropicRequirement } = useTrialSource()
 
-  const targetCount = status?.targets?.length ?? 0;
-  const hasTargets = targetCount > 0;
+  const targetCount = status?.targets?.length ?? 0
+  const hasTargets = targetCount > 0
 
   const { data: schemaStatus, isLoading: schemaLoading } = useQuery({
-    queryKey: ["home", "schema-status", target],
+    queryKey: ['home', 'schema-status', target],
     queryFn: ({ signal }) => fetchSchemaStatus(target!, signal),
     staleTime: 60_000,
     enabled: hasTargets && !!target,
-  });
+  })
 
   const { data: auditRuns } = useQuery({
-    queryKey: ["home", "audit-runs"],
+    queryKey: ['home', 'audit-runs'],
     queryFn: () => fetchAuditRuns(),
     staleTime: 60_000,
     enabled: hasTargets,
-  });
+  })
 
   const { data: registry } = useQuery({
-    queryKey: ["home", "registry"],
+    queryKey: ['home', 'registry'],
     queryFn: () => fetchQueryRegistry(),
     staleTime: 60_000,
     enabled: hasTargets,
-  });
+  })
 
   // "Cached" reflects the live cache list for the selected target, shared with
   // the Caching page via this query key. The registry's readyset_query_id is
   // not a live signal -- it survives a DROP CACHE (rdst-e7s.32).
   const { data: cacheList } = useQuery({
-    queryKey: ["cache-list", target],
+    queryKey: ['cache-list', target],
     queryFn: () => fetchCacheList(target!),
     staleTime: 60_000,
     enabled: hasTargets && !!target,
-  });
+  })
 
-  const needsApiKey = anthropicRequirement ? !anthropicRequirement.satisfied : false;
-  const lastAudit = auditRuns?.runs?.[0];
-  const entries = registry?.queries ?? [];
+  const needsApiKey = anthropicRequirement
+    ? !anthropicRequirement.satisfied
+    : false
+  const lastAudit = auditRuns?.runs?.[0]
+  const entries = registry?.queries ?? []
 
   // Retention span for the sustained-use hand-raiser (rdst-dma.4): audit runs
   // are newest-first, so the oldest run's start dates first RDST activity.
-  const oldestAudit = auditRuns?.runs?.[auditRuns.runs.length - 1];
+  const oldestAudit = auditRuns?.runs?.[auditRuns.runs.length - 1]
   const retentionDays = oldestAudit
-    ? Math.floor((Date.now() - new Date(oldestAudit.started_at).getTime()) / 86_400_000)
-    : null;
+    ? Math.floor(
+        (Date.now() - new Date(oldestAudit.started_at).getTime()) / 86_400_000
+      )
+    : null
 
-  const cachedHashes = cachedRegistryHashes(cacheList);
+  const cachedHashes = cachedRegistryHashes(cacheList)
 
-  const homeState = deriveHomeState(targetCount, schemaStatus?.exists);
-  const counts = portfolioCounts(entries, target ?? undefined, cachedHashes);
-  const recents = continueItems(entries, target ?? undefined, cachedHashes);
+  const homeState = deriveHomeState(targetCount, schemaStatus?.exists)
+  const counts = portfolioCounts(entries, target ?? undefined, cachedHashes)
+  const recents = continueItems(entries, target ?? undefined, cachedHashes)
 
   // Until the status fetch resolves, render nothing state-specific: a wrong
   // guess would flash the first-run hero at every returning user.
   if (!status || (hasTargets && schemaLoading)) {
-    return <div className="w-full" />;
+    return <div className="w-full" />
   }
 
   return (
@@ -620,7 +699,11 @@ function HomePage() {
       >
         <HStack className="gap-4 items-center">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
-            <Icon name="dashboard" label="" className="w-6 h-6 text-content-primary-soft" />
+            <Icon
+              name="dashboard"
+              label=""
+              className="w-6 h-6 text-content-primary-soft"
+            />
           </div>
           <VStack className="gap-0.5 items-start">
             <Text level="headline-4" className="text-content-layout-1">
@@ -639,18 +722,20 @@ function HomePage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.05 }}
       >
-        <Show when={homeState === "first-run"}>
+        <Show when={homeState === 'first-run'}>
           <FirstRunHome needsApiKey={needsApiKey} />
         </Show>
-        <Show when={homeState === "connected"}>
-          <ConnectedHome target={target ?? ""} needsApiKey={needsApiKey} />
+        <Show when={homeState === 'connected'}>
+          <ConnectedHome target={target ?? ''} needsApiKey={needsApiKey} />
         </Show>
-        <Show when={homeState === "active"}>
+        <Show when={homeState === 'active'}>
           <ActiveHome
-            target={target ?? ""}
+            target={target ?? ''}
             counts={counts}
             recents={recents}
-            lastAuditLabel={lastAudit ? formatTimestamp(lastAudit.started_at) : null}
+            lastAuditLabel={
+              lastAudit ? formatTimestamp(lastAudit.started_at) : null
+            }
             retentionDays={retentionDays}
           />
         </Show>
@@ -662,5 +747,5 @@ function HomePage() {
         under Set up.
       </Text>
     </div>
-  );
+  )
 }

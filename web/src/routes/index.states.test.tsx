@@ -16,13 +16,25 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 import { ConnectedHome, FirstRunHome } from './index';
 
 describe('FirstRunHome (state 1)', () => {
-  it('renders the two setup steps and the ungated demo path', () => {
+  it('leads with the demo band (reference structure), then the setup steps', () => {
     const { container } = render(<FirstRunHome needsApiKey={true} />);
     const scope = within(container as HTMLElement);
-    expect(scope.getByText('Two steps, then RDST gets smart')).toBeTruthy();
-    expect(scope.getAllByText('Connect a database').length).toBeGreaterThan(0);
-    expect(scope.getByText('Add your Anthropic key')).toBeTruthy();
+    // The consolidated "Welcome to RDST" header is the screen's only
+    // title/description pair now — the old "Two steps" block is gone, and the
+    // old "Not ready? …" framing was dropped when the band became the lead.
+    expect(scope.queryByText('Two steps, then RDST gets smart')).toBeNull();
+    expect(scope.queryByText(/Not ready\?/)).toBeNull();
+    // Demo band: destination-matching title (USE-041), ungated chip, pill CTA.
+    const demoTitle = scope.getByText('See Readyset Platform in action');
     expect(scope.getByText('no setup · no sign-up')).toBeTruthy();
+    expect(scope.getByText('Try it')).toBeTruthy();
+    const connect = scope.getAllByText('Connect a database')[0];
+    expect(scope.getByText('Add your Anthropic key')).toBeTruthy();
+    // Demo band is the lead element: its title renders before the setup cards.
+    expect(
+      demoTitle.compareDocumentPosition(connect) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
   it('reflects an already-configured key', () => {
     const { container } = render(<FirstRunHome needsApiKey={false} />);

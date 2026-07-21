@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Alert } from "@rs/ui-new/alert";
 import { BaseInputText } from "@rs/ui-new/base-input-text";
 import { Button } from "@rs/ui-new/button";
@@ -24,11 +24,18 @@ import { useCacheRun } from "../lib/useCache";
 import type { CacheRunResult } from "../types/cache";
 import { fillCapturedParams, hasParameters } from "../lib/sqlParameters";
 import { QueryCacheStatus } from "../components/QueryCacheStatus";
+import { QueryCard } from "../components/QueryCard";
 import { ComparisonCard } from "../components/CacheComparison";
 import { ParameterDialog } from "../components/top";
 import { collapseWhitespace } from "../lib/collapseWhitespace";
 
-import { formatTimestamp, formatDuration } from "../lib/formatters";
+import {
+  formatDuration,
+  formatMeta,
+  formatMs,
+  formatTimestamp,
+  shortHash,
+} from "../lib/formatters";
 import {
   byImpact,
   formatDbTime,
@@ -58,11 +65,6 @@ const SOURCE_META: Record<string, { label: string; variant: SourceVariant }> = {
 
 function getSourceMeta(source: string): { label: string; variant: SourceVariant } {
   return SOURCE_META[source] ?? { label: "Manual", variant: "neutral" };
-}
-
-function getCollapsedPreview(sql: string, maxLen = 120): string {
-  const collapsed = collapseWhitespace(sql);
-  return collapsed.length > maxLen ? `${collapsed.slice(0, maxLen)}...` : collapsed;
 }
 
 // Light, front-end-only readable label derived from the SQL when a query has no
@@ -842,301 +844,275 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
                     const notCacheable = isNotCacheable(entry.readyset_supported);
                     const isTesting = testingHash === entry.hash;
 
-                    // Telemetry-bearing rows lead with impact; others keep the
-                    // run-frequency line (which reads "never run" when unseen).
+                    // One muted meta line via the shared helpers: the DB-time
+                    // impact headline + run count when telemetry exists, else the
+                    // run-frequency line ("never run" when unseen); then avg, the
+                    // short hash, and the home target. [USE-002/003, USE-097]
                     const impactCaption = formatImpactCaption(entry);
                     const runCount = formatRunCount(entry);
-                    const metaParts: ReactNode[] = [];
-                    if (impactCaption) {
-                      metaParts.push(
-                        <span key="impact" className="text-content-layout-2">{impactCaption}</span>,
+                    const meta = formatMeta([
+                      impactCaption,
+                      runCount,
+                      impactCaption
+                        ? null
+                        : entry.frequency > 0
+                          ? `${entry.frequency} ${entry.frequency === 1 ? "run" : "runs"}`
+                          : "never run",
+                      (entry.avg_duration_ms ?? 0) > 0
+                        ? `avg ${formatMs(entry.avg_duration_ms)}`
+                        : null,
+                      `hash ${shortHash(entry.hash)}`,
+                      entry.target || null,
+                    ]);
+
+                    // Transient inline states own the card's `children` surface
+                    // (delete-confirm / rename / SQL edit); otherwise the row is
+                    // the canonical QueryCard with footer actions + detail slot.
+                    let cardBody: ReactNode = null;
+                    if (confirmingHash === entry.hash) {
+                      cardBody = (
+                        <div className="flex items-center justify-between gap-4 bg-surface-negative-soft/20 rounded-lg p-4 border border-border-negative-soft/30">
+                          <HStack className="gap-3 items-center flex-1 min-w-0">
+                            <Icon name="alert" label="Warning" className="w-5 h-5 text-content-negative-soft shrink-0" />
+                            <VStack className="gap-1 items-start min-w-0">
+                              <Text level="label-small" className="text-content-layout-1">
+                                Delete this query?
+                              </Text>
+                              <div className="bg-surface-layout-2 px-2 py-1 rounded max-w-md overflow-hidden">
+                                <SQLDisplay
+                                  sql={entry.sql.length > 60 ? `${entry.sql.slice(0, 60)}...` : entry.sql}
+                                  wrap={false}
+                                />
+                              </div>
+                            </VStack>
+                          </HStack>
+                          <HStack className="gap-2 shrink-0">
+                            <Button
+                              variant="primary"
+                              modifier="ghost"
+                              size="small"
+                              label="Cancel"
+                              onClick={() => setConfirmingHash(null)}
+                            />
+                            <Button
+                              variant="negative"
+                              modifier="solid"
+                              size="small"
+                              label="Delete"
+                              icon="trash"
+                              iconPosition="left"
+                              onClick={() => {
+                                removeQuery(entry.hash);
+                                setConfirmingHash(null);
+                              }}
+                            />
+                          </HStack>
+                        </div>
                       );
-                      if (runCount) metaParts.push(<span key="runs">{runCount}</span>);
-                    } else {
-                      metaParts.push(
-                        <span key="runs">
-                          {entry.frequency > 0
-                            ? `${entry.frequency} ${entry.frequency === 1 ? "run" : "runs"}`
-                            : "never run"}
-                        </span>,
+                    } else if (isRenaming) {
+                      cardBody = (
+                        <HStack className="gap-2 items-center w-full min-w-0">
+                          <div className="flex-1">
+                            <BaseInputText
+                              name={`edit-tag-${entry.hash}`}
+                              placeholder="Enter name"
+                              value={tagDraft}
+                              onChange={(e) => setTagDraft(e.target.value)}
+                            />
+                          </div>
+                          <Button
+                            variant="primary"
+                            modifier="ghost"
+                            size="small"
+                            icon="tick"
+                            iconPosition="icon"
+                            label="Save"
+                            onClick={() => handleRename(entry.hash, tagDraft.trim())}
+                          />
+                          <Button
+                            variant="primary"
+                            modifier="ghost"
+                            size="small"
+                            icon="close"
+                            iconPosition="icon"
+                            label="Cancel"
+                            onClick={() => {
+                              setEditingHash(null);
+                              setTagDraft("");
+                            }}
+                          />
+                        </HStack>
                       );
-                    }
-                    if ((entry.avg_duration_ms ?? 0) > 0) {
-                      metaParts.push(<span key="avg">avg {formatDuration(entry.avg_duration_ms)}</span>);
-                    }
-                    if (entry.target) {
-                      metaParts.push(
-                        <span key="target" className="inline-flex items-center gap-1">
-                          <Icon name="database" label="Target" className="w-3 h-3" />
-                          {entry.target}
-                        </span>,
+                    } else if (isEditingSql) {
+                      cardBody = (
+                        <VStack className="gap-3 items-stretch">
+                          <HStack className="gap-2 items-center min-w-0">
+                            <Text level="label-medium" className="text-content-layout-1 font-semibold truncate">
+                              {displayName}
+                            </Text>
+                            <Tag size="small" variant={sourceMeta.variant} modifier="ghost" label={sourceMeta.label} />
+                          </HStack>
+                          <SQLInput
+                            value={sqlDraft}
+                            onChange={setSqlDraft}
+                            placeholder="Edit SQL query..."
+                            minHeight="10rem"
+                            target={entry.target || target}
+                            showPrettify
+                          />
+                          <HStack className="justify-end gap-2">
+                            <Button
+                              variant="primary"
+                              modifier="ghost"
+                              size="small"
+                              label="Cancel"
+                              onClick={handleCancelEditSql}
+                            />
+                            <Button
+                              variant="rising"
+                              modifier="solid"
+                              size="small"
+                              label="Save"
+                              icon="tick"
+                              iconPosition="left"
+                              onClick={() => handleSaveSql(entry.hash)}
+                              loading={updateSqlMutation.isPending}
+                              disabled={!sqlDraft.trim()}
+                            />
+                          </HStack>
+                        </VStack>
                       );
                     }
 
                     return (
                       <m.div
                         key={entry.hash}
-                        data-testid="query-registry-row"
-                        data-query-hash={entry.hash}
                         initial={{ opacity: 0, y: -6 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, x: -16 }}
                         transition={{ duration: 0.18 }}
-                        className="rounded-xl bg-surface-layout-2 p-4 transition-all hover:bg-surface-raised hover:shadow-elevation-1 focus-within:bg-surface-raised focus-within:shadow-elevation-1"
                       >
-                        {confirmingHash === entry.hash ? (
-                          <div className="flex items-center justify-between gap-4 bg-surface-negative-soft/20 rounded-lg p-4 border border-border-negative-soft/30">
-                            <HStack className="gap-3 items-center flex-1 min-w-0">
-                              <Icon name="alert" label="Warning" className="w-5 h-5 text-content-negative-soft shrink-0" />
-                              <VStack className="gap-1 items-start min-w-0">
-                                <Text level="label-small" className="text-content-layout-1">
-                                  Delete this query?
-                                </Text>
-                                <div className="bg-surface-layout-2 px-2 py-1 rounded max-w-md overflow-hidden">
-                                  <SQLDisplay
-                                    sql={entry.sql.length > 60 ? `${entry.sql.slice(0, 60)}...` : entry.sql}
-                                    wrap={false}
-                                  />
-                                </div>
-                              </VStack>
-                            </HStack>
-                            <HStack className="gap-2 shrink-0">
-                              <Button
-                                variant="primary"
-                                modifier="ghost"
-                                size="small"
-                                label="Cancel"
-                                onClick={() => setConfirmingHash(null)}
-                              />
-                              <Button
-                                variant="negative"
-                                modifier="solid"
-                                size="small"
-                                label="Delete"
-                                icon="trash"
-                                iconPosition="left"
-                                onClick={() => {
-                                  removeQuery(entry.hash);
-                                  setConfirmingHash(null);
-                                }}
-                              />
-                            </HStack>
-                          </div>
+                        {cardBody ? (
+                          <QueryCard
+                            data-testid="query-registry-row"
+                            data-query-hash={entry.hash}
+                            sql={entry.sql}
+                          >
+                            {cardBody}
+                          </QueryCard>
                         ) : (
-                          <>
-                            {/* Line 1: identity + source + one primary action + overflow */}
-                            <HStack className="justify-between items-start gap-3">
-                              <VStack className="gap-1.5 items-start min-w-0 flex-1">
-                                {isRenaming ? (
-                                  <HStack className="gap-2 items-center w-full min-w-0">
-                                    <div className="flex-1">
-                                      <BaseInputText
-                                        name={`edit-tag-${entry.hash}`}
-                                        placeholder="Enter name"
-                                        value={tagDraft}
-                                        onChange={(e) => setTagDraft(e.target.value)}
-                                      />
-                                    </div>
-                                    <Button
-                                      variant="primary"
-                                      modifier="ghost"
-                                      size="small"
-                                      icon="tick"
-                                      iconPosition="icon"
-                                      label="Save"
-                                      onClick={() => handleRename(entry.hash, tagDraft.trim())}
-                                    />
-                                    <Button
-                                      variant="primary"
-                                      modifier="ghost"
-                                      size="small"
-                                      icon="close"
-                                      iconPosition="icon"
-                                      label="Cancel"
-                                      onClick={() => {
-                                        setEditingHash(null);
-                                        setTagDraft("");
-                                      }}
-                                    />
-                                  </HStack>
-                                ) : (
-                                  <>
-                                    <HStack className="gap-2 items-center w-full min-w-0">
-                                      <Text level="label-medium" className="text-content-layout-1 font-semibold truncate">
-                                        {displayName}
-                                      </Text>
-                                      <Tag
-                                        size="small"
-                                        variant={sourceMeta.variant}
-                                        modifier="ghost"
-                                        label={sourceMeta.label}
-                                      />
-                                    </HStack>
-                                    <Show when={!isEditingSql}>
-                                      <button
-                                        type="button"
-                                        onClick={() => setExpandedHash(isExpanded ? null : entry.hash)}
-                                        title={entry.sql}
-                                        aria-expanded={isExpanded}
-                                        className="text-left w-full min-w-0 rounded-md hover:bg-surface-layout-1 transition-colors cursor-pointer px-1 -mx-1 py-0.5 block"
-                                      >
-                                        <Text level="mono-small" className="text-content-layout-2 truncate block">
-                                          {getCollapsedPreview(entry.sql)}
-                                        </Text>
-                                      </button>
-                                    </Show>
-                                  </>
-                                )}
-                              </VStack>
-                              <Show when={!isRenaming && !isEditingSql}>
-                                <HStack className="gap-2.5 items-center shrink-0">
-                                  <QueryCacheStatus
-                                    cached={cached}
-                                    readysetSupported={entry.readyset_supported}
-                                    testing={isTesting}
-                                    speedup={runResults[entry.hash]?.speedup_mean}
-                                  />
-                                  <Show when={!cached && !notCacheable && !isTesting}>
-                                    <TooltipProvider delayDuration={150}>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <div>
-                                            <Button
-                                              variant="rising"
-                                              modifier="solid"
-                                              size="small"
-                                              icon="database-settings"
-                                              iconPosition="left"
-                                              label="Cache & test"
-                                              loading={cachingHash === entry.hash}
-                                              onClick={() => handleCacheQuery(entry.hash, entry.sql)}
-                                            />
-                                          </div>
-                                        </TooltipTrigger>
-                                        <TooltipContent label="Cache this query and measure the speedup vs your database" />
-                                      </Tooltip>
-                                    </TooltipProvider>
-                                  </Show>
-                                  <Show when={cached && !isTesting}>
-                                    <Button
-                                      variant="rising"
-                                      modifier="ghost"
-                                      size="small"
-                                      icon="database-settings"
-                                      iconPosition="left"
-                                      label={runResults[entry.hash] ? "Re-test" : "Test"}
-                                      onClick={() => runTest(entry.hash, entry.sql, entry.most_recent_params ?? {})}
-                                    />
-                                  </Show>
+                          <QueryCard
+                            data-testid="query-registry-row"
+                            data-query-hash={entry.hash}
+                            sql={entry.sql}
+                            title={
+                              <Text level="label-medium" className="text-content-layout-1 font-semibold truncate">
+                                {displayName}
+                              </Text>
+                            }
+                            badges={
+                              <>
+                                <Tag
+                                  size="small"
+                                  variant={sourceMeta.variant}
+                                  modifier="ghost"
+                                  label={sourceMeta.label}
+                                />
+                                <QueryCacheStatus
+                                  cached={cached}
+                                  readysetSupported={entry.readyset_supported}
+                                  testing={isTesting}
+                                  speedup={runResults[entry.hash]?.speedup_mean}
+                                />
+                              </>
+                            }
+                            meta={meta}
+                            actions={
+                              <>
+                                <Show when={!cached && !notCacheable && !isTesting}>
                                   <TooltipProvider delayDuration={150}>
                                     <Tooltip>
                                       <TooltipTrigger asChild>
                                         <div>
                                           <Button
-                                            variant="primary"
-                                            modifier="ghost"
+                                            variant="rising"
+                                            modifier="solid"
                                             size="small"
-                                            icon="speedometer"
+                                            icon="database-settings"
                                             iconPosition="left"
-                                            label="Analyze"
-                                            onClick={() => handleAnalyze(entry.sql, entry.target, entry.most_recent_params)}
+                                            label="Cache & test"
+                                            loading={cachingHash === entry.hash}
+                                            onClick={() => handleCacheQuery(entry.hash, entry.sql)}
                                           />
                                         </div>
                                       </TooltipTrigger>
-                                      <TooltipContent label="Analyze this query" />
+                                      <TooltipContent label="Cache this query and measure the speedup vs your database" />
                                     </Tooltip>
                                   </TooltipProvider>
-                                  <Dropdown>
-                                    <Dropdown.Trigger asChild>
-                                      <Button
-                                        variant="primary"
-                                        modifier="ghost"
-                                        size="small"
-                                        icon="more"
-                                        iconPosition="icon"
-                                        label="More actions"
-                                      />
-                                    </Dropdown.Trigger>
-                                    <Dropdown.Content align="end" className="min-w-52">
-                                      <Dropdown.Item
-                                        leftIcon="filter-edit"
-                                        label="Edit SQL"
-                                        onSelect={() => handleStartEditSql(entry.hash, entry.sql)}
-                                      />
-                                      <Dropdown.Item
-                                        leftIcon="edit"
-                                        label="Rename"
-                                        onSelect={() => {
-                                          setEditingHash(entry.hash);
-                                          setTagDraft(entry.tag || "");
-                                        }}
-                                      />
-                                      <Dropdown.Separator />
-                                      <Dropdown.Item
-                                        leftIcon="trash"
-                                        label="Delete"
-                                        className="text-content-negative-soft hover:text-content-negative-soft focus:text-content-negative-soft hover:bg-surface-negative-soft focus:bg-surface-negative-soft"
-                                        onSelect={() => setConfirmingHash(entry.hash)}
-                                      />
-                                    </Dropdown.Content>
-                                  </Dropdown>
-                                </HStack>
-                              </Show>
-                            </HStack>
-
-                            {/* Inline SQL editor (opened from the overflow menu) */}
-                            {isEditingSql && (
-                              <div className="mt-3">
-                                <SQLInput
-                                  value={sqlDraft}
-                                  onChange={setSqlDraft}
-                                  placeholder="Edit SQL query..."
-                                  minHeight="10rem"
-                                  target={entry.target || target}
-                                  showPrettify
-                                />
-                                <HStack className="justify-end gap-2 mt-3">
-                                  <Button
-                                    variant="primary"
-                                    modifier="ghost"
-                                    size="small"
-                                    label="Cancel"
-                                    onClick={handleCancelEditSql}
-                                  />
+                                </Show>
+                                <Show when={cached && !isTesting}>
                                   <Button
                                     variant="rising"
-                                    modifier="solid"
+                                    modifier="ghost"
                                     size="small"
-                                    label="Save"
-                                    icon="tick"
+                                    icon="database-settings"
                                     iconPosition="left"
-                                    onClick={() => handleSaveSql(entry.hash)}
-                                    loading={updateSqlMutation.isPending}
-                                    disabled={!sqlDraft.trim()}
+                                    label={runResults[entry.hash] ? "Re-test" : "Test"}
+                                    onClick={() => runTest(entry.hash, entry.sql, entry.most_recent_params ?? {})}
                                   />
-                                </HStack>
-                              </div>
-                            )}
-
-                            {/* Quiet meta line (runs · avg · target) + expand chevron */}
-                            <Show when={!isRenaming && !isEditingSql}>
-                              <HStack className="justify-between items-center gap-2 mt-2.5">
-                                <Text
-                                  as="div"
-                                  level="caption"
-                                  className="text-content-layout-3 flex items-center gap-1.5 flex-wrap min-w-0"
-                                >
-                                  {metaParts.map((part, i) => (
-                                    <Fragment key={i}>
-                                      {i > 0 && (
-                                        <span aria-hidden className="select-none">
-                                          ·
-                                        </span>
-                                      )}
-                                      {part}
-                                    </Fragment>
-                                  ))}
-                                </Text>
+                                </Show>
+                                <TooltipProvider delayDuration={150}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div>
+                                        <Button
+                                          variant="primary"
+                                          modifier="ghost"
+                                          size="small"
+                                          icon="speedometer"
+                                          iconPosition="left"
+                                          label="Analyze"
+                                          onClick={() => handleAnalyze(entry.sql, entry.target, entry.most_recent_params)}
+                                        />
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent label="Analyze this query" />
+                                  </Tooltip>
+                                </TooltipProvider>
+                                <Dropdown>
+                                  <Dropdown.Trigger asChild>
+                                    <Button
+                                      variant="primary"
+                                      modifier="ghost"
+                                      size="small"
+                                      icon="more"
+                                      iconPosition="icon"
+                                      label="More actions"
+                                    />
+                                  </Dropdown.Trigger>
+                                  <Dropdown.Content align="end" className="min-w-52">
+                                    <Dropdown.Item
+                                      leftIcon="filter-edit"
+                                      label="Edit SQL"
+                                      onSelect={() => handleStartEditSql(entry.hash, entry.sql)}
+                                    />
+                                    <Dropdown.Item
+                                      leftIcon="edit"
+                                      label="Rename"
+                                      onSelect={() => {
+                                        setEditingHash(entry.hash);
+                                        setTagDraft(entry.tag || "");
+                                      }}
+                                    />
+                                    <Dropdown.Separator />
+                                    <Dropdown.Item
+                                      leftIcon="trash"
+                                      label="Delete"
+                                      className="text-content-negative-soft hover:text-content-negative-soft focus:text-content-negative-soft hover:bg-surface-negative-soft focus:bg-surface-negative-soft"
+                                      onSelect={() => setConfirmingHash(entry.hash)}
+                                    />
+                                  </Dropdown.Content>
+                                </Dropdown>
                                 <button
                                   type="button"
                                   aria-label={isExpanded ? "Hide details" : "Show details"}
@@ -1150,11 +1126,11 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
                                     className="w-4 h-4"
                                   />
                                 </button>
-                              </HStack>
-
-                              {/* Expanded detail: full SQL (+ sibling Copy), hash, params, timestamps */}
-                              <Show when={isExpanded}>
-                                <VStack className="gap-3 items-stretch mt-3 pt-3 border-t border-border-layout-1">
+                              </>
+                            }
+                            expansion={
+                              isExpanded ? (
+                                <VStack className="gap-3 items-stretch pt-3 border-t border-border-layout-1">
                                   {/* Cache & test payoff — origin-vs-cache proof (rdst-41p.4) */}
                                   <Show when={!!runResults[entry.hash]}>
                                     <ComparisonCard
@@ -1168,18 +1144,6 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
                                       }
                                     />
                                   </Show>
-
-                                  <VStack className="gap-1.5 items-stretch">
-                                    <HStack className="justify-between items-center">
-                                      <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
-                                        SQL
-                                      </Text>
-                                      <CopyButton text={entry.sql} />
-                                    </HStack>
-                                    <div className="bg-surface-layout-1 rounded-lg px-3 py-2 overflow-x-auto">
-                                      <SQLDisplay sql={entry.sql} wrap />
-                                    </div>
-                                  </VStack>
 
                                   <HStack className="gap-x-4 gap-y-1.5 flex-wrap items-center">
                                     <HStack className="gap-1.5 items-center">
@@ -1229,9 +1193,9 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
                                     </Show>
                                   </HStack>
                                 </VStack>
-                              </Show>
-                            </Show>
-                          </>
+                              ) : undefined
+                            }
+                          />
                         )}
                       </m.div>
                     );

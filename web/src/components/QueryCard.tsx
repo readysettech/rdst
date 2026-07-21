@@ -89,6 +89,16 @@ interface QueryCardProps {
    */
   children?: ReactNode
 
+  /**
+   * Additive slot: a full-width region rendered INSIDE the card, below the
+   * footer row. Hosts a row's revealed detail that is too wide for a badge or
+   * the meta line — the Queries workbench uses it for the "Cache & test"
+   * before/after payoff (origin-vs-cache bars) plus the hash/params/timestamps
+   * detail. Optional and unset by default, so /top, /analyze and /benchmark —
+   * which never pass it — render byte-identically. [triage §1.1; VIS-108]
+   */
+  expansion?: ReactNode
+
   className?: string
   'data-testid'?: string
   'data-query-hash'?: string
@@ -130,6 +140,7 @@ export function QueryCard({
   selectable = false,
   selected = false,
   children,
+  expansion,
   className,
   'data-testid': dataTestid,
   'data-query-hash': dataQueryHash,
@@ -241,6 +252,13 @@ export function QueryCard({
             <HStack className="gap-2 items-center shrink-0">{actions}</HStack>
           </Show>
         </div>
+      </Show>
+
+      {/* Additive detail slot — full width, inside the card, below the footer.
+          Callers own its internal separator/padding. Absent for every consumer
+          that omits `expansion`, so their DOM is unchanged. */}
+      <Show when={!!expansion}>
+        <div className="px-4 pb-4">{expansion}</div>
       </Show>
     </div>
   )

@@ -5,7 +5,6 @@ import { CopyButton } from '@rs/ui-new/copy-button'
 import { Dropdown } from '@rs/ui-new/dropdown'
 import { Icon } from '@rs/ui-new/icon'
 import { AnimatePresence, m } from '@rs/ui-new/motion'
-import { Scrollable } from '@rs/ui-new/scrollable'
 import { Show } from '@rs/ui-new/show'
 import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
@@ -17,8 +16,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { TargetLockNotice } from '../components'
-import { SQLDisplay } from '../components/SQLDisplay'
+import { QueryCard } from '../components/QueryCard'
 import { useTarget } from '../hooks/useTarget'
+import { formatMeta } from '../lib/formatters'
 import {
   cacheLifecycle,
   deleteCacheQuery,
@@ -371,17 +371,27 @@ function CachedQueryRow({
 }) {
   const [confirming, setConfirming] = useState(false)
 
-  if (confirming) {
-    return (
-      <m.tr
-        key={entry.cache_id}
-        data-testid="cache-query-row"
-        data-cache-id={entry.cache_id}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="bg-surface-negative-soft/10"
-      >
-        <td colSpan={4} className="px-4 py-4">
+  // Compact canonical card: full highlighted SQL leads; the cache name titles it;
+  // the type reads as a badge and the TTL folds into the one muted meta line; the
+  // served list stays read-only apart from the link back to Queries (where caching
+  // lives) and Delete. The transient remove-confirm owns the card's `children`
+  // surface. [USE-097, VIS-108]
+  const meta = formatMeta([`TTL ${entry.ttl}`])
+
+  return (
+    <m.div
+      key={entry.cache_id}
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      transition={{ duration: 0.2 }}
+    >
+      {confirming ? (
+        <QueryCard
+          data-testid="cache-query-row"
+          data-cache-id={entry.cache_id}
+          sql={entry.query}
+        >
           <div className="flex items-center justify-between gap-4 bg-surface-negative-soft/20 rounded-lg p-4 border border-border-negative-soft">
             <HStack className="gap-3 items-center flex-1 min-w-0">
               <Icon
@@ -421,66 +431,46 @@ function CachedQueryRow({
               />
             </HStack>
           </div>
-        </td>
-      </m.tr>
-    )
-  }
-
-  return (
-    <m.tr
-      key={entry.cache_id}
-      data-testid="cache-query-row"
-      data-cache-id={entry.cache_id}
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      transition={{ duration: 0.2 }}
-      className="group hover:bg-surface-layout-2/50 transition-colors"
-    >
-      <td className="px-4 py-3">
-        <VStack className="gap-1 items-start">
-          <Text level="mono-small" className="text-content-layout-2">
-            {entry.cache_name}
-          </Text>
-          <Tag size="small" variant="informative" modifier="ghost" label={entry.type} />
-        </VStack>
-      </td>
-      <td className="px-4 py-3">
-        <div className="bg-surface-layout-2 rounded-lg max-w-lg">
-          <Scrollable className="max-h-24">
-            <div className="px-3 py-2">
-              <SQLDisplay sql={entry.query} wrap />
-            </div>
-          </Scrollable>
-        </div>
-      </td>
-      <td className="px-4 py-3 text-center">
-        {/* TTL is a neutral value, not info/warn: grey Tag. */}
-        <Tag size="small" variant="neutral" modifier="ghost" label={entry.ttl} />
-      </td>
-      <td className="px-4 py-3 text-right">
-        <HStack className="gap-2 justify-end items-center">
-          <Show when={!!entry.registry_hash}>
-            <Link
-              to="/query-registry"
-              search={{ hash: entry.registry_hash ?? undefined }}
-              className="text-sm text-content-primary-soft hover:underline whitespace-nowrap"
-            >
-              View in Queries
-            </Link>
-          </Show>
-          <Button
-            variant="negative"
-            modifier="ghost"
-            size="small"
-            icon="trash"
-            iconPosition="icon"
-            label="Delete"
-            onClick={() => setConfirming(true)}
-          />
-        </HStack>
-      </td>
-    </m.tr>
+        </QueryCard>
+      ) : (
+        <QueryCard
+          data-testid="cache-query-row"
+          data-cache-id={entry.cache_id}
+          sql={entry.query}
+          title={
+            <Text level="mono-small" className="text-content-layout-2">
+              {entry.cache_name}
+            </Text>
+          }
+          badges={
+            <Tag size="small" variant="informative" modifier="ghost" label={entry.type} />
+          }
+          meta={meta}
+          actions={
+            <>
+              <Show when={!!entry.registry_hash}>
+                <Link
+                  to="/query-registry"
+                  search={{ hash: entry.registry_hash ?? undefined }}
+                  className="text-sm text-content-primary-soft hover:underline whitespace-nowrap"
+                >
+                  View in Queries
+                </Link>
+              </Show>
+              <Button
+                variant="negative"
+                modifier="ghost"
+                size="small"
+                icon="trash"
+                iconPosition="icon"
+                label="Delete"
+                onClick={() => setConfirming(true)}
+              />
+            </>
+          }
+        />
+      )}
+    </m.div>
   )
 }
 
@@ -1280,37 +1270,21 @@ export function CachePage() {
                 </div>
               </Show>
 
-              {/* Cached queries table */}
+              {/* Served caches — stacked canonical cards (one idiom with Queries,
+                  /top, Analyze, Benchmark); read-only apart from the link back to
+                  Queries and Delete. [USE-097, VIS-108] */}
               <Show when={!isLoadingList && caches.length > 0}>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-surface-layout-2/30">
-                        <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium w-48">
-                          Cache
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium">
-                          Query
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
-                          TTL
-                        </th>
-                        <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-16" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border-layout-1">
-                      <AnimatePresence mode="popLayout">
-                        {caches.map((entry) => (
-                          <CachedQueryRow
-                            key={entry.cache_id}
-                            entry={entry}
-                            onDelete={(id) => deleteMutation.mutate(id)}
-                            isDeleting={deletingId === entry.cache_id}
-                          />
-                        ))}
-                      </AnimatePresence>
-                    </tbody>
-                  </table>
+                <div className="p-3 space-y-2 bg-surface-layout-1">
+                  <AnimatePresence mode="popLayout">
+                    {caches.map((entry) => (
+                      <CachedQueryRow
+                        key={entry.cache_id}
+                        entry={entry}
+                        onDelete={(id) => deleteMutation.mutate(id)}
+                        isDeleting={deletingId === entry.cache_id}
+                      />
+                    ))}
+                  </AnimatePresence>
                 </div>
               </Show>
 
