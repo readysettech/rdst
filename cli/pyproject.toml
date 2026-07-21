@@ -50,6 +50,7 @@ dependencies = [
     "sse-starlette>=2.0.0",
     "fastapi-ai-sdk>=0.1.0",
     "keyring>=25.0.0",
+    "packaging>=26.0",
 ]
 
 [project.optional-dependencies]

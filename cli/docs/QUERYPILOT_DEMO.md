@@ -4,7 +4,7 @@ See the Readyset Platform compare PostgreSQL and Readyset side by side, with Que
 
 ## Requirements
 
-- Python 3.10 or later
+- `curl` or `wget`
 - Docker running locally
 - About 1.1 GB for a one-time container image download (the sample database ships pre-built)
 - About 2 GB of free disk space while the demo is running
@@ -14,7 +14,8 @@ See the Readyset Platform compare PostgreSQL and Readyset side by side, with Que
 Install RDST and start the web app:
 
 ```bash
-pip install rdst
+curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 rdst web
 ```
 

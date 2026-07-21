@@ -10,3 +10,4 @@ pyyaml
 sqlglot
 anthropic
 botocore
+packaging>=26.0

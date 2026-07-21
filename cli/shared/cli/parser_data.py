@@ -1022,6 +1022,35 @@ and walks you through rdst features interactively.""",
         args=[],
         examples=[("rdst version", "Show version")],
     ),
+    "update": CommandDef(
+        name="update",
+        short_help="Check for and install RDST updates",
+        description="""Check for a new RDST release or update an installer-managed installation.
+
+RDST only changes installations created by the Readyset installer. Installations
+owned by uv, pipx, or pip remain under the control of their package manager.""",
+        args=[
+            MutuallyExclusiveGroup(
+                args=[
+                    ArgDef(
+                        "--check",
+                        action="store_true",
+                        help="Check for a newer release without installing it",
+                    ),
+                    ArgDef(
+                        "--version",
+                        metavar="VERSION",
+                        help="Install an exact RDST version",
+                    ),
+                ]
+            )
+        ],
+        examples=[
+            ("rdst update --check", "Check for an update"),
+            ("rdst update", "Install the latest release"),
+            ("rdst update --version 0.1.1589", "Install an exact version"),
+        ],
+    ),
     "web": CommandDef(
         name="web",
         short_help="Start the RDST web server for the web client",
@@ -1702,6 +1731,7 @@ COMMAND_ORDER = [
     "claude",
     "web",
     "version",
+    "update",
 ]
 
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
@@ -1709,7 +1739,7 @@ COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ("Configuration", ["init", "configure", "schema", "query", "guard"]),
     ("Cache & Fleet", ["cache", "fleet", "audit"]),
     ("Integrations", ["claude", "slack", "web"]),
-    ("Other", ["demo", "scan", "report", "help", "version"]),
+    ("Other", ["demo", "scan", "report", "help", "version", "update"]),
 ]
 
 

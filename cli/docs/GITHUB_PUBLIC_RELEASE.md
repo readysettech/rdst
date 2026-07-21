@@ -103,18 +103,17 @@ lib/
 
 ## Package Distribution
 
-RDST is distributed via PyPI as `rdst`:
+RDST is published to PyPI as `rdst` and distributed through the first-party
+installer:
 
 ```bash
-# Install via pip
-pip install rdst
-
-# Install via pipx (recommended)
-pipx install rdst
-
-# Run without installing via uvx
-uvx rdst --help
+curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh
 ```
+
+The mutable installer is pinned to the exact PyPI release validated on native
+macOS, Linux x86_64, and Linux arm64 agents before publication. It installs into
+a private, user-owned runtime. Existing uv and pipx users can continue to
+install from PyPI directly.
 
 ## For Maintainers
 

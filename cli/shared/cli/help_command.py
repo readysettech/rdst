@@ -31,24 +31,23 @@ It connects to PostgreSQL or MySQL databases and provides AI-powered recommendat
 
 ## Installation
 
-**Requirements:** Python 3.9+
-
-### macOS
+### macOS and Linux
 ```bash
-pip install rdst
+curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-### Linux
-```bash
-pip install rdst
-```
+The installer supports x86_64 and arm64 without sudo, pip, or a preinstalled
+Python. Linux requires a glibc-based distribution.
 
 ### Windows
 Coming soon.
 
-### Verify Installation
+### Verify and Update
 ```bash
 rdst version
+rdst update --check
+rdst update
 ```
 
 ## Quick Start
@@ -999,7 +998,7 @@ rdst web --clear
 ```
 
 The web server provides a browser-based interface and REST API for all RDST
-functionality. Requires `pip install rdst[server]` for server dependencies.
+functionality. Server dependencies are included with RDST.
 
 ### rdst slack
 Manage Slack integrations for data agents.

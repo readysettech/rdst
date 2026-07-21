@@ -19,6 +19,7 @@ import os
 # claude: Meta command for registering with Claude Code
 # help: Handled by rdst_help tool differently (rdst help "question" for docs lookup)
 # ask: Requires interactive TTY for best experience
+# update: Mutates the installer-managed runtime and must be invoked explicitly
 MCP_EXCLUDED_COMMANDS = {
     "claude",  # N/A - meta command for MCP registration itself
     "help",  # N/A - rdst_help handles this differently
@@ -27,6 +28,7 @@ MCP_EXCLUDED_COMMANDS = {
     "guard",  # CLI-only - interactive guard management
     "demo",  # CLI-only - requires Docker and interactive TTY
     "web",  # CLI-only - starts a long-running local server
+    "update",  # CLI-only - mutates the installer-managed runtime
     # fleet and audit have MCP tools — see SUBCOMMAND_MAPPING
     # Schema subcommands (handled via rdst_schema tool, some are CLI-only)
     "annotate",  # Schema subcommand - interactive wizard, CLI-only

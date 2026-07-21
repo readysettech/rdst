@@ -248,6 +248,7 @@ Commands:
   tag          Tag and store queries for later reference
   list         Show saved queries
   version      Show version information
+  update       Check for and install RDST updates
   report       Submit feedback or bug reports
   help         Show detailed help
 
@@ -616,6 +617,13 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
 
     elif command == 'version':
         return cli.version()
+    elif command == "update":
+        from features.update.cli import UpdateCommand
+
+        return UpdateCommand().execute(
+            check=getattr(args, "check", False),
+            version=getattr(args, "version", None),
+        )
     elif command == "claude":
         # Register or remove RDST from Claude Code
         import shutil
@@ -812,8 +820,8 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
         except ImportError:
             return RdstResult(
                 False,
-                "Server dependencies not installed.\n"
-                "Install with: pip install rdst[server]",
+                "Server dependencies are unavailable.\n"
+                "Run 'rdst update' or reinstall RDST.",
             )
 
         rdst_dir = _resolve_rdst_source_dir()
@@ -996,7 +1004,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
         _menu_command_names = [
             "configure", "top", "analyze", "ask", "scan", "agent", "guard",
             "init", "query", "schema", "cache", "fleet", "audit", "demo",
-            "version", "report", "help", "claude", "slack", "web",
+            "version", "update", "report", "help", "claude", "slack", "web",
         ]
         commands = [
             (name, _PARSER_COMMANDS[name].short_help)
@@ -1135,6 +1143,10 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             return cli.schema()
         elif cmd == "version":
             return cli.version()
+        elif cmd == "update":
+            from features.update.cli import UpdateCommand
+
+            return UpdateCommand().execute()
         elif cmd == "report":
             from shared.cli.report_command import ReportCommand
             report_cmd = ReportCommand()

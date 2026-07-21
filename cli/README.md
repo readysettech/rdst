@@ -13,35 +13,49 @@ RDST helps you:
 
 ## Installation
 
-### Using uvx (recommended - no installation required)
-
-Run RDST directly without installing:
+Install RDST on macOS or Linux without sudo, pip, or a preinstalled Python:
 
 ```bash
-uvx rdst --help
-uvx rdst analyze "SELECT * FROM users WHERE id = 1"
+curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh
 ```
 
-### Using pipx (persistent installation)
-
-Install globally:
+Open a new shell, then verify the installation:
 
 ```bash
-# Install
-pipx install rdst
-
-# Run
-rdst --help
-
-# Upgrade to latest version
-pipx upgrade rdst
+rdst version
 ```
 
-### Using pip
+The installer supports Apple silicon, Intel macOS, and glibc-based x86_64 or
+arm64 Linux distributions. To install an exact package release:
 
 ```bash
-pip install rdst
+curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | \
+  sh -s -- --version 0.1.1589
 ```
+
+Immutable release scripts and checksums are published under
+`packages/rdst-cli/versions/VERSION/` on the download origin.
+
+Installer-managed RDST never updates silently. Check for and install updates explicitly:
+
+```bash
+rdst update --check
+rdst update
+```
+
+`rdst update` installs the exact resolved release and makes no changes when the
+installed version is already current.
+
+To uninstall the managed runtime while preserving `~/.rdst` configuration:
+
+```bash
+curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | \
+  sh -s -- --uninstall
+```
+
+Existing uv and pipx users can continue to use `uv tool install rdst` or
+`pipx install rdst`; those installations remain managed by their package manager.
+Update them with `uv tool upgrade rdst` or `pipx upgrade rdst`.
 
 > **After installing**, run `rdst init` to configure your first database connection.
 
@@ -118,7 +132,8 @@ uvx rdst analyze "SELECT * FROM orders WHERE status = 'pending'"
 
 ## Requirements
 
-- Python 3.11 or higher
+- macOS or a glibc-based Linux distribution on x86_64 or arm64
+- `curl` or `wget`
 - PostgreSQL or MySQL database access
 
 ## About Readyset

@@ -94,6 +94,7 @@ Current feature-owned domains:
 - `slack`
 - `top`
 - `trial`
+- `update`
 
 Each slice should be readable from its `models.py` and `service.py` first. That is the feature contract.
 
@@ -120,6 +121,7 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 - `slack`: Slack bot, Slack formatting, Slack manifest/handler logic
 - `top`: live/top query monitoring, realtime display, top command sets
 - `trial`: trial registration and trial status flows
+- `update`: installer-owned version resolution and immutable generation activation
 
 ### Shared infrastructure
 

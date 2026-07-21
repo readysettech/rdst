@@ -6,10 +6,10 @@ This server exposes RDST functionality to AI assistants like Claude through the 
 It provides tools for database diagnostics, query analysis, and performance tuning.
 
 INSTALLATION:
-    pip install rdst
+    curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh
 
 REGISTRATION WITH CLAUDE CODE:
-    claude mcp add rdst -- python3 -m rdst.mcp_server
+    claude mcp add rdst -- rdst-mcp
 
 WHAT THIS PROVIDES:
     - Database target configuration management
@@ -68,8 +68,9 @@ It connects to PostgreSQL or MySQL databases and provides AI-powered analysis
 of query performance, index recommendations, and caching suggestions.
 
 ### Installation & Upgrade
-- Install: `pip install rdst`
-- Upgrade: `pip install --upgrade rdst`
+- Install: `curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh`
+- Check for updates: `rdst update --check`
+- Upgrade: `rdst update`
 - Check version: `rdst version`
 
 {SLOW_QUERY_WORKFLOW_DETAILED}
@@ -249,7 +250,7 @@ def run_rdst_command(args: List[str]) -> Dict[str, Any]:
         return {
             "success": False,
             "stdout": "",
-            "stderr": "RDST not found. Install with: pip install rdst",
+            "stderr": "RDST not found. Install from https://docs.readyset.io/readyset-ai/rdst/getting-started",
             "returncode": -1
         }
     except Exception as e:
@@ -2357,7 +2358,7 @@ def handle_prompt(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 Please help me:
 1. First, check if RDST is installed (rdst version)
-2. If not installed, tell me to run: pip install rdst
+2. If not installed, direct me to: https://docs.readyset.io/readyset-ai/rdst/getting-started
 3. Check if I have any targets configured (rdst configure list)
 4. If no targets, help me add one with rdst_configure_add
 5. Remind me to export the password environment variable
