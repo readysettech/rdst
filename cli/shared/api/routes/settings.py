@@ -197,6 +197,48 @@ async def set_email(request: Request, body: EmailRequest) -> EmailUpdateResponse
     )
 
 
+class ResetLocalDataResponse(BaseModel):
+    success: bool
+    removed_path: str
+
+
+@router.post("/reset-local-data")
+async def reset_local_data(request: Request) -> ResetLocalDataResponse:
+    """Delete the local RDST data directory (~/.rdst) and stored secrets.
+
+    Removes connection configs, saved queries, semantic layer, analysis
+    history, trial/identity state, and keyring-persisted keys, returning
+    this install to a fresh state. Server-side accounts (trial
+    registration) are untouched - re-entering a registered email recovers
+    the trial token by email."""
+    if not is_loopback_request(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not same_host_from_headers(request):
+        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+
+    import os
+    import shutil
+
+    from shared.constants import rdst_data_dir
+    from shared.env_requirements_service import EnvRequirementsService
+    from shared.secret_store_service import SecretStoreService
+
+    data_dir = rdst_data_dir()
+    shutil.rmtree(data_dir, ignore_errors=True)
+
+    # A wiped install must not resurrect any keyring-persisted secret (keys
+    # and target passwords) from the process env or the keyring on restart.
+    names = EnvRequirementsService().get_allowed_secret_names()
+    for name in names:
+        os.environ.pop(name, None)
+    try:
+        SecretStoreService().clear_required(names)
+    except Exception:
+        pass
+
+    return ResetLocalDataResponse(success=True, removed_path=str(data_dir))
+
+
 @router.post("/email/verify-poll")
 async def verify_poll(request: Request) -> VerifyPollResponse:
     """One non-blocking check of the primary email's verification, mirroring

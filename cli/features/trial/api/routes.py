@@ -26,12 +26,20 @@ class TrialRegisterResponse(BaseModel):
     # Set when the email was already verified and the keyservice handed the
     # token back directly - the UI can activate without any inbox round-trip.
     trial_token: str | None = None
+    # Set when the email was already verified and the keyservice emailed a
+    # fresh link to the token page instead of starting verification.
+    token_resent: bool = False
+    # The account's real balance on a resend, so activation preserves it.
+    limit_cents: int | None = None
+    remaining_cents: int | None = None
 
 
 class TrialActivateRequest(BaseModel):
     token: str
     email: str
     email_tier: str | None = None
+    limit_cents: int | None = None
+    remaining_cents: int | None = None
 
 
 class TrialActivateResponse(BaseModel):
@@ -75,6 +83,9 @@ async def register_trial(
         did_you_mean=result.did_you_mean,
         status_code=result.status_code,
         trial_token=result.trial_token,
+        token_resent=result.token_resent,
+        limit_cents=result.limit_cents,
+        remaining_cents=result.remaining_cents,
     )
 
 
@@ -89,7 +100,8 @@ async def activate_trial(
 
     service = TrialService()
     result = await service.activate(
-        body.token, body.email, body.email_tier, source="web"
+        body.token, body.email, body.email_tier, source="web",
+        limit_cents=body.limit_cents, remaining_cents=body.remaining_cents,
     )
     return TrialActivateResponse(
         success=result.success,

@@ -119,7 +119,7 @@ describe("ValidateStep", () => {
 
     renderValidateStep();
 
-    expect(await screen.findByRole("button", { name: /Try Free Trial/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Claim free trial credits/i })).toBeTruthy();
     expect(await screen.findByRole("button", { name: /I Have a Key/i })).toBeTruthy();
   });
 
@@ -222,7 +222,7 @@ describe("ValidateStep", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /Try Free Trial/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Claim free trial credits/i })).toBeNull();
       expect(screen.queryByRole("button", { name: /I Have a Key/i })).toBeNull();
     });
   });

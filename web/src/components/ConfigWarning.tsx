@@ -18,7 +18,7 @@ import { invalidateTrialRelatedQueries, useTrialSource } from '../lib/trialQueri
 interface WarningConfig {
   title: string;
   description: string;
-  command: string;
+  command?: string;
   severity: 'error' | 'warning';
   actionLabel?: string;
   actionType?: 'open-env-dialog' | 'open-trial-dialog';
@@ -42,7 +42,6 @@ function getWarningConfig(
     return {
       title: 'Trial Credits Exhausted',
       description: 'Your free trial tokens have been used up. Set an Anthropic API key to continue using AI analysis.',
-      command: 'export ANTHROPIC_API_KEY=sk-ant-...',
       severity: 'error',
       actionLabel: 'Set API Key',
       actionType: 'open-env-dialog',
@@ -54,7 +53,6 @@ function getWarningConfig(
     return {
       title: 'Low Trial Balance',
       description: `${trialState.remaining_tokens_display} of ${trialState.limit_tokens_display} trial tokens remaining. Consider getting your own API key.`,
-      command: 'export ANTHROPIC_API_KEY=sk-ant-...',
       severity: 'warning',
       actionLabel: 'Set API Key',
       actionType: 'open-env-dialog',
@@ -63,18 +61,14 @@ function getWarningConfig(
 
   // Missing key — offer both trial and set key
   if (missingAnthropicRequirements.length > 0) {
-    const names = missingAnthropicRequirements
-      .map((item) => item.accepted_names[0])
-      .filter(Boolean)
-      .join(', ');
     return {
       title: 'Missing Anthropic API Key',
-      description: `Required API key is missing: ${names}. Start a free trial or set your own key.`,
-      command: 'export ANTHROPIC_API_KEY=<value>',
+      description:
+        "AI-powered features require an Anthropic API key. Set your key below, or claim free trial credits if you don't have one.",
       severity: 'warning',
-      actionLabel: 'Try Free Trial',
+      actionLabel: 'Claim free trial credits',
       actionType: 'open-trial-dialog',
-      secondaryActionLabel: 'Set API Key',
+      secondaryActionLabel: 'Set API key',
       secondaryActionType: 'open-env-dialog',
     };
   }
@@ -158,21 +152,22 @@ function ConfigBanner({
                 </Text>
               </VStack>
 
-              {/* Command block */}
-              <HStack className="
-                gap-2 items-center w-full
-                bg-surface-layout-2/50
-                rounded-lg px-3 py-2
-                border-(length:--border-base) border-border-layout-1
-              ">
-                <Text
-                  level="mono-small"
-                  className="text-content-layout-1 flex-1 truncate select-all"
-                >
-                  {config.command}
-                </Text>
-                <CopyButton text={config.command} />
-              </HStack>
+              {config.command && (
+                <HStack className="
+                  gap-2 items-center w-full
+                  bg-surface-layout-2/50
+                  rounded-lg px-3 py-2
+                  border-(length:--border-base) border-border-layout-1
+                ">
+                  <Text
+                    level="mono-small"
+                    className="text-content-layout-1 flex-1 truncate select-all"
+                  >
+                    {config.command}
+                  </Text>
+                  <CopyButton text={config.command} />
+                </HStack>
+              )}
 
               {(config.actionLabel && onAction) && (
                 <HStack className="gap-2 items-center">
@@ -249,6 +244,10 @@ export function ConfigWarning() {
     if (
       location.pathname === '/' ||
       location.pathname === '/onboarding' ||
+      // Settings must stay reachable with zero targets: it's where the user
+      // manages keys and can reset local data. Redirecting it away traps a
+      // fresh or wiped install with no way back in.
+      location.pathname === '/configure' ||
       location.pathname.startsWith('/demo')
     ) return;
     if (initStatus.initialized === false || status.targets.length === 0) {
@@ -328,6 +327,7 @@ export function ConfigWarning() {
         showManualAnthropicInput={shouldShowManualAnthropicInput}
         keyringAvailable={envRequirements?.keyring_available ?? false}
         onSuccess={invalidateAll}
+        onTrialRegister={() => setShowTrialDialog(true)}
       />
       <TrialRegistrationDialog
         isOpen={showTrialDialog}

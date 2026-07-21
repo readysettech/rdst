@@ -10,7 +10,7 @@ import { m } from '@rs/ui-new/motion'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useLocation, useRouter } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -20,7 +20,9 @@ import {
   SettingsSection,
 } from '../components/configure'
 import { EnvSecretsDialog } from '../components/EnvSecretsDialog'
+import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
 import type { AnthropicKeyValidation, EnvRequirement } from '../lib/api'
+import { resetLocalData } from '../lib/api'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
@@ -103,6 +105,29 @@ function ConfigurePage() {
   const [editingTarget, setEditingTarget] =
     useState<ConfigureTargetDetail | null>(null)
   const [showAnthropicDialog, setShowAnthropicDialog] = useState(false)
+  const [showTrialDialog, setShowTrialDialog] = useState(false)
+  // Two-click destructive reset: first click arms with an explicit warning,
+  // second click deletes; arming auto-expires.
+  const [resetArmed, setResetArmed] = useState(false)
+  useEffect(() => {
+    if (!resetArmed) return
+    const id = setTimeout(() => setResetArmed(false), 8000)
+    return () => clearTimeout(id)
+  }, [resetArmed])
+  const resetMutation = useMutation({
+    mutationFn: resetLocalData,
+    // A wiped ~/.rdst invalidates every piece of client state at once; a
+    // full reload lands on the fresh-install experience.
+    onSuccess: () => window.location.reload(),
+    onError: () => setResetArmed(false),
+  })
+  const handleResetLocalData = () => {
+    if (!resetArmed) {
+      setResetArmed(true)
+      return
+    }
+    resetMutation.mutate()
+  }
   // Which connection is being tested (drives the inline per-row spinner), and
   // whether the current inline result has been dismissed.
   const [testingTarget, setTestingTarget] = useState<string | null>(null)
@@ -139,19 +164,24 @@ function ConfigurePage() {
     (trialStatus?.status === 'exhausted' || trialStatus?.active === false)
   const showAnthropicAction = Boolean(anthropicRequirement)
 
-  // Presence vs. validity: a saved key can still be stale/rejected. Probe only
-  // when a key is actually present, and treat the pre-resolve window as a
-  // neutral "Checking…" state rather than a false-green "Configured".
-  // Ports the key-validity probe from CL 14060, adapted to our query hooks.
+  // Presence vs. validity: a saved key can still be stale/rejected. Probe
+  // only when a real Anthropic key is the active source - a trial token is
+  // not an Anthropic key, so testing it against Anthropic would always
+  // "reject" and the verdict would be meaningless.
   const hasAnthropicKey =
-    (Boolean(anthropicRequirement?.satisfied) || trialSourceDetected) &&
+    Boolean(anthropicRequirement?.satisfied) &&
+    !trialSourceDetected &&
     !isTrialExhausted
   const keyValidityQuery = useAnthropicValidity(hasAnthropicKey)
   const keyValidity = keyValidityQuery.data
   const keyChecking =
     hasAnthropicKey && keyValidityQuery.isFetching && !keyValidity
+  // Guarded on hasAnthropicKey so a verdict cached before switching to trial
+  // credits can't keep the rejected state alive.
   const keyRejected =
-    keyValidity?.valid === false && keyValidity.reason === 'rejected'
+    hasAnthropicKey &&
+    keyValidity?.valid === false &&
+    keyValidity.reason === 'rejected'
 
   const anthropicStatusTitle = isTrialExhausted
     ? 'Trial Credits Exhausted'
@@ -503,6 +533,16 @@ function ConfigurePage() {
                         onClick={handleTestKey}
                       />
                     </Show>
+                    <Show when={!trialSourceDetected}>
+                      <Button
+                        variant="primary"
+                        modifier="ghost"
+                        label="Use trial credits"
+                        icon="sparkles"
+                        iconPosition="left"
+                        onClick={() => setShowTrialDialog(true)}
+                      />
+                    </Show>
                     <Button
                       variant="primary"
                       modifier="outline"
@@ -569,6 +609,26 @@ function ConfigurePage() {
                   and analysis history. Passwords are stored in your system
                   keyring, never in plain text.
                 </Text>
+                <HStack className="gap-3 items-center pt-2">
+                  <Button
+                    variant="negative"
+                    modifier="outline"
+                    label={
+                      resetArmed
+                        ? 'Click again to permanently remove'
+                        : 'Remove all local data'
+                    }
+                    disabled={resetMutation.isPending}
+                    onClick={handleResetLocalData}
+                  />
+                  {resetArmed ? (
+                    <Text level="caption" className="text-content-negative-soft">
+                      Deletes {dataDirectory} and stored keys. Your trial
+                      registration is kept server-side — re-enter your email
+                      to recover your token.
+                    </Text>
+                  ) : null}
+                </HStack>
               </VStack>
             </div>
           </SettingsSection>
@@ -595,6 +655,12 @@ function ConfigurePage() {
         requirements={anthropicDialogRequirements}
         showManualAnthropicInput
         keyringAvailable={Boolean(envRequirements?.keyring_available)}
+        onTrialRegister={() => setShowTrialDialog(true)}
+        trialActionLabel={
+          trialSourceDetected
+            ? 'Email me my trial token'
+            : "Don't have a key? Claim free trial credits"
+        }
         onSuccess={() => {
           void invalidateTrialRelatedQueries(queryClient)
           // Key changed: drop the cached validity verdict and re-check so the
@@ -604,6 +670,18 @@ function ConfigurePage() {
           })
           void keyValidityQuery.refetch()
           // If a routable "needs a key" notice sent us here, resume the feature.
+          returnToFeature()
+        }}
+      />
+
+      <TrialRegistrationDialog
+        isOpen={showTrialDialog}
+        onClose={() => setShowTrialDialog(false)}
+        onSuccess={() => {
+          void invalidateTrialRelatedQueries(queryClient)
+          void queryClient.invalidateQueries({
+            queryKey: ['anthropic-validity'],
+          })
           returnToFeature()
         }}
       />

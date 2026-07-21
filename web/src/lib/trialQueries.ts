@@ -9,6 +9,9 @@ export async function invalidateTrialRelatedQueries(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: ['init-status'], ...options }),
     queryClient.invalidateQueries({ queryKey: ['env-requirements'], ...options }),
     queryClient.invalidateQueries({ queryKey: ['trial-status'], ...options }),
+    // Activating a trial promotes its email to the machine identity; refresh
+    // the sidebar identity so it shows the current address, not a stale one.
+    queryClient.invalidateQueries({ queryKey: ['settings', 'email'], ...options }),
   ]);
 }
 

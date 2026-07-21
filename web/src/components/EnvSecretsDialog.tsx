@@ -24,8 +24,17 @@ interface EnvSecretsDialogProps {
   keyringAvailable: boolean;
   onSuccess?: () => void;
   onTrialRegister?: () => void;
+  // Label for the trial pivot action; callers vary it by trial state (e.g.
+  // "Email me my trial token" when a trial is already the active source).
+  trialActionLabel?: string;
   showManualAnthropicInput?: boolean;
 }
+
+// Trial tokens are UUIDs; Anthropic keys are sk-ant-... strings. The one key
+// input accepts both and files each under the right name so users never deal
+// with environment variable names themselves.
+const TRIAL_TOKEN_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface MissingEntry {
   key: string;
@@ -46,7 +55,7 @@ function toMissingEntries(requirements: EnvRequirement[]): MissingEntry[] {
       const hint =
         item.kind === 'target_password'
           ? `Set ${envName} for database authentication.`
-          : `Set ${envName}. Also accepted: ${item.accepted_names.slice(1).join(', ') || 'none'}.`;
+          : 'Paste your Anthropic API key or your Readyset trial token.';
       return {
         key: `${item.kind}:${envName}:${item.target || 'global'}`,
         envName,
@@ -63,6 +72,7 @@ export function EnvSecretsDialog({
   keyringAvailable,
   onSuccess,
   onTrialRegister,
+  trialActionLabel,
   showManualAnthropicInput = false,
 }: EnvSecretsDialogProps) {
   const entries = useMemo(() => {
@@ -75,7 +85,7 @@ export function EnvSecretsDialog({
         key: "anthropic_api_key:ANTHROPIC_API_KEY:global",
         envName: "ANTHROPIC_API_KEY",
         label: "Anthropic API Key",
-        hint: "Set ANTHROPIC_API_KEY. Also accepted: RDST_TRIAL_TOKEN.",
+        hint: "Paste your Anthropic API key or your Readyset trial token.",
       },
     ];
   }, [requirements, showManualAnthropicInput]);
@@ -146,11 +156,14 @@ export function EnvSecretsDialog({
 
   const handleSubmit = () => {
     const payloads = entries
-      .map((entry) => ({
-        name: entry.envName,
-        value: (values[entry.envName] || '').trim(),
-        persist,
-      }))
+      .map((entry) => {
+        const value = (values[entry.envName] || '').trim();
+        const name =
+          entry.envName === 'ANTHROPIC_API_KEY' && TRIAL_TOKEN_RE.test(value)
+            ? 'RDST_TRIAL_TOKEN'
+            : entry.envName;
+        return { name, value, persist };
+      })
       .filter((item) => item.value.length > 0);
 
     if (payloads.length === 0) {
@@ -235,7 +248,7 @@ export function EnvSecretsDialog({
                           [entry.envName]: event.target.value,
                         }))
                       }
-                      placeholder={`Enter value for ${entry.envName}`}
+                      placeholder={`Enter ${entry.label}`}
                       disabled={setEnvSecretMutation.isPending}
                     />
                     <Text level="caption" className="text-content-layout-3">
@@ -246,18 +259,21 @@ export function EnvSecretsDialog({
               </div>
             )}
 
-            {onTrialRegister && requirements.some((r) => r.kind === 'anthropic_api_key') && (
-              <div className="text-center">
-                <button
-                  type="button"
-                  className="text-sm text-content-primary-soft hover:underline cursor-pointer"
+            {onTrialRegister &&
+              (requirements.some((r) => r.kind === 'anthropic_api_key') ||
+                showManualAnthropicInput) && (
+              <div className="flex justify-center">
+                <Button
+                  variant="primary"
+                  modifier="ghost"
+                  icon="sparkles"
+                  iconPosition="left"
+                  label={trialActionLabel ?? "Don't have a key? Claim free trial credits"}
                   onClick={() => {
                     onClose();
                     onTrialRegister();
                   }}
-                >
-                  Don&apos;t have a key? Try for free
-                </button>
+                />
               </div>
             )}
 

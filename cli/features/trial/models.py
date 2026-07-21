@@ -23,6 +23,13 @@ class TrialRegisterResult:
     # already verified (e.g. through the web gate), so there is no
     # verification email to wait for and the client can activate immediately.
     trial_token: str | None = None
+    # True when the email was already verified and the keyservice emailed a
+    # fresh link to the token page instead of starting verification.
+    token_resent: bool = False
+    # The account's real balance, present on a resend so activation stores the
+    # true remaining/limit instead of re-seeding from the email-tier default.
+    limit_cents: int | None = None
+    remaining_cents: int | None = None
 
 
 @dataclass

@@ -31,7 +31,7 @@ import {
   useState,
 } from 'react'
 import { buildParameterHighlights } from '../components/parameterHighlighting'
-import { EmailGate } from '../components/EmailGate'
+import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
 import { SQLDisplay } from '../components/SQLDisplay'
 import { TableHeaderCell } from '../components/TableHeaderCell'
 import {
@@ -1146,6 +1146,62 @@ function formatDownloadSize(mb: number | undefined | null): string {
   if (!mb || mb <= 0) return '1 GB'
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
   return `${Math.round(mb)} MB`
+}
+
+// Post-tour invite: once the walkthrough is done, offer free trial credits
+// through the same TrialRegistrationDialog every other surface uses (so an
+// already-registered email re-sends its token link), plus a pointer to run
+// RDST on the user's own database. Dismissible; never shown mid-tour.
+function DemoTrialInvite() {
+  const [dismissed, setDismissed] = useState(false)
+  const [showTrial, setShowTrial] = useState(false)
+  const navigate = useNavigate()
+  if (dismissed) return null
+  return (
+    <div className="fixed bottom-4 right-4 z-50 w-full max-w-sm">
+      <div className="w-full rounded-xl border border-border-primary-soft bg-surface-raised p-5 shadow-elevation-2">
+        <div className="flex items-start justify-between gap-3">
+          <Text level="headline-4" className="text-content-layout-1">
+            Try this on your own database
+          </Text>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setDismissed(true)}
+            className="shrink-0 text-content-layout-3 hover:text-content-layout-1"
+          >
+            <Icon name="close" label="Dismiss" className="h-4 w-4" />
+          </button>
+        </div>
+        <Text level="body-small" className="mt-2 text-content-layout-2">
+          You just watched Readyset cache these queries live — the same
+          speedup works on your data. Claim free trial credits to power AI
+          analysis (no credit card), then point RDST at your database.
+        </Text>
+        <div className="mt-4 flex flex-col gap-2">
+          <Button
+            variant="primary"
+            modifier="solid"
+            icon="sparkles"
+            iconPosition="left"
+            label="Claim free trial credits"
+            onClick={() => setShowTrial(true)}
+          />
+          <Button
+            variant="primary"
+            modifier="ghost"
+            label="Connect a database"
+            onClick={() => navigate({ to: '/onboarding' })}
+          />
+        </div>
+      </div>
+      <TrialRegistrationDialog
+        isOpen={showTrial}
+        onClose={() => setShowTrial(false)}
+        onSuccess={() => setShowTrial(false)}
+      />
+    </div>
+  )
 }
 
 function StartCard({ onStart }: { onStart: () => void }) {
@@ -2575,10 +2631,19 @@ export function DemoPage() {
             level="body-small"
             className="mt-1 max-w-[72ch] text-content-layout-2"
           >
-            The same workload runs against an orders database through Postgres
-            and Readyset Platform, side by side — showing how much faster your
-            queries get as QueryPilot automatically chooses the right queries to
-            cache.
+            Readyset Platform is a drop-in cache for Postgres and MySQL: it
+            sits in front of your database, serves hot queries from memory,
+            and keeps results fresh automatically as your data changes — no
+            application changes required.{' '}
+            <a
+              href="https://readyset.io/docs"
+              target="_blank"
+              rel="noreferrer"
+              className="text-content-primary-soft hover:underline"
+            >
+              Learn more in the docs
+            </a>
+            .
           </Text>
         </div>
         {showTeardown && (
@@ -2617,7 +2682,10 @@ export function DemoPage() {
       {/* Reciprocity-timed identity capture (rdst-dma.3): a non-blocking panel
           that appears only once the comparison is running and showing the
           speedup — never before proof. Grandfathered/dismissible internally. */}
-      {d.phase === 'ready' && d.events.length > 0 && <EmailGate variant="panel" />}
+      {d.phase === 'ready' &&
+        d.events.length > 0 &&
+        tourDone === true &&
+        tourStep == null && <DemoTrialInvite />}
 
       {d.phase === 'idle' && <StartCard onStart={d.provision} />}
 

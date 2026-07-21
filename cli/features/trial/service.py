@@ -69,7 +69,10 @@ class TrialService:
             return TrialRegisterResult(
                 success=False,
                 error_code="RATE_LIMITED",
-                detail="Too many registration attempts. Please try again later.",
+                detail=resp_data.get(
+                    "detail",
+                    "You've signed up for too many accounts recently.",
+                ),
                 status_code=429,
             )
 
@@ -168,6 +171,9 @@ class TrialService:
             email_tier=resp_data.get("email_tier", "business"),
             status_code=resp.status_code,
             trial_token=resp_data.get("trial_token"),
+            token_resent=bool(resp_data.get("token_resent")),
+            limit_cents=resp_data.get("limit_cents"),
+            remaining_cents=resp_data.get("remaining_cents"),
         )
 
     async def activate(
@@ -176,15 +182,27 @@ class TrialService:
         email: str,
         email_tier: str | None = None,
         source: str = "cli",
+        limit_cents: int | None = None,
+        remaining_cents: int | None = None,
     ) -> TrialActivateResult:
-        """Save trial token to config.toml + keyring + env."""
+        """Save trial token to config.toml + keyring + env.
+
+        When the keyservice reports the account's real balance (a resend for
+        an existing account), store that. Otherwise seed from the email-tier
+        default; the proxy corrects it on the first LLM call."""
         if not token or len(token.strip()) < 10:
             return TrialActivateResult(success=False, message="Invalid token.")
 
         token = token.strip()
-        limit_cents = (
-            500 if email_tier == "business" else 150 if email_tier == "personal" else None
-        )
+        if limit_cents is None:
+            limit_cents = (
+                500 if email_tier == "business"
+                else 150 if email_tier == "personal" else None
+            )
+        # A fresh activation has spent nothing; only a reported balance carries
+        # real remaining.
+        if remaining_cents is None:
+            remaining_cents = limit_cents
 
         try:
             cfg = self._load_config()
@@ -195,7 +213,7 @@ class TrialService:
             }
             if limit_cents is not None:
                 trial_config["limit_cents"] = limit_cents
-                trial_config["remaining_cents"] = limit_cents
+                trial_config["remaining_cents"] = remaining_cents
             cfg.set_trial_config(trial_config)
             # Trial activation confirms a real, reachable address (the user
             # clicked the verification link). Promote it to the primary
@@ -214,6 +232,17 @@ class TrialService:
             persist=True,
         )
         os.environ["RDST_TRIAL_TOKEN"] = token
+
+        if source == "web":
+            # Key resolution prefers a real Anthropic key over the trial
+            # token, so activating the trial from the web is an explicit
+            # request to switch sources: drop the stored key so the trial
+            # takes effect immediately.
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            try:
+                self.secret_store.clear_required(["ANTHROPIC_API_KEY"])
+            except Exception:
+                pass
 
         try:
             telemetry.track(

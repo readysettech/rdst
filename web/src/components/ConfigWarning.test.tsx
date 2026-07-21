@@ -143,9 +143,10 @@ describe('ConfigWarning env secret flow', () => {
 
     renderWarning(queryClient);
 
-    expect(await screen.findByRole('button', { name: /Try Free Trial/i })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /Claim free trial credits/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Set API Key/i })).toBeTruthy();
-    expect(screen.getByText(/export ANTHROPIC_API_KEY=<value>/i)).toBeTruthy();
+    // Env-var plumbing stays out of the UI: no export command, no raw names.
+    expect(screen.queryByText(/ANTHROPIC_API_KEY/)).toBeNull();
   });
 
   it('stays off the demo page even when the key is missing', async () => {
@@ -157,7 +158,7 @@ describe('ConfigWarning env secret flow', () => {
     renderWarning(queryClient);
 
     await waitFor(() => expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: /Try Free Trial/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Claim free trial credits/i })).toBeNull();
     expect(screen.queryByText(/Missing Anthropic API Key/i)).toBeNull();
   });
 
@@ -170,7 +171,7 @@ describe('ConfigWarning env secret flow', () => {
     renderWarning(queryClient);
 
     await waitFor(() => expect(vi.mocked(fetchEnvRequirements)).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: /Try Free Trial/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Claim free trial credits/i })).toBeNull();
     expect(screen.queryByText(/Missing Anthropic API Key/i)).toBeNull();
   });
 
@@ -246,6 +247,29 @@ describe('ConfigWarning env secret flow', () => {
     });
   });
 
+  it('keeps a zero-target install on settings instead of onboarding', async () => {
+    mockPathname = '/configure';
+    vi.mocked(fetchStatus).mockResolvedValue({
+      configured: false,
+      default_target: null,
+      targets: [],
+      version: '1.0.0',
+      error: null,
+    });
+    vi.mocked(fetchInitStatus).mockResolvedValue({
+      initialized: false,
+      targets: [],
+      default_target: null,
+      llm_configured: false,
+    });
+
+    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+
+    await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled());
+    // Settings stays reachable so keys and the reset control are usable.
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it('does not show top banner for target-password-only requirements', async () => {
     vi.mocked(fetchEnvRequirements).mockResolvedValue({
       keyring_available: true,
@@ -267,7 +291,7 @@ describe('ConfigWarning env secret flow', () => {
     renderWarning(queryClient);
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Try Free Trial/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Claim free trial credits/i })).toBeNull();
     });
   });
 

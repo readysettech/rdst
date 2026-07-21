@@ -14,7 +14,7 @@ describe('invalidateTrialRelatedQueries', () => {
 
     await invalidateTrialRelatedQueries(queryClient);
 
-    expect(invalidateSpy).toHaveBeenCalledTimes(4);
+    expect(invalidateSpy).toHaveBeenCalledTimes(5);
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ['status'], refetchType: 'all' }),
     );
@@ -26,6 +26,11 @@ describe('invalidateTrialRelatedQueries', () => {
     );
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ['trial-status'], refetchType: 'all' }),
+    );
+    // Trial activation promotes its email to the machine identity, so the
+    // sidebar identity query is refreshed too.
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['settings', 'email'], refetchType: 'all' }),
     );
   });
 });

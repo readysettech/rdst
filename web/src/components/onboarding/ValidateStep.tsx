@@ -106,7 +106,7 @@ export function ValidateStep({
       icon: "info",
       iconClass: "text-content-warning-soft",
       title: "API Key Required for AI",
-      body: "Set an API key or start a free trial to enable AI analysis.",
+      body: "Set an API key, or claim free trial credits, to enable AI analysis.",
       badgeLabel: "Setup Needed",
     },
     pending: {
@@ -361,7 +361,7 @@ export function ValidateStep({
                         variant="rising"
                         icon="sparkles"
                         iconPosition="left"
-                        label="Try Free Trial"
+                        label="Claim free trial credits"
                         onClick={() => setShowTrialDialog(true)}
                       />
                       <Button
@@ -415,6 +415,7 @@ export function ValidateStep({
           void invalidateTrialRelatedQueries(queryClient);
           onRun();
         }}
+        onTrialRegister={() => setShowTrialDialog(true)}
       />
       <TrialRegistrationDialog
         isOpen={showTrialDialog}

@@ -66,8 +66,10 @@ export function ConnectPage({
   }
 
   const skip = () => {
-    // Already-configured returning users (or "I'll do it later") can leave.
-    leave()
+    // "I'll do it later" goes Home, which is always reachable. Returning to
+    // the page that routed here would just bounce back when it still has no
+    // target (e.g. a feature page needing a database).
+    navigate({ to: '/' })
   }
 
   return (

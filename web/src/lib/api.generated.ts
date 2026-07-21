@@ -945,6 +945,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/demo/tour": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tour */
+        get: operations["tour_api_demo_tour_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/demo/tour-done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tour Done */
+        post: operations["tour_done_api_demo_tour_done_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/demo/uncache": {
         parameters: {
             query?: never;
@@ -1468,7 +1502,7 @@ export interface paths {
         };
         /**
          * Get Query Registry
-         * @description Get queries from the shared query registry.
+         * @description Get queries from the shared query registry, optionally scoped to a target.
          */
         get: operations["get_query_registry_api_query_registry_get"];
         put?: never;
@@ -2092,6 +2126,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/reset-local-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Local Data
+         * @description Delete the local RDST data directory (~/.rdst) and stored secrets.
+         *
+         *     Removes connection configs, saved queries, semantic layer, analysis
+         *     history, trial/identity state, and keyring-persisted keys, returning
+         *     this install to a fresh state. Server-side accounts (trial
+         *     registration) are untouched - re-entering a registered email recovers
+         *     the trial token by email.
+         */
+        post: operations["reset_local_data_api_settings_reset_local_data_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/status": {
         parameters: {
             query?: never;
@@ -2677,10 +2737,7 @@ export interface components {
             /** Valid */
             valid: boolean;
         };
-        /**
-         * AskClarificationNeededEvent
-         * @description Clarification needed from the user.
-         */
+        /** AskClarificationNeededEvent */
         AskClarificationNeededEvent: {
             /** Interpretations */
             interpretations: components["schemas"]["AskInterpretation"][];
@@ -2694,10 +2751,7 @@ export interface components {
              */
             type: "clarification_needed";
         };
-        /**
-         * AskClarificationQuestion
-         * @description A clarification question for the user.
-         */
+        /** AskClarificationQuestion */
         AskClarificationQuestion: {
             /** Id */
             id: string;
@@ -2706,10 +2760,7 @@ export interface components {
             /** Question */
             question: string;
         };
-        /**
-         * AskErrorEvent
-         * @description Ask encountered an error.
-         */
+        /** AskErrorEvent */
         AskErrorEvent: {
             /** Message */
             message: string;
@@ -2752,10 +2803,7 @@ export interface components {
             /** Items */
             items: components["schemas"]["AskHistoryItem"][];
         };
-        /**
-         * AskInterpretation
-         * @description A possible interpretation of the user's question.
-         */
+        /** AskInterpretation */
         AskInterpretation: {
             /** Assumptions */
             assumptions: string[];
@@ -2804,10 +2852,7 @@ export interface components {
              */
             timeout?: number;
         };
-        /**
-         * AskResultEvent
-         * @description Ask completed with results.
-         */
+        /** AskResultEvent */
         AskResultEvent: {
             /** Columns */
             columns: string[];
@@ -2846,10 +2891,7 @@ export interface components {
              */
             type: "result";
         };
-        /**
-         * AskSchemaLoadedEvent
-         * @description Schema has been loaded.
-         */
+        /** AskSchemaLoadedEvent */
         AskSchemaLoadedEvent: {
             /** Source */
             source: string;
@@ -2868,10 +2910,7 @@ export interface components {
              */
             type: "schema_loaded";
         };
-        /**
-         * AskSqlGeneratedEvent
-         * @description SQL has been generated.
-         */
+        /** AskSqlGeneratedEvent */
         AskSqlGeneratedEvent: {
             /**
              * Explanation
@@ -2886,10 +2925,7 @@ export interface components {
              */
             type: "sql_generated";
         };
-        /**
-         * AskStatusEvent
-         * @description Status update during ask execution.
-         */
+        /** AskStatusEvent */
         AskStatusEvent: {
             /** Message */
             message: string;
@@ -3455,14 +3491,7 @@ export interface components {
              */
             type: "tool_call";
         };
-        /**
-         * ChatToolResultEvent
-         * @description Result of one tool execution.
-         *
-         *     For query_database, `data` carries sql/columns/rows/row_count/
-         *     execution_time_ms/truncated/query_hash/query_tag; for get_schema it
-         *     carries tables/source.
-         */
+        /** ChatToolResultEvent */
         ChatToolResultEvent: {
             /** Content */
             content: string;
@@ -3695,16 +3724,7 @@ export interface components {
             /** Success */
             success: boolean;
         };
-        /**
-         * ErrorEvent
-         * @description Error event for service workflows.
-         *
-         *     ``code`` and ``detail`` mirror the shared HTTP error envelope
-         *     (``shared.api.app._error_envelope``) so an SSE failure carries the same
-         *     {code, message, detail} shape the client normalizes in ``lib/sse.ts``.
-         *     Both stay optional so existing producers that only set ``message`` keep
-         *     working; the client derives a code when one is absent.
-         */
+        /** ErrorEvent */
         ErrorEvent: {
             /**
              * Code
@@ -4598,10 +4618,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /**
-         * ProgressEvent
-         * @description Progress update during a multi-step operation.
-         */
+        /** ProgressEvent */
         ProgressEvent: {
             /** Message */
             message: string;
@@ -4615,10 +4632,7 @@ export interface components {
              */
             type: "progress";
         };
-        /**
-         * QueryBenchmarkCompleteEvent
-         * @description Benchmark finished; carries the final tally.
-         */
+        /** QueryBenchmarkCompleteEvent */
         QueryBenchmarkCompleteEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -4638,16 +4652,7 @@ export interface components {
              */
             type: "complete";
         };
-        /**
-         * QueryBenchmarkErrorEvent
-         * @description Benchmark failed (or was rejected by a safety rail) before completion.
-         *
-         *     Carries the shared error envelope ({code, message, detail}, B7/T24) so the
-         *     client normalizes a benchmark failure exactly like every other SSE error.
-         *     ``message`` stays humane and safe to show; ``detail`` holds only the
-         *     exception class name for correlation — never the raw ``str(e)``, which can
-         *     embed host / DSN / SQL material.
-         */
+        /** QueryBenchmarkErrorEvent */
         QueryBenchmarkErrorEvent: {
             /**
              * Code
@@ -4668,10 +4673,7 @@ export interface components {
             type: "error";
         };
         QueryBenchmarkEvent: components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"];
-        /**
-         * QueryBenchmarkProgressEvent
-         * @description Benchmark progress tick.
-         */
+        /** QueryBenchmarkProgressEvent */
         QueryBenchmarkProgressEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -4691,10 +4693,7 @@ export interface components {
              */
             type: "progress";
         };
-        /**
-         * QueryBenchmarkStats
-         * @description Statistics for a single benchmarked query.
-         */
+        /** QueryBenchmarkStats */
         QueryBenchmarkStats: {
             /** Avg Ms */
             avg_ms: number;
@@ -5062,6 +5061,13 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /** ResetLocalDataResponse */
+        ResetLocalDataResponse: {
+            /** Removed Path */
+            removed_path: string;
+            /** Success */
+            success: boolean;
+        };
         /** RewriteImprovement */
         RewriteImprovement: {
             overall: components["schemas"]["RewriteImprovementOverall"];
@@ -5186,10 +5192,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /**
-         * ScanCompleteEvent
-         * @description Scan completed.
-         */
+        /** ScanCompleteEvent */
         ScanCompleteEvent: {
             /** Success */
             success: boolean;
@@ -5203,10 +5206,7 @@ export interface components {
              */
             type: "complete";
         };
-        /**
-         * ScanErrorEvent
-         * @description Scan error.
-         */
+        /** ScanErrorEvent */
         ScanErrorEvent: {
             /** Message */
             message: string;
@@ -5222,10 +5222,7 @@ export interface components {
             type: "error";
         };
         ScanEvent: components["schemas"]["ScanStatusEvent"] | components["schemas"]["ScanFilesFoundEvent"] | components["schemas"]["ScanProgressEvent"] | components["schemas"]["ScanQueryResultEvent"] | components["schemas"]["ScanRegistryEvent"] | components["schemas"]["ScanCompleteEvent"] | components["schemas"]["ScanErrorEvent"];
-        /**
-         * ScanFilesFoundEvent
-         * @description Files with ORM patterns discovered.
-         */
+        /** ScanFilesFoundEvent */
         ScanFilesFoundEvent: {
             /** Files */
             files: {
@@ -5268,10 +5265,7 @@ export interface components {
          * @enum {string}
          */
         ScanPhase: "config" | "discovery" | "extraction" | "conversion" | "registry" | "analysis";
-        /**
-         * ScanProgressEvent
-         * @description Progress update within a scan phase.
-         */
+        /** ScanProgressEvent */
         ScanProgressEvent: {
             /** Current */
             current: number;
@@ -5287,10 +5281,7 @@ export interface components {
              */
             type: "progress";
         };
-        /**
-         * ScanQueryResultEvent
-         * @description Individual query result from scan.
-         */
+        /** ScanQueryResultEvent */
         ScanQueryResultEvent: {
             /** Query */
             query: {
@@ -5302,10 +5293,7 @@ export interface components {
              */
             type: "query_result";
         };
-        /**
-         * ScanRegistryEvent
-         * @description Registry save results.
-         */
+        /** ScanRegistryEvent */
         ScanRegistryEvent: {
             /** New Queries */
             new_queries: number;
@@ -5375,10 +5363,7 @@ export interface components {
              */
             warn_threshold?: number;
         };
-        /**
-         * ScanStatusEvent
-         * @description Status update during scan.
-         */
+        /** ScanStatusEvent */
         ScanStatusEvent: {
             /** Message */
             message: string;
@@ -5831,10 +5816,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /**
-         * TopCompleteEvent
-         * @description Operation completed.
-         */
+        /** TopCompleteEvent */
         TopCompleteEvent: {
             /** Newly Saved */
             newly_saved: number;
@@ -5850,10 +5832,7 @@ export interface components {
              */
             type: "complete";
         };
-        /**
-         * TopConnectedEvent
-         * @description Database connection established.
-         */
+        /** TopConnectedEvent */
         TopConnectedEvent: {
             /** Db Engine */
             db_engine: string;
@@ -5878,10 +5857,7 @@ export interface components {
             /** Setting Name */
             setting_name: string;
         };
-        /**
-         * TopDbLimitWarningEvent
-         * @description Database query size limit is below recommended threshold.
-         */
+        /** TopDbLimitWarningEvent */
         TopDbLimitWarningEvent: {
             /** Db Engine */
             db_engine: string;
@@ -5897,14 +5873,7 @@ export interface components {
              */
             type: "db_limit_warning";
         };
-        /**
-         * TopErrorEvent
-         * @description Error occurred.
-         *
-         *     ``code`` and ``detail`` mirror the shared error envelope (B7/T24):
-         *     ``message`` stays humane, ``detail`` carries the exception class name for
-         *     correlation — never the raw ``str(e)``, which can embed host/DSN material.
-         */
+        /** TopErrorEvent */
         TopErrorEvent: {
             /**
              * Code
@@ -5954,10 +5923,7 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /**
-         * TopQueriesEvent
-         * @description Batch of top queries.
-         */
+        /** TopQueriesEvent */
         TopQueriesEvent: {
             /** Db Engine */
             db_engine: string;
@@ -5983,10 +5949,7 @@ export interface components {
              */
             type: "queries";
         };
-        /**
-         * TopQueryData
-         * @description Individual query data.
-         */
+        /** TopQueryData */
         TopQueryData: {
             /** Avg Time */
             avg_time: string;
@@ -6048,10 +6011,7 @@ export interface components {
             /** Total Time */
             total_time: string;
         };
-        /**
-         * TopQuerySavedEvent
-         * @description Query saved to registry.
-         */
+        /** TopQuerySavedEvent */
         TopQuerySavedEvent: {
             /** Is New */
             is_new: boolean;
@@ -6063,10 +6023,7 @@ export interface components {
              */
             type: "query_saved";
         };
-        /**
-         * TopSourceFallbackEvent
-         * @description Source fallback occurred.
-         */
+        /** TopSourceFallbackEvent */
         TopSourceFallbackEvent: {
             /** From Source */
             from_source: string;
@@ -6080,10 +6037,7 @@ export interface components {
              */
             type: "source_fallback";
         };
-        /**
-         * TopStatusEvent
-         * @description Progress status update.
-         */
+        /** TopStatusEvent */
         TopStatusEvent: {
             /** Message */
             message: string;
@@ -6099,6 +6053,10 @@ export interface components {
             email: string;
             /** Email Tier */
             email_tier?: string | null;
+            /** Limit Cents */
+            limit_cents?: number | null;
+            /** Remaining Cents */
+            remaining_cents?: number | null;
             /** Token */
             token: string;
         };
@@ -6124,8 +6082,12 @@ export interface components {
             email_tier?: string | null;
             /** Error Code */
             error_code?: string | null;
+            /** Limit Cents */
+            limit_cents?: number | null;
             /** Limit Display */
             limit_display?: string | null;
+            /** Remaining Cents */
+            remaining_cents?: number | null;
             /**
              * Status Code
              * @default 200
@@ -6133,6 +6095,11 @@ export interface components {
             status_code?: number;
             /** Success */
             success: boolean;
+            /**
+             * Token Resent
+             * @default false
+             */
+            token_resent?: boolean;
             /** Trial Token */
             trial_token?: string | null;
         };
@@ -7999,6 +7966,46 @@ export interface operations {
         };
     };
     teardown_api_demo_teardown_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    tour_api_demo_tour_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    tour_done_api_demo_tour_done_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -9997,6 +10004,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VerifyPollResponse"];
+                };
+            };
+        };
+    };
+    reset_local_data_api_settings_reset_local_data_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResetLocalDataResponse"];
                 };
             };
         };

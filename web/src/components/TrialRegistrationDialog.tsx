@@ -19,8 +19,12 @@ import { RoutableNotice } from "./RoutableNotice";
 type Step = "email" | "verify" | "success";
 type RegisterMutationData =
   | { mode: "registered"; limitDisplay: string | null; emailTier: string | null }
-  | { mode: "instant"; token: string; emailTier: string | null }
-  | { mode: "already-registered" };
+  | {
+      mode: "token-resent";
+      emailTier: string | null;
+      limitCents: number | null;
+      remainingCents: number | null;
+    };
 
 type TrialMutationError = Error & {
   didYouMean?: string;
@@ -42,7 +46,6 @@ export function TrialRegistrationDialog({
   const [email, setEmail] = useState("");
   const [token, setToken] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [retryIn, setRetryIn] = useState(0);
 
   // Prefill the email captured at the gate so the common case is one click,
   // but leave it fully editable: a user who gave a wrong or throwaway address
@@ -67,14 +70,15 @@ export function TrialRegistrationDialog({
     mutationFn: async (registerEmail: string): Promise<RegisterMutationData> => {
       const result = await registerTrial(registerEmail);
       if (result.success) {
-        if (result.trial_token) {
-          // Email already verified (web gate or CLI flow): the keyservice
-          // hands the token straight back, so activation is one click with
-          // no inbox round-trip.
+        if (result.token_resent) {
+          // Email already verified (any source): the keyservice emailed a
+          // fresh link to the token page. The token itself never travels in
+          // the API response - the user retrieves it from their inbox.
           return {
-            mode: "instant",
-            token: result.trial_token,
+            mode: "token-resent",
             emailTier: result.email_tier ?? null,
+            limitCents: result.limit_cents ?? null,
+            remainingCents: result.remaining_cents ?? null,
           };
         }
         return {
@@ -82,9 +86,6 @@ export function TrialRegistrationDialog({
           limitDisplay: result.limit_display ?? null,
           emailTier: result.email_tier ?? null,
         };
-      }
-      if (result.error_code === "ALREADY_REGISTERED") {
-        return { mode: "already-registered" };
       }
       const error = new Error(result.detail ?? "Registration failed.") as TrialMutationError;
       error.didYouMean = result.did_you_mean ?? undefined;
@@ -94,15 +95,7 @@ export function TrialRegistrationDialog({
       error.errorCode = result.error_code ?? undefined;
       throw error;
     },
-    onSuccess: (data, registerEmail) => {
-      if (data.mode === "instant") {
-        activateMutation.mutate({
-          token: data.token,
-          email: registerEmail,
-          emailTier: data.emailTier,
-        });
-        return;
-      }
+    onSuccess: () => {
       setStep("verify");
     },
   });
@@ -111,12 +104,20 @@ export function TrialRegistrationDialog({
       token,
       email,
       emailTier,
+      limitCents,
+      remainingCents,
     }: {
       token: string;
       email: string;
       emailTier?: string | null;
+      limitCents?: number | null;
+      remainingCents?: number | null;
     }) =>
-      activateTrial(token, email, emailTier ?? undefined).then((result) => {
+      activateTrial(token, email, {
+        emailTier: emailTier ?? undefined,
+        limitCents: limitCents ?? undefined,
+        remainingCents: remainingCents ?? undefined,
+      }).then((result) => {
         if (!result.success) {
           throw new Error(result.message ?? "Activation failed.");
         }
@@ -143,36 +144,54 @@ export function TrialRegistrationDialog({
     validationError ??
     activateError?.message ??
     (isProgramFull || isRateLimited ? null : registerError?.message ?? null);
+  const rateLimitMessage =
+    isRateLimited && registerError ? registerError.message : null;
   const didYouMean =
     registerError && "didYouMean" in registerError
       ? (registerError as TrialMutationError).didYouMean ?? null
       : null;
-
-  // RATE_LIMITED shows a live countdown, not a re-click of the same button.
-  useEffect(() => {
-    if (!isRateLimited) return;
-    setRetryIn(30);
-    const id = setInterval(() => {
-      setRetryIn((n) => (n <= 1 ? 0 : n - 1));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [isRateLimited]);
-  const alreadyRegistered = registerMutation.data?.mode === "already-registered";
+  const tokenResent = registerMutation.data?.mode === "token-resent";
   const limitDisplay =
     registerMutation.data?.mode === "registered"
       ? registerMutation.data.limitDisplay
       : null;
-  const emailTier =
-    registerMutation.data?.mode === "registered"
-      ? registerMutation.data.emailTier
+  const emailTier = registerMutation.data?.emailTier ?? null;
+  const resentBalance =
+    registerMutation.data?.mode === "token-resent"
+      ? registerMutation.data
       : null;
+  // The verify step has two modes — a fresh verification email vs a re-sent
+  // token link — that differ only in copy. Select one set up front instead of
+  // branching every line.
+  const verifyCopy = tokenResent
+    ? {
+        title: "You're Already Registered",
+        subtitle: "This email already has a trial — we've re-sent your token.",
+        banner: `Trial token re-sent to ${email}`,
+        heading: "Your token is on its way:",
+        steps: [
+          '1. Check your inbox for "Your RDST trial token"',
+          "2. Open the link to view your token",
+          "3. Paste the token below",
+        ],
+      }
+    : {
+        title: "Check Your Email",
+        subtitle: "Paste the trial token from the verification email.",
+        banner: `Verification email sent to ${email}`,
+        heading: "Steps to get your token:",
+        steps: [
+          "1. Check your email (including spam folder)",
+          "2. Click the verification link",
+          "3. Copy the trial token from the page",
+        ],
+      };
 
   const reset = () => {
     setStep("email");
     setEmail("");
     setToken("");
     setValidationError(null);
-    setRetryIn(0);
     registerMutation.reset();
     activateMutation.reset();
   };
@@ -206,6 +225,8 @@ export function TrialRegistrationDialog({
       token: token.trim(),
       email,
       emailTier,
+      limitCents: resentBalance?.limitCents ?? null,
+      remainingCents: resentBalance?.remainingCents ?? null,
     });
   };
 
@@ -235,16 +256,12 @@ export function TrialRegistrationDialog({
               <VStack className="gap-0.5 items-start">
                 <Text level="headline-4" className="text-content-layout-1">
                   {step === "email" && "Start Free Trial"}
-                  {step === "verify" &&
-                    (alreadyRegistered ? "Email Already Registered" : "Check Your Email")}
+                  {step === "verify" && verifyCopy.title}
                   {step === "success" && "Trial Activated"}
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
                   {step === "email" && "Get free AI analysis credits — no credit card required."}
-                  {step === "verify" &&
-                    (alreadyRegistered
-                      ? "Enter the trial token from your original signup."
-                      : "Paste the trial token from the verification email.")}
+                  {step === "verify" && verifyCopy.subtitle}
                   {step === "success" && "Your free trial is ready to use."}
                 </Text>
               </VStack>
@@ -256,8 +273,8 @@ export function TrialRegistrationDialog({
             {errorMessage && <Alert variant="negative" modifier="outline" label={errorMessage} />}
 
             {/* Branched trial dead-ends: a capacity limit routes to own-key
-                entry (a real alternative), a rate limit shows a countdown —
-                never the same failing button again. (onboarding F8) */}
+                entry (a real alternative); a rate limit states the cause
+                without a misleading countdown. (onboarding F8) */}
             {isProgramFull && (
               <RoutableNotice
                 kind="key-needed"
@@ -271,9 +288,8 @@ export function TrialRegistrationDialog({
                 variant="warning"
                 modifier="outline"
                 label={
-                  retryIn > 0
-                    ? `Too many attempts — try again in ${retryIn}s.`
-                    : "You can try again now."
+                  rateLimitMessage ??
+                  "You've signed up for too many accounts recently."
                 }
               />
             )}
@@ -315,48 +331,32 @@ export function TrialRegistrationDialog({
 
             {step === "verify" && (
               <>
-                {!alreadyRegistered && (
-                  <div className="rounded-lg bg-surface-positive-soft/20 border border-border-positive-soft px-4 py-3">
-                    <VStack className="gap-1 items-start">
-                      <Text level="label-small" className="text-content-positive-soft">
-                        Verification email sent to {email}
+                <div className="rounded-lg bg-surface-positive-soft/20 border border-border-positive-soft px-4 py-3">
+                  <VStack className="gap-1 items-start">
+                    <Text level="label-small" className="text-content-positive-soft">
+                      {verifyCopy.banner}
+                    </Text>
+                    {limitDisplay && !tokenResent && (
+                      <Text level="body-small" className="text-content-layout-2">
+                        Your trial credit: {limitDisplay}
+                        {emailTier === "business" ? " (business email)" : " (personal email)"}
                       </Text>
-                      {limitDisplay && (
-                        <Text level="body-small" className="text-content-layout-2">
-                          Your trial credit: {limitDisplay}
-                          {emailTier === "business" ? " (business email)" : " (personal email)"}
-                        </Text>
-                      )}
-                    </VStack>
-                  </div>
-                )}
+                    )}
+                  </VStack>
+                </div>
 
-                {alreadyRegistered && (
-                  <Alert
-                    variant="warning"
-                    modifier="outline"
-                    label="This email is already registered. Enter your trial token below."
-                  />
-                )}
-
-                {!alreadyRegistered && (
-                  <div className="rounded-lg bg-surface-layout-2/60 border border-border-layout-1 px-4 py-3">
-                    <VStack className="gap-1 items-start">
-                      <Text level="label-small" className="text-content-layout-1">
-                        Steps to get your token:
+                <div className="rounded-lg bg-surface-layout-2/60 border border-border-layout-1 px-4 py-3">
+                  <VStack className="gap-1 items-start">
+                    <Text level="label-small" className="text-content-layout-1">
+                      {verifyCopy.heading}
+                    </Text>
+                    {verifyCopy.steps.map((line) => (
+                      <Text key={line} level="body-small" className="text-content-layout-3">
+                        {line}
                       </Text>
-                      <Text level="body-small" className="text-content-layout-3">
-                        1. Check your email (including spam folder)
-                      </Text>
-                      <Text level="body-small" className="text-content-layout-3">
-                        2. Click the verification link
-                      </Text>
-                      <Text level="body-small" className="text-content-layout-3">
-                        3. Copy the trial token from the page
-                      </Text>
-                    </VStack>
-                  </div>
-                )}
+                    ))}
+                  </VStack>
+                </div>
 
                 <div className="space-y-1">
                   <Text as="label" level="label-small" className="text-content-layout-2 block">
@@ -420,16 +420,12 @@ export function TrialRegistrationDialog({
               {step === "email" && (
                 <Button
                   variant="rising"
-                  label={
-                    isRateLimited && retryIn > 0
-                      ? `Try again in ${retryIn}s`
-                      : "Start Free Trial"
-                  }
+                  label="Start Free Trial"
                   icon="arrow-right"
                   iconPosition="right"
                   onClick={handleRegister}
                   loading={loading}
-                  disabled={!email || loading || (isRateLimited && retryIn > 0)}
+                  disabled={!email || loading}
                 />
               )}
 

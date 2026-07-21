@@ -79,7 +79,7 @@ export function RoutableNotice({
       icon: 'key' as const,
       title: 'This needs an AI key',
       message:
-        'Add an Anthropic key (or start a free trial) to use this AI feature.',
+        'Add an Anthropic key, or claim free trial credits, to use this AI feature.',
       actionLabel: 'Add AI key',
       search: { section: 'ai' as const, returnTo: currentReturn },
     },

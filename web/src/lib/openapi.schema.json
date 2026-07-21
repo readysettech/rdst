@@ -983,7 +983,6 @@
     "type": "object"
    },
    "AskClarificationNeededEvent": {
-    "description": "Clarification needed from the user.",
     "properties": {
      "interpretations": {
       "items": {
@@ -1019,7 +1018,6 @@
     "type": "object"
    },
    "AskClarificationQuestion": {
-    "description": "A clarification question for the user.",
     "properties": {
      "id": {
       "title": "Id",
@@ -1046,7 +1044,6 @@
     "type": "object"
    },
    "AskErrorEvent": {
-    "description": "Ask encountered an error.",
     "properties": {
      "message": {
       "title": "Message",
@@ -1178,7 +1175,6 @@
     "type": "object"
    },
    "AskInterpretation": {
-    "description": "A possible interpretation of the user's question.",
     "properties": {
      "assumptions": {
       "items": {
@@ -1299,7 +1295,6 @@
     "type": "object"
    },
    "AskResultEvent": {
-    "description": "Ask completed with results.",
     "properties": {
      "columns": {
       "items": {
@@ -1373,7 +1368,6 @@
     "type": "object"
    },
    "AskSchemaLoadedEvent": {
-    "description": "Schema has been loaded.",
     "properties": {
      "source": {
       "title": "Source",
@@ -1411,7 +1405,6 @@
     "type": "object"
    },
    "AskSqlGeneratedEvent": {
-    "description": "SQL has been generated.",
     "properties": {
      "explanation": {
       "anyOf": [
@@ -1443,7 +1436,6 @@
     "type": "object"
    },
    "AskStatusEvent": {
-    "description": "Status update during ask execution.",
     "properties": {
      "message": {
       "title": "Message",
@@ -2823,7 +2815,6 @@
     "type": "object"
    },
    "ChatToolResultEvent": {
-    "description": "Result of one tool execution.\n\nFor query_database, `data` carries sql/columns/rows/row_count/\nexecution_time_ms/truncated/query_hash/query_tag; for get_schema it\ncarries tables/source.",
     "properties": {
      "content": {
       "title": "Content",
@@ -3450,7 +3441,6 @@
     "type": "object"
    },
    "ErrorEvent": {
-    "description": "Error event for service workflows.\n\n``code`` and ``detail`` mirror the shared HTTP error envelope\n(``shared.api.app._error_envelope``) so an SSE failure carries the same\n{code, message, detail} shape the client normalizes in ``lib/sse.ts``.\nBoth stay optional so existing producers that only set ``message`` keep\nworking; the client derives a code when one is absent.",
     "properties": {
      "code": {
       "anyOf": [
@@ -5636,7 +5626,6 @@
     "type": "object"
    },
    "ProgressEvent": {
-    "description": "Progress update during a multi-step operation.",
     "properties": {
      "message": {
       "title": "Message",
@@ -5666,7 +5655,6 @@
     "type": "object"
    },
    "QueryBenchmarkCompleteEvent": {
-    "description": "Benchmark finished; carries the final tally.",
     "properties": {
      "elapsed_seconds": {
       "title": "Elapsed Seconds",
@@ -5714,7 +5702,6 @@
     "type": "object"
    },
    "QueryBenchmarkErrorEvent": {
-    "description": "Benchmark failed (or was rejected by a safety rail) before completion.\n\nCarries the shared error envelope ({code, message, detail}, B7/T24) so the\nclient normalizes a benchmark failure exactly like every other SSE error.\n``message`` stays humane and safe to show; ``detail`` holds only the\nexception class name for correlation \u2014 never the raw ``str(e)``, which can\nembed host / DSN / SQL material.",
     "properties": {
      "code": {
       "anyOf": [
@@ -5771,7 +5758,6 @@
     ]
    },
    "QueryBenchmarkProgressEvent": {
-    "description": "Benchmark progress tick.",
     "properties": {
      "elapsed_seconds": {
       "title": "Elapsed Seconds",
@@ -5819,7 +5805,6 @@
     "type": "object"
    },
    "QueryBenchmarkStats": {
-    "description": "Statistics for a single benchmarked query.",
     "properties": {
      "avg_ms": {
       "title": "Avg Ms",
@@ -5937,6 +5922,11 @@
       "title": "Last Analyzed",
       "type": "string"
      },
+     "last_cache_target": {
+      "default": "",
+      "title": "Last Cache Target",
+      "type": "string"
+     },
      "max_duration_ms": {
       "default": 0.0,
       "title": "Max Duration Ms",
@@ -5971,11 +5961,6 @@
      "readyset_supported": {
       "default": "",
       "title": "Readyset Supported",
-      "type": "string"
-     },
-     "last_cache_target": {
-      "default": "",
-      "title": "Last Cache Target",
       "type": "string"
      },
      "source": {
@@ -6678,6 +6663,24 @@
     "title": "ReportResponse",
     "type": "object"
    },
+   "ResetLocalDataResponse": {
+    "properties": {
+     "removed_path": {
+      "title": "Removed Path",
+      "type": "string"
+     },
+     "success": {
+      "title": "Success",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "success",
+     "removed_path"
+    ],
+    "title": "ResetLocalDataResponse",
+    "type": "object"
+   },
    "RewriteImprovement": {
     "additionalProperties": true,
     "properties": {
@@ -6983,7 +6986,6 @@
     "type": "object"
    },
    "ScanCompleteEvent": {
-    "description": "Scan completed.",
     "properties": {
      "success": {
       "title": "Success",
@@ -7009,7 +7011,6 @@
     "type": "object"
    },
    "ScanErrorEvent": {
-    "description": "Scan error.",
     "properties": {
      "message": {
       "title": "Message",
@@ -7069,7 +7070,6 @@
     ]
    },
    "ScanFilesFoundEvent": {
-    "description": "Files with ORM patterns discovered.",
     "properties": {
      "files": {
       "items": {
@@ -7165,7 +7165,6 @@
     "type": "string"
    },
    "ScanProgressEvent": {
-    "description": "Progress update within a scan phase.",
     "properties": {
      "current": {
       "title": "Current",
@@ -7207,7 +7206,6 @@
     "type": "object"
    },
    "ScanQueryResultEvent": {
-    "description": "Individual query result from scan.",
     "properties": {
      "query": {
       "additionalProperties": true,
@@ -7228,7 +7226,6 @@
     "type": "object"
    },
    "ScanRegistryEvent": {
-    "description": "Registry save results.",
     "properties": {
      "new_queries": {
       "title": "New Queries",
@@ -7344,7 +7341,6 @@
     "type": "object"
    },
    "ScanStatusEvent": {
-    "description": "Status update during scan.",
     "properties": {
      "message": {
       "title": "Message",
@@ -8645,7 +8641,6 @@
     "type": "object"
    },
    "TopCompleteEvent": {
-    "description": "Operation completed.",
     "properties": {
      "newly_saved": {
       "title": "Newly Saved",
@@ -8683,7 +8678,6 @@
     "type": "object"
    },
    "TopConnectedEvent": {
-    "description": "Database connection established.",
     "properties": {
      "db_engine": {
       "title": "Db Engine",
@@ -8741,7 +8735,6 @@
     "type": "object"
    },
    "TopDbLimitWarningEvent": {
-    "description": "Database query size limit is below recommended threshold.",
     "properties": {
      "db_engine": {
       "title": "Db Engine",
@@ -8776,7 +8769,6 @@
     "type": "object"
    },
    "TopErrorEvent": {
-    "description": "Error occurred.\n\n``code`` and ``detail`` mirror the shared error envelope (B7/T24):\n``message`` stays humane, ``detail`` carries the exception class name for\ncorrelation \u2014 never the raw ``str(e)``, which can embed host/DSN material.",
     "properties": {
      "code": {
       "anyOf": [
@@ -8940,7 +8932,6 @@
     "type": "object"
    },
    "TopQueriesEvent": {
-    "description": "Batch of top queries.",
     "properties": {
      "db_engine": {
       "title": "Db Engine",
@@ -9002,7 +8993,6 @@
     "type": "object"
    },
    "TopQueryData": {
-    "description": "Individual query data.",
     "properties": {
      "avg_time": {
       "title": "Avg Time",
@@ -9181,7 +9171,6 @@
     "type": "object"
    },
    "TopQuerySavedEvent": {
-    "description": "Query saved to registry.",
     "properties": {
      "is_new": {
       "title": "Is New",
@@ -9206,7 +9195,6 @@
     "type": "object"
    },
    "TopSourceFallbackEvent": {
-    "description": "Source fallback occurred.",
     "properties": {
      "from_source": {
       "title": "From Source",
@@ -9236,7 +9224,6 @@
     "type": "object"
    },
    "TopStatusEvent": {
-    "description": "Progress status update.",
     "properties": {
      "message": {
       "title": "Message",
@@ -9271,6 +9258,28 @@
        }
       ],
       "title": "Email Tier"
+     },
+     "limit_cents": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limit Cents"
+     },
+     "remaining_cents": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remaining Cents"
      },
      "token": {
       "title": "Token",
@@ -9367,6 +9376,17 @@
       ],
       "title": "Error Code"
      },
+     "limit_cents": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limit Cents"
+     },
      "limit_display": {
       "anyOf": [
        {
@@ -9378,6 +9398,17 @@
       ],
       "title": "Limit Display"
      },
+     "remaining_cents": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Remaining Cents"
+     },
      "status_code": {
       "default": 200,
       "title": "Status Code",
@@ -9385,6 +9416,11 @@
      },
      "success": {
       "title": "Success",
+      "type": "boolean"
+     },
+     "token_resent": {
+      "default": false,
+      "title": "Token Resent",
       "type": "boolean"
      },
      "trial_token": {
@@ -12359,6 +12395,46 @@
     ]
    }
   },
+  "/api/demo/tour": {
+   "get": {
+    "operationId": "tour_api_demo_tour_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Tour",
+    "tags": [
+     "demo",
+     "demo"
+    ]
+   }
+  },
+  "/api/demo/tour-done": {
+   "post": {
+    "operationId": "tour_done_api_demo_tour_done_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Tour Done",
+    "tags": [
+     "demo",
+     "demo"
+    ]
+   }
+  },
   "/api/demo/uncache": {
    "post": {
     "operationId": "uncache_api_demo_uncache_post",
@@ -13583,7 +13659,7 @@
   },
   "/api/query-registry": {
    "get": {
-    "description": "Get queries from the shared query registry.",
+    "description": "Get queries from the shared query registry, optionally scoped to a target.",
     "operationId": "get_query_registry_api_query_registry_get",
     "parameters": [
      {
@@ -15063,6 +15139,28 @@
      }
     },
     "summary": "Verify Poll",
+    "tags": [
+     "settings"
+    ]
+   }
+  },
+  "/api/settings/reset-local-data": {
+   "post": {
+    "description": "Delete the local RDST data directory (~/.rdst) and stored secrets.\n\nRemoves connection configs, saved queries, semantic layer, analysis\nhistory, trial/identity state, and keyring-persisted keys, returning\nthis install to a fresh state. Server-side accounts (trial\nregistration) are untouched - re-entering a registered email recovers\nthe trial token by email.",
+    "operationId": "reset_local_data_api_settings_reset_local_data_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ResetLocalDataResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Reset Local Data",
     "tags": [
      "settings"
     ]

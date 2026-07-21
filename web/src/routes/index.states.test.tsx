@@ -24,9 +24,10 @@ describe('FirstRunHome (state 1)', () => {
     // old "Not ready? …" framing was dropped when the band became the lead.
     expect(scope.queryByText('Two steps, then RDST gets smart')).toBeNull();
     expect(scope.queryByText(/Not ready\?/)).toBeNull();
-    // Demo band: destination-matching title (USE-041), ungated chip, pill CTA.
-    const demoTitle = scope.getByText('See Readyset Platform in action');
-    expect(scope.getByText('no setup · no sign-up')).toBeTruthy();
+    // Demo band: destination-matching title (USE-041) with its ungated
+    // "no setup, no sign-up" qualifier, pill CTA.
+    const demoTitle = scope.getByText(/See Readyset Platform in action/);
+    expect(scope.getByText(/no setup, no sign-up/)).toBeTruthy();
     expect(scope.getByText('Try it')).toBeTruthy();
     const connect = scope.getAllByText('Connect a database')[0];
     expect(scope.getByText('Add your Anthropic key')).toBeTruthy();

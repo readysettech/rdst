@@ -230,8 +230,10 @@ export function FirstRunHome({ needsApiKey }: { needsApiKey: boolean }) {
             level="body-small"
             className="text-content-layout-2 mt-1 mb-4 min-h-14"
           >
-            Powers schema discovery, Ask, and analysis advice. No key yet? Start
-            with a trial — it works the same and you can swap the key in later.
+            RDST uses Claude for schema discovery, Ask, and analysis advice.
+            Add your Anthropic API key — or if you don't have one, claim your
+            free trial credits below. No credit card, and you can swap in your
+            own key anytime.
           </Text>
           <HStack className="gap-2">
             <Button
@@ -243,7 +245,7 @@ export function FirstRunHome({ needsApiKey }: { needsApiKey: boolean }) {
             <Button
               variant="primary"
               modifier="ghost"
-              label="Start trial"
+              label="Claim trial credits"
               onClick={() => navigate({ to: '/configure' })}
             />
           </HStack>

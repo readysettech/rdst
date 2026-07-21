@@ -263,6 +263,11 @@ export type TrialActivateResponse = apiComponents['schemas']['TrialActivateRespo
 export type TrialStatusResponse = apiComponents['schemas']['TrialStatusResponse'];
 export type TrialSimulationResponse = apiComponents['schemas']['TrialSimulationResponse'];
 
+export async function resetLocalData(): Promise<void> {
+  const { response } = await typedClient.POST('/api/settings/reset-local-data');
+  await throwIfNotOk(response, 'Failed to remove local data');
+}
+
 export async function registerTrial(email: string): Promise<TrialRegisterResponse> {
   const { data, response } = await typedClient.POST('/api/trial/register', {
     body: { email },
@@ -272,9 +277,23 @@ export async function registerTrial(email: string): Promise<TrialRegisterRespons
   return data;
 }
 
-export async function activateTrial(token: string, email: string, emailTier?: string): Promise<TrialActivateResponse> {
+export async function activateTrial(
+  token: string,
+  email: string,
+  opts: {
+    emailTier?: string;
+    limitCents?: number;
+    remainingCents?: number;
+  } = {},
+): Promise<TrialActivateResponse> {
   const { data, response } = await typedClient.POST('/api/trial/activate', {
-    body: { token, email, email_tier: emailTier ?? null },
+    body: {
+      token,
+      email,
+      email_tier: opts.emailTier ?? null,
+      limit_cents: opts.limitCents ?? null,
+      remaining_cents: opts.remainingCents ?? null,
+    },
   });
   await throwIfNotOk(response, 'Failed to activate trial');
   if (!data) throw new Error('Missing response body');

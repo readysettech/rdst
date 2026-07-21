@@ -63,7 +63,7 @@ describe('EnvSecretsDialog', () => {
       />
     );
 
-    const input = screen.getByPlaceholderText('Enter value for PROD_DB_PASSWORD');
+    const input = screen.getByPlaceholderText('Enter Password (prod)');
     expect((input as HTMLInputElement).type).toBe('text');
     expect((input as HTMLInputElement).autocomplete).toBe('off');
     expect(input.getAttribute('data-1p-ignore')).toBe('true');
@@ -134,7 +134,7 @@ describe('EnvSecretsDialog', () => {
       </QueryClientProvider>
     );
 
-    const input = screen.getByPlaceholderText('Enter value for ANTHROPIC_API_KEY');
+    const input = screen.getByPlaceholderText('Enter Anthropic API Key');
     fireEvent.change(input, { target: { value: 'sk-ant-typed' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Secrets/i }));
 
@@ -158,7 +158,7 @@ describe('EnvSecretsDialog', () => {
       </QueryClientProvider>
     );
 
-    expect((screen.getByPlaceholderText('Enter value for ANTHROPIC_API_KEY') as HTMLInputElement).value).toBe(
+    expect((screen.getByPlaceholderText('Enter Anthropic API Key') as HTMLInputElement).value).toBe(
       'sk-ant-typed'
     );
   });
@@ -247,7 +247,7 @@ describe('EnvSecretsDialog', () => {
       </QueryClientProvider>
     );
 
-    const input = screen.getByPlaceholderText('Enter value for ANTHROPIC_API_KEY');
+    const input = screen.getByPlaceholderText('Enter Anthropic API Key');
     fireEvent.change(input, { target: { value: 'sk-ant-typed' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Secrets/i }));
 
@@ -291,7 +291,7 @@ describe('EnvSecretsDialog', () => {
       </QueryClientProvider>
     );
 
-    expect((screen.getByPlaceholderText('Enter value for ANTHROPIC_API_KEY') as HTMLInputElement).value).toBe('');
+    expect((screen.getByPlaceholderText('Enter Anthropic API Key') as HTMLInputElement).value).toBe('');
     expect(screen.queryByText(/Enter at least one secret value before saving\./i)).toBeNull();
   });
 });

@@ -30,18 +30,8 @@ function SidebarIdentity() {
     staleTime: 60_000,
   })
   if (!data?.email) return null
-  const name = [data.first_name, data.last_name].filter(Boolean).join(' ')
   return (
     <div className="px-3 py-1">
-      {name && (
-        <Text
-          as="div"
-          level="caption"
-          className="truncate font-medium text-content-layout-2"
-        >
-          {name}
-        </Text>
-      )}
       <Text as="div" level="caption" className="truncate text-content-layout-3">
         {data.email}
       </Text>
