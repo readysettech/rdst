@@ -1,53 +1,73 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { useQueryRegistry } from '../lib/useQueryRegistry'
+import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
+import { useTop } from '../lib/useTop'
+import { TopPage } from './-top-page'
 
-import { TopPage } from "./-top-page";
-import { useTop } from "../lib/useTop";
-import { useQueryRegistry } from "../lib/useQueryRegistry";
-import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
-
-vi.mock("@tanstack/react-router", () => ({
+vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => options,
   useNavigate: () => vi.fn(),
   // autoCodeSplitting rewrites the route's `component` to a lazyRouteComponent
   // call; the tests render TopPage directly, so this just needs to exist.
   lazyRouteComponent: (loader: unknown) => loader,
-}));
+}))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-  useQuery: () => ({ data: undefined, isLoading: false, isFetching: false, error: null }),
-  useMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, isError: false, isSuccess: false, data: undefined, error: null, reset: vi.fn() }),
-}));
+vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => ({
+    invalidateQueries: vi.fn(),
+    // -top-page reads/writes its filters cache on this client; stub the surface
+    // it touches so the page mounts (getQueryData returns "no persisted run").
+    getQueryData: vi.fn(() => undefined),
+    setQueryData: vi.fn(),
+    removeQueries: vi.fn(),
+  }),
+  useQuery: () => ({
+    data: undefined,
+    isLoading: false,
+    isFetching: false,
+    error: null,
+  }),
+  useMutation: () => ({
+    mutate: vi.fn(),
+    mutateAsync: vi.fn(),
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+    data: undefined,
+    error: null,
+    reset: vi.fn(),
+  }),
+}))
 
-vi.mock("../lib/useQueryRegistry", () => ({
+vi.mock('../lib/useQueryRegistry', () => ({
   useQueryRegistry: vi.fn(),
-}));
+}))
 
-vi.mock("../hooks/useTarget", () => ({
-  useTarget: () => ({ target: "prod" }),
-}));
+vi.mock('../hooks/useTarget', () => ({
+  useTarget: () => ({ target: 'prod' }),
+}))
 
-vi.mock("../lib/useTop", () => ({
+vi.mock('../lib/useTop', () => ({
   useTop: vi.fn(),
-}));
+}))
 
-vi.mock("../lib/useTargetPasswordLock", () => ({
+vi.mock('../lib/useTargetPasswordLock', () => ({
   useTargetPasswordLock: vi.fn(),
-}));
+}))
 
-vi.mock("../components", () => ({
+vi.mock('../components', () => ({
   TargetLockNotice: ({ message }: { message: string }) => <div>{message}</div>,
-}));
+}))
 
-vi.mock("../components/top", () => ({
+vi.mock('../components/top', () => ({
   TopFilters: () => <div data-testid="top-filters" />,
   TopHeader: () => <div data-testid="top-header" />,
   TopQueryTable: () => <div data-testid="top-query-table" />,
   TopStatus: () => <div data-testid="top-status" />,
   ParameterDialog: () => null,
   hasParameters: () => false,
-}));
+}))
 
 function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
   vi.mocked(useQueryRegistry).mockReturnValue({
@@ -65,7 +85,7 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
       data: undefined,
       error: null,
       reset: vi.fn(),
-      status: "idle",
+      status: 'idle',
       variables: undefined,
       failureCount: 0,
       failureReason: null,
@@ -76,7 +96,12 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
     removeQuery: vi.fn(),
     updateTag: vi.fn(),
     updateSqlMutation: { mutate: vi.fn(), isPending: false } as any,
-    importMutation: { mutate: vi.fn(), isPending: false, data: undefined, reset: vi.fn() } as any,
+    importMutation: {
+      mutate: vi.fn(),
+      isPending: false,
+      data: undefined,
+      reset: vi.fn(),
+    } as any,
     isFetching: false,
     total: 0,
     limit: 50,
@@ -86,22 +111,22 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
     nextPage: vi.fn(),
     prevPage: vi.fn(),
     resetPagination: vi.fn(),
-  });
+  })
 
   vi.mocked(useTargetPasswordLock).mockReturnValue({
     isLocked: false,
-    targetName: "prod",
-    message: "",
+    targetName: 'prod',
+    message: '',
     missingTargetRequirements: [],
     keyringAvailable: true,
-  });
+  })
 
   vi.mocked(useTop).mockReturnValue({
     getTop: vi.fn(),
     startRealtime: vi.fn(),
     stopRealtime: vi.fn(),
     reset: vi.fn(),
-    state: "idle",
+    state: 'idle',
     queries: [],
     connectionInfo: null,
     sourceFallback: null,
@@ -112,63 +137,66 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
     savedHashes: new Set(),
     error: null,
     ...overrides,
-  });
+  })
 }
 
-describe("TopPage db limit warning", () => {
-  it("does not show warning when dbLimitWarning is null", () => {
-    setupMocks({ dbLimitWarning: null });
-    render(<TopPage />);
+describe('TopPage db limit warning', () => {
+  it('does not show warning when dbLimitWarning is null', () => {
+    setupMocks({ dbLimitWarning: null })
+    render(<TopPage />)
 
-    expect(screen.queryByText(/Low Database Query Size Limit/i)).toBeNull();
-  });
+    expect(screen.queryByText(/Low Database Query Size Limit/i)).toBeNull()
+  })
 
-  it("shows warning when dbLimitWarning is present", () => {
+  it('shows warning when dbLimitWarning is present', () => {
     setupMocks({
       dbLimitWarning: {
         db_limit_bytes: 1024,
         recommended_bytes: 4096,
-        setting_name: "track_activity_query_size",
-        db_engine: "postgresql",
+        setting_name: 'track_activity_query_size',
+        db_engine: 'postgresql',
       },
-    });
-    render(<TopPage />);
+    })
+    render(<TopPage />)
 
-    expect(screen.getByText(/Low Database Query Size Limit/i)).toBeTruthy();
-    expect(screen.getAllByText(/track_activity_query_size/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/1\s*KB/i)).toBeTruthy();
-    expect(screen.getByText(/4\s*KB/i)).toBeTruthy();
-  });
+    expect(screen.getByText(/Low Database Query Size Limit/i)).toBeTruthy()
+    expect(
+      screen.getAllByText(/track_activity_query_size/i).length
+    ).toBeGreaterThan(0)
+    expect(screen.getByText(/1\s*KB/i)).toBeTruthy()
+    expect(screen.getByText(/4\s*KB/i)).toBeTruthy()
+  })
 
-  it("shows ALTER SYSTEM command for PostgreSQL", () => {
+  it('shows ALTER SYSTEM command for PostgreSQL', () => {
     setupMocks({
       dbLimitWarning: {
         db_limit_bytes: 1024,
         recommended_bytes: 4096,
-        setting_name: "track_activity_query_size",
-        db_engine: "postgresql",
+        setting_name: 'track_activity_query_size',
+        db_engine: 'postgresql',
       },
-    });
-    render(<TopPage />);
+    })
+    render(<TopPage />)
 
     expect(
       screen.getAllByText(/ALTER SYSTEM SET track_activity_query_size/i).length
-    ).toBeGreaterThan(0);
-  });
+    ).toBeGreaterThan(0)
+  })
 
-  it("shows SET GLOBAL command for MySQL", () => {
+  it('shows SET GLOBAL command for MySQL', () => {
     setupMocks({
       dbLimitWarning: {
         db_limit_bytes: 1024,
         recommended_bytes: 4096,
-        setting_name: "performance_schema_max_digest_length",
-        db_engine: "mysql",
+        setting_name: 'performance_schema_max_digest_length',
+        db_engine: 'mysql',
       },
-    });
-    render(<TopPage />);
+    })
+    render(<TopPage />)
 
     expect(
-      screen.getAllByText(/SET GLOBAL performance_schema_max_digest_length/i).length
-    ).toBeGreaterThan(0);
-  });
-});
+      screen.getAllByText(/SET GLOBAL performance_schema_max_digest_length/i)
+        .length
+    ).toBeGreaterThan(0)
+  })
+})

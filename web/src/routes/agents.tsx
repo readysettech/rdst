@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { Button } from '@rs/ui-new/button';
 import { Card } from '@rs/ui-new/card';
+import { TableHeaderCell } from '../components/TableHeaderCell';
+import { ConfirmDialog } from '@rs/ui-new/confirm-dialog';
 import { Icon } from '@rs/ui-new/icon';
 import { Markdown } from '@rs/ui-new/markdown';
 import type { IconStrokeName } from '@rs/ui-icons/icon-name';
@@ -615,12 +617,9 @@ function QueryResultView({ data, target }: { data: QueryToolData; target: string
               <thead>
                 <tr className="bg-surface-layout-2 border-b border-border-layout-1">
                   {data.columns.map((col, i) => (
-                    <th
-                      key={i}
-                      className="text-left px-3 py-2 text-content-layout-2 text-label-small font-medium whitespace-nowrap"
-                    >
+                    <TableHeaderCell key={i} className="whitespace-nowrap">
                       {col}
-                    </th>
+                    </TableHeaderCell>
                   ))}
                 </tr>
               </thead>
@@ -1013,6 +1012,58 @@ function EmptyAgentsState({ onCreate }: { onCreate: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
+// Delete confirmation
+// ---------------------------------------------------------------------------
+
+// Deleting an agent is a one-click, irreversible removal of a scoped read
+// policy (audit HIGH). Route the delete through the shared ConfirmDialog so the
+// consequence is named at the point of action, the red lives on the confirm
+// button — never on the row trigger — and Cancel is the focused default. The
+// delete handler fires only on explicit confirm; Cancel / Escape / overlay
+// never delete. Exported so the open→cancel / confirm-once behaviour can be
+// unit-tested in isolation, mirroring SchemaReinitDialog. [USE-077, VIS-023]
+export function AgentDeleteDialog({
+  agent,
+  isOpen,
+  loading,
+  onConfirm,
+  onClose,
+}: {
+  agent: AgentSummary | null;
+  isOpen: boolean;
+  loading?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const name = agent?.name ?? '';
+  return (
+    <ConfirmDialog
+      isOpen={isOpen}
+      onClose={onClose}
+      onConfirm={onConfirm}
+      title={`Delete agent "${name}"?`}
+      subtitle={
+        agent
+          ? `Reads ${agent.target}${agent.guard ? ` · guarded by ${agent.guard}` : ''}`
+          : undefined
+      }
+      notice={{
+        accent: 'negative',
+        icon: 'alert',
+        title: 'This permanently deletes the agent',
+        message:
+          'Deleting removes this agent and discards its in-memory chat history. This cannot be undone.',
+      }}
+      confirmLabel="Delete agent"
+      confirmIcon="trash"
+      confirmVariant="negative"
+      loading={loading}
+      blockCloseWhileLoading
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -1028,6 +1079,9 @@ function AgentsPage() {
   // fully collapsed — no doubled-CTA flash mid-animation.
   const [ctaSuppressed, setCtaSuppressed] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  // The agent awaiting delete confirmation (null = dialog closed). Holding the
+  // whole summary lets the confirm name the target + its scope.
+  const [confirmDelete, setConfirmDelete] = useState<AgentSummary | null>(null);
 
   const selectedAgent = agents.find((a) => a.name === selectedName) ?? null;
 
@@ -1040,12 +1094,18 @@ function AgentsPage() {
     setCtaSuppressed(true);
   };
 
-  const handleDelete = async (name: string) => {
-    setPendingDelete(name);
+  // Runs only from the confirm dialog's confirm button — never straight off the
+  // row's trash affordance (which just opens the dialog). On success the dialog
+  // closes; on failure it stays open with the error toast so the user can retry.
+  const handleConfirmDelete = async () => {
+    const agent = confirmDelete;
+    if (!agent) return;
+    setPendingDelete(agent.name);
     try {
-      await deleteAgent.mutateAsync(name);
-      toast({ title: 'Agent deleted', description: name });
-      if (selectedName === name) setSelectedName(null);
+      await deleteAgent.mutateAsync(agent.name);
+      toast({ title: 'Agent deleted', description: agent.name });
+      if (selectedName === agent.name) setSelectedName(null);
+      setConfirmDelete(null);
     } catch (err) {
       toast({
         title: 'Failed to delete agent',
@@ -1087,11 +1147,15 @@ function AgentsPage() {
           {/* Hidden in the empty state (the empty-state CTA is the single primary
               action there) and while the create panel is open or closing. */}
           <Show when={!ctaSuppressed && !showEmptyState}>
+            {/* Steps down to outline while an agent is selected — the ChatPanel
+                "Send" is the primary then, so the screen keeps exactly one solid
+                primary [S4; VIS-011/016, VIS-022/023]. */}
             <Button
               label="New agent"
               icon="add"
               iconPosition="left"
               variant="primary"
+              modifier={selectedAgent ? 'outline' : 'solid'}
               onClick={openForm}
             />
           </Show>
@@ -1157,7 +1221,7 @@ function AgentsPage() {
                       agent={agent}
                       selected={selectedName === agent.name}
                       onSelect={() => setSelectedName(agent.name)}
-                      onDelete={() => handleDelete(agent.name)}
+                      onDelete={() => setConfirmDelete(agent)}
                       deleting={pendingDelete === agent.name}
                     />
                   ))}
@@ -1170,6 +1234,15 @@ function AgentsPage() {
           <ChatPanel key={selectedAgent?.name ?? 'none'} agent={selectedAgent} />
         </div>
       )}
+
+      {/* One confirm dialog for the whole list; the pending agent drives it. */}
+      <AgentDeleteDialog
+        agent={confirmDelete}
+        isOpen={confirmDelete !== null}
+        loading={deleteAgent.isPending}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }

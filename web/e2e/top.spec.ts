@@ -69,7 +69,7 @@ async function prepareTopPage(page: Parameters<typeof configureTestTarget>[0]) {
   ).toBeEnabled()
 }
 
-test('filters, refreshes, expands, and analyzes historical slow queries', async ({
+test('filters, refreshes, and analyzes historical slow queries', async ({
   page,
 }) => {
   setBackendFixtures({
@@ -162,15 +162,15 @@ test('filters, refreshes, expands, and analyzes historical slow queries', async 
     'data-query-hash',
     'orders-historical-001'
   )
-  await expect(queryRows.first()).toContainText('3200×')
-  await expect(queryRows.first()).toContainText('48.0s')
+  await expect(queryRows.first()).toContainText('freq 3200')
+  await expect(queryRows.first()).toContainText('total 48.0s')
   await expect(page.getByText('Low Database Query Size Limit')).toBeVisible()
   await expect(page.getByText('2 saved', { exact: true })).toBeVisible()
 
-  // Within a row, only the expandable SQL preview carries a title attribute
-  // (a div[role=button] at C-09, a real button after the QueryCard polish).
+  // v3: SQL is always shown full + syntax-highlighted (no expand/collapse dual
+  // state). The SQL element carries the full query as its `title` — a stable
+  // per-row hook — and its text content is the query verbatim.
   const firstSql = queryRows.first().locator('[title]')
-  await firstSql.click()
   await expect(firstSql).toContainText(firstHistoricalQueries[0].query_text)
 
   await page.getByRole('button', { name: 'Find slow queries' }).click()
@@ -180,6 +180,7 @@ test('filters, refreshes, expands, and analyzes historical slow queries', async 
     'data-query-hash',
     refreshedQuery.query_hash
   )
+  // Load folds into the v3 muted meta line ("… · load 42.0%").
   await expect(queryRows).toContainText('load 42.0%')
   expect(topRequests).toBe(2)
 
@@ -334,8 +335,9 @@ test('shows a realtime connection failure and retries the stream', async ({
   const liveRow = page.getByTestId('top-query-row')
   await expect(liveRow).toHaveCount(1)
   await expect(liveRow).toContainText('2 running')
-  await expect(liveRow).toContainText('17×')
-  await expect(liveRow).toContainText('92.4ms')
+  // Realtime meta folds seen/max/qps into the one muted stat line.
+  await expect(liveRow).toContainText('seen 17')
+  await expect(liveRow).toContainText('max 92.4ms')
   await expect(liveRow).toContainText('qps 4.25')
   await expect(
     page.getByText('Fallback: pg_stat → activity', { exact: true })

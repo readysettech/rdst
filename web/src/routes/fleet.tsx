@@ -2,6 +2,7 @@ import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { BaseInputSelect } from '@rs/ui-new/base-input-select'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
+import { TableHeaderCell } from '../components/TableHeaderCell'
 import { Card } from '@rs/ui-new/card'
 import {
   Drawer,
@@ -421,12 +422,7 @@ function SnapshotDiff({ diff }: { diff: FleetDiffResponse }) {
                 <tr className="bg-surface-layout-2/30">
                   {['Target', 'Field', 'Old', 'New', 'Change %'].map(
                     (header) => (
-                      <th
-                        key={header}
-                        className="px-4 py-2 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium"
-                      >
-                        {header}
-                      </th>
+                      <TableHeaderCell key={header}>{header}</TableHeaderCell>
                     )
                   )}
                 </tr>
@@ -658,9 +654,11 @@ function HistoryDriftSection() {
                       options={options}
                     />
                   </div>
+                  {/* Outline so "Audit fleet" stays the screen's one solid
+                      primary when the History & drift panel is open [S4]. */}
                   <Button
                     variant="primary"
-                    modifier="solid"
+                    modifier="outline"
                     size="small"
                     label="Compare"
                     icon="connect"
@@ -1429,12 +1427,7 @@ function FleetPage() {
               <thead>
                 <tr className="bg-surface-layout-2/30">
                   {['Target', 'Connectivity', 'Sizing'].map((header) => (
-                    <th
-                      key={header}
-                      className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium"
-                    >
-                      {header}
-                    </th>
+                    <TableHeaderCell key={header}>{header}</TableHeaderCell>
                   ))}
                   <th className="px-4 py-3 w-10" aria-hidden="true" />
                 </tr>

@@ -241,14 +241,33 @@ test('deploys remotely, creates, benchmarks, restarts, and deletes a cache', asy
   })
   await expect(page.getByText('No queries cached yet')).toBeVisible()
 
+  // Caching#1: Add Cache moved off the bottom of the page into a modal opened
+  // from the list header / empty-state CTA. The only editable cm-content is the
+  // one inside the open dialog, so fillCodeMirror still resolves uniquely.
+  await page.getByRole('button', { name: 'Add cache' }).first().click()
+  const addDialog = page.getByRole('dialog')
+  await expect(
+    addDialog.getByRole('heading', { name: 'Add cache' })
+  ).toBeVisible()
   await fillCodeMirror(page.locator('.cm-editor'), query)
-  await page.getByRole('button', { name: 'Check & Cache' }).click()
+  await addDialog.getByRole('button', { name: 'Check & Cache' }).click()
 
   const cacheRow = page.getByTestId('cache-query-row')
   await expect(cacheRow).toHaveCount(1)
   await expect(cacheRow).toHaveAttribute('data-cache-id', cachedQuery.cache_id)
   await expect(cacheRow).toContainText(cachedQuery.cache_name)
-  await expect(page.getByText('Cache created successfully.')).toBeVisible()
+  // A real (non-optimistic) success closes the modal and toasts. The shared
+  // @rs/ui-new/modal renders `Dialog.Portal` with `forceMount`, so a closed
+  // dialog stays in the DOM as a ghost (role="dialog" data-state="closed",
+  // opacity 0 — not display:none or inert). Asserting zero dialog nodes would
+  // match that ghost and flake; assert the dialog is in its closed state. [FIX-6]
+  await expect(page.getByRole('dialog')).toHaveAttribute('data-state', 'closed')
+  // The toast prints its description both in a visible node and in an aria-live
+  // status region, so a substring match resolves to 2 elements. Scope to the
+  // exact description node to keep the assertion unambiguous. [FIX-6]
+  await expect(
+    page.getByText('Your query is now served from ReadySet.', { exact: true })
+  ).toBeVisible()
   expect(addRequests).toEqual([
     { query, target: 'e2e-guard', dry_run: true },
     { query, target: 'e2e-guard', dry_run: false },
@@ -447,15 +466,19 @@ test('shows cacheability and benchmark failures and retries successfully', async
   await expect(page.getByText('8.5x faster', { exact: true })).toBeVisible()
   expect(benchmarkCalls).toBe(2)
 
+  // Open the Add Cache modal; the check-error and "not cacheable" paths keep it
+  // open (only a real cache success closes it). [Caching#1]
+  await page.getByRole('button', { name: 'Add cache' }).first().click()
+  const addDialog = page.getByRole('dialog')
   await fillCodeMirror(page.locator('.cm-editor'), query)
-  await page.getByRole('button', { name: 'Check & Cache' }).click()
+  await addDialog.getByRole('button', { name: 'Check & Cache' }).click()
   await expect(
     page.getByText('Cache control plane is temporarily unavailable', {
       exact: true,
     })
   ).toBeVisible()
 
-  await page.getByRole('button', { name: 'Check & Cache' }).click()
+  await addDialog.getByRole('button', { name: 'Check & Cache' }).click()
   await expect(
     page.getByText('Query cannot be cached', { exact: true })
   ).toBeVisible()

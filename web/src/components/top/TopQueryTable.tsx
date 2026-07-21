@@ -1,47 +1,48 @@
 /**
  * Ranked list of slow queries (region C of the redesign — the primary content).
  *
- * Row hierarchy: the SQL preview + headline cost lead (big, cost right-aligned);
- * the five equal stat tags are demoted to a muted subline with a thin load meter;
- * the query hash + full stat set drop into the expanded detail. Analyze is the one
- * visible per-row action — Cache lives in a `⋯` overflow. The results header carries
+ * Each row is the canonical QueryCard: the full syntax-highlighted SQL leads, and
+ * the per-query metrics fold into ONE muted meta line beneath it — `hash · freq ·
+ * total · avg · load` historically, swapping to the `seen · max · avg · load · qps`
+ * variant in realtime. The footer carries the row actions: Analyze is the one
+ * visible per-row action, Cache lives in a `⋯` overflow. The results header carries
  * the count, the Sort lens, the Save-automatically preference and Save all.
  * [VIS-011, VIS-016, VIS-017, VIS-110, VIS-119, VIS-127, USE-008]
  */
 
-import { useState } from 'react';
-import type { ReactNode } from 'react';
-import { Button } from '@rs/ui-new/button';
-import { Text } from '@rs/ui-new/text';
-import { Icon } from '@rs/ui-new/icon';
-import { Tag } from '@rs/ui-new/tag';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { Card } from '@rs/ui-new/card';
-import { Show } from '@rs/ui-new/show';
-import { Dropdown } from '@rs/ui-new/dropdown';
-import { BaseInputSwitch } from '@rs/ui-new/base-input-switch';
-import { Label } from '@rs/ui-new/label';
-import { m, AnimatePresence } from '@rs/ui-new/motion';
-import { SQLDisplay } from '../SQLDisplay';
-import type { TopQuery, TopState } from '../../types/top';
+import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
+import { Button } from '@rs/ui-new/button'
+import { Card } from '@rs/ui-new/card'
+import { Dropdown } from '@rs/ui-new/dropdown'
+import { Icon } from '@rs/ui-new/icon'
+import { Label } from '@rs/ui-new/label'
+import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { Show } from '@rs/ui-new/show'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
+import { Text } from '@rs/ui-new/text'
+import { type ReactNode, useMemo } from 'react'
+import { formatMeta, shortHash } from '../../lib/formatters'
+import type { TopQuery, TopState } from '../../types/top'
+import { QueryCard } from '../QueryCard'
 
 interface TopQueryTableProps {
-  queries: TopQuery[];
-  state: TopState;
-  isRealtime: boolean;
-  onAnalyze: (query: TopQuery) => void;
-  onCache?: (query: TopQuery) => void;
-  cachingHash?: string | null;
-  isCached?: (sql: string) => boolean;
+  queries: TopQuery[]
+  state: TopState
+  isRealtime: boolean
+  onAnalyze: (query: TopQuery) => void
+  onCache?: (query: TopQuery) => void
+  cachingHash?: string | null
+  isCached?: (sql: string) => boolean
   /** Results-header controls (region C). */
-  sort?: string;
-  setSort?: (sort: string) => void;
-  onSaveAll?: () => void;
-  canSave?: boolean;
-  autoSave?: boolean;
-  setAutoSave?: (autoSave: boolean) => void;
+  sort?: string
+  setSort?: (sort: string) => void
+  onSaveAll?: () => void
+  canSave?: boolean
+  autoSave?: boolean
+  setAutoSave?: (autoSave: boolean) => void
   /** The single primary CTA shown in the idle empty state. */
-  idleAction?: ReactNode;
+  idleAction?: ReactNode
 }
 
 const sortOptions = [
@@ -49,11 +50,7 @@ const sortOptions = [
   { value: 'freq', label: 'Frequency' },
   { value: 'avg_time', label: 'Avg time' },
   { value: 'load', label: 'Load %' },
-];
-
-function getCollapsedPreview(sql: string): string {
-  return sql.replace(/\s+/g, ' ').trim();
-}
+]
 
 function EmptyState({
   message,
@@ -62,11 +59,11 @@ function EmptyState({
   action,
   gradient = false,
 }: {
-  message: string;
-  icon: 'observe' | 'speedometer' | 'folder-file';
-  title?: string;
-  action?: ReactNode;
-  gradient?: boolean;
+  message: string
+  icon: 'observe' | 'speedometer' | 'folder-file'
+  title?: string
+  action?: ReactNode
+  gradient?: boolean
 }) {
   return (
     <Card className="w-full border-transparent shadow-elevation-1">
@@ -82,16 +79,26 @@ function EmptyState({
             <Icon
               name={icon}
               label="Empty"
-              className={gradient ? 'w-7 h-7 text-content-primary-soft' : 'w-7 h-7 text-content-layout-3'}
+              className={
+                gradient
+                  ? 'w-7 h-7 text-content-primary-soft'
+                  : 'w-7 h-7 text-content-layout-3'
+              }
             />
           </div>
           <VStack className="gap-1 items-center">
             <Show when={!!title}>
-              <Text level="subtitle-1" className="text-content-layout-1 text-center">
+              <Text
+                level="subtitle-1"
+                className="text-content-layout-1 text-center"
+              >
                 {title}
               </Text>
             </Show>
-            <Text level="body-small" className="text-content-layout-3 text-center max-w-md">
+            <Text
+              level="body-small"
+              className="text-content-layout-3 text-center max-w-md"
+            >
               {message}
             </Text>
           </VStack>
@@ -101,7 +108,7 @@ function EmptyState({
         </VStack>
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 /** Per-row `⋯` overflow — demotes Cache out of the primacy slot next to Analyze. */
@@ -111,12 +118,12 @@ function RowOverflowMenu({
   caching,
   cached,
 }: {
-  query: TopQuery;
-  onCache?: (query: TopQuery) => void;
-  caching: boolean;
-  cached: boolean;
+  query: TopQuery
+  onCache?: (query: TopQuery) => void
+  caching: boolean
+  cached: boolean
 }) {
-  if (!onCache) return null;
+  if (!onCache) return null
 
   return (
     <Dropdown>
@@ -138,7 +145,7 @@ function RowOverflowMenu({
         />
       </Dropdown.Content>
     </Dropdown>
-  );
+  )
 }
 
 export function TopQueryTable({
@@ -157,7 +164,51 @@ export function TopQueryTable({
   setAutoSave,
   idleAction,
 }: TopQueryTableProps) {
-  const [expandedHash, setExpandedHash] = useState<string | null>(null);
+  // Per-row view-models: the hash, the max-latency text, the one muted meta line
+  // and the cached flag derive only from the row data, the realtime toggle and
+  // the cached-SQL set behind `isCached` — never from the parent's transient
+  // state (sort menu, auto-save, streaming ticks). Memoized so an unrelated
+  // re-render doesn't rebuild meta strings for up to 200 rows. `isCached` is a
+  // stable useCallback keyed on the cache set, so listing it as a dep recomputes
+  // exactly when a cache op lands, and no more often. [PS5 item 7b]
+  const rowViewModels = useMemo(
+    () =>
+      queries.map((query) => {
+        const hash8 = shortHash(query.query_hash)
+        const maxText =
+          query.max_duration_ms != null
+            ? `${query.max_duration_ms.toFixed(1)}ms`
+            : query.total_time
+        // The whole metric block collapses into one muted stat line under the
+        // SQL — labels folded into values, dot-separated, the owner's approved
+        // format. Realtime swaps freq→seen, total→max and appends QPS; the
+        // "N running" status stays a top badge. [triage §1.1 /top; USE-002/003
+        // fold labels, VIS-011 quiet secondary]
+        const meta = isRealtime
+          ? formatMeta([
+              `hash ${hash8}`,
+              `seen ${query.observation_count ?? query.freq}`,
+              `max ${maxText}`,
+              `avg ${query.avg_time}`,
+              `load ${query.pct_load}`,
+              query.qps != null ? `qps ${query.qps.toFixed(2)}` : null,
+            ])
+          : formatMeta([
+              `hash ${hash8}`,
+              `freq ${query.freq}`,
+              `total ${query.total_time}`,
+              `avg ${query.avg_time}`,
+              `load ${query.pct_load}`,
+            ])
+        return {
+          query,
+          hasRunning: (query.current_instances_running ?? 0) > 0,
+          meta,
+          cached: !!isCached?.(query.query_text),
+        }
+      }),
+    [queries, isRealtime, isCached]
+  )
 
   if (state === 'idle') {
     return (
@@ -173,7 +224,7 @@ export function TopQueryTable({
           action={idleAction}
         />
       </m.div>
-    );
+    )
   }
 
   if (state === 'loading') {
@@ -183,13 +234,16 @@ export function TopQueryTable({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.2 }}
       >
-        <EmptyState icon="speedometer" message="Reading your database's query statistics…" />
+        <EmptyState
+          icon="speedometer"
+          message="Reading your database's query statistics…"
+        />
       </m.div>
-    );
+    )
   }
 
   if (state === 'error') {
-    return null;
+    return null
   }
 
   if (queries.length === 0 && (state === 'complete' || state === 'streaming')) {
@@ -204,12 +258,13 @@ export function TopQueryTable({
           message="No queries matched. Loosen the filters or wait for more traffic."
         />
       </m.div>
-    );
+    )
   }
 
-  const activeSort = sort ?? 'total_time';
-  const sortLabel = sortOptions.find((o) => o.value === activeSort)?.label ?? 'Total time';
-  const showSort = !!setSort && !isRealtime;
+  const activeSort = sort ?? 'total_time'
+  const sortLabel =
+    sortOptions.find((o) => o.value === activeSort)?.label ?? 'Total time'
+  const showSort = !!setSort && !isRealtime
 
   return (
     <m.div
@@ -236,7 +291,11 @@ export function TopQueryTable({
                       >
                         <span className="text-content-layout-3">Sort:</span>
                         <span>{sortLabel}</span>
-                        <Icon name="chevron-down" label="Change sort" className="w-3.5 h-3.5" />
+                        <Icon
+                          name="chevron-down"
+                          label="Change sort"
+                          className="w-3.5 h-3.5"
+                        />
                       </button>
                     </Dropdown.Trigger>
                     <Dropdown.Content align="end" className="min-w-44">
@@ -249,7 +308,9 @@ export function TopQueryTable({
                           key={option.value}
                           label={option.label}
                           active={option.value === activeSort}
-                          rightIcon={option.value === activeSort ? 'tick' : undefined}
+                          rightIcon={
+                            option.value === activeSort ? 'tick' : undefined
+                          }
                           onClick={() => setSort?.(option.value)}
                         />
                       ))}
@@ -263,10 +324,15 @@ export function TopQueryTable({
                       id="top-auto-save"
                       name="auto-save"
                       checked={!!autoSave}
-                      onCheckedChange={(checked) => setAutoSave?.(checked === true)}
+                      onCheckedChange={(checked) =>
+                        setAutoSave?.(checked === true)
+                      }
                       disabled={state === 'streaming'}
                     />
-                    <Label htmlFor="top-auto-save" className="text-label-small text-content-layout-2">
+                    <Label
+                      htmlFor="top-auto-save"
+                      className="text-label-small text-content-layout-2"
+                    >
                       Save automatically
                     </Label>
                   </HStack>
@@ -287,162 +353,78 @@ export function TopQueryTable({
             </HStack>
           </div>
 
-          {/* Query rows */}
-          <div className="divide-y divide-border-layout-1">
+          {/* Query rows — stacked canonical cards (ref 21.47.45 anatomy), compact
+              density for this dense list; the results header above stays intact
+              (count + Sort "applies to next run" + auto-save + Save all = C-05/C-09). */}
+          <div className="p-3 space-y-3 bg-surface-layout-1">
             <AnimatePresence mode="popLayout">
-              {queries.map((query, index) => {
-                const isExpanded = expandedHash === query.query_hash;
-                const hasRunning = (query.current_instances_running ?? 0) > 0;
-                const collapsedPreview = getCollapsedPreview(query.query_text);
-                const headlineCost =
-                  isRealtime && query.max_duration_ms != null
-                    ? `${query.max_duration_ms.toFixed(1)}ms`
-                    : query.total_time;
-                const headlineLabel = isRealtime ? 'max' : 'total';
-                const freqValue =
-                  isRealtime && query.observation_count != null
-                    ? query.observation_count
-                    : query.freq;
-                const loadPctNum = (() => {
-                  const n = parseFloat(query.pct_load);
-                  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
-                })();
-                const toggle = () => setExpandedHash(isExpanded ? null : query.query_hash);
+              {rowViewModels.map((row, index) => {
+                const { query, hasRunning, meta, cached } = row
 
                 return (
                   <m.div
                     key={query.query_hash}
-                    data-testid="top-query-row"
-                    data-query-hash={query.query_hash}
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
                     transition={{ duration: 0.2, delay: index * 0.03 }}
-                    className={`group px-5 py-4 transition-colors ${hasRunning ? 'bg-surface-positive-soft/20' : 'hover:bg-surface-layout-2/30'}`}
                   >
-                    {/* Primary line: rank + SQL preview + headline cost + Analyze + ⋯ */}
-                    <HStack className="justify-between items-start gap-3">
-                      <HStack className="gap-3 items-start min-w-0 flex-1">
+                    <QueryCard
+                      data-testid="top-query-row"
+                      data-query-hash={query.query_hash}
+                      className={
+                        hasRunning
+                          ? 'ring-1 ring-border-positive-soft'
+                          : undefined
+                      }
+                      sql={query.query_text}
+                      leading={
                         <Text
                           as="span"
                           level="mono-small"
-                          className="text-content-layout-3 tabular-nums pt-1.5 shrink-0 w-5 text-right"
+                          className="text-content-layout-3 tabular-nums pt-0.5 shrink-0 w-5 text-right"
                         >
                           {index + 1}
                         </Text>
-                        {/* Non-button disclosure so the expanded CopyButton is a sibling, not
-                            a nested <button> (fixes H1 hydration error). */}
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          aria-expanded={isExpanded}
-                          onClick={toggle}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              toggle();
-                            }
-                          }}
-                          className="min-w-0 flex-1 text-left bg-surface-layout-2 px-3 py-2 rounded-lg hover:ring-1 hover:ring-border-primary-soft transition-all cursor-pointer"
-                          title={query.query_text}
-                        >
-                          <SQLDisplay
-                            sql={
-                              collapsedPreview.length > 140
-                                ? `${collapsedPreview.slice(0, 140)}...`
-                                : collapsedPreview
-                            }
-                            wrap={false}
-                            showCopy={false}
+                      }
+                      badges={
+                        hasRunning ? (
+                          <Tag
+                            size="small"
+                            variant="positive"
+                            modifier="solid"
+                            label={`${query.current_instances_running} running`}
                           />
-                        </div>
-                      </HStack>
-
-                      <HStack className="gap-2 items-center shrink-0">
-                        <VStack className="items-end gap-0 mr-1">
-                          <Text
-                            as="span"
-                            level="label-large"
-                            className="text-content-layout-1 tabular-nums"
-                          >
-                            {headlineCost}
-                          </Text>
-                          <Text as="span" level="caption" className="text-content-layout-3">
-                            {headlineLabel}
-                          </Text>
-                        </VStack>
-                        <Button
-                          variant="primary"
-                          modifier="ghost"
-                          size="small"
-                          icon="speedometer"
-                          iconPosition="left"
-                          label="Analyze"
-                          onClick={() => onAnalyze(query)}
-                        />
-                        <RowOverflowMenu
-                          query={query}
-                          onCache={onCache}
-                          caching={cachingHash === query.query_hash}
-                          cached={!!isCached?.(query.query_text)}
-                        />
-                      </HStack>
-                    </HStack>
-
-                    {/* Secondary subline: thin load meter + muted stats. */}
-                    <HStack className="mt-2 gap-3 items-center flex-wrap pl-8">
-                      <HStack className="gap-2 items-center">
-                        <div className="w-20 h-1.5 rounded-full bg-surface-layout-2 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-surface-warning-soft"
-                            style={{ width: `${loadPctNum}%` }}
+                        ) : undefined
+                      }
+                      meta={meta}
+                      actions={
+                        <>
+                          <Button
+                            variant="primary"
+                            modifier="ghost"
+                            size="small"
+                            icon="speedometer"
+                            iconPosition="left"
+                            label="Analyze"
+                            onClick={() => onAnalyze(query)}
                           />
-                        </div>
-                        <Text as="span" level="caption" className="text-content-layout-2 tabular-nums">
-                          load {query.pct_load}
-                        </Text>
-                      </HStack>
-                      <Text as="span" level="caption" className="text-content-layout-3">
-                        avg {query.avg_time}
-                      </Text>
-                      <Text as="span" level="caption" className="text-content-layout-3 tabular-nums">
-                        {freqValue}×
-                      </Text>
-                      <Show when={isRealtime && query.qps != null}>
-                        <Text as="span" level="caption" className="text-content-layout-3 tabular-nums">
-                          qps {query.qps?.toFixed(2)}
-                        </Text>
-                      </Show>
-                      <Show when={hasRunning}>
-                        <Tag
-                          size="small"
-                          variant="positive"
-                          modifier="solid"
-                          label={`${query.current_instances_running} running`}
-                        />
-                      </Show>
-                    </HStack>
-
-                    {/* Expanded detail — full SQL (with copy) + hash + full stat set (tertiary). */}
-                    <Show when={isExpanded}>
-                      <VStack className="mt-3 gap-2 pl-8 items-start">
-                        <div className="w-full rounded-lg bg-surface-layout-2 p-1">
-                          <SQLDisplay sql={query.query_text} wrap showCopy />
-                        </div>
-                        <Text as="span" level="mono-small" className="text-content-layout-3">
-                          hash {query.query_hash.slice(0, 8)} · freq {query.freq} · total{' '}
-                          {query.total_time} · avg {query.avg_time} · load {query.pct_load}
-                          {query.qps != null ? ` · qps ${query.qps.toFixed(2)}` : ''}
-                        </Text>
-                      </VStack>
-                    </Show>
+                          <RowOverflowMenu
+                            query={query}
+                            onCache={onCache}
+                            caching={cachingHash === query.query_hash}
+                            cached={cached}
+                          />
+                        </>
+                      }
+                    />
                   </m.div>
-                );
+                )
               })}
             </AnimatePresence>
           </div>
         </Card.Content>
       </Card>
     </m.div>
-  );
+  )
 }

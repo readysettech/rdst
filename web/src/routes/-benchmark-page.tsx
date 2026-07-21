@@ -18,10 +18,11 @@ import { Text } from '@rs/ui-new/text'
 import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-
 import { TargetLockNotice } from '../components'
 import { BenchmarkConfirmDialog } from '../components/BenchmarkConfirmDialog'
+import { QueryCard } from '../components/QueryCard'
 import { SQLDisplay } from '../components/SQLDisplay'
+import { TableHeaderCell } from '../components/TableHeaderCell'
 import { useTarget } from '../hooks/useTarget'
 import type {
   BenchmarkMode,
@@ -30,6 +31,7 @@ import type {
   TargetInfo,
 } from '../lib/api'
 import { fetchSchema, fetchTargets } from '../lib/api'
+import { formatMeta, formatMs, shortHash } from '../lib/formatters'
 import {
   detectParameters,
   hasParameters,
@@ -48,12 +50,6 @@ type WizardStep = 'configure' | 'running'
 // MAX_BENCHMARK_MAX_COUNT) — used only to describe the tight-loop bound in the
 // confirmation dialog. The real rail is enforced server-side.
 const BENCHMARK_EXECUTION_CAP = 100_000
-
-function formatDuration(ms: number): string {
-  if (ms < 1) return '<1ms'
-  if (ms < 1000) return `${ms.toFixed(1)}ms`
-  return `${(ms / 1000).toFixed(2)}s`
-}
 
 function formatNumber(n: number): string {
   return n.toLocaleString()
@@ -636,7 +632,10 @@ export function BenchmarkPage() {
                       : 'Queries will execute against this database.'}
                   </Text>
                   {destinationLock.isLocked && (
-                    <Text level="caption" className="text-content-negative-soft">
+                    <Text
+                      level="caption"
+                      className="text-content-negative-soft"
+                    >
                       {destinationLock.message}
                     </Text>
                   )}
@@ -789,81 +788,41 @@ export function BenchmarkPage() {
                       const identifier = query.tag || query.hash
                       const isSelected = selectedQueries.includes(identifier)
                       const queryHasParams = hasParameters(query.sql)
+                      // hash · target · has params folds into the one muted meta
+                      // line; selection is the card's focus. [triage §1.1 /benchmark]
+                      const meta = formatMeta([
+                        `hash ${shortHash(query.hash)}`,
+                        query.target ?? null,
+                        queryHasParams ? 'has params' : null,
+                      ])
                       return (
-                        <m.button
+                        <m.div
                           key={query.hash}
-                          type="button"
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ duration: 0.2, delay: index * 0.02 }}
-                          onClick={() => toggleQuery(identifier)}
-                          aria-pressed={isSelected}
-                          className={`w-full text-left p-4 rounded-xl border transition-all ${
-                            isSelected
-                              ? 'bg-surface-primary-soft border-border-primary-soft shadow-elevation-2'
-                              : 'bg-surface-layout-2/50 border-border-layout-1 hover:bg-surface-layout-2'
-                          } cursor-pointer`}
                         >
-                          <HStack className="gap-3 items-start">
-                            <div
-                              className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-colors ${
-                                isSelected
-                                  ? 'bg-surface-primary-solid border-surface-primary-solid'
-                                  : 'border-border-layout-2'
-                              }`}
-                            >
-                              {isSelected && (
-                                <Icon
-                                  name="tick"
-                                  label="Selected"
-                                  className="w-3 h-3 text-content-primary-solid"
-                                />
-                              )}
-                            </div>
-                            <VStack className="gap-1 items-start flex-1 min-w-0">
-                              <HStack className="gap-2 items-center flex-wrap">
-                                <Text
-                                  level="label-small"
-                                  className="text-content-layout-1"
-                                >
-                                  {query.tag || '(unnamed)'}
-                                </Text>
-                                <Text
-                                  level="mono-small"
-                                  className="text-content-layout-3"
-                                >
-                                  {query.hash.slice(0, 8)}
-                                </Text>
-                                {query.target && (
-                                  <Tag
-                                    size="small"
-                                    variant="informative"
-                                    modifier="ghost"
-                                    label={query.target}
-                                  />
-                                )}
-                                {queryHasParams && (
-                                  <Tag
-                                    size="small"
-                                    variant="warning"
-                                    modifier="ghost"
-                                    label="Has params"
-                                  />
-                                )}
-                              </HStack>
-                              <div className="bg-surface-layout-2 px-2 py-1 rounded-md max-w-full overflow-hidden">
-                                <SQLDisplay
-                                  sql={
-                                    query.sql.length > 80
-                                      ? `${query.sql.slice(0, 80)}...`
-                                      : query.sql
-                                  }
-                                  wrap={false}
-                                />
-                              </div>
-                            </VStack>
-                          </HStack>
-                        </m.button>
+                          {/* Canonical card in selectable mode — the leading tick
+                              box + selected accent replace the footer action bar
+                              (owner: "bazı sayfalarda action bar kalkıyor"). The
+                              meta line stays light: selection is the focus. [triage
+                              §1.1 /benchmark; VIS-108 selectable cards] */}
+                          <QueryCard
+                            selectable
+                            selected={isSelected}
+                            onClick={() => toggleQuery(identifier)}
+                            sql={query.sql}
+                            title={
+                              <Text
+                                level="label-small"
+                                className="text-content-layout-1"
+                              >
+                                {query.tag || '(unnamed)'}
+                              </Text>
+                            }
+                            meta={meta}
+                          />
+                        </m.div>
                       )
                     })}
                   </div>
@@ -1445,27 +1404,25 @@ export function BenchmarkPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="bg-surface-layout-2/30">
-                      <th className="px-4 py-3 text-left text-xs text-content-layout-3 uppercase tracking-wider font-medium">
-                        Query
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-24">
+                      <TableHeaderCell>Query</TableHeaderCell>
+                      <TableHeaderCell align="right" className="w-24">
                         Executions
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
+                      </TableHeaderCell>
+                      <TableHeaderCell align="right" className="w-20">
                         Errors
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
+                      </TableHeaderCell>
+                      <TableHeaderCell align="right" className="w-20">
                         Min
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
+                      </TableHeaderCell>
+                      <TableHeaderCell align="right" className="w-20">
                         Avg
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
+                      </TableHeaderCell>
+                      <TableHeaderCell align="right" className="w-20">
                         P95
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs text-content-layout-3 uppercase tracking-wider font-medium w-20">
+                      </TableHeaderCell>
+                      <TableHeaderCell align="right" className="w-20">
                         Max
-                      </th>
+                      </TableHeaderCell>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border-layout-1">
@@ -1530,7 +1487,7 @@ export function BenchmarkPage() {
                                 level="mono-small"
                                 className="text-content-layout-2"
                               >
-                                {formatDuration(q.min_ms)}
+                                {formatMs(q.min_ms)}
                               </Text>
                             </td>
                             <td className="px-4 py-3 text-right align-top">
@@ -1538,7 +1495,7 @@ export function BenchmarkPage() {
                                 level="mono-small"
                                 className="text-content-layout-2"
                               >
-                                {formatDuration(q.avg_ms)}
+                                {formatMs(q.avg_ms)}
                               </Text>
                             </td>
                             <td className="px-4 py-3 text-right align-top">
@@ -1546,7 +1503,7 @@ export function BenchmarkPage() {
                                 level="mono-small"
                                 className="text-content-layout-2"
                               >
-                                {formatDuration(q.p95_ms)}
+                                {formatMs(q.p95_ms)}
                               </Text>
                             </td>
                             <td className="px-4 py-3 text-right align-top">
@@ -1554,7 +1511,7 @@ export function BenchmarkPage() {
                                 level="mono-small"
                                 className="text-content-layout-2"
                               >
-                                {formatDuration(q.max_ms)}
+                                {formatMs(q.max_ms)}
                               </Text>
                             </td>
                           </m.tr>

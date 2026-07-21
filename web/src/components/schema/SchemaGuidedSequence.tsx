@@ -224,11 +224,15 @@ export function SchemaGuidedSequence({
             cost="~1 min · uses your key"
             action={annotateAction}
           >
+            {/* Label first so the percentage anchors to the left margin, in line
+                with the "still need meanings" copy below it — the bar trails to
+                its right instead of shoving the label into the middle (the
+                off-balance "0% documented" the 240px w-60 track caused). */}
             <HStack className="mt-0.5 gap-3 items-center flex-wrap">
-              <Progress value={pct} max={100} />
               <Text level="label-medium" className="text-content-layout-1 tabular-nums">
                 {pct}% documented
               </Text>
+              <Progress value={pct} max={100} />
             </HStack>
             <Text level="body-small" className="text-content-layout-2">
               {undocumentedTables} of {totalTables} tables and {undocumentedColumns} of{' '}

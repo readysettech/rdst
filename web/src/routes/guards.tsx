@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { cn } from '@rs/tailwind-base';
 import { Button } from '@rs/ui-new/button';
 import { Card } from '@rs/ui-new/card';
+import { ConfirmDialog } from '@rs/ui-new/confirm-dialog';
 import { Icon } from '@rs/ui-new/icon';
 import type { IconStrokeName } from '@rs/ui-icons/icon-name';
 import { Show } from '@rs/ui-new/show';
@@ -975,11 +976,15 @@ function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
         </VStack>
 
         <HStack className="justify-end">
+          {/* Secondary to the page/editor primary ("New guard" / "Create
+              guard") — one solid primary per screen [S4; VIS-011/016,
+              VIS-022/023]. */}
           <Button
             label="Run Check"
             icon="play"
             iconPosition="left"
             variant="primary"
+            modifier="outline"
             onClick={handleRun}
             loading={running}
             disabled={running || !effectiveGuard || !sql.trim()}
@@ -1251,6 +1256,73 @@ function GuardListRow({
 }
 
 // ---------------------------------------------------------------------------
+// Delete confirmation
+// ---------------------------------------------------------------------------
+
+// Names the exact protection a guard provides, from the list-row data only
+// (never invented): the columns it masks and the query rules it enforces. This
+// feeds the confirm notice so a deleter sees the precise security boundary they
+// are about to remove.
+function guardProtectionSummary(guard: GuardSummary): string {
+  const parts: string[] = [];
+  const maskCount = guard.mask_count ?? 0;
+  if (maskCount > 0) {
+    parts.push(`masks ${maskCount} column${maskCount === 1 ? '' : 's'}`);
+  }
+  const ruleParts = (guard.rules ?? []).map(ruleLabel);
+  if (ruleParts.length > 0) {
+    parts.push(`enforces ${ruleParts.join(', ')}`);
+  }
+  return parts.join(' and ');
+}
+
+// Deleting a guard is a SECURITY-boundary change (audit HIGH): every agent
+// bound to it silently loses its masking + query rules, with no undo. Route the
+// delete through the shared ConfirmDialog so the security consequence is named
+// at the point of action, the red lives on the confirm button — never on the
+// row's Delete trigger — and Cancel is the focused default. The delete handler
+// fires only on explicit confirm; Cancel / Escape / overlay never delete.
+// Exported so the open→cancel / confirm-once behaviour can be unit-tested in
+// isolation, mirroring SchemaReinitDialog. [USE-077, VIS-023]
+export function GuardDeleteDialog({
+  guard,
+  isOpen,
+  loading,
+  onConfirm,
+  onClose,
+}: {
+  guard: GuardSummary | null;
+  isOpen: boolean;
+  loading?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const name = guard?.name ?? '';
+  const summary = guard ? guardProtectionSummary(guard) : '';
+  const protection = summary ? `This guard ${summary}. ` : '';
+  return (
+    <ConfirmDialog
+      isOpen={isOpen}
+      onClose={onClose}
+      onConfirm={onConfirm}
+      title={`Delete guard "${name}"?`}
+      subtitle="Deleting a guard changes a security boundary."
+      notice={{
+        accent: 'negative',
+        icon: 'alert',
+        title: 'Agents lose this protection',
+        message: `${protection}Any agent bound to this guard loses that protection the moment it is deleted. This cannot be undone.`,
+      }}
+      confirmLabel="Delete guard"
+      confirmIcon="trash"
+      confirmVariant="negative"
+      loading={loading}
+      blockCloseWhileLoading
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -1267,6 +1339,9 @@ function GuardsPage() {
 
   const [expandedName, setExpandedName] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  // The guard awaiting delete confirmation (null = dialog closed). Holding the
+  // whole summary lets the confirm name the guard + the protection it removes.
+  const [confirmDelete, setConfirmDelete] = useState<GuardSummary | null>(null);
 
   const [editorMode, setEditorMode] = useState<EditorMode>('closed');
   const [form, setForm] = useState<GuardForm>(emptyForm);
@@ -1358,12 +1433,18 @@ function GuardsPage() {
     }
   };
 
-  const handleDelete = async (name: string) => {
-    setPendingDelete(name);
+  // Runs only from the confirm dialog's confirm button — never straight off the
+  // row's Delete trigger (which just opens the dialog). On success the dialog
+  // closes; on failure it stays open with the error toast so the user can retry.
+  const handleConfirmDelete = async () => {
+    const guard = confirmDelete;
+    if (!guard) return;
+    setPendingDelete(guard.name);
     try {
-      await deleteGuard.mutateAsync(name);
-      toast({ title: 'Guard deleted', description: name });
-      if (expandedName === name) setExpandedName(null);
+      await deleteGuard.mutateAsync(guard.name);
+      toast({ title: 'Guard deleted', description: guard.name });
+      if (expandedName === guard.name) setExpandedName(null);
+      setConfirmDelete(null);
     } catch (err) {
       toast({
         title: 'Failed to delete guard',
@@ -1488,11 +1569,14 @@ function GuardsPage() {
                         </HStack>
                       </Show>
                       <div className="ml-auto">
+                        {/* Secondary to the editor's "Create guard" / "Save
+                            changes" primary — one solid per screen [S4]. */}
                         <Button
                           label="Derive"
                           icon="sparkles"
                           iconPosition="left"
                           variant="rising"
+                          modifier="outline"
                           onClick={handleDerive}
                           loading={deriving}
                           disabled={deriving || !form.name.trim() || !form.intent.trim()}
@@ -1593,7 +1677,7 @@ function GuardsPage() {
                       setExpandedName((prev) => (prev === guard.name ? null : guard.name))
                     }
                     onEdit={() => handleEdit(guard.name)}
-                    onDelete={() => handleDelete(guard.name)}
+                    onDelete={() => setConfirmDelete(guard)}
                     deleting={pendingDelete === guard.name}
                   />
                 ))}
@@ -1608,6 +1692,15 @@ function GuardsPage() {
       <Show when={guards.length > 0}>
         <TestSqlPanel guardNames={guardNames} />
       </Show>
+
+      {/* One confirm dialog for the whole list; the pending guard drives it. */}
+      <GuardDeleteDialog
+        guard={confirmDelete}
+        isOpen={confirmDelete !== null}
+        loading={deleteGuard.isPending}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }

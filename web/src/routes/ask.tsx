@@ -4,6 +4,8 @@ import { Icon } from "@rs/ui-new/icon";
 import { HStack, VStack } from "@rs/ui-new/stack";
 import { m } from "@rs/ui-new/motion";
 import { AskPanel } from "../components/AskPanel";
+import { SemanticLayerBadge } from "../components/SemanticLayerBadge";
+import { TargetDropdown } from "../components/TargetDropdown";
 import { TargetLockNotice } from "../components/TargetLockNotice";
 import { useTarget } from "../hooks/useTarget";
 import { useTargetPasswordLock } from "../lib/useTargetPasswordLock";
@@ -25,18 +27,33 @@ function AskPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <HStack className="gap-4 items-center">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
-            <Icon name="sparkles" label="Ask AI" className="w-6 h-6 text-content-primary-soft" />
+        <HStack className="justify-between items-start gap-4 flex-wrap w-full">
+          <HStack className="gap-4 items-center">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
+              <Icon name="sparkles" label="Ask AI" className="w-6 h-6 text-content-primary-soft" />
+            </div>
+            <VStack className="gap-1 items-start">
+              {/* Semantic-layer badge sits inline with the title so the header
+                  names the layer once, right where the eye lands [Ask 1]. */}
+              <HStack className="gap-3 items-center flex-wrap">
+                <Text as="h1" level="headline-3" className="text-content-layout-1">
+                  Ask
+                </Text>
+                <SemanticLayerBadge target={target} />
+              </HStack>
+              <Text level="body-small" className="text-content-layout-3">
+                Ask a question in plain English — get the answer.
+              </Text>
+            </VStack>
+          </HStack>
+          {/* Target selector: the single canonical per-page target indicator,
+              promoted to the header top-right [Ask 1; S5]. */}
+          <div className="shrink-0">
+            <TargetDropdown
+              selectedTarget={target ?? null}
+              onSelectTarget={(t) => setTarget(t)}
+            />
           </div>
-          <VStack className="gap-1 items-start">
-            <Text as="h1" level="headline-3" className="text-content-layout-1">
-              Ask
-            </Text>
-            <Text level="body-small" className="text-content-layout-3">
-              Ask a question in plain English — get the answer.
-            </Text>
-          </VStack>
         </HStack>
       </m.div>
 
@@ -48,7 +65,7 @@ function AskPage() {
         />
       )}
 
-      <AskPanel target={target} onTargetChange={setTarget} disabled={passwordLock.isLocked} />
+      <AskPanel target={target} disabled={passwordLock.isLocked} />
     </div>
   );
 }

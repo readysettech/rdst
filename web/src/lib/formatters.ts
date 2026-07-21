@@ -25,3 +25,33 @@ export function formatDuration(ms?: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
   return `${ms.toFixed(1)}ms`;
 }
+
+/**
+ * Canonical sub-second-aware ms formatter for latency/duration readouts:
+ * `<1ms` under a millisecond, `X.Xms` under a second, `X.XXs` above.
+ * Distinct from `formatDuration` (which collapses zero/sub-1ms to `-`) so the
+ * `<1ms` cache/audit/benchmark readouts stay byte-identical. `undefined`/`null`
+ * → `-`. Single source for the three former local copies. [PS5 dedup item 1]
+ */
+export function formatMs(ms: number | undefined | null): string {
+  if (ms === undefined || ms === null) return "-";
+  if (ms < 1) return "<1ms";
+  if (ms < 1000) return `${ms.toFixed(1)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+/**
+ * Build a card's one muted meta line: drop empty/false/nullish segments and
+ * join the rest with ` · `. Single source for the hand-rolled `· `-joins across
+ * the query cards. [PS5 dedup item 2]
+ */
+export function formatMeta(
+  segments: Array<string | false | null | undefined>,
+): string {
+  return segments.filter(Boolean).join(" · ");
+}
+
+/** First 8 chars of a query hash — the display-length used on every card. */
+export function shortHash(h: string): string {
+  return h.slice(0, 8);
+}

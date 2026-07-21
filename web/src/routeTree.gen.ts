@@ -29,6 +29,7 @@ import { Route as AskRouteImport } from './routes/ask'
 import { Route as AnalyzeRouteImport } from './routes/analyze'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuditRunsRunIdRouteImport } from './routes/audit_.runs.$runId'
 
 const TopRoute = TopRouteImport.update({
   id: '/top',
@@ -130,6 +131,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuditRunsRunIdRoute = AuditRunsRunIdRouteImport.update({
+  id: '/audit_/runs/$runId',
+  path: '/audit/runs/$runId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -152,6 +158,7 @@ export interface FileRoutesByFullPath {
   '/schema': typeof SchemaRoute
   '/test': typeof TestRoute
   '/top': typeof TopRoute
+  '/audit/runs/$runId': typeof AuditRunsRunIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -174,6 +181,7 @@ export interface FileRoutesByTo {
   '/schema': typeof SchemaRoute
   '/test': typeof TestRoute
   '/top': typeof TopRoute
+  '/audit/runs/$runId': typeof AuditRunsRunIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -197,6 +205,7 @@ export interface FileRoutesById {
   '/schema': typeof SchemaRoute
   '/test': typeof TestRoute
   '/top': typeof TopRoute
+  '/audit_/runs/$runId': typeof AuditRunsRunIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -221,6 +230,7 @@ export interface FileRouteTypes {
     | '/schema'
     | '/test'
     | '/top'
+    | '/audit/runs/$runId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -243,6 +253,7 @@ export interface FileRouteTypes {
     | '/schema'
     | '/test'
     | '/top'
+    | '/audit/runs/$runId'
   id:
     | '__root__'
     | '/'
@@ -265,6 +276,7 @@ export interface FileRouteTypes {
     | '/schema'
     | '/test'
     | '/top'
+    | '/audit_/runs/$runId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -288,6 +300,7 @@ export interface RootRouteChildren {
   SchemaRoute: typeof SchemaRoute
   TestRoute: typeof TestRoute
   TopRoute: typeof TopRoute
+  AuditRunsRunIdRoute: typeof AuditRunsRunIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -432,6 +445,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/audit_/runs/$runId': {
+      id: '/audit_/runs/$runId'
+      path: '/audit/runs/$runId'
+      fullPath: '/audit/runs/$runId'
+      preLoaderRoute: typeof AuditRunsRunIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -456,6 +476,7 @@ const rootRouteChildren: RootRouteChildren = {
   SchemaRoute: SchemaRoute,
   TestRoute: TestRoute,
   TopRoute: TopRoute,
+  AuditRunsRunIdRoute: AuditRunsRunIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

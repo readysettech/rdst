@@ -45,7 +45,7 @@ const routeConfig: Record<string, RouteConfig> = {
   '/agents': { label: 'Agents', icon: 'message-multiple' },
   '/fleet': { label: 'Fleet', icon: 'building' },
   '/readyset': { label: 'Readyset Testing', icon: 'test-tube' },
-  '/configure': { label: 'Configure', icon: 'settings' },
+  '/configure': { label: 'Settings', icon: 'settings' },
   '/onboarding': { label: 'Get Started', icon: 'querypilot' },
   '/dev-settings': { label: 'Dev Settings', icon: 'adjustment-horizontal' },
   '/test': { label: 'Test', icon: 'adjustment-horizontal' },
@@ -68,7 +68,17 @@ export function Header({
 }: HeaderProps) {
   const router = useRouterState()
   const currentPath = router.location.pathname
-  const config = routeConfig[currentPath]
+  // The saved-run detail route is dynamic (/audit/runs/$runId), so it has no
+  // static entry — resolve it by prefix to a Health Check child crumb rather
+  // than falling through to the 404 "Not Found" label.
+  const auditRunConfig: RouteConfig = {
+    label: 'Saved run',
+    icon: 'document-validation',
+    parent: '/audit',
+  }
+  const config =
+    routeConfig[currentPath] ??
+    (currentPath.startsWith('/audit/runs/') ? auditRunConfig : undefined)
   // An unknown path is a 404 (the branded notFoundComponent renders below the
   // breadcrumb). Show "Not Found" rather than a redundant "RDST › RDST" (QW7).
   const currentLabel = config?.label || 'Not Found'

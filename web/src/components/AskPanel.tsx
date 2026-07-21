@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@rs/ui-new/button";
 import { Show } from "@rs/ui-new/show";
+import { TableHeaderCell } from "./TableHeaderCell";
 import { Text } from "@rs/ui-new/text";
 import { VStack, HStack } from "@rs/ui-new/stack";
 import { Icon } from "@rs/ui-new/icon";
@@ -15,17 +16,15 @@ import { CopyButton } from "@rs/ui-new/copy-button";
 import { m } from "@rs/ui-new/motion";
 import { useAsk } from "../lib/ask";
 import type { AskClarificationQuestion, AskStatusEvent, AskSchemaLoadedEvent } from "../lib/ask";
-import { fetchAskExamples, fetchAskHistory, fetchSchemaStatus, type AskHistoryItem } from "../lib/api";
+import { fetchAskExamples, fetchAskHistory, type AskHistoryItem } from "../lib/api";
 import { formatTimestamp } from "../lib/formatters";
 import { classifyError } from "../lib/errorContract";
 import { RoutableNotice } from "./RoutableNotice";
-import { TargetDropdown } from "./TargetDropdown";
 import { createCsvFilename, downloadCsv, toCsv } from "../lib/csv";
 import { SQLDisplay } from "./SQLDisplay";
 
 interface AskPanelProps {
   target?: string | null;
-  onTargetChange?: (target: string | null) => void;
   disabled?: boolean;
 }
 
@@ -87,7 +86,7 @@ function HistoryRail({
   );
 }
 
-export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelProps) {
+export function AskPanel({ target, disabled = false }: AskPanelProps) {
   const [question, setQuestion] = useState("");
   // The post-validation SQL is trust evidence, not the headline: collapsed by
   // default so the answer table leads. [ask.md answer-first; VIS-011]
@@ -111,16 +110,6 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
     error,
     reset,
   } = useAsk();
-
-  // Schema readiness for the current target, shown before asking so the user
-  // knows whether answers carry business context (ports readiness from CL 14059).
-  const { data: schemaStatus } = useQuery({
-    queryKey: ["ask", "schema-status", target],
-    queryFn: ({ signal }) => fetchSchemaStatus(target!, signal),
-    staleTime: 60_000,
-    enabled: !!target,
-  });
-  const hasSemanticLayer = schemaStatus?.exists === true;
 
   // Example questions grounded in the current target's own schema, replacing
   // the hardcoded e-commerce prompts (ports schema-grounded examples from
@@ -234,38 +223,6 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
 
   return (
     <VStack className="gap-6 w-full">
-      {/* Context bar: which target Ask runs against + its schema readiness and
-          a keyboard-reachable target selector. [ports CL 14059 context bar] */}
-      <HStack className="gap-3 items-center w-full flex-wrap">
-        <Show when={!!target}>
-          <Tag
-            size="small"
-            variant={hasSemanticLayer ? "positive" : "warning"}
-            modifier="ghost"
-            label={
-              hasSemanticLayer
-                ? `Semantic layer · ${schemaStatus?.tables ?? 0} tables`
-                : "Live introspection — no semantic layer"
-            }
-          />
-          <Show when={!hasSemanticLayer}>
-            <button
-              type="button"
-              onClick={() => navigate({ to: "/schema" })}
-              className="text-content-primary-soft text-label-small hover:underline"
-            >
-              Discover schema →
-            </button>
-          </Show>
-        </Show>
-        <div className="ml-auto">
-          <TargetDropdown
-            selectedTarget={target ?? null}
-            onSelectTarget={(t) => onTargetChange?.(t)}
-          />
-        </div>
-      </HStack>
-
       {/* Question Input */}
       {state === "idle" && (
         <m.div
@@ -479,15 +436,6 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
                   icon="querypilot"
                   iconPosition="left"
                 />
-                <Button
-                  onClick={handleNewQuestion}
-                  variant="primary"
-                  modifier="outline"
-                  size="small"
-                  label="Ask another"
-                  icon="add"
-                  iconPosition="left"
-                />
               </HStack>
               {/* Surface the otherwise-invisible auto-save [USE-065]. */}
               {savedTag && (
@@ -507,6 +455,30 @@ export function AskPanel({ target, onTargetChange, disabled = false }: AskPanelP
                 </HStack>
               )}
             </VStack>
+
+            {/* Ask-another: a fresh-question affordance set apart from the
+                answer it follows — separator, left title+description, right
+                button [Ask 4; VIS-036, VIS-104]. */}
+            <div className="w-full border-t border-border-layout-1" />
+            <HStack className="justify-between items-center gap-4 w-full flex-wrap">
+              <VStack className="gap-0.5 items-start">
+                <Text level="label-small" className="text-content-layout-1">
+                  Ask another question
+                </Text>
+                <Text level="caption" className="text-content-layout-3">
+                  Start fresh — this answer stays in Saved Queries.
+                </Text>
+              </VStack>
+              <Button
+                onClick={handleNewQuestion}
+                variant="primary"
+                modifier="outline"
+                size="small"
+                label="Ask another"
+                icon="add"
+                iconPosition="left"
+              />
+            </HStack>
           </VStack>
         </m.div>
       )}
@@ -786,12 +758,9 @@ function ResultsTable({
               <thead>
                 <tr className="bg-surface-layout-2 border-b border-border-layout-1">
                   {result.columns.map((col, i) => (
-                    <th
-                      key={i}
-                      className="text-left px-4 py-3 text-content-layout-2 text-label-small font-medium whitespace-nowrap"
-                    >
+                    <TableHeaderCell key={i} className="whitespace-nowrap">
                       {col}
-                    </th>
+                    </TableHeaderCell>
                   ))}
                 </tr>
               </thead>

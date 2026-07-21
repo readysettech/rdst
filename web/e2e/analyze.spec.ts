@@ -238,10 +238,12 @@ test('shows a streamed failure and can retry from query history', async ({
 
   await page.getByRole('button', { name: 'Back', exact: true }).click()
   await expect(page).toHaveURL(/\/analyze$/)
-  // The query-history row is itself a role="button" card whose accessible name
-  // includes the nested "Use query" label, so match the explicit button exactly
-  // to avoid a strict-mode collision with the card.
-  await page.getByRole('button', { name: 'Use query', exact: true }).click()
+  // The query-history row is itself a div[role="button"] card that nests a real
+  // <button> "Use query". The shared Button renders its label for BOTH the icon's
+  // a11y-name and the visible text, so the accessible name is "Use query Use
+  // query" — target the real <button> element (the card is a div) to dodge both
+  // the doubled name and the strict-mode collision with the card.
+  await page.locator('button', { hasText: 'Use query' }).click()
   await expect(page.locator('.cm-content[contenteditable="true"]')).toHaveText(
     /SELECT id, total FROM orders WHERE customer_id = :p1 ORDER BY created_at DESC/
   )

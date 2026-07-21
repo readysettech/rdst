@@ -13,7 +13,7 @@ test('adds, updates, defaults, and deletes a database target', async ({
 
   await page.goto('/configure')
   await expect(
-    page.getByRole('heading', { name: 'Database Targets' })
+    page.getByRole('heading', { name: 'Database connections' })
   ).toBeVisible()
 
   const seedRow = page

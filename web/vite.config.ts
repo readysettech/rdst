@@ -58,6 +58,17 @@ export default defineConfig({
           ) {
             return 'react-vendor'
           }
+          // The SQL syntax-highlight palette is the single source of truth shared
+          // by `sqlTheme.ts` (the CodeMirror editor theme) and `SqlTokens.tsx`
+          // (the regex card highlighter rendered inside every QueryCard). Pin it
+          // to its own tiny chunk: otherwise Rollup folds it into the `sqlTheme`
+          // chunk, and because that chunk statically imports the CodeMirror stack,
+          // QueryCard would transitively pull all of CodeMirror into its graph on
+          // every card route — the exact eager-weight defect T12/D-1 fixed. Keep
+          // this rule ABOVE the codemirror match. [PS5 item 3 / bundle guard]
+          if (id.includes('sqlTokenColors')) {
+            return 'sql-token-colors'
+          }
           if (
             id.includes('/@codemirror/') ||
             id.includes('/@lezer/') ||

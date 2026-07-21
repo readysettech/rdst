@@ -444,16 +444,9 @@ export function Sidebar({
                 {advancedItems.map((item) => (
                   <NavLink key={item.to} item={item} active={isActive(item)} />
                 ))}
-                {import.meta.env.DEV && (
-                  <NavLink
-                    item={{
-                      label: 'Dev Settings',
-                      icon: 'test-tube',
-                      to: '/dev-settings',
-                    }}
-                    active={currentPath === '/dev-settings'}
-                  />
-                )}
+                {/* Dev Settings is no longer a nav entry: its tools merged into
+                    the Settings page (Developer settings section, /configure#dev).
+                    The /dev-settings route now redirects there. [USE-097] */}
               </>
             )}
           </nav>

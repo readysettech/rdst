@@ -194,7 +194,9 @@ test('runs a streamed health check and reopens it from history', async ({
     page.getByText('Reduce connection pressure', { exact: true })
   ).toBeVisible()
   // "Oversized" now renders twice (Verdict hero tag + Sizing card tag).
-  await expect(page.getByText('Oversized', { exact: true }).first()).toBeVisible()
+  await expect(
+    page.getByText('Oversized', { exact: true }).first()
+  ).toBeVisible()
   await expect(
     page.getByText('Repeated read-heavy queries are strong cache candidates.', {
       exact: true,
@@ -207,13 +209,16 @@ test('runs a streamed health check and reopens it from history', async ({
     page.getByRole('paragraph').filter({ hasText: /^Top Queries \(1\)$/ })
   ).toBeVisible()
 
-  const pastRun = page.getByRole('button').filter({ hasText: runId })
+  // Past runs now render as links to their own detail route
+  // (/audit/runs/$runId), not the old inline history buttons. [FIX-2]
+  const pastRun = page.getByRole('link').filter({ hasText: runId })
   await expect(pastRun).toHaveCount(1)
   await pastRun.click()
 
-  await expect(
-    page.getByText(`Saved run: ${runId}`, { exact: true })
-  ).toBeVisible()
+  // The detail page names the run (kind heading + bare runId + "Saved · <date>")
+  // and reuses the /audit report body — the old "Saved run: <id>" string is gone.
+  await expect(page.getByRole('heading', { name: 'Quick audit' })).toBeVisible()
+  await expect(page.getByTestId('run-detail-id')).toHaveText(runId)
   await expect(
     page.getByText('Connection pool is nearing capacity', { exact: true })
   ).toBeVisible()

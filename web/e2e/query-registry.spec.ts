@@ -68,10 +68,9 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   await expect(
     queryRow.getByText('active-users', { exact: true })
   ).toBeVisible()
-  await expect(queryRow.locator('button[title]')).toHaveAttribute(
-    'title',
-    updatedSql
-  )
+  // v3: the SQL renders as a highlighted <code title={sql}> (no expand button);
+  // its title attribute carries the full query as a stable per-row hook.
+  await expect(queryRow.locator('[title]')).toHaveAttribute('title', updatedSql)
 
   await page.locator('[name="search"]').fill('active-users')
   await expect(queryRow).toHaveCount(1)

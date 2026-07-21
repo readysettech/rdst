@@ -14,16 +14,13 @@ test('loads the production application and backend', async ({ page }) => {
   await expect(health.json()).resolves.toEqual({ status: 'ok' })
 
   await page.goto('/')
-  // The design-system home replaced the welcome copy with a job launcher:
-  // hero heading plus job cards (a target is configured, so the launcher
-  // branch renders).
+  // The adaptive home greets with a welcome header (rendered as plain text,
+  // not a heading element) plus job cards (a target is configured, so the
+  // launcher branch renders).
+  await expect(page.getByText('Welcome to RDST', { exact: true })).toBeVisible()
   await expect(
-    page.getByRole('heading', {
-      name: 'Understand, diagnose, and speed up your database',
-    })
+    page.getByText('speed up the queries running on your database')
   ).toBeVisible()
-  await expect(page.getByText('Run a health check')).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Ask a question' })).toBeVisible()
 })
 
 test('serves client-side routes directly', async ({ page }) => {

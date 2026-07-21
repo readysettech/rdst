@@ -1,12 +1,13 @@
 import { createTheme } from "@uiw/codemirror-themes";
 import { tags as t } from "@lezer/highlight";
 import { EditorView } from "@codemirror/view";
+import { SQL_TOKEN_COLORS } from "./sqlTokenColors";
 
 export const sqlTheme = createTheme({
   theme: "dark",
   settings: {
     background: "transparent",
-    foreground: "#e8e8e8",
+    foreground: SQL_TOKEN_COLORS.identifier,
     caret: "#e8e8e8",
     selection: "rgba(99, 102, 241, 0.3)",
     selectionMatch: "rgba(99, 102, 241, 0.15)",
@@ -20,37 +21,45 @@ export const sqlTheme = createTheme({
   },
   styles: [
     // Comments
-    { tag: t.comment, color: "#6b7280", fontStyle: "italic" },
-    { tag: t.lineComment, color: "#6b7280", fontStyle: "italic" },
-    { tag: t.blockComment, color: "#6b7280", fontStyle: "italic" },
+    { tag: t.comment, color: SQL_TOKEN_COLORS.comment, fontStyle: "italic" },
+    { tag: t.lineComment, color: SQL_TOKEN_COLORS.comment, fontStyle: "italic" },
+    {
+      tag: t.blockComment,
+      color: SQL_TOKEN_COLORS.comment,
+      fontStyle: "italic",
+    },
     // Keywords (SELECT, FROM, WHERE, etc.)
-    { tag: t.keyword, color: "#f472b6", fontWeight: "500" },
-    { tag: t.operatorKeyword, color: "#f472b6", fontWeight: "500" },
+    { tag: t.keyword, color: SQL_TOKEN_COLORS.keyword, fontWeight: "500" },
+    {
+      tag: t.operatorKeyword,
+      color: SQL_TOKEN_COLORS.keyword,
+      fontWeight: "500",
+    },
     // Operators
     { tag: t.operator, color: "#94a3b8" },
     // Strings (single quotes)
-    { tag: t.string, color: "#86efac" },
+    { tag: t.string, color: SQL_TOKEN_COLORS.string },
     // Numbers and booleans
-    { tag: t.number, color: "#fcd34d" },
-    { tag: t.bool, color: "#fcd34d" },
-    { tag: t.null, color: "#fb923c" },
+    { tag: t.number, color: SQL_TOKEN_COLORS.number },
+    { tag: t.bool, color: SQL_TOKEN_COLORS.bool },
+    { tag: t.null, color: SQL_TOKEN_COLORS.null },
     // Variables and properties
-    { tag: t.variableName, color: "#67e8f9" },
-    { tag: t.propertyName, color: "#67e8f9" },
-    { tag: t.definition(t.variableName), color: "#67e8f9" },
+    { tag: t.variableName, color: SQL_TOKEN_COLORS.param },
+    { tag: t.propertyName, color: SQL_TOKEN_COLORS.param },
+    { tag: t.definition(t.variableName), color: SQL_TOKEN_COLORS.param },
     // Functions
-    { tag: t.function(t.variableName), color: "#c4b5fd" },
+    { tag: t.function(t.variableName), color: SQL_TOKEN_COLORS.fn },
     // Types
     { tag: t.typeName, color: "#5eead4" },
     { tag: t.className, color: "#5eead4" },
     // Punctuation and brackets
-    { tag: t.punctuation, color: "#64748b" },
+    { tag: t.punctuation, color: SQL_TOKEN_COLORS.punctuation },
     { tag: t.bracket, color: "#94a3b8" },
     { tag: t.paren, color: "#94a3b8" },
     { tag: t.squareBracket, color: "#94a3b8" },
     { tag: t.angleBracket, color: "#94a3b8" },
     // Quoted identifiers (double quotes) - light blue to distinguish from keywords
-    { tag: t.special(t.string), color: "#93c5fd" },
+    { tag: t.special(t.string), color: SQL_TOKEN_COLORS.quotedIdent },
     // Regex
     { tag: t.regexp, color: "#c4b5fd" },
     // Errors

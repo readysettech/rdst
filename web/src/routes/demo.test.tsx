@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeAll, describe, it, expect, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('@rs/ui-new/use-toast', () => ({ toast: vi.fn() }));
@@ -199,7 +199,31 @@ function rowScope(title: string) {
   return within(tr as HTMLElement);
 }
 
+// Open the header kebab (system Dropdown / Radix menu). Under jsdom the Radix
+// trigger opens reliably via keyboard; opening also needs these pointer/scroll
+// APIs jsdom omits.
+function openDemoActionsMenu() {
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Demo actions' }), {
+    key: 'Enter',
+  });
+}
+
 describe('DemoPage', () => {
+  beforeAll(() => {
+    // jsdom omits these; Radix menus call them on the trigger, so the header
+    // kebab (system Dropdown) can be opened in tests.
+    const proto = HTMLElement.prototype as unknown as {
+      hasPointerCapture: () => boolean;
+      setPointerCapture: () => void;
+      releasePointerCapture: () => void;
+      scrollIntoView: () => void;
+    };
+    proto.hasPointerCapture = () => false;
+    proto.setPointerCapture = () => {};
+    proto.releasePointerCapture = () => {};
+    proto.scrollIntoView = () => {};
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -316,7 +340,7 @@ describe('DemoPage', () => {
     render(<DemoPage />);
 
     expect(await screen.findByText(/Docker isn't running — start Docker to continue/)).toBeTruthy();
-    expect(screen.getByText(/Container images not downloaded yet — about 2 GB/)).toBeTruthy();
+    expect(screen.getByText(/Container images not downloaded yet — about 500 MB/)).toBeTruthy();
     const start = screen.getByRole('button', { name: /Start the demo/ }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
 
@@ -560,23 +584,25 @@ describe('DemoPage', () => {
     expect(navigateSpy).toHaveBeenCalledWith({ to: '/onboarding', search: { from: 'demo' } });
   });
 
-  it('guards teardown behind a confirm dialog and only tears down on explicit confirm', () => {
+  it('guards teardown behind a confirm dialog and only tears down on explicit confirm', async () => {
     markTourDone();
     const tearDown = vi.fn();
     mockDemo({ tearDown });
     render(<DemoPage />);
-    // The destructive control is renamed and demoted; clicking it does not fire
-    // teardown — it opens a confirm with plain-words copy.
-    fireEvent.click(screen.getByRole('button', { name: /Shut down demo/ }));
+    // The destructive control is demoted into the header kebab menu; selecting
+    // it does not fire teardown — it opens a confirm with plain-words copy.
+    openDemoActionsMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Shut down demo/ }));
     expect(tearDown).not.toHaveBeenCalled();
     expect(screen.getByText('Remove all demo containers and data? You can start it again anytime.')).toBeTruthy();
     // Cancel backs out without tearing down.
     fireEvent.click(screen.getByRole('button', { name: /Cancel/ }));
     expect(tearDown).not.toHaveBeenCalled();
-    // Re-open and confirm: only now does teardown fire, exactly once.
+    // Re-open the menu and confirm: only now does teardown fire, exactly once.
+    // The dialog's confirm is a plain button; the menu item is a menuitem.
+    openDemoActionsMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Shut down demo/ }));
     fireEvent.click(screen.getByRole('button', { name: /Shut down demo/ }));
-    const buttons = screen.getAllByRole('button', { name: /Shut down demo/ });
-    fireEvent.click(buttons[buttons.length - 1]);
     expect(tearDown).toHaveBeenCalledTimes(1);
   });
 
@@ -844,7 +870,9 @@ describe('DemoPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
     expect(screen.queryByText(/Readyset QueryPilot keeps caching/)).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: /Replay tour/ }));
+    // Replay tour now lives in the header kebab menu.
+    openDemoActionsMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Replay tour/ }));
     expect(await screen.findByText(welcome)).toBeTruthy();
   });
 });

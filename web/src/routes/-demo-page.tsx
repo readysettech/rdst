@@ -7,6 +7,7 @@
 import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { Button } from '@rs/ui-new/button'
 import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
+import { Dropdown } from '@rs/ui-new/dropdown'
 import { Icon } from '@rs/ui-new/icon'
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover'
 import { Text } from '@rs/ui-new/text'
@@ -32,6 +33,7 @@ import {
 import { buildParameterHighlights } from '../components/parameterHighlighting'
 import { EmailGate } from '../components/EmailGate'
 import { SQLDisplay } from '../components/SQLDisplay'
+import { TableHeaderCell } from '../components/TableHeaderCell'
 import {
   type ContainerProgress,
   type DiscoveryMode,
@@ -362,11 +364,16 @@ function ThroughputChart({
   samples,
   events,
   windowMode,
+  onWindowMode,
   bare = false,
 }: {
   samples: LoadSample[]
   events: LoadEvent[]
   windowMode: WindowMode
+  // Chart-window control docked at the chart's own top-right (owner decision
+  // #1): the window is a property of the chart, so its control lives on the
+  // chart — not below it, not in a separate Advanced disclosure. [Demo 5a]
+  onWindowMode?: (mode: WindowMode) => void
   // When docked inside the hero surface the chart drops its own border/bg so
   // the hero provides a single elevated container. [VIS-105, VIS-127]
   bare?: boolean
@@ -446,7 +453,7 @@ function ThroughputChart({
       className={bare ? 'p-4 pb-2' : panel('p-4 pb-2')}
     >
       <TooltipProvider delayDuration={150}>
-        <div className="mb-1 flex flex-wrap items-baseline gap-x-5 gap-y-2">
+        <div className="mb-1 flex flex-wrap items-center gap-x-5 gap-y-2">
           <div className="flex items-center gap-1.5">
             <Text as="h2" level="subtitle-2" className="text-content-layout-1">
               Total throughput
@@ -476,6 +483,14 @@ function ThroughputChart({
               tooltip={LEGEND_POSTGRES_TOOLTIP}
             />
           </div>
+          {onWindowMode && (
+            <div className="ml-auto">
+              <WindowToggle
+                windowMode={windowMode}
+                onWindowMode={onWindowMode}
+              />
+            </div>
+          )}
         </div>
       </TooltipProvider>
       <div className="overflow-x-auto">
@@ -704,9 +719,10 @@ function HeartbeatDot() {
   )
 }
 
-// Chart-window control. An expert setting deferred out of the hero into the
-// Advanced disclosure; the chart defaults to the one useful (5-minute) window.
-// [VIS-114, VIS-103]
+// Chart-window control, docked at the chart's top-right (owner decision #1).
+// Compact: no standalone label — the segmented group carries its purpose via
+// aria-label; the chart defaults to the one useful (5-minute) window.
+// [Demo 5a; VIS-011, VIS-114]
 function WindowToggle({
   windowMode,
   onWindowMode,
@@ -715,34 +731,30 @@ function WindowToggle({
   onWindowMode: (mode: WindowMode) => void
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <Text as="span" level="body-small" className="text-content-layout-2">
-        Chart window
-      </Text>
-      <div
-        className="inline-flex overflow-hidden rounded-lg border border-border-layout-1 text-label-small"
-        role="group"
-        aria-label="Chart window"
-      >
-        {(['5m', '1m'] as WindowMode[]).map((option) => (
-          <button
-            key={option}
-            type="button"
-            aria-pressed={windowMode === option}
-            className={`px-2.5 py-1 ${windowMode === option ? 'bg-surface-primary-solid text-content-primary-solid' : 'text-content-layout-2 hover:bg-surface-layout-soft'}`}
-            onClick={() => onWindowMode(option)}
-          >
-            {option === '5m' ? '5 min' : '1 min'}
-          </button>
-        ))}
-      </div>
+    <div
+      className="inline-flex overflow-hidden rounded-lg border border-border-layout-1 text-label-small"
+      role="group"
+      aria-label="Chart window"
+    >
+      {(['5m', '1m'] as WindowMode[]).map((option) => (
+        <button
+          key={option}
+          type="button"
+          aria-pressed={windowMode === option}
+          className={`px-2.5 py-1 ${windowMode === option ? 'bg-surface-primary-solid text-content-primary-solid' : 'text-content-layout-2 hover:bg-surface-layout-soft'}`}
+          onClick={() => onWindowMode(option)}
+        >
+          {option === '5m' ? '5 min' : '1 min'}
+        </button>
+      ))}
     </div>
   )
 }
 
-// QueryPilot caching-policy control. Deferred out of the primary controls into
-// the Advanced disclosure — an expert setting, not part of the headline moment.
-// Renders only while QueryPilot is on. [VIS-011, VIS-103, USE-006]
+// QueryPilot caching-policy control. Lives in the card's action-bar footer
+// (owner decision #2) since the visitor flips it during the guided flow; it is
+// QueryPilot's policy, so it renders only while QueryPilot is on. [Demo 5b;
+// VIS-011, USE-006]
 function PolicyControl({
   mode,
   disabled,
@@ -774,24 +786,60 @@ function PolicyControl({
   )
 }
 
+// The money-shot card's action-bar FOOTER (owner sketch 08.20.41): docked to
+// the chart on one elevated surface, separated by a hairline. QueryPilot switch
+// (left) + its caching policy (owner decision #2, in-bar) + the primary traffic
+// action far right. [Demo 5; VIS-104, VIS-111, VIS-022/023]
 function ControlsRow({
   loadRunning,
   querypilotOn,
   disabled,
+  mode,
   onStart,
   onStop,
   onToggleQueryPilot,
+  onMode,
 }: {
   loadRunning: boolean
   querypilotOn: boolean
   disabled: boolean
+  mode: DiscoveryMode
   onStart: () => void
   onStop: () => void
   onToggleQueryPilot: (next: boolean) => void
+  onMode: (mode: DiscoveryMode) => void
 }) {
   return (
-    <div className={panel('flex flex-wrap items-center gap-x-7 gap-y-3 p-4')}>
-      <div data-tour-anchor="traffic">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-border-layout-1 px-4 py-3.5">
+      {/* An honest labeled switch: the label names what it controls; the switch
+          itself carries the state (knob position + colour + heartbeat). The old
+          trailing "On/Off" word sat at the opposite end from the label and read
+          as a segmented "QueryPilot | Off" toggle — dropped. Matches the app's
+          other switches [Demo 5-switch; USE-043, USE-097, VIS-119]. */}
+      <div data-tour-anchor="querypilot" className="flex items-center gap-3">
+        <Text as="span" level="body-small" className="text-content-layout-2">
+          QueryPilot
+        </Text>
+        <BaseInputSwitch
+          name="querypilot"
+          aria-label="QueryPilot"
+          className={SWITCH_CHECKED_GREEN}
+          checked={querypilotOn}
+          disabled={disabled}
+          onCheckedChange={onToggleQueryPilot}
+        />
+        {querypilotOn && <HeartbeatDot />}
+      </div>
+
+      {/* Caching policy, in the action bar per owner decision #2 — only while
+          QueryPilot is on, since it is QueryPilot's policy. [Demo 5b] */}
+      {querypilotOn && (
+        <PolicyControl mode={mode} disabled={disabled} onMode={onMode} />
+      )}
+
+      {/* Primary traffic action right-aligned, matching the system convention
+          used on every other screen [Demo 4/5; USE-010/097, VIS-022/023]. */}
+      <div data-tour-anchor="traffic" className="ml-auto">
         {loadRunning ? (
           <Button
             variant="primary"
@@ -812,27 +860,6 @@ function ControlsRow({
             onClick={onStart}
           />
         )}
-      </div>
-
-      <div data-tour-anchor="querypilot" className="flex items-center gap-3">
-        <Text as="span" level="body-small" className="text-content-layout-2">
-          QueryPilot
-        </Text>
-        <BaseInputSwitch
-          name="querypilot"
-          className={SWITCH_CHECKED_GREEN}
-          checked={querypilotOn}
-          disabled={disabled}
-          onCheckedChange={onToggleQueryPilot}
-        />
-        <Text
-          as="span"
-          level="body-small"
-          className="font-medium text-content-layout-1"
-        >
-          {querypilotOn ? 'On' : 'Off'}
-        </Text>
-        {querypilotOn && <HeartbeatDot />}
       </div>
     </div>
   )
@@ -910,7 +937,9 @@ function ProvisionView({
 
   if (tearing) {
     return (
-      <div className="qpdemo-enter max-w-2xl space-y-3">
+      // Full-measure to match the idle and running cards, so the phase
+      // transitions never jump sideways. [Demo 1; VIS-033]
+      <div className="qpdemo-enter space-y-3">
         <Text as="h2" level="subtitle-1" className="text-content-layout-1">
           Removing demo containers and data...
         </Text>
@@ -948,7 +977,8 @@ function ProvisionView({
   }
 
   return (
-    <div className="qpdemo-enter max-w-2xl space-y-2.5">
+    // Full-measure to match the idle and running cards. [Demo 1; VIS-033]
+    <div className="qpdemo-enter space-y-2.5">
       <Text as="h2" level="subtitle-1" className="text-content-layout-1">
         Setting up the demo
       </Text>
@@ -1108,6 +1138,17 @@ function PreflightItem({
   )
 }
 
+// Human-readable download size, fed from the backend's proportional
+// `download_mb` (scaled to the images actually missing) instead of a flat
+// "about 2 GB" — so a single missing image no longer overstates the cost
+// [Demo 2 nit-1; USE-065 disclose costs honestly]. The undefined fallback is
+// never displayed (that row shows "checking" until preflight resolves).
+function formatDownloadSize(mb: number | undefined | null): string {
+  if (!mb || mb <= 0) return '1 GB'
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
+  return `${Math.round(mb)} MB`
+}
+
 function StartCard({ onStart }: { onStart: () => void }) {
   const [checks, setChecks] = useState<PreflightChecks | null>(null)
   const [checking, setChecking] = useState(true)
@@ -1126,7 +1167,11 @@ function StartCard({ onStart }: { onStart: () => void }) {
   }, [recheck])
 
   return (
-    <div className={panel('qpdemo-enter max-w-2xl p-5')}>
+    // Full-measure, elevated start card: same width, position and surface
+    // treatment as the running money-shot card, so idle → provisioning → ready
+    // share one content column and the transition never jumps sideways.
+    // [Demo 1/6; VIS-105, VIS-075, VIS-024, VIS-033]
+    <div className="qpdemo-enter rounded-xl bg-surface-raised p-6 shadow-elevation-1">
       <Text
         as="p"
         level="body-small"
@@ -1195,8 +1240,8 @@ function StartCard({ onStart }: { onStart: () => void }) {
             okLabel="Container images downloaded"
             pendingLabel={
               checks && !checks.disk_space_ok
-                ? 'Not enough free disk — the demo needs about 2 GB'
-                : 'Container images not downloaded yet — about 2 GB'
+                ? `Not enough free disk — the demo needs about ${Math.round(checks.disk_required_gb)} GB`
+                : `Container images not downloaded yet — about ${formatDownloadSize(checks?.download_mb)}`
             }
           />
         </ul>
@@ -1523,65 +1568,65 @@ function PatternTable({
       <div className="max-h-[440px] overflow-auto">
         <table className="w-full border-collapse text-label-medium">
           <thead className="sticky top-0 z-10 bg-surface-layout-1">
-            <tr className="border-b border-border-layout-1 text-left text-label-small text-content-layout-3">
-              <th className="w-8 px-3 py-2" />
+            <tr className="border-b border-border-layout-1">
+              <th className="w-8 px-3 py-3" />
               {/* Header clicks take a one-time value snapshot; rows never
                   re-sort live, and sorting is inert while the tour runs. */}
-              <th className="px-3 py-2">
+              <TableHeaderCell>
                 <button
-                  className="font-semibold disabled:cursor-default"
+                  className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={resetOrder}
                 >
                   Query{sortMark('query')}
                 </button>
-              </th>
-              <th className="px-3 py-2 text-right">
+              </TableHeaderCell>
+              <TableHeaderCell align="right">
                 <button
-                  className="font-semibold disabled:cursor-default"
+                  className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('postgres_hits')}
                 >
                   Postgres hits{sortMark('postgres_hits')}
                 </button>
-              </th>
-              <th className="px-3 py-2 text-right">
+              </TableHeaderCell>
+              <TableHeaderCell align="right">
                 <button
-                  className="font-semibold disabled:cursor-default"
+                  className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('readyset_hits')}
                 >
                   Readyset hits{sortMark('readyset_hits')}
                 </button>
-              </th>
-              <th className="px-3 py-2 text-right">
+              </TableHeaderCell>
+              <TableHeaderCell align="right">
                 <button
-                  className="font-semibold disabled:cursor-default"
+                  className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('direct_avg_ms')}
                 >
                   Postgres avg{sortMark('direct_avg_ms')}
                 </button>
-              </th>
-              <th className="px-3 py-2 text-right">
+              </TableHeaderCell>
+              <TableHeaderCell align="right">
                 <button
-                  className="font-semibold disabled:cursor-default"
+                  className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('router_avg_ms')}
                 >
                   Readyset avg{sortMark('router_avg_ms')}
                 </button>
-              </th>
-              <th className="px-3 py-2">
+              </TableHeaderCell>
+              <TableHeaderCell>
                 <button
-                  className="font-semibold disabled:cursor-default"
+                  className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('status')}
                 >
                   Status{sortMark('status')}
                 </button>
-              </th>
-              <th className="px-3 py-2 font-semibold">Cache status</th>
+              </TableHeaderCell>
+              <TableHeaderCell>Cache status</TableHeaderCell>
             </tr>
           </thead>
           <tbody>
@@ -2229,10 +2274,11 @@ export function DemoPage() {
   const [modeResetting, setModeResetting] = useState(false)
   const [pendingMode, setPendingMode] = useState<DiscoveryMode | null>(null)
   const [windowMode, setWindowMode] = useState<WindowMode>('5m')
-  // Deferred surfaces (VIS-103): expert controls live behind Advanced and the
-  // 37-row detail table behind its own disclosure, both collapsed by default so
-  // the hero comparison is the only thing competing for attention.
-  const [advancedUserOpen, setAdvancedUserOpen] = useDisclosure({})
+  // Deferred surface (VIS-103): the 37-row detail table lives behind its own
+  // disclosure, collapsed by default so the hero comparison is the only thing
+  // competing for attention. The former "Advanced" disclosure is gone — per
+  // owner decisions #1/#2 its two controls were promoted onto the card (chart
+  // window → chart top-right, caching policy → action bar). [Demo 5a/5b]
   const [perQueryUserOpen, setPerQueryUserOpen] = useDisclosure({})
   const [tourStep, setTourStep] = useState<TourStepId | null>(null)
   const [tourDone, setTourDone] = useState(readTourDone)
@@ -2285,11 +2331,11 @@ export function DemoPage() {
   // "0.0x" (which reads as "Readyset does zero"). [T16, audit MEDIUM #2]
   const hasComparison = d.samples.some((s) => s.direct.qps > 0)
 
-  // The guided tour still needs the deferred surfaces on screen when it walks
-  // them: the Advanced disclosure auto-opens for the policy step, and the
-  // per-query table stays open for the whole tour. Neither changes the demo's
-  // behavior — only which panels are expanded. [VIS-103]
-  const advancedOpen = advancedUserOpen || tourStep === 'mode'
+  // The guided tour still needs the per-query table on screen when it walks
+  // it, so the table stays open for the whole tour. The caching-policy step now
+  // anchors the always-visible in-bar PolicyControl, so no disclosure has to be
+  // force-opened. This changes only which panel is expanded, not behavior.
+  // [VIS-103]
   const perQueryDetailOpen = perQueryUserOpen || tourStep != null
 
   const noticeRef = useRef<string | null | undefined>(undefined)
@@ -2500,22 +2546,58 @@ export function DemoPage() {
   return (
     <div className="qpdemo relative mx-auto flex max-w-[1060px] flex-col gap-5 p-6">
       <style>{DEMO_STYLE}</style>
-      {/* B — Header band: the job as the page name + one-line subhead. The
-          replay/shut-down utilities are demoted to the quiet F row below.
-          [VIS-116, VIS-011] */}
-      <header>
-        <Text as="h1" level="headline-3" className="text-content-layout-1">
-          See Readyset Platform in action
-        </Text>
-        <Text
-          as="p"
-          level="body-small"
-          className="mt-1 max-w-[72ch] text-content-layout-2"
-        >
-          The same workload runs against an orders database through Postgres and
-          Readyset Platform, side by side — showing how much faster your queries
-          get as QueryPilot automatically chooses the right queries to cache.
-        </Text>
+      {/* B — Header band: the job as the page name + one-line subhead. The rare
+          replay/shut-down utilities collapse into a single kebab menu at the
+          top-right (owner decision #3, ref 08.33.31), keeping the destructive
+          teardown out of the primary flow but one click away. [VIS-116,
+          VIS-011, VIS-022/023] */}
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <Text as="h1" level="headline-3" className="text-content-layout-1">
+            See Readyset Platform in action
+          </Text>
+          <Text
+            as="p"
+            level="body-small"
+            className="mt-1 max-w-[72ch] text-content-layout-2"
+          >
+            The same workload runs against an orders database through Postgres
+            and Readyset Platform, side by side — showing how much faster your
+            queries get as QueryPilot automatically chooses the right queries to
+            cache.
+          </Text>
+        </div>
+        {showTeardown && (
+          <Dropdown>
+            <Dropdown.Trigger asChild>
+              <button
+                type="button"
+                aria-label="Demo actions"
+                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-content-layout-3 transition-colors hover:bg-surface-layout-2 hover:text-content-layout-1"
+              >
+                <Icon name="more" label="Demo actions" className="h-5 w-5" />
+              </button>
+            </Dropdown.Trigger>
+            <Dropdown.Content align="end" className="min-w-52">
+              {d.phase === 'ready' && (
+                <Dropdown.Item
+                  leftIcon="filter-reset"
+                  label="Replay tour"
+                  onClick={openTour}
+                />
+              )}
+              {/* Destructive, so it reads red and stays confirm-guarded (the
+                  ConfirmDialog below still gates the actual teardown). [Demo 7;
+                  VIS-022/023, USE-077] */}
+              <Dropdown.Item
+                leftIcon="trash"
+                label="Shut down demo"
+                className="text-content-negative-soft hover:text-content-negative-soft focus:text-content-negative-soft"
+                onClick={() => setConfirmingTeardown(true)}
+              />
+            </Dropdown.Content>
+          </Dropdown>
+        )}
       </header>
 
       {/* Reciprocity-timed identity capture (rdst-dma.3): a non-blocking panel
@@ -2535,71 +2617,75 @@ export function DemoPage() {
 
       {d.phase === 'ready' && (
         <div className="qpdemo-enter flex flex-col gap-5">
-          {/* C — Hero stage: the comparison money-shot. One headline multiplier
-              and the live chart that proves it, grouped on a single elevated
-              surface so the claim and its evidence read together.
-              [VIS-011, VIS-012, VIS-105, VIS-127] */}
-          <section className="flex flex-col gap-2 rounded-xl bg-surface-raised p-4 shadow-elevation-1">
-            {/* Permanent, fixed-min-height ratio headline: always rendered, so it
-                never mounts/unmounts and jumps the layout. Before any traffic it
-                holds an honest prompt instead of a false "0.0x". The multiplier
-                carries meaning by weight + color, not size alone.
-                [T16, audit MEDIUM #2, VIS-011, VIS-012] */}
-            {hasComparison ? (
-              <p
-                data-testid="lift-ratio"
-                className="flex min-h-[3.25rem] flex-wrap items-baseline gap-x-2.5 gap-y-1"
-              >
-                <Text
-                  as="span"
-                  level="stat-hero"
-                  className={
-                    liftRatio >= 1.3
-                      ? 'text-content-positive-soft'
-                      : 'text-content-layout-1'
-                  }
+          {/* C — The money-shot card (owner sketch 08.20.41): headline + live
+              chart (body) + action-bar (footer), all attached on ONE elevated
+              surface so the claim, its evidence, and the controls that drive it
+              read as a single object. [Demo 5/6; VIS-011, VIS-012, VIS-105,
+              VIS-111, VIS-127, VIS-075] */}
+          <section className="overflow-hidden rounded-xl bg-surface-layout-1 shadow-elevation-1">
+            {/* Header: permanent, fixed-min-height ratio headline — always
+                rendered, so it never mounts/unmounts and jumps the layout.
+                Before any traffic it holds the owner's honest prompt instead of
+                a false "0.0x". The multiplier carries meaning by weight +
+                color, not size alone. [T16, audit MEDIUM #2, VIS-011, VIS-012] */}
+            <div className="px-4 py-4 border-b border-border-layout-1">
+              {hasComparison ? (
+                <p
+                  data-testid="lift-ratio"
+                  className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1"
                 >
-                  {formatLiftRatio(liftRatio)}
-                </Text>
-                <Text
-                  as="span"
-                  level="subtitle-2"
-                  className="font-medium text-content-layout-2"
-                >
-                  Readyset throughput vs Postgres direct
-                </Text>
-              </p>
-            ) : (
-              <p
-                data-testid="lift-ratio"
-                className="flex min-h-[3.25rem] items-center"
-              >
-                <Text
-                  as="span"
-                  level="body-small"
-                  className="text-content-layout-3"
-                >
-                  Start traffic to see how much faster Readyset serves cached
-                  queries.
-                </Text>
-              </p>
-            )}
+                  <Text
+                    as="span"
+                    level="stat-hero"
+                    className={
+                      liftRatio >= 1.3
+                        ? 'text-content-positive-soft'
+                        : 'text-content-layout-1'
+                    }
+                  >
+                    {formatLiftRatio(liftRatio)}
+                  </Text>
+                  <Text
+                    as="span"
+                    level="subtitle-2"
+                    className="font-medium text-content-layout-2"
+                  >
+                    Readyset throughput vs Postgres direct
+                  </Text>
+                </p>
+              ) : (
+                <p data-testid="lift-ratio" className="flex items-center">
+                  <Text
+                    as="span"
+                    level="body-small"
+                    className="text-content-layout-3"
+                  >
+                    Start traffic to see how much faster Readyset serves cached
+                    queries.
+                  </Text>
+                </p>
+              )}
+            </div>
+            {/* Body: the live chart, with its window control docked top-right. */}
             <ThroughputChart
               samples={d.samples}
               events={d.events}
               windowMode={windowMode}
+              onWindowMode={setWindowMode}
               bare
             />
+            {/* Footer: the phase action bar, attached to the card. */}
+            <ControlsRow
+              loadRunning={d.loadRunning}
+              querypilotOn={d.querypilotOn}
+              disabled={modeResetting}
+              mode={d.mode}
+              onStart={d.beginLoad}
+              onStop={d.endLoad}
+              onToggleQueryPilot={d.toggleQueryPilot}
+              onMode={requestMode}
+            />
           </section>
-          {/* 2nd — the phase action controls (traffic + QueryPilot). */}
-          <ControlsRow
-            loadRunning={d.loadRunning}
-            querypilotOn={d.querypilotOn}
-            disabled={modeResetting}
-            onStart={d.beginLoad}
-            onStop={d.endLoad}
-            onToggleQueryPilot={d.toggleQueryPilot}
-          />
           {/* E — per-query detail: the story is told by the chart + number, so
               the 37-row table (with its per-row toggles, sort, popovers and SQL
               expanders) is collapsed by default. Native <details> keeps it a
@@ -2623,7 +2709,11 @@ export function DemoPage() {
               <Text as="span" level="subtitle-2" className="font-medium">
                 Show per-query detail
               </Text>
-              <Text as="span" level="body-small" className="text-content-layout-3">
+              <Text
+                as="span"
+                level="body-small"
+                className="text-content-layout-3"
+              >
                 ({d.patterns.length})
               </Text>
             </summary>
@@ -2655,73 +2745,10 @@ export function DemoPage() {
         </div>
       )}
 
-      {/* F — quiet tertiary utility row: Advanced settings (disclosure),
-          Replay tour, and the demoted, confirm-guarded Shut down demo. Rendered
-          whenever the stack exists (non-idle), matching the prior top-bar
-          affordances but out of the primary flow. [VIS-022, VIS-023, VIS-103] */}
-      {showTeardown && (
-        <div className="mt-1 flex flex-col gap-3 border-t border-border-layout-1 pt-4">
-          {d.phase === 'ready' && (
-            <details open={advancedOpen}>
-              <summary
-                onClick={(e) => {
-                  e.preventDefault()
-                  setAdvancedUserOpen(!advancedUserOpen)
-                }}
-                className="inline-flex cursor-pointer list-none items-center gap-1.5 text-content-layout-2 hover:text-content-layout-1 [&::-webkit-details-marker]:hidden"
-              >
-                <Icon
-                  name="chevron-down"
-                  label=""
-                  className={`h-4 w-4 shrink-0 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
-                />
-                <Text as="span" level="body-small" className="font-medium">
-                  Advanced
-                </Text>
-              </summary>
-              <div className="mt-3 flex flex-wrap items-center gap-x-8 gap-y-3 pl-6">
-                <WindowToggle
-                  windowMode={windowMode}
-                  onWindowMode={setWindowMode}
-                />
-                {d.querypilotOn && (
-                  <PolicyControl
-                    mode={d.mode}
-                    disabled={modeResetting}
-                    onMode={requestMode}
-                  />
-                )}
-              </div>
-            </details>
-          )}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-            {d.phase === 'ready' && (
-              <Button
-                variant="primary"
-                modifier="ghost"
-                size="small"
-                icon="filter-reset"
-                iconPosition="left"
-                label="Replay tour"
-                onClick={openTour}
-              />
-            )}
-            {/* Demoted from a prominent solid-red action to a quiet tertiary,
-                guarded by a confirm — teardown wipes 4 containers + ~2 GB of
-                images, so a mis-click must not fire silently. [T16, audit MEDIUM
-                #4, USE-077, VIS-022] */}
-            <Button
-              variant="negative"
-              modifier="ghost"
-              size="small"
-              icon="trash"
-              iconPosition="left"
-              label="Shut down demo"
-              onClick={() => setConfirmingTeardown(true)}
-            />
-          </div>
-        </div>
-      )}
+      {/* F — the former quiet utility row is gone: Advanced's two controls were
+          promoted onto the card (chart window → chart top-right; caching policy
+          → action bar), and Replay tour + Shut down demo now live in the header
+          kebab menu (owner decisions #1/#2/#3). */}
 
       {modeResetting && <ResetOverlay />}
       {/* Policy-switch + teardown confirmations now ride the shared
