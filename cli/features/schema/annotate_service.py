@@ -20,7 +20,15 @@ from .events import (
 
 
 class AnnotateService:
-    """Service for LLM-powered schema annotation with async event streaming."""
+    """Service for LLM-powered schema annotation with async event streaming.
+
+    Each table is annotated with a single batched LLM call (see
+    AIAnnotator.annotate_table); tables run in concurrent mini-batches with an
+    incremental save after every batch, so an interrupted run keeps its
+    completed tables and a rerun skips them.
+    """
+
+    CONCURRENT_TABLES = 3
 
     async def annotate(
         self,
@@ -58,12 +66,13 @@ class AnnotateService:
             return
 
         layer = manager.load(target)
-        tables_to_annotate = [table_name] if table_name else list(layer.tables.keys())
+        requested = [table_name] if table_name else list(layer.tables.keys())
+        work = [(name, layer.tables[name]) for name in requested if name in layer.tables]
 
         yield AnnotateStartedEvent(
             type="annotate_started",
-            tables=len(tables_to_annotate),
-            message=f"Starting annotation for {len(tables_to_annotate)} table(s)...",
+            tables=len(work),
+            message=f"Starting annotation for {len(work)} table(s)...",
         )
 
         sample_data_fn = self._create_sample_data_function(target_config, sample_rows)
@@ -72,46 +81,69 @@ class AnnotateService:
         total_failures = 0
         last_failure: Optional[str] = None
 
-        for i, tbl_name in enumerate(tables_to_annotate):
-            if tbl_name not in layer.tables:
-                continue
+        for start in range(0, len(work), self.CONCURRENT_TABLES):
+            batch = work[start:start + self.CONCURRENT_TABLES]
+            for offset, (tbl_name, _table) in enumerate(batch):
+                yield AnnotateProgressEvent(
+                    type="annotate_progress",
+                    table=tbl_name,
+                    table_index=start + offset + 1,
+                    total_tables=len(work),
+                    message=f"Annotating {tbl_name}...",
+                )
 
-            table = layer.tables[tbl_name]
-            yield AnnotateProgressEvent(
-                type="annotate_progress",
-                table=tbl_name,
-                table_index=i + 1,
-                total_tables=len(tables_to_annotate),
-                message=f"Annotating {tbl_name}...",
+            outcomes = await asyncio.gather(
+                *(
+                    asyncio.to_thread(
+                        self._annotate_table_sync,
+                        ai_annotator,
+                        tbl_name,
+                        table,
+                        sample_data_fn,
+                        target,
+                    )
+                    for tbl_name, table in batch
+                )
             )
 
-            sample_data = await self._sample_data(sample_data_fn, tbl_name)
-            tables_added, columns_added, failures, failure = await self._annotate_table(
-                ai_annotator, tbl_name, table, sample_data, target
-            )
-            total_tables_annotated += tables_added
-            total_columns_annotated += columns_added
-            total_failures += failures
-            if failure is not None:
-                last_failure = failure
+            completed: list[AnnotateTableCompleteEvent] = []
+            batch_changed = False
+            for offset, ((tbl_name, table), (status, payload)) in enumerate(
+                zip(batch, outcomes)
+            ):
+                columns_added = 0
+                if status == "error":
+                    total_failures += 1
+                    last_failure = payload
+                else:
+                    tables_added, columns_added, changed = self._apply_result(
+                        table, payload
+                    )
+                    total_tables_annotated += tables_added
+                    total_columns_annotated += columns_added
+                    batch_changed = batch_changed or changed
+                completed.append(
+                    AnnotateTableCompleteEvent(
+                        type="annotate_table_complete",
+                        table=tbl_name,
+                        table_index=start + offset + 1,
+                        total_tables=len(work),
+                        columns_annotated=columns_added,
+                    )
+                )
 
-            manager.save(layer)
+            if batch_changed:
+                await asyncio.to_thread(manager.save, layer)
 
-            yield AnnotateTableCompleteEvent(
-                type="annotate_table_complete",
-                table=tbl_name,
-                table_index=i + 1,
-                total_tables=len(tables_to_annotate),
-                columns_annotated=columns_added,
-            )
+            for event in completed:
+                yield event
 
         # Zero annotations despite failed attempts is a failure, not a green
         # complete; the false-success the user hit (rdst-0yy.11). A no-op run
         # (everything already annotated, no failures) still completes honestly.
         if total_tables_annotated + total_columns_annotated == 0 and total_failures > 0:
             message = (
-                f"Annotated 0 of {len(tables_to_annotate)} table(s): every AI "
-                "request failed."
+                f"Annotated 0 of {len(work)} table(s): every AI request failed."
             )
             if last_failure:
                 message += f" Last error: {self._one_line(last_failure)}"
@@ -128,82 +160,82 @@ class AnnotateService:
             ),
         )
 
-    async def _sample_data(
-        self,
-        sample_data_fn: Optional[Callable[[str], list[dict]]],
-        tbl_name: str,
-    ) -> Optional[list[dict]]:
-        """Best-effort row sample; a DB-side failure is not an annotation
-        failure, so it degrades to no samples rather than aborting the run."""
-        if not sample_data_fn:
-            return None
-        try:
-            return await asyncio.to_thread(sample_data_fn, tbl_name)
-        except Exception:
-            return None
-
-    async def _annotate_table(
+    def _annotate_table_sync(
         self,
         ai_annotator: Any,
         tbl_name: str,
         table: Any,
-        sample_data: Optional[list[dict]],
+        sample_data_fn: Optional[Callable[[str], list[dict]]],
         target: str,
-    ) -> tuple[int, int, int, Optional[str]]:
-        """Annotate one table's description and columns.
+    ) -> tuple[str, Any]:
+        """Sample and annotate one table with a single batched LLM call.
 
-        Returns (tables_added, columns_added, failures, last_failure). A failure
-        is the annotator throwing or returning an 'Error...' string; these are
-        counted rather than swallowed, so the caller can refuse a false success.
+        Runs on a worker thread. Returns ("ok", result_dict), ("ok", None)
+        when the table needs no annotation, or ("error", message). Only
+        columns that still need annotation are requested; a partially
+        annotated table does not re-request what it already has. A DB-side
+        sampling failure is not an annotation failure; it degrades to no
+        samples rather than aborting the table.
         """
+        pending = [name for name, col in table.columns.items() if col.needs_annotation]
+        if table.description and not pending:
+            return ("ok", None)
+
+        sample_data = None
+        if sample_data_fn:
+            try:
+                sample_data = sample_data_fn(tbl_name)
+            except Exception:
+                sample_data = None
+
+        try:
+            result = ai_annotator.annotate_table(
+                tbl_name,
+                table,
+                sample_data,
+                f"{target} database",
+                only_columns=pending,
+            )
+            return ("ok", result)
+        except Exception as exc:
+            return ("error", str(exc))
+
+    @staticmethod
+    def _apply_result(table: Any, result: Optional[dict]) -> tuple[int, int, bool]:
+        """Apply a batched annotation result to the layer, filling only empty
+        fields. Returns (tables_added, columns_added, changed); changed also
+        covers business-context and enum-meaning fills, which must reach the
+        incremental save even when no description counters moved."""
+        if not result:
+            return (0, 0, False)
+
         tables_added = 0
         columns_added = 0
-        failures = 0
-        last_failure: Optional[str] = None
+        changed = False
+        if not table.description and result.get("description"):
+            table.description = result["description"]
+            tables_added = 1
+        if not table.business_context and result.get("business_context"):
+            table.business_context = result["business_context"]
+            changed = True
 
-        if not table.description:
-            try:
-                description = await asyncio.to_thread(
-                    ai_annotator.generate_table_description,
-                    tbl_name,
-                    table.columns,
-                    table.row_estimate or "unknown",
-                    sample_data,
-                    f"{target} database",
-                )
-                if description.startswith("Error"):
-                    failures += 1
-                    last_failure = description
-                else:
-                    table.description = description
-                    tables_added = 1
-            except Exception as exc:
-                failures += 1
-                last_failure = str(exc)
-
+        result_columns = result.get("columns") or {}
         for col_name, col in table.columns.items():
-            if col.description:
+            data = result_columns.get(col_name)
+            if not isinstance(data, dict):
                 continue
-            try:
-                col_desc = await asyncio.to_thread(
-                    ai_annotator.generate_column_description,
-                    tbl_name,
-                    col_name,
-                    col.data_type or "unknown",
-                    None,
-                    table.description,
-                )
-                if col_desc.startswith("Error"):
-                    failures += 1
-                    last_failure = col_desc
-                else:
-                    col.description = col_desc
-                    columns_added += 1
-            except Exception as exc:
-                failures += 1
-                last_failure = str(exc)
+            if not col.description and data.get("description"):
+                col.description = data["description"]
+                columns_added += 1
+            mappings = data.get("enum_mappings") or {}
+            for value in col.missing_enum_meanings():
+                meaning = mappings.get(value)
+                if meaning:
+                    col.enum_values[value] = meaning
+                    changed = True
 
-        return tables_added, columns_added, failures, last_failure
+        changed = changed or bool(tables_added or columns_added)
+        return tables_added, columns_added, changed
 
     @staticmethod
     def _key_error_message(reason: str) -> str:

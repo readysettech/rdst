@@ -118,6 +118,22 @@ class ColumnAnnotation:
             stats_profiled_at=stats.get('profiled_at', ''),
         )
 
+    def missing_enum_meanings(self) -> list[str]:
+        """Enum values whose meaning is still empty or a 'TODO:' placeholder
+        (the placeholder form the introspector mints for detected enums)."""
+        return [
+            value
+            for value, meaning in self.enum_values.items()
+            if not meaning or meaning.startswith("TODO:")
+        ]
+
+    @property
+    def needs_annotation(self) -> bool:
+        """True when the column lacks a description or has unfilled enum
+        meanings. The single definition annotation flows derive both their
+        skip and apply decisions from."""
+        return not self.description or bool(self.missing_enum_meanings())
+
 
 @dataclass
 class Relationship:

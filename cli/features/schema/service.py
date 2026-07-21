@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncGenerator, Optional
 
-from shared.anthropic_env import has_anthropic_api_key
-
 from .semantic_layer import (
     SchemaIntrospector,
     SemanticLayerManager,
@@ -603,84 +601,6 @@ class SchemaService:
                 message="",
                 error=f"Failed to add metric: {exc}",
             )
-
-    def annotate(
-        self,
-        target: str,
-        target_config: dict[str, Any],
-        table_name: Optional[str] = None,
-        sample_rows: int = 5,
-    ) -> SchemaUpdateResult:
-        if not has_anthropic_api_key():
-            return SchemaUpdateResult(
-                success=False,
-                message="",
-                error="Anthropic API key not set (ANTHROPIC_API_KEY or RDST_TRIAL_TOKEN). "
-                "Export your API key or run 'rdst init' to configure.",
-            )
-
-        if not self._manager.exists(target):
-            return SchemaUpdateResult(
-                success=False,
-                message="",
-                error=f"No semantic layer found for '{target}'. Run init first.",
-            )
-
-        try:
-            from .semantic_layer import create_ai_annotator
-
-            ai_annotator = create_ai_annotator()
-        except Exception as exc:
-            return SchemaUpdateResult(
-                success=False,
-                message="",
-                error=f"LLM not configured: {exc}. Run 'rdst configure llm' first.",
-            )
-
-        sample_data_fn = None
-        if target_config:
-            sample_data_fn = self._create_sample_data_function(
-                target_config, sample_rows
-            )
-
-        try:
-            layer = self._manager.load(target)
-            tables_to_annotate = [table_name] if table_name else list(layer.tables.keys())
-            ai_annotator.annotate_layer_bulk(layer, tables_to_annotate, sample_data_fn)
-            self._manager.save(layer)
-            return SchemaUpdateResult(
-                success=True,
-                message=f"Generated AI annotations for {len(tables_to_annotate)} table(s)",
-            )
-        except Exception as exc:
-            return SchemaUpdateResult(
-                success=False,
-                message="",
-                error=f"Annotation failed: {exc}",
-            )
-
-    def _create_sample_data_function(self, target_config: dict[str, Any], sample_rows: int):
-        import psycopg2
-
-        def get_samples(table_name: str) -> list[dict]:
-            try:
-                conn = psycopg2.connect(
-                    host=target_config.get("host", "localhost"),
-                    port=target_config.get("port", 5432),
-                    database=target_config.get("database"),
-                    user=target_config.get("user"),
-                    password=target_config.get("password"),
-                )
-                cursor = conn.cursor()
-                cursor.execute(f"SELECT * FROM {table_name} LIMIT %s", (sample_rows,))
-                columns = [desc[0] for desc in cursor.description]
-                rows = cursor.fetchall()
-                conn.close()
-                return [dict(zip(columns, row)) for row in rows]
-            except Exception:
-                return []
-
-        return get_samples
 
     async def get_status_events(self, target: str) -> AsyncGenerator[SchemaEvent, None]:
         try:

@@ -520,46 +520,6 @@ class TestSchemaServiceAddMetric:
         service._manager.add_metric.assert_called_once()
 
 
-class TestSchemaServiceAnnotate:
-    """Tests for annotate() method."""
-
-    @pytest.fixture
-    def mock_manager(self):
-        """Create mock SemanticLayerManager."""
-        return Mock()
-
-    @pytest.fixture
-    def service(self, mock_manager):
-        """Create SchemaService instance with mocked manager."""
-        with patch(
-            "features.schema.service.SemanticLayerManager",
-            return_value=mock_manager,
-        ):
-            svc = SchemaService()
-            return svc
-
-    def test_annotate_requires_anthropic_key(self, service):
-        """Test annotate returns key error when neither env var is set."""
-        with patch.dict("os.environ", {}, clear=True):
-            with patch("features.schema.service.has_anthropic_api_key", return_value=False):
-                result = service.annotate("test-target", {"engine": "postgresql"})
-
-        assert result.success is False
-        assert "ANTHROPIC_API_KEY" in (result.error or "")
-
-    def test_annotate_accepts_rdst_trial_token(self, service):
-        """Test annotate accepts RDST_TRIAL_TOKEN."""
-        service._manager.exists.return_value = False
-
-        with patch.dict(
-            "os.environ", {"RDST_TRIAL_TOKEN": "test-token"}, clear=True
-        ):
-            result = service.annotate("test-target", {"engine": "postgresql"})
-
-        assert result.success is False
-        assert "No semantic layer found" in (result.error or "")
-
-
 class TestSchemaServiceEventTypes:
     """Tests for service event types and dataclasses."""
 

@@ -9,11 +9,14 @@ import json
 from typing import Optional, Dict, List, Any
 from shared.llm_manager import LLMManager
 from features.schema.semantic_models import (
-    SemanticLayer,
     TableAnnotation,
     ColumnAnnotation,
     Terminology
 )
+
+# Very wide tables are annotated in column chunks of this size so each
+# response fits comfortably in the output-token budget.
+COLUMNS_PER_CALL = 40
 
 
 class AIAnnotator:
@@ -48,6 +51,152 @@ class AIAnnotator:
         self.provider = provider
         self.model = model
         self._cache = {}  # Cache suggestions to avoid re-querying
+
+    def annotate_table(self,
+                       table_name: str,
+                       table: TableAnnotation,
+                       sample_data: Optional[List[Dict]] = None,
+                       schema_context: Optional[str] = None,
+                       only_columns: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Annotate a whole table in one LLM call.
+
+        Sends the table's columns with their profile stats (null fraction,
+        distinct count, top values) and enum values in a single prompt, and
+        parses a structured response covering the table description, business
+        context, and every column. Tables wider than COLUMNS_PER_CALL are
+        split into column chunks, one call per chunk.
+
+        Args:
+            table_name: Name of the table
+            table: TableAnnotation carrying columns and profile stats
+            sample_data: Optional list of sample rows
+            schema_context: Optional context about the schema
+            only_columns: Optional subset of column names to request; other
+                columns are left out of the prompt entirely. An empty subset
+                still makes one call for the table-level fields.
+
+        Returns:
+            {"description": str, "business_context": str,
+             "columns": {name: {"description": str, "enum_mappings": dict}}}
+
+        Raises:
+            ValueError: When a response cannot be parsed as the expected JSON.
+        """
+        col_items = list(table.columns.items())
+        if only_columns is not None:
+            requested = set(only_columns)
+            col_items = [(name, col) for name, col in col_items if name in requested]
+
+        sample_text = ""
+        if sample_data:
+            sample_text = "\n\nSample rows:\n" + json.dumps(
+                sample_data[:3], indent=2, default=str
+            )
+
+        if col_items:
+            chunks = [
+                col_items[start:start + COLUMNS_PER_CALL]
+                for start in range(0, len(col_items), COLUMNS_PER_CALL)
+            ]
+        else:
+            # No columns to annotate; one call still fills the table fields.
+            chunks = [[]]
+
+        merged: Dict[str, Any] = {"description": "", "business_context": "", "columns": {}}
+        for chunk in chunks:
+            prompt = self._build_table_prompt(
+                table_name, table, chunk, sample_text, schema_context
+            )
+            response = self.llm.query(
+                system_message="You are an expert database analyst helping document schema semantics.",
+                user_query=prompt,
+                max_tokens=4096,
+                temperature=0.2,
+                provider=self.provider,
+                model=self.model
+            )
+
+            result = self._parse_json_response(response['text'])
+            if not isinstance(result, dict) or not isinstance(result.get('columns'), dict):
+                raise ValueError(
+                    f"Unparseable annotation response for table '{table_name}'"
+                )
+
+            if not merged["description"]:
+                merged["description"] = str(result.get("description") or "")
+            if not merged["business_context"]:
+                merged["business_context"] = str(result.get("business_context") or "")
+
+            chunk_names = {name for name, _col in chunk}
+            for name, data in result["columns"].items():
+                if name not in chunk_names or not isinstance(data, dict):
+                    continue
+                mappings = data.get("enum_mappings")
+                merged["columns"][name] = {
+                    "description": str(data.get("description") or ""),
+                    "enum_mappings": mappings if isinstance(mappings, dict) else {},
+                }
+
+        return merged
+
+    def _build_table_prompt(self,
+                            table_name: str,
+                            table: TableAnnotation,
+                            columns: List[tuple],
+                            sample_text: str,
+                            schema_context: Optional[str]) -> str:
+        """Build the single-call prompt for one table (or one column chunk)."""
+        col_lines = "\n".join(
+            self._column_stats_line(name, col) for name, col in columns
+        )
+
+        context_prefix = ""
+        if schema_context:
+            context_prefix = f"Schema context: {schema_context}\n\n"
+
+        return f"""{context_prefix}Analyze this database table and annotate it.
+
+Table: {table_name}
+Row count: ~{table.row_estimate or "unknown"}
+Columns:
+{col_lines}{sample_text}
+
+Return a JSON object with this exact structure:
+{{
+  "description": "1-2 sentence description of what this table contains",
+  "business_context": "When/why rows are created or updated",
+  "columns": {{
+    "<column_name>": {{
+      "description": "1 sentence describing what this column represents",
+      "enum_mappings": {{"<value>": "human meaning"}}
+    }}
+  }}
+}}
+
+Guidelines:
+- Provide a description for every listed column.
+- Populate enum_mappings only for columns with listed enum values.
+- Focus on business meaning, not technical details."""
+
+    @staticmethod
+    def _column_stats_line(col_name: str, col: ColumnAnnotation) -> str:
+        """One prompt line per column: name, type, and profile stats."""
+        line = f"  {col_name} ({col.data_type or 'unknown'})"
+        details = []
+        if col.null_fraction is not None:
+            details.append(f"null: {col.null_fraction:.0%}")
+        if col.distinct_count is not None:
+            details.append(f"distinct: {col.distinct_count}")
+        if col.top_values:
+            top = ", ".join(f"{v} ({c})" for v, c in col.top_values[:8])
+            details.append(f"top values: {top}")
+        if col.enum_values:
+            values = ", ".join(list(col.enum_values)[:10])
+            details.append(f"enum values: [{values}]")
+        if details:
+            line += " -- " + "; ".join(details)
+        return line
 
     def generate_table_description(self,
                                    table_name: str,
@@ -305,75 +454,6 @@ Be specific about what each value represents in the business domain."""
                 ))
 
         return terms
-
-    def annotate_layer_bulk(self,
-                           layer: SemanticLayer,
-                           table_names: Optional[List[str]] = None,
-                           sample_data_fn: Optional[callable] = None) -> None:
-        """
-        Bulk annotate multiple tables in the semantic layer.
-
-        Modifies the layer in-place with AI-generated suggestions.
-
-        Args:
-            layer: SemanticLayer to annotate
-            table_names: Optional list of specific tables (annotates all if None)
-            sample_data_fn: Optional function(table_name) -> List[Dict] to get samples
-        """
-        tables_to_annotate = table_names or list(layer.tables.keys())
-
-        for table_name in tables_to_annotate:
-            if table_name not in layer.tables:
-                continue
-
-            table = layer.tables[table_name]
-
-            # Skip if already has description
-            if table.description:
-                continue
-
-            # Get sample data if function provided
-            sample_data = None
-            if sample_data_fn:
-                try:
-                    sample_data = sample_data_fn(table_name)
-                except Exception:
-                    pass
-
-            # Generate table description
-            description = self.generate_table_description(
-                table_name=table_name,
-                columns=table.columns,
-                row_estimate=table.row_estimate or "unknown",
-                sample_data=sample_data,
-                schema_context=f"{layer.target} database"
-            )
-
-            table.description = description
-
-            # Generate column descriptions
-            for col_name, col in table.columns.items():
-                if not col.description:
-                    col_desc = self.generate_column_description(
-                        table_name=table_name,
-                        column_name=col_name,
-                        data_type=col.data_type,
-                        sample_values=None,  # Could extract from sample_data
-                        table_context=description
-                    )
-                    col.description = col_desc
-
-            # Generate enum mappings
-            for col_name, col in table.columns.items():
-                if col.enum_values and all(v.startswith("TODO:") for v in col.enum_values.values()):
-                    mappings = self.generate_enum_mappings(
-                        table_name=table_name,
-                        column_name=col_name,
-                        enum_values=list(col.enum_values.keys()),
-                        schema_context=f"{layer.target} database"
-                    )
-                    if mappings:
-                        col.enum_values = mappings
 
     def _parse_json_response(self, text: str) -> Optional[Dict]:
         """

@@ -16,6 +16,7 @@ from features.schema.events import (
     AnnotateErrorEvent,
 )
 from features.schema.annotate_service import AnnotateService
+from features.schema.semantic_models import ColumnAnnotation, TableAnnotation
 
 
 VALID = {"valid": True, "reason": "ok", "model": "claude-haiku-4-5"}
@@ -27,24 +28,31 @@ ANNOTATOR = "features.schema.annotate_service.create_ai_annotator"
 
 
 def _mock_col(description=None, data_type="text"):
-    col = Mock()
-    col.description = description
-    col.data_type = data_type
-    return col
+    return ColumnAnnotation(name="col", description=description or "", data_type=data_type)
 
 
 def _mock_table(description=None, columns=None):
-    table = Mock()
-    table.description = description
-    table.row_estimate = "100"
-    table.columns = columns if columns is not None else {}
-    return table
+    return TableAnnotation(
+        name="table",
+        description=description or "",
+        row_estimate="100",
+        columns=columns if columns is not None else {},
+    )
 
 
 def _mock_layer(tables):
     layer = Mock()
     layer.tables = tables
     return layer
+
+
+def _ok_result(table_desc="desc", col_names=(), col_desc="desc"):
+    """A well-formed AIAnnotator.annotate_table result."""
+    return {
+        "description": table_desc,
+        "business_context": "",
+        "columns": {n: {"description": col_desc, "enum_mappings": {}} for n in col_names},
+    }
 
 
 async def _collect(service, target, target_config, **kwargs):
@@ -126,8 +134,7 @@ class TestAnnotateServiceMarch:
             create_manager.return_value.exists.return_value = True
             create_manager.return_value.load.return_value = layer
             ai = Mock()
-            ai.generate_table_description.return_value = "desc"
-            ai.generate_column_description.return_value = "desc"
+            ai.annotate_table.return_value = _ok_result()
             create_annotator.return_value = ai
 
             events = []
@@ -141,8 +148,9 @@ class TestAnnotateServiceMarch:
 
     @pytest.mark.asyncio
     async def test_all_failures_report_error_not_success(self, service):
-        # Valid at preflight, but every generate_* call fails mid-run. The run
-        # annotated nothing, so it must end in an error, not a green complete.
+        # Valid at preflight, but every annotate_table call fails mid-run. The
+        # run annotated nothing, so it must end in an error, not a green
+        # complete.
         cols = {"id": _mock_col(), "name": _mock_col()}
         layer = _mock_layer({"users": _mock_table(columns=cols)})
         with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
@@ -151,8 +159,7 @@ class TestAnnotateServiceMarch:
             create_manager.return_value.exists.return_value = True
             create_manager.return_value.load.return_value = layer
             ai = Mock()
-            ai.generate_table_description.return_value = "Error: 401 authentication_error"
-            ai.generate_column_description.return_value = "Error: 401 authentication_error"
+            ai.annotate_table.side_effect = RuntimeError("401 authentication_error")
             create_annotator.return_value = ai
 
             events = await _collect(service, "t", {})
@@ -160,23 +167,6 @@ class TestAnnotateServiceMarch:
         assert not any(isinstance(e, AnnotateCompleteEvent) for e in events)
         assert isinstance(events[-1], AnnotateErrorEvent)
         assert "0 of 1" in events[-1].message
-
-    @pytest.mark.asyncio
-    async def test_thrown_exceptions_counted_as_failures(self, service):
-        layer = _mock_layer({"users": _mock_table(columns={"id": _mock_col()})})
-        with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
-            ANNOTATOR
-        ) as create_annotator:
-            create_manager.return_value.exists.return_value = True
-            create_manager.return_value.load.return_value = layer
-            ai = Mock()
-            ai.generate_table_description.side_effect = RuntimeError("boom")
-            ai.generate_column_description.side_effect = RuntimeError("boom")
-            create_annotator.return_value = ai
-
-            events = await _collect(service, "t", {})
-
-        assert isinstance(events[-1], AnnotateErrorEvent)
         assert "Last error" in events[-1].message
 
     @pytest.mark.asyncio
@@ -188,11 +178,10 @@ class TestAnnotateServiceMarch:
             }
         )
 
-        def table_desc(tbl_name, *_args, **_kwargs):
-            return "A good description" if tbl_name == "good" else "Error: rate_limit"
-
-        def col_desc(tbl_name, *_args, **_kwargs):
-            return "A good column description" if tbl_name == "good" else "Error: rate_limit"
+        def annotate(tbl_name, *_args, **_kwargs):
+            if tbl_name == "good":
+                return _ok_result("A good description", col_names=("id",))
+            raise RuntimeError("rate_limit")
 
         with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
             ANNOTATOR
@@ -200,8 +189,7 @@ class TestAnnotateServiceMarch:
             create_manager.return_value.exists.return_value = True
             create_manager.return_value.load.return_value = layer
             ai = Mock()
-            ai.generate_table_description.side_effect = table_desc
-            ai.generate_column_description.side_effect = col_desc
+            ai.annotate_table.side_effect = annotate
             create_annotator.return_value = ai
 
             events = await _collect(service, "t", {})
@@ -210,6 +198,7 @@ class TestAnnotateServiceMarch:
         assert isinstance(complete, AnnotateCompleteEvent)
         assert complete.success is True
         assert complete.tables_annotated == 1
+        assert complete.columns_annotated == 1
         assert "failed" in complete.message
 
     @pytest.mark.asyncio
@@ -231,7 +220,139 @@ class TestAnnotateServiceMarch:
         complete = events[-1]
         assert isinstance(complete, AnnotateCompleteEvent)
         assert complete.success is True
+        ai.annotate_table.assert_not_called()
+
+
+class TestAnnotateServiceBatching:
+    """One batched LLM call per table, concurrent mini-batches, fill-if-empty."""
+
+    async def _run(self, layer, ai):
+        with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
+            ANNOTATOR
+        ) as create_annotator:
+            create_manager.return_value.exists.return_value = True
+            create_manager.return_value.load.return_value = layer
+            create_annotator.return_value = ai
+            events = await _collect(AnnotateService(), "t", {})
+            return events, create_manager.return_value
+
+    @pytest.mark.asyncio
+    async def test_one_call_per_table_never_per_column(self):
+        cols_a = {"id": _mock_col(), "name": _mock_col(), "email": _mock_col()}
+        cols_b = {"id": _mock_col(), "total": _mock_col()}
+        layer = _mock_layer(
+            {"users": _mock_table(columns=cols_a), "orders": _mock_table(columns=cols_b)}
+        )
+        ai = Mock()
+        ai.annotate_table.side_effect = lambda name, *_a, **_k: _ok_result(
+            col_names=("id", "name", "email", "total")
+        )
+
+        events, _ = await self._run(layer, ai)
+
+        assert ai.annotate_table.call_count == 2
         ai.generate_table_description.assert_not_called()
+        ai.generate_column_description.assert_not_called()
+        complete = events[-1]
+        assert isinstance(complete, AnnotateCompleteEvent)
+        assert complete.tables_annotated == 2
+        assert complete.columns_annotated == 5
+
+    @pytest.mark.asyncio
+    async def test_existing_descriptions_never_overwritten(self):
+        described = _mock_col(description="keep me")
+        blank = _mock_col()
+        layer = _mock_layer(
+            {"users": _mock_table(description=None, columns={"a": described, "b": blank})}
+        )
+        ai = Mock()
+        ai.annotate_table.return_value = _ok_result(
+            "new table desc", col_names=("a", "b"), col_desc="overwrite attempt"
+        )
+
+        events, _ = await self._run(layer, ai)
+
+        assert described.description == "keep me"
+        assert blank.description == "overwrite attempt"
+        complete = events[-1]
+        assert complete.tables_annotated == 1
+        assert complete.columns_annotated == 1
+
+    @pytest.mark.asyncio
+    async def test_saves_once_per_concurrent_batch(self):
+        # Five tables at a batch size of three: two saves, both incremental.
+        tables = {
+            f"t{i}": _mock_table(columns={"id": _mock_col()}) for i in range(5)
+        }
+        layer = _mock_layer(tables)
+        ai = Mock()
+        ai.annotate_table.return_value = _ok_result(col_names=("id",))
+
+        events, manager = await self._run(layer, ai)
+
+        assert manager.save.call_count == 2
+        assert isinstance(events[-1], AnnotateCompleteEvent)
+
+    @pytest.mark.asyncio
+    async def test_todo_enum_values_filled_from_mappings(self):
+        col = _mock_col()
+        col.enum_values = {"A": "TODO: describe", "B": ""}
+        layer = _mock_layer({"users": _mock_table(columns={"status": col})})
+        result = _ok_result(col_names=("status",))
+        result["columns"]["status"]["enum_mappings"] = {
+            "A": "Active account",
+            "B": "Banned account",
+            "Z": "Never asked about",
+        }
+        ai = Mock()
+        ai.annotate_table.return_value = result
+
+        await self._run(layer, ai)
+
+        assert col.enum_values == {"A": "Active account", "B": "Banned account"}
+
+    @pytest.mark.asyncio
+    async def test_partial_rerun_requests_only_pending_columns(self):
+        # The incremental-save design means reruns hit partially annotated
+        # tables; already-described columns must not be re-requested.
+        done = _mock_col(description="already described")
+        todo = _mock_col()
+        layer = _mock_layer(
+            {
+                "users": _mock_table(
+                    description="users table", columns={"done": done, "todo": todo}
+                )
+            }
+        )
+        ai = Mock()
+        ai.annotate_table.return_value = _ok_result(col_names=("todo",))
+
+        events, _ = await self._run(layer, ai)
+
+        ai.annotate_table.assert_called_once()
+        assert ai.annotate_table.call_args.kwargs["only_columns"] == ["todo"]
+        assert events[-1].columns_annotated == 1
+
+    @pytest.mark.asyncio
+    async def test_described_table_with_todo_enums_not_skipped_and_saved(self):
+        # Descriptions alone don't make a table complete: unfilled enum
+        # placeholders still need annotation, and an enum-only fill must
+        # reach the incremental save.
+        col = _mock_col(description="status column")
+        col.enum_values = {"A": "TODO: describe"}
+        layer = _mock_layer(
+            {"users": _mock_table(description="described", columns={"status": col})}
+        )
+        result = _ok_result(col_names=("status",))
+        result["columns"]["status"]["enum_mappings"] = {"A": "Active"}
+        ai = Mock()
+        ai.annotate_table.return_value = result
+
+        _events, manager = await self._run(layer, ai)
+
+        ai.annotate_table.assert_called_once()
+        assert col.enum_values == {"A": "Active"}
+        manager.save.assert_called_once()
 
 
 class TestAnnotateServiceEventTypes:
