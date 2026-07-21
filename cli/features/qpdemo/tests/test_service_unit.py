@@ -428,8 +428,8 @@ def test_pull_skipped_when_all_present(monkeypatch):
     assert all(e["type"] == "progress" for e in events)
 
 
-def test_pull_failure_raises(monkeypatch):
-    images = service_mod.qdeploy.PINNED_IMAGES
+def test_pull_transient_failure_retries_then_raises(monkeypatch):
+    monkeypatch.setattr(service_mod.time, "sleep", lambda s: None)
 
     class FailingPull(StubDocker):
         def __call__(self, cmd, timeout=None):
@@ -442,6 +442,90 @@ def test_pull_failure_raises(monkeypatch):
     svc = _bare_pull_service()
     with pytest.raises(RuntimeError, match="Failed to pull"):
         list(svc._pull_missing_images(runner=stub))
+    # A transient error is retried up to the attempt cap before raising.
+    assert len(stub.pulled()) == service_mod.PULL_MAX_ATTEMPTS
+
+
+def test_pull_permanent_failure_raises_immediately(monkeypatch):
+    monkeypatch.setattr(service_mod.time, "sleep", lambda s: None)
+
+    class DeniedPull(StubDocker):
+        def __call__(self, cmd, timeout=None):
+            if cmd[1] == "pull":
+                self.calls.append(cmd)
+                return subprocess.CompletedProcess(
+                    cmd, 1, stderr="manifest unknown: requested image not found"
+                )
+            return super().__call__(cmd, timeout)
+
+    stub = DeniedPull([])
+    svc = _bare_pull_service()
+    with pytest.raises(RuntimeError, match="Failed to pull"):
+        list(svc._pull_missing_images(runner=stub))
+    assert len(stub.pulled()) == 1
+
+
+def test_pull_timeout_retries_then_succeeds(monkeypatch):
+    monkeypatch.setattr(service_mod.time, "sleep", lambda s: None)
+
+    class TimeoutOncePull(StubDocker):
+        def __call__(self, cmd, timeout=None):
+            if cmd[1] == "pull":
+                self.calls.append(cmd)
+                if len(self.pulled()) == 1:
+                    raise subprocess.TimeoutExpired(cmd, timeout or 0)
+                return subprocess.CompletedProcess(cmd, 0)
+            return super().__call__(cmd, timeout)
+
+    stub = TimeoutOncePull([])
+    svc = _bare_pull_service()
+    events = list(svc._pull_missing_images(runner=stub))
+    messages = [e["message"] for e in events]
+    assert any("reconnecting" in m for m in messages)
+    assert any(m.startswith("Pulled ") for m in messages)
+
+
+def test_pull_rate_limit_retries_without_alarm(monkeypatch):
+    monkeypatch.setattr(service_mod.time, "sleep", lambda s: None)
+
+    class RateLimitOncePull(StubDocker):
+        def __call__(self, cmd, timeout=None):
+            if cmd[1] == "pull":
+                self.calls.append(cmd)
+                if len(self.pulled()) == 1:
+                    return subprocess.CompletedProcess(
+                        cmd, 1, stderr="toomanyrequests: Rate exceeded"
+                    )
+                return subprocess.CompletedProcess(cmd, 0)
+            return super().__call__(cmd, timeout)
+
+    stub = RateLimitOncePull([])
+    svc = _bare_pull_service()
+    events = list(svc._pull_missing_images(runner=stub))
+    messages = [e["message"] for e in events]
+    # The throttle recovers on its own in seconds: the pull quietly resumes
+    # and the user never sees a rate-limit warning or a retry countdown.
+    assert len(stub.pulled()) == len(service_mod.qdeploy.PINNED_IMAGES) + 1
+    assert any(m.startswith("Pulled ") for m in messages)
+    assert not any("rate limit" in m.lower() or "retrying" in m for m in messages)
+
+
+def test_pull_progress_counts_layers():
+    prog = service_mod.qdeploy.PullProgress()
+    for line in (
+        "latest: Pulling from readyset/readyset",
+        "aaa111: Pulling fs layer",
+        "bbb222: Pulling fs layer",
+        "ccc333: Already exists",
+        "aaa111: Downloading",
+        "aaa111: Verifying Checksum",
+        "aaa111: Download complete",
+        "aaa111: Pull complete",
+        "Digest: sha256:deadbeef",
+    ):
+        prog.feed(line)
+    assert prog.total_layers == 3
+    assert prog.done_layers == 2
 
 
 def test_preflight_all_green(monkeypatch):

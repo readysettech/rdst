@@ -112,6 +112,18 @@ class TrialService:
                 status_code=400,
             )
 
+        if resp.status_code == 400 and code == "EMAIL_ALIAS":
+            return TrialRegisterResult(
+                success=False,
+                error_code="EMAIL_ALIAS",
+                detail=resp_data.get(
+                    "detail",
+                    "Email aliases with '+' are not supported for trial signup.",
+                ),
+                did_you_mean=resp_data.get("base_email"),
+                status_code=400,
+            )
+
         if resp.status_code == 422:
             email_error = resp_data.get("email_error", "")
             hint = resp_data.get("hint", "")

@@ -70,10 +70,24 @@ IMAGE_PULL_MB = {"pg": 630, "readyset": 215, "sqp": 75, "qp-cron": 55}
 # On a first run the pull stage owns the bar up to here; container starts
 # split the remainder. Cached runs skip straight past the pull stage.
 IMAGE_STAGE_MAX_PCT = 60
-# Anonymous registry pulls are rate-limited per IP; wait out the window a few
-# times before declaring the provision failed.
-PULL_RATE_LIMIT_RETRIES = 3
-PULL_RATE_LIMIT_WAIT_S = 45
+# The registry only meters the small manifest requests (a per-IP budget that
+# refills at about one per second); layer data itself is unmetered CDN. A
+# throttled or interrupted pull therefore recovers after a short pause, and
+# docker keeps already-completed layers, so retries resume rather than
+# restart. Only clearly permanent registry errors fail fast.
+PULL_RETRY_WAITS_S = (5, 10, 20, 40)
+PULL_MAX_ATTEMPTS = len(PULL_RETRY_WAITS_S) + 1
+# While a big image (the orders one is ~630 MB) downloads, stream live
+# layer-count progress so a slow-but-working pull never reads as a hang.
+PULL_PROGRESS_TICK_S = 5
+# Hard cap on a single pull attempt; a docker that produces no result for
+# this long is killed and the attempt retried.
+PULL_ATTEMPT_TIMEOUT_S = 1800
+# Registry errors that waiting can never fix.
+PULL_PERMANENT_ERRORS = (
+    "manifest unknown", "not found", "denied", "unauthorized",
+    "no matching manifest", "invalid reference",
+)
 # Container starts that lose a port race re-allocate and retry this many
 # times before surfacing a ports-exhausted error.
 PORT_RETRY_ATTEMPTS = 3
@@ -229,6 +243,16 @@ class DemoService:
         cfg = TargetsConfig()
         cfg.load()
         return cfg
+
+    def tour_done(self) -> bool:
+        """Whether this install has completed the demo walkthrough."""
+        return self._demo_config().is_demo_tour_done()
+
+    def mark_tour_done(self) -> None:
+        cfg = self._demo_config()
+        if not cfg.is_demo_tour_done():
+            cfg.mark_demo_tour_done()
+            cfg.save()
 
     def _apply_state(self, data: dict) -> qdeploy.Ports | None:
         self._discovery_mode = data.get("discovery_mode", "count_star")
@@ -650,8 +674,9 @@ class DemoService:
         On a first run the download dominates provisioning wall time, so the
         pull stage owns the 2..IMAGE_STAGE_MAX_PCT span of the progress bar and
         each image advances it by its share of the missing bytes. Anonymous
-        registry pulls are rate-limited per IP, so a rate-limited pull retries
-        after a pause instead of failing the provision."""
+        registry pulls are rate-limited per IP and big downloads can time out,
+        so transient failures retry with a growing pause instead of failing
+        the provision; only permanent registry errors fail fast."""
         run = runner or qdeploy._run
         images = list(qdeploy.PINNED_IMAGES.items())
         yield {"type": "progress", "stage": "images", "percent": 1,
@@ -669,19 +694,65 @@ class DemoService:
             yield {"type": "progress", "stage": "images", "percent": pct,
                    "message": f"Pulling {image} ({idx}/{len(missing)}, "
                               f"~{IMAGE_PULL_MB.get(key, 100)} MB)..."}
-            for attempt in range(1, PULL_RATE_LIMIT_RETRIES + 2):
-                r = qdeploy.pull_image(image, run)
-                if r.returncode == 0:
+            mb = IMAGE_PULL_MB.get(key, 100)
+            for attempt in range(1, PULL_MAX_ATTEMPTS + 1):
+                outcome: dict = {}
+                progress = qdeploy.PullProgress()
+
+                def _pull(res=outcome, prog=progress):
+                    try:
+                        if runner is not None:
+                            res["proc"] = qdeploy.pull_image(image, run)
+                        else:
+                            res["proc"] = qdeploy.pull_image_streaming(
+                                image, prog,
+                                on_start=lambda p: res.__setitem__("popen", p))
+                    except subprocess.TimeoutExpired:
+                        res["proc"] = None
+                    except BaseException as e:
+                        res["raised"] = e
+
+                worker = threading.Thread(target=_pull, daemon=True)
+                worker.start()
+                started = time.monotonic()
+                while True:
+                    worker.join(PULL_PROGRESS_TICK_S)
+                    if not worker.is_alive():
+                        break
+                    elapsed = int(time.monotonic() - started)
+                    if elapsed > PULL_ATTEMPT_TIMEOUT_S and "popen" in outcome:
+                        outcome["popen"].kill()
+                        continue
+                    elapsed_disp = (f"{elapsed // 60} min" if elapsed >= 60
+                                    else f"{elapsed}s")
+                    layers = (f"{progress.done_layers}/{progress.total_layers} "
+                              f"layers, " if progress.total_layers else "")
+                    live_pct = pct
+                    if progress.total_layers:
+                        frac = progress.done_layers / progress.total_layers
+                        live_pct = 2 + int(span * (done_mb + mb * frac) / total_mb)
+                    yield {"type": "progress", "stage": "images",
+                           "percent": live_pct,
+                           "message": f"Pulling {image} ({idx}/{len(missing)}, "
+                                      f"~{mb} MB, {layers}{elapsed_disp} "
+                                      f"elapsed)"}
+                if "raised" in outcome:
+                    raise outcome["raised"]
+                r = outcome.get("proc")
+                if r is not None and r.returncode == 0:
                     break
-                err = (r.stderr or "")
-                rate_limited = "toomanyrequests" in err or "Rate exceeded" in err
-                if not rate_limited or attempt > PULL_RATE_LIMIT_RETRIES:
+                err = (r.stderr or "") if r is not None else "pull timed out"
+                permanent = any(m in err.lower() for m in PULL_PERMANENT_ERRORS)
+                if permanent or attempt >= PULL_MAX_ATTEMPTS:
                     raise RuntimeError(f"Failed to pull {image}: {err[:300]}")
+                # Transient hiccups (the registry's shared per-IP manifest
+                # budget refills in seconds; docker resumes finished layers)
+                # pause quietly and pick the download back up - no countdown,
+                # no alarm.
                 yield {"type": "progress", "stage": "images", "percent": pct,
-                       "message": f"Registry rate limit hit; retrying in "
-                                  f"{PULL_RATE_LIMIT_WAIT_S}s "
-                                  f"({attempt}/{PULL_RATE_LIMIT_RETRIES})..."}
-                time.sleep(PULL_RATE_LIMIT_WAIT_S)
+                       "message": f"Pulling {image} ({idx}/{len(missing)}, "
+                                  f"~{mb} MB, reconnecting)"}
+                time.sleep(PULL_RETRY_WAITS_S[attempt - 1])
             done_mb += IMAGE_PULL_MB.get(key, 100)
             yield {"type": "progress", "stage": "images",
                    "percent": 2 + int(span * done_mb / total_mb),

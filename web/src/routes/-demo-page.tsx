@@ -124,7 +124,6 @@ const MANUAL_CACHE_DISABLED_TOOLTIP =
 // A checked switch means "actively caching" everywhere in the demo; green
 // makes that state readable at a glance.
 const SWITCH_CHECKED_GREEN = 'data-[state=checked]:bg-surface-positive-solid'
-const TOUR_STORAGE_KEY = 'qpdemo_walkthrough_done'
 
 type SnapshotSortKey =
   | 'postgres_hits'
@@ -1795,15 +1794,22 @@ function PatternTable({
   )
 }
 
-function readTourDone() {
-  if (typeof window === 'undefined') return false
-  return window.localStorage.getItem(TOUR_STORAGE_KEY) === '1'
+// Tour completion lives on the machine (~/.rdst), not in the browser: a
+// wiped RDST install replays the tour even in a browser that has seen it,
+// and an existing install never auto-tours from a fresh browser profile.
+async function fetchTourDone(): Promise<boolean> {
+  try {
+    const r = await fetch('/api/demo/tour')
+    if (!r.ok) return true
+    const data = (await r.json()) as { done?: boolean }
+    return Boolean(data.done)
+  } catch {
+    return true
+  }
 }
 
-function writeTourDone(done: boolean) {
-  if (typeof window === 'undefined') return
-  if (done) window.localStorage.setItem(TOUR_STORAGE_KEY, '1')
-  else window.localStorage.removeItem(TOUR_STORAGE_KEY)
+function persistTourDone() {
+  void fetch('/api/demo/tour-done', { method: 'POST' }).catch(() => {})
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -2281,7 +2287,17 @@ export function DemoPage() {
   // window → chart top-right, caching policy → action bar). [Demo 5a/5b]
   const [perQueryUserOpen, setPerQueryUserOpen] = useDisclosure({})
   const [tourStep, setTourStep] = useState<TourStepId | null>(null)
-  const [tourDone, setTourDone] = useState(readTourDone)
+  // null = not yet known; the auto-start gate only fires on a definite false.
+  const [tourDone, setTourDone] = useState<boolean | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void fetchTourDone().then((done) => {
+      if (!cancelled) setTourDone(done)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   // Once the tour has been started (auto or via Replay), the auto-open effect
   // must never fire again this session: re-opening at Welcome mid-tour was the
   // "tour resets to Welcome" bug.
@@ -2382,14 +2398,12 @@ export function DemoPage() {
   }, [d.containers])
 
   const completeTour = useCallback(() => {
-    writeTourDone(true)
+    persistTourDone()
     setTourDone(true)
     setTourStep(null)
   }, [])
 
   const openTour = useCallback(() => {
-    writeTourDone(false)
-    setTourDone(false)
     tourStartedRef.current = true
     setTourStep('welcome')
   }, [])
@@ -2405,7 +2419,7 @@ export function DemoPage() {
       if (current === 'reselecting') return 'modeWhyNot'
       if (current === 'modeWhyNot') return 'finale'
       if (current === 'finale') {
-        writeTourDone(true)
+        persistTourDone()
         setTourDone(true)
         return null
       }
@@ -2416,7 +2430,7 @@ export function DemoPage() {
   useEffect(() => {
     if (
       d.phase === 'ready' &&
-      !tourDone &&
+      tourDone === false &&
       !tourStartedRef.current &&
       tourStep == null
     ) {

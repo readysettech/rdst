@@ -235,12 +235,16 @@ export function TrialRegistrationDialog({
               <VStack className="gap-0.5 items-start">
                 <Text level="headline-4" className="text-content-layout-1">
                   {step === "email" && "Start Free Trial"}
-                  {step === "verify" && "Check Your Email"}
+                  {step === "verify" &&
+                    (alreadyRegistered ? "Email Already Registered" : "Check Your Email")}
                   {step === "success" && "Trial Activated"}
                 </Text>
                 <Text level="body-small" className="text-content-layout-3">
                   {step === "email" && "Get free AI analysis credits — no credit card required."}
-                  {step === "verify" && "Paste the trial token from the verification email."}
+                  {step === "verify" &&
+                    (alreadyRegistered
+                      ? "Enter the trial token from your original signup."
+                      : "Paste the trial token from the verification email.")}
                   {step === "success" && "Your free trial is ready to use."}
                 </Text>
               </VStack>
@@ -335,22 +339,24 @@ export function TrialRegistrationDialog({
                   />
                 )}
 
-                <div className="rounded-lg bg-surface-layout-2/60 border border-border-layout-1 px-4 py-3">
-                  <VStack className="gap-1 items-start">
-                    <Text level="label-small" className="text-content-layout-1">
-                      Steps to get your token:
-                    </Text>
-                    <Text level="body-small" className="text-content-layout-3">
-                      1. Check your email (including spam folder)
-                    </Text>
-                    <Text level="body-small" className="text-content-layout-3">
-                      2. Click the verification link
-                    </Text>
-                    <Text level="body-small" className="text-content-layout-3">
-                      3. Copy the trial token from the page
-                    </Text>
-                  </VStack>
-                </div>
+                {!alreadyRegistered && (
+                  <div className="rounded-lg bg-surface-layout-2/60 border border-border-layout-1 px-4 py-3">
+                    <VStack className="gap-1 items-start">
+                      <Text level="label-small" className="text-content-layout-1">
+                        Steps to get your token:
+                      </Text>
+                      <Text level="body-small" className="text-content-layout-3">
+                        1. Check your email (including spam folder)
+                      </Text>
+                      <Text level="body-small" className="text-content-layout-3">
+                        2. Click the verification link
+                      </Text>
+                      <Text level="body-small" className="text-content-layout-3">
+                        3. Copy the trial token from the page
+                      </Text>
+                    </VStack>
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <Text as="label" level="label-small" className="text-content-layout-2 block">

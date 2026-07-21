@@ -258,7 +258,7 @@ export function EmailGate({ variant = 'gate', onDismiss }: EmailGateProps = {}) 
                 </>
               )}
               <a
-                href="https://readyset.io/privacy"
+                href="https://readyset.io/privacy-policy"
                 target="_blank"
                 rel="noreferrer"
                 className="text-content-primary-soft hover:underline"

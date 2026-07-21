@@ -66,6 +66,17 @@ def status():
     return _svc().status()
 
 
+@router.get("/tour")
+def tour():
+    return {"done": _svc().tour_done()}
+
+
+@router.post("/tour-done")
+def tour_done():
+    _svc().mark_tour_done()
+    return {"done": True}
+
+
 @router.get("/workload")
 def workload():
     return {"queries": _svc().workload()}

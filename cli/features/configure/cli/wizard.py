@@ -1227,6 +1227,19 @@ class ConfigurationWizard:
                     continue
                 return False
 
+            if resp.status_code == 400 and code == "EMAIL_ALIAS":
+                detail = resp_data.get(
+                    "detail",
+                    "Email aliases with '+' are not supported for trial signup.",
+                )
+                self.console.print(
+                    MessagePanel(detail, variant="error", title="Email Alias Not Supported")
+                )
+                if attempt < max_attempts - 1:
+                    self.console.print("  Try again with your base email address.\n")
+                    continue
+                return False
+
             if resp.status_code == 400 and code == "INVALID_DOMAIN":
                 self.console.print(
                     MessagePanel(

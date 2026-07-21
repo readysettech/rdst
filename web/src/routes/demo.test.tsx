@@ -766,6 +766,16 @@ describe('DemoPage', () => {
   });
 
   it('drives the anchored walkthrough by events and Next, never revisiting Welcome', async () => {
+    // The auto-start gate asks the backend whether this install has seen the
+    // walkthrough; only a definite "not done" opens it.
+    vi.stubGlobal('fetch', vi.fn((url: RequestInfo | URL) => {
+      const body = String(url).includes('/api/demo/tour') ? { done: false } : {};
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(body),
+        text: () => Promise.resolve(JSON.stringify(body)),
+      } as unknown as Response);
+    }));
     const hook = vi.spyOn(useDemoMod, 'useDemo');
     const welcome = /This demo spins up a small database/;
     let state = {

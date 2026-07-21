@@ -447,6 +447,16 @@ class TargetsConfig:
     def clear_demo_state(self) -> bool:
         return self._data.pop("demo", None) is not None
 
+    # The demo walkthrough is per-install, not per-demo-run: it lives in its
+    # own [demo_tour] section so demo teardown (which clears [demo]) leaves
+    # it intact, and it resets only when ~/.rdst itself is wiped.
+
+    def is_demo_tour_done(self) -> bool:
+        return bool((self._data.get("demo_tour") or {}).get("done"))
+
+    def mark_demo_tour_done(self) -> None:
+        self._data["demo_tour"] = {"done": True}
+
     def list_targets_by_group(self, group: str) -> List[str]:
         targets = self._data.get("targets", {})
         return sorted(name for name, cfg in targets.items() if cfg.get("group") == group)

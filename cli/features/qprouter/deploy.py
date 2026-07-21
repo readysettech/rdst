@@ -198,6 +198,52 @@ def pull_image(image: str, runner=_run) -> subprocess.CompletedProcess:
     return runner(["docker", "pull", image], timeout=1800)
 
 
+class PullProgress:
+    """Running layer tally parsed from `docker pull` status lines.
+
+    Without a TTY docker emits one line per layer status transition and no
+    byte counts, so completed-layer counts are the finest live progress
+    signal available from the CLI."""
+
+    def __init__(self) -> None:
+        self.total_layers = 0
+        self.done_layers = 0
+
+    def feed(self, line: str) -> None:
+        parts = line.strip().split(": ", 1)
+        if len(parts) != 2:
+            return
+        status = parts[1]
+        if status == "Pulling fs layer":
+            self.total_layers += 1
+        elif status == "Already exists":
+            self.total_layers += 1
+            self.done_layers += 1
+        elif status == "Pull complete":
+            self.done_layers += 1
+
+
+def pull_image_streaming(image: str, progress: PullProgress,
+                         on_start=None) -> subprocess.CompletedProcess:
+    """Pull `image`, feeding every status line to `progress` as it arrives so
+    the caller can narrate layer-level progress live. `on_start` receives the
+    Popen handle, letting the caller kill a stuck pull. stderr is merged into
+    stdout; the returned stderr carries the output tail for error
+    classification."""
+    proc = subprocess.Popen(["docker", "pull", image], stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True)
+    if on_start is not None:
+        on_start(proc)
+    out: list[str] = []
+    for line in proc.stdout:
+        out.append(line)
+        progress.feed(line)
+    rc = proc.wait()
+    text = "".join(out)
+    return subprocess.CompletedProcess(proc.args, rc, stdout=text,
+                                       stderr=text[-500:])
+
+
 def deploy_postgres_baked(name: str, port: int) -> subprocess.CompletedProcess:
     """Run the pre-baked Orders image: credentials and data ship in the image,
     runtime flags ship in its CMD — only the name and port vary."""
