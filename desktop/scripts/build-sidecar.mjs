@@ -64,6 +64,10 @@ const PYINSTALLER_ARGS = [
   "--collect-submodules=uvicorn",
   "--collect-submodules=sse_starlette",
   "--collect-submodules=sqlglot",
+  // Collect RDST's data files (analyze workflows, deploy templates, and qpdemo
+  // SQL) that features/shared load relative to __file__.
+  "--collect-data=features",
+  "--collect-data=shared",
   "--hidden-import=uvicorn.logging",
   "--hidden-import=uvicorn.loops.auto",
   "--hidden-import=uvicorn.protocols.http.auto",
