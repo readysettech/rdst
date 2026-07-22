@@ -35,6 +35,7 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: null }),
+  useQueryClient: () => ({}),
 }))
 
 vi.mock('../components/TargetDropdown', () => ({

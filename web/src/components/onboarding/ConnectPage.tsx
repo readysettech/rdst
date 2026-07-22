@@ -8,6 +8,7 @@ import { useConfigure } from '../../lib/useConfigure'
 import { useOnboarding } from '../../lib/useOnboarding'
 import type { ConfigureFormData } from '../../types/configure'
 import { ConfigureForm } from '../configure'
+import { startBootstrapRun } from '../../lib/bootstrapRun'
 
 /**
  * First-run "Connect your database" — a single, exitable page that replaces the
@@ -61,6 +62,10 @@ export function ConnectPage({
       // user can fix the connection details instead of dead-ending.
       return
     }
+    // Kick off the background bootstrap (schema, AI descriptions, optional
+    // Readyset deploy); it never throws, and the sidebar chip tracks it
+    // while the user lands in the app.
+    startBootstrapRun(data.name, { deploy: data.deploy })
     toast({ title: `Connected to ${data.name}`, variant: 'positive' })
     finishToHome()
   }

@@ -34,6 +34,8 @@ export interface ConfigureFormData {
   password_env?: string;
   tls?: boolean;
   read_only?: boolean;
+  /** Add-mode only: deploy Readyset as part of the post-add bootstrap. */
+  deploy?: boolean;
 }
 
 export interface ConfigureTargetDetail extends ConfigureFormData {

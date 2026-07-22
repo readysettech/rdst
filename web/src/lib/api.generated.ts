@@ -348,6 +348,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/bootstrap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Bootstrap
+         * @description Start the add-database bootstrap for a target; returns immediately.
+         */
+        post: operations["start_bootstrap_api_bootstrap_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bootstrap/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bootstrap Run Status
+         * @description Cheap status poll for a run.
+         */
+        get: operations["bootstrap_run_status_api_bootstrap_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bootstrap/runs/{run_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bootstrap Run Events
+         * @description Replay events with seq > after_seq, then stream live until terminal.
+         */
+        get: operations["bootstrap_run_events_api_bootstrap_runs__run_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/browse": {
         parameters: {
             query?: never;
@@ -2737,7 +2797,10 @@ export interface components {
             /** Valid */
             valid: boolean;
         };
-        /** AskClarificationNeededEvent */
+        /**
+         * AskClarificationNeededEvent
+         * @description Clarification needed from the user.
+         */
         AskClarificationNeededEvent: {
             /** Interpretations */
             interpretations: components["schemas"]["AskInterpretation"][];
@@ -2751,7 +2814,10 @@ export interface components {
              */
             type: "clarification_needed";
         };
-        /** AskClarificationQuestion */
+        /**
+         * AskClarificationQuestion
+         * @description A clarification question for the user.
+         */
         AskClarificationQuestion: {
             /** Id */
             id: string;
@@ -2760,7 +2826,10 @@ export interface components {
             /** Question */
             question: string;
         };
-        /** AskErrorEvent */
+        /**
+         * AskErrorEvent
+         * @description Ask encountered an error.
+         */
         AskErrorEvent: {
             /** Message */
             message: string;
@@ -2803,7 +2872,10 @@ export interface components {
             /** Items */
             items: components["schemas"]["AskHistoryItem"][];
         };
-        /** AskInterpretation */
+        /**
+         * AskInterpretation
+         * @description A possible interpretation of the user's question.
+         */
         AskInterpretation: {
             /** Assumptions */
             assumptions: string[];
@@ -2852,7 +2924,10 @@ export interface components {
              */
             timeout?: number;
         };
-        /** AskResultEvent */
+        /**
+         * AskResultEvent
+         * @description Ask completed with results.
+         */
         AskResultEvent: {
             /** Columns */
             columns: string[];
@@ -2891,7 +2966,10 @@ export interface components {
              */
             type: "result";
         };
-        /** AskSchemaLoadedEvent */
+        /**
+         * AskSchemaLoadedEvent
+         * @description Schema has been loaded.
+         */
         AskSchemaLoadedEvent: {
             /** Source */
             source: string;
@@ -2910,7 +2988,10 @@ export interface components {
              */
             type: "schema_loaded";
         };
-        /** AskSqlGeneratedEvent */
+        /**
+         * AskSqlGeneratedEvent
+         * @description SQL has been generated.
+         */
         AskSqlGeneratedEvent: {
             /**
              * Explanation
@@ -2925,7 +3006,10 @@ export interface components {
              */
             type: "sql_generated";
         };
-        /** AskStatusEvent */
+        /**
+         * AskStatusEvent
+         * @description Status update during ask execution.
+         */
         AskStatusEvent: {
             /** Message */
             message: string;
@@ -3215,6 +3299,86 @@ export interface components {
             /** Target */
             target?: string | null;
         };
+        BootstrapEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"];
+        /**
+         * BootstrapNeedsKeyEvent
+         * @description The run reached the annotate gate without a usable Anthropic key.
+         *
+         *     The event name doubles as the run registry's gating signal: the run's
+         *     status parks on needs_key until the next event arrives.
+         */
+        BootstrapNeedsKeyEvent: {
+            /** Message */
+            message: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "needs_key";
+        };
+        /** BootstrapRunStatusResponse */
+        BootstrapRunStatusResponse: {
+            /** Run Id */
+            run_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * BootstrapStageEvent
+         * @description Progress of one bootstrap stage.
+         *
+         *     status is started | progress | done | failed | skipped. Child-service
+         *     events surface as status="progress" with the child's payload in detail,
+         *     so the stream stays one flat, typed union.
+         */
+        BootstrapStageEvent: {
+            /**
+             * Detail
+             * @default null
+             */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Message
+             * @default
+             */
+            message?: string;
+            /** Stage */
+            stage: string;
+            /** Status */
+            status: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "bootstrap_stage";
+        };
+        /** BootstrapStartRequest */
+        BootstrapStartRequest: {
+            /**
+             * Annotate
+             * @default true
+             */
+            annotate?: boolean;
+            /**
+             * Deploy
+             * @default true
+             */
+            deploy?: boolean;
+            /**
+             * Deploy Mode
+             * @default docker
+             */
+            deploy_mode?: string;
+            /** Target */
+            target?: string | null;
+        };
+        /** BootstrapStartResponse */
+        BootstrapStartResponse: {
+            /** Run Id */
+            run_id: string;
+        };
         /** BrowseResponse */
         BrowseResponse: {
             /** Current */
@@ -3491,7 +3655,14 @@ export interface components {
              */
             type: "tool_call";
         };
-        /** ChatToolResultEvent */
+        /**
+         * ChatToolResultEvent
+         * @description Result of one tool execution.
+         *
+         *     For query_database, `data` carries sql/columns/rows/row_count/
+         *     execution_time_ms/truncated/query_hash/query_tag; for get_schema it
+         *     carries tables/source.
+         */
         ChatToolResultEvent: {
             /** Content */
             content: string;
@@ -3724,7 +3895,16 @@ export interface components {
             /** Success */
             success: boolean;
         };
-        /** ErrorEvent */
+        /**
+         * ErrorEvent
+         * @description Error event for service workflows.
+         *
+         *     ``code`` and ``detail`` mirror the shared HTTP error envelope
+         *     (``shared.api.app._error_envelope``) so an SSE failure carries the same
+         *     {code, message, detail} shape the client normalizes in ``lib/sse.ts``.
+         *     Both stay optional so existing producers that only set ``message`` keep
+         *     working; the client derives a code when one is absent.
+         */
         ErrorEvent: {
             /**
              * Code
@@ -4618,7 +4798,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** ProgressEvent */
+        /**
+         * ProgressEvent
+         * @description Progress update during a multi-step operation.
+         */
         ProgressEvent: {
             /** Message */
             message: string;
@@ -4632,7 +4815,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** QueryBenchmarkCompleteEvent */
+        /**
+         * QueryBenchmarkCompleteEvent
+         * @description Benchmark finished; carries the final tally.
+         */
         QueryBenchmarkCompleteEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -4652,7 +4838,16 @@ export interface components {
              */
             type: "complete";
         };
-        /** QueryBenchmarkErrorEvent */
+        /**
+         * QueryBenchmarkErrorEvent
+         * @description Benchmark failed (or was rejected by a safety rail) before completion.
+         *
+         *     Carries the shared error envelope ({code, message, detail}, B7/T24) so the
+         *     client normalizes a benchmark failure exactly like every other SSE error.
+         *     ``message`` stays humane and safe to show; ``detail`` holds only the
+         *     exception class name for correlation — never the raw ``str(e)``, which can
+         *     embed host / DSN / SQL material.
+         */
         QueryBenchmarkErrorEvent: {
             /**
              * Code
@@ -4673,7 +4868,10 @@ export interface components {
             type: "error";
         };
         QueryBenchmarkEvent: components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"];
-        /** QueryBenchmarkProgressEvent */
+        /**
+         * QueryBenchmarkProgressEvent
+         * @description Benchmark progress tick.
+         */
         QueryBenchmarkProgressEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -4693,7 +4891,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** QueryBenchmarkStats */
+        /**
+         * QueryBenchmarkStats
+         * @description Statistics for a single benchmarked query.
+         */
         QueryBenchmarkStats: {
             /** Avg Ms */
             avg_ms: number;
@@ -5192,7 +5393,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** ScanCompleteEvent */
+        /**
+         * ScanCompleteEvent
+         * @description Scan completed.
+         */
         ScanCompleteEvent: {
             /** Success */
             success: boolean;
@@ -5206,7 +5410,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** ScanErrorEvent */
+        /**
+         * ScanErrorEvent
+         * @description Scan error.
+         */
         ScanErrorEvent: {
             /** Message */
             message: string;
@@ -5222,7 +5429,10 @@ export interface components {
             type: "error";
         };
         ScanEvent: components["schemas"]["ScanStatusEvent"] | components["schemas"]["ScanFilesFoundEvent"] | components["schemas"]["ScanProgressEvent"] | components["schemas"]["ScanQueryResultEvent"] | components["schemas"]["ScanRegistryEvent"] | components["schemas"]["ScanCompleteEvent"] | components["schemas"]["ScanErrorEvent"];
-        /** ScanFilesFoundEvent */
+        /**
+         * ScanFilesFoundEvent
+         * @description Files with ORM patterns discovered.
+         */
         ScanFilesFoundEvent: {
             /** Files */
             files: {
@@ -5265,7 +5475,10 @@ export interface components {
          * @enum {string}
          */
         ScanPhase: "config" | "discovery" | "extraction" | "conversion" | "registry" | "analysis";
-        /** ScanProgressEvent */
+        /**
+         * ScanProgressEvent
+         * @description Progress update within a scan phase.
+         */
         ScanProgressEvent: {
             /** Current */
             current: number;
@@ -5281,7 +5494,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** ScanQueryResultEvent */
+        /**
+         * ScanQueryResultEvent
+         * @description Individual query result from scan.
+         */
         ScanQueryResultEvent: {
             /** Query */
             query: {
@@ -5293,7 +5509,10 @@ export interface components {
              */
             type: "query_result";
         };
-        /** ScanRegistryEvent */
+        /**
+         * ScanRegistryEvent
+         * @description Registry save results.
+         */
         ScanRegistryEvent: {
             /** New Queries */
             new_queries: number;
@@ -5363,7 +5582,10 @@ export interface components {
              */
             warn_threshold?: number;
         };
-        /** ScanStatusEvent */
+        /**
+         * ScanStatusEvent
+         * @description Status update during scan.
+         */
         ScanStatusEvent: {
             /** Message */
             message: string;
@@ -5816,7 +6038,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** TopCompleteEvent */
+        /**
+         * TopCompleteEvent
+         * @description Operation completed.
+         */
         TopCompleteEvent: {
             /** Newly Saved */
             newly_saved: number;
@@ -5832,7 +6057,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** TopConnectedEvent */
+        /**
+         * TopConnectedEvent
+         * @description Database connection established.
+         */
         TopConnectedEvent: {
             /** Db Engine */
             db_engine: string;
@@ -5857,7 +6085,10 @@ export interface components {
             /** Setting Name */
             setting_name: string;
         };
-        /** TopDbLimitWarningEvent */
+        /**
+         * TopDbLimitWarningEvent
+         * @description Database query size limit is below recommended threshold.
+         */
         TopDbLimitWarningEvent: {
             /** Db Engine */
             db_engine: string;
@@ -5873,7 +6104,14 @@ export interface components {
              */
             type: "db_limit_warning";
         };
-        /** TopErrorEvent */
+        /**
+         * TopErrorEvent
+         * @description Error occurred.
+         *
+         *     ``code`` and ``detail`` mirror the shared error envelope (B7/T24):
+         *     ``message`` stays humane, ``detail`` carries the exception class name for
+         *     correlation — never the raw ``str(e)``, which can embed host/DSN material.
+         */
         TopErrorEvent: {
             /**
              * Code
@@ -5923,7 +6161,10 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /** TopQueriesEvent */
+        /**
+         * TopQueriesEvent
+         * @description Batch of top queries.
+         */
         TopQueriesEvent: {
             /** Db Engine */
             db_engine: string;
@@ -5949,7 +6190,10 @@ export interface components {
              */
             type: "queries";
         };
-        /** TopQueryData */
+        /**
+         * TopQueryData
+         * @description Individual query data.
+         */
         TopQueryData: {
             /** Avg Time */
             avg_time: string;
@@ -6011,7 +6255,10 @@ export interface components {
             /** Total Time */
             total_time: string;
         };
-        /** TopQuerySavedEvent */
+        /**
+         * TopQuerySavedEvent
+         * @description Query saved to registry.
+         */
         TopQuerySavedEvent: {
             /** Is New */
             is_new: boolean;
@@ -6023,7 +6270,10 @@ export interface components {
              */
             type: "query_saved";
         };
-        /** TopSourceFallbackEvent */
+        /**
+         * TopSourceFallbackEvent
+         * @description Source fallback occurred.
+         */
         TopSourceFallbackEvent: {
             /** From Source */
             from_source: string;
@@ -6037,7 +6287,10 @@ export interface components {
              */
             type: "source_fallback";
         };
-        /** TopStatusEvent */
+        /**
+         * TopStatusEvent
+         * @description Progress status update.
+         */
         TopStatusEvent: {
             /** Message */
             message: string;
@@ -6975,6 +7228,104 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_bootstrap_api_bootstrap_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BootstrapStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BootstrapStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bootstrap_run_status_api_bootstrap_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BootstrapRunStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bootstrap_run_events_api_bootstrap_runs__run_id__events_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "text/event-stream": components["schemas"]["BootstrapEvent"];
                 };
             };
             /** @description Validation Error */

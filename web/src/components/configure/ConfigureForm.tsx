@@ -198,6 +198,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
   );
   const [tls, setTls] = useState(initialData?.tls ?? false);
   const [readOnly, setReadOnly] = useState(initialData?.read_only ?? false);
+  const [deploy, setDeploy] = useState(true);
 
   // "Connection details" holds the fields the connection needs, so it opens by
   // default; "Advanced" (TLS / read-only) stays collapsed until asked for. A
@@ -268,6 +269,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
       password_env: passwordEnv || undefined,
       tls,
       read_only: readOnly,
+      ...(isAddMode ? { deploy } : {}),
     });
   };
 
@@ -283,6 +285,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
     setPasswordEnvCustomized(false);
     setTls(false);
     setReadOnly(false);
+    setDeploy(true);
     onCancel?.();
   };
 
@@ -550,6 +553,30 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                 </div>
               </div>
             </Disclosure>
+
+            {isAddMode && (
+              <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
+                <label htmlFor="cfg-deploy" className="cursor-pointer">
+                  <VStack className="gap-0.5 items-start">
+                    <Text as="span" level="label-small" className="text-content-layout-1">
+                      Deploy Readyset now
+                    </Text>
+                    <Text as="span" level="caption" className="text-content-layout-3">
+                      Starts a ReadySet container (~4 GB RAM, 2 CPUs) so caching
+                      works on the first click
+                    </Text>
+                  </VStack>
+                </label>
+                <BaseInputSwitch
+                  id="cfg-deploy"
+                  name="deploy"
+                  aria-label="Deploy Readyset now"
+                  checked={deploy}
+                  onCheckedChange={setDeploy}
+                  disabled={isLoading}
+                />
+              </div>
+            )}
           </div>
         </Card.Content>
         <Card.Footer>

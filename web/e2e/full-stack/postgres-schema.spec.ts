@@ -1,6 +1,6 @@
 import { clearTargets, expect, test } from '../fixtures'
 
-test('configures Postgres and introspects its schema through the UI', async ({
+test('configures Postgres and bootstraps its schema through the UI', async ({
   page,
 }) => {
   const host = process.env.RDST_E2E_DB_HOST ?? '127.0.0.1'
@@ -21,6 +21,9 @@ test('configures Postgres and introspects its schema through the UI', async ({
     .locator('[name="password"]')
     .fill(process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password')
   await page.locator('[name="password_env"]').fill('RDST_E2E_DB_PASSWORD')
+  // Readyset deployment is not under test here; keep the bootstrap to its
+  // schema track so the run needs no Docker.
+  await page.getByRole('switch', { name: 'Deploy Readyset now' }).click()
   await page.getByRole('button', { name: 'Test & connect' }).click()
 
   await expect(page).toHaveURL('/')
@@ -38,11 +41,21 @@ test('configures Postgres and introspects its schema through the UI', async ({
     },
   })
 
+  // Connecting kicked off the background bootstrap, which initializes the
+  // semantic layer on its own; wait for the layer server-side rather than
+  // racing the run from the UI.
+  await expect(async () => {
+    const status = await page.request.get(
+      '/api/semantic-layer/status?target=postgres-e2e'
+    )
+    expect(status.ok()).toBe(true)
+    expect((await status.json()).exists).toBe(true)
+  }).toPass({ timeout: 30_000 })
+
   await page.goto('/schema')
   await expect(
     page.getByRole('heading', { name: 'Semantic Layer' })
   ).toBeVisible()
-  await page.getByRole('button', { name: 'Initialize Schema' }).click()
 
   await expect(
     page.getByRole('button').filter({ hasText: 'title_basics' })

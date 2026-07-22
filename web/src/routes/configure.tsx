@@ -30,6 +30,7 @@ import {
 import { useAnthropicValidity } from '../lib/useAnthropicValidity'
 import { useConfigure } from '../lib/useConfigure'
 import { useSystemStatus } from '../lib/useSystemStatus'
+import { startBootstrapRun } from '../lib/bootstrapRun'
 import type {
   ConfigureFormData,
   ConfigureTargetDetail,
@@ -303,6 +304,11 @@ function ConfigurePage() {
       }
     } catch {
       return
+    }
+    if (!editingTarget) {
+      // New target: kick off the background bootstrap; it never throws, and
+      // the sidebar chip tracks it.
+      startBootstrapRun(data.name, { deploy: data.deploy })
     }
     setShowForm(false)
     setEditingTarget(null)

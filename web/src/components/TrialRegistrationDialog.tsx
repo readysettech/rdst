@@ -326,6 +326,16 @@ export function TrialRegistrationDialog({
                     Did you mean {didYouMean}?
                   </button>
                 )}
+                {/* The own-key path must always be reachable, not only when
+                    the trial is at capacity. */}
+                {!isProgramFull && (
+                  <RoutableNotice
+                    kind="key-needed"
+                    title="Already have an Anthropic key?"
+                    message="Add your own key instead — no trial needed."
+                    onBeforeRoute={handleClose}
+                  />
+                )}
               </>
             )}
 

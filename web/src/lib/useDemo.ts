@@ -6,6 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
+import { readSSE } from './sseReader'
 
 // ---- types -----------------------------------------------------------------
 export type Phase = 'idle' | 'provisioning' | 'ready' | 'tearing-down'
@@ -139,48 +140,6 @@ export interface DemoStatus {
   notice: string | null
   // Epoch seconds when the environment auto-cleans; null when not provisioned.
   auto_teardown_at: number | null
-}
-
-// ---- generic SSE reader ----------------------------------------------------
-async function readSSE(
-  url: string,
-  init: RequestInit,
-  onEvent: (event: string, data: unknown) => void,
-  signal: AbortSignal
-): Promise<void> {
-  const response = await fetch(url, { ...init, signal })
-  if (!response.ok)
-    throw new Error((await response.text()) || response.statusText)
-  if (!response.body) throw new Error('no response body')
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let currentEvent = 'message'
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed) {
-        currentEvent = 'message'
-        continue
-      }
-      if (trimmed.startsWith('event:')) {
-        currentEvent = trimmed.substring(6).trim()
-      } else if (trimmed.startsWith('data:')) {
-        try {
-          onEvent(currentEvent, JSON.parse(trimmed.substring(5).trim()))
-        } catch {
-          /* ignore keep-alive / partial frames */
-        }
-      }
-    }
-  }
 }
 
 // ---- contract helpers ------------------------------------------------------
