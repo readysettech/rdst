@@ -6,10 +6,10 @@ import { Text } from '@rs/ui-new/text'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
+import { BackgroundRuns } from '../components/BackgroundRuns'
 import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ReportDialog } from '../components/ReportDialog'
 import { TargetDropdown } from '../components/TargetDropdown'
-import { BootstrapChip } from '../components/BootstrapChip'
 import { TrialBalanceBadge } from '../components/TrialBalanceBadge'
 import { useTarget } from '../hooks/useTarget'
 import type { DesktopUpdateState } from '../lib/desktop'
@@ -446,7 +446,7 @@ export function Sidebar({
         {/* Footer */}
         <div className="p-3 border-t border-border-layout-1 space-y-2">
           <SidebarIdentity />
-          <BootstrapChip />
+          <BackgroundRuns />
           <TrialBalanceBadge />
           {/* Settings recedes here as a quiet utility, out of the daily nav. */}
           <NavLink item={settingsItem} active={isActive(settingsItem)} />

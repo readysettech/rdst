@@ -1173,9 +1173,10 @@ class CacheService:
             cache_kwargs = self._connection_kwargs(cache_config)
 
             from queue import Queue, Empty
-            from .performance_comparison import run_comparison
+            from .performance_comparison import ComparisonController, run_comparison
 
             progress_queue: Queue = Queue()
+            controller = ComparisonController()
 
             def _on_progress(stage: str, current: int, total: int):
                 progress_queue.put((stage, current, total))
@@ -1191,6 +1192,7 @@ class CacheService:
                     iterations=iterations,
                     warmup_iterations=warmup,
                     on_progress=_on_progress,
+                    controller=controller,
                 ),
             )
 
@@ -1200,24 +1202,29 @@ class CacheService:
                 "cache": "Benchmarking cache",
             }
 
-            while not future.done():
-                try:
-                    stage, current, total = progress_queue.get_nowait()
-                    label = stage_labels.get(stage, stage)
-                    pct = int((current / total) * 100) if total > 0 else 0
-                    # Map stages to overall percent: warmup 5-20, origin 20-60, cache 60-95
-                    if stage == "warmup":
-                        overall = 5 + int(pct * 0.15)
-                    elif stage == "origin":
-                        overall = 20 + int(pct * 0.40)
-                    else:
-                        overall = 60 + int(pct * 0.35)
-                    yield ProgressEvent(
-                        type="progress", stage=stage, percent=overall,
-                        message=f"{label} ({current}/{total})",
-                    )
-                except Empty:
-                    await asyncio.sleep(0.05)
+            try:
+                while not future.done():
+                    try:
+                        stage, current, total = progress_queue.get_nowait()
+                        label = stage_labels.get(stage, stage)
+                        pct = int((current / total) * 100) if total > 0 else 0
+                        # Map stages to overall percent: warmup 5-20, origin 20-60, cache 60-95
+                        if stage == "warmup":
+                            overall = 5 + int(pct * 0.15)
+                        elif stage == "origin":
+                            overall = 20 + int(pct * 0.40)
+                        else:
+                            overall = 60 + int(pct * 0.35)
+                        yield ProgressEvent(
+                            type="progress", stage=stage, percent=overall,
+                            message=f"{label} ({current}/{total})",
+                        )
+                    except Empty:
+                        await asyncio.sleep(0.05)
+            except asyncio.CancelledError:
+                controller.cancel()
+                future.cancel()
+                raise
 
             result = future.result()
 

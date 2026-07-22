@@ -20,8 +20,11 @@ import { SQLInput } from "../components/SQLInput";
 import { SQLDisplay } from "../components/SQLDisplay";
 import { useTarget } from "../hooks/useTarget";
 import { useCacheAction } from "../lib/useCacheAction";
-import { useCacheRun } from "../lib/useCache";
-import type { CacheRunResult } from "../types/cache";
+import {
+  dismissBackgroundRun,
+  startCacheTestRun,
+  useBackgroundRuns,
+} from "../lib/backgroundRuns";
 import { fillCapturedParams, hasParameters } from "../lib/sqlParameters";
 import { QueryCacheStatus } from "../components/QueryCacheStatus";
 import { QueryCard } from "../components/QueryCard";
@@ -134,7 +137,13 @@ function FilterChip({
   );
 }
 
-export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
+export function QueryRegistryPage({
+  deepLinkHash,
+  deepLinkRunId,
+}: {
+  deepLinkHash?: string;
+  deepLinkRunId?: string;
+}) {
   const navigate = useNavigate();
   const { target } = useTarget();
   const {
@@ -166,6 +175,7 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
   const [showImportForm, setShowImportForm] = useState(false);
   const [importPath, setImportPath] = useState("");
   const [importUpdate, setImportUpdate] = useState(false);
+  const backgroundRuns = useBackgroundRuns();
 
   // Deep-link (deepLinkHash prop from the route wrapper): focus one query by hash
   // (served-cache "View in Queries" links and the Analyze "Set up caching"
@@ -181,13 +191,28 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
     return () => clearTimeout(timer);
   }, [deepLinkHash]);
 
-  // Cache integration. "Cache & test" caches the query, then immediately runs
-  // an origin-vs-cache comparison so the row can show measured proof, not just
-  // "Cached" (rdst-41p.3). cacheRun is a single-flight hook, so testingHash
-  // tracks which row owns the in-flight run and where its result belongs.
-  const cacheRun = useCacheRun();
-  const [testingHash, setTestingHash] = useState<string | null>(null);
-  const [runResults, setRunResults] = useState<Record<string, CacheRunResult>>({});
+  // Cache tests are detached background runs. The newest run per query owns the
+  // inline progress/result unless a deep link names a specific retained run.
+  const cacheTestRuns = useMemo(
+    () => backgroundRuns.filter((run) => run.kind === "cache_test"),
+    [backgroundRuns],
+  );
+  const cacheRunFor = (hash: string) => {
+    const linked = deepLinkRunId
+      ? cacheTestRuns.find(
+          (run) =>
+            run.runId === deepLinkRunId &&
+            run.queryHash === hash &&
+            run.target === target,
+        )
+      : undefined;
+    return (
+      linked ??
+      [...cacheTestRuns]
+        .reverse()
+        .find((run) => run.queryHash === hash && run.target === target)
+    );
+  };
   // A query whose benchmark needs parameter values we do not have. The dialog
   // collects them (pre-filled with any captured values), then the substituted
   // SQL runs, so every query can be tested (rdst-41p.11).
@@ -195,8 +220,23 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
 
   const runConcreteTest = (hash: string, sql: string) => {
     if (!target) return;
-    setTestingHash(hash);
-    void cacheRun.run({ query: sql, target, iterations: 15, warmup: 5 });
+    setExpandedHash(hash);
+    const entry = queries.find((query) => query.hash === hash);
+    void startCacheTestRun({
+      query: sql,
+      target,
+      query_hash: hash,
+      label: entry?.tag?.trim() || deriveQueryName(entry?.sql || sql),
+      iterations: 15,
+      warmup: 5,
+    }).then((runId) => {
+      if (!runId) return;
+      void navigate({
+        to: "/query-registry",
+        search: { hash, run: runId },
+        replace: true,
+      });
+    });
   };
 
   // Benchmark one query origin-vs-cache: fill parameters from captured values,
@@ -216,24 +256,6 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
       runTest(hash, sql, entry?.most_recent_params ?? {});
     },
   });
-
-  useEffect(() => {
-    if (!testingHash) return;
-    if (cacheRun.state === "complete" && cacheRun.result) {
-      setRunResults((prev) => ({ ...prev, [testingHash]: cacheRun.result! }));
-      setExpandedHash(testingHash); // reveal the before/after card
-      setTestingHash(null);
-      cacheRun.reset();
-    } else if (cacheRun.state === "error") {
-      toast({
-        title: "Benchmark didn't complete",
-        description: cacheRun.error ?? "The query is cached, but the perf test failed to run.",
-        variant: "warning",
-      });
-      setTestingHash(null);
-      cacheRun.reset();
-    }
-  }, [cacheRun.state, cacheRun.result, cacheRun.error, cacheRun.reset, testingHash]);
 
   const handleCacheQuery = (hash: string, sql: string) => {
     cacheQuery(sql, hash);
@@ -842,7 +864,11 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
                     const isEditingSql = editingSqlHash === entry.hash;
                     const cached = isCached(entry.hash);
                     const notCacheable = isNotCacheable(entry.readyset_supported);
-                    const isTesting = testingHash === entry.hash;
+                    const cacheTestRun = cacheRunFor(entry.hash);
+                    const isTesting =
+                      cacheTestRun?.status === "running" ||
+                      cacheTestRun?.status === "reconnecting";
+                    const runResult = cacheTestRun?.result;
 
                     // One muted meta line via the shared helpers: the DB-time
                     // impact headline + run count when telemetry exists, else the
@@ -1022,7 +1048,7 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
                                   cached={cached}
                                   readysetSupported={entry.readyset_supported}
                                   testing={isTesting}
-                                  speedup={runResults[entry.hash]?.speedup_mean}
+                                  speedup={runResult?.speedup_mean}
                                 />
                               </>
                             }
@@ -1057,7 +1083,7 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
                                     size="small"
                                     icon="database-settings"
                                     iconPosition="left"
-                                    label={runResults[entry.hash] ? "Re-test" : "Test"}
+                                    label={runResult ? "Re-test" : "Test"}
                                     onClick={() => runTest(entry.hash, entry.sql, entry.most_recent_params ?? {})}
                                   />
                                 </Show>
@@ -1132,15 +1158,31 @@ export function QueryRegistryPage({ deepLinkHash }: { deepLinkHash?: string }) {
                               isExpanded ? (
                                 <VStack className="gap-3 items-stretch pt-3 border-t border-border-layout-1">
                                   {/* Cache & test payoff — origin-vs-cache proof (rdst-41p.4) */}
-                                  <Show when={!!runResults[entry.hash]}>
+                                  <Show when={isTesting}>
+                                    <HStack className="gap-2 rounded-lg border border-border-primary-soft/30 bg-surface-primary-soft/15 px-4 py-3 items-center">
+                                      <span className="w-3.5 h-3.5 rounded-full border-2 border-content-primary-soft border-t-transparent animate-spin shrink-0" />
+                                      <VStack className="gap-0.5 items-start">
+                                        <Text level="label-small" className="text-content-primary-soft">
+                                          Testing in the background
+                                        </Text>
+                                        <Text level="caption" className="text-content-layout-3">
+                                          {cacheTestRun?.message || "Connecting..."}
+                                        </Text>
+                                      </VStack>
+                                    </HStack>
+                                  </Show>
+                                  <Show when={cacheTestRun?.status === "failed"}>
+                                    <Alert
+                                      variant="negative"
+                                      modifier="outline"
+                                      label={`Performance test failed: ${cacheTestRun?.message || "The comparison did not complete."}`}
+                                    />
+                                  </Show>
+                                  <Show when={!!runResult}>
                                     <ComparisonCard
-                                      result={runResults[entry.hash]!}
+                                      result={runResult!}
                                       onDismiss={() =>
-                                        setRunResults((prev) => {
-                                          const next = { ...prev };
-                                          delete next[entry.hash];
-                                          return next;
-                                        })
+                                        cacheTestRun && dismissBackgroundRun(cacheTestRun.runId)
                                       }
                                     />
                                   </Show>

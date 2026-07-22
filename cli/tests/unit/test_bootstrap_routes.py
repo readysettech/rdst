@@ -18,8 +18,8 @@ from shared.api.target_guard import TargetGuard, require_target_body
 from shared.run_registry import RunRegistry
 
 
-def _client(monkeypatch, tmp_path, service_cls=None):
-    registry = RunRegistry(base_dir=tmp_path)
+def _client(monkeypatch, service_cls=None):
+    registry = RunRegistry()
     monkeypatch.setattr(bootstrap_routes, "_registry", registry)
     if service_cls is not None:
         monkeypatch.setattr(bootstrap_routes, "TargetBootstrapService", service_cls)
@@ -34,7 +34,7 @@ def _client(monkeypatch, tmp_path, service_cls=None):
 class StubService:
     """Stands in for TargetBootstrapService; yields two stage events."""
 
-    async def run(self, target, target_config, options=None):
+    async def run(self, target, target_config, options=None, key_wakeup=None):
         yield BootstrapStageEvent(
             type="bootstrap_stage", stage="connection_test", status="started"
         )
@@ -44,8 +44,8 @@ class StubService:
 
 
 class TestStartRoute:
-    def test_start_returns_run_id_immediately(self, monkeypatch, tmp_path):
-        client, registry = _client(monkeypatch, tmp_path, service_cls=StubService)
+    def test_start_returns_run_id_immediately(self, monkeypatch):
+        client, registry = _client(monkeypatch, service_cls=StubService)
 
         response = client.post("/api/bootstrap", json={"target": "imdb"})
 
@@ -55,19 +55,17 @@ class TestStartRoute:
         # The detached run completes; its events landed in the registry.
         assert registry.status(run_id) in ("running", "done")
 
-    def test_start_forwards_deploy_options(self, monkeypatch, tmp_path):
+    def test_start_forwards_deploy_options(self, monkeypatch):
         captured = {}
 
         class RecordingService(StubService):
-            async def run(self, target, target_config, options=None):
+            async def run(self, target, target_config, options=None, key_wakeup=None):
                 captured["target"] = target
                 captured["options"] = options
                 return
                 yield  # pragma: no cover
 
-        client, _registry = _client(
-            monkeypatch, tmp_path, service_cls=RecordingService
-        )
+        client, _registry = _client(monkeypatch, service_cls=RecordingService)
 
         response = client.post(
             "/api/bootstrap",
@@ -81,14 +79,14 @@ class TestStartRoute:
 
 
 class TestStatusRoute:
-    def test_status_of_unknown_run_is_404(self, monkeypatch, tmp_path):
-        client, _registry = _client(monkeypatch, tmp_path)
+    def test_status_of_unknown_run_is_404(self, monkeypatch):
+        client, _registry = _client(monkeypatch)
         response = client.get("/api/bootstrap/runs/nope")
         assert response.status_code == 404
         assert "nope" in response.json()["detail"]
 
-    def test_status_of_finished_run(self, monkeypatch, tmp_path):
-        client, registry = _client(monkeypatch, tmp_path, service_cls=StubService)
+    def test_status_of_finished_run(self, monkeypatch):
+        client, registry = _client(monkeypatch, service_cls=StubService)
         run_id = client.post("/api/bootstrap", json={"target": "imdb"}).json()["run_id"]
 
         response = client.get(f"/api/bootstrap/runs/{run_id}")
@@ -98,8 +96,8 @@ class TestStatusRoute:
         assert body["run_id"] == run_id
         assert body["status"] in ("running", "done")
 
-    def test_events_route_404_for_unknown_run(self, monkeypatch, tmp_path):
-        client, _registry = _client(monkeypatch, tmp_path)
+    def test_events_route_404_for_unknown_run(self, monkeypatch):
+        client, _registry = _client(monkeypatch)
         response = client.get("/api/bootstrap/runs/nope/events")
         assert response.status_code == 404
 
@@ -122,8 +120,8 @@ class TestSseFrames:
         assert payload["seq"] == 3
 
     @pytest.mark.asyncio
-    async def test_frames_replay_with_after_seq(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_frames_replay_with_after_seq(self):
+        registry = RunRegistry()
         run_id = registry.start("bootstrap", "imdb", _gen_events(3))
         # Drain the live run first so replay comes from the buffer.
         async for _frame in bootstrap_routes._sse_frames(registry, run_id, 0):
@@ -135,27 +133,6 @@ class TestSseFrames:
 
         assert [f["id"] for f in frames] == ["3", "4"]
         assert frames[-1]["event"] == "run_end"
-
-    @pytest.mark.asyncio
-    async def test_interrupted_run_gets_synthesized_terminal_frame(self, tmp_path):
-        # A process death leaves a log with no run_end; the SSE stream must
-        # still end with a terminal frame so clients can settle.
-        path = tmp_path / "bootstrap_imdb_20260721_000000_abc123.jsonl"
-        path.write_text(
-            json.dumps({"seq": 1, "event": "bootstrap_stage", "data": {}, "ts": "t"})
-            + "\n"
-        )
-        registry = RunRegistry(base_dir=tmp_path)
-
-        frames = [
-            f
-            async for f in bootstrap_routes._sse_frames(
-                registry, "bootstrap_imdb_20260721_000000_abc123", 0
-            )
-        ]
-
-        assert frames[-1]["event"] == "run_end"
-        assert json.loads(frames[-1]["data"])["status"] == "interrupted"
 
 
 def _gen_events(n):

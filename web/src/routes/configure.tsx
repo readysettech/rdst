@@ -21,8 +21,12 @@ import {
 } from '../components/configure'
 import { EnvSecretsDialog } from '../components/EnvSecretsDialog'
 import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
-import type { AnthropicKeyValidation, EnvRequirement } from '../lib/api'
-import { resetLocalData } from '../lib/api'
+import {
+  type AnthropicKeyValidation,
+  type EnvRequirement,
+  resetLocalData,
+} from '../lib/api'
+import { startBootstrapRun } from '../lib/backgroundRuns'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
@@ -30,7 +34,6 @@ import {
 import { useAnthropicValidity } from '../lib/useAnthropicValidity'
 import { useConfigure } from '../lib/useConfigure'
 import { useSystemStatus } from '../lib/useSystemStatus'
-import { startBootstrapRun } from '../lib/bootstrapRun'
 import type {
   ConfigureFormData,
   ConfigureTargetDetail,
@@ -628,10 +631,13 @@ function ConfigurePage() {
                     onClick={handleResetLocalData}
                   />
                   {resetArmed ? (
-                    <Text level="caption" className="text-content-negative-soft">
+                    <Text
+                      level="caption"
+                      className="text-content-negative-soft"
+                    >
                       Deletes {dataDirectory} and stored keys. Your trial
-                      registration is kept server-side — re-enter your email
-                      to recover your token.
+                      registration is kept server-side — re-enter your email to
+                      recover your token.
                     </Text>
                   ) : null}
                 </HStack>

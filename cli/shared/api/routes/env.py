@@ -7,6 +7,10 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, SecretStr
 
+from shared.anthropic_env import ANTHROPIC_API_KEY_NAMES
+from shared.env_requirements_service import EnvRequirementsService
+from shared.run_registry import run_registry
+
 EnvRequirementKind = Literal["target_password", "anthropic_api_key"]
 EnvRequirementSource = Literal[
     "config",
@@ -16,8 +20,6 @@ EnvRequirementSource = Literal[
     "trial_exhausted",
     "missing",
 ]
-
-from shared.env_requirements_service import EnvRequirementsService
 
 router = APIRouter()
 
@@ -130,6 +132,8 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
         value=body.value.get_secret_value(),
         persist=body.persist,
     )
+    if body.name in ANTHROPIC_API_KEY_NAMES:
+        run_registry.wake_needs_key()
 
     return EnvSetResponse(
         success=True,

@@ -2,12 +2,11 @@
 Unit tests for shared.run_registry.RunRegistry.
 
 Detached background runs: start() returns a run_id immediately, every event
-is persisted to a per-run JSONL, and subscribers replay missed events before
-continuing live. Gates (asyncio.Event) keep the tests deterministic.
+is buffered in memory, and subscribers replay missed events before continuing
+live. Gates (asyncio.Event) keep the tests deterministic.
 """
 
 import asyncio
-import json
 from dataclasses import dataclass
 
 import pytest
@@ -59,8 +58,27 @@ def _steps(n):
 
 class TestDetachedExecution:
     @pytest.mark.asyncio
-    async def test_start_returns_immediately_and_runs_detached(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_describe_preserves_navigation_metadata(self):
+        registry = RunRegistry()
+        run_id = registry.start(
+            "cache_test",
+            "imdb",
+            _steps(1),
+            metadata={"query_hash": "abc123", "label": "Top customers"},
+        )
+
+        description = registry.describe(run_id)
+
+        assert description is not None
+        assert description["metadata"] == {
+            "query_hash": "abc123",
+            "label": "Top customers",
+        }
+        await _collect(registry, run_id)
+
+    @pytest.mark.asyncio
+    async def test_start_returns_immediately_and_runs_detached(self):
+        registry = RunRegistry()
         gate = asyncio.Event()
         run_id = registry.start(
             "bootstrap", "imdb", _gated(gate, ["started"], ["finished"])
@@ -75,8 +93,8 @@ class TestDetachedExecution:
         assert registry.status(run_id) == "done"
 
     @pytest.mark.asyncio
-    async def test_live_events_in_order_with_contiguous_seq(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_live_events_in_order_with_contiguous_seq(self):
+        registry = RunRegistry()
         run_id = registry.start("bootstrap", "imdb", _steps(5))
 
         events = await _collect(registry, run_id)
@@ -87,16 +105,16 @@ class TestDetachedExecution:
         assert events[-1]["data"]["status"] == "done"
 
     @pytest.mark.asyncio
-    async def test_unknown_run_raises_keyerror(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_unknown_run_raises_keyerror(self):
+        registry = RunRegistry()
         with pytest.raises(KeyError):
             await _collect(registry, "no_such_run")
 
 
 class TestReplayThenLive:
     @pytest.mark.asyncio
-    async def test_mid_run_subscriber_replays_then_continues(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_mid_run_subscriber_replays_then_continues(self):
+        registry = RunRegistry()
         gate = asyncio.Event()
         run_id = registry.start(
             "bootstrap", "imdb", _gated(gate, ["early1", "early2"], ["late"])
@@ -112,8 +130,8 @@ class TestReplayThenLive:
         assert [e["seq"] for e in events] == [1, 2, 3, 4]
 
     @pytest.mark.asyncio
-    async def test_after_seq_resume_skips_seen_events(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_after_seq_resume_skips_seen_events(self):
+        registry = RunRegistry()
         run_id = registry.start("bootstrap", "imdb", _steps(4))
         await _collect(registry, run_id)
 
@@ -123,54 +141,64 @@ class TestReplayThenLive:
         assert resumed[0]["seq"] == 3
 
 
-class TestPersistence:
+class TestProcessLifetime:
     @pytest.mark.asyncio
-    async def test_events_persisted_as_jsonl(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
-        run_id = registry.start("bootstrap", "imdb", _steps(3))
-        await _collect(registry, run_id)
-
-        path = tmp_path / f"{run_id}.jsonl"
-        assert path.exists()
-        lines = [json.loads(line) for line in path.read_text().splitlines()]
-        assert [rec["event"] for rec in lines] == [
-            "step0", "step1", "step2", "run_end",
-        ]
-        assert lines[0]["data"]["payload"] == "0"
-        assert all("ts" in rec for rec in lines)
-
-    @pytest.mark.asyncio
-    async def test_fresh_registry_replays_finished_run_from_disk(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_fresh_registry_does_not_know_finished_run(self):
+        registry = RunRegistry()
         run_id = registry.start("bootstrap", "imdb", _steps(2))
         await _collect(registry, run_id)
 
-        fresh = RunRegistry(base_dir=tmp_path)
-        events = await _collect(fresh, run_id, after_seq=1)
-        assert [e["event"] for e in events] == ["step1", "run_end"]
-        assert fresh.status(run_id) == "done"
-
-    @pytest.mark.asyncio
-    async def test_unterminated_file_reads_as_interrupted(self, tmp_path):
-        # A run whose process died mid-flight leaves a JSONL with no run_end.
-        path = tmp_path / "bootstrap_imdb_20260721_000000_abc123.jsonl"
-        path.write_text(
-            json.dumps({"seq": 1, "event": "step0", "data": {}, "ts": "t"}) + "\n"
-        )
-
-        registry = RunRegistry(base_dir=tmp_path)
-        run_id = "bootstrap_imdb_20260721_000000_abc123"
-        assert registry.status(run_id) == "interrupted"
-        events = await _collect(registry, run_id)
-        assert [e["event"] for e in events] == ["step0"]
+        fresh = RunRegistry()
+        assert fresh.status(run_id) is None
+        with pytest.raises(KeyError):
+            await _collect(fresh, run_id, after_seq=1)
 
 
 class TestLifecycle:
     @pytest.mark.asyncio
-    async def test_generator_error_becomes_error_event_and_failed_status(
-        self, tmp_path
-    ):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_yielded_error_event_marks_run_failed(self):
+        registry = RunRegistry()
+
+        async def gen():
+            yield Ev("annotate_error", payload="bad key")
+            yield Ev("never")
+
+        run_id = registry.start("schema_annotation", "imdb", gen())
+        events = await _collect(registry, run_id)
+
+        assert registry.status(run_id) == "failed"
+        assert [e["event"] for e in events] == [
+            "annotate_error",
+            "never",
+            "run_end",
+        ]
+        assert events[-1]["data"]["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_error_event_does_not_close_generator_before_sibling_finishes(self):
+        registry = RunRegistry()
+        sibling_finished = asyncio.Event()
+
+        async def gen():
+            yield Ev("error", payload="deploy failed")
+            await asyncio.sleep(0)
+            sibling_finished.set()
+            yield Ev("schema_finished")
+
+        run_id = registry.start("bootstrap", "imdb", gen())
+        events = await _collect(registry, run_id)
+
+        assert sibling_finished.is_set()
+        assert [e["event"] for e in events] == [
+            "error",
+            "schema_finished",
+            "run_end",
+        ]
+        assert events[-1]["data"]["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_generator_error_becomes_error_event_and_failed_status(self):
+        registry = RunRegistry()
 
         async def gen():
             yield Ev("step0")
@@ -187,8 +215,8 @@ class TestLifecycle:
         assert events[-1]["data"]["status"] == "failed"
 
     @pytest.mark.asyncio
-    async def test_cancel_ends_stream_with_cancelled_status(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_cancel_ends_stream_with_cancelled_status(self):
+        registry = RunRegistry()
         gate = asyncio.Event()
         run_id = registry.start("bootstrap", "imdb", _gated(gate, ["step0"], ["never"]))
         await _wait_status(registry, run_id, "running")
@@ -204,34 +232,107 @@ class TestLifecycle:
         assert registry.cancel("no_such_run") is False
 
     @pytest.mark.asyncio
-    async def test_needs_key_gates_status_then_returns_to_running(self, tmp_path):
-        registry = RunRegistry(base_dir=tmp_path)
+    async def test_needs_key_gates_status_then_returns_to_running(self):
+        registry = RunRegistry()
         gate = asyncio.Event()
         run_id = registry.start(
-            "bootstrap", "imdb", _gated(gate, ["step0", "needs_key"], ["step1"])
+            "bootstrap",
+            "imdb",
+            _gated(gate, ["step0", "needs_key"], ["step1"]),
+            resume_event=gate,
         )
         await _wait_status(registry, run_id, "needs_key")
 
-        gate.set()
+        assert registry.wake_needs_key() == 1
         events = await _collect(registry, run_id)
         assert [e["event"] for e in events] == [
             "step0", "needs_key", "step1", "run_end",
         ]
         assert registry.status(run_id) == "done"
 
+    @pytest.mark.asyncio
+    async def test_wake_needs_key_resumes_every_parked_run(self):
+        registry = RunRegistry()
+        first_gate = asyncio.Event()
+        second_gate = asyncio.Event()
+        first = registry.start(
+            "bootstrap",
+            "imdb",
+            _gated(first_gate, ["needs_key"], ["first_resumed"]),
+            resume_event=first_gate,
+        )
+        second = registry.start(
+            "bootstrap",
+            "analytics",
+            _gated(second_gate, ["needs_key"], ["second_resumed"]),
+            resume_event=second_gate,
+        )
+        await _wait_status(registry, first, "needs_key")
+        await _wait_status(registry, second, "needs_key")
+
+        assert registry.wake_needs_key() == 2
+
+        first_events, second_events = await asyncio.gather(
+            _collect(registry, first),
+            _collect(registry, second),
+        )
+        assert [event["event"] for event in first_events] == [
+            "needs_key",
+            "first_resumed",
+            "run_end",
+        ]
+        assert [event["event"] for event in second_events] == [
+            "needs_key",
+            "second_resumed",
+            "run_end",
+        ]
+        assert registry.status(first) == "done"
+        assert registry.status(second) == "done"
+
 
 class TestEviction:
     @pytest.mark.asyncio
-    async def test_finished_runs_evicted_beyond_cap_but_replayable_from_disk(
-        self, tmp_path
-    ):
-        registry = RunRegistry(base_dir=tmp_path, max_finished=1)
+    async def test_finished_runs_beyond_cap_are_forgotten(self):
+        registry = RunRegistry(max_finished=1)
         first = registry.start("bootstrap", "imdb", _steps(1))
         await _collect(registry, first)
         second = registry.start("bootstrap", "imdb", _steps(1))
         await _collect(registry, second)
 
-        # Oldest finished run left memory but its JSONL replay still works.
-        assert registry.status(first) == "done"
-        events = await _collect(registry, first)
-        assert [e["event"] for e in events] == ["step0", "run_end"]
+        assert registry.status(first) is None
+        with pytest.raises(KeyError):
+            await _collect(registry, first)
+        assert registry.status(second) == "done"
+
+
+class TestMetadata:
+    @pytest.mark.asyncio
+    async def test_describe_and_find_active_across_kinds(self):
+        registry = RunRegistry()
+        gate = asyncio.Event()
+        bootstrap = registry.start(
+            "bootstrap", "imdb", _gated(gate, ["step0"], [])
+        )
+        annotation = registry.start(
+            "schema_annotation", "imdb", _gated(gate, ["step0"], [])
+        )
+        await asyncio.sleep(0.01)
+
+        assert registry.find_active("bootstrap", "imdb") == bootstrap
+        assert (
+            registry.find_active(("bootstrap", "schema_annotation"), "imdb")
+            == annotation
+        )
+        assert registry.describe(annotation) == {
+            "run_id": annotation,
+            "kind": "schema_annotation",
+            "target": "imdb",
+            "status": "running",
+            "last_seq": 1,
+            "metadata": {},
+        }
+
+        gate.set()
+        await _collect(registry, bootstrap)
+        await _collect(registry, annotation)
+        assert registry.find_active("bootstrap", "imdb") is None

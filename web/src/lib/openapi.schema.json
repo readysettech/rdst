@@ -918,6 +918,101 @@
         "title": "AnalyzeRequest",
         "type": "object"
       },
+      "AnnotateCompleteEvent": {
+        "description": "Annotation process completed, possibly with individual table failures.",
+        "properties": {
+          "columns_annotated": {
+            "title": "Columns Annotated",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "tables_annotated": {
+            "title": "Tables Annotated",
+            "type": "integer"
+          },
+          "tables_failed": {
+            "title": "Tables Failed",
+            "type": "integer"
+          },
+          "type": {
+            "const": "annotate_complete",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "success",
+          "tables_annotated",
+          "columns_annotated",
+          "tables_failed",
+          "message"
+        ],
+        "title": "AnnotateCompleteEvent",
+        "type": "object"
+      },
+      "AnnotateErrorEvent": {
+        "description": "Annotation process encountered an error.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "const": "annotate_error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "message"
+        ],
+        "title": "AnnotateErrorEvent",
+        "type": "object"
+      },
+      "AnnotateProgressEvent": {
+        "description": "Progress update during annotation.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "table_index": {
+            "title": "Table Index",
+            "type": "integer"
+          },
+          "total_tables": {
+            "title": "Total Tables",
+            "type": "integer"
+          },
+          "type": {
+            "const": "annotate_progress",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "table",
+          "table_index",
+          "total_tables",
+          "message"
+        ],
+        "title": "AnnotateProgressEvent",
+        "type": "object"
+      },
       "AnnotateRequest": {
         "properties": {
           "sample_rows": {
@@ -945,6 +1040,89 @@
           "target"
         ],
         "title": "AnnotateRequest",
+        "type": "object"
+      },
+      "AnnotateStartedEvent": {
+        "description": "Annotation process started.",
+        "properties": {
+          "completed_tables": {
+            "default": 0,
+            "title": "Completed Tables",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "tables": {
+            "title": "Tables",
+            "type": "integer"
+          },
+          "type": {
+            "const": "annotate_started",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "tables",
+          "message"
+        ],
+        "title": "AnnotateStartedEvent",
+        "type": "object"
+      },
+      "AnnotateTableCompleteEvent": {
+        "description": "A table has been annotated.",
+        "properties": {
+          "columns_annotated": {
+            "title": "Columns Annotated",
+            "type": "integer"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "table_index": {
+            "title": "Table Index",
+            "type": "integer"
+          },
+          "total_tables": {
+            "title": "Total Tables",
+            "type": "integer"
+          },
+          "type": {
+            "const": "annotate_table_complete",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "table",
+          "table_index",
+          "total_tables",
+          "columns_annotated"
+        ],
+        "title": "AnnotateTableCompleteEvent",
+        "type": "object"
+      },
+      "AnnotationRunStartResponse": {
+        "properties": {
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "AnnotationRunStartResponse",
         "type": "object"
       },
       "AnthropicValidateResponse": {
@@ -1945,6 +2123,99 @@
         "title": "AuditTargetStartEvent",
         "type": "object"
       },
+      "BackgroundRunCancelResponse": {
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "boolean"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "cancelled"
+        ],
+        "title": "BackgroundRunCancelResponse",
+        "type": "object"
+      },
+      "BackgroundRunEvent": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/BootstrapStageEvent"
+          },
+          {
+            "$ref": "#/components/schemas/BootstrapNeedsKeyEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ErrorEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AnnotateStartedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AnnotateProgressEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AnnotateTableCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AnnotateCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AnnotateErrorEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ProgressEvent"
+          },
+          {
+            "$ref": "#/components/schemas/CacheRunCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/RunEndEvent"
+          }
+        ]
+      },
+      "BackgroundRunResponse": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_seq": {
+            "title": "Last Seq",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "kind",
+          "target",
+          "status",
+          "last_seq"
+        ],
+        "title": "BackgroundRunResponse",
+        "type": "object"
+      },
       "BenchmarkQueryInput": {
         "description": "A query to benchmark - either by identifier or raw SQL.",
         "properties": {
@@ -2630,6 +2901,72 @@
         "title": "CacheRequest",
         "type": "object"
       },
+      "CacheRunCompleteEvent": {
+        "description": "Performance comparison result (origin vs cache).",
+        "properties": {
+          "cache_stats": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Cache Stats",
+            "type": "object"
+          },
+          "improvement_pct": {
+            "title": "Improvement Pct",
+            "type": "number"
+          },
+          "iterations": {
+            "title": "Iterations",
+            "type": "integer"
+          },
+          "origin_stats": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Origin Stats",
+            "type": "object"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "speedup_mean": {
+            "title": "Speedup Mean",
+            "type": "number"
+          },
+          "speedup_median": {
+            "title": "Speedup Median",
+            "type": "number"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "type": {
+            "const": "cache_run_complete",
+            "title": "Type",
+            "type": "string"
+          },
+          "winner": {
+            "title": "Winner",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "success",
+          "query",
+          "iterations",
+          "origin_stats",
+          "cache_stats",
+          "speedup_mean",
+          "speedup_median",
+          "improvement_pct",
+          "winner"
+        ],
+        "title": "CacheRunCompleteEvent",
+        "type": "object"
+      },
       "CacheRunRequest": {
         "properties": {
           "iterations": {
@@ -2713,6 +3050,75 @@
           "running"
         ],
         "title": "CacheStatusResponse",
+        "type": "object"
+      },
+      "CacheTestRunRequest": {
+        "properties": {
+          "iterations": {
+            "default": 15,
+            "title": "Iterations",
+            "type": "integer"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "query_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Hash"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "warmup": {
+            "default": 5,
+            "title": "Warmup",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "CacheTestRunRequest",
+        "type": "object"
+      },
+      "CacheTestRunStartResponse": {
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "CacheTestRunStartResponse",
         "type": "object"
       },
       "ChatCompleteEvent": {
@@ -7137,6 +7543,26 @@
           "returned"
         ],
         "title": "RowsProcessed",
+        "type": "object"
+      },
+      "RunEndEvent": {
+        "description": "Terminal event appended by the registry after every run.",
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "const": "run_end",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "status"
+        ],
+        "title": "RunEndEvent",
         "type": "object"
       },
       "ScanCompleteEvent": {
@@ -11949,6 +12375,49 @@
         ]
       }
     },
+    "/api/cache/test-runs": {
+      "post": {
+        "description": "Start a detached origin-vs-cache benchmark and return immediately.",
+        "operationId": "start_cache_test_run_api_cache_test_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTestRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTestRunStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Cache Test Run",
+        "tags": [
+          "cache",
+          "cache"
+        ]
+      }
+    },
     "/api/cache/{cache_id}": {
       "delete": {
         "description": "Delete a single cache by ID.",
@@ -14566,6 +15035,146 @@
         ]
       }
     },
+    "/api/runs/{run_id}": {
+      "delete": {
+        "operationId": "cancel_run_api_runs__run_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundRunCancelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Run",
+        "tags": [
+          "runs",
+          "runs"
+        ]
+      },
+      "get": {
+        "operationId": "run_status_api_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Status",
+        "tags": [
+          "runs",
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/events": {
+      "get": {
+        "operationId": "run_events_api_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_seq",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "After Seq",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundRunEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Events",
+        "tags": [
+          "runs",
+          "runs"
+        ]
+      }
+    },
     "/api/scan": {
       "post": {
         "description": "Scan a directory for ORM queries via SSE streaming.\n\nStreams real-time progress as the scan progresses through phases:\n- `status`: Phase status messages\n- `files_found`: Files with ORM patterns discovered\n- `progress`: Per-phase progress (current/total)\n- `query_result`: Individual query results\n- `registry`: Registry save results\n- `complete`: Scan complete with summary\n- `error`: Error occurred",
@@ -14853,6 +15462,49 @@
           }
         },
         "summary": "Annotate Schema",
+        "tags": [
+          "semantic-layer",
+          "semantic-layer"
+        ]
+      }
+    },
+    "/api/semantic-layer/annotation-runs": {
+      "post": {
+        "description": "Start AI annotation as a process-local background run.",
+        "operationId": "start_annotation_run_api_semantic_layer_annotation_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationRunStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Annotation Run",
         "tags": [
           "semantic-layer",
           "semantic-layer"

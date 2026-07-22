@@ -1,45 +1,51 @@
-"""Background run registry: detached async runs with replayable event logs.
+"""In-memory background run registry with replayable events.
 
 A run wraps an async generator of event dataclasses. start() schedules it on
 the event loop and returns a run_id immediately; the run then outlives any
-HTTP request. Every yielded event is appended to ``~/.rdst/runs/<run_id>.jsonl``
-and buffered in memory, so a subscriber can replay what it missed and then
-continue live (SSE reattach). Registry state is mutated only on the event
-loop, so no locking is needed; the small synchronous disk append keeps memory
-and disk in step within a single loop turn.
+HTTP request. Every yielded event is buffered in memory, so a subscriber can
+replay what it missed and then continue live (SSE reattach) while the process
+is alive. Registry state is mutated only on the event loop, so no locking is
+needed. Runs intentionally do not survive an RDST restart.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Iterable, Literal
 
-from shared.constants import rdst_runs_dir
 from shared.service_events import ErrorEvent
 
-TERMINAL_STATUSES = ("done", "failed", "cancelled", "interrupted")
+TERMINAL_STATUSES = ("done", "failed", "cancelled")
 
 # Yielding this event type parks the run's status on "needs_key" until the
 # next event arrives (the adapter shows its key/trial UI in the meantime).
 NEEDS_KEY_EVENT = "needs_key"
 
-# Appended as the final record of every run; carries the terminal status so
-# a fresh process can tell a finished log from an interrupted one.
+# Appended as the final record of every run so subscribers settle cleanly.
 RUN_END_EVENT = "run_end"
 
 
 @dataclass
 class _RunHandle:
-    path: Path
+    kind: str
+    target: str
+    metadata: dict[str, Any] = field(default_factory=dict)
     status: str = "running"
     events: list[dict] = field(default_factory=list)
     waiters: list[asyncio.Future] = field(default_factory=list)
+    resume_event: asyncio.Event | None = None
     task: asyncio.Task | None = None
+
+
+@dataclass
+class RunEndEvent:
+    """Terminal event appended by the registry after every run."""
+
+    type: Literal["run_end"]
+    status: str
 
 
 def _event_payload(event: Any) -> tuple[str, dict]:
@@ -51,14 +57,20 @@ def _event_payload(event: Any) -> tuple[str, dict]:
 
 
 class RunRegistry:
-    """Registry of detached background runs with persisted, replayable events."""
+    """Registry of detached background runs with in-memory event replay."""
 
-    def __init__(self, base_dir: Path | None = None, max_finished: int = 32):
-        self._base_dir = base_dir
+    def __init__(self, max_finished: int = 32):
         self._runs: dict[str, _RunHandle] = {}
         self._max_finished = max_finished
 
-    def start(self, kind: str, target: str, gen: AsyncGenerator[Any, None]) -> str:
+    def start(
+        self,
+        kind: str,
+        target: str,
+        gen: AsyncGenerator[Any, None],
+        metadata: dict[str, Any] | None = None,
+        resume_event: asyncio.Event | None = None,
+    ) -> str:
         """Schedule a run and return its run_id immediately."""
         safe_target = "".join(c if c.isalnum() or c in "-_" else "-" for c in target)
         run_id = (
@@ -66,24 +78,46 @@ class RunRegistry:
             f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_"
             f"{uuid.uuid4().hex[:6]}"
         )
-        path = self._run_path(run_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handle = _RunHandle(path=path)
+        handle = _RunHandle(
+            kind=kind,
+            target=target,
+            metadata=dict(metadata or {}),
+            resume_event=resume_event,
+        )
         handle.task = asyncio.get_running_loop().create_task(self._drive(handle, gen))
         self._runs[run_id] = handle
         return run_id
 
     def status(self, run_id: str) -> str | None:
-        """Current status, from memory or (for evicted/old runs) from disk."""
+        """Return the current status, or None when this process does not know it."""
         handle = self._runs.get(run_id)
-        if handle is not None:
-            return handle.status
-        records = self._read_disk(run_id)
-        if records is None:
+        return handle.status if handle is not None else None
+
+    def describe(self, run_id: str) -> dict[str, Any] | None:
+        """Return the current process-local run metadata."""
+        handle = self._runs.get(run_id)
+        if handle is None:
             return None
-        if records and records[-1]["event"] == RUN_END_EVENT:
-            return records[-1]["data"].get("status", "done")
-        return "interrupted"
+        return {
+            "run_id": run_id,
+            "kind": handle.kind,
+            "target": handle.target,
+            "status": handle.status,
+            "last_seq": len(handle.events),
+            "metadata": handle.metadata,
+        }
+
+    def find_active(self, kinds: str | Iterable[str], target: str) -> str | None:
+        """Find an active run for a target, newest first."""
+        accepted = {kinds} if isinstance(kinds, str) else set(kinds)
+        for run_id, handle in reversed(self._runs.items()):
+            if (
+                handle.kind in accepted
+                and handle.target == target
+                and handle.status not in TERMINAL_STATUSES
+            ):
+                return run_id
+        return None
 
     def cancel(self, run_id: str) -> bool:
         """Cancel a live run. Returns False for unknown or finished runs."""
@@ -93,23 +127,25 @@ class RunRegistry:
         handle.task.cancel()
         return True
 
+    def wake_needs_key(self) -> int:
+        """Wake every run currently parked on the shared key gate."""
+        woken = 0
+        for handle in self._runs.values():
+            if handle.status == NEEDS_KEY_EVENT and handle.resume_event is not None:
+                handle.resume_event.set()
+                woken += 1
+        return woken
+
     async def events(
         self, run_id: str, after_seq: int = 0
     ) -> AsyncGenerator[dict, None]:
         """Replay events with seq > after_seq, then stream live until terminal.
 
-        Raises KeyError for a run_id with neither a live handle nor a log on
-        disk.
+        Raises KeyError for a run_id unknown to this process.
         """
         handle = self._runs.get(run_id)
         if handle is None:
-            records = self._read_disk(run_id)
-            if records is None:
-                raise KeyError(f"Unknown run: {run_id}")
-            for record in records:
-                if record["seq"] > after_seq:
-                    yield record
-            return
+            raise KeyError(f"Unknown run: {run_id}")
 
         index = after_seq
         while True:
@@ -129,6 +165,13 @@ class RunRegistry:
             async for event in gen:
                 name, data = _event_payload(event)
                 self._append(handle, name, data)
+                if name == "error" or name.endswith("_error"):
+                    status = "failed"
+                    # Some orchestrators isolate child-track failures by
+                    # yielding an error event and continuing to drain their
+                    # healthy siblings. Keep consuming so closing this driver
+                    # does not cancel that remaining work; the run still ends
+                    # failed once the generator is exhausted.
                 # Status only turns terminal below, after this loop exits.
                 handle.status = (
                     NEEDS_KEY_EVENT if name == NEEDS_KEY_EVENT else "running"
@@ -142,8 +185,7 @@ class RunRegistry:
             self._append(handle, name, data)
             status = "failed"
         finally:
-            # The terminal record must be written no matter how generator
-            # cleanup goes, or the run would read as interrupted forever.
+            # Always emit a terminal record so attached subscribers settle.
             try:
                 await gen.aclose()
             except (Exception, asyncio.CancelledError):
@@ -160,16 +202,13 @@ class RunRegistry:
             "ts": datetime.now(timezone.utc).isoformat(),
         }
         handle.events.append(record)
-        with open(handle.path, "a") as f:
-            f.write(json.dumps(record, default=str) + "\n")
         waiters, handle.waiters = handle.waiters, []
         for future in waiters:
             if not future.done():
                 future.set_result(None)
 
     def _evict_finished(self) -> None:
-        """Drop the oldest finished runs beyond the cap; their logs remain on
-        disk, so events() falls back to replay."""
+        """Forget the oldest finished runs beyond the in-memory retention cap."""
         finished = [
             run_id
             for run_id, handle in self._runs.items()
@@ -178,18 +217,16 @@ class RunRegistry:
         for run_id in finished[: max(0, len(finished) - self._max_finished)]:
             del self._runs[run_id]
 
-    def _run_path(self, run_id: str) -> Path:
-        base = self._base_dir if self._base_dir is not None else rdst_runs_dir()
-        return base / f"{run_id}.jsonl"
 
-    def _read_disk(self, run_id: str) -> list[dict] | None:
-        path = self._run_path(run_id)
-        if not path.exists():
-            return None
-        records = []
-        for line in path.read_text().splitlines():
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-        return records
+# The one process-wide registry used by every web background-run adapter.
+run_registry = RunRegistry()
+
+
+__all__ = [
+    "NEEDS_KEY_EVENT",
+    "RUN_END_EVENT",
+    "TERMINAL_STATUSES",
+    "RunEndEvent",
+    "RunRegistry",
+    "run_registry",
+]

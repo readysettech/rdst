@@ -16,6 +16,7 @@ vi.stubGlobal(
 
 vi.mock('@tanstack/react-router', () => ({
   useRouterState: () => ({ location: { pathname: '/' } }),
+  useNavigate: () => vi.fn(),
   Link: ({
     to,
     children,

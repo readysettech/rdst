@@ -5,7 +5,7 @@ a schema track (structure -> profile -> key gate -> annotate) in parallel
 with an optional Readyset deploy track. Yields BootstrapEvent dataclasses
 shaped for shared.run_registry.RunRegistry: the needs_key event parks the
 run's status while adapters raise their key/trial UI, and annotation
-resumes when a key lands (polled) or is skipped after the wait budget.
+resumes when a key save wakes it, with polling as a fallback.
 """
 
 from __future__ import annotations
@@ -36,9 +36,8 @@ class BootstrapOptions:
     deploy: bool = True
     deploy_mode: str = "docker"
     annotate: bool = True
-    # How long the annotate gate waits for a usable key after emitting
-    # needs_key, and how often it re-validates while waiting.
-    key_wait_seconds: float = 600.0
+    # How often the annotate gate re-validates while waiting. It has no
+    # deadline: the user may add a key at any point while RDST remains open.
     key_poll_seconds: float = 5.0
 
 
@@ -83,6 +82,7 @@ class TargetBootstrapService:
         target: str,
         target_config: dict[str, Any],
         options: BootstrapOptions | None = None,
+        key_wakeup: asyncio.Event | None = None,
     ) -> AsyncGenerator[BootstrapEvent, None]:
         options = options or BootstrapOptions()
 
@@ -113,7 +113,7 @@ class TargetBootstrapService:
         # Independent tracks share one queue; a sentinel per track marks its
         # end so the merged stream closes exactly when both are done.
         queue: asyncio.Queue = asyncio.Queue()
-        tracks = [self._schema_track(target, target_config, options)]
+        tracks = [self._schema_track(target, target_config, options, key_wakeup)]
         if options.deploy:
             tracks.append(self._deploy_track(target, options))
         tasks = [asyncio.create_task(self._pump(track, queue)) for track in tracks]
@@ -146,7 +146,11 @@ class TargetBootstrapService:
             await queue.put(_TRACK_DONE)
 
     async def _schema_track(
-        self, target: str, target_config: dict[str, Any], options: BootstrapOptions
+        self,
+        target: str,
+        target_config: dict[str, Any],
+        options: BootstrapOptions,
+        key_wakeup: asyncio.Event | None,
     ) -> AsyncGenerator[BootstrapEvent, None]:
         schema = self._schema_service()
 
@@ -186,43 +190,46 @@ class TargetBootstrapService:
                     "or start a free trial to continue."
                 ),
             )
-            validity = await self._await_key(options)
-        if not validity.get("valid"):
-            yield _stage(
-                STAGE_ANNOTATE,
-                "skipped",
-                "No usable Anthropic key; skipping AI descriptions.",
-            )
-            return
-
+            validity = await self._await_key(options, key_wakeup)
         yield _stage(STAGE_ANNOTATE, "started", "Generating AI descriptions...")
         failure: str | None = None
         async for event in self._annotate_service().annotate(target, target_config):
             if event.type == "annotate_error":
                 failure = event.message
+            elif event.type == "annotate_complete" and not getattr(
+                event, "success", True
+            ):
+                failure = event.message or "Some AI descriptions could not be generated"
             yield _progress(STAGE_ANNOTATE, event)
         if failure:
             yield _stage(STAGE_ANNOTATE, "failed", failure)
         else:
             yield _stage(STAGE_ANNOTATE, "done", "AI descriptions generated")
 
-    async def _await_key(self, options: BootstrapOptions) -> dict:
-        """Poll key validity until it lands or the wait budget runs out.
+    async def _await_key(
+        self, options: BootstrapOptions, key_wakeup: asyncio.Event | None
+    ) -> dict:
+        """Wait for a usable key until the run is cancelled or RDST exits.
 
-        Each no-key check pays a config read plus keyring lookups (that path
-        is not cached), so the interval backs off toward a cap; a key set via
-        the web lands in the process env and is seen on the next tick.
+        The web's own-key and trial flows wake this wait immediately. The
+        backoff remains for credentials changed through another in-process
+        path and as protection against a missed notification.
         """
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + options.key_wait_seconds
         interval = options.key_poll_seconds
-        while loop.time() < deadline:
-            await asyncio.sleep(interval)
+        while True:
+            if key_wakeup is None:
+                await asyncio.sleep(interval)
+            else:
+                try:
+                    await asyncio.wait_for(key_wakeup.wait(), timeout=interval)
+                except asyncio.TimeoutError:
+                    pass
+                else:
+                    key_wakeup.clear()
             interval = min(interval * 2, options.key_poll_seconds * 6)
             validity = await asyncio.to_thread(self._key_validator)
             if validity.get("valid"):
                 return validity
-        return {"valid": False}
 
     async def _deploy_track(
         self, target: str, options: BootstrapOptions

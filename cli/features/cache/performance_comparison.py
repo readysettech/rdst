@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404 - subprocess required for Docker/database operations
 import time
 import statistics
+import threading
 from typing import Any, Dict, List, Optional, cast
 
 from shared.ui import (
@@ -15,6 +16,57 @@ from shared.ui import (
     Text,
 )
 from shared.ui.theme import duration_style
+
+
+class ComparisonCancelled(Exception):
+    """Raised inside the benchmark worker when its owning run is cancelled."""
+
+
+class ComparisonController:
+    """Thread-safe cancellation bridge for synchronous database drivers."""
+
+    def __init__(self):
+        self._cancelled = threading.Event()
+        self._lock = threading.Lock()
+        self._connections: list[Any] = []
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled.is_set()
+
+    def register(self, connection: Any) -> None:
+        with self._lock:
+            if self.cancelled:
+                self._cancel_connection(connection)
+                raise ComparisonCancelled()
+            self._connections.append(connection)
+
+    def unregister(self, connection: Any) -> None:
+        with self._lock:
+            if connection in self._connections:
+                self._connections.remove(connection)
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+        with self._lock:
+            connections = list(self._connections)
+        for connection in connections:
+            self._cancel_connection(connection)
+
+    @staticmethod
+    def _cancel_connection(connection: Any) -> None:
+        try:
+            cancel = getattr(connection, "cancel", None)
+            if callable(cancel):
+                cancel()
+            else:
+                connection.close()
+        except Exception:
+            pass
+
+    def raise_if_cancelled(self) -> None:
+        if self.cancelled:
+            raise ComparisonCancelled()
 
 
 def _open_persistent_connection(db_config: Dict[str, Any]):
@@ -48,16 +100,27 @@ def _open_persistent_connection(db_config: Dict[str, Any]):
     return conn, engine
 
 
-def _execute_on_connection(conn, query: str, engine: str) -> Dict[str, Any]:
+def _execute_on_connection(
+    conn,
+    query: str,
+    engine: str,
+    controller: Optional[ComparisonController] = None,
+) -> Dict[str, Any]:
     """Execute a query on an existing connection and measure query time only."""
     try:
+        if controller:
+            controller.raise_if_cancelled()
         start = time.perf_counter()
         with conn.cursor() as cursor:
             cursor.execute(query)
             cursor.fetchall()
         end = time.perf_counter()
+        if controller:
+            controller.raise_if_cancelled()
         return {"success": True, "execution_time_ms": (end - start) * 1000}
     except Exception as e:
+        if controller and controller.cancelled:
+            raise ComparisonCancelled() from e
         return {"success": False, "error": str(e)}
 
 
@@ -68,6 +131,7 @@ def run_comparison(
     iterations: int = 5,
     warmup_iterations: int = 2,
     on_progress: Optional[Any] = None,
+    controller: Optional[ComparisonController] = None,
 ) -> Dict[str, Any]:
     """Run a headless performance comparison — no console output.
 
@@ -91,22 +155,26 @@ def run_comparison(
     try:
         # Open persistent connections up front
         origin_conn, origin_engine = _open_persistent_connection(original_db_config)
+        if controller:
+            controller.register(origin_conn)
         cache_conn, cache_engine = _open_persistent_connection(readyset_db_config)
+        if controller:
+            controller.register(cache_conn)
 
         total_steps = warmup_iterations * 2 + iterations * 2
 
         # Warmup — both targets
         for i in range(warmup_iterations):
-            _execute_on_connection(origin_conn, query, origin_engine)
+            _execute_on_connection(origin_conn, query, origin_engine, controller)
             _progress("warmup", i + 1, warmup_iterations * 2)
         for i in range(warmup_iterations):
-            _execute_on_connection(cache_conn, query, cache_engine)
+            _execute_on_connection(cache_conn, query, cache_engine, controller)
             _progress("warmup", warmup_iterations + i + 1, warmup_iterations * 2)
 
         # Benchmark Original DB
         original_times: List[float] = []
         for i in range(iterations):
-            result = _execute_on_connection(origin_conn, query, origin_engine)
+            result = _execute_on_connection(origin_conn, query, origin_engine, controller)
             if result["success"]:
                 original_times.append(result["execution_time_ms"])
             _progress("origin", i + 1, iterations)
@@ -117,7 +185,7 @@ def run_comparison(
         # Benchmark Readyset
         readyset_times: List[float] = []
         for i in range(iterations):
-            result = _execute_on_connection(cache_conn, query, cache_engine)
+            result = _execute_on_connection(cache_conn, query, cache_engine, controller)
             if result["success"]:
                 readyset_times.append(result["execution_time_ms"])
             _progress("cache", i + 1, iterations)
@@ -164,15 +232,21 @@ def run_comparison(
             },
             "winner": "readyset" if speedup > 1 else "original",
         }
+    except ComparisonCancelled:
+        return {"success": False, "cancelled": True, "error": "Comparison cancelled"}
     except Exception as e:
         return {"success": False, "error": f"Performance comparison failed: {str(e)}"}
     finally:
         if origin_conn:
+            if controller:
+                controller.unregister(origin_conn)
             try:
                 origin_conn.close()
             except Exception:
                 pass
         if cache_conn:
+            if controller:
+                controller.unregister(cache_conn)
             try:
                 cache_conn.close()
             except Exception:

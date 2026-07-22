@@ -41,8 +41,12 @@ from features.schema.models import (
 )
 from features.schema.service import SchemaService
 from shared.api.target_guard import TargetGuard, require_target, require_target_body
+from shared.run_registry import run_registry
 
 router = APIRouter(tags=["semantic-layer"])
+
+# Shared process-local registry; tests replace it with an isolated instance.
+_registry = run_registry
 
 
 class SchemaStatusResponse(BaseModel):
@@ -221,6 +225,11 @@ class AnnotateRequest(BaseModel):
     target: str
     table_name: Optional[str] = None
     sample_rows: int = 5
+
+
+class AnnotationRunStartResponse(BaseModel):
+    run_id: str
+    reused: bool = False
 
 
 def _status_to_response(status: SchemaStatus) -> SchemaStatusResponse:
@@ -712,6 +721,40 @@ async def annotate_schema(
     )
 
 
+@router.post(
+    "/semantic-layer/annotation-runs",
+    response_model=AnnotationRunStartResponse,
+)
+async def start_annotation_run(
+    request: AnnotateRequest,
+    guard: TargetGuard = Depends(require_target_body),
+) -> AnnotationRunStartResponse:
+    """Start AI annotation as a process-local background run."""
+    existing = _registry.find_active("schema_annotation", guard.target_name)
+    if existing is not None:
+        return AnnotationRunStartResponse(run_id=existing, reused=True)
+
+    bootstrap = _registry.find_active("bootstrap", guard.target_name)
+    if bootstrap is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Database setup is already running for '{guard.target_name}'. "
+                "Wait for it to finish before starting AI annotation."
+            ),
+        )
+
+    service = AnnotateService()
+    generator = service.annotate(
+        guard.target_name,
+        guard.target_config,
+        request.table_name,
+        request.sample_rows,
+    )
+    run_id = _registry.start("schema_annotation", guard.target_name, generator)
+    return AnnotationRunStartResponse(run_id=run_id)
+
+
 def _annotate_event_to_sse(event) -> dict:
     """Convert AnnotateEvent to SSE format."""
     if isinstance(event, AnnotateStartedEvent):
@@ -720,6 +763,7 @@ def _annotate_event_to_sse(event) -> dict:
             "data": json.dumps(
                 {
                     "tables": event.tables,
+                    "completed_tables": event.completed_tables,
                     "message": event.message,
                 }
             ),

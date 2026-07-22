@@ -145,6 +145,7 @@ class TestAnnotateServiceMarch:
 
         assert isinstance(events[0], AnnotateStartedEvent)
         assert events[0].tables == 2
+        assert events[0].completed_tables == 0
 
     @pytest.mark.asyncio
     async def test_all_failures_report_error_not_success(self, service):
@@ -196,9 +197,10 @@ class TestAnnotateServiceMarch:
 
         complete = events[-1]
         assert isinstance(complete, AnnotateCompleteEvent)
-        assert complete.success is True
+        assert complete.success is False
         assert complete.tables_annotated == 1
         assert complete.columns_annotated == 1
+        assert complete.tables_failed == 1
         assert "failed" in complete.message
 
     @pytest.mark.asyncio
@@ -220,7 +222,45 @@ class TestAnnotateServiceMarch:
         complete = events[-1]
         assert isinstance(complete, AnnotateCompleteEvent)
         assert complete.success is True
+        assert complete.message == "Schema is already fully annotated"
+        started = events[0]
+        assert isinstance(started, AnnotateStartedEvent)
+        assert started.tables == 1
+        assert started.completed_tables == 1
         ai.annotate_table.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rerun_derives_progress_from_saved_annotations(self, service):
+        complete_table = _mock_table(
+            description="already done",
+            columns={"id": _mock_col(description="already done")},
+        )
+        pending_tables = {
+            "orders": _mock_table(columns={"id": _mock_col()}),
+            "products": _mock_table(columns={"id": _mock_col()}),
+        }
+        layer = _mock_layer({"users": complete_table, **pending_tables})
+
+        with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
+            ANNOTATOR
+        ) as create_annotator:
+            create_manager.return_value.exists.return_value = True
+            create_manager.return_value.load.return_value = layer
+            ai = Mock()
+            ai.annotate_table.return_value = _ok_result(col_names=("id",))
+            create_annotator.return_value = ai
+
+            events = await _collect(service, "t", {})
+
+        started = events[0]
+        assert isinstance(started, AnnotateStartedEvent)
+        assert started.tables == 3
+        assert started.completed_tables == 1
+        assert "Resuming annotation: 1 of 3" in started.message
+        progress = [e for e in events if isinstance(e, AnnotateProgressEvent)]
+        assert [e.table_index for e in progress] == [2, 3]
+        assert [e.total_tables for e in progress] == [3, 3]
+        assert ai.annotate_table.call_count == 2
 
 
 class TestAnnotateServiceBatching:
@@ -399,12 +439,14 @@ class TestAnnotateServiceEventTypes:
             success=True,
             tables_annotated=5,
             columns_annotated=25,
+            tables_failed=0,
             message="Annotation complete",
         )
         assert event.type == "annotate_complete"
         assert event.success is True
         assert event.tables_annotated == 5
         assert event.columns_annotated == 25
+        assert event.tables_failed == 0
 
     def test_annotate_error_event_structure(self):
         event = AnnotateErrorEvent(

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from features.trial.service import TrialService
 from shared.api.guards import is_loopback_request, same_host_from_headers
+from shared.run_registry import run_registry
 
 router = APIRouter()
 
@@ -103,6 +104,8 @@ async def activate_trial(
         body.token, body.email, body.email_tier, source="web",
         limit_cents=body.limit_cents, remaining_cents=body.remaining_cents,
     )
+    if result.success:
+        run_registry.wake_needs_key()
     return TrialActivateResponse(
         success=result.success,
         message=result.message,

@@ -29,6 +29,8 @@ from features.ask.events import AskEvent
 from features.ask.service import AskService
 from features.audit.events import AuditEvent
 from features.audit.service import AuditService
+from features.bootstrap.events import BootstrapEvent
+from features.bootstrap.service import TargetBootstrapService
 from features.cache.events import CacheEvent
 from features.cache.service import CacheService
 from features.init.events import InitEvent
@@ -46,6 +48,7 @@ from features.top.service import TopService
 ANALYZE_EVENT = TypeAdapter(AnalyzeEvent)
 ASK_EVENT = TypeAdapter(AskEvent)
 AUDIT_EVENT = TypeAdapter(AuditEvent)
+BOOTSTRAP_EVENT = TypeAdapter(BootstrapEvent)
 CACHE_EVENT = TypeAdapter(CacheEvent)
 INIT_EVENT = TypeAdapter(InitEvent)
 SCAN_EVENT = TypeAdapter(ScanEvent)
@@ -89,6 +92,34 @@ class FakeAuditService(AuditService):
                     SnapshotStore().save_raw, snapshot_id, event.result
                 )
             yield event
+
+
+class FakeTargetBootstrapService(TargetBootstrapService):
+    async def run(
+        self,
+        target,
+        target_config,
+        options=None,
+        key_wakeup=None,
+    ):
+        response = fixtures.take("bootstrap", default=None)
+        if response is None:
+            async for event in super().run(
+                target,
+                target_config,
+                options,
+                key_wakeup=key_wakeup,
+            ):
+                yield event
+            return
+
+        async for event in fixtures.replay(response, BOOTSTRAP_EVENT):
+            yield event
+            if event.type == "needs_key":
+                if key_wakeup is None:
+                    raise RuntimeError("Bootstrap fixture needs a resume event")
+                await key_wakeup.wait()
+                key_wakeup.clear()
 
 
 class FakeCacheService(CacheService):
@@ -194,6 +225,7 @@ SERVICE_FAKES = [
     FakeAnalyzeService,
     FakeAskService,
     FakeAuditService,
+    FakeTargetBootstrapService,
     FakeCacheService,
     FakeInitService,
     FakeScanService,

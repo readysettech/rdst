@@ -4,11 +4,11 @@ import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useRouter } from '@tanstack/react-router'
+import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { useConfigure } from '../../lib/useConfigure'
 import { useOnboarding } from '../../lib/useOnboarding'
 import type { ConfigureFormData } from '../../types/configure'
 import { ConfigureForm } from '../configure'
-import { startBootstrapRun } from '../../lib/bootstrapRun'
 
 /**
  * First-run "Connect your database" — a single, exitable page that replaces the

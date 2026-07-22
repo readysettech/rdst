@@ -655,6 +655,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cache/test-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Cache Test Run
+         * @description Start a detached origin-vs-cache benchmark and return immediately.
+         */
+        post: operations["start_cache_test_run_api_cache_test_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cache/{cache_id}": {
         parameters: {
             query?: never;
@@ -1771,6 +1791,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Status */
+        get: operations["run_status_api_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        /** Cancel Run */
+        delete: operations["cancel_run_api_runs__run_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Events */
+        get: operations["run_events_api_runs__run_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scan": {
         parameters: {
             query?: never;
@@ -1880,6 +1935,26 @@ export interface paths {
          * @description Use LLM to generate descriptions for tables and columns (SSE streaming).
          */
         post: operations["annotate_schema_api_semantic_layer_annotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/semantic-layer/annotation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Annotation Run
+         * @description Start AI annotation as a process-local background run.
+         */
+        post: operations["start_annotation_run_api_semantic_layer_annotation_runs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2773,6 +2848,59 @@ export interface components {
             /** Target */
             target?: string | null;
         };
+        /**
+         * AnnotateCompleteEvent
+         * @description Annotation process completed, possibly with individual table failures.
+         */
+        AnnotateCompleteEvent: {
+            /** Columns Annotated */
+            columns_annotated: number;
+            /** Message */
+            message: string;
+            /** Success */
+            success: boolean;
+            /** Tables Annotated */
+            tables_annotated: number;
+            /** Tables Failed */
+            tables_failed: number;
+            /**
+             * Type
+             * @constant
+             */
+            type: "annotate_complete";
+        };
+        /**
+         * AnnotateErrorEvent
+         * @description Annotation process encountered an error.
+         */
+        AnnotateErrorEvent: {
+            /** Message */
+            message: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "annotate_error";
+        };
+        /**
+         * AnnotateProgressEvent
+         * @description Progress update during annotation.
+         */
+        AnnotateProgressEvent: {
+            /** Message */
+            message: string;
+            /** Table */
+            table: string;
+            /** Table Index */
+            table_index: number;
+            /** Total Tables */
+            total_tables: number;
+            /**
+             * Type
+             * @constant
+             */
+            type: "annotate_progress";
+        };
         /** AnnotateRequest */
         AnnotateRequest: {
             /**
@@ -2784,6 +2912,55 @@ export interface components {
             table_name?: string | null;
             /** Target */
             target: string;
+        };
+        /**
+         * AnnotateStartedEvent
+         * @description Annotation process started.
+         */
+        AnnotateStartedEvent: {
+            /**
+             * Completed Tables
+             * @default 0
+             */
+            completed_tables?: number;
+            /** Message */
+            message: string;
+            /** Tables */
+            tables: number;
+            /**
+             * Type
+             * @constant
+             */
+            type: "annotate_started";
+        };
+        /**
+         * AnnotateTableCompleteEvent
+         * @description A table has been annotated.
+         */
+        AnnotateTableCompleteEvent: {
+            /** Columns Annotated */
+            columns_annotated: number;
+            /** Table */
+            table: string;
+            /** Table Index */
+            table_index: number;
+            /** Total Tables */
+            total_tables: number;
+            /**
+             * Type
+             * @constant
+             */
+            type: "annotate_table_complete";
+        };
+        /** AnnotationRunStartResponse */
+        AnnotationRunStartResponse: {
+            /**
+             * Reused
+             * @default false
+             */
+            reused?: boolean;
+            /** Run Id */
+            run_id: string;
         };
         /** AnthropicValidateResponse */
         AnthropicValidateResponse: {
@@ -3256,6 +3433,31 @@ export interface components {
              */
             type: "target_start";
         };
+        /** BackgroundRunCancelResponse */
+        BackgroundRunCancelResponse: {
+            /** Cancelled */
+            cancelled: boolean;
+            /** Run Id */
+            run_id: string;
+        };
+        BackgroundRunEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"] | components["schemas"]["AnnotateStartedEvent"] | components["schemas"]["AnnotateProgressEvent"] | components["schemas"]["AnnotateTableCompleteEvent"] | components["schemas"]["AnnotateCompleteEvent"] | components["schemas"]["AnnotateErrorEvent"] | components["schemas"]["ProgressEvent"] | components["schemas"]["CacheRunCompleteEvent"] | components["schemas"]["RunEndEvent"];
+        /** BackgroundRunResponse */
+        BackgroundRunResponse: {
+            /** Kind */
+            kind: string;
+            /** Last Seq */
+            last_seq: number;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Run Id */
+            run_id: string;
+            /** Status */
+            status: string;
+            /** Target */
+            target: string;
+        };
         /**
          * BenchmarkQueryInput
          * @description A query to benchmark - either by identifier or raw SQL.
@@ -3518,6 +3720,39 @@ export interface components {
             /** Target */
             target?: string | null;
         };
+        /**
+         * CacheRunCompleteEvent
+         * @description Performance comparison result (origin vs cache).
+         */
+        CacheRunCompleteEvent: {
+            /** Cache Stats */
+            cache_stats: {
+                [key: string]: number;
+            };
+            /** Improvement Pct */
+            improvement_pct: number;
+            /** Iterations */
+            iterations: number;
+            /** Origin Stats */
+            origin_stats: {
+                [key: string]: number;
+            };
+            /** Query */
+            query: string;
+            /** Speedup Mean */
+            speedup_mean: number;
+            /** Speedup Median */
+            speedup_median: number;
+            /** Success */
+            success: boolean;
+            /**
+             * Type
+             * @constant
+             */
+            type: "cache_run_complete";
+            /** Winner */
+            winner: string;
+        };
         /** CacheRunRequest */
         CacheRunRequest: {
             /**
@@ -3547,6 +3782,32 @@ export interface components {
             endpoint?: string | null;
             /** Running */
             running: boolean;
+        };
+        /** CacheTestRunRequest */
+        CacheTestRunRequest: {
+            /**
+             * Iterations
+             * @default 15
+             */
+            iterations?: number;
+            /** Label */
+            label?: string | null;
+            /** Query */
+            query: string;
+            /** Query Hash */
+            query_hash?: string | null;
+            /** Target */
+            target?: string | null;
+            /**
+             * Warmup
+             * @default 5
+             */
+            warmup?: number;
+        };
+        /** CacheTestRunStartResponse */
+        CacheTestRunStartResponse: {
+            /** Run Id */
+            run_id: string;
         };
         /** ChatCompleteEvent */
         ChatCompleteEvent: {
@@ -5392,6 +5653,19 @@ export interface components {
             returned: number;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * RunEndEvent
+         * @description Terminal event appended by the registry after every run.
+         */
+        RunEndEvent: {
+            /** Status */
+            status: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "run_end";
         };
         /**
          * ScanCompleteEvent
@@ -7741,6 +8015,39 @@ export interface operations {
             };
         };
     };
+    start_cache_test_run_api_cache_test_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTestRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTestRunStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     delete_cache_api_cache__cache_id__delete: {
         parameters: {
             query: {
@@ -9683,6 +9990,102 @@ export interface operations {
             };
         };
     };
+    run_status_api_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackgroundRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_run_api_runs__run_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackgroundRunCancelResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_events_api_runs__run_id__events_get: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "text/event-stream": components["schemas"]["BackgroundRunEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     scan_directory_api_scan_post: {
         parameters: {
             query?: never;
@@ -9868,6 +10271,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_annotation_run_api_semantic_layer_annotation_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationRunStartResponse"];
                 };
             };
             /** @description Validation Error */

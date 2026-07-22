@@ -9,13 +9,16 @@ import { QueryRegistryPage } from './-query-registry-page'
 
 export const Route = createFileRoute('/query-registry')({
   // Optional deep-link to focus one query (served-cache links, Analyze handoff).
-  validateSearch: (search: Record<string, unknown>): { hash?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { hash?: string; run?: string } => ({
     hash: typeof search.hash === 'string' ? search.hash : undefined,
+    run: typeof search.run === 'string' ? search.run : undefined,
   }),
   component: QueryRegistryPageRoute,
 })
 
 function QueryRegistryPageRoute() {
-  const { hash } = Route.useSearch()
-  return <QueryRegistryPage deepLinkHash={hash} />
+  const { hash, run } = Route.useSearch()
+  return <QueryRegistryPage deepLinkHash={hash} deepLinkRunId={run} />
 }

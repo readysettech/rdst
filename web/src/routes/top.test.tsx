@@ -114,6 +114,7 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
   })
 
   vi.mocked(useTargetPasswordLock).mockReturnValue({
+    isResolved: true,
     isLocked: false,
     targetName: 'prod',
     message: '',

@@ -1,23 +1,24 @@
 import { useCallback, useRef, useState } from 'react'
-import { useTargetSwitchLock } from './targetSwitchLock'
-import type { components } from './api.generated'
 import type {
-  SchemaStatus,
-  SchemaDetails,
-  SchemaTargetSummary,
-  SchemaInitResult,
-  SchemaExportResult,
-  SchemaDeleteResult,
-  SchemaUpdateResult,
-  AddTableData,
   AddColumnData,
   AddEnumData,
-  AddTerminologyData,
-  AddRelationshipData,
   AddMetricData,
+  AddRelationshipData,
+  AddTableData,
+  AddTerminologyData,
+  SchemaDeleteResult,
+  SchemaDetails,
+  SchemaExportResult,
+  SchemaInitResult,
+  SchemaStatus,
+  SchemaTargetSummary,
+  SchemaUpdateResult,
 } from '../types/schema'
+import type { components } from './api.generated'
+import { useTargetSwitchLock } from './targetSwitchLock'
 
-export type SchemaOperationResult = components['schemas']['SchemaOperationResponse']
+export type SchemaOperationResult =
+  components['schemas']['SchemaOperationResponse']
 
 interface UseSchemaReturn {
   // State
@@ -43,16 +44,16 @@ interface UseSchemaReturn {
   addColumn: (target: string, data: AddColumnData) => Promise<boolean>
   addEnum: (target: string, data: AddEnumData) => Promise<boolean>
   addTerminology: (target: string, data: AddTerminologyData) => Promise<boolean>
-  addRelationship: (target: string, data: AddRelationshipData) => Promise<boolean>
+  addRelationship: (
+    target: string,
+    data: AddRelationshipData
+  ) => Promise<boolean>
   addMetric: (target: string, data: AddMetricData) => Promise<boolean>
   refreshSchema: (target: string) => Promise<SchemaOperationResult | null>
-  profileSchema: (target: string, table?: string) => Promise<SchemaOperationResult | null>
-  annotateWithLLM: (
+  profileSchema: (
     target: string,
-    tableName?: string,
-    onProgress?: (message: string, tableIndex?: number, totalTables?: number) => void
-  ) => Promise<boolean>
-
+    table?: string
+  ) => Promise<SchemaOperationResult | null>
   // Utilities
   clearError: () => void
 }
@@ -82,6 +83,8 @@ export function useSchema(): UseSchemaReturn {
       }
       const controller = new AbortController()
       abortControllerRef.current = controller
+      setLoading(true)
+      setError(null)
 
       try {
         const response = await fetch(url, {
@@ -105,7 +108,10 @@ export function useSchema(): UseSchemaReturn {
           error: err instanceof Error ? err.message : 'Request failed',
         }
       } finally {
-        abortControllerRef.current = null
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null
+          setLoading(false)
+        }
       }
     },
     []
@@ -115,21 +121,18 @@ export function useSchema(): UseSchemaReturn {
 
   const checkStatus = useCallback(
     async (target: string): Promise<SchemaStatus | null> => {
-      setLoading(true)
-      setError(null)
-
       const { data, error: fetchError } = await fetchWithAbort<SchemaStatus>(
         `/api/semantic-layer/status?target=${encodeURIComponent(target)}`
       )
 
       if (fetchError) {
         setError(fetchError)
-        setLoading(false)
         return null
       }
 
-      setStatus(data)
-      setLoading(false)
+      // An overlapping request aborts this one. Preserve the last good status
+      // rather than replacing it with null and blanking the Schema route.
+      if (data !== null) setStatus(data)
       return data
     },
     [fetchWithAbort]
@@ -137,59 +140,46 @@ export function useSchema(): UseSchemaReturn {
 
   const loadSchema = useCallback(
     async (target: string, table?: string): Promise<SchemaDetails | null> => {
-      setLoading(true)
-      setError(null)
-
       let url = `/api/semantic-layer?target=${encodeURIComponent(target)}`
       if (table) {
         url += `&table=${encodeURIComponent(table)}`
       }
 
-      const { data, error: fetchError } = await fetchWithAbort<SchemaDetails>(url)
+      const { data, error: fetchError } =
+        await fetchWithAbort<SchemaDetails>(url)
 
       if (fetchError) {
         setError(fetchError)
-        setLoading(false)
         return null
       }
 
-      setSchema(data)
-      setLoading(false)
+      if (data !== null) setSchema(data)
       return data
     },
     [fetchWithAbort]
   )
 
   const listTargets = useCallback(async (): Promise<SchemaTargetSummary[]> => {
-    setLoading(true)
-    setError(null)
-
     const { data, error: fetchError } = await fetchWithAbort<{
       targets: SchemaTargetSummary[]
     }>('/api/semantic-layer/targets')
 
     if (fetchError) {
       setError(fetchError)
-      setLoading(false)
       return []
     }
 
     const targetList = data?.targets || []
     setTargets(targetList)
-    setLoading(false)
     return targetList
   }, [fetchWithAbort])
 
   const exportSchema = useCallback(
     async (target: string, format = 'yaml'): Promise<string | null> => {
-      setLoading(true)
-      setError(null)
-
-      const { data, error: fetchError } = await fetchWithAbort<SchemaExportResult>(
-        `/api/semantic-layer/export?target=${encodeURIComponent(target)}&format=${encodeURIComponent(format)}`
-      )
-
-      setLoading(false)
+      const { data, error: fetchError } =
+        await fetchWithAbort<SchemaExportResult>(
+          `/api/semantic-layer/export?target=${encodeURIComponent(target)}&format=${encodeURIComponent(format)}`
+        )
 
       if (fetchError) {
         setError(fetchError)
@@ -211,14 +201,14 @@ export function useSchema(): UseSchemaReturn {
   const initSchema = useCallback(
     async (
       target: string,
-      options?: { enumThreshold?: number; force?: boolean; sampleEnums?: boolean }
+      options?: {
+        enumThreshold?: number
+        force?: boolean
+        sampleEnums?: boolean
+      }
     ): Promise<SchemaInitResult | null> => {
-      setLoading(true)
-      setError(null)
-
-      const { data, error: fetchError } = await fetchWithAbort<SchemaInitResult>(
-        '/api/semantic-layer/init',
-        {
+      const { data, error: fetchError } =
+        await fetchWithAbort<SchemaInitResult>('/api/semantic-layer/init', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -227,10 +217,7 @@ export function useSchema(): UseSchemaReturn {
             force: options?.force ?? false,
             sample_enums: options?.sampleEnums ?? true,
           }),
-        }
-      )
-
-      setLoading(false)
+        })
 
       if (fetchError) {
         setError(fetchError)
@@ -248,15 +235,11 @@ export function useSchema(): UseSchemaReturn {
 
   const deleteSchema = useCallback(
     async (target: string): Promise<boolean> => {
-      setLoading(true)
-      setError(null)
-
-      const { data, error: fetchError } = await fetchWithAbort<SchemaDeleteResult>(
-        `/api/semantic-layer?target=${encodeURIComponent(target)}`,
-        { method: 'DELETE' }
-      )
-
-      setLoading(false)
+      const { data, error: fetchError } =
+        await fetchWithAbort<SchemaDeleteResult>(
+          `/api/semantic-layer?target=${encodeURIComponent(target)}`,
+          { method: 'DELETE' }
+        )
 
       if (fetchError) {
         setError(fetchError)
@@ -283,17 +266,12 @@ export function useSchema(): UseSchemaReturn {
 
   const addTable = useCallback(
     async (target: string, data: AddTableData): Promise<boolean> => {
-      setLoading(true)
-      setError(null)
-
       const { data: result, error: fetchError } =
         await fetchWithAbort<SchemaUpdateResult>('/api/semantic-layer/table', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ target, ...data }),
         })
-
-      setLoading(false)
 
       if (fetchError) {
         setError(fetchError)
@@ -312,17 +290,12 @@ export function useSchema(): UseSchemaReturn {
 
   const addColumn = useCallback(
     async (target: string, data: AddColumnData): Promise<boolean> => {
-      setLoading(true)
-      setError(null)
-
       const { data: result, error: fetchError } =
         await fetchWithAbort<SchemaUpdateResult>('/api/semantic-layer/column', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ target, ...data }),
         })
-
-      setLoading(false)
 
       if (fetchError) {
         setError(fetchError)
@@ -341,17 +314,12 @@ export function useSchema(): UseSchemaReturn {
 
   const addEnum = useCallback(
     async (target: string, data: AddEnumData): Promise<boolean> => {
-      setLoading(true)
-      setError(null)
-
       const { data: result, error: fetchError } =
         await fetchWithAbort<SchemaUpdateResult>('/api/semantic-layer/enum', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ target, ...data }),
         })
-
-      setLoading(false)
 
       if (fetchError) {
         setError(fetchError)
@@ -370,17 +338,15 @@ export function useSchema(): UseSchemaReturn {
 
   const addTerminology = useCallback(
     async (target: string, data: AddTerminologyData): Promise<boolean> => {
-      setLoading(true)
-      setError(null)
-
       const { data: result, error: fetchError } =
-        await fetchWithAbort<SchemaUpdateResult>('/api/semantic-layer/terminology', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target, ...data }),
-        })
-
-      setLoading(false)
+        await fetchWithAbort<SchemaUpdateResult>(
+          '/api/semantic-layer/terminology',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target, ...data }),
+          }
+        )
 
       if (fetchError) {
         setError(fetchError)
@@ -399,17 +365,15 @@ export function useSchema(): UseSchemaReturn {
 
   const addRelationship = useCallback(
     async (target: string, data: AddRelationshipData): Promise<boolean> => {
-      setLoading(true)
-      setError(null)
-
       const { data: result, error: fetchError } =
-        await fetchWithAbort<SchemaUpdateResult>('/api/semantic-layer/relationship', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target, ...data }),
-        })
-
-      setLoading(false)
+        await fetchWithAbort<SchemaUpdateResult>(
+          '/api/semantic-layer/relationship',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target, ...data }),
+          }
+        )
 
       if (fetchError) {
         setError(fetchError)
@@ -428,17 +392,12 @@ export function useSchema(): UseSchemaReturn {
 
   const addMetric = useCallback(
     async (target: string, data: AddMetricData): Promise<boolean> => {
-      setLoading(true)
-      setError(null)
-
       const { data: result, error: fetchError } =
         await fetchWithAbort<SchemaUpdateResult>('/api/semantic-layer/metric', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ target, ...data }),
         })
-
-      setLoading(false)
 
       if (fetchError) {
         setError(fetchError)
@@ -457,19 +416,15 @@ export function useSchema(): UseSchemaReturn {
 
   const refreshSchema = useCallback(
     async (target: string): Promise<SchemaOperationResult | null> => {
-      setLoading(true)
-      setError(null)
-
-      const { data, error: fetchError } = await fetchWithAbort<SchemaOperationResult>(
-        '/api/semantic-layer/refresh',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target }),
-        }
-      )
-
-      setLoading(false)
+      const { data, error: fetchError } =
+        await fetchWithAbort<SchemaOperationResult>(
+          '/api/semantic-layer/refresh',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target }),
+          }
+        )
 
       if (fetchError) {
         setError(fetchError)
@@ -482,20 +437,19 @@ export function useSchema(): UseSchemaReturn {
   )
 
   const profileSchema = useCallback(
-    async (target: string, table?: string): Promise<SchemaOperationResult | null> => {
-      setLoading(true)
-      setError(null)
-
-      const { data, error: fetchError } = await fetchWithAbort<SchemaOperationResult>(
-        '/api/semantic-layer/profile',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target, table }),
-        }
-      )
-
-      setLoading(false)
+    async (
+      target: string,
+      table?: string
+    ): Promise<SchemaOperationResult | null> => {
+      const { data, error: fetchError } =
+        await fetchWithAbort<SchemaOperationResult>(
+          '/api/semantic-layer/profile',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target, table }),
+          }
+        )
 
       if (fetchError) {
         setError(fetchError)
@@ -505,81 +459,6 @@ export function useSchema(): UseSchemaReturn {
       return data
     },
     [fetchWithAbort]
-  )
-
-  const annotateWithLLM = useCallback(
-    async (
-      target: string,
-      tableName?: string,
-      onProgress?: (message: string, tableIndex?: number, totalTables?: number) => void
-    ): Promise<boolean> => {
-      setLoading(true)
-      setError(null)
-
-      try {
-        const response = await fetch('/api/semantic-layer/annotate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target, table_name: tableName }),
-        })
-
-        if (!response.ok || !response.body) {
-          throw new Error(`HTTP ${response.status}`)
-        }
-
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let success = true
-        let currentEvent = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              currentEvent = line.slice(7).trim()
-            } else if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6))
-
-                if (currentEvent === 'error') {
-                  setError(data.message || 'Annotation failed')
-                  success = false
-                } else if (currentEvent === 'progress' || currentEvent === 'started' || currentEvent === 'table_complete') {
-                  if (onProgress && data.message) {
-                    onProgress(data.message, data.table_index, data.total_tables)
-                  }
-                } else if (currentEvent === 'complete') {
-                  if (onProgress && data.message) {
-                    onProgress(data.message)
-                  }
-                } else if (currentEvent === 'unknown') {
-                  console.warn('[Schema SSE] Unknown event payload (ignored):', data)
-                } else if (currentEvent) {
-                  console.warn('[Schema SSE] Unknown event type (ignored):', currentEvent, data)
-                }
-              } catch {
-                // Ignore parse errors
-              }
-            }
-          }
-        }
-
-        setLoading(false)
-        return success
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Request failed')
-        setLoading(false)
-        return false
-      }
-    },
-    []
   )
 
   return {
@@ -607,8 +486,6 @@ export function useSchema(): UseSchemaReturn {
     addMetric,
     refreshSchema,
     profileSchema,
-    annotateWithLLM,
-
     // Utilities
     clearError,
   }

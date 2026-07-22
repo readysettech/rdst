@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from shared.api.target_guard import TargetGuard, require_target, require_target_body
+from shared.run_registry import run_registry
 from shared.service_events import ErrorEvent, ProgressEvent
 
 from ..events import (
@@ -69,6 +70,19 @@ class CacheRunRequest(BaseModel):
     target: Optional[str] = None
     iterations: int = 15
     warmup: int = 5
+
+
+class CacheTestRunRequest(CacheRunRequest):
+    query_hash: Optional[str] = None
+    label: Optional[str] = None
+
+
+class CacheTestRunStartResponse(BaseModel):
+    run_id: str
+
+
+# Shared process-local registry; tests replace it with an isolated instance.
+_run_registry = run_registry
 
 
 # Response shapes returned by non-SSE endpoints. These mirror `_event_to_dict`
@@ -414,6 +428,30 @@ async def run_cache_comparison(
             yield _event_to_sse(event)
 
     return EventSourceResponse(_generator())
+
+
+@router.post("/test-runs", response_model=CacheTestRunStartResponse)
+async def start_cache_test_run(
+    request: CacheTestRunRequest,
+    guard: TargetGuard = Depends(require_target_body),
+) -> CacheTestRunStartResponse:
+    """Start a detached origin-vs-cache benchmark and return immediately."""
+    service = CacheService()
+    generator = service.run_comparison(
+        CacheInput(target=guard.target_name, query=request.query),
+        iterations=request.iterations,
+        warmup=request.warmup,
+    )
+    run_id = _run_registry.start(
+        "cache_test",
+        guard.target_name,
+        generator,
+        metadata={
+            "query_hash": request.query_hash,
+            "label": request.label,
+        },
+    )
+    return CacheTestRunStartResponse(run_id=run_id)
 
 
 @router.delete("/{cache_id}")

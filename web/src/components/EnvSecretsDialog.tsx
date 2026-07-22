@@ -226,10 +226,16 @@ export function EnvSecretsDialog({
               <div className="space-y-4">
                 {entries.map((entry, index) => (
                   <div key={entry.key} className="space-y-1">
-                    <Text as="label" level="label-small" className="text-content-layout-2 block">
-                      {entry.label}
-                    </Text>
+                    <label htmlFor={`rdst-secret-${index}`}>
+                      <Text
+                        level="label-small"
+                        className="text-content-layout-2 block"
+                      >
+                        {entry.label}
+                      </Text>
+                    </label>
                   <BaseInputText
+                      id={`rdst-secret-${index}`}
                       type="text"
                       name={`rdst-secret-${index}`}
                       autoComplete="off"

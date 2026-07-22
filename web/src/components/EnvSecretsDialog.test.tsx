@@ -103,6 +103,7 @@ describe('EnvSecretsDialog', () => {
     expect(
       screen.getByText(/Secure keychain is unavailable\. Values will be session-only\./i)
     ).toBeTruthy();
+    expect(screen.getByLabelText('Anthropic API Key')).toBeTruthy();
   });
 
   it('preserves typed values and validation state when parent rerenders while open', async () => {

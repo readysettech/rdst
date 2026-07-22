@@ -2,12 +2,14 @@
 
 POST /bootstrap starts a background run via the shared RunRegistry and
 returns its run_id immediately; GET .../events streams the run over SSE
-with replay (after_seq) so clients can reattach after navigation, reload,
-or a dropped connection. Frames carry id=seq for Last-Event-ID semantics.
+with in-process replay (after_seq) so clients can reattach after navigation,
+reload, or a dropped connection while RDST remains open. Frames carry id=seq
+for Last-Event-ID semantics.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,14 +17,14 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from shared.api.target_guard import TargetGuard, require_target_body
-from shared.run_registry import RUN_END_EVENT, RunRegistry
+from shared.run_registry import RunRegistry, run_registry
 
 from ..service import BootstrapOptions, TargetBootstrapService
 
 router = APIRouter(prefix="/bootstrap", tags=["bootstrap"])
 
-# One registry for the process; tests swap it for a tmp-dir instance.
-_registry = RunRegistry()
+# One registry for the process; tests replace it with an isolated instance.
+_registry = run_registry
 
 
 class BootstrapStartRequest(BaseModel):
@@ -53,8 +55,13 @@ async def start_bootstrap(
         annotate=request.annotate,
     )
     service = TargetBootstrapService()
-    gen = service.run(guard.target_name, guard.target_config, options)
-    run_id = _registry.start("bootstrap", guard.target_name, gen)
+    key_wakeup = asyncio.Event()
+    gen = service.run(
+        guard.target_name, guard.target_config, options, key_wakeup=key_wakeup
+    )
+    run_id = _registry.start(
+        "bootstrap", guard.target_name, gen, resume_event=key_wakeup
+    )
     return BootstrapStartResponse(run_id=run_id)
 
 
@@ -89,14 +96,5 @@ def _record_to_sse(record: dict) -> dict:
 
 
 async def _sse_frames(registry: RunRegistry, run_id: str, after_seq: int):
-    saw_terminal = False
     async for record in registry.events(run_id, after_seq=after_seq):
-        saw_terminal = saw_terminal or record["event"] == RUN_END_EVENT
         yield _record_to_sse(record)
-    # An interrupted run's log has no run_end; synthesize the terminal frame
-    # so clients can settle instead of treating it as a dropped connection.
-    if not saw_terminal and registry.status(run_id) == "interrupted":
-        yield {
-            "event": RUN_END_EVENT,
-            "data": json.dumps({"status": "interrupted"}),
-        }

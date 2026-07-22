@@ -3,9 +3,11 @@ Unit tests for TargetBootstrapService.
 
 The orchestrator composes injected fakes; assertions cover stage ordering
 within tracks, the connection-test abort, refresh-vs-init idempotency, the
-needs_key gate (park, poll, resume or skip), and track isolation.
+needs_key gate (park, poll, and resume), and track isolation.
 """
 
+import asyncio
+import threading
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
@@ -13,6 +15,7 @@ import pytest
 
 from features.bootstrap.events import BootstrapNeedsKeyEvent, BootstrapStageEvent
 from features.bootstrap.service import BootstrapOptions, TargetBootstrapService
+from shared.run_registry import RunRegistry
 from shared.service_events import ErrorEvent
 
 
@@ -28,6 +31,13 @@ class DeployComplete:
     success: bool = True
     endpoint: str = "postgresql://127.0.0.1:5433/db"
     message: str = ""
+
+
+@dataclass
+class AnnotateComplete:
+    type: str = "annotate_complete"
+    success: bool = True
+    message: str = "Annotation complete"
 
 
 class FakeConfigure:
@@ -103,7 +113,7 @@ def _service(configure=None, schema=None, annotate=None, cache=None, validator=N
 
 
 def _opts(**kwargs):
-    defaults = {"key_wait_seconds": 0.05, "key_poll_seconds": 0.01}
+    defaults = {"key_poll_seconds": 0.01}
     defaults.update(kwargs)
     return BootstrapOptions(**defaults)
 
@@ -113,6 +123,25 @@ async def _run(service, options=None):
         e
         async for e in service.run("imdb", {"engine": "postgresql"}, options or _opts())
     ]
+
+
+async def _drain(events):
+    return [event async for event in events]
+
+
+async def _collect_run(registry, run_id):
+    async def collect():
+        return [event async for event in registry.events(run_id)]
+
+    return await asyncio.wait_for(collect(), 2.0)
+
+
+async def _wait_run_status(registry, run_id, expected):
+    async def wait():
+        while registry.status(run_id) != expected:
+            await asyncio.sleep(0.005)
+
+    await asyncio.wait_for(wait(), 2.0)
 
 
 def _stages(events, stage):
@@ -189,6 +218,24 @@ class TestSchemaTrack:
         assert _stages(events, "annotate")[-1] == ("failed", "no credit")
 
     @pytest.mark.asyncio
+    async def test_partial_annotation_marks_stage_failed(self):
+        annotate = FakeAnnotate(
+            events=[
+                AnnotateComplete(
+                    success=False,
+                    message="Annotated 2 tables; 1 AI request failed",
+                )
+            ]
+        )
+
+        events = await _run(_service(annotate=annotate))
+
+        assert _stages(events, "annotate")[-1] == (
+            "failed",
+            "Annotated 2 tables; 1 AI request failed",
+        )
+
+    @pytest.mark.asyncio
     async def test_annotate_disabled_is_skipped(self):
         annotate = FakeAnnotate()
         events = await _run(_service(annotate=annotate), _opts(annotate=False))
@@ -198,6 +245,37 @@ class TestSchemaTrack:
 
 class TestKeyGate:
     @pytest.mark.asyncio
+    async def test_key_save_wakes_gate_before_poll_interval(self):
+        results = [
+            {"valid": False, "reason": "no_key"},
+            {"valid": True, "reason": "ok"},
+        ]
+        annotate = FakeAnnotate()
+        service = _service(
+            annotate=annotate,
+            validator=lambda: results.pop(0) if results else {"valid": True},
+        )
+        key_wakeup = asyncio.Event()
+        events = service.run(
+            "imdb",
+            {"engine": "postgresql"},
+            _opts(deploy=False, key_poll_seconds=30.0),
+            key_wakeup=key_wakeup,
+        )
+
+        seen = []
+        async for event in events:
+            seen.append(event)
+            if isinstance(event, BootstrapNeedsKeyEvent):
+                key_wakeup.set()
+                break
+
+        seen.extend(await asyncio.wait_for(_drain(events), timeout=1.0))
+
+        assert annotate.calls == 1
+        assert _stages(seen, "annotate")[-1][0] == "done"
+
+    @pytest.mark.asyncio
     async def test_missing_key_emits_needs_key_then_resumes_when_key_lands(self):
         results = [{"valid": False, "reason": "no_key"}, {"valid": True, "reason": "ok"}]
         annotate = FakeAnnotate()
@@ -205,25 +283,73 @@ class TestKeyGate:
             annotate=annotate, validator=lambda: results.pop(0) if results else {"valid": True}
         )
 
-        events = await _run(service, _opts(key_wait_seconds=1.0))
+        events = await _run(service)
 
         assert any(isinstance(e, BootstrapNeedsKeyEvent) for e in events)
         assert annotate.calls == 1
         assert _stages(events, "annotate")[-1][0] == "done"
 
     @pytest.mark.asyncio
-    async def test_key_never_lands_skips_annotate_but_deploy_completes(self):
+    async def test_rejected_key_stays_parked_until_valid_replacement(self):
+        results = [
+            {"valid": False, "reason": "no_key"},
+            {"valid": False, "reason": "rejected"},
+            {"valid": True, "reason": "ok"},
+        ]
+        rejected_checked = threading.Event()
+        validation_calls = 0
+
+        def validate_key():
+            nonlocal validation_calls
+            result = results.pop(0)
+            validation_calls += 1
+            if result["reason"] == "rejected":
+                rejected_checked.set()
+            return result
+
         annotate = FakeAnnotate()
+        service = _service(annotate=annotate, validator=validate_key)
+        registry = RunRegistry()
+        key_wakeup = asyncio.Event()
+        run_id = registry.start(
+            "bootstrap",
+            "imdb",
+            service.run(
+                "imdb",
+                {"engine": "postgresql"},
+                _opts(deploy=False, key_poll_seconds=30.0),
+                key_wakeup=key_wakeup,
+            ),
+            resume_event=key_wakeup,
+        )
+        await _wait_run_status(registry, run_id, "needs_key")
+
+        assert registry.wake_needs_key() == 1
+        assert await asyncio.to_thread(rejected_checked.wait, 1.0)
+        assert registry.status(run_id) == "needs_key"
+        assert annotate.calls == 0
+
+        assert registry.wake_needs_key() == 1
+        events = await _collect_run(registry, run_id)
+
+        assert validation_calls == 3
+        assert annotate.calls == 1
+        assert registry.status(run_id) == "done"
+        assert [event["event"] for event in events].count("needs_key") == 1
+
+    @pytest.mark.asyncio
+    async def test_key_never_lands_remains_parked(self):
         service = _service(
-            annotate=annotate, validator=lambda: {"valid": False, "reason": "no_key"}
+            validator=lambda: {"valid": False, "reason": "no_key"}
         )
 
-        events = await _run(service)
+        wait = asyncio.create_task(service._await_key(_opts(), asyncio.Event()))
+        await asyncio.sleep(0.05)
 
-        assert any(isinstance(e, BootstrapNeedsKeyEvent) for e in events)
-        assert annotate.calls == 0
-        assert _stages(events, "annotate")[-1][0] == "skipped"
-        assert _stages(events, "deploy")[-1][0] == "done"
+        assert not wait.done()
+        wait.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await wait
 
 
 class TestDeployTrack:
@@ -255,6 +381,33 @@ class TestDeployTrack:
         errors = [e for e in events if isinstance(e, ErrorEvent)]
         assert any("docker not found" in e.message for e in errors)
         assert _stages(events, "annotate")[-1][0] == "done"
+
+    @pytest.mark.asyncio
+    async def test_registry_drains_schema_track_after_deploy_error(self):
+        class ExplodingCache(FakeCache):
+            async def deploy(self, input_data, options):
+                raise RuntimeError("docker not found")
+                yield  # pragma: no cover
+
+        registry = RunRegistry()
+        run_id = registry.start(
+            "bootstrap",
+            "imdb",
+            _service(cache=ExplodingCache()).run(
+                "imdb", {"engine": "postgresql"}, _opts()
+            ),
+        )
+
+        records = [record async for record in registry.events(run_id)]
+        annotation_stages = [
+            record["data"]
+            for record in records
+            if record["event"] == "bootstrap_stage"
+            and record["data"]["stage"] == "annotate"
+        ]
+
+        assert annotation_stages[-1]["status"] == "done"
+        assert records[-1]["data"]["status"] == "failed"
 
     @pytest.mark.asyncio
     async def test_child_events_surface_as_progress_with_detail(self):

@@ -60,6 +60,7 @@ class AnnotateStartedEvent:
     type: Literal["annotate_started"]
     tables: int
     message: str
+    completed_tables: int = 0
 
 
 @dataclass
@@ -86,12 +87,13 @@ class AnnotateTableCompleteEvent:
 
 @dataclass
 class AnnotateCompleteEvent:
-    """Annotation process completed successfully."""
+    """Annotation process completed, possibly with individual table failures."""
 
     type: Literal["annotate_complete"]
     success: bool
     tables_annotated: int
     columns_annotated: int
+    tables_failed: int
     message: str
 
 

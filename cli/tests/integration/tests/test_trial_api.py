@@ -9,6 +9,7 @@ on the on-disk trial config.
 
 from __future__ import annotations
 
+from features.trial.api import routes as trial_routes
 from shared.config.targets import TargetsConfig
 
 
@@ -53,6 +54,28 @@ async def test_status_reads_seeded_trial_from_disk(client, tmp_rdst_home):
     assert body["status"] == "active"
     assert body["remaining_cents"] == 350
     assert body["limit_cents"] == 500
+
+
+async def test_activate_trial_wakes_parked_jobs(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    class Registry:
+        wake_calls = 0
+
+        def wake_needs_key(self):
+            self.wake_calls += 1
+
+    registry = Registry()
+    monkeypatch.setattr(trial_routes, "run_registry", registry)
+
+    response = await client.post(
+        "/api/trial/activate",
+        json={"token": "trial-token-abc", "email": "user@example.com"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["success"] is True
+    assert registry.wake_calls == 1
 
 
 async def test_simulate_exhaust_flips_status_and_zeros_remaining(

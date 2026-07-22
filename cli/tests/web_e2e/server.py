@@ -15,6 +15,7 @@ from tests.web_e2e.fakes import (
     FakeAnalyzeService,
     FakeAskService,
     FakeAuditService,
+    FakeTargetBootstrapService,
     FakeCacheService,
     FakeInitService,
     FakeScanService,
@@ -29,6 +30,7 @@ from tests.web_e2e.fakes import (
 from features.analyze.api import routes as analyze_routes
 from features.ask.api import routes as ask_routes
 from features.audit.api import routes as audit_routes
+from features.bootstrap.api import routes as bootstrap_routes
 from features.cache.api import routes as cache_routes
 from features.init.api import routes as init_routes
 from features.scan.api import routes as scan_routes
@@ -40,6 +42,7 @@ from features.top.api import routes as top_routes
 analyze_routes.AnalyzeService = FakeAnalyzeService
 ask_routes.AskService = FakeAskService
 audit_routes.AuditService = FakeAuditService
+bootstrap_routes.TargetBootstrapService = FakeTargetBootstrapService
 cache_routes.CacheService = FakeCacheService
 init_routes.InitService = FakeInitService
 scan_routes.ScanService = FakeScanService

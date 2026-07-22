@@ -67,12 +67,32 @@ class AnnotateService:
 
         layer = manager.load(target)
         requested = [table_name] if table_name else list(layer.tables.keys())
-        work = [(name, layer.tables[name]) for name in requested if name in layer.tables]
+        all_work = [
+            (name, layer.tables[name]) for name in requested if name in layer.tables
+        ]
+        work = [
+            (name, table)
+            for name, table in all_work
+            if self._table_needs_annotation(table)
+        ]
+        completed_before = len(all_work) - len(work)
+        total_tables = len(all_work)
+
+        if completed_before and work:
+            start_message = (
+                f"Resuming annotation: {completed_before} of {total_tables} "
+                "table(s) already complete"
+            )
+        elif not work:
+            start_message = f"All {total_tables} table(s) already annotated"
+        else:
+            start_message = f"Starting annotation for {total_tables} table(s)..."
 
         yield AnnotateStartedEvent(
             type="annotate_started",
-            tables=len(work),
-            message=f"Starting annotation for {len(work)} table(s)...",
+            tables=total_tables,
+            completed_tables=completed_before,
+            message=start_message,
         )
 
         sample_data_fn = self._create_sample_data_function(target_config, sample_rows)
@@ -87,8 +107,8 @@ class AnnotateService:
                 yield AnnotateProgressEvent(
                     type="annotate_progress",
                     table=tbl_name,
-                    table_index=start + offset + 1,
-                    total_tables=len(work),
+                    table_index=completed_before + start + offset + 1,
+                    total_tables=total_tables,
                     message=f"Annotating {tbl_name}...",
                 )
 
@@ -126,8 +146,8 @@ class AnnotateService:
                     AnnotateTableCompleteEvent(
                         type="annotate_table_complete",
                         table=tbl_name,
-                        table_index=start + offset + 1,
-                        total_tables=len(work),
+                        table_index=completed_before + start + offset + 1,
+                        total_tables=total_tables,
                         columns_annotated=columns_added,
                     )
                 )
@@ -152,9 +172,10 @@ class AnnotateService:
 
         yield AnnotateCompleteEvent(
             type="annotate_complete",
-            success=True,
+            success=total_failures == 0,
             tables_annotated=total_tables_annotated,
             columns_annotated=total_columns_annotated,
+            tables_failed=total_failures,
             message=self._complete_message(
                 total_tables_annotated, total_columns_annotated, total_failures
             ),
@@ -178,8 +199,6 @@ class AnnotateService:
         samples rather than aborting the table.
         """
         pending = [name for name, col in table.columns.items() if col.needs_annotation]
-        if table.description and not pending:
-            return ("ok", None)
 
         sample_data = None
         if sample_data_fn:
@@ -199,6 +218,13 @@ class AnnotateService:
             return ("ok", result)
         except Exception as exc:
             return ("error", str(exc))
+
+    @staticmethod
+    def _table_needs_annotation(table: Any) -> bool:
+        """Whether a rerun still has useful AI work for this table."""
+        return not table.description or any(
+            column.needs_annotation for column in table.columns.values()
+        )
 
     @staticmethod
     def _apply_result(table: Any, result: Optional[dict]) -> tuple[int, int, bool]:
@@ -257,6 +283,8 @@ class AnnotateService:
 
     @staticmethod
     def _complete_message(tables: int, columns: int, failures: int) -> str:
+        if tables == 0 and columns == 0 and failures == 0:
+            return "Schema is already fully annotated"
         message = f"Annotated {tables} table(s) and {columns} column(s)"
         if failures:
             message += f" ({failures} AI request(s) failed)"

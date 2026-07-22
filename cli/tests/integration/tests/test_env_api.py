@@ -13,6 +13,7 @@ import os
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from shared.api.routes import env as env_routes
 from shared.config.targets import TargetsConfig
 
 
@@ -114,6 +115,28 @@ async def test_set_env_secret_session_only_when_persist_false(
     assert (
         inmemory_keyring.get_password("rdst-web", "PROD_DB_PASSWORD") is None
     )
+
+
+async def test_set_anthropic_secret_notifies_parked_work(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    class Registry:
+        wake_calls = 0
+
+        def wake_needs_key(self):
+            self.wake_calls += 1
+
+    registry = Registry()
+    monkeypatch.setattr(env_routes, "run_registry", registry)
+
+    response = await client.post(
+        "/api/env/set",
+        json={"name": "ANTHROPIC_API_KEY", "value": "sk-ant-test", "persist": False},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["success"] is True
+    assert registry.wake_calls == 1
 
 
 async def test_set_env_secret_rejects_non_allowlisted_name(

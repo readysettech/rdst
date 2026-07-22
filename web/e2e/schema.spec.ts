@@ -47,6 +47,17 @@ const semanticLayer = {
   },
 }
 
+test('shows only the actionable password notice for a locked target', async ({
+  page,
+}) => {
+  await configureTestTarget(page)
+
+  await page.goto('/schema')
+
+  await expect(page.getByText('Connection needs a password')).toBeVisible()
+  await expect(page.getByText(/^Error: HTTP 423:/)).toHaveCount(0)
+})
+
 test('initializes, explores, refreshes, and deletes a semantic layer', async ({
   page,
 }) => {
