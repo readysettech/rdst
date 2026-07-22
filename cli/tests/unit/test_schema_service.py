@@ -9,6 +9,8 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from typing import Any, Dict, List
 
+from features.schema.semantic_layer.manager import SemanticLayerManager
+from features.schema.semantic_models import SemanticLayer, TableAnnotation
 from features.schema.service import SchemaService
 from features.schema.models import (
     SchemaCustomType,
@@ -81,6 +83,8 @@ class TestSchemaServiceGetStatus:
             "relationships": 3,
             "terminology": 10,
             "updated_at": "2024-01-01T00:00:00Z",
+            "profiled_tables": 2,
+            "profiled_at": "2024-01-02T00:00:00Z",
         }
 
         status = service.get_status("test-target")
@@ -92,6 +96,8 @@ class TestSchemaServiceGetStatus:
         assert status.columns == 25
         assert status.relationships == 3
         assert status.terminology == 10
+        assert status.profiled_tables == 2
+        assert status.profiled_at == "2024-01-02T00:00:00Z"
 
     def test_returns_empty_status_when_not_exists(self, service):
         """Test get_status when semantic layer doesn't exist."""
@@ -889,3 +895,36 @@ class TestSchemaTableNotFoundErrorSplit:
         msg = error_events[0].message
         assert "No semantic layer found" in msg
         assert " or " not in msg
+
+
+class TestGetSummaryProfileFields:
+    """get_summary must surface how much of the layer has been profiled."""
+
+    def _layer(self, tmp_path, profiled_at_by_table):
+        manager = SemanticLayerManager(base_dir=tmp_path)
+        layer = SemanticLayer(target="t")
+        for name, profiled_at in profiled_at_by_table.items():
+            table = TableAnnotation(name=name)
+            table.profiled_at = profiled_at
+            layer.tables[name] = table
+        manager.save(layer)
+        return manager
+
+    def test_unprofiled_layer_reports_zero(self, tmp_path):
+        manager = self._layer(tmp_path, {"users": "", "orders": ""})
+        summary = manager.get_summary("t")
+        assert summary["profiled_tables"] == 0
+        assert summary["profiled_at"] is None
+
+    def test_partial_profile_counts_and_latest_timestamp(self, tmp_path):
+        manager = self._layer(
+            tmp_path,
+            {
+                "users": "2026-07-20T10:00:00+00:00",
+                "orders": "",
+                "items": "2026-07-21T09:00:00+00:00",
+            },
+        )
+        summary = manager.get_summary("t")
+        assert summary["profiled_tables"] == 2
+        assert summary["profiled_at"] == "2026-07-21T09:00:00+00:00"

@@ -17,6 +17,8 @@ class SchemaStatus:
     relationships: int
     terminology: int
     updated_at: Optional[str]
+    profiled_tables: int = 0
+    profiled_at: Optional[str] = None
 
 
 @dataclass

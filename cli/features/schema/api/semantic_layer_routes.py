@@ -53,6 +53,8 @@ class SchemaStatusResponse(BaseModel):
     relationships: int
     terminology: int
     updated_at: Optional[str] = None
+    profiled_tables: int = 0
+    profiled_at: Optional[str] = None
 
 
 class SchemaTableColumnResponse(BaseModel):
@@ -62,6 +64,8 @@ class SchemaTableColumnResponse(BaseModel):
     unit: Optional[str] = None
     is_pii: bool = False
     enum_values: Optional[dict[str, str]] = None
+    null_fraction: Optional[float] = None
+    distinct_count: Optional[int] = None
 
 
 class SchemaTableRelationshipResponse(BaseModel):
@@ -228,6 +232,8 @@ def _status_to_response(status: SchemaStatus) -> SchemaStatusResponse:
         relationships=status.relationships,
         terminology=status.terminology,
         updated_at=status.updated_at,
+        profiled_tables=status.profiled_tables,
+        profiled_at=status.profiled_at,
     )
 
 
@@ -246,6 +252,8 @@ def _details_to_response(details: SchemaDetails) -> SchemaDetailsResponse:
                     unit=c.unit,
                     is_pii=c.is_pii,
                     enum_values=c.enum_values,
+                    null_fraction=c.null_fraction,
+                    distinct_count=c.distinct_count,
                 )
                 for c in t.columns
             ],

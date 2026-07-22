@@ -5747,6 +5747,13 @@ export interface components {
             columns: number;
             /** Exists */
             exists: boolean;
+            /** Profiled At */
+            profiled_at?: string | null;
+            /**
+             * Profiled Tables
+             * @default 0
+             */
+            profiled_tables?: number;
             /** Relationships */
             relationships: number;
             /** Tables */
@@ -5764,6 +5771,8 @@ export interface components {
             data_type?: string | null;
             /** Description */
             description?: string | null;
+            /** Distinct Count */
+            distinct_count?: number | null;
             /** Enum Values */
             enum_values?: {
                 [key: string]: string;
@@ -5775,6 +5784,8 @@ export interface components {
             is_pii?: boolean;
             /** Name */
             name: string;
+            /** Null Fraction */
+            null_fraction?: number | null;
             /** Unit */
             unit?: string | null;
         };

@@ -10,6 +10,8 @@ export interface SchemaStatus {
   relationships: number
   terminology: number
   updated_at: string | null
+  profiled_tables?: number
+  profiled_at?: string | null
 }
 
 export interface SchemaTableColumn {
@@ -18,6 +20,8 @@ export interface SchemaTableColumn {
   description: string | null
   unit: string | null
   is_pii: boolean
+  null_fraction?: number | null
+  distinct_count?: number | null
   enum_values: Record<string, string> | null
 }
 

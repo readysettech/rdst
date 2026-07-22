@@ -127,6 +127,12 @@ export function SchemaGuidedSequence({
   const { totalTables, totalColumns, undocumentedTables, undocumentedColumns, pct } =
     coverage(schema)
   const updatedLabel = status.updated_at ? new Date(status.updated_at).toLocaleDateString() : null
+  const profiledTables = status.profiled_tables ?? 0
+  // The > 0 guard covers the empty-schema case, where 0 >= 0 would tick.
+  const profileDone = profiledTables > 0 && profiledTables >= status.tables
+  const profiledLabel = status.profiled_at
+    ? new Date(status.profiled_at).toLocaleDateString()
+    : null
 
   if (pct >= WELL_DOCUMENTED_PCT) {
     return (
@@ -200,18 +206,18 @@ export function SchemaGuidedSequence({
 
           <div className="border-t border-border-layout-1" />
 
-          {/* TODO(rdst-dma.7.1): no frontend profile-done signal yet (SchemaStatus
-              carries no profiled_at / stats), so this stays a numbered step rather
-              than a real done-tick like Structure. */}
           <StageRow
             index={2}
+            done={profileDone}
             title="Column profile"
             what="Shapes, ranges, null rates, and sample values, sampled with read-only queries."
             cost="Read-only DB · no AI"
             action={ghost('Profile', 'speedometer', onProfile, profiling)}
           >
             <Text level="caption" className="text-content-layout-3">
-              Lets Ask reason about what's in a column, not just its name.
+              {profiledTables > 0
+                ? `Profiled · ${profiledTables} of ${status.tables} tables${profiledLabel ? ` · ${profiledLabel}` : ''}`
+                : "Lets Ask reason about what's in a column, not just its name."}
             </Text>
           </StageRow>
 

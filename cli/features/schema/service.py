@@ -60,6 +60,8 @@ class SchemaService:
             relationships=summary.get("relationships", 0),
             terminology=summary.get("terminology", 0),
             updated_at=summary.get("updated_at"),
+            profiled_tables=summary.get("profiled_tables", 0),
+            profiled_at=summary.get("profiled_at"),
         )
 
     def get_schema(

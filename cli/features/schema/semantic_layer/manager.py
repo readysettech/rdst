@@ -410,6 +410,10 @@ class SemanticLayerManager:
             len(table.relationships) for table in layer.tables.values()
         )
 
+        profile_stamps = [
+            table.profiled_at for table in layer.tables.values() if table.profiled_at
+        ]
+
         return {
             'exists': True,
             'tables': len(layer.tables),
@@ -417,5 +421,7 @@ class SemanticLayerManager:
             'relationships': total_relationships,
             'terminology': len(layer.terminology),
             'metrics': len(layer.metrics),
-            'updated_at': layer.updated_at.isoformat()
+            'updated_at': layer.updated_at.isoformat(),
+            'profiled_tables': len(profile_stamps),
+            'profiled_at': max(profile_stamps) if profile_stamps else None,
         }

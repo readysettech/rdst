@@ -7977,6 +7977,22 @@
             "title": "Exists",
             "type": "boolean"
           },
+          "profiled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profiled At"
+          },
+          "profiled_tables": {
+            "default": 0,
+            "title": "Profiled Tables",
+            "type": "integer"
+          },
           "relationships": {
             "title": "Relationships",
             "type": "integer"
@@ -8040,6 +8056,17 @@
             ],
             "title": "Description"
           },
+          "distinct_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distinct Count"
+          },
           "enum_values": {
             "anyOf": [
               {
@@ -8062,6 +8089,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "null_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Null Fraction"
           },
           "unit": {
             "anyOf": [
