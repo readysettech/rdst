@@ -246,7 +246,7 @@ class TestConfigureCommandNoTargetError:
 class TestPgVersionNotTruncated:
     """PG version string must not be truncated at 80 chars.
 
-    Tests the truncation logic used in _perform_connection_test:
+    Tests the truncation logic used in perform_connection_test:
         (version[:120] + "...") if len(version) > 120 else version
     """
 
@@ -312,7 +312,7 @@ class TestTestConnectionSingleStatusMessage:
         with patch.object(service, "_load_config", return_value=mock_cfg):
             with patch.object(
                 service,
-                "_perform_connection_test",
+                "perform_connection_test",
                 new_callable=AsyncMock,
                 return_value={"success": True, "message": "Connected!", "server_version": "PG 15"},
             ):

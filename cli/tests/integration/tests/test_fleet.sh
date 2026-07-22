@@ -130,14 +130,14 @@ EOF
   # Test 10: Audit with LLM insights + health score (requires ANTHROPIC_API_KEY)
   # --------------------------------------------------------------------------
 
-  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  if [[ -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
     run_cmd "Audit: with LLM insights" "${RDST_CMD[@]}" audit \
       --target "fleet-${DB_ENGINE}" -v
     assert_contains "Health Score" "audit insights has health score"
     assert_contains "Next Steps" "audit insights has next steps"
     echo "PASS: Audit with LLM insights"
   else
-    echo "SKIP: Audit with LLM insights (no ANTHROPIC_API_KEY)"
+    echo "SKIP: Audit with LLM insights (no ANTHROPIC_API_KEY or SKIP_LLM_INSIGHT_TESTS=true)"
   fi
 
   # --------------------------------------------------------------------------
@@ -240,21 +240,21 @@ EOF
   # Test 21: Fleet Audit with LLM Insights (no duration)
   # --------------------------------------------------------------------------
 
-  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  if [[ -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
     run_cmd "Fleet: audit with insights" "${RDST_CMD[@]}" fleet audit \
       --group integration-group --json
     assert_contains "fleet-${DB_ENGINE}" "fleet audit insights includes target"
     assert_contains "insights" "fleet audit has insights in JSON"
     echo "PASS: Fleet audit with LLM insights"
   else
-    echo "SKIP: Fleet audit with LLM insights (no ANTHROPIC_API_KEY)"
+    echo "SKIP: Fleet audit with LLM insights (no ANTHROPIC_API_KEY or SKIP_LLM_INSIGHT_TESTS=true)"
   fi
 
   # --------------------------------------------------------------------------
   # Test 22: Query run --file with --analyze
   # --------------------------------------------------------------------------
 
-  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  if [[ -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
     ANALYZE_CSV="$TMP_RUN/analyze_queries.csv"
     if [[ "$DB_ENGINE" == "postgresql" ]]; then
       cat > "$ANALYZE_CSV" << 'EOF'
@@ -287,7 +287,7 @@ EOF
   # Verifies: captured queries, RS speedup data, health score, no pricing.
   # ==========================================================================
 
-  if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" && -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" && -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
     echo ""
     echo "=== TEST 23: Audit with duration + RS cache + verbose (${DB_ENGINE}) ==="
 
@@ -337,7 +337,7 @@ sys.exit(0 if fast else 1)
   # Test 24: Fleet audit with --duration + verbose
   # ==========================================================================
 
-  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  if [[ -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
     echo ""
     echo "=== TEST 24: Fleet audit + duration + verbose (${DB_ENGINE}) ==="
 

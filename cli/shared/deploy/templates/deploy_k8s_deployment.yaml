@@ -38,7 +38,7 @@ spec:
         - name: DEPLOYMENT_ENV
           value: "rdst_k8s"
         - name: QUERY_CACHING
-          value: "explicit"
+          value: "{query_caching}"
         - name: CACHE_MODE
           value: "shallow"
         resources:

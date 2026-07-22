@@ -98,7 +98,7 @@ test_scan_no_schema() {
   run_expect_fail "Scan without schema initialized" \
     "${RDST_CMD[@]}" scan "/tmp" --schema "no-such-target-xyz-$$"
   assert_contains "No schema found" "should report missing schema"
-  assert_contains "rdst schema init" "should suggest schema init command"
+  assert_contains "No schema found" "should explain the missing schema"
 }
 
 # -----------------------------------------------------------------------------

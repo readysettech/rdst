@@ -239,7 +239,7 @@ for i, line in enumerate(lines):
   # Test 11: Audit with --duration AND LLM insights
   # ============================================================================
 
-  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  if [[ -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
     # Start background workload
     local capture_pid3=""
     if [[ -f "$capture_script" ]]; then
@@ -275,7 +275,7 @@ for i, line in enumerate(lines):
   # appears in the JSON output.
   # ==========================================================================
 
-  if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" && -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" && -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
     echo ""
     echo "=== TEST 10: Audit duration + RS cache benchmarking (${DB_ENGINE}) ==="
 

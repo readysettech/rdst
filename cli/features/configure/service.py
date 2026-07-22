@@ -321,7 +321,7 @@ class ConfigureService:
                 message="Connecting...",
             )
 
-            result = await self._perform_connection_test(target_config)
+            result = await self.perform_connection_test(target_config)
 
             if result["success"]:
                 yield ConfigureConnectionTestEvent(
@@ -347,7 +347,7 @@ class ConfigureService:
                 target_name=name,
             )
 
-    async def _perform_connection_test(
+    async def perform_connection_test(
         self,
         config: Dict[str, Any],
     ) -> Dict[str, Any]:

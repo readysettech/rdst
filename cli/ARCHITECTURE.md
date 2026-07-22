@@ -77,6 +77,7 @@ Current feature-owned domains:
 - `analyze`
 - `ask`
 - `audit`
+- `bootstrap`
 - `cache`
 - `configure`
 - `demo`
@@ -101,6 +102,7 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 - `analyze`: query analysis, explain flows, rewrite evaluation, analysis rendering
 - `ask`: natural-language-to-SQL, Ask engine, validation, Ask prompts, Ask debug tooling
 - `audit`: audit workflows, capture, storage, scoring, audit prompts
+- `bootstrap`: post-add target bootstrap orchestration and its run API
 - `cache`: Readyset setup, cacheability, deployment, cache command flows
 - `configure`: target configuration, connection profiles, setup wizard, config API
 - `demo`: demo setup and sample data loading

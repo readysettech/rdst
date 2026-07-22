@@ -215,13 +215,15 @@ test_cache_drop_all() {
 }
 
 test_cache_error_wrong_target() {
-  log_section "Cache Commands: Error - Wrong Target Type (${DB_ENGINE})"
+  log_section "Cache Commands: Database Target Resolution (${DB_ENGINE})"
 
-  # Try cache command against database target (not Readyset)
-  run_expect_fail "Cache show on database target" \
+  # Cache commands accept the database target and resolve its cache sibling
+  # (the Queries-workbench rework); with the sibling deployed and drained by
+  # the drop-all test above, this reports an empty list rather than a
+  # target-type error.
+  run_cmd "Cache show on database target resolves to cache sibling" \
     "${RDST_CMD[@]}" cache show --target "$TARGET_NAME"
-  assert_contains "database target" "should explain target type issue"
-  assert_contains "rdst cache deploy" "should hint to deploy"
+  assert_contains "No caches found" "resolved target reports empty cache list"
 }
 
 test_cache_error_unsupported_query() {
@@ -231,7 +233,7 @@ test_cache_error_unsupported_query() {
   run_expect_fail "Cache add INSERT" \
     "${RDST_CMD[@]}" cache add "INSERT INTO title_basics (tconst) VALUES ('test')" \
     --target "$CACHE_TARGET_NAME"
-  assert_contains "not cacheable" "should reject non-SELECT"
+  assert_contains "Only SELECT queries can be cached" "should reject non-SELECT"
 
   # Try caching NOW() (non-deterministic)
   run_expect_fail "Cache add NOW()" \

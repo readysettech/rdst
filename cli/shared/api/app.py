@@ -153,6 +153,7 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
     from features.analyze.events import AnalyzeEvent
     from features.ask.events import AskEvent
     from features.audit.events import AuditEvent, WorkloadEvent
+    from features.bootstrap.events import BootstrapEvent
     from features.fleet.events import FleetEvent
     from features.cache.readyset_events import (
         ReadysetCacheEvent,
@@ -167,6 +168,10 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
         "AnalyzeEvent": (AnalyzeEvent, ["/api/analyze", "/api/analyze/quick"]),
         "AskEvent": (AskEvent, ["/api/ask"]),
         "AuditEvent": (AuditEvent, ["/api/audit", "/api/fleet/audit"]),
+        "BootstrapEvent": (
+            BootstrapEvent,
+            ["/api/bootstrap/runs/{run_id}/events"],
+        ),
         "ChatEvent": (ChatEvent, ["/api/agents/chat/sessions/{session_id}/message"]),
         "WorkloadEvent": (WorkloadEvent, ["/api/audit/capture"]),
         "FleetEvent": (FleetEvent, ["/api/fleet/status", "/api/fleet/import", "/api/fleet/discover"]),
@@ -274,6 +279,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     from features.analyze.api import routes as analyze
     from features.ask.api import routes as ask
     from features.audit.api import routes as audit
+    from features.bootstrap.api import routes as bootstrap
     from features.fleet.api import routes as fleet
     from features.guard.api import routes as guard
     from features.cache.api import readyset_routes as readyset
@@ -293,6 +299,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(agent.router, prefix="/api")
     app.include_router(analyze.router, prefix="/api")
     app.include_router(audit.router, prefix="/api", tags=["audit"])
+    app.include_router(bootstrap.router, prefix="/api", tags=["bootstrap"])
     app.include_router(browse.router, prefix="/api", tags=["browse"])
     app.include_router(fleet.router, prefix="/api", tags=["fleet"])
     app.include_router(guard.router, prefix="/api")
