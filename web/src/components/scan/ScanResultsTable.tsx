@@ -3,53 +3,60 @@
  * Div-based stacked row layout (no <table>)
  */
 
-import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from '@tanstack/react-router';
-import { Button } from '@rs/ui-new/button';
-import { Scrollable } from '@rs/ui-new/scrollable';
-import { Text } from '@rs/ui-new/text';
-import { Icon } from '@rs/ui-new/icon';
-import { Tag } from '@rs/ui-new/tag';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { Card } from '@rs/ui-new/card';
-import { Show } from '@rs/ui-new/show';
-import { m, AnimatePresence } from '@rs/ui-new/motion';
-import { Modal, ModalContent, ModalContentContainer, ModalTitle } from '@rs/ui-new/modal';
-import { Highlight } from '@rs/ui-new/highlight';
-import { SQLDisplay } from '../SQLDisplay';
-import { useFormatSql } from '../../lib/useFormatSql';
-import { collapseWhitespace } from '../../lib/collapseWhitespace';
-import type { ScanQuery, ScanState } from '../../types/scan';
+import { Button } from '@rs/ui-new/button'
+import { Card } from '@rs/ui-new/card'
+import { Highlight } from '@rs/ui-new/highlight'
+import { Icon } from '@rs/ui-new/icon'
+import {
+  Modal,
+  ModalContent,
+  ModalContentContainer,
+  ModalTitle,
+} from '@rs/ui-new/modal'
+import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { Scrollable } from '@rs/ui-new/scrollable'
+import { Show } from '@rs/ui-new/show'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
+import { Text } from '@rs/ui-new/text'
+import { useNavigate } from '@tanstack/react-router'
+import { useCallback, useMemo, useState } from 'react'
+import { collapseWhitespace } from '../../lib/collapseWhitespace'
+import { useFormatSql } from '../../lib/useFormatSql'
+import type { ScanQuery, ScanState } from '../../types/scan'
+import { SQLDisplay } from '../SQLDisplay'
 
 interface ScanResultsTableProps {
-  queries: ScanQuery[];
-  state: ScanState;
-  target: string | null;
-  onCacheQuery?: (sql: string, id: string) => void;
-  cachingHash?: string | null;
+  queries: ScanQuery[]
+  state: ScanState
+  target: string | null
+  onCacheQuery?: (sql: string, id: string) => void
+  cachingHash?: string | null
 }
 
 interface FileGroup {
-  file: string;
-  queries: ScanQuery[];
+  file: string
+  queries: ScanQuery[]
 }
 
 function groupByFile(queries: ScanQuery[]): FileGroup[] {
-  const map = new Map<string, ScanQuery[]>();
+  const map = new Map<string, ScanQuery[]>()
   for (const q of queries) {
-    const existing = map.get(q.file);
+    const existing = map.get(q.file)
     if (existing) {
-      existing.push(q);
+      existing.push(q)
     } else {
-      map.set(q.file, [q]);
+      map.set(q.file, [q])
     }
   }
-  return Array.from(map.entries()).map(([file, queries]) => ({ file, queries }));
+  return Array.from(map.entries()).map(([file, queries]) => ({ file, queries }))
 }
 
 function guessOrmLanguage(ormType: string): 'js' | 'python' {
-  const pythonOrms = ['sqlalchemy', 'django', 'peewee', 'tortoise'];
-  return pythonOrms.some((o) => ormType.toLowerCase().includes(o)) ? 'python' : 'js';
+  const pythonOrms = ['sqlalchemy', 'django', 'peewee', 'tortoise']
+  return pythonOrms.some((o) => ormType.toLowerCase().includes(o))
+    ? 'python'
+    : 'js'
 }
 
 function EmptyState({
@@ -57,47 +64,63 @@ function EmptyState({
   hint,
   icon,
 }: {
-  message: string;
-  hint?: string;
-  icon: 'search' | 'folder-file';
+  message: string
+  hint?: string
+  icon: 'search' | 'folder-file'
 }) {
   return (
     <Card className="w-full">
       <Card.Content className="py-16">
         <VStack className="gap-3 items-center">
           <div className="w-14 h-14 rounded-2xl bg-surface-layout-2 flex items-center justify-center">
-            <Icon name={icon} label="Empty" className="w-7 h-7 text-content-layout-3" />
+            <Icon
+              name={icon}
+              label="Empty"
+              className="w-7 h-7 text-content-layout-3"
+            />
           </div>
-          <Text level="body-small" className="text-content-layout-2 text-center max-w-md">
+          <Text
+            level="body-small"
+            className="text-content-layout-2 text-center max-w-md"
+          >
             {message}
           </Text>
           {hint && (
-            <Text level="caption" className="text-content-layout-3 text-center max-w-md">
+            <Text
+              level="caption"
+              className="text-content-layout-3 text-center max-w-md"
+            >
               {hint}
             </Text>
           )}
         </VStack>
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 interface QueryDetailModalProps {
-  query: ScanQuery | null;
-  onClose: () => void;
-  onAnalyze: () => void;
+  query: ScanQuery | null
+  onClose: () => void
+  onAnalyze: () => void
 }
 
-function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) {
-  const formattedSql = useFormatSql(query?.sql ?? null);
-  const displaySql = formattedSql ?? query?.sql ?? '';
+function QueryDetailModal({
+  query,
+  onClose,
+  onAnalyze,
+}: QueryDetailModalProps) {
+  const formattedSql = useFormatSql(query?.sql ?? null)
+  const displaySql = formattedSql ?? query?.sql ?? ''
 
   return (
     <Modal open={!!query} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={!!query}>
         <ModalContent size="large" className="p-0 gap-0 shadow-elevation-3">
           <ModalTitle className="sr-only">
-            {query ? `${query.function || query.class || 'Query'} details` : 'Query details'}
+            {query
+              ? `${query.function || query.class || 'Query'} details`
+              : 'Query details'}
           </ModalTitle>
           {query && (
             <>
@@ -113,7 +136,11 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
                     />
                   </div>
                   <div className="min-w-0">
-                    <Text as="h2" level="headline-5" className="text-content-layout-1 truncate">
+                    <Text
+                      as="h2"
+                      level="headline-5"
+                      className="text-content-layout-1 truncate"
+                    >
                       {query.function || query.class || '?'}()
                     </Text>
                     <HStack className="gap-2 items-center">
@@ -121,10 +148,20 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
                         {query.file}:{query.start_line}
                       </Text>
                       {query.status === 'sql' && (
-                        <Tag size="small" variant="positive" modifier="ghost" label="sql" />
+                        <Tag
+                          size="small"
+                          variant="positive"
+                          modifier="ghost"
+                          label="sql"
+                        />
                       )}
                       {query.status === 'skipped' && (
-                        <Tag size="small" variant="informative" modifier="ghost" label="skip" />
+                        <Tag
+                          size="small"
+                          variant="informative"
+                          modifier="ghost"
+                          label="skip"
+                        />
                       )}
                       {query.issues.length > 0 && (
                         <Tag
@@ -194,7 +231,10 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
                               label="Issue"
                               className="w-3.5 h-3.5 text-content-warning-soft shrink-0 mt-0.5"
                             />
-                            <Text level="body-small" className="text-content-layout-2">
+                            <Text
+                              level="body-small"
+                              className="text-content-layout-2"
+                            >
                               {issue}
                             </Text>
                           </HStack>
@@ -213,7 +253,10 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
                       >
                         Skip Reason
                       </Text>
-                      <Text level="body-small" className="text-content-layout-3 italic">
+                      <Text
+                        level="body-small"
+                        className="text-content-layout-3 italic"
+                      >
                         {query.skip_reason}
                       </Text>
                     </div>
@@ -245,22 +288,31 @@ function QueryDetailModal({ query, onClose, onAnalyze }: QueryDetailModalProps) 
         </ModalContent>
       </ModalContentContainer>
     </Modal>
-  );
+  )
 }
 
 interface QueryRowProps {
-  query: ScanQuery;
-  qIdx: number;
-  onViewDetail: () => void;
-  onAnalyze: () => void;
-  onCache?: () => void;
-  isCaching?: boolean;
+  query: ScanQuery
+  qIdx: number
+  onViewDetail: () => void
+  onAnalyze: () => void
+  onCache?: () => void
+  isCaching?: boolean
 }
 
-function QueryRow({ query, qIdx, onViewDetail, onAnalyze, onCache, isCaching }: QueryRowProps) {
-  const collapsedSql = query.sql ? collapseWhitespace(query.sql) : '';
+function QueryRow({
+  query,
+  qIdx,
+  onViewDetail,
+  onAnalyze,
+  onCache,
+  isCaching,
+}: QueryRowProps) {
+  const collapsedSql = query.sql ? collapseWhitespace(query.sql) : ''
   const sqlPreview =
-    collapsedSql.length > 120 ? `${collapsedSql.slice(0, 120)}...` : collapsedSql;
+    collapsedSql.length > 120
+      ? `${collapsedSql.slice(0, 120)}...`
+      : collapsedSql
 
   return (
     <m.div
@@ -275,20 +327,38 @@ function QueryRow({ query, qIdx, onViewDetail, onAnalyze, onCache, isCaching }: 
       {/* Line 1: Identity + metadata + action */}
       <HStack className="justify-between items-center gap-3">
         <HStack className="gap-2.5 items-center min-w-0 flex-1">
-          <Text as="span" level="mono-small" className="text-content-layout-2 shrink-0">
+          <Text
+            as="span"
+            level="mono-small"
+            className="text-content-layout-2 shrink-0"
+          >
             :{query.start_line}
           </Text>
-          <Text as="span" level="mono-small" className="text-content-layout-1 truncate">
+          <Text
+            as="span"
+            level="mono-small"
+            className="text-content-layout-1 truncate"
+          >
             {query.function || query.class || '?'}()
           </Text>
           {query.status === 'sql' && (
             <Tag size="small" variant="positive" modifier="ghost" label="sql" />
           )}
           {query.status === 'skipped' && (
-            <Tag size="small" variant="informative" modifier="ghost" label="skip" />
+            <Tag
+              size="small"
+              variant="informative"
+              modifier="ghost"
+              label="skip"
+            />
           )}
           {query.status === 'pending' && (
-            <Tag size="small" variant="informative" modifier="ghost" label="pending" />
+            <Tag
+              size="small"
+              variant="informative"
+              modifier="ghost"
+              label="pending"
+            />
           )}
           {query.issues.length > 0 && (
             <Tag
@@ -307,7 +377,7 @@ function QueryRow({ query, qIdx, onViewDetail, onAnalyze, onCache, isCaching }: 
               size="small"
               icon="database-settings"
               iconPosition="left"
-              label="Cache"
+              label={isCaching ? 'Testing…' : 'Compare speed'}
               loading={isCaching}
               onClick={onCache}
             />
@@ -341,67 +411,85 @@ function QueryRow({ query, qIdx, onViewDetail, onAnalyze, onCache, isCaching }: 
                 label="View detail"
                 className="w-3 h-3 text-content-layout-3 shrink-0"
               />
-              <Text level="mono-small" className="text-content-layout-2 truncate">
+              <Text
+                level="mono-small"
+                className="text-content-layout-2 truncate"
+              >
                 {sqlPreview}
               </Text>
             </button>
           ) : query.status === 'skipped' ? (
-            <Text level="mono-small" className="text-content-layout-3 italic truncate block">
+            <Text
+              level="mono-small"
+              className="text-content-layout-3 italic truncate block"
+            >
               {query.skip_reason || 'Skipped'}
             </Text>
           ) : (
-            <Text level="mono-small" className="text-content-layout-3">--</Text>
+            <Text level="mono-small" className="text-content-layout-3">
+              --
+            </Text>
           )}
         </div>
-        <Text as="span" level="caption" className="text-content-layout-3 shrink-0">
+        <Text
+          as="span"
+          level="caption"
+          className="text-content-layout-3 shrink-0"
+        >
           {query.orm_type || query.terminal_method}
         </Text>
       </HStack>
     </m.div>
-  );
+  )
 }
 
-export function ScanResultsTable({ queries, state, target, onCacheQuery, cachingHash }: ScanResultsTableProps) {
-  const navigate = useNavigate();
-  const [detailQuery, setDetailQuery] = useState<ScanQuery | null>(null);
-  const fileGroups = useMemo(() => groupByFile(queries), [queries]);
+export function ScanResultsTable({
+  queries,
+  state,
+  target,
+  onCacheQuery,
+  cachingHash,
+}: ScanResultsTableProps) {
+  const navigate = useNavigate()
+  const [detailQuery, setDetailQuery] = useState<ScanQuery | null>(null)
+  const fileGroups = useMemo(() => groupByFile(queries), [queries])
 
   // Track which files are expanded (default: all collapsed)
-  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
 
   const toggleFile = useCallback((file: string) => {
     setExpandedFiles((prev) => {
-      const next = new Set(prev);
+      const next = new Set(prev)
       if (next.has(file)) {
-        next.delete(file);
+        next.delete(file)
       } else {
-        next.add(file);
+        next.add(file)
       }
-      return next;
-    });
-  }, []);
+      return next
+    })
+  }, [])
 
   const handleAnalyze = useCallback(
     (query: ScanQuery) => {
-      if (!query.sql || query.status !== 'sql') return;
+      if (!query.sql || query.status !== 'sql') return
       navigate({
         to: '/results',
         search: { query: query.sql, target: target || undefined },
-      });
+      })
     },
     [navigate, target]
-  );
+  )
 
   if (state === 'idle') {
-    return null;
+    return null
   }
 
   if (state === 'scanning' && queries.length === 0) {
-    return null;
+    return null
   }
 
   if (state === 'error') {
-    return null;
+    return null
   }
 
   if (queries.length === 0 && state === 'complete') {
@@ -417,7 +505,7 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
           hint="Scan checks .py and .ts files for SQLAlchemy, Django, Prisma, and Drizzle queries."
         />
       </m.div>
-    );
+    )
   }
 
   return (
@@ -433,8 +521,15 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
             <div className="px-5 py-3 border-b border-border-layout-1 bg-surface-layout-2/50 space-y-1.5">
               <HStack className="justify-between items-center">
                 <HStack className="gap-2 items-center">
-                  <Icon name="layers" label="Results" className="w-4 h-4 text-content-layout-3" />
-                  <Text level="overline" className="text-content-layout-3 uppercase tracking-wider">
+                  <Icon
+                    name="layers"
+                    label="Results"
+                    className="w-4 h-4 text-content-layout-3"
+                  />
+                  <Text
+                    level="overline"
+                    className="text-content-layout-3 uppercase tracking-wider"
+                  >
                     Extracted Queries
                   </Text>
                 </HStack>
@@ -455,7 +550,11 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
               </HStack>
               {/* Honesty caveat at the point the converted SQL is shown */}
               <HStack className="gap-1.5 items-center">
-                <Icon name="alert" label="Experimental" className="w-3 h-3 text-content-warning-soft shrink-0" />
+                <Icon
+                  name="alert"
+                  label="Experimental"
+                  className="w-3 h-3 text-content-warning-soft shrink-0"
+                />
                 <Text level="caption" className="text-content-warning-soft">
                   Experimental · AI-converted SQL — verify before use
                 </Text>
@@ -466,10 +565,10 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
             <div className="divide-y divide-border-layout-1">
               <AnimatePresence mode="popLayout">
                 {fileGroups.map((group) => {
-                  const isCollapsed = !expandedFiles.has(group.file);
+                  const isCollapsed = !expandedFiles.has(group.file)
                   const sqlCount = group.queries.filter(
                     (q) => q.status === 'sql'
-                  ).length;
+                  ).length
 
                   return (
                     <div key={`file-${group.file}`}>
@@ -485,7 +584,9 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
                       >
                         <HStack className="gap-2.5 items-center min-w-0">
                           <Icon
-                            name={isCollapsed ? 'chevron-right' : 'chevron-down'}
+                            name={
+                              isCollapsed ? 'chevron-right' : 'chevron-down'
+                            }
                             label="Toggle"
                             className="w-4 h-4 text-content-layout-3 shrink-0"
                           />
@@ -494,7 +595,10 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
                             label="File"
                             className="w-4 h-4 text-content-layout-3 shrink-0"
                           />
-                          <Text level="label-small" className="text-content-layout-1 truncate flex-1">
+                          <Text
+                            level="label-small"
+                            className="text-content-layout-1 truncate flex-1"
+                          >
                             {group.file}
                           </Text>
                           <HStack className="gap-1.5 shrink-0">
@@ -528,7 +632,11 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
                               onAnalyze={() => handleAnalyze(query)}
                               onCache={
                                 onCacheQuery && query.sql
-                                  ? () => onCacheQuery(query.sql!, query.snippet_hash)
+                                  ? () =>
+                                      onCacheQuery(
+                                        query.sql!,
+                                        query.snippet_hash
+                                      )
                                   : undefined
                               }
                               isCaching={cachingHash === query.snippet_hash}
@@ -537,7 +645,7 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
                         </div>
                       )}
                     </div>
-                  );
+                  )
                 })}
               </AnimatePresence>
             </div>
@@ -550,10 +658,10 @@ export function ScanResultsTable({ queries, state, target, onCacheQuery, caching
         onClose={() => setDetailQuery(null)}
         onAnalyze={() => {
           if (detailQuery) {
-            handleAnalyze(detailQuery);
+            handleAnalyze(detailQuery)
           }
         }}
       />
     </>
-  );
+  )
 }

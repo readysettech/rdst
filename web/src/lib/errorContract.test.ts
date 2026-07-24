@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifyError,
-  isTrialExhaustedError,
   friendlySqlError,
+  isTrialExhaustedError,
+  normalizeExplainError,
   normalizeHttpError,
   normalizeSseError,
   recoveryFor,
@@ -140,6 +141,26 @@ describe('friendlySqlError', () => {
 
   it('falls back when there is no detail', () => {
     expect(friendlySqlError(undefined)).toMatch(/could not be analyzed/i)
+  })
+
+  it('keeps connection details out of the primary message', () => {
+    const raw =
+      'PostgreSQL EXPLAIN failed: connection to server at "127.0.0.1", port 15434 failed: Connection refused'
+    const envelope = normalizeExplainError(raw)
+
+    expect(envelope.code).toBe('database_connection')
+    expect(envelope.message).toBe(
+      'Could not connect to the database. Check that it is running and reachable, then try again.'
+    )
+    expect(envelope.message).not.toContain('127.0.0.1')
+    expect(envelope.detail).toBe(raw)
+  })
+
+  it('classifies actual SQL failures as invalid SQL', () => {
+    const envelope = normalizeExplainError('syntax error at or near "SELCT"')
+
+    expect(envelope.code).toBe('invalid_sql')
+    expect(envelope.message).toContain('SQL syntax error')
   })
 })
 

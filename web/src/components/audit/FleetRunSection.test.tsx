@@ -121,6 +121,22 @@ describe('FleetRunSection live activity', () => {
     expect(screen.queryByText('alpha')).toBeNull()
   })
 
+  it('shows the Readyset comparison summary for a completed target', () => {
+    renderRun({
+      status: 'done',
+      verdict: 'right_sized',
+      cacheScore: 80,
+      readysetComparison: {
+        queries_tested: 4,
+        supported_count: 3,
+        avg_speedup: 8.5,
+        queries: [],
+      },
+    })
+
+    expect(screen.getByText('Readyset 3/4 cacheable · 8.5x avg')).toBeTruthy()
+  })
+
   it('renders a no-query Readyset skip as a calm completed result', () => {
     renderRun(
       {
@@ -173,7 +189,9 @@ describe('FleetRunSection live activity', () => {
       statusMessage: 'Benchmarking alpha',
     })
 
-    expect(screen.getByText('Benchmarking alpha; 1 capture queued')).toBeTruthy()
+    expect(
+      screen.getByText('Benchmarking alpha; 1 capture queued')
+    ).toBeTruthy()
     expect(screen.getAllByText('Benchmarking', { exact: true })).toHaveLength(1)
     expect(screen.getAllByText('Queued', { exact: true })).toHaveLength(1)
   })

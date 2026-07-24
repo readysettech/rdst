@@ -71,7 +71,6 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 source "${SCRIPT_DIR}/tests/test_config.sh"
 source "${SCRIPT_DIR}/tests/test_analyze.sh"
 source "${SCRIPT_DIR}/tests/test_cache.sh"
-source "${SCRIPT_DIR}/tests/test_cache_commands.sh"
 source "${SCRIPT_DIR}/tests/test_top_and_registry.sh"
 source "${SCRIPT_DIR}/tests/test_query_command.sh"
 source "${SCRIPT_DIR}/tests/test_errors.sh"
@@ -165,7 +164,6 @@ run_test_suite() {
     if should_run_area "cache"; then
       if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" ]]; then
         test_cache_commands
-        test_cache_subcommands
         test_readyset_flag
       else
         echo ""

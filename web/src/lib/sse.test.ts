@@ -22,9 +22,11 @@ describe('useAnalyze unknown events', () => {
     __resetTargetSwitchLockForTests()
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        sseResponse('event: unknown\ndata: {"message":"x"}\n\n')
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse('event: unknown\ndata: {"message":"x"}\n\n')
+        )
     )
 
     const { result } = renderHook(() => useAnalyze())
@@ -55,7 +57,10 @@ describe('useAnalyze unknown events', () => {
 
     let analyzePromise = Promise.resolve()
     act(() => {
-      analyzePromise = result.current.analyze.analyze({ query: 'SELECT 1', target: 'prod' })
+      analyzePromise = result.current.analyze.analyze({
+        query: 'SELECT 1',
+        target: 'prod',
+      })
     })
 
     await waitFor(() => {
@@ -78,6 +83,39 @@ describe('useAnalyze unknown events', () => {
     await waitFor(() => {
       expect(result.current.lock.isLocked).toBe(false)
       expect(result.current.lock.message).toBe('')
+    })
+  })
+
+  it('treats an EXPLAIN connection failure as a database error, not invalid SQL', async () => {
+    const raw =
+      'PostgreSQL EXPLAIN failed: connection to server at "127.0.0.1", port 15434 failed: Connection refused'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        sseResponse(
+          `event: complete\ndata: ${JSON.stringify({
+            success: true,
+            analysis_id: 'a1',
+            query_hash: 'h1',
+            explain_results: { success: false, error: raw },
+            llm_analysis: {},
+          })}\n\n`
+        )
+      )
+    )
+
+    const { result } = renderHook(() => useAnalyze())
+
+    await act(async () => {
+      await result.current.analyze({ query: 'SELECT 1', target: 'prod' })
+    })
+
+    expect(result.current.state).toBe('error')
+    expect(result.current.errorEnvelope).toEqual({
+      code: 'database_connection',
+      message:
+        'Could not connect to the database. Check that it is running and reachable, then try again.',
+      detail: raw,
     })
   })
 })

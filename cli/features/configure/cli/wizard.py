@@ -3,6 +3,7 @@ Modern interactive configuration wizard for rdst CLI.
 Handles database target configuration with a beautiful, step-by-step interface.
 """
 
+import asyncio
 from typing import List, Dict, Optional, Any
 
 from shared.cli.types import RdstResult
@@ -194,9 +195,26 @@ class ConfigurationWizard:
                 self._show_info("Cancelled", "Target removal cancelled")
                 return RdstResult(False, "Removal cancelled")
 
-        # Remove target
-        cfg.remove(name)
-        cfg.save()
+        # Use the same lifecycle-aware service as the non-interactive CLI and
+        # web API so an owned sandbox is retired before credentials disappear.
+        from ..service import ConfigureService
+
+        success = False
+        error_message: str | None = None
+
+        async def remove() -> None:
+            nonlocal success, error_message
+            async for event in ConfigureService().remove_target(name):
+                if event.type == "success":
+                    success = True
+                elif event.type == "error":
+                    error_message = event.message
+
+        asyncio.run(remove())
+        if not success:
+            message = error_message or f"Failed to remove target '{name}'"
+            self._show_error("Remove Failed", message)
+            return RdstResult(False, message)
 
         self._show_success("Removed", f"Target '{name}' has been removed")
         return RdstResult(True, f"Target '{name}' removed")
@@ -374,8 +392,6 @@ class ConfigurationWizard:
                     f'rdst analyze -q "SELECT ..." --target {target_name}',
                     "Analyze a query",
                 ),
-                (f"rdst cache deploy --target {target_name} --mode docker",
-                 "Deploy Readyset cache"),
             ]
             steps = NextSteps(next_step_list)
             self.console.print(steps)

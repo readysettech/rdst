@@ -65,8 +65,11 @@ class ReadysetExperimentService:
         query: str,
         iterations: int = 15,
         warmup: int = 5,
+        interval_ms: int | None = None,
+        concurrency: int | None = None,
+        duration_seconds: int | None = None,
     ) -> AsyncGenerator[CacheEvent, None]:
-        """Provision, verify, create, validate, benchmark, and clean up."""
+        """Provision, verify, create, validate, run bounded measurements, and clean up."""
         queue: asyncio.Queue[Any] = asyncio.Queue()
         worker = asyncio.create_task(
             self._compare_worker(
@@ -76,6 +79,9 @@ class ReadysetExperimentService:
                 query=query,
                 iterations=iterations,
                 warmup=warmup,
+                interval_ms=interval_ms,
+                concurrency=concurrency,
+                duration_seconds=duration_seconds,
             )
         )
         try:
@@ -108,6 +114,9 @@ class ReadysetExperimentService:
         query: str,
         iterations: int,
         warmup: int,
+        interval_ms: int | None,
+        concurrency: int | None,
+        duration_seconds: int | None,
     ) -> None:
         cache_name = temporary_cache_name(owner_id, query)
         created = False
@@ -210,6 +219,9 @@ class ReadysetExperimentService:
                         readyset=readyset,
                         iterations=iterations,
                         warmup=warmup,
+                        interval_ms=interval_ms,
+                        concurrency=concurrency,
+                        duration_seconds=duration_seconds,
                         progress=progress,
                     )
                     if not result.get("success"):
@@ -229,6 +241,12 @@ class ReadysetExperimentService:
                         speedup_median=result["speedup"]["median"],
                         improvement_pct=result["speedup"]["improvement_pct"],
                         winner=result["winner"],
+                        origin_iterations=result["original"].get(
+                            "iterations", result["iterations"]
+                        ),
+                        cache_iterations=result["readyset"].get(
+                            "iterations", result["iterations"]
+                        ),
                     )
                 finally:
                     if created:
@@ -368,7 +386,7 @@ async def _execute_rows_cancellable(
         None, lambda: _execute_rows(config, query, controller)
     )
     try:
-        return await future
+        return await asyncio.shield(future)
     except asyncio.CancelledError as cancellation:
         controller.cancel()
         while not future.done():
@@ -499,6 +517,9 @@ async def _run_comparison_cancellable(
     readyset: dict[str, Any],
     iterations: int,
     warmup: int,
+    interval_ms: int | None,
+    concurrency: int | None,
+    duration_seconds: int | None,
     progress,
 ) -> dict[str, Any]:
     progress_queue: Queue = Queue()
@@ -507,6 +528,7 @@ async def _run_comparison_cancellable(
     def on_progress(stage: str, current: int, total: int) -> None:
         progress_queue.put((stage, current, total))
 
+    last_percent = 65
     future = asyncio.get_running_loop().run_in_executor(
         None,
         lambda: run_comparison(
@@ -515,32 +537,47 @@ async def _run_comparison_cancellable(
             readyset_db_config=readyset,
             iterations=iterations,
             warmup_iterations=warmup,
+            interval_ms=interval_ms,
+            concurrency=concurrency,
+            duration_seconds=duration_seconds,
             on_progress=on_progress,
             controller=controller,
         ),
     )
     try:
-        while not future.done():
+        while True:
             try:
                 stage, current, total = progress_queue.get_nowait()
-                percent = (
-                    65 + int((current / total) * 25)
-                    if total
-                    else 65
-                )
-                await progress(
-                    "benchmarking_readyset"
-                    if stage == "cache"
-                    else "benchmarking_origin",
-                    (
-                        "Benchmarking Readyset"
-                        if stage == "cache"
-                        else "Benchmarking origin"
-                    ),
-                    percent,
-                )
             except Empty:
+                if future.done():
+                    break
                 await asyncio.sleep(0.05)
+                continue
+
+            if stage.endswith("_warmup"):
+                candidate = 65 + int((current / total) * 5) if total else 65
+            elif stage == "cache":
+                candidate = 80 + int((current / total) * 10) if total else 80
+            else:
+                candidate = 70 + int((current / total) * 10) if total else 70
+            last_percent = max(last_percent, candidate)
+            readyset_stage = stage.startswith("cache")
+            warming = stage.endswith("_warmup")
+            await progress(
+                "benchmarking_readyset"
+                if readyset_stage
+                else "benchmarking_origin",
+                (
+                    f"Warming {'Readyset' if readyset_stage else 'origin'} benchmark"
+                    if warming
+                    else (
+                        "Benchmarking Readyset"
+                        if readyset_stage
+                        else "Benchmarking origin"
+                    )
+                ),
+                last_percent,
+            )
         return future.result()
     except asyncio.CancelledError as cancellation:
         controller.cancel()

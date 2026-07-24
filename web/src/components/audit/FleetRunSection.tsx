@@ -256,6 +256,18 @@ function TargetRow({
               <Text level="caption" className="text-content-layout-3">
                 cache {state.cacheScore ?? '-'}/100
               </Text>
+              <Show when={!!state.readysetComparison}>
+                <Text level="caption" className="text-content-layout-3">
+                  Readyset {state.readysetComparison?.supported_count ?? 0}/
+                  {state.readysetComparison?.queries_tested ?? 0} cacheable
+                  {state.readysetComparison?.avg_speedup
+                    ? ` · ${state.readysetComparison.avg_speedup.toLocaleString(
+                        undefined,
+                        { maximumFractionDigits: 1 }
+                      )}x avg`
+                    : ''}
+                </Text>
+              </Show>
             </HStack>
           </Show>
         </VStack>

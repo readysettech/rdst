@@ -23,8 +23,9 @@ import { TrialRegistrationDialog } from './TrialRegistrationDialog'
 
 function titleFor(run: BackgroundRunState): string {
   if (run.kind === 'bootstrap') return `Setting up ${run.target}`
-  if (run.kind === 'cache_test')
+  if (run.kind === 'cache_test' || run.kind === 'speed_test')
     return `Testing ${run.queryLabel || run.queryHash || run.target}`
+  if (run.kind === 'load_test') return `Benchmark · ${run.target}`
   if (run.kind === 'audit') return `Health check on ${run.target}`
   if (run.kind === 'fleet_audit') return 'Fleet health check'
   if (run.kind === 'audit_capture') return `Capturing ${run.target}`
@@ -33,8 +34,9 @@ function titleFor(run: BackgroundRunState): string {
 
 function doneLabel(run: BackgroundRunState): string {
   if (run.kind === 'bootstrap') return `${run.target} is ready`
-  if (run.kind === 'cache_test')
+  if (run.kind === 'cache_test' || run.kind === 'speed_test')
     return run.message || 'Performance test complete'
+  if (run.kind === 'load_test') return run.message || 'Benchmark complete'
   if (run.kind === 'fleet_audit')
     return run.message || 'Fleet health check complete'
   if (isAuditKind(run.kind))
@@ -44,7 +46,8 @@ function doneLabel(run: BackgroundRunState): string {
 
 function terminalLabel(run: BackgroundRunState): string {
   if (run.status === 'cancelled') {
-    if (run.kind === 'cache_test') return 'Performance test cancelled'
+    if (run.kind === 'cache_test' || run.kind === 'speed_test')
+      return 'Performance test cancelled'
     if (isHealthCheckKind(run.kind)) return 'Health check cancelled'
   }
   if (run.status !== 'done')
@@ -52,22 +55,36 @@ function terminalLabel(run: BackgroundRunState): string {
   return doneLabel(run)
 }
 
-/** Kinds whose card opens the screen showing that job's result. */
-function isOpenable(run: BackgroundRunState): boolean {
-  return run.kind === 'cache_test' || isHealthCheckKind(run.kind)
+function isTerminal(run: BackgroundRunState): boolean {
+  return ['done', 'partial', 'failed', 'cancelled', 'interrupted'].includes(
+    run.status
+  )
 }
 
-function isTerminal(run: BackgroundRunState): boolean {
-  return ['done', 'partial', 'failed', 'cancelled'].includes(run.status)
+function isQueued(run: BackgroundRunState): boolean {
+  return run.status === 'running' && run.stage === 'queued'
+}
+
+function isActive(run: BackgroundRunState): boolean {
+  return (
+    !isQueued(run) &&
+    (run.status === 'running' ||
+      run.status === 'reconnecting' ||
+      run.status === 'stopping')
+  )
 }
 
 type RunSeverity = 'error' | 'warning' | 'running' | 'neutral'
 
 function severityFor(run: BackgroundRunState): RunSeverity {
-  if (run.status === 'failed') return 'error'
+  if (run.status === 'failed' || run.status === 'interrupted') return 'error'
   if (run.status === 'needs_key' || run.status === 'partial' || run.hasWarnings)
     return 'warning'
-  if (run.status === 'running' || run.status === 'reconnecting')
+  if (
+    run.status === 'running' ||
+    run.status === 'reconnecting' ||
+    run.status === 'stopping'
+  )
     return 'running'
   return 'neutral'
 }
@@ -97,6 +114,16 @@ function detailFor(run: BackgroundRunState): string {
       : `${run.current} of ${run.total} tables`
   }
   return isTerminal(run) ? terminalLabel(run) : run.message
+}
+
+/** Kinds whose card opens the screen showing that job's result. */
+function isOpenable(run: BackgroundRunState): boolean {
+  return (
+    run.kind === 'cache_test' ||
+    run.kind === 'speed_test' ||
+    run.kind === 'load_test' ||
+    isHealthCheckKind(run.kind)
+  )
 }
 
 function RunCard({
@@ -141,7 +168,11 @@ function RunCard({
     )
   }
 
-  if (run.status === 'running' || run.status === 'reconnecting') {
+  if (
+    run.status === 'running' ||
+    run.status === 'reconnecting' ||
+    run.status === 'stopping'
+  ) {
     return (
       <div
         className="min-w-0 rounded-lg bg-surface-primary-soft/20 px-3 py-2"
@@ -152,7 +183,9 @@ function RunCard({
           <button
             type="button"
             onClick={isOpenable(run) ? onOpen : undefined}
-            className={`min-w-0 flex-1 text-left ${isOpenable(run) ? 'cursor-pointer' : 'cursor-default'}`}
+            className={`min-w-0 flex-1 text-left ${
+              isOpenable(run) ? 'cursor-pointer' : 'cursor-default'
+            }`}
           >
             <VStack className="min-w-0 items-start gap-0">
               <Text
@@ -282,9 +315,9 @@ export function BackgroundRuns() {
 
   if (!latestRun || !triggerRun) return null
 
-  const activeCount = runs.filter(
-    (run) => run.status === 'running' || run.status === 'reconnecting'
-  ).length
+  const queuedCount = runs.filter(isQueued).length
+  const activeCount = runs.filter(isActive).length
+  const pendingCount = activeCount + queuedCount
   const errorCount = runs.filter((run) => severityFor(run) === 'error').length
   const warningCount = runs.filter(
     (run) => severityFor(run) === 'warning'
@@ -321,7 +354,16 @@ export function BackgroundRuns() {
         : navigate({ to: '/audit' }))
       return
     }
-    if (run.kind !== 'cache_test' || !run.queryHash) return
+    if (run.kind === 'load_test') {
+      setTarget(run.target)
+      void navigate({ to: '/benchmark', search: { run: run.runId } })
+      return
+    }
+    if (
+      (run.kind !== 'cache_test' && run.kind !== 'speed_test') ||
+      !run.queryHash
+    )
+      return
     setTarget(run.target)
     void navigate({
       to: '/query-registry',
@@ -353,7 +395,7 @@ export function BackgroundRuns() {
                 data-testid="job-warning-icon"
                 className="h-4 w-4 shrink-0 text-content-warning-soft"
               />
-            ) : activeCount > 0 ? (
+            ) : pendingCount > 0 ? (
               <span
                 className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-content-primary-soft border-t-transparent"
                 data-testid="running-job-spinner"
@@ -390,7 +432,7 @@ export function BackgroundRuns() {
                   ? 'bg-surface-negative-soft text-content-negative-soft'
                   : triggerSeverity === 'warning'
                     ? 'bg-surface-warning-soft text-content-warning-soft'
-                    : activeCount > 0
+                    : pendingCount > 0
                       ? 'bg-surface-primary-soft text-content-primary-soft'
                       : 'bg-surface-layout-3 text-content-layout-2'
               }`}
@@ -418,9 +460,13 @@ export function BackgroundRuns() {
                   ? `${errorCount} ${errorCount === 1 ? 'job has' : 'jobs have'} failed`
                   : warningCount > 0
                     ? `${warningCount} ${warningCount === 1 ? 'job needs' : 'jobs need'} attention`
-                    : activeCount > 0
-                      ? `${activeCount} ${activeCount === 1 ? 'job' : 'jobs'} running`
-                      : 'No jobs running'}
+                    : activeCount > 0 && queuedCount > 0
+                      ? `${activeCount} running · ${queuedCount} queued`
+                      : activeCount > 0
+                        ? `${activeCount} ${activeCount === 1 ? 'job' : 'jobs'} running`
+                        : queuedCount > 0
+                          ? `${queuedCount} ${queuedCount === 1 ? 'job' : 'jobs'} queued`
+                          : 'No jobs running'}
               </Text>
             </VStack>
             <Text level="caption" className="text-content-layout-3">

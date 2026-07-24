@@ -138,7 +138,7 @@ const sections: Array<{ title: string; items: NavItem[] }> = [
   {
     title: 'Optimize',
     items: [
-      { label: 'Caching', icon: 'database-settings', to: '/cache' },
+      { label: 'Comparisons', icon: 'database-settings', to: '/cache' },
       { label: 'Queries', icon: 'folder-file', to: '/query-registry' },
     ],
   },

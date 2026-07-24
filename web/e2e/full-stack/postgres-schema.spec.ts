@@ -20,9 +20,6 @@ test('configures Postgres and bootstraps its schema through the UI', async ({
   await page
     .locator('[name="password"]')
     .fill(process.env.RDST_E2E_DB_PASSWORD ?? 'rdst_e2e_password')
-  // Readyset deployment is not under test here; keep the bootstrap to its
-  // schema track so the run needs no Docker.
-  await page.getByRole('switch', { name: 'Deploy Readyset now' }).click()
   await page.getByRole('button', { name: 'Test & connect' }).click()
 
   await expect(page).toHaveURL('/')

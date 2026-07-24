@@ -21,10 +21,18 @@ import {
 // The provider-first paths, in the order they read on the page. They all read
 // the same way so no provider looks like the afterthought.
 const PROVIDER_CARDS = [
-  { tab: 'aws', logo: <AwsLogo size={16} className="text-content-layout-2" />, label: 'AWS' },
+  {
+    tab: 'aws',
+    logo: <AwsLogo size={16} className="text-content-layout-2" />,
+    label: 'AWS',
+  },
   { tab: 'supabase', logo: <SupabaseLogo size={16} />, label: 'Supabase' },
   { tab: 'neon', logo: <NeonLogo size={16} />, label: 'Neon' },
-  { tab: 'digitalocean', logo: <DigitalOceanLogo size={16} />, label: 'DigitalOcean' },
+  {
+    tab: 'digitalocean',
+    logo: <DigitalOceanLogo size={16} />,
+    label: 'DigitalOcean',
+  },
 ] as const satisfies readonly {
   tab: AddTab
   logo: ReactNode
@@ -109,10 +117,10 @@ export function ConnectPage({
       // user can fix the connection details instead of dead-ending.
       return
     }
-    // Kick off the background bootstrap (schema, AI descriptions, optional
-    // Readyset deploy); it never throws, and the sidebar chip tracks it
+    // Kick off schema/annotation bootstrap. Readyset starts lazily only when
+    // the user runs a comparison.
     // while the user lands in the app.
-    startBootstrapRun(data.name, { deploy: data.deploy })
+    startBootstrapRun(data.name)
     toast({ title: `Connected to ${data.name}`, variant: 'positive' })
     finishToHome()
   }

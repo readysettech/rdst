@@ -4,6 +4,7 @@ import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404 - subprocess re
 import time
 import statistics
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, cast
 
 from shared.ui import (
@@ -21,6 +22,9 @@ MIN_COMPARISON_ITERATIONS = 1
 MAX_COMPARISON_ITERATIONS = 1000
 MIN_COMPARISON_WARMUP = 0
 MAX_COMPARISON_WARMUP = 100
+MAX_COMPARISON_INTERVAL_MS = 60_000
+MAX_COMPARISON_CONCURRENCY = 64
+MAX_COMPARISON_DURATION_SECONDS = 300
 
 
 class ComparisonCancelled(Exception):
@@ -55,8 +59,12 @@ class ComparisonController:
         self._cancelled.set()
         with self._lock:
             connections = list(self._connections)
+        self.cancel_connections(connections)
+
+    @classmethod
+    def cancel_connections(cls, connections: list[Any]) -> None:
         for connection in connections:
-            self._cancel_connection(connection)
+            cls._cancel_connection(connection)
 
     @staticmethod
     def _cancel_connection(connection: Any) -> None:
@@ -71,6 +79,10 @@ class ComparisonController:
 
     def raise_if_cancelled(self) -> None:
         if self.cancelled:
+            raise ComparisonCancelled()
+
+    def wait(self, timeout: float) -> None:
+        if self._cancelled.wait(timeout):
             raise ComparisonCancelled()
 
 
@@ -129,12 +141,152 @@ def _execute_on_connection(
         return {"success": False, "error": str(e)}
 
 
+def _run_concurrent_measurements(
+    *,
+    query: str,
+    db_config: Dict[str, Any],
+    label: str,
+    stage: str,
+    iterations: int,
+    warmup_iterations: int,
+    concurrency: int,
+    duration_seconds: int | None,
+    progress,
+    controller: ComparisonController | None,
+) -> Dict[str, Any]:
+    connections: list[Any] = []
+    samples: list[tuple[int, float]] = []
+    state_lock = threading.Lock()
+    stop = threading.Event()
+    deadline_expired = threading.Event()
+    deadline_timer: threading.Timer | None = None
+    next_index = 0
+    failure: tuple[int, str] | None = None
+
+    try:
+        engine = (db_config.get("engine") or "postgresql").lower()
+        worker_count = min(concurrency, iterations)
+        for _ in range(worker_count):
+            connection, connection_engine = _open_persistent_connection(db_config)
+            engine = connection_engine
+            if controller:
+                controller.register(connection)
+            connections.append(connection)
+
+        deadline = (
+            time.perf_counter() + duration_seconds
+            if duration_seconds is not None
+            else None
+        )
+        if duration_seconds is not None:
+            def expire_deadline() -> None:
+                deadline_expired.set()
+                stop.set()
+                ComparisonController.cancel_connections(connections)
+
+            deadline_timer = threading.Timer(duration_seconds, expire_deadline)
+            deadline_timer.daemon = True
+            deadline_timer.start()
+
+        for index in range(warmup_iterations):
+            if deadline_expired.is_set():
+                break
+            result = _execute_on_connection(
+                connections[0], query, engine, controller
+            )
+            if not result["success"]:
+                if deadline_expired.is_set():
+                    break
+                return {
+                    "success": False,
+                    "error": (
+                        f"{label} warmup iteration {index + 1} failed: "
+                        f"{result.get('error') or 'unknown error'}"
+                    ),
+                }
+            progress(f"{stage}_warmup", index + 1, warmup_iterations)
+
+        def worker(connection: Any) -> None:
+            nonlocal next_index, failure
+            while not stop.is_set():
+                if controller:
+                    controller.raise_if_cancelled()
+                with state_lock:
+                    if next_index >= iterations:
+                        return
+                    if deadline is not None and time.perf_counter() >= deadline:
+                        return
+                    sample_index = next_index
+                    next_index += 1
+
+                result = _execute_on_connection(
+                    connection, query, engine, controller
+                )
+                if not result["success"]:
+                    if deadline_expired.is_set():
+                        return
+                    should_cancel = False
+                    with state_lock:
+                        if failure is None:
+                            failure = (
+                                sample_index,
+                                str(result.get("error") or "unknown error"),
+                            )
+                            should_cancel = True
+                    stop.set()
+                    if should_cancel:
+                        ComparisonController.cancel_connections(connections)
+                    return
+
+                with state_lock:
+                    samples.append((sample_index, result["execution_time_ms"]))
+                    completed = len(samples)
+                    progress(stage, completed, iterations)
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [
+                executor.submit(worker, connection) for connection in connections
+            ]
+            for future in futures:
+                future.result()
+
+        if controller:
+            controller.raise_if_cancelled()
+        if failure is not None:
+            index, error = failure
+            return {
+                "success": False,
+                "error": f"{label} iteration {index + 1} failed: {error}",
+            }
+        if not samples:
+            return {
+                "success": False,
+                "error": f"{label} completed no measured iterations",
+            }
+        samples.sort(key=lambda item: item[0])
+        return {"success": True, "times": [value for _, value in samples]}
+    finally:
+        if deadline_timer is not None:
+            deadline_timer.cancel()
+            deadline_timer.join()
+        for connection in connections:
+            if controller:
+                controller.unregister(connection)
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+
 def run_comparison(
     query: str,
     original_db_config: Dict[str, Any],
     readyset_db_config: Dict[str, Any],
     iterations: int = 5,
     warmup_iterations: int = 2,
+    interval_ms: int | None = None,
+    concurrency: int | None = None,
+    duration_seconds: int | None = None,
     on_progress: Optional[Any] = None,
     controller: Optional[ComparisonController] = None,
 ) -> Dict[str, Any]:
@@ -144,6 +296,9 @@ def run_comparison(
     from timing measurements.  Only query execution time is measured.
 
     Args:
+        interval_ms: Fixed start interval for sequential executions.
+        concurrency: Number of concurrent persistent connections per side.
+        duration_seconds: Per-side measurement deadline; count remains the cap.
         on_progress: Optional callable(stage, current, total) for progress updates.
 
     Suitable for service-layer / API use.
@@ -164,6 +319,44 @@ def run_comparison(
                 f"{MIN_COMPARISON_WARMUP} and {MAX_COMPARISON_WARMUP}"
             ),
         }
+    if interval_ms is not None and concurrency is not None:
+        return {
+            "success": False,
+            "error": "Cannot specify both interval and concurrency",
+        }
+    if (
+        interval_ms is not None
+        and not 0 <= interval_ms <= MAX_COMPARISON_INTERVAL_MS
+    ):
+        return {
+            "success": False,
+            "error": (
+                "Comparison interval must be between 0 and "
+                f"{MAX_COMPARISON_INTERVAL_MS} milliseconds"
+            ),
+        }
+    if (
+        concurrency is not None
+        and not 1 <= concurrency <= MAX_COMPARISON_CONCURRENCY
+    ):
+        return {
+            "success": False,
+            "error": (
+                "Comparison concurrency must be between 1 and "
+                f"{MAX_COMPARISON_CONCURRENCY}"
+            ),
+        }
+    if (
+        duration_seconds is not None
+        and not 1 <= duration_seconds <= MAX_COMPARISON_DURATION_SECONDS
+    ):
+        return {
+            "success": False,
+            "error": (
+                "Comparison duration must be between 1 and "
+                f"{MAX_COMPARISON_DURATION_SECONDS} seconds"
+            ),
+        }
 
     def _progress(stage: str, current: int, total: int):
         if on_progress:
@@ -172,74 +365,148 @@ def run_comparison(
             except Exception:
                 pass
 
+    def _run_sequential_measurements(
+        connection: Any, engine: str, label: str, stage: str
+    ) -> Dict[str, Any]:
+        times: List[float] = []
+        interval_seconds = (interval_ms or 0) / 1000
+        deadline = (
+            time.perf_counter() + duration_seconds
+            if duration_seconds is not None
+            else None
+        )
+        deadline_expired = threading.Event()
+        deadline_timer = None
+        if duration_seconds is not None:
+            def expire_deadline() -> None:
+                deadline_expired.set()
+                ComparisonController.cancel_connections([connection])
+
+            deadline_timer = threading.Timer(duration_seconds, expire_deadline)
+            deadline_timer.daemon = True
+            deadline_timer.start()
+
+        next_start = time.perf_counter()
+        try:
+            for index in range(warmup_iterations):
+                if deadline_expired.is_set():
+                    break
+                result = _execute_on_connection(
+                    connection, query, engine, controller
+                )
+                if not result["success"]:
+                    if deadline_expired.is_set():
+                        break
+                    return {
+                        "success": False,
+                        "error": (
+                            f"{label} warmup iteration {index + 1} failed: "
+                            f"{result.get('error') or 'unknown error'}"
+                        ),
+                    }
+                _progress(f"{stage}_warmup", index + 1, warmup_iterations)
+
+            for index in range(iterations):
+                now = time.perf_counter()
+                if index > 0 and now < next_start:
+                    delay = next_start - now
+                    if deadline is not None:
+                        delay = min(delay, max(0, deadline - now))
+                    if delay > 0:
+                        if controller:
+                            controller.wait(delay)
+                        else:
+                            time.sleep(delay)
+                if deadline is not None and time.perf_counter() >= deadline:
+                    break
+
+                started = time.perf_counter()
+                result = _execute_on_connection(
+                    connection, query, engine, controller
+                )
+                if not result["success"]:
+                    if deadline_expired.is_set():
+                        break
+                    return {
+                        "success": False,
+                        "error": (
+                            f"{label} iteration {index + 1} failed: "
+                            f"{result.get('error') or 'unknown error'}"
+                        ),
+                    }
+                times.append(result["execution_time_ms"])
+                _progress(stage, len(times), iterations)
+                next_start = started + interval_seconds
+        finally:
+            if deadline_timer is not None:
+                deadline_timer.cancel()
+                deadline_timer.join()
+
+        if not times:
+            return {
+                "success": False,
+                "error": f"{label} completed no measured iterations",
+            }
+        return {"success": True, "times": times}
+
     origin_conn = None
     cache_conn = None
     try:
-        # Open persistent connections up front
-        origin_conn, origin_engine = _open_persistent_connection(original_db_config)
-        if controller:
-            controller.register(origin_conn)
-        cache_conn, cache_engine = _open_persistent_connection(readyset_db_config)
-        if controller:
-            controller.register(cache_conn)
-
-        # Warmup — both targets
-        for i in range(warmup_iterations):
-            result = _execute_on_connection(
-                origin_conn, query, origin_engine, controller
+        if concurrency is not None:
+            original_result = _run_concurrent_measurements(
+                query=query,
+                db_config=original_db_config,
+                label="Original database",
+                stage="origin",
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                concurrency=concurrency,
+                duration_seconds=duration_seconds,
+                progress=_progress,
+                controller=controller,
             )
-            if not result["success"]:
-                return {
-                    "success": False,
-                    "error": (
-                        f"Original database warmup iteration {i + 1} failed: "
-                        f"{result.get('error') or 'unknown error'}"
-                    ),
-                }
-            _progress("warmup", i + 1, warmup_iterations * 2)
-        for i in range(warmup_iterations):
-            result = _execute_on_connection(
-                cache_conn, query, cache_engine, controller
+            if not original_result["success"]:
+                return original_result
+            readyset_result = _run_concurrent_measurements(
+                query=query,
+                db_config=readyset_db_config,
+                label="Readyset",
+                stage="cache",
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                concurrency=concurrency,
+                duration_seconds=duration_seconds,
+                progress=_progress,
+                controller=controller,
             )
-            if not result["success"]:
-                return {
-                    "success": False,
-                    "error": (
-                        f"Readyset warmup iteration {i + 1} failed: "
-                        f"{result.get('error') or 'unknown error'}"
-                    ),
-                }
-            _progress("warmup", warmup_iterations + i + 1, warmup_iterations * 2)
+            if not readyset_result["success"]:
+                return readyset_result
+            original_times = original_result["times"]
+            readyset_times = readyset_result["times"]
+        else:
+            origin_conn, origin_engine = _open_persistent_connection(
+                original_db_config
+            )
+            if controller:
+                controller.register(origin_conn)
+            cache_conn, cache_engine = _open_persistent_connection(
+                readyset_db_config
+            )
+            if controller:
+                controller.register(cache_conn)
 
-        # Benchmark Original DB
-        original_times: List[float] = []
-        for i in range(iterations):
-            result = _execute_on_connection(origin_conn, query, origin_engine, controller)
-            if not result["success"]:
-                return {
-                    "success": False,
-                    "error": (
-                        f"Original database iteration {i + 1} failed: "
-                        f"{result.get('error') or 'unknown error'}"
-                    ),
-                }
-            original_times.append(result["execution_time_ms"])
-            _progress("origin", i + 1, iterations)
-
-        # Benchmark Readyset
-        readyset_times: List[float] = []
-        for i in range(iterations):
-            result = _execute_on_connection(cache_conn, query, cache_engine, controller)
-            if not result["success"]:
-                return {
-                    "success": False,
-                    "error": (
-                        f"Readyset iteration {i + 1} failed: "
-                        f"{result.get('error') or 'unknown error'}"
-                    ),
-                }
-            readyset_times.append(result["execution_time_ms"])
-            _progress("cache", i + 1, iterations)
+            original_result = _run_sequential_measurements(
+                origin_conn, origin_engine, "Original database", "origin"
+            )
+            if not original_result["success"]:
+                return original_result
+            readyset_result = _run_sequential_measurements(
+                cache_conn, cache_engine, "Readyset", "cache"
+            )
+            if not readyset_result["success"]:
+                return readyset_result
+            original_times = original_result["times"]
+            readyset_times = readyset_result["times"]
 
         original_stats = _calculate_statistics(original_times)
         readyset_stats = _calculate_statistics(readyset_times)
@@ -258,18 +525,21 @@ def run_comparison(
         return {
             "success": True,
             "query": query,
-            "iterations": iterations,
+            "iterations": min(len(original_times), len(readyset_times)),
+            "requested_iterations": iterations,
             "original": {
                 "host": original_db_config.get("host"),
                 "port": original_db_config.get("port"),
                 "stats": original_stats,
                 "times": original_times,
+                "iterations": len(original_times),
             },
             "readyset": {
                 "host": readyset_db_config.get("host"),
                 "port": readyset_db_config.get("port"),
                 "stats": readyset_stats,
                 "times": readyset_times,
+                "iterations": len(readyset_times),
             },
             "speedup": {
                 "mean": speedup,

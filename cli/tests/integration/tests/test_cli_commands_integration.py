@@ -280,7 +280,7 @@ class TestFleetCommandIntegration:
     """Integration tests for FleetCommand orchestration and persistence."""
 
     @staticmethod
-    def _audit_args(*, output_json=True):
+    def _audit_args(*, output_json=True, auto_yes=False):
         return SimpleNamespace(
             group="test-cluster",
             tag=None,
@@ -290,7 +290,7 @@ class TestFleetCommandIntegration:
             no_insights=True,
             duration="10s",
             verbose=not output_json,
-            auto_yes=False,
+            auto_yes=auto_yes,
         )
 
     @staticmethod
@@ -374,7 +374,9 @@ class TestFleetCommandIntegration:
                 side_effect=run_benchmark,
             ) as benchmark,
         ):
-            result = FleetCommand()._handle_audit(self._audit_args())
+            result = FleetCommand()._handle_audit(
+                self._audit_args(auto_yes=True)
+            )
 
         assert result.ok is True
         assert {target for phase, target in events if phase == "capture"} == {

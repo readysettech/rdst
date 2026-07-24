@@ -26,7 +26,6 @@ async function startGatedCapture(page: Page): Promise<() => void> {
   await page
     .getByRole('checkbox', { name: 'Select e2e-guard' })
     .click({ force: true })
-  await page.getByRole('button', { name: 'Check requirements' }).click()
   await page.getByRole('button', { name: 'Run health check' }).click()
   return release
 }
@@ -86,6 +85,19 @@ test('starts with no target selected and offers only capture durations', async (
     ).toBeVisible()
   }
   await expect(page.getByRole('option', { name: 'Instant' })).toHaveCount(0)
+})
+
+test('runs requirements from the primary action', async ({ page }) => {
+  await prepareAuditPage(page)
+  await page
+    .getByRole('checkbox', { name: 'Select e2e-guard' })
+    .click({ force: true })
+  const runButton = page.getByRole('button', { name: 'Run health check' })
+  await expect(runButton).toBeEnabled()
+
+  const requirementsRequest = page.waitForRequest('**/api/audit/requirements*')
+  await runButton.click()
+  await requirementsRequest
 })
 
 test('opens a saved report from Reports on the run route and returns to Reports', async ({

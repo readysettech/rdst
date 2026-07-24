@@ -186,6 +186,23 @@ export function friendlySqlError(raw: string | undefined): string {
   if (!text) {
     return 'The query could not be analyzed. Check the SQL and try again.'
   }
+  if (
+    /connection (?:to server .* )?failed|connection refused|could not connect|server closed the connection|network is unreachable|no route to host|connection timed out/i.test(
+      text
+    )
+  ) {
+    return 'Could not connect to the database. Check that it is running and reachable, then try again.'
+  }
+  if (
+    /password authentication failed|authentication failed for user|access denied for user|no pg_hba\.conf entry/i.test(
+      text
+    )
+  ) {
+    return 'The database rejected the connection. Check the target credentials and access settings.'
+  }
+  if (/permission denied|must be owner|insufficient privilege/i.test(text)) {
+    return "The database denied permission to analyze this query. Check the target user's permissions."
+  }
   if (/syntax error/i.test(text)) {
     return `SQL syntax error: ${text.replace(/^.*?syntax error/i, 'syntax error')}`
   }
@@ -197,6 +214,40 @@ export function friendlySqlError(raw: string | undefined): string {
     return `The query references something the database can't find: ${text}`
   }
   return `The query could not be analyzed: ${text}`
+}
+
+/**
+ * Classify an EXPLAIN failure by its actual cause. A failed EXPLAIN does not
+ * necessarily mean invalid SQL: connection, authentication, and permission
+ * failures need database recovery, while only query-shape failures should send
+ * the user back to the editor.
+ */
+export function normalizeExplainError(
+  raw: string | undefined
+): ApiErrorEnvelope {
+  const text = (raw ?? '').trim()
+  const connection =
+    /connection (?:to server .* )?failed|connection refused|could not connect|server closed the connection|network is unreachable|no route to host|connection timed out/i.test(
+      text
+    )
+  const authentication =
+    /password authentication failed|authentication failed for user|access denied for user|no pg_hba\.conf entry/i.test(
+      text
+    )
+  const permission =
+    /permission denied|must be owner|insufficient privilege/i.test(text)
+
+  return {
+    code: connection
+      ? 'database_connection'
+      : authentication
+        ? 'database_authentication'
+        : permission
+          ? 'database_permission'
+          : 'invalid_sql',
+    message: friendlySqlError(text),
+    detail: text || undefined,
+  }
 }
 
 /**

@@ -499,12 +499,15 @@ class AuditCommand:
                 for cmd in (step.get("commands") or [])[:4]:
                     console.print(f"     [white]{cmd}[/white]")
 
-        # Cache deploy hint if a strong candidate
+        # Offer a repeatable temporary comparison for a strong candidate.
         opp_score = int(cache_opp.get("score") or 0)
-        if opp_score >= 70:
+        candidate_hash = (captured[0].get("query_hash") or "")[:12] if captured else ""
+        if opp_score >= 70 and candidate_hash:
             console.print()
-            console.print(f"[bold green]Strong candidate for Readyset caching.[/bold green]")
-            console.print(f"  [dim]rdst cache deploy --target {target}[/dim]")
+            console.print("[bold green]Strong candidate for Readyset caching.[/bold green]")
+            console.print(
+                f"  [dim]rdst query cache-compare {candidate_hash} --target {target}[/dim]"
+            )
 
     def _render_audit_insights(self, console, raw_text: str) -> None:
         """Parse structured JSON insights and render with Rich."""
@@ -559,8 +562,8 @@ class AuditCommand:
     def _run_readyset_testing(self, console, target, queries, max_queries=20, auto_yes=False):
         """Test audit queries against a local Readyset cache.
 
-        Preserves the existing deploy/start consent preflight, then delegates
-        the managed sandbox lease and cache cleanup to run_ephemeral_benchmark.
+        Performs Docker and consent preflight, then delegates the managed
+        sandbox lease and cache cleanup to run_ephemeral_benchmark.
 
         Returns list of {query_hash, query_text, cacheable, not_cacheable_reason,
         baseline_ms, readyset_ms, speedup} or None if RS not available.
@@ -570,7 +573,6 @@ class AuditCommand:
                 docker_available,
                 run_ephemeral_benchmark,
             )
-            from shared.deploy.lifecycle import ProbeState, probe
         except ImportError:
             return None
 
@@ -579,63 +581,28 @@ class AuditCommand:
         if not docker_available():
             console.print("[dim]  Skipping Readyset cache testing (Docker not installed)[/dim]")
             return None
-
-        # Probe first: only prompt the user if we'll actually need to deploy/start.
-        pre = probe(target, mode="docker")
-
-        if pre.state == ProbeState.NOT_DEPLOYED:
-            if not auto_yes and not sys.stdin.isatty():
-                return None
-            if auto_yes:
-                console.print("[dim]  Auto-deploying ephemeral Readyset cache (-y)[/dim]")
-                consent = True
-            else:
-                from shared.ui import Confirm
-                console.print()
-                console.print(
-                    "[dim]  Readyset can benchmark your captured queries to show how much"
-                    "\n  faster they'd run with caching. We'll deploy a local Docker"
-                    "\n  container, run the benchmark, and tear it down when done.[/dim]"
-                )
-                try:
-                    consent = Confirm.ask(
-                        "  Deploy Readyset (ephemeral) to test query performance?",
-                        default=True,
-                    )
-                except (EOFError, KeyboardInterrupt):
-                    consent = False
-            if not consent:
-                return None
-        elif pre.state == ProbeState.DEPLOYED_STOPPED:
-            if not auto_yes and not sys.stdin.isatty():
-                return None
-            if auto_yes:
-                console.print("[dim]  Auto-starting cache for ephemeral benchmark (-y)[/dim]")
-                consent = True
-            else:
-                from shared.ui import Confirm
-                console.print()
-                console.print(
-                    "[dim]  Readyset can benchmark your captured queries to show how much"
-                    "\n  faster they'd run with caching. The local cache container is"
-                    "\n  stopped — we'll start it for the benchmark and stop it again."
-                    "[/dim]"
-                )
-                try:
-                    consent = Confirm.ask(
-                        "  Start Readyset cache to test query performance?",
-                        default=True,
-                    )
-                except (EOFError, KeyboardInterrupt):
-                    consent = False
-            if not consent:
-                return None
-        elif pre.state == ProbeState.DEPLOYED_RUNNING:
-            # No prompt needed — reuse existing container, leave it alone after.
-            pass
+        if auto_yes:
+            console.print("[dim]  Preparing managed Readyset sandbox (-y)[/dim]")
         else:
-            console.print(f"[yellow]  Cache probe inconclusive ({pre.state.value}). Skipping benchmark.[/yellow]")
-            return None
+            if not sys.stdin.isatty():
+                return None
+            from shared.ui import Confirm
+
+            console.print()
+            console.print(
+                "[dim]  Readyset can benchmark your captured queries to show how much"
+                "\n  faster they'd run with caching. RDST will prepare its local managed"
+                "\n  sandbox and leave it warm for later comparisons.[/dim]"
+            )
+            try:
+                consent = Confirm.ask(
+                    "  Test query performance with the Readyset sandbox?",
+                    default=True,
+                )
+            except (EOFError, KeyboardInterrupt):
+                consent = False
+            if not consent:
+                return None
 
         outcome = run_ephemeral_benchmark(
             target, queries, max_queries=max_queries, console=console,

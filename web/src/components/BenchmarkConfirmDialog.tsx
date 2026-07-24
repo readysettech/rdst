@@ -22,7 +22,7 @@ interface BenchmarkConfirmDialogProps {
 }
 
 /**
- * Pre-flight confirmation for a benchmark run (B5/T5).
+ * Pre-flight confirmation for a Benchmark run.
  *
  * Names the destination and the planned load before any real DB work. Local
  * targets get a single explicit confirm; non-local (remote) targets get a
@@ -70,7 +70,7 @@ export function BenchmarkConfirmDialog({
       isOpen={isOpen}
       onClose={onClose}
       onConfirm={handleConfirm}
-      title={`Run benchmark against ${target}?`}
+      title={`Run Benchmark against ${target}?`}
       titleAccessory={
         isRemote ? (
           <Tag
@@ -88,7 +88,7 @@ export function BenchmarkConfirmDialog({
               accent: 'negative',
               icon: 'alert',
               title: 'This is a remote database',
-              message: `${target} is not a local target. Benchmarking runs real read-only load against a remote — possibly production — database. Type the target name below to confirm you intend to run load against it.`,
+              message: `${target} is not a local target. Benchmark runs real read-only load against a remote — possibly production — database. Type the target name below to confirm you intend to run load against it.`,
             }
           : {
               accent: 'warning',

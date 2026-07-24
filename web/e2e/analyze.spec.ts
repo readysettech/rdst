@@ -65,9 +65,9 @@ const completeAnalysis = {
   readyset_cacheability: {
     checked: true,
     cacheable: true,
-    confidence: 'high',
-    method: 'static',
-    explanation: 'The query is cacheable.',
+    confidence: 'medium',
+    method: 'static_analysis',
+    explanation: 'Static SQL screening found no obvious blockers.',
     issues: [],
     warnings: [],
   },
@@ -113,10 +113,24 @@ async function prepareAnalysisPage(
 }
 
 test('submits SQL and renders streamed analysis results', async ({ page }) => {
-  setBackendFixtures({
-    analyze: [{ events: serviceEvents(successEvents), delay_ms: 250 }],
-  })
   await prepareAnalysisPage(page)
+  const registryResponse = await page.request.post('/api/query-registry', {
+    data: { sql: query, target: 'e2e-guard' },
+  })
+  expect(registryResponse.ok()).toBe(true)
+  const registryHash = ((await registryResponse.json()) as { hash: string })
+    .hash
+  const matchingEvents = successEvents.map((entry) =>
+    entry.event === 'complete'
+      ? {
+          ...entry,
+          data: { ...completeAnalysis, query_hash: registryHash },
+        }
+      : entry
+  )
+  setBackendFixtures({
+    analyze: [{ events: serviceEvents(matchingEvents), delay_ms: 250 }],
+  })
 
   await fillCodeMirror(page.locator('.cm-editor'), query)
   // C-09 moved the fast-mode switch behind the editor's "Options" popover;
@@ -163,10 +177,19 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
     page.getByText('Return only columns needed by the caller.')
   ).toBeVisible()
   await expect(
-    page.getByRole('heading', { name: 'Readyset Cacheability' })
+    page.getByRole('heading', { name: 'Readyset Compatibility' })
   ).toBeVisible()
   await expect(
-    page.getByRole('paragraph').filter({ hasText: /^Cacheable$/ })
+    page.getByRole('paragraph').filter({ hasText: /^No obvious blockers$/ })
+  ).toBeVisible()
+  await expect(
+    page.locator('div.rounded-xl.border-border-positive-soft').filter({
+      hasText: 'No obvious blockers',
+    })
+  ).toBeVisible()
+  await expect(page.getByText('STATIC CHECK')).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Try with Readyset' })
   ).toBeVisible()
 
   await expect
@@ -184,6 +207,17 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
       sql: 'SELECT id, total FROM orders WHERE customer_id = :p1 ORDER BY created_at DESC',
       target: 'e2e-guard',
     })
+
+  await page.getByRole('button', { name: 'Try with Readyset' }).click()
+  await expect(page).toHaveURL(new RegExp(`/cache\\?hash=${registryHash}`))
+  const focusedQuery = page.locator(
+    `[data-testid="speed-test-query"][data-query-hash="${registryHash}"]`
+  )
+  await expect(focusedQuery).toBeVisible()
+  await expect(focusedQuery).toHaveClass(/ring-2/)
+  await expect(
+    focusedQuery.getByRole('button', { name: 'Compare with Readyset' })
+  ).toBeVisible()
 })
 
 test('shows a streamed failure and can retry from query history', async ({
@@ -256,4 +290,58 @@ test('shows a streamed failure and can retry from query history', async ({
     page.getByText('Performance Summary', { exact: true })
   ).toBeVisible()
   expect(analysisCalls).toBe(2)
+})
+
+test('presents an EXPLAIN connection failure as a target problem', async ({
+  page,
+}) => {
+  const driverError =
+    'PostgreSQL EXPLAIN failed: connection to server at "127.0.0.1", port 15434 failed: Connection refused'
+  setBackendFixtures({
+    analyze: [
+      {
+        events: [
+          {
+            type: 'complete',
+            success: true,
+            analysis_id: 'analysis-connection-failure',
+            query_hash: 'query-connection-failure',
+            explain_results: {
+              success: false,
+              database_engine: 'postgresql',
+              execution_time_ms: 0,
+              rows_examined: 0,
+              rows_returned: 0,
+              cost_estimate: 0,
+              error: driverError,
+            },
+            llm_analysis: {},
+          },
+        ],
+      },
+    ],
+  })
+  await prepareAnalysisPage(page)
+
+  await fillCodeMirror(page.locator('.cm-editor'), query)
+  await page.getByRole('button', { name: 'Analyze Query' }).click()
+
+  await expect(
+    page
+      .getByRole('paragraph')
+      .filter({ hasText: /^Analysis could not complete$/ })
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      'Could not connect to the database. Check that it is running and reachable, then try again.'
+    )
+  ).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Check connection' })
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Edit query' })).toHaveCount(0)
+  await expect(page.getByText(driverError)).toHaveCount(0)
+
+  await page.getByText('Technical details').click()
+  await expect(page.getByText(driverError)).toBeVisible()
 })

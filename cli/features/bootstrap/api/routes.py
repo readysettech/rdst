@@ -29,8 +29,6 @@ _registry = run_registry
 
 class BootstrapStartRequest(BaseModel):
     target: str | None = None
-    deploy: bool = True
-    deploy_mode: str = "docker"
     annotate: bool = True
 
 
@@ -49,11 +47,7 @@ async def start_bootstrap(
     guard: TargetGuard = Depends(require_target_body),
 ) -> BootstrapStartResponse:
     """Start the add-database bootstrap for a target; returns immediately."""
-    options = BootstrapOptions(
-        deploy=request.deploy,
-        deploy_mode=request.deploy_mode,
-        annotate=request.annotate,
-    )
+    options = BootstrapOptions(annotate=request.annotate)
     service = TargetBootstrapService()
     key_wakeup = asyncio.Event()
     gen = service.run(

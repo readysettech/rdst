@@ -116,6 +116,7 @@ class _SandboxTracker:
         self.active = 0
         self.max_active = 0
         self.log: list[str] = []
+        self.dirty_reasons: list[str] = []
         self.start_count = 0
 
     async def start(self):
@@ -142,8 +143,11 @@ class _SandboxTracker:
                 "password": "secret",
             }
         )
+        async def mark_dirty(reason):
+            self.dirty_reasons.append(reason)
+
         try:
-            yield SimpleNamespace(connection=connection)
+            yield SimpleNamespace(connection=connection, mark_dirty=mark_dirty)
         finally:
             self.active -= 1
             self.log.append(f"exit:{target}")
@@ -250,9 +254,9 @@ class TestBenchmarkCorrectness:
 
         assert results[0]["cacheable"] is False
         assert cursor.execute.call_count == 0
-        # Initial inventory + cleanup only: unsupported results never reach
-        # shallow verification or timing.
-        assert service.list_calls == 2
+        # Initial inventory plus cleanup verification: unsupported results
+        # never reach shallow verification or timing.
+        assert service.list_calls == 3
 
     def test_error_event_from_add_cache_is_reported_and_not_timed(self):
         service = _BenchmarkCacheService(
@@ -283,7 +287,7 @@ class TestBenchmarkCorrectness:
         assert results[0]["cacheable"] is False
         assert "not shallow" in results[0]["not_cacheable_reason"]
         assert cursor.execute.call_count == 0
-        assert service.list_calls == 3
+        assert service.list_calls == 4
 
     def test_static_false_negative_and_pending_deep_do_not_gate_shallow(self):
         cache = {
@@ -319,6 +323,45 @@ class TestBenchmarkCorrectness:
         assert result["readyset_ms"] == 25.0
         assert result["speedup"] == 1.0
         assert all(call.args[0] == service.cache_config for call in connect.call_args_list)
+
+    def test_failed_readyset_execution_is_not_reported_as_a_measurement(self):
+        cache = {
+            "cache_id": "q_shallow",
+            "query": "SELECT id FROM users WHERE id = $1",
+            "type": "shallow",
+        }
+        service = _BenchmarkCacheService(
+            [CacheAddEvent(
+                type="cache_add", success=True, supported=True,
+                query=cache["query"],
+            )],
+            [[], [cache], [cache], []],
+        )
+        connection = MagicMock()
+        connection.cursor.return_value.execute.side_effect = RuntimeError("query failed")
+
+        with (
+            patch("features.cache.service.CacheService", return_value=service),
+            patch("shared.db_connection.create_direct_connection", return_value=connection),
+            patch("features.audit.readyset_benchmark.time.sleep"),
+            patch(
+                "features.cache.readyset_cacheability.check_readyset_cacheability",
+                return_value={"cacheable": True, "issues": [], "warnings": []},
+            ),
+        ):
+            results = benchmark_queries(
+                "prod",
+                [{
+                    "query_hash": "abc123",
+                    "query_text": cache["query"],
+                    "avg_time_ms": 25.0,
+                }],
+            )
+
+        assert results[0]["cacheable"] is False
+        assert results[0]["readyset_ms"] == 0
+        assert results[0]["speedup"] == 0
+        assert "query failed" in results[0]["not_cacheable_reason"]
 
     def test_upstream_ms_is_capture_average_passthrough(self):
         cache = {
@@ -430,6 +473,46 @@ class TestLifecycleInvariant:
         )
         assert last_capture_complete < first_readyset
 
+    @pytest.mark.asyncio
+    async def test_cancelling_fleet_audit_cancels_active_captures(self):
+        import asyncio
+
+        capture_started = asyncio.Event()
+        capture_stopped = asyncio.Event()
+
+        async def blocking_capture(self, **kwargs):
+            capture_started.set()
+            try:
+                await asyncio.Event().wait()
+                if False:
+                    yield None
+            finally:
+                capture_stopped.set()
+
+        service = AuditService(
+            config=_FakeConfig({"db1": {"engine": "postgresql"}})
+        )
+
+        async def consume():
+            return [
+                event async for event in service.audit_fleet(
+                    ["db1"], duration_seconds=30,
+                )
+            ]
+
+        with (
+            patch.object(AuditService, "audit_target", return_value=_fake_result("db1")),
+            patch.object(CaptureService, "run_capture", blocking_capture),
+            patch("features.audit.readyset_benchmark.docker_available", return_value=False),
+        ):
+            task = asyncio.create_task(consume())
+            await asyncio.wait_for(capture_started.wait(), timeout=1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert capture_stopped.is_set()
+
     def test_sequential_single_container_with_teardown_between_targets(self):
         targets = ["db1", "db2", "db3"]
         events, tracker, _ = _run_fleet(targets)
@@ -453,7 +536,12 @@ class TestLifecycleInvariant:
         calls = {"n": 0}
 
         def flaky_benchmark(
-            target, queries, max_queries=20, console=None, cache_config=None
+            target,
+            queries,
+            max_queries=20,
+            console=None,
+            cache_config=None,
+            cleanup_errors=None,
         ):
             calls["n"] += 1
             if calls["n"] == 2:
@@ -492,6 +580,57 @@ class TestLifecycleInvariant:
         assert events[-1].type == "complete" and events[-1].success is True
 
     @pytest.mark.asyncio
+    async def test_cancelled_benchmark_keeps_lease_until_worker_stops(
+        self, monkeypatch
+    ):
+        import asyncio
+        import functools
+        import threading
+
+        tracker = _SandboxTracker()
+        worker_started = threading.Event()
+        worker_release = threading.Event()
+
+        async def threaded(func, /, *args, **kwargs):
+            call = functools.partial(func, *args, **kwargs)
+            return await asyncio.get_running_loop().run_in_executor(None, call)
+
+        def blocking_benchmark(*args, **kwargs):
+            worker_started.set()
+            worker_release.wait(timeout=2)
+            raise RuntimeError("worker failed during cancellation")
+
+        monkeypatch.setattr(asyncio, "to_thread", threaded)
+        with (
+            patch("features.audit.readyset_benchmark.docker_available", return_value=True),
+            patch("shared.deploy.sandbox_manager.sandbox_manager", tracker),
+            patch(
+                "features.audit.readyset_benchmark.benchmark_queries",
+                side_effect=blocking_benchmark,
+            ),
+        ):
+            task = asyncio.create_task(
+                run_managed_benchmark("db1", [{"query_text": "SELECT 1"}])
+            )
+            for _ in range(100):
+                if worker_started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert worker_started.is_set()
+
+            task.cancel()
+            await asyncio.sleep(0.05)
+            assert tracker.active == 1
+
+            worker_release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert tracker.active == 0
+        assert tracker.log == ["enter:db1", "exit:db1"]
+        assert tracker.dirty_reasons == ["Audit benchmark cache cleanup failed"]
+
+    @pytest.mark.asyncio
     async def test_managed_benchmark_passes_lease_connection_config(self):
         tracker = _SandboxTracker()
         benchmark = MagicMock(return_value=list(RAW_RESULTS))
@@ -515,6 +654,31 @@ class TestLifecycleInvariant:
         }
         assert tracker.log == ["enter:db1", "exit:db1"]
         assert tracker.start_count == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_failure_marks_sandbox_dirty_and_preserves_results(self):
+        tracker = _SandboxTracker()
+
+        def benchmark(*args, cleanup_errors, **kwargs):
+            cleanup_errors.append("DROP CACHE failed")
+            return list(RAW_RESULTS)
+
+        with (
+            patch("features.audit.readyset_benchmark.docker_available", return_value=True),
+            patch("shared.deploy.sandbox_manager.sandbox_manager", tracker),
+            patch(
+                "features.audit.readyset_benchmark.benchmark_queries",
+                side_effect=benchmark,
+            ),
+        ):
+            outcome = await run_managed_benchmark(
+                "db1", [{"query_text": "SELECT 1"}]
+            )
+
+        assert outcome["status"] == "ok"
+        assert outcome["results"] == RAW_RESULTS
+        assert outcome["cleanup_warning"] == "DROP CACHE failed"
+        assert tracker.dirty_reasons == ["Audit benchmark cache cleanup failed"]
 
 
 class TestFreshEphemeralLifecycle:

@@ -174,8 +174,8 @@ export HOME="$TMP_HOME"
 READYSET_CONTAINER_NAME="rdst-integration-test-readyset"
 READYSET_PORT="${READYSET_PORT:-5433}"
 
-# Cache tests deploy Readyset via `rdst cache`; pull its image up front so
-# the first deploy never races a cold multi-hundred-MB download. Best-effort:
+# Comparisons prepare the managed sandbox; pull its image up front so the
+# first test never races a cold multi-hundred-MB download. Best-effort:
 # if the pull fails, `docker run` still pulls on demand.
 READYSET_TEST_IMAGE="$(python3 -c 'from shared.deploy import READYSET_IMAGE; print(READYSET_IMAGE)' 2>/dev/null || true)"
 if [[ -n "$READYSET_TEST_IMAGE" ]]; then
@@ -190,7 +190,8 @@ fi
 cleanup() {
   echo "Cleaning up test environment..."
 
-  # Clean up cache command's test containers (created by rdst cache)
+  # Clean up the singleton sandbox and containers from older RDST versions.
+  docker rm -f "rdst-readyset-sandbox" >/dev/null 2>&1 || true
   if [[ "$TEST_POSTGRESQL" == "true" ]]; then
     docker rm -f "rdst-readyset-${PG_TARGET_NAME}" >/dev/null 2>&1 || true
     docker rm -f "rdst-test-psql-${PG_TARGET_NAME}" >/dev/null 2>&1 || true

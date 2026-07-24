@@ -846,7 +846,13 @@ def _render_target_detailed(r: Dict[str, Any], skip_header: bool = False) -> str
     name = r.get("target_name") or "target"
     m = r.get("metrics") or {}
     workload = r.get("workload") or {}
-    rs_results = r.get("readyset_results") or []
+    rs_results = r.get("readyset_results")
+    if rs_results is None:
+        comparison_queries = (r.get("readyset_comparison") or {}).get("queries") or []
+        rs_results = [
+            {**query, "cacheable": query.get("supported")}
+            for query in comparison_queries
+        ]
     ha = r.get("health_analysis") or {}
 
     if skip_header:
@@ -1488,11 +1494,9 @@ def _synthesize_next_steps(
     if fleet_savings and fleet_savings.get("total_savings_usd"):
         steps.append({
             "rank": rank,
-            "title": "Deploy a caching layer on the primary",
-            "body": "Captured queries show high repetition — a caching layer would cut read load on the database and reduce per-query latency.",
-            "commands": [
-                f'rdst cache deploy --target {results[0].get("target_name","<target>")}',
-            ],
+            "title": "Measure a caching candidate",
+            "body": "Captured queries show high repetition. Run a temporary Readyset comparison on a representative query before deciding how to reduce read load.",
+            "commands": [],
             "estimated_savings_usd": fleet_savings["total_savings_usd"],
         })
     return steps

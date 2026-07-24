@@ -26,14 +26,6 @@ class ChildEv:
 
 
 @dataclass
-class DeployComplete:
-    type: str = "deploy_complete"
-    success: bool = True
-    endpoint: str = "postgresql://127.0.0.1:5433/db"
-    message: str = ""
-
-
-@dataclass
 class AnnotateComplete:
     type: str = "annotate_complete"
     success: bool = True
@@ -88,26 +80,11 @@ class FakeAnnotate:
             yield event
 
 
-class FakeCache:
-    def __init__(self, events=None):
-        self.events = events if events is not None else [
-            ChildEv("progress", "deploying"),
-            DeployComplete(),
-        ]
-        self.inputs = []
-
-    async def deploy(self, input_data, options):
-        self.inputs.append((input_data, options))
-        for event in self.events:
-            yield event
-
-
-def _service(configure=None, schema=None, annotate=None, cache=None, validator=None):
+def _service(configure=None, schema=None, annotate=None, validator=None):
     return TargetBootstrapService(
         configure_service=configure or FakeConfigure(),
         schema_service=schema or FakeSchema(),
         annotate_service=annotate or FakeAnnotate(),
-        cache_service=cache or FakeCache(),
         key_validator=validator or (lambda: {"valid": True, "reason": "ok"}),
     )
 
@@ -156,11 +133,9 @@ class TestConnectionStage:
     @pytest.mark.asyncio
     async def test_connection_failure_aborts_everything(self):
         schema = FakeSchema()
-        cache = FakeCache()
         service = _service(
             configure=FakeConfigure(success=False, message="auth failed"),
             schema=schema,
-            cache=cache,
         )
 
         events = await _run(service)
@@ -171,7 +146,6 @@ class TestConnectionStage:
         assert isinstance(events[-1], ErrorEvent)
         assert events[-1].code == "CONNECTION_FAILED"
         assert schema.calls == []
-        assert cache.inputs == []
 
     @pytest.mark.asyncio
     async def test_happy_path_stage_order_within_tracks(self):
@@ -181,9 +155,6 @@ class TestConnectionStage:
             statuses = [s for s, _m in _stages(events, stage)]
             assert statuses[0] == "started"
             assert statuses[-1] == "done"
-        deploy_statuses = [s for s, _m in _stages(events, "deploy")]
-        assert deploy_statuses[0] == "started"
-        assert deploy_statuses[-1] == "done"
         # Schema-track ordering: structure completes before profile starts,
         # profile before annotate.
         flat = [
@@ -259,7 +230,7 @@ class TestKeyGate:
         events = service.run(
             "imdb",
             {"engine": "postgresql"},
-            _opts(deploy=False, key_poll_seconds=30.0),
+            _opts(key_poll_seconds=30.0),
             key_wakeup=key_wakeup,
         )
 
@@ -317,7 +288,7 @@ class TestKeyGate:
             service.run(
                 "imdb",
                 {"engine": "postgresql"},
-                _opts(deploy=False, key_poll_seconds=30.0),
+                _opts(key_poll_seconds=30.0),
                 key_wakeup=key_wakeup,
             ),
             resume_event=key_wakeup,
@@ -350,74 +321,3 @@ class TestKeyGate:
         wait.cancel()
         with pytest.raises(asyncio.CancelledError):
             await wait
-
-
-class TestDeployTrack:
-    @pytest.mark.asyncio
-    async def test_deploy_disabled_emits_no_deploy_stage(self):
-        cache = FakeCache()
-        events = await _run(_service(cache=cache), _opts(deploy=False))
-        assert _stages(events, "deploy") == []
-        assert cache.inputs == []
-
-    @pytest.mark.asyncio
-    async def test_deploy_options_forwarded(self):
-        cache = FakeCache()
-        await _run(_service(cache=cache), _opts(deploy_mode="kubernetes"))
-        input_data, options = cache.inputs[0]
-        assert input_data.target == "imdb"
-        assert options.mode == "kubernetes"
-        assert options.yes is True
-
-    @pytest.mark.asyncio
-    async def test_deploy_failure_does_not_kill_schema_track(self):
-        class ExplodingCache(FakeCache):
-            async def deploy(self, input_data, options):
-                raise RuntimeError("docker not found")
-                yield  # pragma: no cover
-
-        events = await _run(_service(cache=ExplodingCache()))
-
-        errors = [e for e in events if isinstance(e, ErrorEvent)]
-        assert any("docker not found" in e.message for e in errors)
-        assert _stages(events, "annotate")[-1][0] == "done"
-
-    @pytest.mark.asyncio
-    async def test_registry_drains_schema_track_after_deploy_error(self):
-        class ExplodingCache(FakeCache):
-            async def deploy(self, input_data, options):
-                raise RuntimeError("docker not found")
-                yield  # pragma: no cover
-
-        registry = RunRegistry()
-        run_id = registry.start(
-            "bootstrap",
-            "imdb",
-            _service(cache=ExplodingCache()).run(
-                "imdb", {"engine": "postgresql"}, _opts()
-            ),
-        )
-
-        records = [record async for record in registry.events(run_id)]
-        annotation_stages = [
-            record["data"]
-            for record in records
-            if record["event"] == "bootstrap_stage"
-            and record["data"]["stage"] == "annotate"
-        ]
-
-        assert annotation_stages[-1]["status"] == "done"
-        assert records[-1]["data"]["status"] == "failed"
-
-    @pytest.mark.asyncio
-    async def test_child_events_surface_as_progress_with_detail(self):
-        events = await _run(_service())
-        progress = [
-            e
-            for e in events
-            if isinstance(e, BootstrapStageEvent)
-            and e.stage == "deploy"
-            and e.status == "progress"
-        ]
-        assert progress
-        assert progress[0].detail["type"] in ("progress", "deploy_complete")

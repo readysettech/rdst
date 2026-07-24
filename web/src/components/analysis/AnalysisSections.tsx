@@ -4,139 +4,140 @@
  * Extracted from AnalysisResults.tsx so that both the standalone /results page
  * and the scan analysis modal can render rich analysis data without duplication.
  */
-import { useId } from "react";
-import { useDisclosure } from "@rs/ui-new/use-disclosure";
-import { Tag } from "@rs/ui-new/tag";
-import { Text } from "@rs/ui-new/text";
-import { Card } from "@rs/ui-new/card";
-import { Icon } from "@rs/ui-new/icon";
-import { Button } from "@rs/ui-new/button";
-import { HStack, VStack } from "@rs/ui-new/stack";
-import { DetailExpander } from "@rs/ui-new/error-state";
-import { m } from "@rs/ui-new/motion";
-import { SQLDisplay } from "../SQLDisplay";
+
+import { Button } from '@rs/ui-new/button'
+import { Card } from '@rs/ui-new/card'
+import { DetailExpander } from '@rs/ui-new/error-state'
+import { Icon } from '@rs/ui-new/icon'
+import { m } from '@rs/ui-new/motion'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
+import { Text } from '@rs/ui-new/text'
+import { useDisclosure } from '@rs/ui-new/use-disclosure'
+import { useId } from 'react'
 import type {
-  ExplainResults,
-  RewriteTesting,
-  ReadysetCacheability,
-  TestedRewrite,
   CompleteEvent,
-} from "../../lib/api";
+  ExplainResults,
+  ReadysetCacheability,
+  RewriteTesting,
+  TestedRewrite,
+} from '../../lib/api'
+import { SQLDisplay } from '../SQLDisplay'
 
 // ---------------------------------------------------------------------------
 // Shared types & helpers
 // ---------------------------------------------------------------------------
 
-type TagVariant = "positive" | "informative" | "warning" | "negative";
-type StyleVariant = "positive" | "info" | "warning" | "negative";
+type TagVariant = 'positive' | 'informative' | 'warning' | 'negative'
+type StyleVariant = 'positive' | 'info' | 'warning' | 'negative'
 
 // Valid icon names from @rs/ui-icons
 export type ValidIconName =
-  | "access"
-  | "add"
-  | "alert"
-  | "arrow-down"
-  | "arrow-left"
-  | "arrow-right"
-  | "arrow-up"
-  | "close"
-  | "database"
-  | "database-settings"
-  | "edit"
-  | "info"
-  | "key"
-  | "play"
-  | "search"
-  | "settings"
-  | "sparkles"
-  | "speedometer"
-  | "tick-double"
-  | "tick"
-  | "trash"
-  | "layers"
-  | "dashboard"
-  | "observe"
-  | "querypilot"
-  | "test-tube";
+  | 'access'
+  | 'add'
+  | 'alert'
+  | 'arrow-down'
+  | 'arrow-left'
+  | 'arrow-right'
+  | 'arrow-up'
+  | 'close'
+  | 'database'
+  | 'database-settings'
+  | 'edit'
+  | 'info'
+  | 'key'
+  | 'play'
+  | 'search'
+  | 'settings'
+  | 'sparkles'
+  | 'speedometer'
+  | 'tick-double'
+  | 'tick'
+  | 'trash'
+  | 'layers'
+  | 'dashboard'
+  | 'observe'
+  | 'querypilot'
+  | 'test-tube'
 
 export const getRatingVariant = (rating: string): TagVariant => {
   switch (rating?.toLowerCase()) {
-    case "excellent":
-      return "positive";
-    case "good":
-      return "informative";
-    case "fair":
-      return "warning";
-    case "poor":
-      return "negative";
+    case 'excellent':
+      return 'positive'
+    case 'good':
+      return 'informative'
+    case 'fair':
+      return 'warning'
+    case 'poor':
+      return 'negative'
     default:
-      return "informative";
+      return 'informative'
   }
-};
+}
 
 export const getRatingIcon = (rating: string): ValidIconName => {
   switch (rating?.toLowerCase()) {
-    case "excellent":
-      return "sparkles";
-    case "good":
-      return "tick-double";
-    case "fair":
-      return "alert";
-    case "poor":
-      return "close";
+    case 'excellent':
+      return 'sparkles'
+    case 'good':
+      return 'tick-double'
+    case 'fair':
+      return 'alert'
+    case 'poor':
+      return 'close'
     default:
-      return "info";
+      return 'info'
   }
-};
+}
 
 export const getPriorityVariant = (priority: string): TagVariant => {
   switch (priority?.toLowerCase()) {
-    case "high":
-      return "negative";
-    case "medium":
-      return "warning";
-    case "low":
-      return "positive";
+    case 'high':
+      return 'negative'
+    case 'medium':
+      return 'warning'
+    case 'low':
+      return 'positive'
     default:
-      return "informative";
+      return 'informative'
   }
-};
+}
 
 export const getScoreVariant = (score: number): StyleVariant => {
-  if (score >= 80) return "positive";
-  if (score >= 50) return "warning";
-  return "negative";
-};
+  if (score >= 80) return 'positive'
+  if (score >= 50) return 'warning'
+  return 'negative'
+}
 
 export const variantStyles: Record<
   StyleVariant,
   { bg: string; text: string; border: string; glow: string }
 > = {
   positive: {
-    bg: "bg-surface-positive-soft",
-    text: "text-content-positive-soft",
-    border: "border-border-positive-soft",
-    glow: "shadow-glow-positive",
+    bg: 'bg-surface-positive-soft',
+    text: 'text-content-positive-soft',
+    border: 'border-border-positive-soft',
+    glow: 'shadow-glow-positive',
   },
   info: {
-    bg: "bg-surface-info-soft",
-    text: "text-content-info-soft",
-    border: "border-border-info-soft",
-    glow: "shadow-glow-info",
+    bg: 'bg-surface-info-soft',
+    text: 'text-content-info-soft',
+    border: 'border-border-info-soft',
+    glow: 'shadow-glow-info',
   },
   warning: {
-    bg: "bg-surface-warning-soft",
-    text: "text-content-warning-soft",
-    border: "border-border-warning-soft",
-    glow: "shadow-glow-warning",
+    bg: 'bg-surface-warning-soft',
+    text: 'text-content-warning-soft',
+    border: 'border-border-warning-soft',
+    glow: 'shadow-glow-warning',
   },
   negative: {
-    bg: "bg-surface-negative-soft",
-    text: "text-content-negative-soft",
-    border: "border-border-negative-soft",
-    glow: "shadow-glow-negative",
+    bg: 'bg-surface-negative-soft',
+    text: 'text-content-negative-soft',
+    border: 'border-border-negative-soft',
+    glow: 'shadow-glow-negative',
   },
-};
+}
 
 // ---------------------------------------------------------------------------
 // Normalize rewrite testing data from various backend shapes
@@ -145,46 +146,46 @@ export const variantStyles: Record<
 export function normalizeRewriteTesting(
   candidate: unknown
 ): RewriteTesting | undefined {
-  if (!candidate || typeof candidate !== "object") {
-    return undefined;
+  if (!candidate || typeof candidate !== 'object') {
+    return undefined
   }
 
   const testing = candidate as RewriteTesting & {
-    success?: boolean;
-    rewrite_results?: unknown;
-    best_rewrite?: unknown;
-  };
+    success?: boolean
+    rewrite_results?: unknown
+    best_rewrite?: unknown
+  }
 
-  if (typeof testing.tested === "boolean") {
-    return testing;
+  if (typeof testing.tested === 'boolean') {
+    return testing
   }
 
   if (testing.skipped_reason || testing.success === false) {
-    return { ...testing, tested: false };
+    return { ...testing, tested: false }
   }
 
   if (testing.success === true) {
     const rewriteResults = Array.isArray(testing.rewrite_results)
       ? testing.rewrite_results
-      : [];
+      : []
     return {
       ...testing,
       tested: rewriteResults.length > 0 || Boolean(testing.best_rewrite),
-      rewrite_results: rewriteResults as RewriteTesting["rewrite_results"],
-    };
+      rewrite_results: rewriteResults as RewriteTesting['rewrite_results'],
+    }
   }
 
-  return undefined;
+  return undefined
 }
 
 export function resolveRewriteTesting(
   ...candidates: Array<RewriteTesting | undefined>
 ): RewriteTesting | undefined {
   for (const c of candidates) {
-    const normalized = normalizeRewriteTesting(c);
-    if (normalized) return normalized;
+    const normalized = normalizeRewriteTesting(c)
+    if (normalized) return normalized
   }
-  return undefined;
+  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -196,17 +197,17 @@ export function ScoreGauge({
   size = 80,
   variant: variantOverride,
 }: {
-  score: number;
-  size?: number;
+  score: number
+  size?: number
   // When set, the ring/number use this variant instead of the raw score band,
   // so the gauge agrees with the surrounding rating verdict. [QW20]
-  variant?: StyleVariant;
+  variant?: StyleVariant
 }) {
-  const variant = variantOverride ?? getScoreVariant(score);
-  const style = variantStyles[variant];
-  const radius = (size - 8) / 2;
-  const circumference = radius * 2 * Math.PI;
-  const offset = circumference - (score / 100) * circumference;
+  const variant = variantOverride ?? getScoreVariant(score)
+  const style = variantStyles[variant]
+  const radius = (size - 8) / 2
+  const circumference = radius * 2 * Math.PI
+  const offset = circumference - (score / 100) * circumference
 
   return (
     <div className="relative" style={{ width: size, height: size }}>
@@ -232,12 +233,12 @@ export function ScoreGauge({
           initial={{ strokeDashoffset: circumference }}
           animate={{ strokeDashoffset: offset }}
           style={{ strokeDasharray: circumference }}
-          transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
+          transition={{ duration: 1, ease: 'easeOut', delay: 0.2 }}
         />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
         <m.span
-          className={`${size >= 96 ? "text-stat-hero" : "text-xl font-bold"} tabular-nums ${style.text}`}
+          className={`${size >= 96 ? 'text-stat-hero' : 'text-xl font-bold'} tabular-nums ${style.text}`}
           initial={{ opacity: 0, scale: 0.5 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.4, delay: 0.5 }}
@@ -246,7 +247,7 @@ export function ScoreGauge({
         </m.span>
       </div>
     </div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -259,10 +260,10 @@ export function MetricCard({
   icon,
   delay = 0,
 }: {
-  label: string;
-  value: string | number;
-  icon?: "speedometer" | "layers" | "dashboard" | "observe";
-  delay?: number;
+  label: string
+  value: string | number
+  icon?: 'speedometer' | 'layers' | 'dashboard' | 'observe'
+  delay?: number
 }) {
   return (
     <m.div
@@ -286,14 +287,11 @@ export function MetricCard({
           {label}
         </Text>
       </HStack>
-      <Text
-        level="mono-large"
-        className="text-content-layout-1 font-semibold"
-      >
+      <Text level="mono-large" className="text-content-layout-1 font-semibold">
         {String(value)}
       </Text>
     </m.div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -306,10 +304,10 @@ export function SectionHeader({
   subtitle,
   action,
 }: {
-  icon: ValidIconName;
-  title: string;
-  subtitle?: string;
-  action?: React.ReactNode;
+  icon: ValidIconName
+  title: string
+  subtitle?: string
+  action?: React.ReactNode
 }) {
   return (
     <HStack className="justify-between items-start mb-5">
@@ -334,7 +332,7 @@ export function SectionHeader({
       </HStack>
       {action}
     </HStack>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -343,11 +341,11 @@ export function SectionHeader({
 
 interface PerformanceSummarySectionProps {
   perf: {
-    overall_rating?: string;
-    efficiency_score?: number;
-    primary_concerns?: string[];
-  };
-  explainResults?: ExplainResults;
+    overall_rating?: string
+    efficiency_score?: number
+    primary_concerns?: string[]
+  }
+  explainResults?: ExplainResults
 }
 
 export function PerformanceSummarySection({
@@ -356,11 +354,11 @@ export function PerformanceSummarySection({
 }: PerformanceSummarySectionProps) {
   const ratingVariant = perf.overall_rating
     ? getRatingVariant(perf.overall_rating)
-    : "informative";
+    : 'informative'
   const ratingStyle =
-    ratingVariant === "informative"
+    ratingVariant === 'informative'
       ? variantStyles.info
-      : variantStyles[ratingVariant as StyleVariant];
+      : variantStyles[ratingVariant as StyleVariant]
 
   return (
     <m.div
@@ -377,7 +375,11 @@ export function PerformanceSummarySection({
               <ScoreGauge
                 score={perf.efficiency_score}
                 size={104}
-                variant={ratingVariant === "informative" ? "info" : (ratingVariant as StyleVariant)}
+                variant={
+                  ratingVariant === 'informative'
+                    ? 'info'
+                    : (ratingVariant as StyleVariant)
+                }
               />
             )}
             <VStack className="gap-1 items-start">
@@ -393,7 +395,7 @@ export function PerformanceSummarySection({
                   />
                   <Text level="label-medium" className={ratingStyle.text}>
                     {perf.overall_rating.charAt(0).toUpperCase() +
-                      perf.overall_rating.slice(1)}{" "}
+                      perf.overall_rating.slice(1)}{' '}
                     Performance
                   </Text>
                 </HStack>
@@ -415,25 +417,25 @@ export function PerformanceSummarySection({
           <div className="grid grid-cols-2 tablet:grid-cols-4 gap-4 mb-6">
             <MetricCard
               label="Execution Time"
-              value={`${explainResults.execution_time_ms?.toFixed(2) || "0"}ms`}
+              value={`${explainResults.execution_time_ms?.toFixed(2) || '0'}ms`}
               icon="speedometer"
               delay={0.1}
             />
             <MetricCard
               label="Rows Examined"
-              value={explainResults.rows_examined?.toLocaleString() || "0"}
+              value={explainResults.rows_examined?.toLocaleString() || '0'}
               icon="layers"
               delay={0.15}
             />
             <MetricCard
               label="Rows Returned"
-              value={explainResults.rows_returned?.toLocaleString() || "0"}
+              value={explainResults.rows_returned?.toLocaleString() || '0'}
               icon="dashboard"
               delay={0.2}
             />
             <MetricCard
               label="Cost Estimate"
-              value={explainResults.cost_estimate?.toFixed(2) || "0"}
+              value={explainResults.cost_estimate?.toFixed(2) || '0'}
               icon="observe"
               delay={0.25}
             />
@@ -483,7 +485,7 @@ export function PerformanceSummarySection({
         )}
       </div>
     </m.div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -493,10 +495,10 @@ export function PerformanceSummarySection({
 export function TestedOptimizationsSection({
   testing,
 }: {
-  testing: RewriteTesting;
+  testing: RewriteTesting
 }) {
   if (!testing.tested) {
-    if (testing.skipped_reason === "parameterized_query") {
+    if (testing.skipped_reason === 'parameterized_query') {
       return (
         <m.div
           className="bg-surface-warning-soft/50 border border-border-warning-soft rounded-xl p-5"
@@ -513,10 +515,7 @@ export function TestedOptimizationsSection({
               />
             </div>
             <VStack className="gap-1 items-start">
-              <Text
-                level="label-medium"
-                className="text-content-warning-soft"
-              >
+              <Text level="label-medium" className="text-content-warning-soft">
                 Rewrite Testing Skipped
               </Text>
               <Text level="body-small" className="text-content-layout-2">
@@ -526,29 +525,28 @@ export function TestedOptimizationsSection({
             </VStack>
           </HStack>
         </m.div>
-      );
+      )
     }
-    return null;
+    return null
   }
 
-  const rewriteResults = testing.rewrite_results || [];
-  const originalTime =
-    testing.original_performance?.execution_time_ms || 0;
-  const baselineRowsReturned = testing.original_performance?.rows_returned;
+  const rewriteResults = testing.rewrite_results || []
+  const originalTime = testing.original_performance?.execution_time_ms || 0
+  const baselineRowsReturned = testing.original_performance?.rows_returned
 
   const isRowCountMismatch = (baseline: unknown, rewrite: unknown): boolean =>
-    typeof baseline === "number" &&
-    typeof rewrite === "number" &&
+    typeof baseline === 'number' &&
+    typeof rewrite === 'number' &&
     baseline >= 0 &&
     rewrite >= 0 &&
-    baseline !== rewrite;
+    baseline !== rewrite
 
   const bestRewriteRowsReturned =
-    testing.best_rewrite?.performance?.rows_returned;
+    testing.best_rewrite?.performance?.rows_returned
   const bestRewriteMismatch = isRowCountMismatch(
     baselineRowsReturned,
-    bestRewriteRowsReturned,
-  );
+    bestRewriteRowsReturned
+  )
 
   if (rewriteResults.length === 0) {
     return (
@@ -566,17 +564,14 @@ export function TestedOptimizationsSection({
                 label="Info"
                 className="w-5 h-5 text-content-info-soft"
               />
-              <Text
-                level="body-small"
-                className="text-content-info-soft"
-              >
+              <Text level="body-small" className="text-content-info-soft">
                 No rewrites were tested successfully
               </Text>
             </HStack>
           </div>
         </Card.Content>
       </Card>
-    );
+    )
   }
 
   return (
@@ -590,15 +585,22 @@ export function TestedOptimizationsSection({
         <div className="rounded-xl border border-border-negative-soft bg-surface-negative-soft/40 p-4">
           <HStack className="gap-3 items-start">
             <div className="w-8 h-8 rounded-lg bg-surface-negative-soft flex items-center justify-center">
-              <Icon name="alert" label="Mismatch" className="w-4 h-4 text-content-negative-soft" />
+              <Icon
+                name="alert"
+                label="Mismatch"
+                className="w-4 h-4 text-content-negative-soft"
+              />
             </div>
             <VStack className="gap-1 items-start">
               <Text level="label-medium" className="text-content-negative-soft">
                 Row count mismatch detected
               </Text>
               <Text level="body-small" className="text-content-layout-2">
-                Best rewrite returns {bestRewriteRowsReturned?.toLocaleString() ?? "?"} rows, but the original returned {baselineRowsReturned?.toLocaleString() ?? "?"}.
-                Review carefully before adopting this rewrite.
+                Best rewrite returns{' '}
+                {bestRewriteRowsReturned?.toLocaleString() ?? '?'} rows, but the
+                original returned{' '}
+                {baselineRowsReturned?.toLocaleString() ?? '?'}. Review
+                carefully before adopting this rewrite.
               </Text>
             </VStack>
           </HStack>
@@ -607,48 +609,46 @@ export function TestedOptimizationsSection({
       <SectionHeader
         icon="test-tube"
         title="Tested Optimizations"
-        subtitle={`${rewriteResults.length} rewrite${rewriteResults.length > 1 ? "s" : ""} tested against original`}
+        subtitle={`${rewriteResults.length} rewrite${rewriteResults.length > 1 ? 's' : ''} tested against original`}
       />
       <div className="space-y-3">
         {rewriteResults.map((rewrite: TestedRewrite, i: number) => {
-          const improvement =
-            rewrite.improvement?.overall?.improvement_pct || 0;
-          const rewriteTime =
-            rewrite.performance?.execution_time_ms || 0;
-          const rewriteRowsReturned = rewrite.performance?.rows_returned;
+          const improvement = rewrite.improvement?.overall?.improvement_pct || 0
+          const rewriteTime = rewrite.performance?.execution_time_ms || 0
+          const rewriteRowsReturned = rewrite.performance?.rows_returned
           const rowCountMismatch = isRowCountMismatch(
             baselineRowsReturned,
-            rewriteRowsReturned,
-          );
+            rewriteRowsReturned
+          )
 
           let status: {
-            icon: ValidIconName;
-            text: string;
-            variant: TagVariant;
-          };
+            icon: ValidIconName
+            text: string
+            variant: TagVariant
+          }
           if (improvement >= 10) {
             status = {
-              icon: "arrow-up",
-              text: "FASTER",
-              variant: "positive",
-            };
+              icon: 'arrow-up',
+              text: 'FASTER',
+              variant: 'positive',
+            }
           } else if (improvement >= 0) {
             status = {
-              icon: "arrow-right",
-              text: "SIMILAR",
-              variant: "informative",
-            };
+              icon: 'arrow-right',
+              text: 'SIMILAR',
+              variant: 'informative',
+            }
           } else {
             status = {
-              icon: "arrow-down",
-              text: "SLOWER",
-              variant: "negative",
-            };
+              icon: 'arrow-down',
+              text: 'SLOWER',
+              variant: 'negative',
+            }
           }
 
           const styleVariant: StyleVariant =
-            status.variant === "informative" ? "info" : status.variant;
-          const style = variantStyles[styleVariant];
+            status.variant === 'informative' ? 'info' : status.variant
+          const style = variantStyles[styleVariant]
 
           return (
             <m.div
@@ -675,16 +675,13 @@ export function TestedOptimizationsSection({
                       <span
                         className={`${style.text} font-mono text-sm font-medium`}
                       >
-                        {improvement >= 0 ? "+" : ""}
+                        {improvement >= 0 ? '+' : ''}
                         {improvement.toFixed(1)}%
                       </span>
                     </HStack>
-                    <Text
-                      level="body-small"
-                      className="text-content-layout-2"
-                    >
+                    <Text level="body-small" className="text-content-layout-2">
                       {rewrite.suggestion_metadata?.explanation ||
-                        "Query rewrite optimization"}
+                        'Query rewrite optimization'}
                     </Text>
                   </VStack>
                   <VStack className="gap-1 items-end shrink-0">
@@ -695,18 +692,12 @@ export function TestedOptimizationsSection({
                       >
                         {rewriteTime.toFixed(2)}
                       </Text>
-                      <Text
-                        level="caption"
-                        className="text-content-layout-3"
-                      >
+                      <Text level="caption" className="text-content-layout-3">
                         ms
                       </Text>
                     </HStack>
                     {originalTime > 0 && (
-                      <Text
-                        level="caption"
-                        className="text-content-layout-3"
-                      >
+                      <Text level="caption" className="text-content-layout-3">
                         vs {originalTime.toFixed(2)}ms original
                       </Text>
                     )}
@@ -715,7 +706,7 @@ export function TestedOptimizationsSection({
                         size="small"
                         variant="negative"
                         modifier="ghost"
-                        label={`Returns ${rewriteRowsReturned?.toLocaleString() ?? "?"} rows (${baselineRowsReturned?.toLocaleString() ?? "?"} original)`}
+                        label={`Returns ${rewriteRowsReturned?.toLocaleString() ?? '?'} rows (${baselineRowsReturned?.toLocaleString() ?? '?'} original)`}
                       />
                     )}
                   </VStack>
@@ -729,11 +720,11 @@ export function TestedOptimizationsSection({
                 />
               </div>
             </m.div>
-          );
+          )
         })}
       </div>
     </m.div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -743,9 +734,11 @@ export function TestedOptimizationsSection({
 export function IndexRecommendationsSection({
   recommendations,
 }: {
-  recommendations: NonNullable<CompleteEvent["llm_analysis"]>["index_recommendations"];
+  recommendations: NonNullable<
+    CompleteEvent['llm_analysis']
+  >['index_recommendations']
 }) {
-  if (!recommendations || recommendations.length === 0) return null;
+  if (!recommendations || recommendations.length === 0) return null
 
   return (
     <m.div
@@ -757,7 +750,7 @@ export function IndexRecommendationsSection({
       <SectionHeader
         icon="search"
         title="Index Recommendations"
-        subtitle={`${recommendations.length} suggested index${recommendations.length > 1 ? "es" : ""} for optimization`}
+        subtitle={`${recommendations.length} suggested index${recommendations.length > 1 ? 'es' : ''} for optimization`}
       />
       <div className="space-y-3">
         {recommendations.map((index, i) => (
@@ -784,7 +777,7 @@ export function IndexRecommendationsSection({
                       level="label-medium"
                       className="text-content-layout-1"
                     >
-                      Index on{" "}
+                      Index on{' '}
                       <Text
                         as="span"
                         level="mono-small"
@@ -833,10 +826,7 @@ export function IndexRecommendationsSection({
                 </HStack>
                 <ul className="space-y-1.5 ml-5">
                   {index.caveats.map((c, j) => (
-                    <li
-                      key={j}
-                      className="text-content-layout-2 list-disc"
-                    >
+                    <li key={j} className="text-content-layout-2 list-disc">
                       <Text as="span" level="body-small">
                         {c}
                       </Text>
@@ -849,7 +839,7 @@ export function IndexRecommendationsSection({
         ))}
       </div>
     </m.div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -860,68 +850,67 @@ export function AdditionalRecommendationsSection({
   opportunities,
   collapsible = false,
 }: {
-  opportunities: NonNullable<CompleteEvent["llm_analysis"]>["optimization_opportunities"];
+  opportunities: NonNullable<
+    CompleteEvent['llm_analysis']
+  >['optimization_opportunities']
   /** On /results these are the *other* recs — collapse them behind a
    *  "More recommendations (N) ▾" disclosure so they sit under Details rather
    *  than as a full peer section. Scan modal keeps the default (expanded). */
-  collapsible?: boolean;
+  collapsible?: boolean
 }) {
-  const [open, setOpen] = useDisclosure({});
-  if (!opportunities || opportunities.length === 0) return null;
+  const [open, setOpen] = useDisclosure({})
+  if (!opportunities || opportunities.length === 0) return null
 
   const list = (
     <div className="bg-surface-layout-1 rounded-xl border border-border-layout-1 overflow-hidden">
       {opportunities.map((opp, i) => {
-          const priorityVariant: StyleVariant =
-            opp.priority?.toLowerCase() === "high"
-              ? "negative"
-              : opp.priority?.toLowerCase() === "medium"
-                ? "warning"
-                : "info";
-          const style = variantStyles[priorityVariant];
+        const priorityVariant: StyleVariant =
+          opp.priority?.toLowerCase() === 'high'
+            ? 'negative'
+            : opp.priority?.toLowerCase() === 'medium'
+              ? 'warning'
+              : 'info'
+        const style = variantStyles[priorityVariant]
 
-          return (
-            <m.div
-              key={i}
-              className={`p-4 ${i > 0 ? "border-t border-border-layout-1" : ""} hover:bg-surface-layout-2/50 transition-colors`}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.2, delay: 0.05 * i }}
-            >
-              <HStack className="gap-4 items-start">
-                <div
-                  className={`w-7 h-7 rounded-lg ${style.bg} flex items-center justify-center shrink-0 mt-0.5`}
+        return (
+          <m.div
+            key={i}
+            className={`p-4 ${i > 0 ? 'border-t border-border-layout-1' : ''} hover:bg-surface-layout-2/50 transition-colors`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.2, delay: 0.05 * i }}
+          >
+            <HStack className="gap-4 items-start">
+              <div
+                className={`w-7 h-7 rounded-lg ${style.bg} flex items-center justify-center shrink-0 mt-0.5`}
+              >
+                <Text level="caption" className={`${style.text} font-bold`}>
+                  {opp.priority?.charAt(0).toUpperCase() || 'M'}
+                </Text>
+              </div>
+              <VStack className="gap-1.5 items-start flex-1">
+                <HStack className="gap-2 items-center">
+                  <Tag
+                    variant={getPriorityVariant(opp.priority)}
+                    modifier="ghost"
+                    size="small"
+                    label={opp.priority?.toUpperCase() || 'MEDIUM'}
+                  />
+                </HStack>
+                <Text
+                  as="span"
+                  level="body-small"
+                  className="text-content-layout-2 leading-relaxed"
                 >
-                  <Text
-                    level="caption"
-                    className={`${style.text} font-bold`}
-                  >
-                    {opp.priority?.charAt(0).toUpperCase() || "M"}
-                  </Text>
-                </div>
-                <VStack className="gap-1.5 items-start flex-1">
-                  <HStack className="gap-2 items-center">
-                    <Tag
-                      variant={getPriorityVariant(opp.priority)}
-                      modifier="ghost"
-                      size="small"
-                      label={opp.priority?.toUpperCase() || "MEDIUM"}
-                    />
-                  </HStack>
-                  <Text
-                    as="span"
-                    level="body-small"
-                    className="text-content-layout-2 leading-relaxed"
-                  >
-                    {opp.description}
-                  </Text>
-                </VStack>
-              </HStack>
-            </m.div>
-          );
-        })}
+                  {opp.description}
+                </Text>
+              </VStack>
+            </HStack>
+          </m.div>
+        )
+      })}
     </div>
-  );
+  )
 
   // Collapsed variant: a quiet "More recommendations (N) ▾" disclosure that
   // keeps these off the default view until asked for. [brief, VIS-107]
@@ -950,12 +939,12 @@ export function AdditionalRecommendationsSection({
           <Icon
             name="chevron-down"
             label=""
-            className={`w-4 h-4 text-content-layout-3 transition-transform ${open ? "rotate-180" : ""}`}
+            className={`w-4 h-4 text-content-layout-3 transition-transform ${open ? 'rotate-180' : ''}`}
           />
         </button>
         {open && list}
       </m.div>
-    );
+    )
   }
 
   return (
@@ -972,11 +961,11 @@ export function AdditionalRecommendationsSection({
       />
       {list}
     </m.div>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
-// ReadysetCacheabilitySection — cacheable status
+// ReadysetCacheabilitySection — compatibility estimate or verification
 // ---------------------------------------------------------------------------
 
 export function ReadysetCacheabilitySection({
@@ -987,14 +976,14 @@ export function ReadysetCacheabilitySection({
   onSetUpCaching,
   isCaching,
 }: {
-  cacheability: ReadysetCacheability;
-  cacheDeployed?: boolean;
-  onCacheQuery?: () => void;
-  onDeployNavigate?: () => void;
-  onSetUpCaching?: () => void;
-  isCaching?: boolean;
+  cacheability: ReadysetCacheability
+  cacheDeployed?: boolean
+  onCacheQuery?: () => void
+  onDeployNavigate?: () => void
+  onSetUpCaching?: () => void
+  isCaching?: boolean
 }) {
-  const detailId = useId();
+  const detailId = useId()
   // A definitive "Not Cacheable / BLOCKED" verdict is only trustworthy when the
   // check completed with a confident, clean answer. An errored or low-confidence
   // result (a returned "no: db error" row, Readyset startup/timeout, unknown
@@ -1002,47 +991,62 @@ export function ReadysetCacheabilitySection({
   // BLOCKED (P69). A genuine unsupported verdict (confidence "high", no error
   // signal) still renders as BLOCKED.
   const CHECK_ERROR =
-    /db error|connection|timeout|timed out|unreachable|refused|startup|unavailable|pending|failed|\berror\b/i;
+    /db error|connection|timeout|timed out|unreachable|refused|startup|unavailable|pending|failed|\berror\b/i
   const verdictLooksUnreliable =
     cacheability.cacheable === false &&
-    (cacheability.confidence === "low" ||
-      cacheability.confidence === "unknown" ||
-      CHECK_ERROR.test(cacheability.explanation ?? "") ||
-      (cacheability.issues ?? []).some((issue) => CHECK_ERROR.test(issue)));
+    (cacheability.confidence === 'low' ||
+      cacheability.confidence === 'unknown' ||
+      CHECK_ERROR.test(cacheability.explanation ?? '') ||
+      (cacheability.issues ?? []).some((issue) => CHECK_ERROR.test(issue)))
   const isVerified =
     cacheability.checked &&
-    cacheability.method !== "static_analysis" &&
-    cacheability.method !== "readyset_unavailable" &&
-    !verdictLooksUnreliable;
-  const isCacheable = isVerified && cacheability.cacheable === true;
+    cacheability.method !== 'static_analysis' &&
+    cacheability.method !== 'readyset_unavailable' &&
+    !verdictLooksUnreliable
+  const isEstimated =
+    cacheability.checked && cacheability.method === 'static_analysis'
+  const isCacheable = isVerified && cacheability.cacheable === true
+  const isPositive =
+    isCacheable || (isEstimated && cacheability.cacheable === true)
   // Keep raw driver/client text out of the primary copy (P41): the backend now
   // sends a human `explanation` plus raw `detail`; if a raw-looking explanation
   // still arrives (legacy payload / unreliable verdict), swap it for a generic
   // line and move the raw text behind the technical-details expander.
   const rawDetail =
-    (cacheability as ReadysetCacheability & { detail?: string | null }).detail ??
-    undefined;
+    (cacheability as ReadysetCacheability & { detail?: string | null })
+      .detail ?? undefined
   const explanationLooksRaw =
     !isVerified &&
     Boolean(cacheability.explanation) &&
-    CHECK_ERROR.test(cacheability.explanation ?? "");
-  const bodyText =
-    explanationLooksRaw && rawDetail === undefined
+    CHECK_ERROR.test(cacheability.explanation ?? '')
+  const staticBodyText = isEstimated
+    ? cacheability.cacheable
+      ? 'Static SQL screening found no obvious Readyset blockers. Run a temporary comparison to verify support and measure performance.'
+      : 'Static SQL screening found potential Readyset blockers. Review them before trying Readyset.'
+    : undefined
+  const bodyText = staticBodyText
+    ? staticBodyText
+    : explanationLooksRaw && rawDetail === undefined
       ? "Readyset could not complete the cacheability check, so this query's cacheability has not been verified."
-      : cacheability.explanation;
+      : cacheability.explanation
   const technicalDetail =
-    rawDetail ?? (explanationLooksRaw ? cacheability.explanation ?? undefined : undefined);
-  const variant: StyleVariant = !isVerified
-    ? "warning"
-    : isCacheable
-      ? "positive"
-      : "negative";
-  const style = variantStyles[variant];
-  const verdict = !isVerified
-    ? "Not Verified"
-    : isCacheable
-      ? "Cacheable"
-      : "Not Cacheable";
+    rawDetail ??
+    (explanationLooksRaw ? (cacheability.explanation ?? undefined) : undefined)
+  const variant: StyleVariant = isPositive
+    ? 'positive'
+    : !isVerified
+      ? 'warning'
+      : 'negative'
+  const style = variantStyles[variant]
+  const verdict = isEstimated
+    ? cacheability.cacheable
+      ? 'No obvious blockers'
+      : 'Potential blockers'
+    : !isVerified
+      ? 'Not Verified'
+      : isCacheable
+        ? 'Readyset compatible'
+        : 'Unsupported by Readyset'
 
   return (
     <m.div
@@ -1053,8 +1057,8 @@ export function ReadysetCacheabilitySection({
     >
       <SectionHeader
         icon="layers"
-        title="Readyset Cacheability"
-        subtitle="Query compatibility with Readyset caching"
+        title="Readyset Compatibility"
+        subtitle="Static SQL screening — Docker is only needed for a comparison"
       />
       <div
         className={`rounded-xl overflow-hidden border ${style.border} ${style.glow}`}
@@ -1063,18 +1067,20 @@ export function ReadysetCacheabilitySection({
           <HStack className="justify-between items-center mb-4">
             <HStack className="gap-4 items-center">
               <m.div
-                className={`w-14 h-14 rounded-2xl ${!isVerified ? "bg-surface-warning-soft" : isCacheable ? "bg-surface-positive-soft" : "bg-surface-negative-soft"} flex items-center justify-center`}
+                className={`w-14 h-14 rounded-2xl ${isPositive ? 'bg-surface-positive-soft' : !isVerified ? 'bg-surface-warning-soft' : 'bg-surface-negative-soft'} flex items-center justify-center`}
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{
-                  type: "spring",
+                  type: 'spring',
                   stiffness: 400,
                   damping: 15,
                   delay: 0.2,
                 }}
               >
                 <Icon
-                  name={!isVerified ? "alert" : isCacheable ? "tick-double" : "close"}
+                  name={
+                    isPositive ? 'tick-double' : !isVerified ? 'alert' : 'close'
+                  }
                   label={verdict}
                   className={`w-7 h-7 ${style.text}`}
                 />
@@ -1086,7 +1092,7 @@ export function ReadysetCacheabilitySection({
                 {isVerified && cacheability.confidence && (
                   <Text level="caption" className="text-content-layout-3">
                     {cacheability.confidence.charAt(0).toUpperCase() +
-                      cacheability.confidence.slice(1)}{" "}
+                      cacheability.confidence.slice(1)}{' '}
                     confidence
                   </Text>
                 )}
@@ -1094,8 +1100,18 @@ export function ReadysetCacheabilitySection({
             </HStack>
             <HStack className="gap-2 items-center">
               <Tag
-                variant={!isVerified ? "warning" : isCacheable ? "positive" : "negative"}
-                label={!isVerified ? "UNAVAILABLE" : isCacheable ? "READY" : "BLOCKED"}
+                variant={
+                  isPositive ? 'positive' : !isVerified ? 'warning' : 'negative'
+                }
+                label={
+                  isEstimated
+                    ? 'STATIC CHECK'
+                    : !isVerified
+                      ? 'UNAVAILABLE'
+                      : isCacheable
+                        ? 'VERIFIED'
+                        : 'UNSUPPORTED'
+                }
               />
             </HStack>
           </HStack>
@@ -1114,8 +1130,7 @@ export function ReadysetCacheabilitySection({
           )}
 
           {/* Cache action buttons */}
-          {isVerified &&
-            isCacheable &&
+          {(isCacheable || isEstimated) &&
             (onSetUpCaching || onCacheQuery || onDeployNavigate) && (
               <m.div
                 className="mt-5 pt-5 border-t border-border-layout-1/30"
@@ -1124,13 +1139,10 @@ export function ReadysetCacheabilitySection({
                 transition={{ delay: 0.6 }}
               >
                 {onSetUpCaching ? (
-                  // Honest verb + ellipsis: a real deploy is coming, gated on the
-                  // cache page (cost disclosed + Cancel), not a one-word disguise.
-                  // [analyze-query.md; diagnose-to-fix MoT 3; USE-008, USE-017]
                   <Button
                     variant="primary"
                     modifier="solid"
-                    label="Set up caching…"
+                    label="Try with Readyset"
                     icon="database-settings"
                     iconPosition="left"
                     onClick={onSetUpCaching}
@@ -1139,7 +1151,7 @@ export function ReadysetCacheabilitySection({
                   <Button
                     variant="primary"
                     modifier="solid"
-                    label="Cache This Query"
+                    label="Compare speed"
                     icon="add"
                     iconPosition="left"
                     onClick={onCacheQuery}
@@ -1149,7 +1161,7 @@ export function ReadysetCacheabilitySection({
                   <Button
                     variant="primary"
                     modifier="outline"
-                    label="Deploy Cache First"
+                    label="Open comparisons"
                     icon="database-settings"
                     iconPosition="left"
                     onClick={onDeployNavigate}
@@ -1158,45 +1170,42 @@ export function ReadysetCacheabilitySection({
               </m.div>
             )}
         </div>
-        {isVerified && cacheability.issues && cacheability.issues.length > 0 && (
-          <div className="p-5 bg-surface-layout-1 border-t border-border-layout-1">
-            <HStack className="gap-2 items-center mb-3">
-              <Icon
-                name="alert"
-                label="Issues"
-                className="w-4 h-4 text-content-negative-soft"
-              />
-              <Text
-                level="overline"
-                className="text-content-layout-3 uppercase tracking-wider"
-              >
-                Blocking Issues
-              </Text>
-            </HStack>
-            <ul className="space-y-2">
-              {cacheability.issues.map((issue, i) => (
-                <m.li
-                  key={i}
-                  className="flex items-start gap-2"
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.1 * i }}
+        {(isVerified || isEstimated) &&
+          cacheability.issues &&
+          cacheability.issues.length > 0 && (
+            <div className="p-5 bg-surface-layout-1 border-t border-border-layout-1">
+              <HStack className="gap-2 items-center mb-3">
+                <Icon
+                  name="alert"
+                  label="Issues"
+                  className="w-4 h-4 text-content-negative-soft"
+                />
+                <Text
+                  level="overline"
+                  className="text-content-layout-3 uppercase tracking-wider"
                 >
-                  <span className="text-content-negative-soft mt-1.5">
-                    •
-                  </span>
-                  <Text
-                    level="body-small"
-                    className="text-content-layout-2"
+                  Blocking Issues
+                </Text>
+              </HStack>
+              <ul className="space-y-2">
+                {cacheability.issues.map((issue, i) => (
+                  <m.li
+                    key={i}
+                    className="flex items-start gap-2"
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 * i }}
                   >
-                    {issue}
-                  </Text>
-                </m.li>
-              ))}
-            </ul>
-          </div>
-        )}
+                    <span className="text-content-negative-soft mt-1.5">•</span>
+                    <Text level="body-small" className="text-content-layout-2">
+                      {issue}
+                    </Text>
+                  </m.li>
+                ))}
+              </ul>
+            </div>
+          )}
       </div>
     </m.div>
-  );
+  )
 }

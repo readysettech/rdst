@@ -485,12 +485,13 @@ async def run_benchmark(request: BenchmarkRequest, guard: TargetGuard = Depends(
 @router.post(
     "/query-registry/load-test-runs",
     response_model=LoadTestRunStartResponse,
+    summary="Start Benchmark Run",
 )
 async def start_load_test_run(
     request: BenchmarkRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> LoadTestRunStartResponse:
-    """Start or attach to the target's detached origin-only load test."""
+    """Start or attach to the target's detached origin-only benchmark."""
     from shared.deploy.sandbox_manager import sandbox_manager
     from shared.run_registry import run_registry
     from ..service import QueryService

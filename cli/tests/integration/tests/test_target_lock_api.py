@@ -43,7 +43,11 @@ def _seed_prod_target() -> None:
         ("POST", "/api/ask", {"question": "count users", "target": "prod"}),
         ("GET", "/api/schema?target=prod", None),
         ("GET", "/api/top?target=prod", None),
-        ("POST", "/api/readyset/setup", {"target": "prod"}),
+        (
+            "POST",
+            "/api/cache/test-runs",
+            {"query": "select 1", "target": "prod"},
+        ),
         (
             "POST",
             "/api/query-registry/benchmark",

@@ -20,7 +20,9 @@ from pathlib import Path
 # tear down gracefully and allows `except KeyboardInterrupt` blocks (e.g. in
 # report_command.py) to catch Ctrl-C correctly.  The main() try/except catches
 # KeyboardInterrupt and exits with code 1.
-signal.signal(signal.SIGINT, signal.SIG_DFL)
+signal.signal(signal.SIGINT, signal.default_int_handler)
+if hasattr(signal, "SIGBREAK"):
+    signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
 
 # UI system
@@ -479,113 +481,6 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             sequential=getattr(args, 'sequential', False),
         )
 
-    elif command == 'cache':
-        cache_subcommand = getattr(args, 'cache_subcommand', None)
-        if not cache_subcommand:
-            return RdstResult(
-                False,
-                "Cache command requires a subcommand: deploy, add, show, delete, drop-all\nTry: rdst cache --help",
-            )
-
-        # Deploy has its own target loading (loads DB target, not cache target)
-        if cache_subcommand == 'deploy':
-            from features.cache.cli.deploy import DeployCommand
-            deploy_cmd = DeployCommand()
-            return deploy_cmd.execute(
-                target=getattr(args, 'target', None),
-                mode=getattr(args, 'mode', None),
-                deploy_config=getattr(args, 'deploy_config', 'readyset'),
-                host=getattr(args, 'host', None),
-                ssh_key=getattr(args, 'ssh_key', None),
-                ssh_user=getattr(args, 'ssh_user', 'root'),
-                port=getattr(args, 'port', None),
-                namespace=getattr(args, 'namespace', 'readyset'),
-                kubeconfig=getattr(args, 'kubeconfig', None),
-                script_only=getattr(args, 'script_only', False),
-                output_json=getattr(args, 'output_json', False),
-                no_request_path=getattr(args, 'no_request_path', False),
-                memory=getattr(args, 'memory', None),
-                cpus=getattr(args, 'cpus', None),
-                force=getattr(args, 'force', False),
-            )
-
-        # Other cache subcommands need target config
-        from features.cache.cli.command import CacheCommands
-        from shared.config.targets import TargetsConfig
-        cache_cmd = CacheCommands()
-
-        # Load target config for cache commands
-        cache_target = getattr(args, 'target', None)
-        cache_target_config = None
-        if cache_target:
-            targets_config = TargetsConfig()
-            targets_config.load()
-            cache_target_config = targets_config.get(cache_target)
-            if not cache_target_config:
-                # `cache remove` is idempotent — let it through with no
-                # config so its own handler can report "nothing to remove"
-                # instead of erroring at dispatch. Other commands still hard-fail.
-                if cache_subcommand != 'remove':
-                    available = ", ".join(targets_config.list_targets()) or "none"
-                    return RdstResult(False, f"Target '{cache_target}' not found. Available: {available}")
-
-        if cache_subcommand == 'add':
-            return cache_cmd.add(
-                query=getattr(args, 'query', None),
-                target=cache_target,
-                target_config=cache_target_config,
-                tag=getattr(args, 'tag', None),
-                dry_run=getattr(args, 'dry_run', False),
-                json_output=getattr(args, 'json_output', False),
-            )
-        elif cache_subcommand == 'show':
-            return cache_cmd.show(
-                target=cache_target,
-                target_config=cache_target_config,
-                json_output=getattr(args, 'json_output', False),
-            )
-        elif cache_subcommand == 'delete':
-            return cache_cmd.delete(
-                cache_id=getattr(args, 'cache_id', None),
-                target=cache_target,
-                target_config=cache_target_config,
-                json_output=getattr(args, 'json_output', False),
-            )
-        elif cache_subcommand == 'drop-all':
-            return cache_cmd.drop_all(
-                target=cache_target,
-                target_config=cache_target_config,
-                json_output=getattr(args, 'json_output', False),
-                yes=getattr(args, 'yes', False),
-            )
-        elif cache_subcommand == 'remove':
-            return cache_cmd.remove(
-                target=cache_target,
-                target_config=cache_target_config,
-                json_output=getattr(args, 'json_output', False),
-                yes=getattr(args, 'yes', False),
-            )
-        elif cache_subcommand == 'start':
-            return cache_cmd.start(
-                target=cache_target,
-                target_config=cache_target_config,
-                json_output=getattr(args, 'json_output', False),
-            )
-        elif cache_subcommand == 'stop':
-            return cache_cmd.stop(
-                target=cache_target,
-                target_config=cache_target_config,
-                json_output=getattr(args, 'json_output', False),
-            )
-        elif cache_subcommand == 'restart':
-            return cache_cmd.restart(
-                target=cache_target,
-                target_config=cache_target_config,
-                json_output=getattr(args, 'json_output', False),
-            )
-        else:
-            return RdstResult(False, f"Unknown cache subcommand: {cache_subcommand}")
-
     # =========================================================================
     # Fleet — Multi-target management
     # =========================================================================
@@ -1003,7 +898,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
         # Order matches what --help shows; 'exit' is appended as a menu-only entry.
         _menu_command_names = [
             "configure", "top", "analyze", "ask", "scan", "agent", "guard",
-            "init", "query", "schema", "cache", "fleet", "audit", "demo",
+            "init", "query", "schema", "fleet", "audit", "demo",
             "version", "update", "report", "help", "claude", "slack", "web",
         ]
         commands = [
@@ -1152,8 +1047,6 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             report_cmd = ReportCommand()
             success = report_cmd.run()
             return RdstResult(success, "")
-        elif cmd == "cache":
-            return RdstResult(True, "Run: rdst cache --help")
         elif cmd == "fleet":
             return RdstResult(True, "Run: rdst fleet --help")
         elif cmd == "audit":

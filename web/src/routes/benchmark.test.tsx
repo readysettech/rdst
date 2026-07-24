@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useBenchmark } from '../lib/sse'
 import { useQueryRegistry } from '../lib/useQueryRegistry'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
@@ -52,7 +52,9 @@ vi.mock('../components', () => ({
   TargetLockNotice: ({ message }: { message: string }) => <div>{message}</div>,
 }))
 
-function setup(lockActive: boolean) {
+afterEach(cleanup)
+
+function setup(lockActive: boolean, runState: 'idle' | 'queued' = 'idle') {
   vi.mocked(useQueryRegistry).mockReturnValue({
     listError: null,
     queries: [
@@ -113,8 +115,24 @@ function setup(lockActive: boolean) {
   vi.mocked(useBenchmark).mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),
-    state: 'idle',
+    state: runState === 'queued' ? 'running' : 'idle',
+    stage: runState,
+    message:
+      runState === 'queued'
+        ? 'Waiting for an isolated measurement slot...'
+        : undefined,
     progress: undefined,
+    request:
+      runState === 'queued'
+        ? {
+            queries: ['Q1'],
+            target: 'prod',
+            mode: 'interval',
+            interval_ms: 100,
+            concurrency: 1,
+            duration_seconds: 30,
+          }
+        : undefined,
     error: undefined,
     reset: vi.fn(),
   })
@@ -130,7 +148,9 @@ function setup(lockActive: boolean) {
 
   render(<BenchmarkPage />)
 
-  fireEvent.click(screen.getAllByText('Q1')[0])
+  if (runState === 'idle') {
+    fireEvent.click(screen.getAllByText('Q1')[0])
+  }
 }
 
 describe('BenchmarkPage password lock', () => {
@@ -148,5 +168,22 @@ describe('BenchmarkPage password lock', () => {
       name: /Start Benchmark/i,
     })[0]
     expect((startButton as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('explains why a queued benchmark has not started', () => {
+    setup(false, 'queued')
+
+    expect(
+      screen.getByText('Waiting for another performance test')
+    ).toBeTruthy()
+    expect(
+      screen.getByText(/runs performance measurements one at a time/i)
+    ).toBeTruthy()
+    expect(screen.getByText(/30s test timer begins only after/i)).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /Cancel queued test/ })
+    ).toBeTruthy()
+    expect(screen.queryByText('Running...')).toBeNull()
+    expect(screen.queryByText('Total Executions')).toBeNull()
   })
 })

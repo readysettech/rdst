@@ -139,7 +139,7 @@ function RowOverflowMenu({
       <Dropdown.Content align="end" className="min-w-52">
         <Dropdown.Item
           leftIcon="database-settings"
-          label={cached ? 'Cached' : caching ? 'Caching…' : 'Cache query'}
+          label={cached ? 'Compared' : caching ? 'Testing…' : 'Compare speed'}
           disabled={cached || caching}
           onClick={() => onCache(query)}
         />

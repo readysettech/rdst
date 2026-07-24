@@ -8,9 +8,21 @@ import { createFileRoute } from '@tanstack/react-router'
 import { BenchmarkPage } from './-benchmark-page'
 
 export const Route = createFileRoute('/benchmark')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    run: typeof search.run === 'string' ? search.run : undefined,
+  }),
   component: BenchmarkPageRoute,
 })
 
 function BenchmarkPageRoute() {
-  return <BenchmarkPage />
+  const { run } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  return (
+    <BenchmarkPage
+      selectedRunId={run}
+      onClearSelectedRun={() =>
+        navigate({ search: { run: undefined }, replace: true })
+      }
+    />
+  )
 }

@@ -172,9 +172,9 @@ class AuditService:
         each successful audit runs a live workload capture (same path as
         the CLI's `fleet audit --duration`); the capture summary lands in
         the target_complete result under "workload", and the captured
-        queries are benchmarked against an ephemeral Readyset container.
+        queries are benchmarked through the managed Readyset sandbox.
         All targets capture in parallel first, then Readyset benchmarks run
-        sequentially so at most one container is alive at a time.
+        sequentially through its capacity-one lease.
         """
         import asyncio
 
@@ -366,22 +366,26 @@ class AuditService:
             tasks = [asyncio.create_task(_capture_one(name)) for name in targets]
             results_by_target: dict[str, dict[str, Any]] = {}
             completed = 0
-            while completed < total:
-                kind, name, payload = await event_queue.get()
-                if kind == "event":
-                    yield payload
-                    continue
-                result = payload
-                assert isinstance(result, dict)
-                results_by_target[name] = result
-                completed += 1
-                if result.get("error"):
-                    yield _target_error_event(result)
-            await asyncio.gather(*tasks)
+            try:
+                while completed < total:
+                    kind, name, payload = await event_queue.get()
+                    if kind == "event":
+                        yield payload
+                        continue
+                    result = payload
+                    assert isinstance(result, dict)
+                    results_by_target[name] = result
+                    completed += 1
+                    if result.get("error"):
+                        yield _target_error_event(result)
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
 
             # Phase 2: benchmark captured targets strictly in requested order.
-            # Each benchmark owns one fresh ephemeral container and tears it
-            # down before this loop advances to the next target.
+            # Each benchmark releases its sandbox lease before this loop advances.
             results = [results_by_target[name] for name in targets]
             for result in results:
                 if result.get("error"):

@@ -32,6 +32,7 @@ from features.audit.service import AuditService
 from features.bootstrap.events import BootstrapEvent
 from features.bootstrap.service import TargetBootstrapService
 from features.cache.events import CacheEvent
+from features.cache.experiment_service import ReadysetExperimentService
 from features.cache.service import CacheService
 from features.init.events import InitEvent
 from features.init.service import InitService
@@ -164,6 +165,92 @@ class FakeCacheService(CacheService):
             yield event
 
 
+class FakeReadysetExperimentService(ReadysetExperimentService):
+    async def compare(
+        self,
+        *,
+        owner_id,
+        target,
+        query,
+        iterations=15,
+        warmup=5,
+        interval_ms=None,
+        concurrency=None,
+        duration_seconds=None,
+    ):
+        del (
+            owner_id,
+            target,
+            query,
+            iterations,
+            warmup,
+            interval_ms,
+            concurrency,
+            duration_seconds,
+        )
+        async for event in fixtures.events("speed_test", CACHE_EVENT):
+            yield event
+
+
+_ABSENT_SANDBOX = {
+    "phase": "absent",
+    "current_target": None,
+    "generation": 0,
+    "lease_owner": None,
+    "lease_purpose": None,
+    "queued_requests": 0,
+    "dirty_reason": None,
+    "failed_target": None,
+    "last_error": None,
+    "last_released_at": None,
+    "expires_at": None,
+    "container_name": "rdst-readyset-sandbox",
+    "healthy": False,
+}
+
+
+class FakeSandboxManager:
+    """No-Docker lifecycle boundary for browser-integration tests."""
+
+    async def start(self):
+        return None
+
+    async def stop(self):
+        return None
+
+    async def diagnostics(self):
+        return fixtures.value(
+            "sandbox_diagnostics",
+            default=dict(_ABSENT_SANDBOX),
+        )
+
+    def request_prewarm(self, target):
+        del target
+        fixtures.take("sandbox_prewarm", default={"value": True})
+
+    async def remove_target(self, target):
+        del target
+        return False
+
+
+fake_sandbox_manager = FakeSandboxManager()
+
+
+async def fake_docker_runtime_status():
+    return fixtures.value(
+        "docker_runtime",
+        default={"installed": True, "running": True},
+    )
+
+
+async def fake_probe_upstream(target_config):
+    del target_config
+    return fixtures.value(
+        "upstream_probe",
+        default={"success": True, "error": None},
+    )
+
+
 class FakeScanService(ScanService):
     async def scan_directory(self, input_data, options):
         del input_data, options
@@ -227,6 +314,7 @@ SERVICE_FAKES = [
     FakeAuditService,
     FakeTargetBootstrapService,
     FakeCacheService,
+    FakeReadysetExperimentService,
     FakeInitService,
     FakeScanService,
     FakeSchemaService,

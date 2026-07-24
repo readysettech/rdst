@@ -9,6 +9,8 @@ import pytest
 from features.cache.events import CacheRunCompleteEvent
 from features.cache.experiment_service import (
     ReadysetExperimentService,
+    _execute_rows_cancellable,
+    _run_comparison_cancellable,
     parameter_fingerprint,
     temporary_cache_name,
 )
@@ -89,6 +91,78 @@ async def _events(service: ReadysetExperimentService):
     ]
 
 
+@pytest.mark.asyncio
+async def test_validation_cancellation_waits_for_database_thread(monkeypatch):
+    started = threading.Event()
+    cancelled = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def rows(_config, _query, controller):
+        started.set()
+        while not controller.cancelled:
+            cancelled.wait(0.01)
+        cancelled.set()
+        release.wait(2)
+        finished.set()
+        return []
+
+    monkeypatch.setattr("features.cache.experiment_service._execute_rows", rows)
+    task = asyncio.create_task(_execute_rows_cancellable({}, "SELECT 1"))
+    assert await asyncio.to_thread(started.wait, 1)
+
+    task.cancel()
+    assert await asyncio.to_thread(cancelled.wait, 1)
+    await asyncio.sleep(0)
+    assert task.done() is False
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert finished.is_set()
+
+
+@pytest.mark.asyncio
+async def test_comparison_bridge_drains_ordered_progress(monkeypatch):
+    def comparison(**kwargs):
+        kwargs["on_progress"]("origin_warmup", 1, 1)
+        for current in range(1, 4):
+            kwargs["on_progress"]("origin", current, 3)
+        kwargs["on_progress"]("cache_warmup", 1, 1)
+        for current in range(1, 4):
+            kwargs["on_progress"]("cache", current, 3)
+        return {"success": True}
+
+    monkeypatch.setattr(
+        "features.cache.experiment_service.run_comparison", comparison
+    )
+    updates: list[tuple[str, str, int]] = []
+
+    async def progress(stage, message, percent):
+        updates.append((stage, message, percent))
+
+    result = await _run_comparison_cancellable(
+        query="SELECT 1",
+        origin={},
+        readyset={},
+        iterations=3,
+        warmup=0,
+        interval_ms=None,
+        concurrency=2,
+        duration_seconds=None,
+        progress=progress,
+    )
+
+    assert result["success"] is True
+    assert [stage for stage, _, _ in updates] == (
+        ["benchmarking_origin"] * 4 + ["benchmarking_readyset"] * 4
+    )
+    assert "Warming origin" in updates[0][1]
+    assert "Warming Readyset" in updates[4][1]
+    percents = [percent for _, _, percent in updates]
+    assert percents == sorted(percents)
+
+
 @pytest.fixture
 def experiment_stubs(monkeypatch):
     monkeypatch.setattr(
@@ -125,6 +199,64 @@ def experiment_stubs(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_compare_forwards_load_controls_to_benchmark(
+    experiment_stubs, monkeypatch
+):
+    captured: dict = {}
+
+    async def comparison(**kwargs):
+        captured.update(kwargs)
+        return {
+            "success": True,
+            "iterations": 10,
+            "original": {
+                "iterations": 12,
+                "stats": {"mean": 2.0, "median": 2.0},
+            },
+            "readyset": {
+                "iterations": 10,
+                "stats": {"mean": 1.0, "median": 1.0},
+            },
+            "speedup": {
+                "mean": 2.0,
+                "median": 2.0,
+                "improvement_pct": 50.0,
+            },
+            "winner": "readyset",
+        }
+
+    monkeypatch.setattr(
+        "features.cache.experiment_service._run_comparison_cancellable",
+        comparison,
+    )
+    manager = _Manager()
+    service = ReadysetExperimentService(manager, _Cache(manager=manager))
+
+    events = [
+        event
+        async for event in service.compare(
+            owner_id="speed_test_123",
+            target="origin",
+            query="SELECT 1",
+            iterations=20,
+            warmup=1,
+            interval_ms=25,
+            duration_seconds=10,
+        )
+    ]
+
+    result = next(event for event in events if isinstance(event, CacheRunCompleteEvent))
+    assert result.iterations == 10
+    assert result.origin_iterations == 12
+    assert result.cache_iterations == 10
+    assert captured["iterations"] == 20
+    assert captured["warmup"] == 1
+    assert captured["interval_ms"] == 25
+    assert captured["concurrency"] is None
+    assert captured["duration_seconds"] == 10
+
+
+@pytest.mark.asyncio
 async def test_compare_creates_and_drops_only_its_named_cache(experiment_stubs):
     manager = _Manager()
     cache = _Cache(manager=manager)
@@ -134,6 +266,8 @@ async def test_compare_creates_and_drops_only_its_named_cache(experiment_stubs):
     result = next(event for event in events if isinstance(event, CacheRunCompleteEvent))
     cache_name = temporary_cache_name("speed_test_123", "SELECT 1")
     assert result.speedup_mean == 10.0
+    assert result.origin_iterations == 3
+    assert result.cache_iterations == 3
     assert cache.statements == [
         "EXPLAIN CREATE CACHE FROM SELECT 1",
         f"CREATE CACHE {cache_name} FROM SELECT 1",

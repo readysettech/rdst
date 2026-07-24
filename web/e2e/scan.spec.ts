@@ -150,7 +150,7 @@ async function chooseScanDirectory(
   await expect(page.getByRole('button', { name: 'Start Scan' })).toBeEnabled()
 }
 
-test('scans a project, renders analysis, caches a query, and hands off to Analyze', async ({
+test('scans a project, renders analysis, speed-tests a query, and hands off to Analyze', async ({
   page,
 }) => {
   setBackendFixtures({
@@ -164,42 +164,42 @@ test('scans a project, renders analysis, caches a query, and hands off to Analyz
         ],
       },
     ],
-    cache_add: [
+    speed_test: [
       {
         events: [
           {
-            type: 'cache_add',
-            success: true,
-            supported: true,
-            query,
-            query_hash: sqlQuery.hash,
-            detail: 'Query is cacheable.',
+            type: 'progress',
+            stage: 'benchmarking_origin',
+            percent: 65,
+            message: 'Benchmarking origin and Readyset',
           },
-        ],
-      },
-      {
-        events: [
           {
-            type: 'cache_add',
+            type: 'cache_run_complete',
             success: true,
-            supported: true,
             query,
-            query_hash: sqlQuery.hash,
-            detail: 'Cache created.',
-          },
-        ],
-      },
-    ],
-    cache_status: [
-      {
-        events: [
-          {
-            type: 'cache_status',
-            deployed: true,
-            running: true,
-            endpoint: 'postgresql://127.0.0.1:5433/app',
-            cache_target: 'e2e-guard-cache',
-            container_name: 'rdst-readyset-e2e-guard',
+            iterations: 15,
+            origin_stats: {
+              mean: 10,
+              median: 9,
+              min: 8,
+              max: 14,
+              p50: 9,
+              p95: 13,
+              p99: 14,
+            },
+            cache_stats: {
+              mean: 2,
+              median: 2,
+              min: 1.5,
+              max: 3,
+              p50: 2,
+              p95: 2.8,
+              p99: 3,
+            },
+            speedup_mean: 5,
+            speedup_median: 4.5,
+            improvement_pct: 80,
+            winner: 'readyset',
           },
         ],
       },
@@ -280,20 +280,30 @@ test('scans a project, renders analysis, caches a query, and hands off to Analyz
   ).toBeVisible()
   await page.getByRole('button', { name: 'Close', exact: true }).click()
 
-  const cacheAddRequests: unknown[] = []
+  const speedTestRequests: unknown[] = []
   page.on('request', (request) => {
     const url = new URL(request.url())
-    if (url.pathname === '/api/cache/add') {
-      cacheAddRequests.push(request.postDataJSON())
+    if (url.pathname === '/api/cache/test-runs') {
+      speedTestRequests.push(request.postDataJSON())
     }
   })
 
-  const cacheButton = sqlRow.getByRole('button', { name: 'Cache' })
-  await cacheButton.click()
-  await expect(page.getByText('Query cached', { exact: true })).toBeVisible()
-  expect(cacheAddRequests).toEqual([
-    { query, target: 'e2e-guard', dry_run: true },
-    { query, target: 'e2e-guard', dry_run: false },
+  const speedTestButton = sqlRow.getByRole('button', {
+    name: 'Compare speed',
+  })
+  await speedTestButton.click()
+  await expect(
+    page.getByText('Comparison started', { exact: true })
+  ).toBeVisible()
+  await expect(page.getByText('Performance test complete')).toBeVisible()
+  expect(speedTestRequests).toEqual([
+    {
+      query,
+      target: 'e2e-guard',
+      query_hash: sqlQuery.snippet_hash,
+      iterations: 15,
+      warmup: 5,
+    },
   ])
 
   await sqlRow.getByRole('button', { name: 'Analyze' }).click()

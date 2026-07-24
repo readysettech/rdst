@@ -98,6 +98,8 @@ class CacheRunCompleteEvent:
     speedup_median: float
     improvement_pct: float
     winner: str
+    origin_iterations: Optional[int] = None
+    cache_iterations: Optional[int] = None
 
 
 CacheEvent = Union[

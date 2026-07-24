@@ -1882,19 +1882,54 @@ class QueryCommand:
 
         if not queries:
             return RdstResult(ok=False, message='No queries specified. Usage: rdst query cache-compare "SELECT ..." --target <name>')
-        if interval is not None or concurrency is not None or duration is not None:
+        from features.cache.performance_comparison import (
+            MAX_COMPARISON_CONCURRENCY,
+            MAX_COMPARISON_DURATION_SECONDS,
+            MAX_COMPARISON_INTERVAL_MS,
+        )
+
+        if interval is not None and concurrency is not None:
+            return RdstResult(
+                ok=False,
+                message="Cannot specify both --interval and --concurrency.",
+            )
+        if (
+            interval is not None
+            and not 0 <= interval <= MAX_COMPARISON_INTERVAL_MS
+        ):
             return RdstResult(
                 ok=False,
                 message=(
-                    "Temporary Readyset speed tests do not support load-generation "
-                    "flags. Use `rdst query run` for interval, concurrency, or "
-                    "duration-based workloads."
+                    "Comparison interval must be between 0 and "
+                    f"{MAX_COMPARISON_INTERVAL_MS} milliseconds."
+                ),
+            )
+        if (
+            concurrency is not None
+            and not 1 <= concurrency <= MAX_COMPARISON_CONCURRENCY
+        ):
+            return RdstResult(
+                ok=False,
+                message=(
+                    "Comparison concurrency must be between 1 and "
+                    f"{MAX_COMPARISON_CONCURRENCY}."
+                ),
+            )
+        if (
+            duration is not None
+            and not 1 <= duration <= MAX_COMPARISON_DURATION_SECONDS
+        ):
+            return RdstResult(
+                ok=False,
+                message=(
+                    "Comparison duration must be between 1 and "
+                    f"{MAX_COMPARISON_DURATION_SECONDS} seconds."
                 ),
             )
         if not 1 <= count <= 1000:
             return RdstResult(
                 ok=False,
-                message="Speed test count must be between 1 and 1000.",
+                message="Comparison count must be between 1 and 1000.",
             )
 
         # Resolve upstream target first (before warning or query resolution)
@@ -1917,24 +1952,6 @@ class QueryCommand:
                     "Choose its source database target instead."
                 ),
             )
-
-        # Warn about running queries against production
-        if not skip_warning and not quiet and sys.stdout.isatty():
-            from shared.ui import Confirm
-            desc = f"{count} times" if count else "continuously"
-            if duration:
-                desc += f" for up to {duration}s"
-            self.console.print(
-                MessagePanel(
-                    f"This will run each query {desc} against your upstream database\n"
-                    f"and {desc} against the Readyset cache.\n\n"
-                    f"To suppress this prompt: --skip-warning",
-                    variant="warning",
-                    title="Query Execution Warning",
-                )
-            )
-            if not Confirm.ask("Continue?", default=True):
-                return RdstResult(True, " ")
 
         # Resolve queries — if an arg looks like SQL, auto-add to registry
         resolved_queries = []
@@ -1968,6 +1985,54 @@ class QueryCommand:
         if not resolved_queries:
             return RdstResult(ok=False, message="No queries found in registry.")
 
+        query_count = len(resolved_queries)
+        if count < query_count:
+            return RdstResult(
+                ok=False,
+                message=(
+                    f"Comparison count must be at least {query_count} when "
+                    f"testing {query_count} queries."
+                ),
+            )
+        count_base, count_extra = divmod(count, query_count)
+        iteration_limits = [
+            count_base + (1 if index < count_extra else 0)
+            for index in range(query_count)
+        ]
+        duration_limits: list[int | None] = [None] * query_count
+        if duration is not None:
+            if duration < query_count:
+                return RdstResult(
+                    ok=False,
+                    message=(
+                        f"Comparison duration must be at least {query_count} "
+                        f"seconds when testing {query_count} queries."
+                    ),
+                )
+            duration_base, duration_extra = divmod(duration, query_count)
+            duration_limits = [
+                duration_base + (1 if index < duration_extra else 0)
+                for index in range(query_count)
+            ]
+
+        if not skip_warning and not quiet and sys.stdout.isatty():
+            from shared.ui import Confirm
+
+            desc = f"up to {count} measured executions"
+            if duration:
+                desc += f" over up to {duration}s"
+            self.console.print(
+                MessagePanel(
+                    f"This will run {desc} against your upstream database\n"
+                    f"and the same bounded workload against Readyset.\n\n"
+                    f"To suppress this prompt: --skip-warning",
+                    variant="warning",
+                    title="Query Execution Warning",
+                )
+            )
+            if not Confirm.ask("Continue?", default=True):
+                return RdstResult(True, " ")
+
         from features.cache.events import CacheRunCompleteEvent
         from features.cache.experiment_service import ReadysetExperimentService
         from shared.deploy.sandbox_manager import sandbox_manager
@@ -1978,7 +2043,15 @@ class QueryCommand:
             await sandbox_manager.start()
             try:
                 service = ReadysetExperimentService(sandbox_manager)
+                comparison_options = {}
+                if interval is not None:
+                    comparison_options["interval_ms"] = interval
+                if concurrency is not None:
+                    comparison_options["concurrency"] = concurrency
                 for index, (entry, sql) in enumerate(resolved_queries):
+                    options = dict(comparison_options)
+                    if duration_limits[index] is not None:
+                        options["duration_seconds"] = duration_limits[index]
                     final = None
                     failure = None
                     async for event in service.compare(
@@ -1988,8 +2061,9 @@ class QueryCommand:
                         ),
                         target=target,
                         query=sql,
-                        iterations=count,
+                        iterations=iteration_limits[index],
                         warmup=1,
+                        **options,
                     ):
                         if isinstance(event, CacheRunCompleteEvent):
                             final = event
@@ -2009,13 +2083,13 @@ class QueryCommand:
                         "query": entry.tag or entry.hash[:12],
                         "hash": entry.hash,
                         "success": False,
-                        "error": failure or "Speed test did not complete",
+                        "error": failure or "Comparison did not complete",
                     }
                 )
                 if not quiet:
                     self.console.print(
                         f"[yellow]{entry.tag or entry.hash[:12]}: "
-                        f"{failure or 'Speed test did not complete'}[/yellow]"
+                        f"{failure or 'Comparison did not complete'}[/yellow]"
                     )
                 continue
             row = {
@@ -2023,6 +2097,8 @@ class QueryCommand:
                 "hash": entry.hash,
                 "success": True,
                 "iterations": final.iterations,
+                "origin_iterations": final.origin_iterations or final.iterations,
+                "readyset_iterations": final.cache_iterations or final.iterations,
                 "origin_stats": final.origin_stats,
                 "readyset_stats": final.cache_stats,
                 "speedup_mean": final.speedup_mean,
@@ -2034,9 +2110,14 @@ class QueryCommand:
             if not quiet:
                 self.console.print(
                     DataTable(
-                        title=f"Readyset Speed Test: {row['query']}",
+                        title=f"Readyset Comparison: {row['query']}",
                         columns=["Metric", "Origin", "Readyset"],
                         rows=[
+                            (
+                                "Samples",
+                                str(final.origin_iterations or final.iterations),
+                                str(final.cache_iterations or final.iterations),
+                            ),
                             (
                                 "Mean",
                                 f"{final.origin_stats.get('mean', 0):.2f}ms",
@@ -2065,11 +2146,15 @@ class QueryCommand:
             message=(
                 "Comparison complete"
                 if successes > 0
-                else "Readyset speed test failed"
+                else "Readyset comparison failed"
             ),
             data={
                 "target": target,
                 "sandbox_managed": True,
+                "count": count,
+                "interval_ms": interval,
+                "concurrency": concurrency,
+                "duration_seconds": duration,
                 "results": result_rows,
             },
         )

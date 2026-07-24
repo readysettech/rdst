@@ -1,260 +1,452 @@
+import type { APIRequestContext, Page } from '@playwright/test'
 import {
   clearQueryRegistry,
   configureTestTarget,
+  consumeBrowserError,
   expect,
   setBackendFixtures,
   test,
 } from './fixtures'
 
-const query =
-  'SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id ORDER BY COUNT(*) DESC'
+const directQuery =
+  'SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id'
+const secondDirectQuery =
+  'SELECT product_id, SUM(total) FROM orders GROUP BY product_id'
+const parameterizedQuery =
+  'SELECT id, email FROM users WHERE account_id = :account_id'
 
-const cachedQuery = {
-  cache_id: 'q_orders_summary_001',
-  cache_name: 'orders_summary',
-  query,
-  type: 'shallow',
-  ttl: 'forever',
-  registry_hash: 'orders-summary-hash',
+const readySandbox = {
+  phase: 'ready',
+  current_target: 'e2e-guard',
+  generation: 1,
+  lease_owner: null,
+  lease_purpose: null,
+  queued_requests: 0,
+  dirty_reason: null,
+  failed_target: null,
+  last_error: null,
+  last_released_at: '2026-07-23T12:00:00+00:00',
+  expires_at: '2026-07-24T12:00:00+00:00',
+  container_name: 'rdst-readyset-sandbox',
+  healthy: true,
 }
 
-async function prepareCachePage(
-  page: Parameters<typeof configureTestTarget>[0]
-) {
+const originStats = {
+  mean: 12,
+  median: 11,
+  min: 9,
+  max: 18,
+  p50: 11,
+  p95: 17,
+  p99: 18,
+  stddev: 2,
+}
+
+function resultEvent(query: string, speedup = 4) {
+  return {
+    type: 'cache_run_complete',
+    success: true,
+    query,
+    iterations: 15,
+    origin_stats: originStats,
+    cache_stats: {
+      mean: originStats.mean / speedup,
+      median: originStats.median / speedup,
+      min: originStats.min / speedup,
+      max: originStats.max / speedup,
+      p50: originStats.p50 / speedup,
+      p95: originStats.p95 / speedup,
+      p99: originStats.p99 / speedup,
+      stddev: 0.5,
+    },
+    speedup_mean: speedup,
+    speedup_median: speedup,
+    improvement_pct: 75,
+    winner: 'readyset',
+  }
+}
+
+async function addQuery(
+  request: APIRequestContext,
+  sql: string
+): Promise<string> {
+  const response = await request.post('/api/query-registry', {
+    data: { sql, target: 'e2e-guard' },
+  })
+  expect(response.ok()).toBe(true)
+  const body = (await response.json()) as {
+    success: boolean
+    hash: string
+  }
+  expect(body.success).toBe(true)
+  return body.hash
+}
+
+async function prepareSpeedTests(page: Page, queries: string[]) {
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
+  const hashes: string[] = []
+  for (const query of queries) {
+    hashes.push(await addQuery(page.request, query))
+  }
+  return hashes
 }
 
-test('deploys remotely, then restarts and deletes a served cache', async ({
+test('first render shows useful query actions without an empty sandbox diagnostics card', async ({
   page,
 }) => {
   setBackendFixtures({
-    cache_delete: [
+    sandbox_diagnostics: [{ value: readySandbox, repeat: true }],
+  })
+  await prepareSpeedTests(page, [directQuery])
+
+  await page.goto('/cache')
+
+  await expect(
+    page.getByRole('heading', { name: 'Readyset Comparisons' })
+  ).toBeVisible()
+  await expect(page.getByTestId('speed-test-query')).toHaveCount(1)
+  await expect(
+    page.getByRole('button', { name: 'Compare with Readyset' })
+  ).toBeVisible()
+  await expect(page.getByText('Local Readyset sandbox')).toHaveCount(0)
+  await expect(page.getByText('Prepared target')).toHaveCount(0)
+  await expect(page.getByText('Current activity')).toHaveCount(0)
+})
+
+test('missing Docker explains setup and queues no Readyset work', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    docker_runtime: [
+      { value: { installed: false, running: false }, repeat: true },
+    ],
+  })
+  await prepareSpeedTests(page, [directQuery])
+  let prewarmRequests = 0
+  let testRunRequests = 0
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if (path === '/api/cache/sandbox/prewarm') prewarmRequests += 1
+    if (path === '/api/cache/test-runs') testRunRequests += 1
+  })
+
+  await page.goto('/cache')
+
+  await expect(page.getByText('Install Docker to try Readyset')).toBeVisible()
+  await expect(
+    page.getByText(
+      'Analyze Query works without Docker. Docker is only required to run this temporary local Readyset comparison.'
+    )
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Get Docker' })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Compare with Readyset' })
+  ).toBeDisabled()
+  await page.waitForTimeout(250)
+  expect(prewarmRequests).toBe(0)
+  expect(testRunRequests).toBe(0)
+})
+
+test('dead upstream rejects a comparison without creating a queued job', async ({
+  page,
+  browserErrors,
+}) => {
+  setBackendFixtures({
+    sandbox_diagnostics: [{ value: readySandbox, repeat: true }],
+    upstream_probe: [
       {
-        events: [
-          {
-            type: 'cache_delete',
-            success: true,
-            cache_id: cachedQuery.cache_id,
-          },
-        ],
+        value: {
+          success: false,
+          error: 'connection to server failed: connection refused',
+        },
+        repeat: true,
       },
     ],
-    cache_deploy: [
+  })
+  const [queryHash] = await prepareSpeedTests(page, [directQuery])
+  let eventStreamRequests = 0
+  page.on('request', (request) => {
+    if (/\/api\/runs\/[^/]+\/events$/.test(new URL(request.url()).pathname)) {
+      eventStreamRequests += 1
+    }
+  })
+
+  await page.goto('/cache')
+  const row = page.locator(
+    `[data-testid="speed-test-query"][data-query-hash="${queryHash}"]`
+  )
+  await row.getByRole('button', { name: 'Compare with Readyset' }).click()
+
+  await expect(
+    row.getByText(
+      "Readyset comparisons require a reachable source database. RDST could not connect to 'e2e-guard', so no Readyset work was queued."
+    )
+  ).toBeVisible()
+  await expect(row.getByText('Testing', { exact: true })).toHaveCount(0)
+  expect(eventStreamRequests).toBe(0)
+  consumeBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 503 (Service Unavailable)'
+  )
+})
+
+test('job queue distinguishes the active sandbox test from queued tests', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    sandbox_diagnostics: [{ value: readySandbox, repeat: true }],
+    speed_test: [
       {
         events: [
           {
             type: 'progress',
-            stage: 'deploy',
-            percent: 60,
-            message: 'Starting ReadySet on remote host...',
+            stage: 'waiting_for_readyset',
+            percent: 10,
+            message: 'Waiting for Readyset to accept SQL',
           },
-          {
-            type: 'deploy_complete',
-            success: true,
-            deployed: true,
-            running: true,
-            endpoint: 'postgresql://cache.example.test:5433/app',
-            cache_target: 'e2e-guard-cache',
-            container_name: null,
-          },
-        ],
-      },
-    ],
-    cache_lifecycle: [
-      {
-        events: [
-          {
-            type: 'cache_lifecycle',
-            success: true,
-            operation: 'restart',
-            state: 'running',
-            detail: 'ReadySet restarted.',
-          },
-        ],
-      },
-    ],
-    // The cache itself is created from the Queries workbench (Cache & test)
-    // now; it reaches the deployment-only Cache page via the served-cache list.
-    cache_list: [
-      {
-        events: [
-          {
-            type: 'cache_list',
-            success: true,
-            count: 1,
-            caches: [cachedQuery],
-          },
+          { ...resultEvent(directQuery, 4), _delay_ms: 1500 },
         ],
       },
       {
-        events: [{ type: 'cache_list', success: true, count: 0, caches: [] }],
-        repeat: true,
-      },
-    ],
-    cache_status: [
-      {
-        events: [
-          {
-            type: 'cache_status',
-            deployed: false,
-            running: false,
-            endpoint: null,
-            cache_target: null,
-            container_name: null,
-          },
-        ],
-      },
-      {
-        events: [
-          {
-            type: 'cache_status',
-            deployed: true,
-            running: true,
-            endpoint: 'postgresql://cache.example.test:5433/app',
-            cache_target: 'e2e-guard-cache',
-            container_name: null,
-          },
-        ],
-        repeat: true,
+        delay_ms: 1500,
+        events: [resultEvent(secondDirectQuery, 3)],
       },
     ],
   })
-  await prepareCachePage(page)
-
-  let deployRequest: unknown
-  let lifecycleRequest: unknown
-  page.on('request', (request) => {
-    const url = new URL(request.url())
-    if (url.pathname === '/api/cache/deploy') {
-      deployRequest = request.postDataJSON()
-    }
-    if (url.pathname === '/api/cache/restart') {
-      lifecycleRequest = request.postDataJSON()
-    }
-  })
+  const [firstHash, secondHash] = await prepareSpeedTests(page, [
+    directQuery,
+    secondDirectQuery,
+  ])
 
   await page.goto('/cache')
+  const first = page.locator(
+    `[data-testid="speed-test-query"][data-query-hash="${firstHash}"]`
+  )
+  const second = page.locator(
+    `[data-testid="speed-test-query"][data-query-hash="${secondHash}"]`
+  )
+
+  await first.getByRole('button', { name: 'Compare with Readyset' }).click()
   await expect(
-    page.getByRole('heading', { name: 'ReadySet Cache' })
+    first.getByText('Waiting for Readyset to accept SQL')
   ).toBeVisible()
-  await expect(page.getByText('Deploy a cache for "e2e-guard"')).toBeVisible()
+  await second.getByRole('button', { name: 'Compare with Readyset' }).click()
 
-  // C-09 collapsed the non-Docker deploy modes behind the "Other deploy
-  // options" disclosure; open it before selecting Remote Host.
-  await page.getByRole('button', { name: /Other deploy options/ }).click()
-  await page.getByRole('button', { name: /Remote Host/ }).click()
-  await expect(
-    page.getByRole('button', { name: 'Deploy to Remote' })
-  ).toBeDisabled()
-  await page.locator('[name="remote-dest"]').fill('ops@cache.example.test')
-  await page.getByRole('button', { name: 'Systemd', exact: true }).click()
-  await page.getByRole('button', { name: 'Deploy to Remote' }).click()
+  await page.getByTestId('jobs-trigger').click()
+  await expect(page.getByText('1 running · 1 queued')).toBeVisible()
+  await expect(page.getByText('2 jobs running')).toHaveCount(0)
 
-  await expect(page.getByText('Cache Running', { exact: true })).toBeVisible()
-  await expect(
-    page.getByText('postgresql://cache.example.test:5433/app', {
-      exact: true,
-    })
-  ).toBeVisible()
-  expect(deployRequest).toEqual({
-    target: 'e2e-guard',
-    mode: 'systemd',
-    host: 'cache.example.test',
-    ssh_user: 'ops',
-  })
-
-  // The served-cache list surfaces the cache created via Queries.
-  const cacheRow = page.getByTestId('cache-query-row')
-  await expect(cacheRow).toHaveCount(1)
-  await expect(cacheRow).toHaveAttribute('data-cache-id', cachedQuery.cache_id)
-  await expect(cacheRow).toContainText(cachedQuery.cache_name)
-
-  // Lifecycle actions collapsed into the "Cache actions" overflow menu at
-  // C-09; Restart is a menuitem there now.
-  await page.getByRole('button', { name: 'Cache actions' }).click()
-  await page.getByRole('menuitem', { name: 'Restart' }).click()
-  await expect(page.getByText('Cache restarted', { exact: true })).toBeVisible()
-  expect(lifecycleRequest).toEqual({ target: 'e2e-guard' })
-
-  await cacheRow.getByRole('button', { name: 'Delete' }).click()
-  await expect(cacheRow.getByText('Remove this cached query?')).toBeVisible()
-  await cacheRow.getByRole('button', { name: 'Remove' }).click()
-  await expect(page.getByText('No queries cached yet')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(first.getByText('4.0x faster with Readyset')).toBeVisible()
+  await expect(second.getByText('3.0x faster with Readyset')).toBeVisible()
 })
 
-test('registers an endpoint for a deployed cache and shows the empty state', async ({
+test('runs a comparison, survives refresh, and re-tests the query', async ({
   page,
 }) => {
-  const endpoint = 'postgresql://readyset.internal:15433/app'
   setBackendFixtures({
-    cache_register: [
+    sandbox_diagnostics: [{ value: readySandbox, repeat: true }],
+    speed_test: [
       {
         events: [
           {
-            type: 'cache_status',
-            deployed: true,
-            running: true,
-            endpoint,
-            cache_target: 'e2e-guard-cache',
-            container_name: null,
+            type: 'progress',
+            stage: 'checking_query',
+            percent: 25,
+            message: 'Checking Readyset compatibility',
+            _delay_ms: 250,
           },
-        ],
-      },
-    ],
-    cache_status: [
-      {
-        events: [
           {
-            type: 'cache_status',
-            deployed: true,
-            running: false,
-            endpoint: null,
-            cache_target: 'e2e-guard-cache',
-            container_name: null,
+            type: 'progress',
+            stage: 'benchmarking_origin',
+            percent: 65,
+            message: 'Benchmarking origin and Readyset',
+            _delay_ms: 250,
           },
+          { ...resultEvent(directQuery, 4), _delay_ms: 750 },
         ],
       },
       {
         events: [
           {
-            type: 'cache_status',
-            deployed: true,
-            running: true,
-            endpoint,
-            cache_target: 'e2e-guard-cache',
-            container_name: null,
+            type: 'progress',
+            stage: 'benchmarking_origin',
+            percent: 65,
+            message: 'Benchmarking origin and Readyset',
+            _delay_ms: 150,
           },
+          resultEvent(directQuery, 6),
         ],
       },
     ],
   })
-  await prepareCachePage(page)
+  const [queryHash] = await prepareSpeedTests(page, [directQuery])
 
-  let registerRequest: unknown
+  const requests: Record<string, unknown>[] = []
   page.on('request', (request) => {
-    const url = new URL(request.url())
-    if (url.pathname === '/api/cache/register') {
-      registerRequest = request.postDataJSON()
+    if (new URL(request.url()).pathname === '/api/cache/test-runs') {
+      requests.push(request.postDataJSON() as Record<string, unknown>)
+    }
+  })
+
+  await page.goto('/cache')
+  const row = page.locator(
+    `[data-testid="speed-test-query"][data-query-hash="${queryHash}"]`
+  )
+  await row.getByRole('button', { name: 'Compare with Readyset' }).click()
+
+  await expect(row.getByText('Testing', { exact: true })).toBeVisible()
+  await expect(row.getByText('Benchmarking origin and Readyset')).toBeVisible()
+  await expect(row.getByText('4.0x faster with Readyset')).toBeVisible()
+  await expect(row.getByText('4.0x faster', { exact: true })).toBeVisible()
+  await expect(row.getByRole('button', { name: 'Re-test' })).toBeVisible()
+
+  expect(requests[0]).toMatchObject({
+    target: 'e2e-guard',
+    query: directQuery,
+    query_hash: queryHash,
+    iterations: 15,
+    warmup: 5,
+  })
+
+  await page.reload()
+  const restoredRow = page.locator(
+    `[data-testid="speed-test-query"][data-query-hash="${queryHash}"]`
+  )
+  await expect(restoredRow.getByText('4.0x faster with Readyset')).toBeVisible()
+  await expect(
+    restoredRow.getByText('4.0x faster', { exact: true })
+  ).toBeVisible()
+
+  await restoredRow.getByRole('button', { name: 'Re-test' }).click()
+  await expect(restoredRow.getByText('6.0x faster with Readyset')).toBeVisible()
+  expect(requests).toHaveLength(2)
+})
+
+test('substitutes query parameters before starting the comparison', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    sandbox_diagnostics: [{ value: readySandbox, repeat: true }],
+    speed_test: [
+      {
+        events: [
+          resultEvent('SELECT id, email FROM users WHERE account_id = 42', 3),
+        ],
+      },
+    ],
+  })
+  const [queryHash] = await prepareSpeedTests(page, [parameterizedQuery])
+
+  let testRequest: Record<string, unknown> | undefined
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/cache/test-runs') {
+      testRequest = request.postDataJSON() as Record<string, unknown>
+    }
+  })
+
+  await page.goto('/cache')
+  const row = page.locator(
+    `[data-testid="speed-test-query"][data-query-hash="${queryHash}"]`
+  )
+  await row.getByRole('button', { name: 'Compare with Readyset' }).click()
+
+  await expect(
+    page.getByRole('heading', { name: 'Enter Parameter Values' })
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Run test' })).toBeDisabled()
+  await page.locator('[name="param-:account_id"]').fill('42')
+  await page.getByRole('button', { name: 'Run test' }).click()
+
+  await expect(row.getByText('3.0x faster with Readyset')).toBeVisible()
+  expect(testRequest).toMatchObject({
+    target: 'e2e-guard',
+    query: 'SELECT id, email FROM users WHERE account_id = 42',
+    query_hash: queryHash,
+  })
+})
+
+test('shows a failed run in its query row and allows a successful retry', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    sandbox_diagnostics: [{ value: readySandbox, repeat: true }],
+    speed_test: [
+      {
+        events: [
+          {
+            type: 'progress',
+            stage: 'checking_query',
+            percent: 25,
+            message: 'Checking Readyset compatibility',
+          },
+          {
+            type: 'error',
+            message: 'This query is unsupported by Readyset.',
+            code: 'readyset_unsupported',
+            stage: 'checking_query',
+          },
+        ],
+      },
+      {
+        events: [resultEvent(directQuery, 2.5)],
+      },
+    ],
+  })
+  const [queryHash] = await prepareSpeedTests(page, [directQuery])
+
+  await page.goto('/cache')
+  const row = page.locator(
+    `[data-testid="speed-test-query"][data-query-hash="${queryHash}"]`
+  )
+  await row.getByRole('button', { name: 'Compare with Readyset' }).click()
+
+  await expect(
+    row.getByText('This query is unsupported by Readyset.')
+  ).toBeVisible()
+  await expect(
+    row.getByRole('button', { name: 'Compare with Readyset' })
+  ).toBeEnabled()
+
+  await row.getByRole('button', { name: 'Compare with Readyset' }).click()
+  await expect(row.getByText('2.5x faster with Readyset')).toBeVisible()
+})
+
+test('surfaces sandbox preparation failure and sends retry without restoring the old diagnostics card', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    sandbox_diagnostics: [
+      {
+        value: {
+          ...readySandbox,
+          phase: 'error',
+          current_target: null,
+          failed_target: 'e2e-guard',
+          last_error: 'Readyset could not connect to this database.',
+          healthy: false,
+        },
+        repeat: true,
+      },
+    ],
+  })
+  await prepareSpeedTests(page, [directQuery])
+
+  let retryRequests = 0
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/cache/sandbox/prewarm') {
+      retryRequests += 1
     }
   })
 
   await page.goto('/cache')
   await expect(
-    page.getByText('Endpoint Required', { exact: true })
+    page.getByText('Readyset could not connect to this database.')
   ).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Connect' })).toBeDisabled()
-  await page.locator('[name="endpoint-host"]').fill('readyset.internal')
-  await page.locator('[name="endpoint-port"]').fill('15433')
-  await page.getByRole('button', { name: 'Connect' }).click()
+  await expect(page.getByText('Local Readyset sandbox')).toHaveCount(0)
 
-  await expect(page.getByText('Connected', { exact: true })).toBeVisible()
-  await expect(page.getByText('Cache Running', { exact: true })).toBeVisible()
-  await expect(page.getByText(endpoint, { exact: true })).toBeVisible()
-  await expect(page.getByText('No queries cached yet')).toBeVisible()
-  expect(registerRequest).toEqual({
-    target: 'e2e-guard',
-    cache_host: 'readyset.internal',
-    cache_port: 15433,
-  })
+  const beforeRetry = retryRequests
+  await page.getByRole('button', { name: 'Retry preparation' }).click()
+  await expect.poll(() => retryRequests).toBeGreaterThan(beforeRetry)
 })

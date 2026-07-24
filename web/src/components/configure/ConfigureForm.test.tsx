@@ -68,21 +68,19 @@ describe('ConfigureForm connection URL parsing', () => {
   })
 })
 
-
-describe('ConfigureForm deploy option', () => {
+describe('ConfigureForm sandbox behavior', () => {
   afterEach(() => {
     cleanup()
   })
 
-  it('is pre-checked in add mode and included in the submit payload', () => {
+  it('does not expose or submit a persistent Readyset deployment option', () => {
     const onSubmit = vi.fn()
 
     render(<ConfigureForm onSubmit={onSubmit} />)
 
-    const deploySwitch = screen.getByRole('switch', {
-      name: 'Deploy Readyset now',
-    })
-    expect(deploySwitch.getAttribute('aria-checked')).toBe('true')
+    expect(
+      screen.queryByRole('switch', { name: 'Deploy Readyset now' })
+    ).toBeNull()
 
     fireEvent.change(
       screen.getByPlaceholderText('postgresql://user@host:5432/database'),
@@ -95,34 +93,12 @@ describe('ConfigureForm deploy option', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add Target' }))
 
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ deploy: true })
-    )
+    const submitted = onSubmit.mock.calls[0]?.[0]
+    expect(submitted).toBeDefined()
+    expect(submitted).not.toHaveProperty('deploy')
   })
 
-  it('unchecking it submits deploy: false', () => {
-    const onSubmit = vi.fn()
-
-    render(<ConfigureForm onSubmit={onSubmit} />)
-
-    fireEvent.click(screen.getByRole('switch', { name: 'Deploy Readyset now' }))
-    fireEvent.change(
-      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
-      {
-        target: {
-          value: 'postgresql://alice:secret@db.example.com:5432/app_db', // trufflehog:ignore
-        },
-      }
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add Target' }))
-
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({ deploy: false })
-    )
-  })
-
-  it('is absent when editing an existing target', () => {
+  it('does not expose persistent deployment while editing a target', () => {
     render(
       <ConfigureForm
         initialData={{

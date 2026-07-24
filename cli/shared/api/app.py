@@ -112,7 +112,13 @@ def register_error_handlers(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
+    from shared.deploy.sandbox_manager import sandbox_manager
+
+    await sandbox_manager.start()
+    try:
+        yield
+    finally:
+        await sandbox_manager.stop()
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -155,11 +161,6 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
     from features.audit.events import AuditEvent, WorkloadEvent
     from features.bootstrap.events import BootstrapEvent
     from features.fleet.events import FleetEvent
-    from features.cache.readyset_events import (
-        ReadysetCacheEvent,
-        ReadysetExplainEvent,
-        ReadysetSetupEvent,
-    )
     from features.cache.events import CacheRunCompleteEvent
     from features.query_registry.events import QueryBenchmarkEvent
     from features.scan.events import ScanEvent
@@ -175,6 +176,7 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
         | WorkloadEvent
         | ProgressEvent
         | CacheRunCompleteEvent
+        | QueryBenchmarkEvent
         | ErrorEvent
         | RunEndEvent
     )
@@ -203,9 +205,6 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
             QueryBenchmarkEvent,
             ["/api/query-registry/benchmark"],
         ),
-        "ReadysetCacheEvent": (ReadysetCacheEvent, ["/api/readyset/cache"]),
-        "ReadysetExplainEvent": (ReadysetExplainEvent, ["/api/readyset/explain"]),
-        "ReadysetSetupEvent": (ReadysetSetupEvent, ["/api/readyset/setup"]),
         "ScanEvent": (ScanEvent, ["/api/scan"]),
         "TopEvent": (TopEvent, ["/api/top/realtime"]),
     }
@@ -307,7 +306,6 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     from features.fleet.api import routes as fleet
     from features.providers.api import routes as providers
     from features.guard.api import routes as guard
-    from features.cache.api import readyset_routes as readyset
     from features.cache.api import routes as cache
     from features.configure.api import routes as configure
     from features.init.api import routes as init
@@ -337,7 +335,6 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(env.router, prefix="/api", tags=["env"])
     app.include_router(schema.router, prefix="/api")
     app.include_router(registry.router, prefix="/api")
-    app.include_router(readyset.router, prefix="/api")
     app.include_router(top.router, prefix="/api", tags=["top"])
     app.include_router(init.router, prefix="/api", tags=["init"])
     app.include_router(semantic_layer.router, prefix="/api", tags=["semantic-layer"])

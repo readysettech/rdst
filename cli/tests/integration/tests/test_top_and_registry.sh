@@ -61,7 +61,7 @@ test_list_command() {
     "${RDST_CMD[@]}" analyze "$LIST_HASH" --skip-warning
   assert_not_contains "ERROR:" "analyze using list hash should succeed"
 
-  # Note: Cache by hash is tested in test_cache_commands
+  # Note: Readyset comparisoning by query is covered in test_cache_commands.
 }
 
 test_top_command() {

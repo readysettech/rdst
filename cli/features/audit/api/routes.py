@@ -83,8 +83,8 @@ class AuditCaptureRequest(BaseModel):
     limit: int = 50
     analysis: bool = True
     save: bool = True
-    # Benchmark captured queries against an ephemeral Readyset container;
-    # the comparison lands in the complete event's summary.
+    # Benchmark captured queries through the managed Readyset sandbox; the
+    # comparison lands in the complete event's summary.
     readyset: bool = False
 
 

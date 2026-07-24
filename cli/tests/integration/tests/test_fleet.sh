@@ -305,8 +305,7 @@ EOF
   fi
 
   # ==========================================================================
-  # Test 23: Audit with --duration + Readyset cache testing (verbose)
-  # RS cache was deployed by test_cache_commands earlier in the suite.
+  # Test 23: Audit with --duration + managed Readyset comparisons (verbose)
   # Verifies: captured queries, RS speedup data, health score, no pricing.
   # ==========================================================================
 

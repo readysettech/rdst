@@ -11,7 +11,9 @@ Bug 8:  email validation on CLI --email flag path
 Bug 9:  --positive/--negative are mutually exclusive
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
+import os
 import sys
 import signal
 import pytest
@@ -134,23 +136,102 @@ class TestEarlySigintHandler:
         for line in source.splitlines():
             if "signal.signal(signal.SIGINT" in line:
                 assert "sys.exit" not in line, (
-                    "SIGINT handler must not call sys.exit(); use signal.SIG_DFL or "
+                    "SIGINT handler must not call sys.exit(); use default_int_handler or "
                     "raise KeyboardInterrupt instead.  Got: " + line.strip()
                 )
 
-    def test_sigint_handler_uses_sig_dfl(self):
-        """rdst.py should restore default SIGINT behavior (SIG_DFL) so that
-        KeyboardInterrupt is raised and handled gracefully."""
+    def test_sigint_handler_raises_keyboard_interrupt(self):
+        """rdst.py should use Python's SIGINT handler so cleanup can run."""
         import os
 
         rdst_path = os.path.join(os.path.dirname(__file__), "..", "..", "rdst.py")
         with open(rdst_path) as f:
             source = f.read()
 
-        assert "signal.SIG_DFL" in source, (
-            "rdst.py should set the SIGINT handler to signal.SIG_DFL so that "
+        assert "signal.default_int_handler" in source, (
+            "rdst.py should use signal.default_int_handler so that "
             "KeyboardInterrupt is raised on Ctrl-C"
         )
+        assert 'hasattr(signal, "SIGBREAK")' in source
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX SIGINT subprocess test")
+    def test_sigint_runs_subprocess_finally_cleanup(self, tmp_path):
+        import subprocess
+        import sys
+        import time
+
+        rdst_dir = Path(__file__).resolve().parents[2]
+        started = tmp_path / "started"
+        cleaned = tmp_path / "cleaned"
+        code = f"""
+import runpy
+import time
+from pathlib import Path
+runpy.run_path({str(rdst_dir / 'rdst.py')!r}, run_name='rdst_signal_test')
+Path({str(started)!r}).write_text('started')
+try:
+    time.sleep(30)
+finally:
+    Path({str(cleaned)!r}).write_text('cleaned')
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-c", code],
+            cwd=rdst_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={**os.environ, "RDST_TESTING": "true"},
+        )
+        deadline = time.monotonic() + 5
+        while not started.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert started.exists()
+
+        process.send_signal(signal.SIGINT)
+        process.communicate(timeout=5)
+
+        assert cleaned.read_text() == "cleaned"
+        assert process.returncode != 0
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows Ctrl-Break subprocess test")
+    def test_sigbreak_runs_subprocess_finally_cleanup(self, tmp_path):
+        import subprocess
+        import sys
+        import time
+
+        rdst_dir = Path(__file__).resolve().parents[2]
+        started = tmp_path / "started"
+        cleaned = tmp_path / "cleaned"
+        code = f"""
+import runpy
+import time
+from pathlib import Path
+runpy.run_path({str(rdst_dir / 'rdst.py')!r}, run_name='rdst_signal_test')
+Path({str(started)!r}).write_text('started')
+try:
+    time.sleep(30)
+finally:
+    Path({str(cleaned)!r}).write_text('cleaned')
+"""
+        process = subprocess.Popen(
+            [sys.executable, "-c", code],
+            cwd=rdst_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={**os.environ, "RDST_TESTING": "true"},
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+        deadline = time.monotonic() + 5
+        while not started.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert started.exists()
+
+        process.send_signal(signal.CTRL_BREAK_EVENT)
+        process.communicate(timeout=5)
+
+        assert cleaned.read_text() == "cleaned"
+        assert process.returncode != 0
 
 
 class TestGuardShowDeleteSuggestions:

@@ -1,9 +1,9 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  sseFrames as frames,
   jsonResponse,
   runSurvivesRemountAndCancel,
-  sseFrames as frames,
   sseResponse,
 } from '@/test-utils'
 import {
@@ -15,10 +15,10 @@ import { api } from './client'
 import {
   bulkAddFleetTargets,
   createFleetAwsProfile,
-  fetchFleetDiscoverPreview,
   FleetAwsLoginError,
   fetchFleetAwsLogin,
   fetchFleetAwsStatus,
+  fetchFleetDiscoverPreview,
   fleetAwsLogout,
   startFleetAwsLogin,
   updateFleetTargetGroup,
@@ -113,6 +113,12 @@ describe('useFleetAudit', () => {
           result: {
             sizing: { verdict: 'oversized' },
             cache_opportunity: { score: 70 },
+            readyset_comparison: {
+              queries_tested: 4,
+              supported_count: 3,
+              avg_speedup: 8.5,
+              queries: [],
+            },
           },
           index: 0,
           total: 2,
@@ -151,6 +157,12 @@ describe('useFleetAudit', () => {
       status: 'done',
       verdict: 'oversized',
       cacheScore: 70,
+      readysetComparison: {
+        queries_tested: 4,
+        supported_count: 3,
+        avg_speedup: 8.5,
+        queries: [],
+      },
     })
     expect(result.current.targets.b).toEqual({
       status: 'error',

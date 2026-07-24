@@ -35,12 +35,12 @@ class TestCommandGroupsCompleteness:
             "'audit' is missing from COMMAND_GROUPS. Add it to an appropriate group."
         )
 
-    def test_cache_in_command_groups(self):
-        """cache must appear in COMMAND_GROUPS."""
+    def test_cache_management_is_not_a_command_group(self):
+        """Temporary Readyset tests do not expose deployment management."""
         grouped = _all_commands_in_groups()
-        assert "cache" in grouped, (
-            "'cache' is missing from COMMAND_GROUPS. Add it to an appropriate group."
-        )
+        assert "cache" not in grouped
+        assert "cache" not in COMMANDS
+        assert "cache" not in COMMAND_ORDER
 
     def test_fleet_in_command_groups(self):
         """fleet must appear in COMMAND_GROUPS."""
@@ -121,10 +121,14 @@ class TestRdstDocsContent:
     def test_docs_contain_existing_commands(self):
         """Smoke test: RDST_DOCS still contains docs for well-known commands."""
         for section in ["### rdst init", "### rdst analyze", "### rdst top",
-                        "### rdst cache", "### rdst audit", "### rdst fleet"]:
+                        "### rdst audit", "### rdst fleet"]:
             assert section in RDST_DOCS, (
                 f"RDST_DOCS is unexpectedly missing '{section}'."
             )
+
+    def test_docs_do_not_advertise_cache_deployment_management(self):
+        assert "### rdst cache" not in RDST_DOCS
+        assert "rdst cache deploy" not in RDST_DOCS
 
     def test_web_section_exists(self):
         """RDST_DOCS must contain a section for 'rdst web'."""

@@ -1,23 +1,32 @@
 /**
- * Shared Cache button used across Top Queries, Query Registry, Scan Results.
- * Shows: Cache → loading → Cached (disabled).
+ * Shared temporary Readyset speed-test button.
  */
 
-import { Button } from '@rs/ui-new/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@rs/ui-new/tooltip';
+import { Button } from '@rs/ui-new/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@rs/ui-new/tooltip'
 
 interface CacheButtonProps {
   /** Is this query already cached this session? */
-  cached: boolean;
+  cached: boolean
   /** Is this query currently being cached? */
-  loading: boolean;
+  loading: boolean
   /** Cache button click handler. */
-  onClick: () => void;
+  onClick: () => void
   /** Button size. */
-  size?: 'small' | 'base';
+  size?: 'small' | 'base'
 }
 
-export function CacheButton({ cached, loading, onClick, size = 'small' }: CacheButtonProps) {
+export function CacheButton({
+  cached,
+  loading,
+  onClick,
+  size = 'small',
+}: CacheButtonProps) {
   if (cached) {
     return (
       <Button
@@ -26,10 +35,10 @@ export function CacheButton({ cached, loading, onClick, size = 'small' }: CacheB
         size={size}
         icon="tick-double"
         iconPosition="left"
-        label="Cached"
+        label="Compared"
         disabled
       />
-    );
+    )
   }
 
   return (
@@ -43,14 +52,14 @@ export function CacheButton({ cached, loading, onClick, size = 'small' }: CacheB
               size={size}
               icon="database-settings"
               iconPosition="left"
-              label="Cache"
+              label="Compare with Readyset"
               loading={loading}
               onClick={onClick}
             />
           </div>
         </TooltipTrigger>
-        <TooltipContent label="Cache this query with ReadySet for sub-ms reads" />
+        <TooltipContent label="Measure this query with a temporary Readyset cache" />
       </Tooltip>
     </TooltipProvider>
-  );
+  )
 }

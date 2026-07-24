@@ -1,11 +1,16 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-import { ConnectPage } from './ConnectPage'
 import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { useConfigure } from '../../lib/useConfigure'
 import { useOnboarding } from '../../lib/useOnboarding'
+import { ConnectPage } from './ConnectPage'
 
 const mockNavigate = vi.fn()
 const mockHistoryPush = vi.fn()
@@ -39,10 +44,7 @@ vi.mock('../configure', () => ({
   }: {
     onSubmit: (data: Record<string, unknown>) => void
   }) => (
-    <button
-      type="button"
-      onClick={() => onSubmit({ name: 'mydb', deploy: false })}
-    >
+    <button type="button" onClick={() => onSubmit({ name: 'mydb' })}>
       Mock Submit
     </button>
   ),
@@ -104,7 +106,7 @@ describe('ConnectPage', () => {
     expect(addTarget).toHaveBeenCalled()
     expect(setDefaultTarget).toHaveBeenCalledWith('mydb')
     expect(completeInit).toHaveBeenCalled()
-    expect(startBootstrapRun).toHaveBeenCalledWith('mydb', { deploy: false })
+    expect(startBootstrapRun).toHaveBeenCalledWith('mydb')
     expect(queryClient.getQueryData(['init-status'])).toMatchObject({
       initialized: true,
     })

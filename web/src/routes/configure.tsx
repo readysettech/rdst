@@ -459,7 +459,7 @@ function ConfigurePage() {
     if (!editingTarget) {
       // New target: kick off the background bootstrap; it never throws, and
       // the sidebar chip tracks it.
-      startBootstrapRun(data.name, { deploy: data.deploy })
+      startBootstrapRun(data.name)
     }
     setShowForm(false)
     setEditingTarget(null)

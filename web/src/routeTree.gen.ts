@@ -14,7 +14,6 @@ import { Route as TestRouteImport } from './routes/test'
 import { Route as SchemaRouteImport } from './routes/schema'
 import { Route as ScanRouteImport } from './routes/scan'
 import { Route as ResultsRouteImport } from './routes/results'
-import { Route as ReadysetRouteImport } from './routes/readyset'
 import { Route as QueryRegistryRouteImport } from './routes/query-registry'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as GuardsRouteImport } from './routes/guards'
@@ -54,11 +53,6 @@ const ScanRoute = ScanRouteImport.update({
 const ResultsRoute = ResultsRouteImport.update({
   id: '/results',
   path: '/results',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReadysetRoute = ReadysetRouteImport.update({
-  id: '/readyset',
-  path: '/readyset',
   getParentRoute: () => rootRouteImport,
 } as any)
 const QueryRegistryRoute = QueryRegistryRouteImport.update({
@@ -152,7 +146,6 @@ export interface FileRoutesByFullPath {
   '/guards': typeof GuardsRoute
   '/onboarding': typeof OnboardingRoute
   '/query-registry': typeof QueryRegistryRoute
-  '/readyset': typeof ReadysetRoute
   '/results': typeof ResultsRoute
   '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
@@ -175,7 +168,6 @@ export interface FileRoutesByTo {
   '/guards': typeof GuardsRoute
   '/onboarding': typeof OnboardingRoute
   '/query-registry': typeof QueryRegistryRoute
-  '/readyset': typeof ReadysetRoute
   '/results': typeof ResultsRoute
   '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
@@ -199,7 +191,6 @@ export interface FileRoutesById {
   '/guards': typeof GuardsRoute
   '/onboarding': typeof OnboardingRoute
   '/query-registry': typeof QueryRegistryRoute
-  '/readyset': typeof ReadysetRoute
   '/results': typeof ResultsRoute
   '/scan': typeof ScanRoute
   '/schema': typeof SchemaRoute
@@ -224,7 +215,6 @@ export interface FileRouteTypes {
     | '/guards'
     | '/onboarding'
     | '/query-registry'
-    | '/readyset'
     | '/results'
     | '/scan'
     | '/schema'
@@ -247,7 +237,6 @@ export interface FileRouteTypes {
     | '/guards'
     | '/onboarding'
     | '/query-registry'
-    | '/readyset'
     | '/results'
     | '/scan'
     | '/schema'
@@ -270,7 +259,6 @@ export interface FileRouteTypes {
     | '/guards'
     | '/onboarding'
     | '/query-registry'
-    | '/readyset'
     | '/results'
     | '/scan'
     | '/schema'
@@ -294,7 +282,6 @@ export interface RootRouteChildren {
   GuardsRoute: typeof GuardsRoute
   OnboardingRoute: typeof OnboardingRoute
   QueryRegistryRoute: typeof QueryRegistryRoute
-  ReadysetRoute: typeof ReadysetRoute
   ResultsRoute: typeof ResultsRoute
   ScanRoute: typeof ScanRoute
   SchemaRoute: typeof SchemaRoute
@@ -338,13 +325,6 @@ declare module '@tanstack/react-router' {
       path: '/results'
       fullPath: '/results'
       preLoaderRoute: typeof ResultsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/readyset': {
-      id: '/readyset'
-      path: '/readyset'
-      fullPath: '/readyset'
-      preLoaderRoute: typeof ReadysetRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/query-registry': {
@@ -470,7 +450,6 @@ const rootRouteChildren: RootRouteChildren = {
   GuardsRoute: GuardsRoute,
   OnboardingRoute: OnboardingRoute,
   QueryRegistryRoute: QueryRegistryRoute,
-  ReadysetRoute: ReadysetRoute,
   ResultsRoute: ResultsRoute,
   ScanRoute: ScanRoute,
   SchemaRoute: SchemaRoute,

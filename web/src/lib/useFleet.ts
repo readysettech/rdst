@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
-import type { AuditReport } from '../types/audit'
+import type { AuditReport, ReadysetComparison } from '../types/audit'
 import type {
   AuditEvent,
   FleetConnectivityEvent,
@@ -346,10 +346,16 @@ export async function finalizeFleetAwsSsoProfile(
   const body = await readJson(response)
   if (!response.ok)
     throw new FleetAwsLoginError(
-      String(body.detail || body.message || 'Could not create the AWS profile.'),
+      String(
+        body.detail || body.message || 'Could not create the AWS profile.'
+      ),
       typeof body.code === 'string' ? body.code : undefined
     )
-  return body as unknown as { created: boolean; profile: string; detail?: string }
+  return body as unknown as {
+    created: boolean
+    profile: string
+    detail?: string
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -844,6 +850,7 @@ export interface FleetAuditTargetState {
   benchmarkStep?: string
   verdict?: string
   cacheScore?: number
+  readysetComparison?: ReadysetComparison
   error?: string
   notice?: string
 }
@@ -1081,6 +1088,7 @@ async function followFleetAudit(
                 status: 'done' as const,
                 verdict: result.sizing?.verdict ?? undefined,
                 cacheScore: result.cache_opportunity?.score,
+                readysetComparison: result.readyset_comparison ?? undefined,
                 ...(current.targets[event.target_name]?.notice
                   ? { notice: current.targets[event.target_name].notice }
                   : {}),

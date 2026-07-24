@@ -49,9 +49,8 @@ MCP_ONLY_TOOLS = {
 # e.g., rdst_configure_add -> configure add
 SUBCOMMAND_MAPPING = {
     "configure": ["add", "list", "remove", "default", "llm"],
-    "query": ["add", "list", "delete"],
+    "query": ["add", "list", "delete", "cache_compare"],
     "agent": ["list", "ask", "create"],
-    "cache": ["deploy", "add", "show", "delete", "drop_all"],
     "fleet": ["list", "status", "audit", "snapshots", "diff"],
     "audit": ["show", "list"],
 }

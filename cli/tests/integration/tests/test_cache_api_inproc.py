@@ -1,16 +1,8 @@
-"""In-process integration tests for the cache API endpoints.
-
-Drives the real `CacheService` against `tmp_rdst_home`. We exercise
-the config-only paths (no Readyset container required): "no cache
-deployed" status and the empty-list error path. Full deploy/run/remove
-lifecycle lives in the realdb suite (slice 5), gated on a Readyset
-container.
-"""
+"""In-process integration tests for the temporary Readyset sandbox API."""
 
 from __future__ import annotations
 
 import pytest
-
 
 
 @pytest.fixture
@@ -18,69 +10,108 @@ def seeded_target_defaults() -> dict:
     return {"name": "cachetest", "env": "CACHE_PASSWORD"}
 
 
-async def test_status_returns_not_deployed_when_no_cache_configured(
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/api/cache/status"),
+        ("post", "/api/cache/deploy"),
+        ("get", "/api/cache/list"),
+        ("post", "/api/cache/add"),
+        ("post", "/api/cache/register"),
+        ("delete", "/api/cache/remove"),
+        ("delete", "/api/cache/drop-all"),
+        ("post", "/api/cache/start"),
+        ("post", "/api/cache/stop"),
+        ("post", "/api/cache/restart"),
+        ("post", "/api/cache/run"),
+        ("get", "/api/readyset/status"),
+        ("post", "/api/readyset/setup"),
+        ("post", "/api/readyset/explain"),
+        ("post", "/api/readyset/cache"),
+    ],
+)
+async def test_persistent_cache_management_routes_are_absent(
+    client, method, path
+):
+    response = await getattr(client, method)(path)
+
+    assert response.status_code == 404
+
+
+async def test_sandbox_diagnostics_remain_available(client):
+    response = await client.get("/api/cache/sandbox")
+
+    assert response.status_code == 200
+    assert response.json()["container_name"] == "rdst-readyset-sandbox"
+
+
+async def test_temporary_comparison_requires_target_password(
     client, tmp_rdst_home, monkeypatch, seed_target
 ):
-    """A configured target with no Readyset deployment → `cache_status`
-    event with deployed=false, running=false."""
-    seed_target()
-    monkeypatch.setenv("CACHE_PASSWORD", "irrelevant")
-
-    response = await client.get("/api/cache/status?target=cachetest")
-    assert response.status_code == 200, response.text
-
-    body = response.json()
-    # `_event_to_dict` collapses CacheStatusEvent into a flat dict.
-    assert body.get("deployed") is False
-    assert body.get("running") is False
-
-
-async def test_list_for_undeployed_target_returns_error_payload(
-    client, tmp_rdst_home, monkeypatch, seed_target
-):
-    """`/cache/list` for a target with no deployment surfaces an error
-    payload (success=false) — there's no cache to query against."""
-    seed_target()
-    monkeypatch.setenv("CACHE_PASSWORD", "irrelevant")
-
-    response = await client.get("/api/cache/list?target=cachetest")
-    assert response.status_code == 200, response.text
-
-    body = response.json()
-    assert body.get("success") is False
-    assert "No cache deployed" in (body.get("error") or "")
-
-
-async def test_start_for_undeployed_target_returns_error_payload(
-    client, tmp_rdst_home, monkeypatch, seed_target
-):
-    """`/cache/start` for a target with no deployment surfaces an error
-    payload — there's no cache container to start."""
-    seed_target()
-    monkeypatch.setenv("CACHE_PASSWORD", "irrelevant")
-
-    response = await client.post("/api/cache/start", json={"target": "cachetest"})
-    assert response.status_code == 200, response.text
-
-    body = response.json()
-    assert body.get("success") is False
-    assert "No cache target found" in (body.get("error") or "")
-
-
-async def test_status_locked_when_target_password_missing(
-    client, tmp_rdst_home, monkeypatch, seed_target
-):
-    """The `Depends(require_target)` guard 423s before any cache work
-    when the target's `password_env` isn't set in the process env."""
     seed_target(env="MISSING_CACHE_PASSWORD")
     monkeypatch.delenv("MISSING_CACHE_PASSWORD", raising=False)
 
-    response = await client.get("/api/cache/status?target=cachetest")
+    response = await client.post(
+        "/api/cache/test-runs",
+        json={"target": "cachetest", "query": "SELECT 1"},
+    )
+
     assert response.status_code == 423
     assert response.json()["detail"]["code"] == "TARGET_PASSWORD_REQUIRED"
 
 
-async def test_status_404_for_unknown_target(client, tmp_rdst_home):
-    """No such target → guard returns 404 before any service work."""
-    response = await client.get("/api/cache/status?target=does-not-exist")
+async def test_temporary_comparison_rejects_unknown_target(client, tmp_rdst_home):
+    response = await client.post(
+        "/api/cache/test-runs",
+        json={"target": "does-not-exist", "query": "SELECT 1"},
+    )
+
     assert response.status_code == 404
+
+
+async def test_temporary_comparison_registers_a_speed_test(
+    client, tmp_rdst_home, monkeypatch, seed_target
+):
+    from features.cache.api import routes
+
+    class Registry:
+        def __init__(self):
+            self.started = None
+
+        def find_active_matching(self, *args, **kwargs):
+            return None
+
+        def start_factory(self, kind, target, factory, metadata=None):
+            self.started = (kind, target, metadata)
+            return "speed_test_cachetest_new"
+
+    async def ready_runtime():
+        return None
+
+    async def healthy_upstream(_guard):
+        return None
+
+    registry = Registry()
+    monkeypatch.setattr(routes, "_run_registry", registry)
+    monkeypatch.setattr(routes, "_require_readyset_runtime", ready_runtime)
+    monkeypatch.setattr(routes, "_require_healthy_upstream", healthy_upstream)
+    seed_target()
+    monkeypatch.setenv("CACHE_PASSWORD", "irrelevant")
+
+    response = await client.post(
+        "/api/cache/test-runs",
+        json={
+            "target": "cachetest",
+            "query": "SELECT 1",
+            "query_hash": "abc123",
+            "iterations": 3,
+            "warmup": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"run_id": "speed_test_cachetest_new"}
+    assert registry.started is not None
+    kind, target, metadata = registry.started
+    assert (kind, target) == ("speed_test", "cachetest")
+    assert metadata["query_hash"] == "abc123"

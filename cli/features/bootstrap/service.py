@@ -1,11 +1,12 @@
 """Add-database bootstrap orchestrator.
 
 Composes existing services into one background run: a connection test, then
-a schema track (structure -> profile -> key gate -> annotate) in parallel
-with an optional Readyset deploy track. Yields BootstrapEvent dataclasses
-shaped for shared.run_registry.RunRegistry: the needs_key event parks the
-run's status while adapters raise their key/trial UI, and annotation
-resumes when a key save wakes it, with polling as a fallback.
+a schema track (structure -> profile -> key gate -> annotate). Readyset is
+provisioned lazily by explicit comparisons, never by target creation. Yields
+BootstrapEvent dataclasses shaped for shared.run_registry.RunRegistry: the
+needs_key event parks the run's status while adapters raise their key/trial
+UI, and annotation resumes when a key save wakes it, with polling as a
+fallback.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from shared.service_events import ErrorEvent
 from .events import (
     STAGE_ANNOTATE,
     STAGE_CONNECTION_TEST,
-    STAGE_DEPLOY,
     STAGE_PROFILE,
     STAGE_STRUCTURE,
     BootstrapEvent,
@@ -33,8 +33,6 @@ _TRACK_DONE = object()
 
 @dataclass
 class BootstrapOptions:
-    deploy: bool = True
-    deploy_mode: str = "docker"
     annotate: bool = True
     # How often the annotate gate re-validates while waiting. It has no
     # deadline: the user may add a key at any point while RDST remains open.
@@ -68,13 +66,11 @@ class TargetBootstrapService:
         configure_service: Any = None,
         schema_service: Any = None,
         annotate_service: Any = None,
-        cache_service: Any = None,
         key_validator: Callable[[], dict] | None = None,
     ):
         self._configure = configure_service
         self._schema = schema_service
         self._annotate = annotate_service
-        self._cache = cache_service
         self._key_validator = key_validator or validate_anthropic_key
 
     async def run(
@@ -110,12 +106,9 @@ class TargetBootstrapService:
             {"server_version": result.get("server_version")},
         )
 
-        # Independent tracks share one queue; a sentinel per track marks its
-        # end so the merged stream closes exactly when both are done.
+        # Independent tracks share one queue; a sentinel per track marks its end.
         queue: asyncio.Queue = asyncio.Queue()
         tracks = [self._schema_track(target, target_config, options, key_wakeup)]
-        if options.deploy:
-            tracks.append(self._deploy_track(target, options))
         tasks = [asyncio.create_task(self._pump(track, queue)) for track in tracks]
         try:
             remaining = len(tasks)
@@ -231,35 +224,6 @@ class TargetBootstrapService:
             if validity.get("valid"):
                 return validity
 
-    async def _deploy_track(
-        self, target: str, options: BootstrapOptions
-    ) -> AsyncGenerator[BootstrapEvent, None]:
-        from features.cache.models import CacheInput, CacheOptions
-
-        yield _stage(STAGE_DEPLOY, "started", "Deploying Readyset...")
-        outcome: Any = None
-        deploy = self._cache_service().deploy(
-            CacheInput(target=target),
-            CacheOptions(mode=options.deploy_mode, yes=True),
-        )
-        async for event in deploy:
-            if event.type in ("deploy_complete", "error"):
-                outcome = event
-            yield _progress(STAGE_DEPLOY, event)
-        if outcome is not None and outcome.type == "deploy_complete" and outcome.success:
-            yield _stage(
-                STAGE_DEPLOY,
-                "done",
-                "Readyset ready",
-                {"endpoint": outcome.endpoint},
-            )
-        else:
-            yield _stage(
-                STAGE_DEPLOY,
-                "failed",
-                getattr(outcome, "message", "") or "Readyset deploy failed",
-            )
-
     def _connection_test_sync(self, target_config: dict[str, Any]) -> dict:
         """Run the configure test on a worker thread.
 
@@ -290,10 +254,3 @@ class TargetBootstrapService:
 
             self._annotate = AnnotateService()
         return self._annotate
-
-    def _cache_service(self) -> Any:
-        if self._cache is None:
-            from features.cache.service import CacheService
-
-            self._cache = CacheService()
-        return self._cache

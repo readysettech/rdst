@@ -375,11 +375,11 @@ function AuditPage() {
   // surfaced at preflight (the checklist's inline "Set password"), not on the
   // pick, so choosing targets stays friction-free.
   const selectionReady = selectedTargets.length > 0
-  const preflightBlocksLaunch = preflight
-    ? isAuditPreflightBlocked(preflight, {
-        requireQueryStats: captureDuration > 0,
-      })
-    : captureDuration > 0
+  const preflightBlocksLaunch =
+    preflight !== null &&
+    isAuditPreflightBlocked(preflight, {
+      requireQueryStats: captureDuration > 0,
+    })
   const launcherDisabled =
     busy ||
     requirementsBusy ||

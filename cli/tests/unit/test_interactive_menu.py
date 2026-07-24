@@ -94,11 +94,11 @@ def run_menu_with_inputs(inputs):
 
 EXPECTED_COMMANDS = [
     "configure", "top", "analyze", "ask", "scan", "agent", "guard",
-    "init", "query", "schema", "cache", "fleet", "audit", "demo",
+    "init", "query", "schema", "fleet", "audit", "demo",
     "version", "update", "report", "help", "claude", "slack", "web", "exit",
 ]
 
-PREVIOUSLY_MISSING = ["cache", "fleet", "audit", "demo", "claude", "slack", "web"]
+PREVIOUSLY_MISSING = ["fleet", "audit", "demo", "claude", "slack", "web"]
 
 
 def _get_menu_command_names():
@@ -525,7 +525,7 @@ class TestMenuItemCapitalization:
         expected = {
             "configure", "top", "analyze", "ask", "scan", "agent", "guard",
             "init", "query", "schema", "version", "update", "report", "help",
-            "cache", "fleet", "audit", "demo", "claude", "slack", "web",
+            "fleet", "audit", "demo", "claude", "slack", "web",
         }
         missing = expected - set(commands)
         assert not missing, f"Missing expected commands: {missing}"
@@ -542,11 +542,11 @@ class TestMenuCommands:
             f"'{cmd_name}' is missing from the interactive menu"
         )
 
-    def test_menu_has_22_entries_including_exit(self):
-        """Menu should show 21 real commands + exit = 22 entries."""
+    def test_menu_has_21_entries_including_exit(self):
+        """Menu should show 20 real commands + exit = 21 entries."""
         names = _get_menu_command_names_at_runtime()
-        assert len(names) == 22, (
-            f"Expected 22 menu entries (21 commands + exit), got {len(names)}: {names}"
+        assert len(names) == 21, (
+            f"Expected 21 menu entries (20 commands + exit), got {len(names)}: {names}"
         )
 
     @pytest.mark.parametrize("cmd_name", PREVIOUSLY_MISSING)
@@ -558,7 +558,7 @@ class TestMenuCommands:
 
         commands = [
             "configure", "top", "analyze", "ask", "scan", "agent", "guard",
-            "init", "query", "schema", "cache", "fleet", "audit", "demo",
+            "init", "query", "schema", "fleet", "audit", "demo",
             "version", "update", "report", "help", "claude", "slack", "web", "exit",
         ]
         idx = str(commands.index(cmd_name) + 1)
@@ -648,7 +648,7 @@ class TestMenuDescriptionsFromParserData:
                 )
 
     @pytest.mark.parametrize("cmd_name", [
-        "configure", "top", "analyze", "ask", "cache", "fleet", "audit",
+        "configure", "top", "analyze", "ask", "fleet", "audit",
         "demo", "claude", "slack", "web",
     ])
     def test_specific_command_uses_parser_data_description(self, cmd_name):

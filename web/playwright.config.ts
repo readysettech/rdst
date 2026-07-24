@@ -7,6 +7,9 @@ const repoRoot = resolve(appDir, '..', '..', '..')
 const rdstDir = resolve(repoRoot, 'rdst')
 const distDir = resolve(appDir, 'dist')
 const baseURL = process.env.RDST_E2E_BASE_URL ?? 'http://127.0.0.1:8787'
+const serverURL = new URL(baseURL)
+const serverPort =
+  serverURL.port || (serverURL.protocol === 'https:' ? '443' : '80')
 const isCI = Boolean(process.env.CI)
 
 export default defineConfig({
@@ -48,7 +51,7 @@ export default defineConfig({
     // `python -m uvicorn` resolves inside the project interpreter, so a venv
     // whose console-script shebangs have gone stale (e.g. after the repo
     // moved on disk) still serves.
-    command: `pnpm run build && uv run --directory "${rdstDir}" python -m uvicorn tests.web_e2e.server:app --host 127.0.0.1 --port 8787`,
+    command: `pnpm run build && uv run --directory "${rdstDir}" python -m uvicorn tests.web_e2e.server:app --host 127.0.0.1 --port ${serverPort}`,
     cwd: appDir,
     env: {
       ...process.env,

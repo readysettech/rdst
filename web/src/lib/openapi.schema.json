@@ -885,6 +885,11 @@
             "title": "Query",
             "type": "string"
           },
+          "readyset_cache": {
+            "default": false,
+            "title": "Readyset Cache",
+            "type": "boolean"
+          },
           "skip_readyset": {
             "default": false,
             "title": "Skip Readyset",
@@ -919,6 +924,7 @@
         "type": "object"
       },
       "AnnotateCompleteEvent": {
+        "description": "Annotation process completed, possibly with individual table failures.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -958,6 +964,7 @@
         "type": "object"
       },
       "AnnotateErrorEvent": {
+        "description": "Annotation process encountered an error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -977,6 +984,7 @@
         "type": "object"
       },
       "AnnotateProgressEvent": {
+        "description": "Progress update during annotation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1040,6 +1048,7 @@
         "type": "object"
       },
       "AnnotateStartedEvent": {
+        "description": "Annotation process started.",
         "properties": {
           "completed_tables": {
             "default": 0,
@@ -1069,6 +1078,7 @@
         "type": "object"
       },
       "AnnotateTableCompleteEvent": {
+        "description": "A table has been annotated.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -1168,6 +1178,7 @@
         "type": "object"
       },
       "AskClarificationNeededEvent": {
+        "description": "Clarification needed from the user.",
         "properties": {
           "interpretations": {
             "items": {
@@ -1203,6 +1214,7 @@
         "type": "object"
       },
       "AskClarificationQuestion": {
+        "description": "A clarification question for the user.",
         "properties": {
           "id": {
             "title": "Id",
@@ -1229,6 +1241,7 @@
         "type": "object"
       },
       "AskErrorEvent": {
+        "description": "Ask encountered an error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1360,6 +1373,7 @@
         "type": "object"
       },
       "AskInterpretation": {
+        "description": "A possible interpretation of the user's question.",
         "properties": {
           "assumptions": {
             "items": {
@@ -1480,6 +1494,7 @@
         "type": "object"
       },
       "AskResultEvent": {
+        "description": "Ask completed with results.",
         "properties": {
           "columns": {
             "items": {
@@ -1553,6 +1568,7 @@
         "type": "object"
       },
       "AskSchemaLoadedEvent": {
+        "description": "Schema has been loaded.",
         "properties": {
           "source": {
             "title": "Source",
@@ -1590,6 +1606,7 @@
         "type": "object"
       },
       "AskSqlGeneratedEvent": {
+        "description": "SQL has been generated.",
         "properties": {
           "explanation": {
             "anyOf": [
@@ -1621,6 +1638,7 @@
         "type": "object"
       },
       "AskStatusEvent": {
+        "description": "Status update during ask execution.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2452,6 +2470,15 @@
             "$ref": "#/components/schemas/CacheRunCompleteEvent"
           },
           {
+            "$ref": "#/components/schemas/QueryBenchmarkProgressEvent"
+          },
+          {
+            "$ref": "#/components/schemas/QueryBenchmarkCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/QueryBenchmarkErrorEvent"
+          },
+          {
             "$ref": "#/components/schemas/RunEndEvent"
           }
         ]
@@ -2628,6 +2655,7 @@
         ]
       },
       "BootstrapNeedsKeyEvent": {
+        "description": "The run reached the annotate gate without a usable Anthropic key.\n\nThe event name doubles as the run registry's gating signal: the run's\nstatus parks on needs_key until the next event arrives.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2665,6 +2693,7 @@
         "type": "object"
       },
       "BootstrapStageEvent": {
+        "description": "Progress of one bootstrap stage.\n\nstatus is started | progress | done | failed | skipped. Child-service\nevents surface as status=\"progress\" with the child's payload in detail,\nso the stream stays one flat, typed union.",
         "properties": {
           "detail": {
             "anyOf": [
@@ -2712,16 +2741,6 @@
             "default": true,
             "title": "Annotate",
             "type": "boolean"
-          },
-          "deploy": {
-            "default": true,
-            "title": "Deploy",
-            "type": "boolean"
-          },
-          "deploy_mode": {
-            "default": "docker",
-            "title": "Deploy Mode",
-            "type": "string"
           },
           "target": {
             "anyOf": [
@@ -2792,139 +2811,10 @@
         "title": "BrowseResponse",
         "type": "object"
       },
-      "CacheAddRequest": {
+      "CacheRunCompleteEvent": {
+        "description": "Performance comparison result (origin vs cache).",
         "properties": {
-          "dry_run": {
-            "default": false,
-            "title": "Dry Run",
-            "type": "boolean"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "tag": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tag"
-          },
-          "target": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target"
-          }
-        },
-        "required": [
-          "query"
-        ],
-        "title": "CacheAddRequest",
-        "type": "object"
-      },
-      "CacheAddResponse": {
-        "properties": {
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "query_hash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Query Hash"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          },
-          "supported": {
-            "title": "Supported",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "success",
-          "supported",
-          "query"
-        ],
-        "title": "CacheAddResponse",
-        "type": "object"
-      },
-      "CacheDeleteResponse": {
-        "properties": {
-          "cache_id": {
-            "title": "Cache Id",
-            "type": "string"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "success",
-          "cache_id"
-        ],
-        "title": "CacheDeleteResponse",
-        "type": "object"
-      },
-      "CacheDeployRequest": {
-        "properties": {
-          "host": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Host"
-          },
-          "mode": {
-            "default": "docker",
-            "title": "Mode",
-            "type": "string"
-          },
-          "namespace": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Namespace"
-          },
-          "port": {
+          "cache_iterations": {
             "anyOf": [
               {
                 "type": "integer"
@@ -2933,252 +2823,9 @@
                 "type": "null"
               }
             ],
-            "title": "Port"
+            "default": null,
+            "title": "Cache Iterations"
           },
-          "ssh_user": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ssh User"
-          },
-          "target": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target"
-          }
-        },
-        "title": "CacheDeployRequest",
-        "type": "object"
-      },
-      "CacheDropAllResponse": {
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "success",
-          "count"
-        ],
-        "title": "CacheDropAllResponse",
-        "type": "object"
-      },
-      "CacheEntryResponse": {
-        "properties": {
-          "cache_id": {
-            "title": "Cache Id",
-            "type": "string"
-          },
-          "cache_name": {
-            "title": "Cache Name",
-            "type": "string"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "registry_hash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Registry Hash"
-          },
-          "ttl": {
-            "title": "Ttl",
-            "type": "string"
-          },
-          "type": {
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "cache_id",
-          "cache_name",
-          "query",
-          "type",
-          "ttl"
-        ],
-        "title": "CacheEntryResponse",
-        "type": "object"
-      },
-      "CacheErrorResponse": {
-        "properties": {
-          "error": {
-            "title": "Error",
-            "type": "string"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "success",
-          "error"
-        ],
-        "title": "CacheErrorResponse",
-        "type": "object"
-      },
-      "CacheLifecycleRequest": {
-        "properties": {
-          "target": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target"
-          }
-        },
-        "title": "CacheLifecycleRequest",
-        "type": "object"
-      },
-      "CacheLifecycleResponse": {
-        "properties": {
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail"
-          },
-          "operation": {
-            "title": "Operation",
-            "type": "string"
-          },
-          "state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "State"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "success",
-          "operation"
-        ],
-        "title": "CacheLifecycleResponse",
-        "type": "object"
-      },
-      "CacheListResponse": {
-        "properties": {
-          "caches": {
-            "items": {
-              "$ref": "#/components/schemas/CacheEntryResponse"
-            },
-            "title": "Caches",
-            "type": "array"
-          },
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "success",
-          "caches",
-          "count"
-        ],
-        "title": "CacheListResponse",
-        "type": "object"
-      },
-      "CacheRegisterRequest": {
-        "properties": {
-          "cache_host": {
-            "title": "Cache Host",
-            "type": "string"
-          },
-          "cache_port": {
-            "default": 5433,
-            "title": "Cache Port",
-            "type": "integer"
-          },
-          "target": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target"
-          }
-        },
-        "required": [
-          "cache_host"
-        ],
-        "title": "CacheRegisterRequest",
-        "type": "object"
-      },
-      "CacheRequest": {
-        "properties": {
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "target": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target"
-          }
-        },
-        "required": [
-          "query"
-        ],
-        "title": "CacheRequest",
-        "type": "object"
-      },
-      "CacheRunCompleteEvent": {
-        "properties": {
           "cache_stats": {
             "additionalProperties": {
               "type": "number"
@@ -3193,6 +2840,18 @@
           "iterations": {
             "title": "Iterations",
             "type": "integer"
+          },
+          "origin_iterations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Origin Iterations"
           },
           "origin_stats": {
             "additionalProperties": {
@@ -3242,95 +2901,12 @@
         "title": "CacheRunCompleteEvent",
         "type": "object"
       },
-      "CacheRunRequest": {
-        "properties": {
-          "iterations": {
-            "default": 15,
-            "title": "Iterations",
-            "type": "integer"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "target": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target"
-          },
-          "warmup": {
-            "default": 5,
-            "title": "Warmup",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "query"
-        ],
-        "title": "CacheRunRequest",
-        "type": "object"
-      },
-      "CacheStatusResponse": {
-        "properties": {
-          "cache_target": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Target"
-          },
-          "container_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Container Name"
-          },
-          "deployed": {
-            "title": "Deployed",
-            "type": "boolean"
-          },
-          "endpoint": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Endpoint"
-          },
-          "running": {
-            "title": "Running",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "deployed",
-          "running"
-        ],
-        "title": "CacheStatusResponse",
-        "type": "object"
-      },
       "CacheTestRunRequest": {
         "properties": {
           "iterations": {
             "default": 15,
+            "maximum": 1000.0,
+            "minimum": 1.0,
             "title": "Iterations",
             "type": "integer"
           },
@@ -3373,6 +2949,8 @@
           },
           "warmup": {
             "default": 5,
+            "maximum": 100.0,
+            "minimum": 0.0,
             "title": "Warmup",
             "type": "integer"
           }
@@ -3643,6 +3221,7 @@
         "type": "object"
       },
       "ChatToolResultEvent": {
+        "description": "Result of one tool execution.\n\nFor query_database, `data` carries sql/columns/rows/row_count/\nexecution_time_ms/truncated/query_hash/query_tag; for get_schema it\ncarries tables/source.",
         "properties": {
           "content": {
             "title": "Content",
@@ -3823,62 +3402,6 @@
           "success"
         ],
         "title": "CompleteEvent",
-        "type": "object"
-      },
-      "ContainerStatus": {
-        "properties": {
-          "readyset_port": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Readyset Port"
-          },
-          "readyset_running": {
-            "title": "Readyset Running",
-            "type": "boolean"
-          },
-          "running": {
-            "title": "Running",
-            "type": "boolean"
-          },
-          "target": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target"
-          },
-          "test_db_port": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Test Db Port"
-          },
-          "test_db_running": {
-            "title": "Test Db Running",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "running",
-          "test_db_running",
-          "readyset_running"
-        ],
-        "title": "ContainerStatus",
         "type": "object"
       },
       "ConversationHistoryResponse": {
@@ -4269,6 +3792,7 @@
         "type": "object"
       },
       "ErrorEvent": {
+        "description": "Error event for service workflows.\n\n``code`` and ``detail`` mirror the shared HTTP error envelope\n(``shared.api.app._error_envelope``) so an SSE failure carries the same\n{code, message, detail} shape the client normalizes in ``lib/sse.ts``.\nBoth stay optional so existing producers that only set ``message`` keep\nworking; the client derives a code when one is absent.",
         "properties": {
           "code": {
             "anyOf": [
@@ -6442,6 +5966,19 @@
         "title": "LlmValidationResult",
         "type": "object"
       },
+      "LoadTestRunStartResponse": {
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "LoadTestRunStartResponse",
+        "type": "object"
+      },
       "MessageResponse": {
         "description": "Single message in conversation history.",
         "properties": {
@@ -6617,6 +6154,7 @@
         "type": "object"
       },
       "ProgressEvent": {
+        "description": "Progress update during a multi-step operation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -6659,6 +6197,7 @@
         "type": "object"
       },
       "QueryBenchmarkCompleteEvent": {
+        "description": "Benchmark finished; carries the final tally.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6706,6 +6245,7 @@
         "type": "object"
       },
       "QueryBenchmarkErrorEvent": {
+        "description": "Benchmark failed (or was rejected by a safety rail) before completion.\n\nCarries the shared error envelope ({code, message, detail}, B7/T24) so the\nclient normalizes a benchmark failure exactly like every other SSE error.\n``message`` stays humane and safe to show; ``detail`` holds only the\nexception class name for correlation \u2014 never the raw ``str(e)``, which can\nembed host / DSN / SQL material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -6762,6 +6302,7 @@
         ]
       },
       "QueryBenchmarkProgressEvent": {
+        "description": "Benchmark progress tick.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6809,6 +6350,7 @@
         "type": "object"
       },
       "QueryBenchmarkStats": {
+        "description": "Statistics for a single benchmarked query.",
         "properties": {
           "avg_ms": {
             "title": "Avg Ms",
@@ -7044,84 +6586,6 @@
         "title": "QueryRegistryResponse",
         "type": "object"
       },
-      "ReadysetCacheCompleteEvent": {
-        "properties": {
-          "cache_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cache Id"
-          },
-          "cached": {
-            "title": "Cached",
-            "type": "boolean"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "readyset_port": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Readyset Port"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          },
-          "type": {
-            "const": "complete",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "success",
-          "cached",
-          "message"
-        ],
-        "title": "ReadysetCacheCompleteEvent",
-        "type": "object"
-      },
-      "ReadysetCacheEvent": {
-        "anyOf": [
-          {
-            "$ref": "#/components/schemas/ReadysetProgressEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ReadysetErrorEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ReadysetCacheCompleteEvent"
-          }
-        ]
-      },
       "ReadysetCacheability": {
         "additionalProperties": true,
         "properties": {
@@ -7346,177 +6810,6 @@
         ],
         "title": "ReadysetCheckedEvent",
         "type": "object"
-      },
-      "ReadysetErrorEvent": {
-        "properties": {
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "const": "error",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "message"
-        ],
-        "title": "ReadysetErrorEvent",
-        "type": "object"
-      },
-      "ReadysetExplainCompleteEvent": {
-        "properties": {
-          "cacheable": {
-            "title": "Cacheable",
-            "type": "boolean"
-          },
-          "confidence": {
-            "title": "Confidence",
-            "type": "string"
-          },
-          "explanation": {
-            "title": "Explanation",
-            "type": "string"
-          },
-          "issues": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Issues",
-            "type": "array"
-          },
-          "readyset_port": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Readyset Port"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          },
-          "type": {
-            "const": "complete",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "success",
-          "cacheable",
-          "confidence",
-          "explanation",
-          "issues"
-        ],
-        "title": "ReadysetExplainCompleteEvent",
-        "type": "object"
-      },
-      "ReadysetExplainEvent": {
-        "anyOf": [
-          {
-            "$ref": "#/components/schemas/ReadysetProgressEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ReadysetErrorEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ReadysetExplainCompleteEvent"
-          }
-        ]
-      },
-      "ReadysetProgressEvent": {
-        "properties": {
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "stage": {
-            "title": "Stage",
-            "type": "string"
-          },
-          "type": {
-            "const": "progress",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "stage",
-          "message"
-        ],
-        "title": "ReadysetProgressEvent",
-        "type": "object"
-      },
-      "ReadysetSetupCompleteEvent": {
-        "properties": {
-          "already_running": {
-            "default": false,
-            "title": "Already Running",
-            "type": "boolean"
-          },
-          "readyset_port": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Readyset Port"
-          },
-          "success": {
-            "title": "Success",
-            "type": "boolean"
-          },
-          "test_db_port": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Test Db Port"
-          },
-          "type": {
-            "const": "complete",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "success"
-        ],
-        "title": "ReadysetSetupCompleteEvent",
-        "type": "object"
-      },
-      "ReadysetSetupEvent": {
-        "anyOf": [
-          {
-            "$ref": "#/components/schemas/ReadysetProgressEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ReadysetErrorEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ReadysetSetupCompleteEvent"
-          }
-        ]
       },
       "Recommendations": {
         "additionalProperties": true,
@@ -8030,6 +7323,7 @@
         "type": "object"
       },
       "RunEndEvent": {
+        "description": "Terminal event appended by the registry after every run.",
         "properties": {
           "status": {
             "title": "Status",
@@ -8048,7 +7342,169 @@
         "title": "RunEndEvent",
         "type": "object"
       },
+      "SandboxPrewarmRequest": {
+        "properties": {
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "SandboxPrewarmRequest",
+        "type": "object"
+      },
+      "SandboxPrewarmResponse": {
+        "properties": {
+          "queued": {
+            "title": "Queued",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "queued"
+        ],
+        "title": "SandboxPrewarmResponse",
+        "type": "object"
+      },
+      "SandboxStatusResponse": {
+        "properties": {
+          "container_name": {
+            "title": "Container Name",
+            "type": "string"
+          },
+          "current_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Target"
+          },
+          "dirty_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dirty Reason"
+          },
+          "docker_installed": {
+            "title": "Docker Installed",
+            "type": "boolean"
+          },
+          "docker_running": {
+            "title": "Docker Running",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "failed_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed Target"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "integer"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_released_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Released At"
+          },
+          "lease_owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Owner"
+          },
+          "lease_purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Purpose"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "queued_requests": {
+            "title": "Queued Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "phase",
+          "generation",
+          "queued_requests",
+          "container_name",
+          "healthy",
+          "docker_installed",
+          "docker_running"
+        ],
+        "title": "SandboxStatusResponse",
+        "type": "object"
+      },
       "ScanCompleteEvent": {
+        "description": "Scan completed.",
         "properties": {
           "success": {
             "title": "Success",
@@ -8074,6 +7530,7 @@
         "type": "object"
       },
       "ScanErrorEvent": {
+        "description": "Scan error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -8133,6 +7590,7 @@
         ]
       },
       "ScanFilesFoundEvent": {
+        "description": "Files with ORM patterns discovered.",
         "properties": {
           "files": {
             "items": {
@@ -8228,6 +7686,7 @@
         "type": "string"
       },
       "ScanProgressEvent": {
+        "description": "Progress update within a scan phase.",
         "properties": {
           "current": {
             "title": "Current",
@@ -8269,6 +7728,7 @@
         "type": "object"
       },
       "ScanQueryResultEvent": {
+        "description": "Individual query result from scan.",
         "properties": {
           "query": {
             "additionalProperties": true,
@@ -8289,6 +7749,7 @@
         "type": "object"
       },
       "ScanRegistryEvent": {
+        "description": "Registry save results.",
         "properties": {
           "new_queries": {
             "title": "New Queries",
@@ -8404,6 +7865,7 @@
         "type": "object"
       },
       "ScanStatusEvent": {
+        "description": "Status update during scan.",
         "properties": {
           "message": {
             "title": "Message",
@@ -9243,23 +8705,6 @@
         "title": "SettingsBody",
         "type": "object"
       },
-      "SetupRequest": {
-        "properties": {
-          "target": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target"
-          }
-        },
-        "title": "SetupRequest",
-        "type": "object"
-      },
       "StatusResponse": {
         "properties": {
           "configured": {
@@ -9742,6 +9187,7 @@
         "type": "object"
       },
       "TopCompleteEvent": {
+        "description": "Operation completed.",
         "properties": {
           "newly_saved": {
             "title": "Newly Saved",
@@ -9779,6 +9225,7 @@
         "type": "object"
       },
       "TopConnectedEvent": {
+        "description": "Database connection established.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -9836,6 +9283,7 @@
         "type": "object"
       },
       "TopDbLimitWarningEvent": {
+        "description": "Database query size limit is below recommended threshold.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -9870,6 +9318,7 @@
         "type": "object"
       },
       "TopErrorEvent": {
+        "description": "Error occurred.\n\n``code`` and ``detail`` mirror the shared error envelope (B7/T24):\n``message`` stays humane, ``detail`` carries the exception class name for\ncorrelation \u2014 never the raw ``str(e)``, which can embed host/DSN material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -10033,6 +9482,7 @@
         "type": "object"
       },
       "TopQueriesEvent": {
+        "description": "Batch of top queries.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -10094,6 +9544,7 @@
         "type": "object"
       },
       "TopQueryData": {
+        "description": "Individual query data.",
         "properties": {
           "avg_time": {
             "title": "Avg Time",
@@ -10272,6 +9723,7 @@
         "type": "object"
       },
       "TopQuerySavedEvent": {
+        "description": "Query saved to registry.",
         "properties": {
           "is_new": {
             "title": "Is New",
@@ -10296,6 +9748,7 @@
         "type": "object"
       },
       "TopSourceFallbackEvent": {
+        "description": "Source fallback occurred.",
         "properties": {
           "from_source": {
             "title": "From Source",
@@ -10325,6 +9778,7 @@
         "type": "object"
       },
       "TopStatusEvent": {
+        "description": "Progress status update.",
         "properties": {
           "message": {
             "title": "Message",
@@ -12383,215 +11837,38 @@
         ]
       }
     },
-    "/api/cache/add": {
-      "post": {
-        "description": "Create a cache or dry-run check.",
-        "operationId": "add_cache_api_cache_add_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CacheAddRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheAddResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response Add Cache Api Cache Add Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Add Cache",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/deploy": {
-      "post": {
-        "description": "Deploy Readyset cache (SSE stream).",
-        "operationId": "deploy_cache_api_cache_deploy_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CacheDeployRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Deploy Cache",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/drop-all": {
-      "delete": {
-        "description": "Delete all caches.",
-        "operationId": "drop_all_caches_api_cache_drop_all_delete",
-        "parameters": [
-          {
-            "description": "Target database name",
-            "in": "query",
-            "name": "target",
-            "required": true,
-            "schema": {
-              "description": "Target database name",
-              "title": "Target",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheDropAllResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response Drop All Caches Api Cache Drop All Delete"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Drop All Caches",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/list": {
+    "/api/cache/sandbox": {
       "get": {
-        "description": "List cached queries for a database target.",
-        "operationId": "list_caches_api_cache_list_get",
-        "parameters": [
-          {
-            "description": "Target database name",
-            "in": "query",
-            "name": "target",
-            "required": true,
-            "schema": {
-              "description": "Target database name",
-              "title": "Target",
-              "type": "string"
-            }
-          }
-        ],
+        "description": "Return process-local sandbox diagnostics without connection secrets.",
+        "operationId": "get_sandbox_status_api_cache_sandbox_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheListResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response List Caches Api Cache List Get"
+                  "$ref": "#/components/schemas/SandboxStatusResponse"
                 }
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
-        "summary": "List Caches",
+        "summary": "Get Sandbox Status",
         "tags": [
           "cache",
           "cache"
         ]
       }
     },
-    "/api/cache/register": {
+    "/api/cache/sandbox/prewarm": {
       "post": {
-        "description": "Register a cache target with a user-provided endpoint (for non-local deploys).",
-        "operationId": "register_cache_target_api_cache_register_post",
+        "description": "Queue low-priority preparation for the requested Comparisons target.",
+        "operationId": "prewarm_sandbox_api_cache_sandbox_prewarm_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CacheRegisterRequest"
+                "$ref": "#/components/schemas/SandboxPrewarmRequest"
               }
             }
           },
@@ -12602,15 +11879,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheStatusResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response Register Cache Target Api Cache Register Post"
+                  "$ref": "#/components/schemas/SandboxPrewarmResponse"
                 }
               }
             },
@@ -12627,309 +11896,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Register Cache Target",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/remove": {
-      "delete": {
-        "description": "Remove cache target and stop container.",
-        "operationId": "remove_cache_api_cache_remove_delete",
-        "parameters": [
-          {
-            "description": "Target database name",
-            "in": "query",
-            "name": "target",
-            "required": true,
-            "schema": {
-              "description": "Target database name",
-              "title": "Target",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheDeleteResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response Remove Cache Api Cache Remove Delete"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Remove Cache",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/restart": {
-      "post": {
-        "description": "Restart a deployed cache, preserving its config.",
-        "operationId": "restart_cache_api_cache_restart_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CacheLifecycleRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheLifecycleResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response Restart Cache Api Cache Restart Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Restart Cache",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/run": {
-      "post": {
-        "description": "Run a query against both origin DB and Readyset cache, stream comparison results (SSE).",
-        "operationId": "run_cache_comparison_api_cache_run_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CacheRunRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Run Cache Comparison",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/start": {
-      "post": {
-        "description": "Start a stopped cache without redeploying.",
-        "operationId": "start_cache_api_cache_start_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CacheLifecycleRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheLifecycleResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response Start Cache Api Cache Start Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Start Cache",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/status": {
-      "get": {
-        "description": "Check cache deployment status for a database target.",
-        "operationId": "get_cache_status_api_cache_status_get",
-        "parameters": [
-          {
-            "description": "Target database name",
-            "in": "query",
-            "name": "target",
-            "required": true,
-            "schema": {
-              "description": "Target database name",
-              "title": "Target",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheStatusResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response Get Cache Status Api Cache Status Get"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Cache Status",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/stop": {
-      "post": {
-        "description": "Stop a running cache without removing it.",
-        "operationId": "stop_cache_api_cache_stop_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CacheLifecycleRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheLifecycleResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response Stop Cache Api Cache Stop Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Stop Cache",
+        "summary": "Prewarm Sandbox",
         "tags": [
           "cache",
           "cache"
@@ -12938,7 +11905,7 @@
     },
     "/api/cache/test-runs": {
       "post": {
-        "description": "Start a detached origin-vs-cache benchmark and return immediately.",
+        "description": "Start or attach to one complete temporary Readyset speed experiment.",
         "operationId": "start_cache_test_run_api_cache_test_runs_post",
         "requestBody": {
           "content": {
@@ -12973,69 +11940,6 @@
           }
         },
         "summary": "Start Cache Test Run",
-        "tags": [
-          "cache",
-          "cache"
-        ]
-      }
-    },
-    "/api/cache/{cache_id}": {
-      "delete": {
-        "description": "Delete a single cache by ID.",
-        "operationId": "delete_cache_api_cache__cache_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "cache_id",
-            "required": true,
-            "schema": {
-              "title": "Cache Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Target database name",
-            "in": "query",
-            "name": "target",
-            "required": true,
-            "schema": {
-              "description": "Target database name",
-              "title": "Target",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/CacheDeleteResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CacheErrorResponse"
-                    }
-                  ],
-                  "title": "Response Delete Cache Api Cache  Cache Id  Delete"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Cache",
         "tags": [
           "cache",
           "cache"
@@ -16198,6 +15102,45 @@
         "summary": "Import Queries"
       }
     },
+    "/api/query-registry/load-test-runs": {
+      "post": {
+        "description": "Start or attach to the target's detached origin-only benchmark.",
+        "operationId": "start_load_test_run_api_query_registry_load_test_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BenchmarkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoadTestRunStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Benchmark Run"
+      }
+    },
     "/api/query-registry/{query_hash}": {
       "delete": {
         "description": "Remove a query from the registry.",
@@ -16336,189 +15279,6 @@
           }
         },
         "summary": "Update Query Tag"
-      }
-    },
-    "/api/readyset/cache": {
-      "post": {
-        "operationId": "create_cache_api_readyset_cache_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CacheRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              },
-              "text/event-stream": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReadysetCacheEvent"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Cache",
-        "tags": [
-          "readyset"
-        ]
-      }
-    },
-    "/api/readyset/explain": {
-      "post": {
-        "operationId": "explain_cache_api_readyset_explain_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CacheRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              },
-              "text/event-stream": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReadysetExplainEvent"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Explain Cache",
-        "tags": [
-          "readyset"
-        ]
-      }
-    },
-    "/api/readyset/setup": {
-      "post": {
-        "operationId": "setup_containers_api_readyset_setup_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetupRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              },
-              "text/event-stream": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReadysetSetupEvent"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Setup Containers",
-        "tags": [
-          "readyset"
-        ]
-      }
-    },
-    "/api/readyset/status": {
-      "get": {
-        "operationId": "get_status_api_readyset_status_get",
-        "parameters": [
-          {
-            "description": "Target database name",
-            "in": "query",
-            "name": "target",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Target database name",
-              "title": "Target"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContainerStatus"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Status",
-        "tags": [
-          "readyset"
-        ]
       }
     },
     "/api/report": {

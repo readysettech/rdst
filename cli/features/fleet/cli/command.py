@@ -664,131 +664,6 @@ class FleetCommand:
         except Exception:
             return False
 
-    def _preflight_cache_check(self, console, cfg, targets, auto_yes: bool = False) -> bool:
-        """Check if Readyset caches exist for fleet targets. Prompt once to deploy if needed.
-
-        Returns True if caches are available (existing or newly deployed).
-        """
-        import shutil
-        import sys
-
-        if not shutil.which("docker"):
-            console.print("[dim]  Skipping Readyset cache testing (Docker not installed)[/dim]")
-            return False
-        if not auto_yes and not sys.stdin.isatty():
-            return False
-
-        try:
-            from features.cache.service import CacheService
-            from features.cache.models import CacheInput, CacheOptions
-            import asyncio
-        except ImportError:
-            return False
-
-        service = CacheService()
-
-        # Check which targets need caches deployed or restarted
-        targets_needing_deploy = []
-        targets_needing_restart = []
-        targets_running = []
-        for target_name in targets:
-            cache_target = service._resolve_cache_target(target_name)
-            if not cache_target:
-                targets_needing_deploy.append(target_name)
-                continue
-            # Config exists — check if container is actually running
-            _cache_name, cache_config = cache_target
-            container = cache_config.get("container_name", f"rdst-readyset-{target_name}")
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ["docker", "inspect", "-f", "{{.State.Running}}", container],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if result.returncode == 0 and "true" in result.stdout.lower():
-                    targets_running.append(target_name)
-                else:
-                    targets_needing_restart.append((target_name, container))
-            except Exception:
-                targets_needing_restart.append((target_name, container))
-
-        if not targets_needing_deploy and not targets_needing_restart:
-            return True  # All targets have running caches
-
-        # Build prompt message
-        from shared.ui import Prompt
-        actions = []
-        if targets_needing_deploy:
-            actions.append(f"deploy {len(targets_needing_deploy)}")
-        if targets_needing_restart:
-            actions.append(f"restart {len(targets_needing_restart)}")
-        action_str = " and ".join(actions)
-
-        console.print()
-        if auto_yes:
-            deploy = "y"
-            console.print(f"[dim]  Auto-deploying Readyset cache(s) for benchmarking (-y)[/dim]")
-        else:
-            console.print(
-                "[dim]  Readyset can benchmark your captured queries to show how much"
-                "\n  faster they'd run with caching. This deploys a local Docker"
-                "\n  container per target that proxies your database.[/dim]"
-            )
-            try:
-                deploy = Prompt.ask(
-                    f"  {action_str.capitalize()} Readyset cache(s) to test query caching?",
-                    choices=["y", "n"], default="y"
-                )
-            except (EOFError, KeyboardInterrupt):
-                deploy = "n"
-
-        if deploy.lower() != "y":
-            return len(targets_running) > 0
-
-        ready = len(targets_running)
-
-        # Restart stopped containers (fall back to fresh deploy if removed)
-        import subprocess
-        for target_name, container in targets_needing_restart:
-            console.print(f"[dim]  Starting {container}...[/dim]")
-            start_result = subprocess.run(
-                ["docker", "start", container], capture_output=True, text=True, timeout=30,
-            )
-            if start_result.returncode == 0:
-                ready += 1
-            else:
-                # Container was removed — deploy fresh
-                console.print(f"[dim]  Container not found, deploying fresh for {target_name}...[/dim]")
-                targets_needing_deploy.append(target_name)
-
-        # Deploy new containers
-        for target_name in targets_needing_deploy:
-            console.print(f"[dim]  Deploying Readyset for {target_name}...[/dim]")
-            try:
-                async def _deploy(tn=target_name):
-                    async for event in service.deploy(
-                        CacheInput(target=tn),
-                        CacheOptions(mode="docker"),
-                    ):
-                        if event.type == "deploy_complete":
-                            return event.success
-                    return False
-
-                if asyncio.run(_deploy()):
-                    ready += 1
-                    console.print(f"[green]  Readyset deployed for {target_name}[/green]")
-                else:
-                    console.print(f"[yellow]  Failed to deploy for {target_name}[/yellow]")
-            except Exception as e:
-                console.print(f"[yellow]  Deploy failed for {target_name}: {e}[/yellow]")
-
-        # Wait for RS instances to initialize
-        if targets_needing_restart or targets_needing_deploy:
-            import time as _t
-            _t.sleep(3)
-
-        return ready > 0
-
     # =========================================================================
     # Fleet Summary Mode (default UX)
     # =========================================================================
@@ -1386,24 +1261,44 @@ class FleetCommand:
                     if not output_json:
                         console.print("[dim]  Skipping Readyset cache benchmarks (Docker not installed)[/dim]")
                 else:
-                    audit_cmd = AuditCommand()
-                    for r in all_results:
-                        if r.get("error"):
-                            continue
-                        wl = r.get("workload") or {}
-                        queries = wl.get("queries") or []
-                        if not queries:
-                            continue
-                        target_name = r.get("target_name", "")
-                        if not output_json:
-                            console.print(f"[dim]  Testing {target_name} queries against Readyset...[/dim]")
-                        rs_results = audit_cmd._run_readyset_testing(
-                            console, target_name, queries, max_queries=20,
-                            auto_yes=auto_yes,
-                        )
-                        if rs_results:
-                            r["readyset_results"] = rs_results
-                            r["readyset_comparison"] = build_comparison(rs_results)
+                    candidates = [
+                        result
+                        for result in all_results
+                        if not result.get("error")
+                        and (result.get("workload") or {}).get("queries")
+                    ]
+                    consent = auto_yes
+                    if candidates and not consent:
+                        import sys
+
+                        if sys.stdin.isatty():
+                            from shared.ui import Confirm
+
+                            try:
+                                consent = Confirm.ask(
+                                    f"  Benchmark captured queries for {len(candidates)} "
+                                    "targets with the Readyset sandbox?",
+                                    default=True,
+                                )
+                            except (EOFError, KeyboardInterrupt):
+                                consent = False
+                    if consent:
+                        audit_cmd = AuditCommand()
+                        for r in candidates:
+                            queries = (r.get("workload") or {}).get("queries") or []
+                            target_name = r.get("target_name", "")
+                            if not output_json:
+                                console.print(
+                                    f"[dim]  Testing {target_name} queries against "
+                                    "Readyset...[/dim]"
+                                )
+                            rs_results = audit_cmd._run_readyset_testing(
+                                console, target_name, queries, max_queries=20,
+                                auto_yes=True,
+                            )
+                            if rs_results:
+                                r["readyset_results"] = rs_results
+                                r["readyset_comparison"] = build_comparison(rs_results)
             except Exception:
                 pass
 

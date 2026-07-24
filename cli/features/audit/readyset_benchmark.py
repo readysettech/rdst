@@ -208,6 +208,7 @@ def benchmark_queries(
     max_queries: int = 20,
     console=None,
     cache_config: dict[str, Any] | None = None,
+    cleanup_errors: list[str] | None = None,
 ) -> list[dict[str, Any]] | None:
     """Benchmark captured queries against a running Readyset cache.
 
@@ -363,31 +364,48 @@ def benchmark_queries(
         if not bench_sql:
             results.append(_skipped("Query is empty after parameter substitution"))
             continue
+        execution_error: Exception | None = None
+        conn = None
+        times: list[float] = []
         try:
-            from shared.db_connection import create_direct_connection
+            from shared.db_connection import close_connection, create_direct_connection
+
             conn = create_direct_connection(cache_cfg)
-            times = []
             for i in range(3):
+                cursor = None
                 start = time.perf_counter()
                 try:
                     cursor = conn.cursor()
                     cursor.execute(bench_sql)
                     cursor.fetchall()
-                    cursor.close()
-                except Exception:
+                except Exception as exc:
+                    execution_error = exc
                     break
+                finally:
+                    if cursor is not None:
+                        cursor.close()
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 if i > 0:  # Skip warmup
                     times.append(elapsed_ms)
-            conn.close()
-            if times:
-                readyset_ms = sum(times) / len(times)
-        except Exception as e:
+        except Exception as exc:
+            execution_error = exc
+        finally:
+            if conn is not None:
+                close_connection(conn)
+
+        if execution_error is not None:
             if not conn_error_shown:
-                console.print(f"[yellow]  Could not connect to Readyset cache: {e}[/yellow]")
+                console.print(
+                    f"[yellow]  Could not execute against Readyset cache: "
+                    f"{execution_error}[/yellow]"
+                )
                 conn_error_shown = True
-            _drop_created_caches(service, CacheInput, target, pre_existing_ids)
-            return None
+            results.append(_skipped(f"Readyset execution failed: {execution_error}"))
+            continue
+        if not times:
+            results.append(_skipped("Readyset benchmark produced no measured samples"))
+            continue
+        readyset_ms = sum(times) / len(times)
 
         # Timing precision is ~0.1ms; sub-precision readings round to 0.0ms.
         # Floor the denominator at the precision limit so the fastest cache
@@ -403,7 +421,9 @@ def benchmark_queries(
             "speedup": round(speedup, 1),
         })
 
-    _drop_created_caches(service, CacheInput, target, pre_existing_ids)
+    errors = _drop_created_caches(service, CacheInput, target, pre_existing_ids)
+    if cleanup_errors is not None:
+        cleanup_errors.extend(errors)
 
     cached_count = sum(1 for r in results if r["cacheable"])
     if cached_count > 0:
@@ -422,20 +442,75 @@ def _list_cache_ids(service, CacheInput, target: str) -> set[str]:
     return {_cache_id(cache) for cache in caches if _cache_id(cache)}
 
 
-def _drop_created_caches(service, CacheInput, target: str, pre_existing_ids: set[str]) -> None:
-    """Drop caches the benchmark created: everything present now that was not
-    present before, identified by ReadySet's own cache ids."""
-    created = _list_cache_ids(service, CacheInput, target) - pre_existing_ids
+def _drop_created_caches(
+    service, CacheInput, target: str, pre_existing_ids: set[str]
+) -> list[str]:
+    """Drop and verify every cache created by this benchmark."""
+    caches, list_error = _list_caches(service, CacheInput, target)
+    if list_error:
+        return [list_error]
+    created = {
+        _cache_id(cache)
+        for cache in caches
+        if _cache_id(cache) and _cache_id(cache) not in pre_existing_ids
+    }
+    errors: list[str] = []
     for cid in created:
         try:
+            delete_error: str | None = None
+
             async def _delete(cache_id=cid):
-                async for _event in service.delete_cache(
+                nonlocal delete_error
+                async for event in service.delete_cache(
                     CacheInput(target=target, cache_id=cache_id)
                 ):
-                    pass
+                    if event.type == "error":
+                        delete_error = (
+                            getattr(event, "message", None)
+                            or f"DROP CACHE {cache_id} failed"
+                        )
+
             asyncio.run(_delete())
-        except Exception:
-            pass
+            if delete_error:
+                errors.append(delete_error)
+        except Exception as exc:
+            errors.append(f"DROP CACHE {cid} raised: {exc}")
+
+    remaining, verify_error = _list_caches(service, CacheInput, target)
+    if verify_error:
+        errors.append(verify_error)
+    else:
+        remaining_ids = {_cache_id(cache) for cache in remaining}
+        leaked = sorted(created & remaining_ids)
+        if leaked:
+            errors.append(f"Temporary caches remain after cleanup: {', '.join(leaked)}")
+    return errors
+
+
+async def _benchmark_queries_settled(*args, **kwargs):
+    """Keep the lease until the blocking benchmark worker has stopped."""
+    worker = asyncio.create_task(asyncio.to_thread(benchmark_queries, *args, **kwargs))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError as cancellation:
+        worker_error: Exception | None = None
+        while True:
+            try:
+                await asyncio.shield(worker)
+                break
+            except asyncio.CancelledError:
+                continue
+            except Exception as exc:
+                worker_error = exc
+                break
+        if worker_error is not None:
+            cleanup_errors = kwargs.get("cleanup_errors")
+            if isinstance(cleanup_errors, list):
+                cleanup_errors.append(
+                    "Benchmark worker failed during cancellation: "
+                    f"{worker_error}"
+                )
+        raise cancellation
 
 
 async def run_managed_benchmark(
@@ -459,14 +534,30 @@ async def run_managed_benchmark(
             priority=SandboxPriority.AUDIT_BATCH,
         ) as lease:
             benchmark_console = console or _NullConsole()
-            results = await asyncio.to_thread(
-                benchmark_queries,
-                target,
-                queries,
-                max_queries=max_queries,
-                console=benchmark_console,
-                cache_config=lease.connection.as_target_config(),
-            )
+            cleanup_errors: list[str] = []
+            try:
+                results = await _benchmark_queries_settled(
+                    target,
+                    queries,
+                    max_queries=max_queries,
+                    console=benchmark_console,
+                    cache_config=lease.connection.as_target_config(),
+                    cleanup_errors=cleanup_errors,
+                )
+            except asyncio.CancelledError:
+                if cleanup_errors:
+                    await asyncio.shield(
+                        lease.mark_dirty("Audit benchmark cache cleanup failed")
+                    )
+                raise
+            except Exception as exc:
+                await lease.mark_dirty(
+                    f"Audit benchmark failed before cleanup: {type(exc).__name__}"
+                )
+                return {"status": "error", "detail": str(exc)}
+
+            if cleanup_errors:
+                await lease.mark_dirty("Audit benchmark cache cleanup failed")
             if not results:
                 detail = (
                     benchmark_console.last_message
@@ -477,7 +568,10 @@ async def run_managed_benchmark(
                     "status": "error",
                     "detail": detail or "Benchmark produced no results",
                 }
-            return {"status": "ok", "results": results}
+            outcome: dict[str, Any] = {"status": "ok", "results": results}
+            if cleanup_errors:
+                outcome["cleanup_warning"] = "; ".join(cleanup_errors)
+            return outcome
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
     finally:

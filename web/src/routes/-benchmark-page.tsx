@@ -25,7 +25,6 @@ import { SQLDisplay } from '../components/SQLDisplay'
 import { TableHeaderCell } from '../components/TableHeaderCell'
 import { useTarget } from '../hooks/useTarget'
 import type {
-  BenchmarkMode,
   BenchmarkQueryInput,
   QueryBenchmarkStats,
   TargetInfo,
@@ -162,7 +161,13 @@ function MetricCard({
   )
 }
 
-export function BenchmarkPage() {
+export function BenchmarkPage({
+  selectedRunId,
+  onClearSelectedRun,
+}: {
+  selectedRunId?: string
+  onClearSelectedRun?: () => void
+}) {
   const { queries, isLoading: registryLoading } = useQueryRegistry()
   const { target } = useTarget()
   const { data: status } = useSystemStatus()
@@ -184,18 +189,32 @@ export function BenchmarkPage() {
     setDestinationTarget(value || null)
   }, [])
   const destinationLock = useTargetPasswordLock(destinationTarget)
-  const { start, stop, state, progress, error, reset } = useBenchmark()
+  const {
+    start,
+    stop,
+    state,
+    stage: runStage,
+    message: runMessage,
+    progress,
+    request: activeRequest,
+    error,
+    reset,
+  } = useBenchmark(selectedRunId, destinationTarget)
 
   const [step, setStep] = useState<WizardStep>('configure')
+  useEffect(() => {
+    if (state !== 'idle') setStep('running')
+  }, [state])
   const [selectedQueries, setSelectedQueries] = useState<string[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [sourceFilter, setSourceFilter] = useState<string>(target || 'all')
-  const [mode, setMode] = useState<BenchmarkMode>('interval')
+  const mode = 'interval' as const
   const [intervalMs, setIntervalMs] = useState(100)
-  const [concurrency, setConcurrency] = useState(1)
+  const concurrency = 1
   const [durationSeconds, setDurationSeconds] = useState(30)
   const [paramValues, setParamValues] = useState<Record<string, string>>({})
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [repeatPrevious, setRepeatPrevious] = useState(false)
   // Load-tuning knobs (mode / interval / duration) are deferred behind this
   // disclosure so the two decisions that define a run — which queries, which
   // database — carry the default view. Starts collapsed. [C-09; VIS-011]
@@ -388,38 +407,26 @@ export function BenchmarkPage() {
 
   // The confirmation dialog gates every real run: it names the target + planned
   // load, and a remote target additionally requires a typed confirmation (B5).
-  const loadSummary =
-    mode === 'interval'
-      ? `${intervalMs === 0 ? 'tight loop' : `${intervalMs}ms interval`} · ${durationSeconds}s`
-      : `${concurrency} ${concurrency === 1 ? 'worker' : 'workers'} · ${durationSeconds}s`
   const estimatedExecutions = useMemo(() => {
-    if (mode === 'interval') {
-      if (intervalMs <= 0) return null // tight loop → bounded only by the cap
-      // The benchmark loop executes ONE query per tick, round-robin across the
-      // selection — so the total is duration/interval regardless of how many
-      // queries are selected (they share the ticks, not multiply them).
-      const total = Math.ceil((durationSeconds * 1000) / intervalMs)
-      return Math.min(total, BENCHMARK_EXECUTION_CAP)
-    }
-    return null // concurrency mode depends on live latency
-  }, [mode, intervalMs, durationSeconds])
+    if (intervalMs <= 0) return null // tight loop → bounded only by the cap
+    // The load-test loop executes one query per tick, round-robin.
+    const total = Math.ceil((durationSeconds * 1000) / intervalMs)
+    return Math.min(total, BENCHMARK_EXECUTION_CAP)
+  }, [intervalMs, durationSeconds])
 
   // One-line summary shown on the collapsed "Load settings" disclosure so the
   // deferred knobs stay glanceable, e.g. "Fixed interval · 100 ms · 30 s". [C-09]
-  const loadSettingsSummary =
-    mode === 'interval'
-      ? `Fixed interval · ${intervalMs === 0 ? 'tight loop' : `${intervalMs} ms`} · ${durationSeconds} s`
-      : `Concurrent · ${concurrency} ${concurrency === 1 ? 'worker' : 'workers'} · ${durationSeconds} s`
+  const loadSettingsSummary = `Fixed interval · ${
+    intervalMs === 0 ? 'tight loop' : `${intervalMs} ms`
+  } · ${durationSeconds} s`
 
   // Plain-language consequence line beside the primary CTA so the run's cost is
   // disclosed before the click (USE-065), e.g. "≈300 executions against demo".
   const consequenceTarget = destinationTarget ?? 'the selected target'
   const consequenceSummary =
-    mode === 'concurrency'
-      ? `Continuous load against ${consequenceTarget} for ${durationSeconds}s`
-      : estimatedExecutions === null
-        ? `Up to ${BENCHMARK_EXECUTION_CAP.toLocaleString()} executions against ${consequenceTarget}`
-        : `≈${estimatedExecutions.toLocaleString()} executions against ${consequenceTarget}`
+    estimatedExecutions === null
+      ? `Up to ${BENCHMARK_EXECUTION_CAP.toLocaleString()} executions against ${consequenceTarget}`
+      : `≈${estimatedExecutions.toLocaleString()} executions against ${consequenceTarget}`
 
   // Total valid selections, independent of the current filter, so a selection
   // the filter is hiding still shows in the persistent chip (USE-006). The
@@ -467,8 +474,8 @@ export function BenchmarkPage() {
       queries: queryInputs,
       target: runTarget,
       mode,
-      interval_ms: mode === 'interval' ? intervalMs : undefined,
-      concurrency: mode === 'concurrency' ? concurrency : undefined,
+      interval_ms: intervalMs,
+      concurrency,
       duration_seconds: durationSeconds,
     })
   }
@@ -476,34 +483,66 @@ export function BenchmarkPage() {
   const handleStart = () => {
     if (destinationLock.isLocked) return
     if (!canStart || !runTarget) return
+    setRepeatPrevious(false)
     setConfirmOpen(true)
   }
 
   const handleConfirmRun = () => {
     setConfirmOpen(false)
+    if (repeatPrevious && activeRequest) {
+      setStep('running')
+      void start(activeRequest)
+      return
+    }
     runBenchmark()
   }
 
   const handleStop = () => stop()
   const handleBack = () => {
     reset()
+    onClearSelectedRun?.()
     setStep('configure')
   }
   const handleRunAgain = () => {
     if (destinationLock.isLocked) return
     // "Run Again" re-fires the same real load — gate it behind the same confirm.
+    setRepeatPrevious(true)
     setConfirmOpen(true)
   }
+
+  const previousIntervalMs = activeRequest?.interval_ms ?? 100
+  const previousDurationSeconds = activeRequest?.duration_seconds ?? 30
+  const confirmIntervalMs = repeatPrevious ? previousIntervalMs : intervalMs
+  const confirmDurationSeconds = repeatPrevious
+    ? previousDurationSeconds
+    : durationSeconds
+  const confirmQueryCount = repeatPrevious
+    ? (activeRequest?.queries.length ?? 0)
+    : runnableCount
+  const confirmLoadSummary = `${
+    confirmIntervalMs === 0 ? 'tight loop' : `${confirmIntervalMs}ms interval`
+  } · ${confirmDurationSeconds}s`
+  const confirmEstimatedExecutions =
+    confirmIntervalMs <= 0
+      ? null
+      : Math.min(
+          Math.ceil((confirmDurationSeconds * 1000) / confirmIntervalMs),
+          BENCHMARK_EXECUTION_CAP
+        )
+  const confirmTarget = repeatPrevious
+    ? (activeRequest?.target ?? runTarget ?? destinationTarget ?? '')
+    : (runTarget ?? destinationTarget ?? '')
+  const confirmIsRemote = remoteTargetNames.has(confirmTarget)
 
   // Rendered in both wizard steps (Start on configure, Run Again on running).
   const confirmDialog = (
     <BenchmarkConfirmDialog
       isOpen={confirmOpen}
-      target={runTarget ?? destinationTarget ?? ''}
-      isRemote={destinationIsRemote}
-      queryCount={runnableCount}
-      loadSummary={loadSummary}
-      estimatedExecutions={estimatedExecutions}
+      target={confirmTarget}
+      isRemote={confirmIsRemote}
+      queryCount={confirmQueryCount}
+      loadSummary={confirmLoadSummary}
+      estimatedExecutions={confirmEstimatedExecutions}
       executionCap={BENCHMARK_EXECUTION_CAP}
       onConfirm={handleConfirmRun}
       onClose={() => setConfirmOpen(false)}
@@ -539,7 +578,7 @@ export function BenchmarkPage() {
                 Benchmark
               </Text>
               <Text level="body-small" className="text-content-layout-3">
-                Run load tests on saved queries to measure performance under
+                Run benchmarks on saved queries to measure performance under
                 stress
               </Text>
             </VStack>
@@ -1033,34 +1072,15 @@ export function BenchmarkPage() {
                             Execution Mode
                           </Text>
                           <div className="flex gap-2 p-1 bg-surface-layout-2 rounded-lg">
-                            <button
-                              type="button"
-                              onClick={() => setMode('interval')}
-                              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                                mode === 'interval'
-                                  ? 'bg-surface-layout-1 text-content-layout-1 shadow-sm'
-                                  : 'text-content-layout-3 hover:text-content-layout-2'
-                              } cursor-pointer`}
-                            >
+                            <div className="px-4 py-2 rounded-md text-sm font-medium bg-surface-layout-1 text-content-layout-1 shadow-sm">
                               Fixed Interval
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setMode('concurrency')}
-                              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                                mode === 'concurrency'
-                                  ? 'bg-surface-layout-1 text-content-layout-1 shadow-sm'
-                                  : 'text-content-layout-3 hover:text-content-layout-2'
-                              } cursor-pointer`}
-                            >
-                              Concurrent
-                            </button>
+                            </div>
                           </div>
                         </VStack>
 
                         {/* Mode-specific setting */}
                         <VStack className="gap-2 items-start">
-                          <Show when={mode === 'interval'}>
+                          <Show when>
                             <Text
                               level="label-small"
                               className="text-content-layout-2"
@@ -1086,31 +1106,6 @@ export function BenchmarkPage() {
                               {intervalMs <= 0
                                 ? 'Tight loop — no delay between queries. Maximum load.'
                                 : `Execute every ${intervalMs}ms`}
-                            </Text>
-                          </Show>
-                          <Show when={mode === 'concurrency'}>
-                            <Text
-                              level="label-small"
-                              className="text-content-layout-2"
-                            >
-                              Concurrent Workers
-                            </Text>
-                            <BaseInputText
-                              name="concurrency"
-                              type="number"
-                              value={String(concurrency)}
-                              onChange={(e) =>
-                                setConcurrency(
-                                  Math.max(1, Number(e.target.value) || 1)
-                                )
-                              }
-                            />
-                            <Text
-                              level="caption"
-                              className="text-content-warning-soft"
-                            >
-                              Workers run queries back-to-back for the full
-                              duration — the heaviest load setting.
                             </Text>
                           </Show>
                         </VStack>
@@ -1227,6 +1222,12 @@ export function BenchmarkPage() {
         : runPartialFailed
           ? 'partial'
           : 'success'
+  const displayedQueryCount = activeRequest?.queries.length ?? runnableCount
+  const displayedIntervalMs = activeRequest?.interval_ms ?? intervalMs
+  const displayedDurationSeconds =
+    activeRequest?.duration_seconds ?? durationSeconds
+  const isWaitingForMeasurement =
+    state === 'running' && runStage === 'queued' && !progress
 
   return (
     <div className="space-y-6 w-full">
@@ -1253,21 +1254,25 @@ export function BenchmarkPage() {
             >
               <Icon
                 name={
-                  runAccent === 'running'
-                    ? 'play'
-                    : runAccent === 'success'
-                      ? 'tick-double'
-                      : 'alert'
+                  isWaitingForMeasurement
+                    ? 'info'
+                    : runAccent === 'running'
+                      ? 'play'
+                      : runAccent === 'success'
+                        ? 'tick-double'
+                        : 'alert'
                 }
                 label="Status"
                 className={`w-6 h-6 ${
-                  runAccent === 'running'
-                    ? 'text-content-primary-soft animate-pulse'
-                    : runAccent === 'failure'
-                      ? 'text-content-negative-soft'
-                      : runAccent === 'partial'
-                        ? 'text-content-warning-soft'
-                        : 'text-content-positive-soft'
+                  isWaitingForMeasurement
+                    ? 'text-content-info-soft'
+                    : runAccent === 'running'
+                      ? 'text-content-primary-soft animate-pulse'
+                      : runAccent === 'failure'
+                        ? 'text-content-negative-soft'
+                        : runAccent === 'partial'
+                          ? 'text-content-warning-soft'
+                          : 'text-content-positive-soft'
                 }`}
               />
             </div>
@@ -1292,24 +1297,25 @@ export function BenchmarkPage() {
                   }
                   modifier="solid"
                   label={
-                    state === 'running'
-                      ? 'Running...'
-                      : state === 'error'
-                        ? 'Error'
-                        : runAllFailed
-                          ? 'Failed'
-                          : runPartialFailed
-                            ? 'Completed with errors'
-                            : 'Complete'
+                    isWaitingForMeasurement
+                      ? 'Waiting'
+                      : state === 'running'
+                        ? 'Running...'
+                        : state === 'error'
+                          ? 'Error'
+                          : runAllFailed
+                            ? 'Failed'
+                            : runPartialFailed
+                              ? 'Completed with errors'
+                              : 'Complete'
                   }
                 />
               </HStack>
               <Text level="body-small" className="text-content-layout-3">
-                {runnableCount} queries •{' '}
-                {mode === 'interval'
-                  ? `${intervalMs}ms interval`
-                  : `${concurrency} workers`}{' '}
-                • {durationSeconds}s duration
+                {displayedQueryCount}{' '}
+                {displayedQueryCount === 1 ? 'query' : 'queries'} •{' '}
+                {displayedIntervalMs}ms interval • {displayedDurationSeconds}s
+                duration
               </Text>
             </VStack>
           </HStack>
@@ -1317,7 +1323,7 @@ export function BenchmarkPage() {
             <Button
               variant="negative"
               modifier="solid"
-              label="Stop"
+              label={isWaitingForMeasurement ? 'Cancel queued test' : 'Stop'}
               icon="close"
               iconPosition="left"
               onClick={handleStop}
@@ -1345,35 +1351,92 @@ export function BenchmarkPage() {
       {/* Step indicator */}
       <StepIndicator currentStep={step} />
 
-      {/* Summary Metrics */}
-      <m.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.1 }}
-      >
-        <HStack className="gap-4">
-          <MetricCard
-            label="Duration"
-            value={`${progress?.elapsed_seconds.toFixed(1) || '0.0'}s`}
-          />
-          <MetricCard
-            label="Total Executions"
-            value={formatNumber(progress?.total_executions || 0)}
-          />
-          <MetricCard label="QPS" value={(progress?.qps || 0).toFixed(2)} />
-          <MetricCard
-            label="Error Rate"
-            value={`${errorRate}%`}
-            variant={
-              runAllFailed || state === 'error'
-                ? 'negative'
-                : totalFailures > 0
-                  ? 'warning'
-                  : 'positive'
-            }
-          />
-        </HStack>
-      </m.div>
+      {isWaitingForMeasurement ? (
+        <m.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+        >
+          <Card className="border-border-info-soft bg-surface-info-soft/30">
+            <Card.Content className="p-6">
+              <HStack className="gap-4 items-start">
+                <div className="w-11 h-11 rounded-xl bg-surface-info-soft flex items-center justify-center shrink-0">
+                  <Icon
+                    name="info"
+                    label="Waiting"
+                    className="w-5 h-5 text-content-info-soft"
+                  />
+                </div>
+                <VStack className="gap-3 items-start">
+                  <VStack className="gap-1 items-start">
+                    <Text
+                      as="h2"
+                      level="headline-4"
+                      className="text-content-layout-1"
+                    >
+                      Waiting for another performance test
+                    </Text>
+                    <Text
+                      level="body-small"
+                      className="text-content-layout-2 max-w-3xl"
+                    >
+                      RDST runs performance measurements one at a time so
+                      traffic from one job does not distort another job&apos;s
+                      results. This benchmark will start automatically when the
+                      active measurement finishes.
+                    </Text>
+                  </VStack>
+                  <HStack className="gap-2 items-center">
+                    <Tag
+                      variant="informative"
+                      modifier="ghost"
+                      label="Queued"
+                    />
+                    <Text level="caption" className="text-content-layout-3">
+                      {runMessage ||
+                        'Waiting for an isolated measurement slot...'}
+                    </Text>
+                  </HStack>
+                  <Text level="caption" className="text-content-layout-3">
+                    No action is required. The {displayedDurationSeconds}s test
+                    timer begins only after the first query starts running.
+                  </Text>
+                </VStack>
+              </HStack>
+            </Card.Content>
+          </Card>
+        </m.div>
+      ) : (
+        /* Summary Metrics */
+        <m.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+        >
+          <HStack className="gap-4">
+            <MetricCard
+              label="Duration"
+              value={`${progress?.elapsed_seconds.toFixed(1) || '0.0'}s`}
+            />
+            <MetricCard
+              label="Total Executions"
+              value={formatNumber(progress?.total_executions || 0)}
+            />
+            <MetricCard label="QPS" value={(progress?.qps || 0).toFixed(2)} />
+            <MetricCard
+              label="Error Rate"
+              value={`${errorRate}%`}
+              variant={
+                runAllFailed || state === 'error'
+                  ? 'negative'
+                  : totalFailures > 0
+                    ? 'warning'
+                    : 'positive'
+              }
+            />
+          </HStack>
+        </m.div>
+      )}
 
       {/* Per-query stats table */}
       <Show when={(progress?.queries?.length || 0) > 0}>
@@ -1570,7 +1633,7 @@ export function BenchmarkPage() {
               icon="play"
               iconPosition="left"
               onClick={handleRunAgain}
-              disabled={destinationLock.isLocked}
+              disabled={destinationLock.isLocked || !activeRequest}
             />
           </HStack>
         </m.div>

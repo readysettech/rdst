@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { CacheRunResult, CacheTestRunRequest } from '../types/cache'
+import type { BenchmarkRequest } from './api'
 import type { components } from './api.generated'
 import { api } from './client'
 import { normalizeSseError } from './errorContract'
@@ -9,17 +10,27 @@ export type BackgroundRunKind =
   | 'bootstrap'
   | 'schema_annotation'
   | 'cache_test'
+  | 'speed_test'
+  | 'load_test'
   | 'audit'
   | 'audit_capture'
   | 'fleet_audit'
 export type BackgroundRunStatus =
   | 'running'
   | 'reconnecting'
+  | 'stopping'
   | 'needs_key'
   | 'done'
   | 'partial'
   | 'failed'
   | 'cancelled'
+  | 'interrupted'
+
+type QueryBenchmarkEvent = components['schemas']['QueryBenchmarkEvent']
+type LoadTestProgress = Extract<
+  QueryBenchmarkEvent,
+  { type: 'progress' | 'complete' }
+>
 
 export interface BackgroundRunState {
   runId: string
@@ -35,6 +46,8 @@ export interface BackgroundRunState {
   queryHash?: string
   queryLabel?: string
   result?: CacheRunResult
+  loadResult?: LoadTestProgress
+  loadRequest?: BenchmarkRequest
   hidden?: boolean
   /** Saved audit/capture run to deep-link to once the run has produced one. */
   snapshotId?: string
@@ -59,12 +72,15 @@ const TERMINAL: BackgroundRunStatus[] = [
   'partial',
   'failed',
   'cancelled',
+  'interrupted',
 ]
 
 const INITIAL_STAGES: Record<BackgroundRunKind, string> = {
   bootstrap: 'connection_test',
   schema_annotation: 'annotate',
   cache_test: 'connecting',
+  speed_test: 'queued',
+  load_test: 'queued',
   audit: 'config',
   audit_capture: 'config',
   fleet_audit: 'config',
@@ -104,7 +120,10 @@ function publish(): void {
 function persist(): void {
   try {
     if (snapshot.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(snapshot.map(storageSafeRun))
+      )
     } else {
       localStorage.removeItem(STORAGE_KEY)
     }
@@ -112,6 +131,21 @@ function persist(): void {
   } catch {
     // Private mode or storage unavailable; reload reattachment degrades.
   }
+}
+
+function storageSafeRun(run: BackgroundRunState): StoredRun {
+  const loadRequest = run.loadRequest
+    ? {
+        ...run.loadRequest,
+        queries: run.loadRequest.queries.map((query) => {
+          if (typeof query === 'string') return query
+          const { sql: _sql, ...safeQuery } = query
+          return safeQuery
+        }),
+      }
+    : undefined
+  const result = run.result ? { ...run.result, query: '' } : undefined
+  return { ...run, loadRequest, result }
 }
 
 function updateRun(runId: string, partial: Partial<BackgroundRunState>): void {
@@ -149,7 +183,11 @@ function attachRun(
   kind: BackgroundRunKind,
   target: string,
   message: string,
-  metadata: { queryHash?: string; queryLabel?: string } = {}
+  metadata: {
+    queryHash?: string
+    queryLabel?: string
+    loadRequest?: BenchmarkRequest
+  } = {}
 ): BackgroundRunState {
   const existing = runs.get(runId)
   if (existing) return existing
@@ -177,7 +215,7 @@ function kickoffFailed(
   target: string,
   message: string,
   metadata: { queryHash?: string; queryLabel?: string } = {}
-): void {
+): string {
   const runId = `${kind}_${target}_start_failed_${Date.now()}`
   runs.set(runId, {
     runId,
@@ -193,21 +231,15 @@ function kickoffFailed(
     ...metadata,
   })
   publish()
+  return runId
 }
 
 /** Start automatic database setup. Failures surface in the sidebar. */
-export function startBootstrapRun(
-  target: string,
-  options: { deploy?: boolean; deployMode?: string } = {}
-): void {
+export function startBootstrapRun(target: string): void {
   void (async () => {
     try {
       const { data, error } = await api.POST('/api/bootstrap', {
-        body: {
-          target,
-          deploy: options.deploy ?? true,
-          deploy_mode: options.deployMode ?? 'docker',
-        },
+        body: { target },
       })
       if (error || !data) throw new Error('bootstrap start rejected')
       attachRun(data.run_id, 'bootstrap', target, 'Starting...')
@@ -249,7 +281,7 @@ export async function startSchemaAnnotationRun(
   }
 }
 
-/** Start an origin-vs-cache comparison that survives route changes. */
+/** Start a complete temporary Readyset comparison that survives route changes. */
 export async function startCacheTestRun(
   request: CacheTestRunRequest
 ): Promise<string | null> {
@@ -266,17 +298,17 @@ export async function startCacheTestRun(
     }
     attachRun(
       data.run_id,
-      'cache_test',
+      'speed_test',
       request.target ?? '',
-      'Connecting...',
+      'Queued for the Readyset sandbox...',
       metadata
     )
     return data.run_id
   } catch (error) {
     kickoffFailed(
-      'cache_test',
+      'speed_test',
       request.target ?? '',
-      error instanceof Error ? error.message : 'Cache test could not start',
+      error instanceof Error ? error.message : 'Comparison could not start',
       metadata
     )
     return null
@@ -376,6 +408,39 @@ export async function startFleetAuditRun(
   }
 }
 
+/** Start or attach to an origin-only Benchmark background job. */
+export async function startLoadTestRun(
+  request: BenchmarkRequest
+): Promise<string | null> {
+  const target = request.target ?? ''
+  try {
+    const response = await fetch('/api/query-registry/load-test-runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+      const body = await response.json().catch(() => undefined)
+      throw new Error(normalizeSseError(body).message)
+    }
+    const data = (await response.json()) as { run_id: string }
+    attachRun(
+      data.run_id,
+      'load_test',
+      target,
+      'Waiting for an isolated measurement slot...',
+      { loadRequest: request }
+    )
+    return data.run_id
+  } catch (error) {
+    return kickoffFailed(
+      'load_test',
+      target,
+      error instanceof Error ? error.message : 'Benchmark could not start'
+    )
+  }
+}
+
 /** Restore every in-flight run saved by this browser. */
 export function reattachBackgroundRuns(): void {
   if (reattachStarted) return
@@ -400,7 +465,10 @@ async function probeAndStream(runId: string): Promise<void> {
     })
     if (!data) {
       if (response.status === 404) {
-        removeRun(runId)
+        updateRun(runId, {
+          status: 'interrupted',
+          message: 'Interrupted — run again.',
+        })
         return
       }
       throw new Error(`Run status failed with HTTP ${response.status}`)
@@ -409,6 +477,13 @@ async function probeAndStream(runId: string): Promise<void> {
     if (!current || isTerminal(current.status)) return
     const backendStatus = data.status as BackgroundRunStatus
     const replayPending = data.last_seq > current.lastSeq
+    const metadataRequest = data.metadata?.request
+    const loadRequest =
+      metadataRequest &&
+      typeof metadataRequest === 'object' &&
+      Array.isArray((metadataRequest as { queries?: unknown }).queries)
+        ? (metadataRequest as BenchmarkRequest)
+        : current.loadRequest
     reconnectStatuses.delete(runId)
     updateRun(runId, {
       kind: data.kind as BackgroundRunKind,
@@ -421,6 +496,7 @@ async function probeAndStream(runId: string): Promise<void> {
         typeof data.metadata?.label === 'string'
           ? data.metadata.label
           : current.queryLabel,
+      loadRequest,
       // Keep the stream attachable until missed terminal frames (including the
       // useful failure message) have replayed.
       status:
@@ -447,16 +523,7 @@ function readStoredRuns(): StoredRun[] {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (!Array.isArray(parsed)) return []
-      return parsed.map((value: unknown) => {
-        const stored = value as StoredRun
-        return (value as { status?: string }).status === 'interrupted'
-          ? {
-              ...stored,
-              status: 'reconnecting',
-              message: 'Running...',
-            }
-          : stored
-      })
+      return parsed as StoredRun[]
     }
     const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!legacyRaw) return []
@@ -510,7 +577,10 @@ async function streamRun(runId: string): Promise<void> {
         )
         if (streaming.get(runId) !== token) return
         if (response.status === 404) {
-          removeRun(runId)
+          updateRun(runId, {
+            status: 'interrupted',
+            message: 'Interrupted — run again.',
+          })
           return
         }
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -555,6 +625,18 @@ function applyFrame(runId: string, event: string, data: unknown): void {
 
   switch (event) {
     case 'progress':
+      if (
+        run.kind === 'load_test' &&
+        typeof payload.total_executions === 'number'
+      ) {
+        updateRun(runId, {
+          ...base,
+          stage: 'running',
+          message: `${Number(payload.total_executions).toLocaleString()} executions`,
+          loadResult: payload as unknown as LoadTestProgress,
+        })
+        break
+      }
       updateRun(runId, {
         ...base,
         stage: String(payload.stage ?? run.stage),
@@ -695,6 +777,17 @@ function applyFrame(runId: string, event: string, data: unknown): void {
       })
       break
     case 'complete': {
+      if (run.kind === 'load_test') {
+        updateRun(runId, {
+          ...base,
+          stage: 'complete',
+          message: 'Benchmark complete',
+          loadResult: payload as unknown as LoadTestProgress,
+        })
+        break
+      }
+      if (!isHealthCheckKind(run.kind)) break
+
       // A quick audit reports its saved snapshot, a capture its workload run;
       // either is the run detail this job's card deep-links to.
       const saved = payload.snapshot_id ?? payload.run_id
@@ -751,15 +844,22 @@ function applyFrame(runId: string, event: string, data: unknown): void {
 }
 
 export async function cancelBackgroundRun(runId: string): Promise<void> {
+  updateRun(runId, { status: 'stopping', message: 'Stopping active query...' })
   try {
     const { data, error } = await api.DELETE('/api/runs/{run_id}', {
       params: { path: { run_id: runId } },
     })
     if (error || !data?.cancelled) {
-      updateRun(runId, { message: normalizeSseError(error).message })
+      updateRun(runId, {
+        status: 'running',
+        message: normalizeSseError(error).message,
+      })
     }
   } catch {
-    updateRun(runId, { message: 'Could not cancel this run' })
+    updateRun(runId, {
+      status: 'running',
+      message: 'Could not cancel this run',
+    })
   }
 }
 

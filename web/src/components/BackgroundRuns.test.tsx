@@ -136,6 +136,35 @@ describe('BackgroundRuns', () => {
     )
   })
 
+  it('distinguishes queued jobs from the job that is actually running', () => {
+    useRuns.mockReturnValue([
+      run({
+        runId: 'load_test_imdb_queued',
+        kind: 'load_test',
+        stage: 'queued',
+        message: 'Queued for measurement...',
+      }),
+      run({
+        runId: 'cache_test_imdb_queued',
+        kind: 'speed_test',
+        stage: 'queued',
+        message: 'Queued for the Readyset sandbox...',
+      }),
+      run({
+        runId: 'cache_test_imdb_active',
+        kind: 'speed_test',
+        stage: 'waiting_for_readyset',
+        message: 'Waiting for Readyset to accept SQL',
+      }),
+    ])
+
+    render(<BackgroundRuns />)
+    openJobs()
+
+    expect(screen.getByText('1 running · 2 queued')).toBeTruthy()
+    expect(screen.queryByText('3 jobs running')).toBeNull()
+  })
+
   it('opens the key dialog for a parked run', () => {
     useRuns.mockReturnValue([run({ status: 'needs_key' })])
     render(<BackgroundRuns />)
@@ -278,6 +307,30 @@ describe('BackgroundRuns', () => {
       'cache_test_imdb_done'
     )
     expect(backgroundRuns.dismissBackgroundRun).not.toHaveBeenCalled()
+  })
+
+  it('opens and acknowledges a completed benchmark from the jobs list', () => {
+    useRuns.mockReturnValue([
+      run({
+        runId: 'load_test_imdb_done',
+        kind: 'load_test',
+        status: 'done',
+        message: 'Benchmark complete',
+      }),
+    ])
+
+    render(<BackgroundRuns />)
+    openJobs()
+    fireEvent.click(screen.getByTitle('View results'))
+
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/benchmark',
+      search: { run: 'load_test_imdb_done' },
+    })
+    expect(setTarget).toHaveBeenCalledWith('imdb')
+    expect(backgroundRuns.acknowledgeBackgroundRun).toHaveBeenCalledWith(
+      'load_test_imdb_done'
+    )
   })
 
   it('dismisses a terminal job without opening it', () => {

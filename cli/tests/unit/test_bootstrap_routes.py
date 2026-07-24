@@ -55,7 +55,7 @@ class TestStartRoute:
         # The detached run completes; its events landed in the registry.
         assert registry.status(run_id) in ("running", "done")
 
-    def test_start_forwards_deploy_options(self, monkeypatch):
+    def test_start_forwards_annotation_option(self, monkeypatch):
         captured = {}
 
         class RecordingService(StubService):
@@ -69,13 +69,12 @@ class TestStartRoute:
 
         response = client.post(
             "/api/bootstrap",
-            json={"target": "imdb", "deploy": False, "deploy_mode": "kubernetes"},
+            json={"target": "imdb", "annotate": False},
         )
 
         assert response.status_code == 200
         assert captured["target"] == "imdb"
-        assert captured["options"].deploy is False
-        assert captured["options"].deploy_mode == "kubernetes"
+        assert captured["options"].annotate is False
 
 
 class TestStatusRoute:

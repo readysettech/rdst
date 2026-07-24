@@ -1,32 +1,37 @@
-import { Text } from "@rs/ui-new/text";
-import { Icon } from "@rs/ui-new/icon";
-import { HStack } from "@rs/ui-new/stack";
-import { isNotCacheable } from "../lib/queryImpact";
+import { Icon } from '@rs/ui-new/icon'
+import { HStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import { isNotCacheable } from '../lib/queryImpact'
 
 interface QueryCacheStatusProps {
-  /** Live: the query is currently in the cache (from SHOW CACHES). */
-  cached: boolean;
+  /** This browser retains a completed Readyset comparison for the query. */
+  cached: boolean
   /**
    * Persisted Readyset verdict from the registry (rdst-41p.1):
    * "" | "yes" | "pending" | "unsupported: <reason>".
    */
-  readysetSupported?: string;
-  /** A "Cache & test" run is in flight for this query (rdst-41p.3). */
-  testing?: boolean;
+  readysetSupported?: string
+  /** A temporary Readyset comparison is in flight for this query. */
+  testing?: boolean
   /**
    * Measured speedup over the origin from the most recent test, when the
-   * cache won (rdst-41p.3). Turns "Cached" into proof: "Cached &middot; 24x faster".
+   * cache won.
    */
-  speedup?: number;
+  speedup?: number
 }
 
 // Per-query cache status for the Queries workbench. Only terminal states get a
-// badge: a test in flight, then Cached (with any measured speedup), then a
-// confirmed "Not cacheable" verdict. Cacheable-or-unknown queries show no badge
+// badge: a test in flight, then measured speedup, then a confirmed unsupported
+// verdict. Compatible-or-unknown queries show no badge
 // (lazy EXPLAIN rarely confirms cacheability up front) -- the row's Cache action
 // speaks for itself, so a positive badge would only imply the unmarked ones are
 // not cacheable (rdst-41p.11).
-export function QueryCacheStatus({ cached, readysetSupported, testing, speedup }: QueryCacheStatusProps) {
+export function QueryCacheStatus({
+  cached,
+  readysetSupported,
+  testing,
+  speedup,
+}: QueryCacheStatusProps) {
   if (testing) {
     return (
       <HStack className="gap-1.5 items-center">
@@ -35,17 +40,25 @@ export function QueryCacheStatus({ cached, readysetSupported, testing, speedup }
           Testing
         </Text>
       </HStack>
-    );
+    )
   }
   if (cached) {
     return (
       <HStack className="gap-1.5 items-center">
-        <Icon name="tick-double" label="Cached" className="w-3.5 h-3.5 text-content-positive-soft" />
+        <Icon
+          name="tick-double"
+          label="Compared"
+          className="w-3.5 h-3.5 text-content-positive-soft"
+        />
         <Text level="label-small" className="text-content-positive-soft">
-          {speedup && speedup > 1 ? <>Cached &middot; {speedup.toFixed(1)}x faster</> : "Cached"}
+          {speedup && speedup > 1 ? (
+            <>{speedup.toFixed(1)}x faster with Readyset</>
+          ) : (
+            'Compared'
+          )}
         </Text>
       </HStack>
-    );
+    )
   }
 
   if (isNotCacheable(readysetSupported)) {
@@ -53,11 +66,11 @@ export function QueryCacheStatus({ cached, readysetSupported, testing, speedup }
       <HStack className="gap-1.5 items-center">
         <span className="w-1.5 h-1.5 rounded-full bg-content-layout-disabled" />
         <Text level="label-small" className="text-content-layout-3">
-          Not cacheable
+          Unsupported by Readyset
         </Text>
       </HStack>
-    );
+    )
   }
   // Never cache-checked: assert nothing (lazy EXPLAIN), the action still shows.
-  return null;
+  return null
 }

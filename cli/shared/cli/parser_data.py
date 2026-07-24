@@ -383,6 +383,12 @@ and Readyset caching opportunities.""",
                 action="store_true",
                 help="Skip the EXPLAIN ANALYZE safety confirmation prompt",
             ),
+            ArgDef(
+                "--readyset-cache",
+                action="store_true",
+                dest="readyset_cache",
+                help="Explicitly verify the query with a temporary Readyset cache",
+            ),
         ],
         examples=[
             (
@@ -395,8 +401,8 @@ and Readyset caching opportunities.""",
             ),
             ("rdst analyze -f query.sql --target mydb", "Analyze query from file"),
             (
-                'rdst analyze -q "SELECT ..." --target mydb',
-                "Analyze with automatic Readyset performance test",
+                'rdst analyze -q "SELECT ..." --target mydb --readyset-cache',
+                "Verify with a temporary Readyset performance test",
             ),
         ],
     ),
@@ -668,7 +674,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
             ),
             SubcommandDef(
                 name="cache-compare",
-                help="Compare query performance: upstream vs Readyset cache",
+                help="Run a temporary Readyset comparison",
                 args=[
                     ArgDef(
                         "queries",
@@ -678,33 +684,33 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
                     ArgDef(
                         "--target",
                         short="-t",
-                        help="Target database (upstream or cache — resolves automatically)",
+                        help="Source database target",
                     ),
                     ArgDef(
                         "--interval",
                         type=int,
                         metavar="MS",
-                        help="Fixed interval mode: run every N milliseconds per target",
+                        help="Start executions every N milliseconds per side",
                     ),
                     ArgDef(
                         "--concurrency",
                         short="-c",
                         type=int,
                         metavar="N",
-                        help="Concurrency mode: maintain N concurrent executions per target",
+                        help="Maintain N concurrent executions per side",
                     ),
                     ArgDef(
                         "--duration",
                         type=int,
                         metavar="SECS",
-                        help="Stop after N seconds per target",
+                        help="Stop each side after N seconds",
                     ),
                     ArgDef(
                         "--count",
                         type=int,
                         default=100,
                         metavar="N",
-                        help="Stop after N total executions per target (default: 100)",
+                        help="Maximum measured executions for each side (default: 100)",
                     ),
                     ArgDef(
                         "--quiet",
@@ -728,7 +734,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
             ("delete", "Delete a query by name or hash"),
             ("import", "Import multiple queries from a SQL file"),
             ("run", "Run saved queries for benchmarking/load generation"),
-            ("cache-compare", "Compare query performance: upstream vs Readyset cache"),
+            ("cache-compare", "Run a temporary Readyset comparison"),
         ],
         examples=[
             ('rdst query add my-query -q "SELECT * FROM users"', "Add a query"),
@@ -736,7 +742,7 @@ Queries captured by 'rdst top' are automatically saved here as they're detected.
             ('rdst query list --filter "users"', "Filter queries"),
             ("rdst query show my-query", "Show query details"),
             ("rdst query delete --hash abc123", "Delete by hash"),
-            ("rdst query cache-compare my-query --count 100", "Compare upstream vs cache"),
+            ("rdst query cache-compare my-query --count 100", "Measure source vs temporary Readyset cache"),
         ],
     ),
     "schema": CommandDef(
@@ -1364,178 +1370,6 @@ Modes:
             ("rdst scan . --analyze --schema mydb --sequential", "Deterministic analysis (one query at a time)"),
         ],
     ),
-    "cache": CommandDef(
-        name="cache",
-        short_help="Deploy and manage Readyset shallow caches",
-        description="""Deploy Readyset and manage shallow caches.
-
-Use 'cache deploy' to deploy a Readyset instance, then 'cache add/show/delete'
-to manage cached queries. After deploying, a Readyset target is automatically
-registered (e.g., mydb-cache). Use that target name with cache commands.""",
-        subcommand_dest="cache_subcommand",
-        subcommand_defs=[
-            SubcommandDef(
-                name="deploy",
-                help="Deploy Readyset cache to local or remote environment",
-                args=[
-                    ArgDef("--target", required=True, help="Database target to deploy for"),
-                    ArgDef(
-                        "--mode",
-                        choices=["docker", "systemd", "kubernetes"],
-                        required=True,
-                        help="Deployment mode: docker, systemd, or kubernetes",
-                    ),
-                    ArgDef(
-                        "--config",
-                        choices=["readyset", "readyset-squeepy"],
-                        default="readyset",
-                        dest="deploy_config",
-                        help="Deployment config: readyset (default) or readyset-squeepy",
-                    ),
-                    ArgDef("--host", help="Remote host for SSH deployment (omit for local)"),
-                    ArgDef("--ssh-key", help="SSH private key path"),
-                    ArgDef("--ssh-user", default="root", help="SSH username (default: root)"),
-                    ArgDef("--port", type=int, help="Readyset listen port"),
-                    ArgDef("--namespace", default="readyset", help="Kubernetes namespace"),
-                    ArgDef("--kubeconfig", help="Path to kubeconfig file for Kubernetes deployment"),
-                    ArgDef(
-                        "--script-only",
-                        action="store_true",
-                        help="Generate deployment script without executing",
-                    ),
-                    ArgDef(
-                        "--no-request-path",
-                        action="store_true",
-                        dest="no_request_path",
-                        help=(
-                            "Deploy with explicit-only caching (QUERY_CACHING=explicit). "
-                            "Default is in-request-path mode where every SELECT auto-caches."
-                        ),
-                    ),
-                    ArgDef(
-                        "--force",
-                        action="store_true",
-                        dest="force",
-                        help=(
-                            "Tear down any existing container + cache config row for this target, "
-                            "then deploy fresh. Equivalent to `cache remove --yes` followed by "
-                            "`cache deploy`. Useful when the existing container is broken or you "
-                            "want to apply new flags (e.g. --memory) without manual cleanup."
-                        ),
-                    ),
-                    ArgDef(
-                        "--memory",
-                        dest="memory",
-                        help=(
-                            "Cache memory limit (e.g. '4g', '512m', '1073741824'). "
-                            "Sets both Docker --memory and ReadySet's READYSET_MEMORY_LIMIT. "
-                            "ReadySet evicts shallow cache entries (LRU) when this is reached. "
-                            "Default: 4g"
-                        ),
-                    ),
-                    ArgDef(
-                        "--cpus",
-                        dest="cpus",
-                        help="Cache CPU limit (Docker --cpus value). Default: 2",
-                    ),
-                    ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
-                ],
-            ),
-            SubcommandDef(
-                name="add",
-                help="Create a shallow cache for a query",
-                args=[
-                    ArgDef("query", nargs="?", help="SQL query or registry hash_id (12 hex chars)"),
-                    ArgDef("--target", required=True, help="Readyset target name"),
-                    ArgDef("--tag", help="Tag for query in registry"),
-                    ArgDef("--dry-run", action="store_true", help="Check if query is cacheable without creating it"),
-                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
-                ],
-            ),
-            SubcommandDef(
-                name="show",
-                help="List cached queries in Readyset",
-                args=[
-                    ArgDef("--target", required=True, help="Readyset target name"),
-                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
-                ],
-            ),
-            SubcommandDef(
-                name="delete",
-                help="Remove a cache from Readyset by cache ID",
-                args=[
-                    ArgDef("cache_id", help="Cache ID (from 'rdst cache show')"),
-                    ArgDef("--target", required=True, help="Readyset target name"),
-                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
-                ],
-            ),
-            SubcommandDef(
-                name="drop-all",
-                help="Remove all caches from Readyset",
-                args=[
-                    ArgDef("--target", required=True, help="Readyset target name"),
-                    ArgDef("--yes", short="-y", action="store_true", help="Skip confirmation prompt"),
-                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
-                ],
-            ),
-            SubcommandDef(
-                name="start",
-                help="Start a stopped cache container (preserves config)",
-                args=[
-                    ArgDef("--target", help="Target (upstream or cache name, defaults to default target)"),
-                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
-                ],
-            ),
-            SubcommandDef(
-                name="stop",
-                help="Stop a running cache without removing it",
-                args=[
-                    ArgDef("--target", help="Target (upstream or cache name, defaults to default target)"),
-                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
-                ],
-            ),
-            SubcommandDef(
-                name="restart",
-                help="Restart a deployed cache (preserves config)",
-                args=[
-                    ArgDef("--target", help="Target (upstream or cache name, defaults to default target)"),
-                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
-                ],
-            ),
-            SubcommandDef(
-                name="remove",
-                help="Remove cache deployment (stops local Docker container and removes target)",
-                args=[
-                    ArgDef("--target", help="Target to remove cache for (upstream or cache name, defaults to default target)"),
-                    ArgDef("--yes", short="-y", action="store_true", help="Skip confirmation prompt"),
-                    ArgDef("--json", action="store_true", dest="json_output", help="JSON output"),
-                ],
-            ),
-        ],
-        subcommands=[
-            ("deploy", "Deploy Readyset cache"),
-            ("start", "Start a stopped cache container"),
-            ("stop", "Stop a running cache without removing"),
-            ("restart", "Restart a deployed cache"),
-            ("add", "Create a shallow cache for a query"),
-            ("show", "List all cached queries"),
-            ("delete", "Remove a cache by ID"),
-            ("drop-all", "Remove all caches"),
-            ("remove", "Remove cache deployment (stops container + removes target)"),
-        ],
-        examples=[
-            ("rdst cache deploy --target mydb --mode docker", "Deploy locally (Docker)"),
-            ("rdst cache deploy --target mydb --mode systemd", "Deploy as systemd service"),
-            ("rdst cache deploy --target mydb --mode docker --host 10.0.1.50", "Deploy to remote server"),
-            ("rdst cache deploy --target mydb --mode kubernetes", "Deploy to Kubernetes"),
-            ("rdst cache deploy --target mydb --mode docker --script-only", "Generate script only"),
-            ("rdst cache add abc123def456 --target mydb-cache", "Cache query by registry hash"),
-            ('rdst cache add "SELECT * FROM orders WHERE id = ?" --target mydb-cache', "Cache direct SQL"),
-            ("rdst cache show --target mydb-cache", "List all caches"),
-            ("rdst cache delete q_abc123 --target mydb-cache", "Remove a cache"),
-            ("rdst cache drop-all --target mydb-cache --yes", "Remove all caches"),
-        ],
-    ),
     # =========================================================================
     # Fleet — Multi-target management and fleet-wide audit
     # =========================================================================
@@ -1627,7 +1461,7 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
                     ArgDef("--no-insights", action="store_true", help="Skip LLM fleet insights"),
                     ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
                     ArgDef("--verbose", short="-v", action="store_true", dest="verbose", help=argparse.SUPPRESS),
-                    ArgDef("--yes", short="-y", action="store_true", dest="auto_yes", help="Auto-accept Readyset cache deployment (no prompt)"),
+                    ArgDef("--yes", short="-y", action="store_true", dest="auto_yes", help="Auto-accept temporary Readyset comparisons (no prompt)"),
                 ],
             ),
             SubcommandDef(
@@ -1691,7 +1525,7 @@ registered (e.g., mydb-cache). Use that target name with cache commands.""",
             ArgDef("--export-captured-queries", action="store_true", dest="export_captured_queries", help="Export queries captured during --duration window"),
             ArgDef("--json", action="store_true", dest="output_json", help="JSON output"),
             ArgDef("--verbose", short="-v", action="store_true", dest="verbose", help=argparse.SUPPRESS),
-            ArgDef("--yes", short="-y", action="store_true", dest="auto_yes", help="Auto-accept Readyset cache deployment (no prompt)"),
+            ArgDef("--yes", short="-y", action="store_true", dest="auto_yes", help="Auto-accept temporary Readyset comparisons (no prompt)"),
         ],
         subcommands=[
             ("list", "List past audit runs"),
@@ -1722,7 +1556,6 @@ COMMAND_ORDER = [
     "slack",
     "guard",
     "scan",
-    "cache",
     "fleet",
     "audit",
     "demo",
@@ -1737,7 +1570,7 @@ COMMAND_ORDER = [
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ("Analysis", ["top", "analyze", "ask", "agent"]),
     ("Configuration", ["init", "configure", "schema", "query", "guard"]),
-    ("Cache & Fleet", ["cache", "fleet", "audit"]),
+    ("Fleet", ["fleet", "audit"]),
     ("Integrations", ["claude", "slack", "web"]),
     ("Other", ["demo", "scan", "report", "help", "version", "update"]),
 ]
@@ -1765,7 +1598,7 @@ def get_main_examples() -> List[Tuple[str, str]]:
         ("rdst init", "First-time setup wizard"),
         ("rdst top --target mydb", "Monitor slow queries"),
         ('rdst analyze -q "SELECT * FROM users" --target mydb', "Analyze a query"),
-        ('rdst query cache-compare my-query --target mydb', "Compare upstream vs Readyset cache performance"),
+        ('rdst query cache-compare my-query --target mydb', "Run a temporary Readyset comparison"),
         ('rdst help "how do I find slow queries?"', "Quick docs lookup"),
     ]
 

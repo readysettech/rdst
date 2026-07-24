@@ -7,12 +7,11 @@ from typing import Any, Literal
 
 from shared.service_events import ErrorEvent
 
-# Stage identifiers, in pipeline order (deploy runs parallel to the rest).
+# Stage identifiers, in pipeline order.
 STAGE_CONNECTION_TEST = "connection_test"
 STAGE_STRUCTURE = "structure"
 STAGE_PROFILE = "profile"
 STAGE_ANNOTATE = "annotate"
-STAGE_DEPLOY = "deploy"
 
 
 @dataclass
@@ -48,7 +47,6 @@ BootstrapEvent = BootstrapStageEvent | BootstrapNeedsKeyEvent | ErrorEvent
 __all__ = [
     "STAGE_ANNOTATE",
     "STAGE_CONNECTION_TEST",
-    "STAGE_DEPLOY",
     "STAGE_PROFILE",
     "STAGE_STRUCTURE",
     "BootstrapEvent",

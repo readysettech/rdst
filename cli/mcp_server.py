@@ -34,6 +34,7 @@ PASSWORD HANDLING:
 import json
 import sys
 import os
+import signal
 import subprocess
 from typing import Any, Dict, List, Optional
 
@@ -222,29 +223,74 @@ def _get_rdst_command() -> List[str]:
     return ["rdst"]
 
 
-def run_rdst_command(args: List[str]) -> Dict[str, Any]:
+def run_rdst_command(
+    args: List[str],
+    timeout_seconds: int = 300,
+    graceful_timeout: bool = False,
+) -> Dict[str, Any]:
     """Execute an RDST CLI command and return the result."""
     try:
         cmd = _get_rdst_command() + args
+        if graceful_timeout:
+            process_options: Dict[str, Any] = {}
+            if os.name == "nt":
+                process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=os.environ.copy(),
+                **process_options,
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                interrupt = (
+                    signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT
+                )
+                process.send_signal(interrupt)
+                try:
+                    stdout, stderr = process.communicate(timeout=60)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    stdout, stderr = process.communicate()
+                return {
+                    "success": False,
+                    "stdout": stdout,
+                    "stderr": (
+                        f"Command timed out after {timeout_seconds} seconds; "
+                        "RDST cancelled it and waited for cleanup.\n"
+                        f"{stderr}"
+                    ).rstrip(),
+                    "returncode": -1,
+                }
+            return {
+                "success": process.returncode == 0,
+                "stdout": stdout,
+                "stderr": stderr,
+                "returncode": process.returncode,
+            }
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout for long-running commands
-            env=os.environ.copy()  # Pass through environment variables
+            timeout=timeout_seconds,
+            env=os.environ.copy(),
         )
         return {
             "success": result.returncode == 0,
             "stdout": result.stdout,
             "stderr": result.stderr,
-            "returncode": result.returncode
+            "returncode": result.returncode,
         }
     except subprocess.TimeoutExpired:
         return {
             "success": False,
             "stdout": "",
-            "stderr": "Command timed out after 5 minutes",
-            "returncode": -1
+            "stderr": f"Command timed out after {timeout_seconds} seconds",
+            "returncode": -1,
         }
     except FileNotFoundError:
         return {
@@ -264,7 +310,7 @@ def run_rdst_command(args: List[str]) -> Dict[str, Any]:
 
 def get_tools() -> List[Dict[str, Any]]:
     """Return the list of available MCP tools."""
-    return [
+    tools = [
         {
             "name": "rdst_configure_add",
             "description": """Add a new database target configuration to RDST.
@@ -487,15 +533,9 @@ AFTER ANALYSIS: ALWAYS display the key findings to the user:
 The user wants to SEE the analysis, not just know it completed.
 
 READYSET CACHING:
-If the query takes >1 second (1000ms), suggest testing Readyset caching using
-the --readyset-cache flag. This will:
-1. Pull Readyset Docker containers (first run downloads images - may take a while)
-2. Create a test replica of the user's database schema
-3. Attempt to cache the query in Readyset
-4. Run a performance comparison (original DB vs Readyset cached)
-5. Show whether the query is cacheable and the speedup achieved
-
-Warn the user this process may take a while, especially on first run.
+Analyze performs static compatibility screening without Docker by default. Set
+`readyset_cache=true` to explicitly verify with RDST's temporary local sandbox,
+or call rdst_query_cache_compare for a dedicated comparison.
 
 PREREQUISITES:
 - A database target must be configured (use rdst_configure_add first)
@@ -531,21 +571,7 @@ COMMON ISSUES:
                     },
                     "readyset_cache": {
                         "type": "boolean",
-                        "description": """Test if this query can be cached by Readyset and show performance improvement.
-
-This process:
-1. Pulls Readyset Docker containers (first run downloads images - may take a while)
-2. Creates a test replica of the user's database schema
-3. Attempts to cache the query in Readyset
-4. Runs a performance comparison (original DB vs Readyset cached)
-
-REQUIRES: Docker must be installed and running.
-WARNING: This may take a while, especially on first run. Warn the user before running.
-
-OUTPUT INCLUDES:
-- Whether query is cacheable (and the reason if not)
-- Performance comparison: original DB vs Readyset cache
-- CREATE CACHE command for production deployment"""
+                        "description": "Explicitly verify with a temporary Readyset cache"
                     }
                 },
                 "required": []
@@ -708,6 +734,62 @@ Use --force to skip confirmation prompt.
                     }
                 },
                 "required": []
+            }
+        },
+        {
+            "name": "rdst_query_cache_compare",
+            "description": """Measure a query against its source database and a
+temporary local Readyset sandbox.
+
+RDST automatically prepares its one local sandbox, creates a temporary cache,
+runs the comparison, removes that cache, and keeps the clean sandbox warm for
+up to 24 hours. It does not create an application-facing Readyset deployment.
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "SQL query, registry name, or registry hash"
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Source database target"
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum measured iterations per side (default: 100)"
+                        ),
+                        "minimum": 1,
+                        "maximum": 1000
+                    },
+                    "interval": {
+                        "type": "integer",
+                        "description": (
+                            "Start executions every N milliseconds per side; "
+                            "cannot be combined with concurrency"
+                        ),
+                        "minimum": 0,
+                        "maximum": 60000
+                    },
+                    "concurrency": {
+                        "type": "integer",
+                        "description": (
+                            "Maintain N concurrent executions per side; "
+                            "cannot be combined with interval"
+                        ),
+                        "minimum": 1,
+                        "maximum": 64
+                    },
+                    "duration": {
+                        "type": "integer",
+                        "description": "Stop each side after N seconds",
+                        "minimum": 1,
+                        "maximum": 300
+                    }
+                },
+                "required": ["query", "target"]
             }
         },
         {
@@ -1168,7 +1250,7 @@ Examples:
             }
         },
         {
-            "name": "rdst_cache_deploy",
+            "name": "_retired_cache_deploy",
             "description": """Deploy Readyset shallow cache permanently to local, remote, or Kubernetes environments.
 
 Modes:
@@ -1238,7 +1320,7 @@ Examples:
             }
         },
         {
-            "name": "rdst_cache_add",
+            "name": "_retired_cache_add",
             "description": """Create a shallow cache for a query in a deployed Readyset instance.
 
 Shallow caching stores query results in Readyset's in-memory cache with a TTL
@@ -1286,7 +1368,7 @@ Examples:
             }
         },
         {
-            "name": "rdst_cache_show",
+            "name": "_retired_cache_show",
             "description": """List all cached queries in a deployed Readyset instance.
 
 Shows a table of all shallow caches with columns: Cache Name, Query, Type, TTL.
@@ -1314,7 +1396,7 @@ Examples:
             }
         },
         {
-            "name": "rdst_cache_delete",
+            "name": "_retired_cache_delete",
             "description": """Remove a specific cache from a deployed Readyset instance.
 
 Use rdst_cache_show to get the cache ID/name, then pass it here to remove.
@@ -1344,7 +1426,7 @@ Examples:
             }
         },
         {
-            "name": "rdst_cache_drop_all",
+            "name": "_retired_cache_drop_all",
             "description": """Remove ALL caches from a deployed Readyset instance.
 
 Runs DROP ALL CACHES against Readyset. This removes every cached query.
@@ -1638,6 +1720,11 @@ Examples:
             }
         }
     ]
+    return [
+        tool
+        for tool in tools
+        if not tool["name"].startswith("_retired_cache_")
+    ]
 
 
 def get_prompts() -> List[Dict[str, Any]]:
@@ -1808,6 +1895,40 @@ Required environment variable: {api_key_info.get(provider, 'Check provider docs'
         if arguments.get("force"):
             args.append("--force")
         return run_rdst_command(args)
+
+    elif name == "rdst_query_cache_compare":
+        args = [
+            "query",
+            "cache-compare",
+            arguments["query"],
+            "--target",
+            arguments["target"],
+            "--count",
+            str(arguments.get("count", 100)),
+            "--skip-warning",
+        ]
+        interval = None
+        if "interval" in arguments:
+            interval = int(arguments["interval"])
+            args.extend(["--interval", str(interval)])
+        if "concurrency" in arguments:
+            args.extend(["--concurrency", str(arguments["concurrency"])])
+        duration = None
+        if "duration" in arguments:
+            duration = int(arguments["duration"])
+            args.extend(["--duration", str(duration)])
+        count = int(arguments.get("count", 100))
+        timeout_seconds = count * 2 + 600
+        if interval is not None:
+            pacing_ms = max(0, count - 1) * interval * 2
+            timeout_seconds += (pacing_ms + 999) // 1000
+        if duration is not None:
+            timeout_seconds = max(timeout_seconds, duration * 2 + 600)
+        return run_rdst_command(
+            args,
+            timeout_seconds=timeout_seconds,
+            graceful_timeout=True,
+        )
 
     elif name == "rdst_version":
         return run_rdst_command(["version"])

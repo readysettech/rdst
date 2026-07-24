@@ -37,8 +37,8 @@ SEVERITY GUIDE (for top_findings and fleet_findings)
 
 TONE RULES
 - Neutral, technical, no marketing language.
-- Refer to "caching" or "caching layer" generically; name Readyset only in
-  the Next Steps section when recommending `rdst cache deploy`.
+- Refer to "caching" or "caching layer" generically. Recommend measuring a
+  representative query before making a deployment decision.
 - Dollars appear ONLY in next_steps[].estimated_savings_usd. Not in findings,
   not in bodies, not in summaries.
 - No emojis.

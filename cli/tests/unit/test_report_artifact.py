@@ -111,6 +111,42 @@ def test_capture_without_health_analysis_has_no_report(tmp_rdst_home):
     assert report_html_for_run("20260720_100000_abcdef") is None
 
 
+def test_capture_report_renders_readyset_comparison(tmp_rdst_home):
+    capture = {
+        **_audit_snapshot(),
+        "run_id": "20260720_100000_abcdef",
+        "duration_seconds": 120,
+        "total_queries": 10,
+        "queries": [
+            {
+                "query_hash": "a3f2c1b8d9e1",
+                "query_text": "SELECT * FROM orders",
+                "calls": 10,
+                "avg_time_ms": 5.0,
+                "pct_total_time": 100.0,
+            }
+        ],
+        "readyset_comparison": {
+            "queries": [
+                {
+                    "query_hash": "a3f2c1b8d9e1",
+                    "supported": True,
+                    "upstream_ms": 5.0,
+                    "readyset_ms": 0.5,
+                    "speedup": 10.0,
+                }
+            ]
+        },
+    }
+    _write_capture(tmp_rdst_home, "prod", "20260720_100000_abcdef", capture)
+
+    html, _ = report_html_for_run("20260720_100000_abcdef")
+
+    assert "<th>Readyset Avg</th>" in html
+    assert "10.0x" in html
+    assert "<strong>1</strong> cacheable by Readyset" in html
+
+
 def test_capture_with_health_analysis_lifts_workload_fields(tmp_rdst_home):
     capture = {
         "run_id": "20260720_100000_abcdef",

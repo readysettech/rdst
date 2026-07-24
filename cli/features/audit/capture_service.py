@@ -218,9 +218,8 @@ class CaptureService:
         """Capture a workload from a database target.
 
         When `readyset_testing` is set, captured queries are benchmarked
-        against an ephemeral Readyset container after analysis; the
-        comparison lands in the complete event's summary under
-        "readyset_comparison".
+        through the managed Readyset sandbox after analysis; the comparison
+        lands in the complete event's summary under "readyset_comparison".
         """
         from shared.db_connection import create_direct_connection
 

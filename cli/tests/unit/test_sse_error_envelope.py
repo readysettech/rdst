@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
 
 from features.analyze.api.routes import _event_to_sse as analyze_event_to_sse
-from features.cache.api.routes import _event_to_sse as cache_event_to_sse
 from features.top.api import routes as top_routes
 from features.top.models import TopOptions
 from shared.service_events import ErrorEvent
@@ -41,23 +40,6 @@ def test_analyze_error_event_serializes_envelope() -> None:
     assert data["message"] == "The analysis could not be completed."
     assert data["detail"] == "TimeoutError"
     assert data["stage"] == "executing_explain"
-
-
-def test_cache_error_event_serializes_envelope() -> None:
-    mapped = cache_event_to_sse(
-        ErrorEvent(
-            type="error",
-            message="The benchmark could not be completed.",
-            code="internal_error",
-            detail="ConnectionError",
-        )
-    )
-
-    assert mapped["event"] == "error"
-    data = json.loads(mapped["data"])
-    assert data["code"] == "internal_error"
-    assert data["message"] == "The benchmark could not be completed."
-    assert data["detail"] == "ConnectionError"
 
 
 async def test_top_in_service_error_emits_envelope_not_str_e(monkeypatch) -> None:

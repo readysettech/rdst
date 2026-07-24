@@ -12,6 +12,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { HandRaiser } from '../components/HandRaiser'
 import { useTarget } from '../hooks/useTarget'
 import { fetchQueryRegistry, fetchSchemaStatus } from '../lib/api'
+import { useBackgroundRuns } from '../lib/backgroundRuns'
 import { formatTimestamp } from '../lib/formatters'
 import {
   type ContinueItem,
@@ -23,7 +24,6 @@ import {
 import { fillCapturedParams } from '../lib/sqlParameters'
 import { useTrialSource } from '../lib/trialQueries'
 import { fetchAuditRuns } from '../lib/useAudit'
-import { cachedRegistryHashes, fetchCacheList } from '../lib/useCache'
 import { useSystemStatus } from '../lib/useSystemStatus'
 
 export const Route = createFileRoute('/')({
@@ -230,10 +230,10 @@ export function FirstRunHome({ needsApiKey }: { needsApiKey: boolean }) {
             level="body-small"
             className="text-content-layout-2 mt-1 mb-4 min-h-14"
           >
-            RDST uses Claude for schema discovery, Ask, and analysis advice.
-            Add your Anthropic API key — or if you don't have one, claim your
-            free trial credits below. No credit card, and you can swap in your
-            own key anytime.
+            RDST uses Claude for schema discovery, Ask, and analysis advice. Add
+            your Anthropic API key — or if you don't have one, claim your free
+            trial credits below. No credit card, and you can swap in your own
+            key anytime.
           </Text>
           <HStack className="gap-2">
             <Button
@@ -496,14 +496,14 @@ function ActiveHome({
             to="/analyze"
           />
           <PortfolioTile
-            label="Cached"
+            label="Compared"
             value={String(counts.cached)}
             unit={
               counts.candidates > 0
                 ? `${counts.candidates} candidate${counts.candidates === 1 ? '' : 's'} waiting`
-                : 'serving from Readyset'
+                : 'measured with Readyset'
             }
-            action={gapOnCache ? 'Cache them' : 'Manage caches'}
+            action={gapOnCache ? 'Test candidates' : 'View comparisons'}
             to="/cache"
             highlight={gapOnCache}
           />
@@ -525,7 +525,7 @@ function ActiveHome({
               signal="retention_30d"
               tone="accent"
               showDismiss
-              message={`A month of RDST on ${target}, ${counts.cached} cache${counts.cached === 1 ? '' : 's'} serving. If this is heading to production, we'd like to help you size it.`}
+              message={`A month of RDST on ${target}, with ${counts.cached} Readyset comparison${counts.cached === 1 ? '' : 's'} retained. If this is heading to production, we'd like to help you size it.`}
             />
           </div>
         </Show>
@@ -558,9 +558,15 @@ function ActiveHome({
                         },
                       })
                     } else if (item.nextAction === 'Cache') {
-                      navigate({ to: '/cache' })
+                      navigate({
+                        to: '/cache',
+                        search: { hash: undefined },
+                      })
                     } else {
-                      navigate({ to: '/benchmark' })
+                      navigate({
+                        to: '/benchmark',
+                        search: { run: undefined },
+                      })
                     }
                   }}
                   className="flex items-center gap-3 rounded-lg border border-border-layout-1 bg-surface-layout-2/40 px-3 py-2.5 hover:border-border-layout-2 transition-colors text-left"
@@ -630,6 +636,7 @@ function HomePage() {
   const { target } = useTarget()
   const { data: status } = useSystemStatus()
   const { anthropicRequirement } = useTrialSource()
+  const backgroundRuns = useBackgroundRuns()
 
   const targetCount = status?.targets?.length ?? 0
   const hasTargets = targetCount > 0
@@ -655,16 +662,6 @@ function HomePage() {
     enabled: hasTargets,
   })
 
-  // "Cached" reflects the live cache list for the selected target, shared with
-  // the Caching page via this query key. The registry's readyset_query_id is
-  // not a live signal -- it survives a DROP CACHE (rdst-e7s.32).
-  const { data: cacheList } = useQuery({
-    queryKey: ['cache-list', target],
-    queryFn: () => fetchCacheList(target!),
-    staleTime: 60_000,
-    enabled: hasTargets && !!target,
-  })
-
   const needsApiKey = anthropicRequirement
     ? !anthropicRequirement.satisfied
     : false
@@ -680,7 +677,18 @@ function HomePage() {
       )
     : null
 
-  const cachedHashes = cachedRegistryHashes(cacheList)
+  const cachedHashes = new Set(
+    backgroundRuns
+      .filter(
+        (run) =>
+          run.kind === 'speed_test' &&
+          run.target === target &&
+          run.status === 'done' &&
+          run.result &&
+          run.queryHash
+      )
+      .map((run) => run.queryHash as string)
+  )
 
   const homeState = deriveHomeState(targetCount, schemaStatus?.exists)
   const counts = portfolioCounts(entries, target ?? undefined, cachedHashes)
@@ -744,9 +752,8 @@ function HomePage() {
       </m.div>
 
       <Text level="caption" className="text-content-layout-3">
-        Looking for Agents, Guards, or Benchmark? They live under
-        Advanced in the sidebar. Databases, AI Settings, and Schema now live
-        under Set up.
+        Looking for Agents, Guards, or Benchmark? They live under Advanced in
+        the sidebar. Databases, AI Settings, and Schema now live under Set up.
       </Text>
     </div>
   )

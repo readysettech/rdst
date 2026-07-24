@@ -481,67 +481,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/cache/add": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Add Cache
-         * @description Create a cache or dry-run check.
-         */
-        post: operations["add_cache_api_cache_add_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/deploy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Deploy Cache
-         * @description Deploy Readyset cache (SSE stream).
-         */
-        post: operations["deploy_cache_api_cache_deploy_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/drop-all": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Drop All Caches
-         * @description Delete all caches.
-         */
-        delete: operations["drop_all_caches_api_cache_drop_all_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/list": {
+    "/api/cache/sandbox": {
         parameters: {
             query?: never;
             header?: never;
@@ -549,10 +489,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Caches
-         * @description List cached queries for a database target.
+         * Get Sandbox Status
+         * @description Return process-local sandbox diagnostics without connection secrets.
          */
-        get: operations["list_caches_api_cache_list_get"];
+        get: operations["get_sandbox_status_api_cache_sandbox_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -561,7 +501,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/cache/register": {
+    "/api/cache/sandbox/prewarm": {
         parameters: {
             query?: never;
             header?: never;
@@ -571,130 +511,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Register Cache Target
-         * @description Register a cache target with a user-provided endpoint (for non-local deploys).
+         * Prewarm Sandbox
+         * @description Queue low-priority preparation for the requested Comparisons target.
          */
-        post: operations["register_cache_target_api_cache_register_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/remove": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Remove Cache
-         * @description Remove cache target and stop container.
-         */
-        delete: operations["remove_cache_api_cache_remove_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/restart": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Restart Cache
-         * @description Restart a deployed cache, preserving its config.
-         */
-        post: operations["restart_cache_api_cache_restart_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Run Cache Comparison
-         * @description Run a query against both origin DB and Readyset cache, stream comparison results (SSE).
-         */
-        post: operations["run_cache_comparison_api_cache_run_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/start": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start Cache
-         * @description Start a stopped cache without redeploying.
-         */
-        post: operations["start_cache_api_cache_start_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Cache Status
-         * @description Check cache deployment status for a database target.
-         */
-        get: operations["get_cache_status_api_cache_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/stop": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Stop Cache
-         * @description Stop a running cache without removing it.
-         */
-        post: operations["stop_cache_api_cache_stop_post"];
+        post: operations["prewarm_sandbox_api_cache_sandbox_prewarm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -712,30 +532,10 @@ export interface paths {
         put?: never;
         /**
          * Start Cache Test Run
-         * @description Start a detached origin-vs-cache benchmark and return immediately.
+         * @description Start or attach to one complete temporary Readyset speed experiment.
          */
         post: operations["start_cache_test_run_api_cache_test_runs_post"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cache/{cache_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Cache
-         * @description Delete a single cache by ID.
-         */
-        delete: operations["delete_cache_api_cache__cache_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2201,6 +2001,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/query-registry/load-test-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Benchmark Run
+         * @description Start or attach to the target's detached origin-only benchmark.
+         */
+        post: operations["start_load_test_run_api_query_registry_load_test_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/query-registry/{query_hash}": {
         parameters: {
             query?: never;
@@ -2259,74 +2079,6 @@ export interface paths {
          * @description Update the tag/name of a query in the registry.
          */
         patch: operations["update_query_tag_api_query_registry__query_hash__tag_patch"];
-        trace?: never;
-    };
-    "/api/readyset/cache": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Cache */
-        post: operations["create_cache_api_readyset_cache_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/readyset/explain": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Explain Cache */
-        post: operations["explain_cache_api_readyset_explain_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/readyset/setup": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Setup Containers */
-        post: operations["setup_containers_api_readyset_setup_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/readyset/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Status */
-        get: operations["get_status_api_readyset_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/report": {
@@ -3392,6 +3144,11 @@ export interface components {
             /** Query */
             query: string;
             /**
+             * Readyset Cache
+             * @default false
+             */
+            readyset_cache?: boolean;
+            /**
              * Skip Readyset
              * @default false
              */
@@ -3409,7 +3166,10 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /** AnnotateCompleteEvent */
+        /**
+         * AnnotateCompleteEvent
+         * @description Annotation process completed, possibly with individual table failures.
+         */
         AnnotateCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -3427,7 +3187,10 @@ export interface components {
              */
             type: "annotate_complete";
         };
-        /** AnnotateErrorEvent */
+        /**
+         * AnnotateErrorEvent
+         * @description Annotation process encountered an error.
+         */
         AnnotateErrorEvent: {
             /** Message */
             message: string;
@@ -3437,7 +3200,10 @@ export interface components {
              */
             type: "annotate_error";
         };
-        /** AnnotateProgressEvent */
+        /**
+         * AnnotateProgressEvent
+         * @description Progress update during annotation.
+         */
         AnnotateProgressEvent: {
             /** Message */
             message: string;
@@ -3465,7 +3231,10 @@ export interface components {
             /** Target */
             target: string;
         };
-        /** AnnotateStartedEvent */
+        /**
+         * AnnotateStartedEvent
+         * @description Annotation process started.
+         */
         AnnotateStartedEvent: {
             /**
              * Completed Tables
@@ -3482,7 +3251,10 @@ export interface components {
              */
             type: "annotate_started";
         };
-        /** AnnotateTableCompleteEvent */
+        /**
+         * AnnotateTableCompleteEvent
+         * @description A table has been annotated.
+         */
         AnnotateTableCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -3522,7 +3294,10 @@ export interface components {
             /** Valid */
             valid: boolean;
         };
-        /** AskClarificationNeededEvent */
+        /**
+         * AskClarificationNeededEvent
+         * @description Clarification needed from the user.
+         */
         AskClarificationNeededEvent: {
             /** Interpretations */
             interpretations: components["schemas"]["AskInterpretation"][];
@@ -3536,7 +3311,10 @@ export interface components {
              */
             type: "clarification_needed";
         };
-        /** AskClarificationQuestion */
+        /**
+         * AskClarificationQuestion
+         * @description A clarification question for the user.
+         */
         AskClarificationQuestion: {
             /** Id */
             id: string;
@@ -3545,7 +3323,10 @@ export interface components {
             /** Question */
             question: string;
         };
-        /** AskErrorEvent */
+        /**
+         * AskErrorEvent
+         * @description Ask encountered an error.
+         */
         AskErrorEvent: {
             /** Message */
             message: string;
@@ -3588,7 +3369,10 @@ export interface components {
             /** Items */
             items: components["schemas"]["AskHistoryItem"][];
         };
-        /** AskInterpretation */
+        /**
+         * AskInterpretation
+         * @description A possible interpretation of the user's question.
+         */
         AskInterpretation: {
             /** Assumptions */
             assumptions: string[];
@@ -3637,7 +3421,10 @@ export interface components {
              */
             timeout?: number;
         };
-        /** AskResultEvent */
+        /**
+         * AskResultEvent
+         * @description Ask completed with results.
+         */
         AskResultEvent: {
             /** Columns */
             columns: string[];
@@ -3676,7 +3463,10 @@ export interface components {
              */
             type: "result";
         };
-        /** AskSchemaLoadedEvent */
+        /**
+         * AskSchemaLoadedEvent
+         * @description Schema has been loaded.
+         */
         AskSchemaLoadedEvent: {
             /** Source */
             source: string;
@@ -3695,7 +3485,10 @@ export interface components {
              */
             type: "schema_loaded";
         };
-        /** AskSqlGeneratedEvent */
+        /**
+         * AskSqlGeneratedEvent
+         * @description SQL has been generated.
+         */
         AskSqlGeneratedEvent: {
             /**
              * Explanation
@@ -3710,7 +3503,10 @@ export interface components {
              */
             type: "sql_generated";
         };
-        /** AskStatusEvent */
+        /**
+         * AskStatusEvent
+         * @description Status update during ask execution.
+         */
         AskStatusEvent: {
             /** Message */
             message: string;
@@ -4065,7 +3861,7 @@ export interface components {
             /** Run Id */
             run_id: string;
         };
-        BackgroundRunEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"] | components["schemas"]["AnnotateStartedEvent"] | components["schemas"]["AnnotateProgressEvent"] | components["schemas"]["AnnotateTableCompleteEvent"] | components["schemas"]["AnnotateCompleteEvent"] | components["schemas"]["AnnotateErrorEvent"] | components["schemas"]["AuditStatusEvent"] | components["schemas"]["AuditTargetStartEvent"] | components["schemas"]["AuditMetricsCollectedEvent"] | components["schemas"]["AuditTargetCompleteEvent"] | components["schemas"]["AuditTargetErrorEvent"] | components["schemas"]["AuditLlmInsightsEvent"] | components["schemas"]["AuditSnapshotSavedEvent"] | components["schemas"]["AuditDiffEvent"] | components["schemas"]["AuditCompleteEvent"] | components["schemas"]["AuditErrorEvent"] | components["schemas"]["WorkloadStatusEvent"] | components["schemas"]["WorkloadConnectedEvent"] | components["schemas"]["WorkloadSnapshotEvent"] | components["schemas"]["WorkloadCaptureProgressEvent"] | components["schemas"]["WorkloadCaptureCompleteEvent"] | components["schemas"]["WorkloadAnalysisProgressEvent"] | components["schemas"]["WorkloadQueriesSavedEvent"] | components["schemas"]["WorkloadCompleteEvent"] | components["schemas"]["WorkloadErrorEvent"] | components["schemas"]["ProgressEvent"] | components["schemas"]["CacheRunCompleteEvent"] | components["schemas"]["RunEndEvent"];
+        BackgroundRunEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"] | components["schemas"]["AnnotateStartedEvent"] | components["schemas"]["AnnotateProgressEvent"] | components["schemas"]["AnnotateTableCompleteEvent"] | components["schemas"]["AnnotateCompleteEvent"] | components["schemas"]["AnnotateErrorEvent"] | components["schemas"]["AuditStatusEvent"] | components["schemas"]["AuditTargetStartEvent"] | components["schemas"]["AuditMetricsCollectedEvent"] | components["schemas"]["AuditTargetCompleteEvent"] | components["schemas"]["AuditTargetErrorEvent"] | components["schemas"]["AuditLlmInsightsEvent"] | components["schemas"]["AuditSnapshotSavedEvent"] | components["schemas"]["AuditDiffEvent"] | components["schemas"]["AuditCompleteEvent"] | components["schemas"]["AuditErrorEvent"] | components["schemas"]["WorkloadStatusEvent"] | components["schemas"]["WorkloadConnectedEvent"] | components["schemas"]["WorkloadSnapshotEvent"] | components["schemas"]["WorkloadCaptureProgressEvent"] | components["schemas"]["WorkloadCaptureCompleteEvent"] | components["schemas"]["WorkloadAnalysisProgressEvent"] | components["schemas"]["WorkloadQueriesSavedEvent"] | components["schemas"]["WorkloadCompleteEvent"] | components["schemas"]["WorkloadErrorEvent"] | components["schemas"]["ProgressEvent"] | components["schemas"]["CacheRunCompleteEvent"] | components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"] | components["schemas"]["RunEndEvent"];
         /** BackgroundRunResponse */
         BackgroundRunResponse: {
             /** Kind */
@@ -4127,7 +3923,13 @@ export interface components {
             target?: string | null;
         };
         BootstrapEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"];
-        /** BootstrapNeedsKeyEvent */
+        /**
+         * BootstrapNeedsKeyEvent
+         * @description The run reached the annotate gate without a usable Anthropic key.
+         *
+         *     The event name doubles as the run registry's gating signal: the run's
+         *     status parks on needs_key until the next event arrives.
+         */
         BootstrapNeedsKeyEvent: {
             /** Message */
             message: string;
@@ -4144,7 +3946,14 @@ export interface components {
             /** Status */
             status: string;
         };
-        /** BootstrapStageEvent */
+        /**
+         * BootstrapStageEvent
+         * @description Progress of one bootstrap stage.
+         *
+         *     status is started | progress | done | failed | skipped. Child-service
+         *     events surface as status="progress" with the child's payload in detail,
+         *     so the stream stays one flat, typed union.
+         */
         BootstrapStageEvent: {
             /**
              * Detail
@@ -4175,16 +3984,6 @@ export interface components {
              * @default true
              */
             annotate?: boolean;
-            /**
-             * Deploy
-             * @default true
-             */
-            deploy?: boolean;
-            /**
-             * Deploy Mode
-             * @default docker
-             */
-            deploy_mode?: string;
             /** Target */
             target?: string | null;
         };
@@ -4207,133 +4006,16 @@ export interface components {
             /** Parent */
             parent: string | null;
         };
-        /** CacheAddRequest */
-        CacheAddRequest: {
-            /**
-             * Dry Run
-             * @default false
-             */
-            dry_run?: boolean;
-            /** Query */
-            query: string;
-            /** Tag */
-            tag?: string | null;
-            /** Target */
-            target?: string | null;
-        };
-        /** CacheAddResponse */
-        CacheAddResponse: {
-            /** Detail */
-            detail?: string | null;
-            /** Query */
-            query: string;
-            /** Query Hash */
-            query_hash?: string | null;
-            /** Success */
-            success: boolean;
-            /** Supported */
-            supported: boolean;
-        };
-        /** CacheDeleteResponse */
-        CacheDeleteResponse: {
-            /** Cache Id */
-            cache_id: string;
-            /** Success */
-            success: boolean;
-        };
-        /** CacheDeployRequest */
-        CacheDeployRequest: {
-            /** Host */
-            host?: string | null;
-            /**
-             * Mode
-             * @default docker
-             */
-            mode?: string;
-            /** Namespace */
-            namespace?: string | null;
-            /** Port */
-            port?: number | null;
-            /** Ssh User */
-            ssh_user?: string | null;
-            /** Target */
-            target?: string | null;
-        };
-        /** CacheDropAllResponse */
-        CacheDropAllResponse: {
-            /** Count */
-            count: number;
-            /** Success */
-            success: boolean;
-        };
-        /** CacheEntryResponse */
-        CacheEntryResponse: {
-            /** Cache Id */
-            cache_id: string;
-            /** Cache Name */
-            cache_name: string;
-            /** Query */
-            query: string;
-            /** Registry Hash */
-            registry_hash?: string | null;
-            /** Ttl */
-            ttl: string;
-            /** Type */
-            type: string;
-        };
-        /** CacheErrorResponse */
-        CacheErrorResponse: {
-            /** Error */
-            error: string;
-            /** Success */
-            success: boolean;
-        };
-        /** CacheLifecycleRequest */
-        CacheLifecycleRequest: {
-            /** Target */
-            target?: string | null;
-        };
-        /** CacheLifecycleResponse */
-        CacheLifecycleResponse: {
-            /** Detail */
-            detail?: string | null;
-            /** Operation */
-            operation: string;
-            /** State */
-            state?: string | null;
-            /** Success */
-            success: boolean;
-        };
-        /** CacheListResponse */
-        CacheListResponse: {
-            /** Caches */
-            caches: components["schemas"]["CacheEntryResponse"][];
-            /** Count */
-            count: number;
-            /** Success */
-            success: boolean;
-        };
-        /** CacheRegisterRequest */
-        CacheRegisterRequest: {
-            /** Cache Host */
-            cache_host: string;
-            /**
-             * Cache Port
-             * @default 5433
-             */
-            cache_port?: number;
-            /** Target */
-            target?: string | null;
-        };
-        /** CacheRequest */
-        CacheRequest: {
-            /** Query */
-            query: string;
-            /** Target */
-            target?: string | null;
-        };
-        /** CacheRunCompleteEvent */
+        /**
+         * CacheRunCompleteEvent
+         * @description Performance comparison result (origin vs cache).
+         */
         CacheRunCompleteEvent: {
+            /**
+             * Cache Iterations
+             * @default null
+             */
+            cache_iterations?: number | null;
             /** Cache Stats */
             cache_stats: {
                 [key: string]: number;
@@ -4342,6 +4024,11 @@ export interface components {
             improvement_pct: number;
             /** Iterations */
             iterations: number;
+            /**
+             * Origin Iterations
+             * @default null
+             */
+            origin_iterations?: number | null;
             /** Origin Stats */
             origin_stats: {
                 [key: string]: number;
@@ -4361,36 +4048,6 @@ export interface components {
             type: "cache_run_complete";
             /** Winner */
             winner: string;
-        };
-        /** CacheRunRequest */
-        CacheRunRequest: {
-            /**
-             * Iterations
-             * @default 15
-             */
-            iterations?: number;
-            /** Query */
-            query: string;
-            /** Target */
-            target?: string | null;
-            /**
-             * Warmup
-             * @default 5
-             */
-            warmup?: number;
-        };
-        /** CacheStatusResponse */
-        CacheStatusResponse: {
-            /** Cache Target */
-            cache_target?: string | null;
-            /** Container Name */
-            container_name?: string | null;
-            /** Deployed */
-            deployed: boolean;
-            /** Endpoint */
-            endpoint?: string | null;
-            /** Running */
-            running: boolean;
         };
         /** CacheTestRunRequest */
         CacheTestRunRequest: {
@@ -4525,7 +4182,14 @@ export interface components {
              */
             type: "tool_call";
         };
-        /** ChatToolResultEvent */
+        /**
+         * ChatToolResultEvent
+         * @description Result of one tool execution.
+         *
+         *     For query_database, `data` carries sql/columns/rows/row_count/
+         *     execution_time_ms/truncated/query_hash/query_tag; for get_schema it
+         *     carries tables/source.
+         */
         ChatToolResultEvent: {
             /** Content */
             content: string;
@@ -4586,21 +4250,6 @@ export interface components {
              * @constant
              */
             type: "complete";
-        };
-        /** ContainerStatus */
-        ContainerStatus: {
-            /** Readyset Port */
-            readyset_port?: number | null;
-            /** Readyset Running */
-            readyset_running: boolean;
-            /** Running */
-            running: boolean;
-            /** Target */
-            target?: string | null;
-            /** Test Db Port */
-            test_db_port?: number | null;
-            /** Test Db Running */
-            test_db_running: boolean;
         };
         /**
          * ConversationHistoryResponse
@@ -4758,7 +4407,16 @@ export interface components {
             /** Success */
             success: boolean;
         };
-        /** ErrorEvent */
+        /**
+         * ErrorEvent
+         * @description Error event for service workflows.
+         *
+         *     ``code`` and ``detail`` mirror the shared HTTP error envelope
+         *     (``shared.api.app._error_envelope``) so an SSE failure carries the same
+         *     {code, message, detail} shape the client normalizes in ``lib/sse.ts``.
+         *     Both stay optional so existing producers that only set ``message`` keep
+         *     working; the client derives a code when one is absent.
+         */
         ErrorEvent: {
             /**
              * Code
@@ -5632,6 +5290,11 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /** LoadTestRunStartResponse */
+        LoadTestRunStartResponse: {
+            /** Run Id */
+            run_id: string;
+        };
         /**
          * MessageResponse
          * @description Single message in conversation history.
@@ -5709,7 +5372,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** ProgressEvent */
+        /**
+         * ProgressEvent
+         * @description Progress update during a multi-step operation.
+         */
         ProgressEvent: {
             /** Message */
             message: string;
@@ -5728,7 +5394,10 @@ export interface components {
             /** Token */
             token: string;
         };
-        /** QueryBenchmarkCompleteEvent */
+        /**
+         * QueryBenchmarkCompleteEvent
+         * @description Benchmark finished; carries the final tally.
+         */
         QueryBenchmarkCompleteEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -5748,7 +5417,16 @@ export interface components {
              */
             type: "complete";
         };
-        /** QueryBenchmarkErrorEvent */
+        /**
+         * QueryBenchmarkErrorEvent
+         * @description Benchmark failed (or was rejected by a safety rail) before completion.
+         *
+         *     Carries the shared error envelope ({code, message, detail}, B7/T24) so the
+         *     client normalizes a benchmark failure exactly like every other SSE error.
+         *     ``message`` stays humane and safe to show; ``detail`` holds only the
+         *     exception class name for correlation — never the raw ``str(e)``, which can
+         *     embed host / DSN / SQL material.
+         */
         QueryBenchmarkErrorEvent: {
             /**
              * Code
@@ -5769,7 +5447,10 @@ export interface components {
             type: "error";
         };
         QueryBenchmarkEvent: components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"];
-        /** QueryBenchmarkProgressEvent */
+        /**
+         * QueryBenchmarkProgressEvent
+         * @description Benchmark progress tick.
+         */
         QueryBenchmarkProgressEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -5789,7 +5470,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** QueryBenchmarkStats */
+        /**
+         * QueryBenchmarkStats
+         * @description Statistics for a single benchmarked query.
+         */
         QueryBenchmarkStats: {
             /** Avg Ms */
             avg_ms: number;
@@ -5906,36 +5590,6 @@ export interface components {
             /** Total */
             total: number;
         };
-        /** ReadysetCacheCompleteEvent */
-        ReadysetCacheCompleteEvent: {
-            /**
-             * Cache Id
-             * @default null
-             */
-            cache_id?: string | null;
-            /** Cached */
-            cached: boolean;
-            /**
-             * Error
-             * @default null
-             */
-            error?: string | null;
-            /** Message */
-            message: string;
-            /**
-             * Readyset Port
-             * @default null
-             */
-            readyset_port?: number | null;
-            /** Success */
-            success: boolean;
-            /**
-             * Type
-             * @constant
-             */
-            type: "complete";
-        };
-        ReadysetCacheEvent: components["schemas"]["ReadysetProgressEvent"] | components["schemas"]["ReadysetErrorEvent"] | components["schemas"]["ReadysetCacheCompleteEvent"];
         /** ReadysetCacheability */
         ReadysetCacheability: {
             /**
@@ -6023,78 +5677,6 @@ export interface components {
              */
             warnings?: string[] | null;
         };
-        /** ReadysetErrorEvent */
-        ReadysetErrorEvent: {
-            /** Message */
-            message: string;
-            /**
-             * Type
-             * @constant
-             */
-            type: "error";
-        };
-        /** ReadysetExplainCompleteEvent */
-        ReadysetExplainCompleteEvent: {
-            /** Cacheable */
-            cacheable: boolean;
-            /** Confidence */
-            confidence: string;
-            /** Explanation */
-            explanation: string;
-            /** Issues */
-            issues: string[];
-            /**
-             * Readyset Port
-             * @default null
-             */
-            readyset_port?: number | null;
-            /** Success */
-            success: boolean;
-            /**
-             * Type
-             * @constant
-             */
-            type: "complete";
-        };
-        ReadysetExplainEvent: components["schemas"]["ReadysetProgressEvent"] | components["schemas"]["ReadysetErrorEvent"] | components["schemas"]["ReadysetExplainCompleteEvent"];
-        /** ReadysetProgressEvent */
-        ReadysetProgressEvent: {
-            /** Message */
-            message: string;
-            /** Stage */
-            stage: string;
-            /**
-             * Type
-             * @constant
-             */
-            type: "progress";
-        };
-        /** ReadysetSetupCompleteEvent */
-        ReadysetSetupCompleteEvent: {
-            /**
-             * Already Running
-             * @default false
-             */
-            already_running?: boolean;
-            /**
-             * Readyset Port
-             * @default null
-             */
-            readyset_port?: number | null;
-            /** Success */
-            success: boolean;
-            /**
-             * Test Db Port
-             * @default null
-             */
-            test_db_port?: number | null;
-            /**
-             * Type
-             * @constant
-             */
-            type: "complete";
-        };
-        ReadysetSetupEvent: components["schemas"]["ReadysetProgressEvent"] | components["schemas"]["ReadysetErrorEvent"] | components["schemas"]["ReadysetSetupCompleteEvent"];
         /** Recommendations */
         Recommendations: {
             /** Available */
@@ -6302,7 +5884,10 @@ export interface components {
             /** Verified */
             verified: boolean;
         };
-        /** RunEndEvent */
+        /**
+         * RunEndEvent
+         * @description Terminal event appended by the registry after every run.
+         */
         RunEndEvent: {
             /** Status */
             status: string;
@@ -6312,7 +5897,53 @@ export interface components {
              */
             type: "run_end";
         };
-        /** ScanCompleteEvent */
+        /** SandboxPrewarmRequest */
+        SandboxPrewarmRequest: {
+            /** Target */
+            target?: string | null;
+        };
+        /** SandboxPrewarmResponse */
+        SandboxPrewarmResponse: {
+            /** Queued */
+            queued: boolean;
+        };
+        /** SandboxStatusResponse */
+        SandboxStatusResponse: {
+            /** Container Name */
+            container_name: string;
+            /** Current Target */
+            current_target?: string | null;
+            /** Dirty Reason */
+            dirty_reason?: string | null;
+            /** Docker Installed */
+            docker_installed: boolean;
+            /** Docker Running */
+            docker_running: boolean;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Failed Target */
+            failed_target?: string | null;
+            /** Generation */
+            generation: number;
+            /** Healthy */
+            healthy: boolean;
+            /** Last Error */
+            last_error?: string | null;
+            /** Last Released At */
+            last_released_at?: string | null;
+            /** Lease Owner */
+            lease_owner?: string | null;
+            /** Lease Purpose */
+            lease_purpose?: string | null;
+            /** Phase */
+            phase: string;
+            /** Queued Requests */
+            queued_requests: number;
+        };
+        /**
+         * ScanCompleteEvent
+         * @description Scan completed.
+         */
         ScanCompleteEvent: {
             /** Success */
             success: boolean;
@@ -6326,7 +5957,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** ScanErrorEvent */
+        /**
+         * ScanErrorEvent
+         * @description Scan error.
+         */
         ScanErrorEvent: {
             /** Message */
             message: string;
@@ -6342,7 +5976,10 @@ export interface components {
             type: "error";
         };
         ScanEvent: components["schemas"]["ScanStatusEvent"] | components["schemas"]["ScanFilesFoundEvent"] | components["schemas"]["ScanProgressEvent"] | components["schemas"]["ScanQueryResultEvent"] | components["schemas"]["ScanRegistryEvent"] | components["schemas"]["ScanCompleteEvent"] | components["schemas"]["ScanErrorEvent"];
-        /** ScanFilesFoundEvent */
+        /**
+         * ScanFilesFoundEvent
+         * @description Files with ORM patterns discovered.
+         */
         ScanFilesFoundEvent: {
             /** Files */
             files: {
@@ -6385,7 +6022,10 @@ export interface components {
          * @enum {string}
          */
         ScanPhase: "config" | "discovery" | "extraction" | "conversion" | "registry" | "analysis";
-        /** ScanProgressEvent */
+        /**
+         * ScanProgressEvent
+         * @description Progress update within a scan phase.
+         */
         ScanProgressEvent: {
             /** Current */
             current: number;
@@ -6401,7 +6041,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** ScanQueryResultEvent */
+        /**
+         * ScanQueryResultEvent
+         * @description Individual query result from scan.
+         */
         ScanQueryResultEvent: {
             /** Query */
             query: {
@@ -6413,7 +6056,10 @@ export interface components {
              */
             type: "query_result";
         };
-        /** ScanRegistryEvent */
+        /**
+         * ScanRegistryEvent
+         * @description Registry save results.
+         */
         ScanRegistryEvent: {
             /** New Queries */
             new_queries: number;
@@ -6483,7 +6129,10 @@ export interface components {
              */
             warn_threshold?: number;
         };
-        /** ScanStatusEvent */
+        /**
+         * ScanStatusEvent
+         * @description Status update during scan.
+         */
         ScanStatusEvent: {
             /** Message */
             message: string;
@@ -6760,11 +6409,6 @@ export interface components {
             /** Cache Budget */
             cache_budget: number;
         };
-        /** SetupRequest */
-        SetupRequest: {
-            /** Target */
-            target?: string | null;
-        };
         /** StatusResponse */
         StatusResponse: {
             /** Configured */
@@ -6947,7 +6591,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** TopCompleteEvent */
+        /**
+         * TopCompleteEvent
+         * @description Operation completed.
+         */
         TopCompleteEvent: {
             /** Newly Saved */
             newly_saved: number;
@@ -6963,7 +6610,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** TopConnectedEvent */
+        /**
+         * TopConnectedEvent
+         * @description Database connection established.
+         */
         TopConnectedEvent: {
             /** Db Engine */
             db_engine: string;
@@ -6988,7 +6638,10 @@ export interface components {
             /** Setting Name */
             setting_name: string;
         };
-        /** TopDbLimitWarningEvent */
+        /**
+         * TopDbLimitWarningEvent
+         * @description Database query size limit is below recommended threshold.
+         */
         TopDbLimitWarningEvent: {
             /** Db Engine */
             db_engine: string;
@@ -7004,7 +6657,14 @@ export interface components {
              */
             type: "db_limit_warning";
         };
-        /** TopErrorEvent */
+        /**
+         * TopErrorEvent
+         * @description Error occurred.
+         *
+         *     ``code`` and ``detail`` mirror the shared error envelope (B7/T24):
+         *     ``message`` stays humane, ``detail`` carries the exception class name for
+         *     correlation — never the raw ``str(e)``, which can embed host/DSN material.
+         */
         TopErrorEvent: {
             /**
              * Code
@@ -7054,7 +6714,10 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /** TopQueriesEvent */
+        /**
+         * TopQueriesEvent
+         * @description Batch of top queries.
+         */
         TopQueriesEvent: {
             /** Db Engine */
             db_engine: string;
@@ -7080,7 +6743,10 @@ export interface components {
              */
             type: "queries";
         };
-        /** TopQueryData */
+        /**
+         * TopQueryData
+         * @description Individual query data.
+         */
         TopQueryData: {
             /** Avg Time */
             avg_time: string;
@@ -7142,7 +6808,10 @@ export interface components {
             /** Total Time */
             total_time: string;
         };
-        /** TopQuerySavedEvent */
+        /**
+         * TopQuerySavedEvent
+         * @description Query saved to registry.
+         */
         TopQuerySavedEvent: {
             /** Is New */
             is_new: boolean;
@@ -7154,7 +6823,10 @@ export interface components {
              */
             type: "query_saved";
         };
-        /** TopSourceFallbackEvent */
+        /**
+         * TopSourceFallbackEvent
+         * @description Source fallback occurred.
+         */
         TopSourceFallbackEvent: {
             /** From Source */
             from_source: string;
@@ -7168,7 +6840,10 @@ export interface components {
              */
             type: "source_fallback";
         };
-        /** TopStatusEvent */
+        /**
+         * TopStatusEvent
+         * @description Progress status update.
+         */
         TopStatusEvent: {
             /** Message */
             message: string;
@@ -8314,78 +7989,9 @@ export interface operations {
             };
         };
     };
-    add_cache_api_cache_add_post: {
+    get_sandbox_status_api_cache_sandbox_get: {
         parameters: {
             query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CacheAddRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CacheAddResponse"] | components["schemas"]["CacheErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    deploy_cache_api_cache_deploy_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CacheDeployRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    drop_all_caches_api_cache_drop_all_delete: {
-        parameters: {
-            query: {
-                /** @description Target database name */
-                target: string;
-            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8398,53 +8004,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CacheDropAllResponse"] | components["schemas"]["CacheErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["SandboxStatusResponse"];
                 };
             };
         };
     };
-    list_caches_api_cache_list_get: {
-        parameters: {
-            query: {
-                /** @description Target database name */
-                target: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CacheListResponse"] | components["schemas"]["CacheErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    register_cache_target_api_cache_register_post: {
+    prewarm_sandbox_api_cache_sandbox_prewarm_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -8453,7 +8018,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CacheRegisterRequest"];
+                "application/json": components["schemas"]["SandboxPrewarmRequest"];
             };
         };
         responses: {
@@ -8463,203 +8028,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CacheStatusResponse"] | components["schemas"]["CacheErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    remove_cache_api_cache_remove_delete: {
-        parameters: {
-            query: {
-                /** @description Target database name */
-                target: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CacheDeleteResponse"] | components["schemas"]["CacheErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    restart_cache_api_cache_restart_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CacheLifecycleRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CacheLifecycleResponse"] | components["schemas"]["CacheErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    run_cache_comparison_api_cache_run_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CacheRunRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    start_cache_api_cache_start_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CacheLifecycleRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CacheLifecycleResponse"] | components["schemas"]["CacheErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_cache_status_api_cache_status_get: {
-        parameters: {
-            query: {
-                /** @description Target database name */
-                target: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CacheStatusResponse"] | components["schemas"]["CacheErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    stop_cache_api_cache_stop_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CacheLifecycleRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CacheLifecycleResponse"] | components["schemas"]["CacheErrorResponse"];
+                    "application/json": components["schemas"]["SandboxPrewarmResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8693,40 +8062,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CacheTestRunStartResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_cache_api_cache__cache_id__delete: {
-        parameters: {
-            query: {
-                /** @description Target database name */
-                target: string;
-            };
-            header?: never;
-            path: {
-                cache_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CacheDeleteResponse"] | components["schemas"]["CacheErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11091,6 +10426,39 @@ export interface operations {
             };
         };
     };
+    start_load_test_run_api_query_registry_load_test_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BenchmarkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadTestRunStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     remove_query_from_registry_api_query_registry__query_hash__delete: {
         parameters: {
             query?: never;
@@ -11179,140 +10547,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdateTagResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_cache_api_readyset_cache_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CacheRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                    "text/event-stream": components["schemas"]["ReadysetCacheEvent"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    explain_cache_api_readyset_explain_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CacheRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                    "text/event-stream": components["schemas"]["ReadysetExplainEvent"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    setup_containers_api_readyset_setup_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetupRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                    "text/event-stream": components["schemas"]["ReadysetSetupEvent"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_status_api_readyset_status_get: {
-        parameters: {
-            query?: {
-                /** @description Target database name */
-                target?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ContainerStatus"];
                 };
             };
             /** @description Validation Error */

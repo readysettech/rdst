@@ -100,10 +100,9 @@ test_analyze_interactive_flag() {
 }
 
 test_readyset_flag() {
-  log_section "4. Analyze Auto-Readyset (${DB_ENGINE})"
+  log_section "4. Analyze Readyset Screening (${DB_ENGINE})"
 
-  # Readyset analysis runs automatically when a cache target exists.
-  # No --readyset flag needed. Cache tests should have deployed Readyset already.
+  # Analyze performs static Readyset screening without requiring Docker.
 
   local simple_query="SELECT * FROM title_basics WHERE tconst = 'tt0000005'"
 
@@ -112,21 +111,20 @@ test_readyset_flag() {
     "${RDST_CMD[@]}" analyze --readyset --target "$TARGET_NAME" --skip-warning --query "$simple_query"
   assert_contains "unrecognized arguments" "old flag should be rejected"
 
-  # Analyze with deployed cache — Readyset section should appear automatically
-  run_cmd "Analyze with auto-Readyset (SQL text)" \
+  run_cmd "Analyze with Readyset static screening (SQL text)" \
     "${RDST_CMD[@]}" analyze \
     --target "$TARGET_NAME" \
     --skip-warning \
     --query "$simple_query"
   assert_contains "RDST Query Analysis" "should show analysis header"
-  assert_regex "Readyset Performance" "should show Readyset section"
+  assert_contains "Readyset Compatibility" "should show static Readyset screening"
 
   # Get hash for next test
   local READYSET_HASH
   READYSET_HASH=$(latest_hash_from_list)
   [[ -n "$READYSET_HASH" ]] || fail "Failed to capture query hash"
 
-  run_cmd "Analyze with auto-Readyset (by hash ${READYSET_HASH})" \
+  run_cmd "Analyze with Readyset screening (by hash ${READYSET_HASH})" \
     "${RDST_CMD[@]}" analyze --hash "$READYSET_HASH" --skip-warning
   assert_contains "RDST Query Analysis" "hash analyze should show analysis"
   assert_regex "Readyset" "hash analyze should mention Readyset"

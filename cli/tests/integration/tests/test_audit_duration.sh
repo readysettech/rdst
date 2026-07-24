@@ -267,10 +267,8 @@ for i, line in enumerate(lines):
   fi
 
   # ==========================================================================
-  # Test 10: Audit with --duration + RS cache benchmarking
-  # RS cache was deployed by test_cache_commands. This test verifies that
-  # captured queries get benchmarked against the cache and speedup data
-  # appears in the JSON output.
+  # Test 10: Audit with --duration + temporary Readyset comparisons
+  # Captured queries are benchmarked through the manager-owned sandbox.
   # ==========================================================================
 
   if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" && -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
@@ -340,35 +338,30 @@ PYEOF
   fi
 
   # ==========================================================================
-  # Test 11: Audit -y ephemeral lifecycle — auto-deploy + auto-teardown
-  # When no cache is deployed beforehand, audit -y should silently deploy
-  # a Readyset container, run the benchmark, and tear it down on exit.
-  # Validates fix for CLD-1750 (containers leaking after audit).
+  # Test 11: Audit -y prepares and leaves one clean sandbox warm
   # ==========================================================================
 
   if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" != "true" ]]; then
     echo ""
-    echo "=== TEST 11: Audit ephemeral lifecycle (${DB_ENGINE}) ==="
+    echo "=== TEST 11: Audit managed sandbox lifecycle (${DB_ENGINE}) ==="
 
-    local CONTAINER_NAME="rdst-readyset-${AUDIT_TARGET}"
+    local CONTAINER_NAME="rdst-readyset-sandbox"
 
-    # Tear down any existing cache so audit must auto-deploy
-    "${RDST_CMD[@]}" cache remove --target "${AUDIT_TARGET}" --yes >/dev/null 2>&1 || true
+    # Start absent so the audit must provision through the manager.
     docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
     if docker ps -a --filter "name=$CONTAINER_NAME" -q | grep -q .; then
       echo "FAIL: pre-condition — container still exists, can't test ephemeral path"
     else
-      run_cmd "Audit: -y auto-deploys ephemeral cache" "${RDST_CMD[@]}" audit \
+      run_cmd "Audit: -y prepares managed sandbox" "${RDST_CMD[@]}" audit \
         --target "${AUDIT_TARGET}" --duration 10s --no-insights -y --json
 
-      # After audit completes: container should be gone
-      if docker ps -a --filter "name=$CONTAINER_NAME" -q | grep -q .; then
-        echo "FAIL: ephemeral container not torn down after audit"
-        docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+      # The clean sandbox remains running for reuse for up to 24 hours.
+      if ! docker ps --filter "name=^/${CONTAINER_NAME}$" -q | grep -q .; then
+        echo "FAIL: managed sandbox was not left warm after audit"
         exit 1
       fi
-      echo "PASS: Audit ephemeral lifecycle (deploy + teardown clean)"
+      echo "PASS: Audit managed sandbox remains warm"
     fi
   fi
 

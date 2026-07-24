@@ -281,6 +281,7 @@ class RdstCLI:
         review: bool = False,
         output_json: bool = False,
         skip_warning: bool = False,
+        readyset_cache: bool = False,
         **kwargs,
     ) -> RdstResult:
         """
@@ -307,6 +308,7 @@ class RdstCLI:
             fast: Whether to skip EXPLAIN ANALYZE and use EXPLAIN only
             interactive: Whether to enter interactive mode after analysis
             review: Whether to review conversation history instead of analyzing
+            readyset_cache: Whether to verify using a temporary Readyset cache
             **kwargs: Additional arguments
 
         Returns:
@@ -341,6 +343,7 @@ class RdstCLI:
             review=review,
             output_json=output_json,
             skip_warning=skip_warning,
+            readyset_cache=readyset_cache,
         )
 
     # rdst init
@@ -372,6 +375,14 @@ class RdstCLI:
         Returns:
             RdstResult with operation outcome
         """
+        if subcommand == "cache-compare":
+            try:
+                from features.query_registry.cli.command import QueryCommand
+
+                return QueryCommand().execute(subcommand, **kwargs)
+            except Exception as e:
+                return RdstResult(False, f"query command failed: {e}")
+
         import asyncio
 
         try:
@@ -437,7 +448,7 @@ class RdstCLI:
             "  - rdst agent            Manage and run data agents with safety policies\n"
             "  - rdst query            Manage saved queries (add/list/delete)\n"
             "  - rdst schema           Manage semantic layer for your database\n"
-            "  - rdst cache            Deploy and manage Readyset shallow caches\n"
+            "  - rdst query cache-compare  Run a temporary Readyset comparison\n"
             "  - rdst fleet            Manage and audit database fleets\n"
             "  - rdst audit            Run a deep health audit of a database target\n"
             "  - rdst guard            Manage reusable safety policies\n"

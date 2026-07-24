@@ -15,6 +15,7 @@ import {
   startBootstrapRun,
   startCacheTestRun,
   startFleetAuditRun,
+  startLoadTestRun,
   startSchemaAnnotationRun,
 } from './backgroundRuns'
 import { api } from './client'
@@ -89,7 +90,7 @@ describe('background run store', () => {
       'bootstrap_imdb_x'
     )
     expect(api.POST).toHaveBeenCalledWith('/api/bootstrap', {
-      body: { target: 'imdb', deploy: true, deploy_mode: 'docker' },
+      body: { target: 'imdb' },
     })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/runs/bootstrap_imdb_x/events?after_seq=0',
@@ -111,9 +112,7 @@ describe('background run store', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     startBootstrapRun('imdb')
-    await waitFor(() =>
-      expect(run('bootstrap_imdb_x')?.status).toBeDefined()
-    )
+    await waitFor(() => expect(run('bootstrap_imdb_x')?.status).toBeDefined())
     expect(localStorage.getItem('rdst_background_runs')).toContain(
       'bootstrap_imdb_x'
     )
@@ -122,6 +121,67 @@ describe('background run store', () => {
 
     expect(getBackgroundRuns()).toEqual([])
     expect(localStorage.getItem('rdst_background_runs')).toBeNull()
+  })
+
+  it('keeps the complete load request in memory but redacts SQL from storage', async () => {
+    const request = {
+      target: 'imdb',
+      queries: [{ identifier: 'slow-query', sql: 'SELECT 1' }],
+      mode: 'interval' as const,
+      interval_ms: 50,
+      concurrency: 1,
+      duration_seconds: 5,
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input)
+        if (url === '/api/query-registry/load-test-runs') {
+          return new Response(
+            JSON.stringify({ run_id: 'load_test_imdb_reload' }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          )
+        }
+        return sseResponse(
+          frames(
+            [
+              'complete',
+              {
+                type: 'complete',
+                elapsed_seconds: 5,
+                total_executions: 100,
+                total_successes: 100,
+                total_failures: 0,
+                qps: 20,
+                queries: [],
+                seq: 1,
+              },
+            ],
+            ['run_end', { status: 'done', seq: 2 }]
+          )
+        )
+      })
+    )
+
+    await startLoadTestRun(request)
+
+    await waitFor(() =>
+      expect(run('load_test_imdb_reload')?.status).toBe('done')
+    )
+    expect(run('load_test_imdb_reload')?.loadRequest).toEqual(request)
+    expect(
+      JSON.parse(localStorage.getItem('rdst_background_runs') ?? '[]')[0]
+        .loadRequest
+    ).toEqual({
+      ...request,
+      queries: [{ identifier: 'slow-query' }],
+    })
+    expect(localStorage.getItem('rdst_background_runs')).not.toContain(
+      'SELECT 1'
+    )
   })
 
   it('tracks table progress for manual annotation', async () => {
@@ -235,7 +295,7 @@ describe('background run store', () => {
     expect(runId).toBe('cache_test_imdb_z')
     await waitFor(() => expect(run('cache_test_imdb_z')?.status).toBe('done'))
     expect(run('cache_test_imdb_z')).toMatchObject({
-      kind: 'cache_test',
+      kind: 'speed_test',
       queryHash: 'abc123',
       queryLabel: 'Health check',
       message: 'Performance test complete',
@@ -244,22 +304,39 @@ describe('background run store', () => {
     expect(localStorage.getItem('rdst_background_runs')).toContain(
       'cache_test_imdb_z'
     )
+    expect(localStorage.getItem('rdst_background_runs')).not.toContain(
+      'SELECT 1'
+    )
   })
 
   it('tracks a health check through to its saved snapshot', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        sseResponse(
-          frames(
-            ['status', { phase: 'collect', message: 'Collecting...', seq: 1 }],
-            ['target_start', { target_name: 'imdb', index: 0, total: 1, seq: 2 }],
-            ['snapshot_saved', { snapshot_id: 'audit_imdb_20260727', seq: 3 }],
-            ['complete', { success: true, snapshot_id: 'audit_imdb_20260727', seq: 4 }],
-            ['run_end', { status: 'done', seq: 5 }]
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse(
+            frames(
+              [
+                'status',
+                { phase: 'collect', message: 'Collecting...', seq: 1 },
+              ],
+              [
+                'target_start',
+                { target_name: 'imdb', index: 0, total: 1, seq: 2 },
+              ],
+              [
+                'snapshot_saved',
+                { snapshot_id: 'audit_imdb_20260727', seq: 3 },
+              ],
+              [
+                'complete',
+                { success: true, snapshot_id: 'audit_imdb_20260727', seq: 4 },
+              ],
+              ['run_end', { status: 'done', seq: 5 }]
+            )
           )
         )
-      )
     )
 
     const started = await startAuditRun('imdb', { insights: false })
@@ -283,8 +360,14 @@ describe('background run store', () => {
       vi.fn().mockResolvedValue(
         sseResponse(
           frames(
-            ['target_start', { target_name: 'db1', index: 0, total: 2, seq: 1 }],
-            ['target_start', { target_name: 'db2', index: 1, total: 2, seq: 2 }],
+            [
+              'target_start',
+              { target_name: 'db1', index: 0, total: 2, seq: 1 },
+            ],
+            [
+              'target_start',
+              { target_name: 'db2', index: 1, total: 2, seq: 2 },
+            ],
             [
               'target_complete',
               { target_name: 'db1', result: {}, index: 0, total: 2, seq: 3 },
@@ -338,23 +421,27 @@ describe('background run store', () => {
   it('reports capture progress as a percentage of the capture window', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        sseResponse(
-          frames(
-            [
-              'capture_progress',
-              { elapsed_seconds: 15, total_seconds: 60, seq: 1 },
-            ],
-            ['complete', { success: true, run_id: 'cap_imdb_1', seq: 2 }],
-            ['run_end', { status: 'done', seq: 3 }]
+      vi
+        .fn()
+        .mockResolvedValue(
+          sseResponse(
+            frames(
+              [
+                'capture_progress',
+                { elapsed_seconds: 15, total_seconds: 60, seq: 1 },
+              ],
+              ['complete', { success: true, run_id: 'cap_imdb_1', seq: 2 }],
+              ['run_end', { status: 'done', seq: 3 }]
+            )
           )
         )
-      )
     )
 
     await startAuditCaptureRun('imdb', { duration: 60 })
 
-    await waitFor(() => expect(run('audit_capture_imdb_b')?.status).toBe('done'))
+    await waitFor(() =>
+      expect(run('audit_capture_imdb_b')?.status).toBe('done')
+    )
     expect(run('audit_capture_imdb_b')).toMatchObject({
       kind: 'audit_capture',
       message: 'Capture complete',
@@ -574,7 +661,7 @@ describe('background run store', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('migrates an old interrupted run and reattaches it on reload', async () => {
+  it('retains an interrupted run as terminal after reload', async () => {
     localStorage.setItem(
       'rdst_background_runs',
       JSON.stringify([
@@ -614,8 +701,8 @@ describe('background run store', () => {
 
     reattachBackgroundRuns()
 
-    await waitFor(() => expect(run('bootstrap_imdb_x')?.status).toBe('done'))
-    expect(api.GET).toHaveBeenCalledOnce()
+    expect(run('bootstrap_imdb_x')?.status).toBe('interrupted')
+    expect(api.GET).not.toHaveBeenCalled()
   })
 
   it('retains stored terminal results without probing the backend', () => {
@@ -644,7 +731,7 @@ describe('background run store', () => {
     expect(api.GET).not.toHaveBeenCalled()
   })
 
-  it('forgets a stored run after the backend process restarts', async () => {
+  it('marks a stored run interrupted after the backend process restarts', async () => {
     localStorage.setItem(
       'rdst_background_runs',
       JSON.stringify([
@@ -671,7 +758,12 @@ describe('background run store', () => {
 
     reattachBackgroundRuns()
 
-    await waitFor(() => expect(getBackgroundRuns()).toHaveLength(0))
+    await waitFor(() =>
+      expect(run('schema_annotation_gone')).toMatchObject({
+        status: 'interrupted',
+        message: 'Interrupted — run again.',
+      })
+    )
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

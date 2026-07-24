@@ -1,102 +1,100 @@
 /**
- * Shared hook + component for the "Cache" button used across
- * Top Queries, Query Registry, Scan Results, and Analyze Results.
+ * Shared temporary Readyset speed-test action used by query surfaces.
  *
- * Handles: deploy (if needed) → dry-run check → create cache → toast feedback.
- * Checks the backend cache list to persist "Cached" state across refreshes.
+ * The name is retained while callers migrate, but this hook no longer creates
+ * a durable cache. One background job provisions the sandbox, creates a
+ * temporary cache, measures it, and removes it.
  */
 
-import { useState, useCallback, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from '@rs/ui-new/use-toast';
-import { cachedRegistryHashes, deployAndCache, fetchCacheList } from './useCache';
+import { toast } from '@rs/ui-new/use-toast'
+import { useCallback, useMemo, useState } from 'react'
+import { startCacheTestRun, useBackgroundRuns } from './backgroundRuns'
 
 interface UseCacheActionOptions {
-  target: string | null;
-  /** Fired after a cache is successfully created, e.g. to chain a perf test. */
-  onCached?: (sql: string, id: string) => void;
+  target: string | null
+  /** Called after the background comparison is accepted. */
+  onCached?: (sql: string, id: string) => void
 }
 
 interface UseCacheActionReturn {
-  /** Trigger cache for a query. Handles deploy + create + toast. */
-  cacheQuery: (sql: string, id: string) => void;
-  /** Hash currently being cached (loading state). */
-  cachingId: string | null;
-  /** Check whether a query (by its registry hash) is already cached. */
-  isCached: (registryHash: string) => boolean;
-  /** Whether a cache operation is in progress. */
-  isPending: boolean;
+  cacheQuery: (sql: string, id: string) => void
+  cachingId: string | null
+  /** True when this browser retains a completed measured comparison. */
+  isCached: (registryHash: string) => boolean
+  isPending: boolean
 }
 
-export function useCacheAction({ target, onCached }: UseCacheActionOptions): UseCacheActionReturn {
-  const queryClient = useQueryClient();
-  const [cachingId, setCachingId] = useState<string | null>(null);
-  // Session-level cache for immediate feedback before the list refetches
-  const [sessionCached, setSessionCached] = useState<Record<string, true>>({});
+export function useCacheAction({
+  target,
+  onCached,
+}: UseCacheActionOptions): UseCacheActionReturn {
+  const backgroundRuns = useBackgroundRuns()
+  const [startingId, setStartingId] = useState<string | null>(null)
 
-  // Fetch the actual cache list from backend
-  const { data: cacheList } = useQuery({
-    queryKey: ['cache-list', target],
-    queryFn: () => fetchCacheList(target!),
-    enabled: !!target,
-    staleTime: 30_000,
-  });
+  const speedRuns = useMemo(
+    () =>
+      backgroundRuns.filter(
+        (run) =>
+          (run.kind === 'speed_test' || run.kind === 'cache_test') &&
+          run.target === target
+      ),
+    [backgroundRuns, target]
+  )
 
-  // Cached-ness is matched by registry hash (see cachedRegistryHashes), not
-  // re-derived from SQL text which cannot see through ReadySet's parameter
-  // rewriting. Clear the optimistic session cache once the authoritative list
-  // arrives.
-  const cachedHashSet = useMemo(() => {
-    if (cacheList?.caches) setSessionCached({});
-    return cachedRegistryHashes(cacheList);
-  }, [cacheList]);
+  const active = speedRuns.find(
+    (run) =>
+      run.status === 'running' ||
+      run.status === 'reconnecting' ||
+      run.status === 'needs_key'
+  )
 
   const isCached = useCallback(
-    (registryHash: string): boolean =>
-      cachedHashSet.has(registryHash) || !!sessionCached[registryHash],
-    [cachedHashSet, sessionCached],
-  );
-
-  const mutation = useMutation({
-    mutationFn: async ({ sql }: { sql: string; id: string }) => {
-      return deployAndCache(target!, sql);
-    },
-    onSuccess: (_data, { sql, id }) => {
-      setCachingId(null);
-      setSessionCached((prev) => ({ ...prev, [id]: true }));
-      queryClient.invalidateQueries({ queryKey: ['status'] });
-      queryClient.invalidateQueries({ queryKey: ['cache-status', target] });
-      queryClient.invalidateQueries({ queryKey: ['cache-list', target] });
-      toast({
-        title: 'Query cached',
-        description: 'Query is now served from ReadySet cache.',
-        variant: 'positive',
-      });
-      onCached?.(sql, id);
-    },
-    onError: (err: Error) => {
-      setCachingId(null);
-      toast({
-        title: 'Cache failed',
-        description: `${err.message}. Go to Cache page to troubleshoot.`,
-        variant: 'negative',
-      });
-    },
-  });
+    (registryHash: string) =>
+      speedRuns.some(
+        (run) =>
+          run.queryHash === registryHash &&
+          run.status === 'done' &&
+          Boolean(run.result)
+      ),
+    [speedRuns]
+  )
 
   const cacheQuery = useCallback(
     (sql: string, id: string) => {
-      if (!target) return;
-      setCachingId(id);
-      mutation.mutate({ sql, id });
+      if (!target) return
+      setStartingId(id)
+      void startCacheTestRun({
+        query: sql,
+        target,
+        query_hash: id,
+        iterations: 15,
+        warmup: 5,
+      }).then((runId) => {
+        setStartingId(null)
+        if (!runId) {
+          toast({
+            title: 'Comparison could not start',
+            description: 'Open Jobs for details.',
+            variant: 'negative',
+          })
+          return
+        }
+        toast({
+          title: 'Comparison started',
+          description:
+            'Readyset will use a temporary cache and remove it after the test.',
+          variant: 'positive',
+        })
+        onCached?.(sql, id)
+      })
     },
-    [target, mutation],
-  );
+    [target, onCached]
+  )
 
   return {
     cacheQuery,
-    cachingId,
+    cachingId: startingId ?? active?.queryHash ?? null,
     isCached,
-    isPending: mutation.isPending,
-  };
+    isPending: startingId !== null || Boolean(active),
+  }
 }

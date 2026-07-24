@@ -6,9 +6,13 @@ import { createFileRoute } from '@tanstack/react-router'
 import { CachePage } from './-cache-page'
 
 export const Route = createFileRoute('/cache')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    hash: typeof search.hash === 'string' ? search.hash : undefined,
+  }),
   component: CachePageRoute,
 })
 
 function CachePageRoute() {
-  return <CachePage />
+  const { hash } = Route.useSearch()
+  return <CachePage deepLinkHash={hash} />
 }

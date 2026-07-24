@@ -2,35 +2,35 @@
  * Form component for configuring database targets
  */
 
-import { useState, type ReactNode } from 'react';
-import { Button } from '@rs/ui-new/button';
-import { BaseInputText } from '@rs/ui-new/base-input-text';
-import { BaseInputSelect } from '@rs/ui-new/base-input-select';
-import { BaseInputSwitch } from '@rs/ui-new/base-input-switch';
-import { Text } from '@rs/ui-new/text';
-import { Icon } from '@rs/ui-new/icon';
-import { Card } from '@rs/ui-new/card';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { Show } from '@rs/ui-new/show';
-import { useDisclosure } from '@rs/ui-new/use-disclosure';
-import type { ConfigureFormData } from '../../types/configure';
+import { BaseInputSelect } from '@rs/ui-new/base-input-select'
+import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
+import { BaseInputText } from '@rs/ui-new/base-input-text'
+import { Button } from '@rs/ui-new/button'
+import { Card } from '@rs/ui-new/card'
+import { Icon } from '@rs/ui-new/icon'
+import { Show } from '@rs/ui-new/show'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import { useDisclosure } from '@rs/ui-new/use-disclosure'
+import { type ReactNode, useState } from 'react'
+import type { ConfigureFormData } from '../../types/configure'
 
 interface ConfigureFormProps {
-  initialData?: Partial<ConfigureFormData>;
-  onSubmit?: (data: ConfigureFormData) => void;
-  onCancel?: () => void;
-  isLoading?: boolean;
+  initialData?: Partial<ConfigureFormData>
+  onSubmit?: (data: ConfigureFormData) => void
+  onCancel?: () => void
+  isLoading?: boolean
   /** Override the add-mode submit label (e.g. "Test & connect" on first run). */
-  submitLabel?: string;
+  submitLabel?: string
   /** Size of the primary submit button; first run uses a large hero CTA
    *  [VIS-022, VIS-035]. Defaults to `base` so other callers are unchanged. */
-  submitSize?: 'base' | 'large';
+  submitSize?: 'base' | 'large'
 }
 
 const engineOptions = [
   { value: 'postgresql', label: 'PostgreSQL' },
   { value: 'mysql', label: 'MySQL' },
-];
+]
 
 /**
  * A form label programmatically associated with its input via `htmlFor` — the
@@ -42,8 +42,8 @@ function FieldLabel({
   htmlFor,
   children,
 }: {
-  htmlFor: string;
-  children: ReactNode;
+  htmlFor: string
+  children: ReactNode
 }) {
   return (
     <label htmlFor={htmlFor} className="block mb-1.5">
@@ -51,7 +51,7 @@ function FieldLabel({
         {children}
       </Text>
     </label>
-  );
+  )
 }
 
 /**
@@ -68,12 +68,12 @@ function Disclosure({
   onToggle,
   children,
 }: {
-  id: string;
-  title: string;
-  subtitle?: string;
-  open: boolean;
-  onToggle: (open: boolean) => void;
-  children: ReactNode;
+  id: string
+  title: string
+  subtitle?: string
+  open: boolean
+  onToggle: (open: boolean) => void
+  children: ReactNode
 }) {
   return (
     <div className="rounded-xl border border-border-layout-1 overflow-hidden">
@@ -104,7 +104,7 @@ function Disclosure({
         {children}
       </div>
     </div>
-  );
+  )
 }
 
 export function defaultPasswordEnv(targetName: string): string {
@@ -112,56 +112,65 @@ export function defaultPasswordEnv(targetName: string): string {
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return normalized ? `RDST_${normalized}_PASSWORD` : '';
+    .replace(/^_+|_+$/g, '')
+  return normalized ? `RDST_${normalized}_PASSWORD` : ''
 }
 
 interface ParsedConnectionUrl {
-  engine: string;
-  host: string;
-  port: number;
-  database: string;
-  user: string;
-  password: string;
-  tls: boolean;
+  engine: string
+  host: string
+  port: number
+  database: string
+  user: string
+  password: string
+  tls: boolean
 }
 
 function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
   try {
     // Handle postgres:// as alias for postgresql://
-    const normalizedUrl = url.replace(/^postgres:\/\//, 'postgresql://');
+    const normalizedUrl = url.replace(/^postgres:\/\//, 'postgresql://')
 
     // Check for supported protocols
-    if (!normalizedUrl.startsWith('postgresql://') && !normalizedUrl.startsWith('mysql://')) {
-      return null;
+    if (
+      !normalizedUrl.startsWith('postgresql://') &&
+      !normalizedUrl.startsWith('mysql://')
+    ) {
+      return null
     }
 
     // Parse using URL API (replace protocol for parsing)
-    const parsableUrl = normalizedUrl.replace(/^(postgresql|mysql):\/\//, 'http://');
-    const parsed = new URL(parsableUrl);
+    const parsableUrl = normalizedUrl.replace(
+      /^(postgresql|mysql):\/\//,
+      'http://'
+    )
+    const parsed = new URL(parsableUrl)
 
     // Determine engine from original protocol
-    const engine = normalizedUrl.startsWith('mysql://') ? 'mysql' : 'postgresql';
-    const defaultPort = engine === 'mysql' ? 3306 : 5432;
+    const engine = normalizedUrl.startsWith('mysql://') ? 'mysql' : 'postgresql'
+    const defaultPort = engine === 'mysql' ? 3306 : 5432
 
     // Extract database from pathname (remove leading slash)
-    const database = parsed.pathname.replace(/^\//, '');
-    const params = parsed.searchParams;
+    const database = parsed.pathname.replace(/^\//, '')
+    const params = parsed.searchParams
 
     // Infer TLS/SSL from connection string query params
-    let tls = false;
+    let tls = false
     if (engine === 'postgresql') {
-      const sslMode = (params.get('sslmode') || '').toLowerCase();
-      tls = sslMode === 'require' || sslMode === 'verify-ca' || sslMode === 'verify-full';
+      const sslMode = (params.get('sslmode') || '').toLowerCase()
+      tls =
+        sslMode === 'require' ||
+        sslMode === 'verify-ca' ||
+        sslMode === 'verify-full'
     } else {
-      const ssl = (params.get('ssl') || '').toLowerCase();
-      const sslMode = (params.get('ssl-mode') || '').toUpperCase();
+      const ssl = (params.get('ssl') || '').toLowerCase()
+      const sslMode = (params.get('ssl-mode') || '').toUpperCase()
       tls =
         ssl === 'true' ||
         ssl === '1' ||
         sslMode === 'REQUIRED' ||
         sslMode === 'VERIFY_CA' ||
-        sslMode === 'VERIFY_IDENTITY';
+        sslMode === 'VERIFY_IDENTITY'
     }
 
     return {
@@ -172,91 +181,102 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
       user: parsed.username ? decodeURIComponent(parsed.username) : '',
       password: parsed.password ? decodeURIComponent(parsed.password) : '',
       tls,
-    };
+    }
   } catch {
-    return null;
+    return null
   }
 }
 
-export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, submitLabel, submitSize = 'base' }: ConfigureFormProps) {
-  const isAddMode = !initialData?.name;
-  const [connectionUrl, setConnectionUrl] = useState('');
-  const [urlError, setUrlError] = useState<string | null>(null);
-  const [name, setName] = useState(initialData?.name || '');
-  const [engine, setEngine] = useState(initialData?.engine || 'postgresql');
+export function ConfigureForm({
+  initialData,
+  onSubmit,
+  onCancel,
+  isLoading,
+  submitLabel,
+  submitSize = 'base',
+}: ConfigureFormProps) {
+  const isAddMode = !initialData?.name
+  const [connectionUrl, setConnectionUrl] = useState('')
+  const [urlError, setUrlError] = useState<string | null>(null)
+  const [name, setName] = useState(initialData?.name || '')
+  const [engine, setEngine] = useState(initialData?.engine || 'postgresql')
   const defaultPort =
     initialData?.port ??
-    ((initialData?.engine || 'postgresql') === 'mysql' ? 3306 : 5432);
-  const [host, setHost] = useState(initialData?.host || 'localhost');
-  const [port, setPort] = useState(defaultPort);
-  const [database, setDatabase] = useState(initialData?.database || '');
-  const [user, setUser] = useState(initialData?.user || '');
-  const [passwordEnv, setPasswordEnv] = useState(initialData?.password_env || '');
-  const [password, setPassword] = useState('');
+    ((initialData?.engine || 'postgresql') === 'mysql' ? 3306 : 5432)
+  const [host, setHost] = useState(initialData?.host || 'localhost')
+  const [port, setPort] = useState(defaultPort)
+  const [database, setDatabase] = useState(initialData?.database || '')
+  const [user, setUser] = useState(initialData?.user || '')
+  const [passwordEnv, setPasswordEnv] = useState(
+    initialData?.password_env || ''
+  )
+  const [password, setPassword] = useState('')
   const [passwordEnvCustomized, setPasswordEnvCustomized] = useState(
-    Boolean(initialData?.password_env),
-  );
-  const [tls, setTls] = useState(initialData?.tls ?? false);
-  const [readOnly, setReadOnly] = useState(initialData?.read_only ?? false);
-  const [deploy, setDeploy] = useState(true);
+    Boolean(initialData?.password_env)
+  )
+  const [tls, setTls] = useState(initialData?.tls ?? false)
+  const [readOnly, setReadOnly] = useState(initialData?.read_only ?? false)
 
   // "Connection details" holds the fields the connection needs, so it opens by
   // default; "Advanced" (TLS / read-only) stays collapsed until asked for. A
   // paste reveals both so the auto-filled values — including the inferred TLS —
   // are visible for review. [VIS-114, USE-067]
-  const [detailsOpenState, setDetailsOpenState] = useState(true);
+  const [detailsOpenState, setDetailsOpenState] = useState(true)
   const [detailsOpen, setDetailsOpen] = useDisclosure({
     open: detailsOpenState,
     onOpenChange: setDetailsOpenState,
-  });
-  const [advancedOpen, setAdvancedOpen] = useDisclosure({});
+  })
+  const [advancedOpen, setAdvancedOpen] = useDisclosure({})
 
   const handleParseUrl = () => {
-    setUrlError(null);
-    const trimmedUrl = connectionUrl.trim();
+    setUrlError(null)
+    const trimmedUrl = connectionUrl.trim()
 
     if (!trimmedUrl) {
-      setUrlError('Please enter a connection URL');
-      return;
+      setUrlError('Please enter a connection URL')
+      return
     }
 
-    const parsed = parseConnectionUrl(trimmedUrl);
+    const parsed = parseConnectionUrl(trimmedUrl)
     if (!parsed) {
-      setUrlError('Invalid URL format. Expected: postgresql://user@host:port/database');
-      return;
+      setUrlError(
+        'Invalid URL format. Expected: postgresql://user@host:port/database'
+      )
+      return
     }
 
-    setEngine(parsed.engine);
-    setHost(parsed.host);
-    setPort(parsed.port);
-    setDatabase(parsed.database);
-    setUser(parsed.user);
-    setPassword(parsed.password);
-    setTls(parsed.tls);
+    setEngine(parsed.engine)
+    setHost(parsed.host)
+    setPort(parsed.port)
+    setDatabase(parsed.database)
+    setUser(parsed.user)
+    setPassword(parsed.password)
+    setTls(parsed.tls)
 
     // Auto-generate name from database if not already set
     if (!name && parsed.database) {
-      setName(parsed.database);
+      setName(parsed.database)
       if (!passwordEnvCustomized) {
-        setPasswordEnv(defaultPasswordEnv(parsed.database));
+        setPasswordEnv(defaultPasswordEnv(parsed.database))
       }
     }
 
     // Reveal the pre-filled fields (and the inferred TLS in Advanced) for review.
-    setDetailsOpen(true);
-    setAdvancedOpen(true);
+    setDetailsOpen(true)
+    setAdvancedOpen(true)
 
     // Clear the URL field after successful parse
-    setConnectionUrl('');
-  };
+    setConnectionUrl('')
+  }
 
   const isAddModePasswordValid =
-    !isAddMode || (passwordEnv.trim().length > 0 && password.length > 0);
-  const isValid = name && host && port && database && user && isAddModePasswordValid;
+    !isAddMode || (passwordEnv.trim().length > 0 && password.length > 0)
+  const isValid =
+    name && host && port && database && user && isAddModePasswordValid
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isValid || !onSubmit) return;
+    e.preventDefault()
+    if (!isValid || !onSubmit) return
 
     onSubmit({
       name,
@@ -269,25 +289,23 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
       password_env: passwordEnv || undefined,
       tls,
       read_only: readOnly,
-      ...(isAddMode ? { deploy } : {}),
-    });
-  };
+    })
+  }
 
   const handleCancel = () => {
-    setName('');
-    setEngine('postgresql');
-    setHost('localhost');
-    setPort(5432);
-    setDatabase('');
-    setUser('');
-    setPasswordEnv('');
-    setPassword('');
-    setPasswordEnvCustomized(false);
-    setTls(false);
-    setReadOnly(false);
-    setDeploy(true);
-    onCancel?.();
-  };
+    setName('')
+    setEngine('postgresql')
+    setHost('localhost')
+    setPort(5432)
+    setDatabase('')
+    setUser('')
+    setPasswordEnv('')
+    setPassword('')
+    setPasswordEnvCustomized(false)
+    setTls(false)
+    setReadOnly(false)
+    onCancel?.()
+  }
 
   return (
     <form onSubmit={handleSubmit}>
@@ -304,7 +322,7 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
             </Text>
           </HStack>
         </Card.Header>
-      <Card.Content>
+        <Card.Content>
           <div className="space-y-5">
             {/* Quick Setup — the primary path. Hidden when editing a known
                 connection (there's no string to paste). The parser itself stays
@@ -312,9 +330,17 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
             {isAddMode && (
               <div className="rounded-xl bg-surface-layout-2/50 p-4">
                 <HStack className="gap-2 items-center mb-3">
-                  <Icon name="connect" label="Quick setup" className="w-4 h-4 text-content-primary-soft" />
+                  <Icon
+                    name="connect"
+                    label="Quick setup"
+                    className="w-4 h-4 text-content-primary-soft"
+                  />
                   <label htmlFor="cfg-connection-url">
-                    <Text as="span" level="label-small" className="text-content-primary-soft">
+                    <Text
+                      as="span"
+                      level="label-small"
+                      className="text-content-primary-soft"
+                    >
                       Quick Setup
                     </Text>
                   </label>
@@ -327,8 +353,8 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                         name="connectionUrl"
                         value={connectionUrl}
                         onChange={(e) => {
-                          setConnectionUrl(e.target.value);
-                          setUrlError(null);
+                          setConnectionUrl(e.target.value)
+                          setUrlError(null)
                         }}
                         placeholder="postgresql://user@host:5432/database"
                         disabled={isLoading}
@@ -344,7 +370,10 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                     />
                   </div>
                   <Show when={!!urlError}>
-                    <Text level="body-small" className="text-content-negative-soft">
+                    <Text
+                      level="body-small"
+                      className="text-content-negative-soft"
+                    >
                       {urlError}
                     </Text>
                   </Show>
@@ -364,10 +393,10 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                 name="name"
                 value={name}
                 onChange={(e) => {
-                  const nextName = e.target.value;
-                  setName(nextName);
+                  const nextName = e.target.value
+                  setName(nextName)
                   if (isAddMode && !passwordEnvCustomized) {
-                    setPasswordEnv(defaultPasswordEnv(nextName));
+                    setPasswordEnv(defaultPasswordEnv(nextName))
                   }
                 }}
                 placeholder="my-database"
@@ -393,7 +422,9 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <FieldLabel htmlFor="cfg-engine">Database Engine *</FieldLabel>
+                    <FieldLabel htmlFor="cfg-engine">
+                      Database Engine *
+                    </FieldLabel>
                     <BaseInputSelect
                       id="cfg-engine"
                       name="engine"
@@ -468,16 +499,20 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder={isAddMode ? 'Enter database password' : 'Leave blank to keep current password'}
+                    placeholder={
+                      isAddMode
+                        ? 'Enter database password'
+                        : 'Leave blank to keep current password'
+                    }
                     disabled={isLoading}
                     required={isAddMode}
                     autoComplete="new-password"
                   />
                   <Text level="caption" className="text-content-layout-3 mt-1">
-                    Stored in your local secret store, never in the target configuration
+                    Stored in your local secret store, never in the target
+                    configuration
                   </Text>
                 </div>
-
               </div>
             </Disclosure>
 
@@ -493,10 +528,18 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                 <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
                   <label htmlFor="cfg-tls" className="cursor-pointer">
                     <VStack className="gap-0.5 items-start">
-                      <Text as="span" level="label-small" className="text-content-layout-1">
+                      <Text
+                        as="span"
+                        level="label-small"
+                        className="text-content-layout-1"
+                      >
                         TLS / SSL
                       </Text>
-                      <Text as="span" level="caption" className="text-content-layout-3">
+                      <Text
+                        as="span"
+                        level="caption"
+                        className="text-content-layout-3"
+                      >
                         Require encrypted connection
                       </Text>
                     </VStack>
@@ -514,10 +557,18 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                 <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
                   <label htmlFor="cfg-read-only" className="cursor-pointer">
                     <VStack className="gap-0.5 items-start">
-                      <Text as="span" level="label-small" className="text-content-layout-1">
+                      <Text
+                        as="span"
+                        level="label-small"
+                        className="text-content-layout-1"
+                      >
                         Read Only
                       </Text>
-                      <Text as="span" level="caption" className="text-content-layout-3">
+                      <Text
+                        as="span"
+                        level="caption"
+                        className="text-content-layout-3"
+                      >
                         Restrict to SELECT queries only
                       </Text>
                     </VStack>
@@ -533,30 +584,6 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                 </div>
               </div>
             </Disclosure>
-
-            {isAddMode && (
-              <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
-                <label htmlFor="cfg-deploy" className="cursor-pointer">
-                  <VStack className="gap-0.5 items-start">
-                    <Text as="span" level="label-small" className="text-content-layout-1">
-                      Deploy Readyset now
-                    </Text>
-                    <Text as="span" level="caption" className="text-content-layout-3">
-                      Starts a ReadySet container (~4 GB RAM, 2 CPUs) so caching
-                      works on the first click
-                    </Text>
-                  </VStack>
-                </label>
-                <BaseInputSwitch
-                  id="cfg-deploy"
-                  name="deploy"
-                  aria-label="Deploy Readyset now"
-                  checked={deploy}
-                  onCheckedChange={setDeploy}
-                  disabled={isLoading}
-                />
-              </div>
-            )}
           </div>
         </Card.Content>
         <Card.Footer>
@@ -573,7 +600,11 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
               variant="rising"
               modifier="solid"
               size={submitSize}
-              label={initialData?.name ? 'Update Target' : submitLabel ?? 'Add Target'}
+              label={
+                initialData?.name
+                  ? 'Update Target'
+                  : (submitLabel ?? 'Add Target')
+              }
               type="submit"
               loading={isLoading}
               disabled={!isValid}
@@ -582,5 +613,5 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
         </Card.Footer>
       </Card>
     </form>
-  );
+  )
 }
