@@ -2,10 +2,30 @@
 
 from __future__ import annotations
 
+import shutil
 import socket
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404
 from typing import Any, Dict, Optional
 from urllib.parse import quote as urlquote
+
+MANAGED_SANDBOX_NAME = "rdst-readyset-sandbox"
+MANAGED_SANDBOX_LABEL = "io.readyset.rdst.sandbox"
+
+
+def docker_runtime_status() -> Dict[str, bool]:
+    """Return whether the local Docker CLI and daemon are available."""
+    if shutil.which("docker") is None:
+        return {"installed": False, "running": False}
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return {"installed": True, "running": False}
+    return {"installed": True, "running": result.returncode == 0}
 
 
 def deploy_local_docker(
@@ -16,7 +36,7 @@ def deploy_local_docker(
     """Deploy Readyset locally via Docker.
 
     Two paths:
-    1. Container exists from prior analyze → promote to permanent
+    1. A target-specific container already exists → promote to permanent
     2. No container → create new with persistent flags
     """
     # Check for existing container (both naming conventions)
@@ -240,6 +260,297 @@ def _create_container(
             "success": False,
             "error": "Container creation timed out (5 min). Check your network connection.",
         }
+
+
+def deploy_managed_sandbox(
+    target_name: str,
+    variables: Dict[str, str],
+    password: str,
+    fingerprint: str,
+) -> Dict[str, Any]:
+    """Create the manager-owned capacity-one sandbox.
+
+    Unlike the legacy deploy path this has a stable name, explicit ownership
+    labels, explicit cache creation, and no Docker restart policy.
+    """
+    variables = dict(variables)
+    variables["container_name"] = MANAGED_SANDBOX_NAME
+    variables["query_caching"] = "explicit"
+    existing, inspection_error = _inspect_exact_container_checked(
+        MANAGED_SANDBOX_NAME
+    )
+    if inspection_error:
+        return {
+            "success": False,
+            "error": f"Could not inspect managed sandbox: {inspection_error}",
+        }
+    if existing:
+        if existing.get("managed") != "true":
+            return {
+                "success": False,
+                "error": (
+                    f"Container '{MANAGED_SANDBOX_NAME}' already exists but is not "
+                    "owned by RDST. Rename or remove it before running a speed test."
+                ),
+            }
+        removed = remove_managed_sandbox()
+        if not removed.get("success"):
+            return removed
+
+    result = _create_container_command(
+        variables,
+        password,
+        extra_args=[
+            "--label",
+            f"{MANAGED_SANDBOX_LABEL}=true",
+            "--label",
+            f"io.readyset.rdst.target={target_name}",
+            "--label",
+            f"io.readyset.rdst.fingerprint={fingerprint}",
+        ],
+        restart_policy=False,
+    )
+    if result.get("success"):
+        result["target"] = target_name
+        result["fingerprint"] = fingerprint
+    return result
+
+
+def inspect_managed_sandbox() -> Optional[Dict[str, Any]]:
+    """Return labeled sandbox identity, or None for absent/foreign containers."""
+    result, inspection_error = _inspect_exact_container_checked(
+        MANAGED_SANDBOX_NAME
+    )
+    if inspection_error:
+        raise RuntimeError(f"Could not inspect managed sandbox: {inspection_error}")
+    if not result or result.get("managed") != "true":
+        return None
+    return result
+
+
+def managed_sandbox_running() -> bool:
+    result = inspect_managed_sandbox()
+    return bool(result and result.get("running"))
+
+
+def remove_managed_sandbox() -> Dict[str, Any]:
+    """Remove only the exact, labeled RDST sandbox."""
+    existing, inspection_error = _inspect_exact_container_checked(
+        MANAGED_SANDBOX_NAME
+    )
+    if inspection_error:
+        return {
+            "success": False,
+            "removed": False,
+            "error": f"Could not inspect managed sandbox: {inspection_error}",
+        }
+    if not existing:
+        return {"success": True, "removed": False}
+    if existing.get("managed") != "true":
+        return {
+            "success": False,
+            "error": (
+                f"Refusing to remove foreign container '{MANAGED_SANDBOX_NAME}'."
+            ),
+        }
+    try:
+        result = subprocess.run(
+            ["docker", "rm", "-f", MANAGED_SANDBOX_NAME],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+        return {"success": False, "error": f"Failed to remove sandbox: {exc}"}
+    if result.returncode != 0:
+        return {
+            "success": False,
+            "error": result.stderr.strip() or "docker rm failed",
+        }
+    return {"success": True, "removed": True}
+
+
+def remove_configured_legacy_container(name: str) -> Dict[str, Any]:
+    """Remove one exact legacy container already referenced by RDST config."""
+    if (
+        not name.startswith("rdst-readyset-")
+        or name == MANAGED_SANDBOX_NAME
+        or "/" in name
+    ):
+        return {"success": False, "error": "Not an RDST legacy container name"}
+    state = _docker_inspect_state(name)
+    if state is None:
+        runtime = docker_runtime_status()
+        if not runtime.get("running"):
+            return {
+                "success": False,
+                "removed": False,
+                "error": (
+                    "Docker is unavailable, so RDST could not verify or remove "
+                    f"legacy container '{name}'."
+                ),
+            }
+        return {"success": True, "removed": False}
+    try:
+        result = subprocess.run(
+            ["docker", "rm", "-f", name],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+        return {"success": False, "error": f"Failed to remove {name}: {exc}"}
+    if result.returncode != 0:
+        return {
+            "success": False,
+            "error": result.stderr.strip() or f"docker rm {name} failed",
+        }
+    return {"success": True, "removed": True}
+
+
+def _inspect_exact_container(name: str) -> Optional[Dict[str, Any]]:
+    value, _error = _inspect_exact_container_checked(name)
+    return value
+
+
+def _inspect_exact_container_checked(
+    name: str,
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                (
+                    "{{.State.Running}}|"
+                    f'{{{{index .Config.Labels "{MANAGED_SANDBOX_LABEL}"}}}}|'
+                    '{{index .Config.Labels "io.readyset.rdst.target"}}|'
+                    '{{index .Config.Labels "io.readyset.rdst.fingerprint"}}'
+                ),
+                name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "docker inspect timed out"
+    except FileNotFoundError:
+        return None, "Docker CLI was not found"
+    except OSError as exc:
+        return None, str(exc)
+    if result.returncode != 0:
+        error = result.stderr.strip() or "docker inspect failed"
+        lowered = error.lower()
+        if "no such object" in lowered or "no such container" in lowered:
+            return None, None
+        return None, error
+    parts = result.stdout.strip().split("|")
+    if len(parts) != 4:
+        return None, "docker inspect returned an invalid response"
+    return {
+        "running": parts[0].lower() == "true",
+        "managed": parts[1],
+        "target": parts[2],
+        "fingerprint": parts[3],
+    }, None
+
+
+def _create_container_command(
+    variables: Dict[str, str],
+    password: str,
+    *,
+    extra_args: list[str] | None = None,
+    restart_policy: bool,
+) -> Dict[str, Any]:
+    """Create a Readyset container with an explicit lifecycle policy."""
+    engine = variables["db_engine"]
+    db_host = variables["db_host"]
+    docker_db_host = (
+        "host.docker.internal"
+        if db_host in ("localhost", "127.0.0.1", "::1")
+        else db_host
+    )
+    safe_user = urlquote(variables["db_user"], safe="")
+    safe_password = urlquote(password, safe="")
+    db_type = "mysql" if engine == "mysql" else "postgresql"
+    db_url = (
+        f"{db_type}://{safe_user}:{safe_password}@{docker_db_host}:"
+        f"{variables['db_port']}/{variables['db_name']}"
+    )
+    readyset_port = variables["readyset_port"]
+    metrics_port = variables.get("metrics_port", "6034")
+    command = ["docker", "run", "-d"]
+    if restart_policy:
+        command.append("--restart=unless-stopped")
+    command.extend(
+        [
+            "--name",
+            variables["container_name"],
+            f"--memory={variables.get('docker_memory', '4g')}",
+            f"--cpus={variables.get('cpus', '2')}",
+        ]
+    )
+    command.extend(extra_args or [])
+    command.extend(
+        [
+            "-e",
+            f"UPSTREAM_DB_URL={db_url}",
+            "-e",
+            f"DATABASE_TYPE={db_type}",
+            "-e",
+            f"LISTEN_ADDRESS=0.0.0.0:{readyset_port}",
+            "-e",
+            "DEPLOYMENT_MODE=standalone",
+            "-e",
+            f"QUERY_CACHING={variables.get('query_caching', 'explicit')}",
+            "-e",
+            "QUERY_LOG_MODE=enabled",
+            "-e",
+            "PROMETHEUS_METRICS=true",
+            "-e",
+            "CACHE_MODE=shallow",
+            "-e",
+            "SHALLOW_MEMORY_PERCENT=100",
+            "-e",
+            f"READYSET_MEMORY_LIMIT={variables.get('memory_bytes', 4 * 1024 * 1024 * 1024)}",
+            "-e",
+            "DEFAULT_TTL_MS=600000",
+            "-e",
+            f"METRICS_ADDRESS=0.0.0.0:{metrics_port}",
+            "-p",
+            f"{readyset_port}:{readyset_port}",
+            "-p",
+            f"{metrics_port}:{metrics_port}",
+            "--add-host=host.docker.internal:host-gateway",
+            variables["readyset_image"],
+        ]
+    )
+    try:
+        docker_check = subprocess.run(
+            ["docker", "info"], capture_output=True, timeout=5
+        )
+        if docker_check.returncode != 0:
+            return {
+                "success": False,
+                "error": "Docker is not running. Start Docker and try again.",
+            }
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=300
+        )
+    except FileNotFoundError:
+        return {"success": False, "error": "Docker CLI was not found on RDST's PATH."}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Container creation timed out (5 min)."}
+    if result.returncode != 0:
+        return {"success": False, "error": _format_docker_error(result.stderr.strip())}
+    return {
+        "success": True,
+        "container_name": variables["container_name"],
+        "created": True,
+        "port": readyset_port,
+    }
 
 
 def _container_name(target_name: str) -> str:

@@ -21,6 +21,7 @@ export default defineConfig({
   failOnFlakyTests: isCI,
   retries: isCI ? 1 : 0,
   workers: 1,
+  expect: { timeout: isCI ? 15_000 : 5_000 },
   // Keep only evidence from failed attempts. Buildkite uploads this directory
   // together with the HTML report and the complete runner/server log.
   preserveOutput: 'failures-only',

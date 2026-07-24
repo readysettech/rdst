@@ -22,6 +22,36 @@ from shared.deploy import lifecycle
 from shared.deploy import local_docker
 
 
+class TestDockerRuntimeStatus:
+    @patch("shared.deploy.local_docker.subprocess.run")
+    @patch("shared.deploy.local_docker.shutil.which", return_value=None)
+    def test_reports_missing_cli_without_invoking_docker(self, _which, mock_run):
+        assert local_docker.docker_runtime_status() == {
+            "installed": False,
+            "running": False,
+        }
+        mock_run.assert_not_called()
+
+    @patch("shared.deploy.local_docker.subprocess.run")
+    @patch(
+        "shared.deploy.local_docker.shutil.which",
+        return_value="/usr/bin/docker",
+    )
+    def test_reports_daemon_state_from_docker_info(self, _which, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
+        assert local_docker.docker_runtime_status() == {
+            "installed": True,
+            "running": True,
+        }
+        mock_run.assert_called_once_with(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+
 class TestLifecycleProbeState:
 
     def test_probe_state_values(self):
@@ -199,3 +229,122 @@ class TestLocalDockerLifecycleOps:
         result = local_docker.restart_local_docker("test")
         assert result.success is True
         assert result.state_after == lifecycle.ProbeState.DEPLOYED_RUNNING
+
+
+class TestManagedSandboxDocker:
+    @staticmethod
+    def variables():
+        return {
+            "db_engine": "postgresql",
+            "db_host": "localhost",
+            "db_port": "5432",
+            "db_user": "app",
+            "db_name": "app",
+            "readyset_port": "5433",
+            "metrics_port": "6034",
+            "container_name": "ignored",
+            "readyset_image": "readyset:test",
+        }
+
+    @patch("shared.deploy.local_docker.subprocess.run")
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=(None, None),
+    )
+    def test_managed_deploy_has_stable_identity_and_no_restart_policy(
+        self, _inspect, mock_run
+    ):
+        mock_run.side_effect = [
+            MagicMock(returncode=0),
+            MagicMock(returncode=0, stdout="container-id", stderr=""),
+        ]
+
+        result = local_docker.deploy_managed_sandbox(
+            "origin", self.variables(), "secret", "fingerprint"
+        )
+
+        assert result["success"] is True
+        command = mock_run.call_args_list[1].args[0]
+        assert command[0:3] == ["docker", "run", "-d"]
+        assert "--restart=unless-stopped" not in command
+        assert command[command.index("--name") + 1] == "rdst-readyset-sandbox"
+        assert "QUERY_CACHING=explicit" in command
+        assert "io.readyset.rdst.sandbox=true" in command
+        assert "io.readyset.rdst.target=origin" in command
+        assert "io.readyset.rdst.fingerprint=fingerprint" in command
+
+    @patch("shared.deploy.local_docker.subprocess.run")
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=({"managed": "", "running": True}, None),
+    )
+    def test_managed_deploy_refuses_foreign_stable_name(self, _inspect, mock_run):
+        result = local_docker.deploy_managed_sandbox(
+            "origin", self.variables(), "secret", "fingerprint"
+        )
+
+        assert result["success"] is False
+        assert "not owned by RDST" in result["error"]
+        mock_run.assert_not_called()
+
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=({"managed": "", "running": True}, None),
+    )
+    def test_managed_remove_refuses_foreign_stable_name(self, _inspect):
+        result = local_docker.remove_managed_sandbox()
+
+        assert result["success"] is False
+        assert "Refusing to remove foreign container" in result["error"]
+
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=(None, "docker inspect timed out"),
+    )
+    def test_managed_remove_does_not_claim_absence_after_inspection_failure(
+        self, _inspect
+    ):
+        result = local_docker.remove_managed_sandbox()
+
+        assert result["success"] is False
+        assert result["removed"] is False
+        assert "timed out" in result["error"]
+
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=(None, "Docker daemon unavailable"),
+    )
+    def test_managed_deploy_fails_closed_after_inspection_failure(self, _inspect):
+        result = local_docker.deploy_managed_sandbox(
+            "origin", self.variables(), "secret", "fingerprint"
+        )
+
+        assert result["success"] is False
+        assert "Docker daemon unavailable" in result["error"]
+
+    @patch(
+        "shared.deploy.local_docker._inspect_exact_container_checked",
+        return_value=(None, "docker inspect timed out"),
+    )
+    def test_managed_inspect_reports_inspection_failure(self, _inspect):
+        with pytest.raises(RuntimeError, match="docker inspect timed out"):
+            local_docker.inspect_managed_sandbox()
+
+    @patch(
+        "shared.deploy.local_docker.docker_runtime_status",
+        return_value={"installed": True, "running": False},
+    )
+    @patch(
+        "shared.deploy.local_docker._docker_inspect_state",
+        return_value=None,
+    )
+    def test_legacy_remove_does_not_claim_absence_when_daemon_is_down(
+        self, _inspect, _runtime
+    ):
+        result = local_docker.remove_configured_legacy_container(
+            "rdst-readyset-production"
+        )
+
+        assert result["success"] is False
+        assert result["removed"] is False
+        assert "Docker" in result["error"]
