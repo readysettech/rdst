@@ -1375,10 +1375,8 @@ class FleetCommand:
                             _time.sleep(0.5)
 
         # Readyset cache benchmarking on captured queries. Sequential by
-        # design: each target's _run_readyset_testing wraps one
-        # ephemeral_lifecycle — deploy (or reuse a running container),
-        # benchmark, tear down to the pre-run state — before the next
-        # target starts, so at most one container is alive at a time.
+        # design: each target's _run_readyset_testing acquires the managed
+        # capacity-one sandbox lease before the next target starts.
         if duration_seconds:
             try:
                 from features.audit.cli.command import AuditCommand

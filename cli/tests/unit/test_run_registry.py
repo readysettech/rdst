@@ -26,6 +26,13 @@ class CompleteEv:
     success: bool
 
 
+@dataclass
+class CleanupError:
+    type: str = "error"
+    message: str = "Temporary cache cleanup failed"
+    code: str = "speed_test_cleanup_failed"
+
+
 async def _collect(registry, run_id, after_seq=0):
     async def _go():
         return [e async for e in registry.events(run_id, after_seq=after_seq)]
@@ -203,6 +210,25 @@ class TestLifecycle:
         assert events[-1]["data"]["status"] == "failed"
 
     @pytest.mark.asyncio
+    async def test_cleanup_error_after_speed_result_marks_run_partial(self):
+        registry = RunRegistry()
+
+        async def gen():
+            yield Ev("cache_run_complete")
+            yield CleanupError()
+
+        run_id = registry.start("speed_test", "imdb", gen())
+        events = await _collect(registry, run_id)
+
+        assert registry.status(run_id) == "partial"
+        assert [event["event"] for event in events] == [
+            "cache_run_complete",
+            "error",
+            "run_end",
+        ]
+        assert events[-1]["data"]["status"] == "partial"
+
+    @pytest.mark.asyncio
     async def test_generator_error_becomes_error_event_and_failed_status(self):
         registry = RunRegistry()
 
@@ -236,6 +262,47 @@ class TestLifecycle:
         assert events[-1]["event"] == "run_end"
         assert events[-1]["data"]["status"] == "cancelled"
         assert registry.cancel("no_such_run") is False
+
+    @pytest.mark.asyncio
+    async def test_immediate_cancel_still_emits_terminal_event(self):
+        registry = RunRegistry()
+        gate = asyncio.Event()
+        run_id = registry.start(
+            "speed_test", "imdb", _gated(gate, ["never"], [])
+        )
+
+        assert registry.cancel(run_id) is True
+        events = await _collect(registry, run_id)
+
+        assert registry.status(run_id) == "cancelled"
+        assert [event["event"] for event in events] == ["run_end"]
+        assert events[-1]["data"]["status"] == "cancelled"
+        assert registry.find_active_matching(
+            "speed_test", "imdb", {}, keys=()
+        ) is None
+
+    @pytest.mark.asyncio
+    async def test_cancel_target_cancels_every_active_target_run(self):
+        registry = RunRegistry()
+        gate = asyncio.Event()
+        first = registry.start(
+            "speed_test", "imdb", _gated(gate, ["queued"], [])
+        )
+        second = registry.start(
+            "load_test", "imdb", _gated(gate, ["queued"], [])
+        )
+        other = registry.start(
+            "speed_test", "analytics", _gated(gate, ["queued"], [])
+        )
+        await asyncio.sleep(0.01)
+
+        assert registry.cancel_target("imdb") == 2
+        await _wait_status(registry, first, "cancelled")
+        await _wait_status(registry, second, "cancelled")
+        assert registry.status(other) == "running"
+
+        gate.set()
+        await _collect(registry, other)
 
     @pytest.mark.asyncio
     async def test_needs_key_gates_status_then_returns_to_running(self):

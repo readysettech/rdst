@@ -312,8 +312,8 @@ class AuditService:
                     step="deploying",
                 )
                 try:
-                    outcome = await asyncio.to_thread(
-                        self.run_readyset_comparison, target_name, captured,
+                    outcome = await self.run_readyset_comparison(
+                        target_name, captured,
                     )
                 except Exception as exc:
                     outcome = {"status": "error", "detail": str(exc)}
@@ -495,17 +495,15 @@ class AuditService:
         return workload
 
     @staticmethod
-    def run_readyset_comparison(
+    async def run_readyset_comparison(
         target_name: str, queries: list[dict[str, Any]], max_queries: int = 20,
     ) -> dict[str, Any]:
-        """Benchmark captured queries against an ephemeral Readyset container.
+        """Benchmark captured queries through the managed Readyset sandbox."""
+        from .readyset_benchmark import build_comparison, run_managed_benchmark
 
-        Blocking; run in a thread. Returns a status plus either the comparison
-        or a clear failure detail. A failed benchmark never fails the audit.
-        """
-        from .readyset_benchmark import build_comparison, run_ephemeral_benchmark
-
-        outcome = run_ephemeral_benchmark(target_name, queries, max_queries=max_queries)
+        outcome = await run_managed_benchmark(
+            target_name, queries, max_queries=max_queries
+        )
         if outcome.get("status") != "ok":
             return {
                 "status": "error",

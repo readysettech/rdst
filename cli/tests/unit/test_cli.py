@@ -277,7 +277,80 @@ class TestFormatAnalyzeOutput:
 
         result = format_analyze_output(workflow_result)
         assert "Readyset Performance" in result
-        assert "PERFORMANCE COMPARISON" in result
+        assert "VERIFIED READYSET SPEED TEST" in result
+        assert "CACHEABLE" in result
+
+    def test_static_readyset_cacheability_is_labeled_as_compatibility(self):
+        workflow_result = {
+            "FormatFinalResults": {"success": False},
+            "query": "SELECT 1",
+            "explain_results": {
+                "success": True,
+                "execution_time_ms": 1.0,
+                "rows_examined": 1,
+                "rows_returned": 1,
+            },
+            "readyset_cacheability": {
+                "checked": True,
+                "cacheable": True,
+                "confidence": "high",
+                "method": "static_analysis",
+                "explanation": "No compatibility issues detected.",
+                "issues": [],
+                "warnings": [],
+            },
+        }
+
+        result = format_analyze_output(workflow_result)
+
+        assert "Readyset Compatibility" in result
+        assert "STATIC COMPATIBILITY CHECK" in result
+        assert "CACHEABLE" in result
+        assert "static_analysis" in result
+        assert "No compatibility issues detected." in result
+        assert "PERFORMANCE COMPARISON" not in result
+
+    def test_explicit_readyset_speed_test_displays_measured_result(self):
+        workflow_result = {
+            "FormatFinalResults": {"success": False},
+            "query": "SELECT 1",
+            "explain_results": {
+                "success": True,
+                "execution_time_ms": 1.0,
+                "rows_examined": 1,
+                "rows_returned": 1,
+            },
+            "readyset_analysis": {
+                "success": True,
+                "cacheable": True,
+                "confidence": "high",
+                "method": "readyset_speed_test",
+                "explanation": "Verified with a temporary Readyset cache.",
+                "performance_comparison": {
+                    "original": {"stats": {"mean": 12.0}},
+                    "readyset": {"stats": {"mean": 3.0}},
+                    "speedup": {"mean": 4.0},
+                },
+            },
+            "readyset_cacheability": {
+                "checked": True,
+                "cacheable": True,
+                "confidence": "high",
+                "method": "readyset_speed_test",
+            },
+        }
+
+        result = format_analyze_output(workflow_result)
+
+        assert "Readyset Performance" in result
+        assert "VERIFIED READYSET SPEED TEST" in result
+        assert "readyset_speed_test" in result
+        assert "Origin mean" in result
+        assert "12.00ms" in result
+        assert "Readyset mean" in result
+        assert "3.00ms" in result
+        assert "Mean speedup" in result
+        assert "4.0x" in result
 
 
 class TestTargetsConfig:

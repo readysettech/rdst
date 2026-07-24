@@ -17,6 +17,11 @@ from shared.ui import (
 )
 from shared.ui.theme import duration_style
 
+MIN_COMPARISON_ITERATIONS = 1
+MAX_COMPARISON_ITERATIONS = 1000
+MIN_COMPARISON_WARMUP = 0
+MAX_COMPARISON_WARMUP = 100
+
 
 class ComparisonCancelled(Exception):
     """Raised inside the benchmark worker when its owning run is cancelled."""
@@ -143,6 +148,23 @@ def run_comparison(
 
     Suitable for service-layer / API use.
     """
+    if not MIN_COMPARISON_ITERATIONS <= iterations <= MAX_COMPARISON_ITERATIONS:
+        return {
+            "success": False,
+            "error": (
+                "Measured iterations must be between "
+                f"{MIN_COMPARISON_ITERATIONS} and {MAX_COMPARISON_ITERATIONS}"
+            ),
+        }
+    if not MIN_COMPARISON_WARMUP <= warmup_iterations <= MAX_COMPARISON_WARMUP:
+        return {
+            "success": False,
+            "error": (
+                "Warmup iterations must be between "
+                f"{MIN_COMPARISON_WARMUP} and {MAX_COMPARISON_WARMUP}"
+            ),
+        }
+
     def _progress(stage: str, current: int, total: int):
         if on_progress:
             try:
@@ -161,37 +183,63 @@ def run_comparison(
         if controller:
             controller.register(cache_conn)
 
-        total_steps = warmup_iterations * 2 + iterations * 2
-
         # Warmup — both targets
         for i in range(warmup_iterations):
-            _execute_on_connection(origin_conn, query, origin_engine, controller)
+            result = _execute_on_connection(
+                origin_conn, query, origin_engine, controller
+            )
+            if not result["success"]:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Original database warmup iteration {i + 1} failed: "
+                        f"{result.get('error') or 'unknown error'}"
+                    ),
+                }
             _progress("warmup", i + 1, warmup_iterations * 2)
         for i in range(warmup_iterations):
-            _execute_on_connection(cache_conn, query, cache_engine, controller)
+            result = _execute_on_connection(
+                cache_conn, query, cache_engine, controller
+            )
+            if not result["success"]:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Readyset warmup iteration {i + 1} failed: "
+                        f"{result.get('error') or 'unknown error'}"
+                    ),
+                }
             _progress("warmup", warmup_iterations + i + 1, warmup_iterations * 2)
 
         # Benchmark Original DB
         original_times: List[float] = []
         for i in range(iterations):
             result = _execute_on_connection(origin_conn, query, origin_engine, controller)
-            if result["success"]:
-                original_times.append(result["execution_time_ms"])
+            if not result["success"]:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Original database iteration {i + 1} failed: "
+                        f"{result.get('error') or 'unknown error'}"
+                    ),
+                }
+            original_times.append(result["execution_time_ms"])
             _progress("origin", i + 1, iterations)
-
-        if not original_times:
-            return {"success": False, "error": "All original database queries failed"}
 
         # Benchmark Readyset
         readyset_times: List[float] = []
         for i in range(iterations):
             result = _execute_on_connection(cache_conn, query, cache_engine, controller)
-            if result["success"]:
-                readyset_times.append(result["execution_time_ms"])
+            if not result["success"]:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Readyset iteration {i + 1} failed: "
+                        f"{result.get('error') or 'unknown error'}"
+                    ),
+                }
+            readyset_times.append(result["execution_time_ms"])
             _progress("cache", i + 1, iterations)
-
-        if not readyset_times:
-            return {"success": False, "error": "All Readyset queries failed"}
 
         original_stats = _calculate_statistics(original_times)
         readyset_stats = _calculate_statistics(readyset_times)

@@ -10,7 +10,20 @@ import {
 test('creates, renames, edits, searches, analyzes, and deletes a saved query', async ({
   page,
 }) => {
-  setBackendFixtures()
+  setBackendFixtures({
+    analyze: [
+      {
+        events: [
+          {
+            type: 'complete',
+            success: true,
+            analysis_id: 'query-registry-e2e',
+            query_hash: 'query-registry-e2e',
+          },
+        ],
+      },
+    ],
+  })
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
 
@@ -18,9 +31,7 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   const updatedSql = 'SELECT id, email FROM users ORDER BY id'
 
   await page.goto('/query-registry')
-  await expect(
-    page.getByRole('heading', { name: 'Queries' })
-  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Queries' })).toBeVisible()
   await expect(page.getByText('No saved queries')).toBeVisible()
 
   await page.getByRole('button', { name: 'Add Query' }).click()
@@ -83,6 +94,7 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   await expect(page).toHaveURL(/\/results\?/)
   expect(new URL(page.url()).searchParams.get('query')).toBe(updatedSql)
   await expect(page.getByText(updatedSql, { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Re-analyze' })).toBeVisible()
 
   await page.goto('/query-registry')
   queryRow = page.getByTestId('query-registry-row')

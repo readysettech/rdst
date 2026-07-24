@@ -1,23 +1,26 @@
 """Tests for Readyset cache benchmarking in fleet audit.
 
-Covers the container lifecycle invariant (one ephemeral container at a
-time, torn down between targets and on mid-run failure), the gating rules
-(capture required, Docker required), and the readyset_comparison payload.
+Covers the managed sandbox lifecycle invariant, the gating rules (capture
+required, Docker required), and the readyset_comparison payload.
 """
 
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from features.audit.capture_service import CaptureService
 from features.audit.events import WorkloadCompleteEvent
 from features.audit.models import AuditMetrics, AuditResult
-from features.audit.readyset_benchmark import benchmark_queries, build_comparison
+from features.audit.readyset_benchmark import (
+    benchmark_queries,
+    build_comparison,
+    run_managed_benchmark,
+)
 from features.audit.service import AuditService
 from features.cache.events import CacheAddEvent, CacheListEvent
 from shared.deploy.lifecycle import ProbeResult, ProbeState, ephemeral_lifecycle
@@ -106,25 +109,44 @@ async def _fake_run_capture(self, **kwargs):
     )
 
 
-class _LifecycleTracker:
-    """Fake ephemeral_lifecycle that records container aliveness."""
+class _SandboxTracker:
+    """Fake capacity-one manager that records lease ownership."""
 
     def __init__(self):
         self.active = 0
         self.max_active = 0
         self.log: list[str] = []
+        self.start_count = 0
 
-    @contextmanager
-    def __call__(self, target_name, mode="docker", *, fresh=False):
-        assert fresh is True
-        self.log.append(f"enter:{target_name}")
+    async def start(self):
+        self.start_count += 1
+
+    async def stop(self):
+        self.start_count -= 1
+
+    @asynccontextmanager
+    async def lease(self, *, target, owner_id, purpose, priority):
+        assert owner_id.startswith(f"audit-benchmark-{target}-")
+        assert purpose == "audit_benchmark"
+        self.log.append(f"enter:{target}")
         self.active += 1
         self.max_active = max(self.max_active, self.active)
+        connection = SimpleNamespace(
+            as_target_config=lambda: {
+                "target_type": "readyset",
+                "engine": "postgresql",
+                "host": "127.0.0.1",
+                "port": 5433,
+                "database": "app",
+                "user": "app",
+                "password": "secret",
+            }
+        )
         try:
-            yield SimpleNamespace(error=None, we_deployed=True, we_started=False)
+            yield SimpleNamespace(connection=connection)
         finally:
             self.active -= 1
-            self.log.append(f"exit:{target_name}")
+            self.log.append(f"exit:{target}")
 
 
 class _BenchmarkCacheService:
@@ -325,7 +347,7 @@ def _run_fleet(targets, *, benchmark_side_effect=None, docker=True):
     """Run audit_fleet with duration against fakes; returns (events, tracker)."""
     import asyncio
 
-    tracker = _LifecycleTracker()
+    tracker = _SandboxTracker()
     benchmark = MagicMock(return_value=list(RAW_RESULTS))
     if benchmark_side_effect is not None:
         benchmark.side_effect = benchmark_side_effect
@@ -343,7 +365,7 @@ def _run_fleet(targets, *, benchmark_side_effect=None, docker=True):
         patch.object(AuditService, "audit_target", side_effect=lambda n, c, on_progress=None: _fake_result(n)),
         patch.object(CaptureService, "run_capture", _fake_run_capture),
         patch("features.audit.readyset_benchmark.docker_available", return_value=docker),
-        patch("shared.deploy.lifecycle.ephemeral_lifecycle", tracker),
+        patch("shared.deploy.sandbox_manager.sandbox_manager", tracker),
         patch("features.audit.readyset_benchmark.benchmark_queries", benchmark),
     ):
         events = asyncio.run(_collect())
@@ -412,24 +434,27 @@ class TestLifecycleInvariant:
         targets = ["db1", "db2", "db3"]
         events, tracker, _ = _run_fleet(targets)
 
-        # One container at a time, torn down before the next target starts.
+        # One lease at a time, released before the next target starts.
         assert tracker.max_active == 1
         assert tracker.log == [
             "enter:db1", "exit:db1",
             "enter:db2", "exit:db2",
             "enter:db3", "exit:db3",
         ]
-        assert tracker.active == 0  # zero containers left after the run
+        assert tracker.active == 0
+        assert tracker.start_count == 0
 
         completes = [e for e in events if e.type == "target_complete"]
         assert [e.target_name for e in completes] == targets
         for e in completes:
             assert e.result["readyset_comparison"]["queries_tested"] == 3
 
-    def test_teardown_on_mid_run_benchmark_failure(self):
+    def test_lease_release_on_mid_run_benchmark_failure(self):
         calls = {"n": 0}
 
-        def flaky_benchmark(target, queries, max_queries=20, console=None):
+        def flaky_benchmark(
+            target, queries, max_queries=20, console=None, cache_config=None
+        ):
             calls["n"] += 1
             if calls["n"] == 2:
                 raise RuntimeError("benchmark blew up")
@@ -440,8 +465,8 @@ class TestLifecycleInvariant:
             targets, benchmark_side_effect=flaky_benchmark,
         )
 
-        # Lifecycle exited (teardown ran) for every target, including the
-        # one whose benchmark raised, and the fleet run still completed.
+        # Every lease was released, including the one whose benchmark raised,
+        # and the fleet run still completed.
         assert tracker.log == [
             "enter:db1", "exit:db1",
             "enter:db2", "exit:db2",
@@ -465,6 +490,31 @@ class TestLifecycleInvariant:
             "db2: Readyset benchmark could not run: benchmark blew up"
         )
         assert events[-1].type == "complete" and events[-1].success is True
+
+    @pytest.mark.asyncio
+    async def test_managed_benchmark_passes_lease_connection_config(self):
+        tracker = _SandboxTracker()
+        benchmark = MagicMock(return_value=list(RAW_RESULTS))
+
+        with (
+            patch("features.audit.readyset_benchmark.docker_available", return_value=True),
+            patch("shared.deploy.sandbox_manager.sandbox_manager", tracker),
+            patch("features.audit.readyset_benchmark.benchmark_queries", benchmark),
+        ):
+            outcome = await run_managed_benchmark("db1", [{"query_text": "SELECT 1"}])
+
+        assert outcome == {"status": "ok", "results": RAW_RESULTS}
+        assert benchmark.call_args.kwargs["cache_config"] == {
+            "target_type": "readyset",
+            "engine": "postgresql",
+            "host": "127.0.0.1",
+            "port": 5433,
+            "database": "app",
+            "user": "app",
+            "password": "secret",
+        }
+        assert tracker.log == ["enter:db1", "exit:db1"]
+        assert tracker.start_count == 0
 
 
 class TestFreshEphemeralLifecycle:
@@ -716,7 +766,8 @@ class TestCaptureReadysetParity:
                 return_value=docker,
             ),
             patch(
-                "features.audit.readyset_benchmark.run_ephemeral_benchmark",
+                "features.audit.readyset_benchmark.run_managed_benchmark",
+                new_callable=AsyncMock,
                 return_value={"status": "ok", "results": list(RAW_RESULTS)},
             ) as bench,
         ):

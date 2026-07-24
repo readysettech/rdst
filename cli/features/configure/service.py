@@ -246,6 +246,17 @@ class ConfigureService:
                 )
                 return
 
+            # Stop target-owned work and retire its local sandbox before the
+            # credentials required to settle that work are deleted.
+            from shared.deploy.sandbox_manager import sandbox_manager
+            from shared.run_registry import run_registry
+
+            run_registry.cancel_target(name)
+            await sandbox_manager.start()
+            try:
+                await sandbox_manager.remove_target(name)
+            finally:
+                await sandbox_manager.stop()
             cfg.remove(name)
             cfg.save()
 

@@ -2,9 +2,8 @@
 
 Shared machinery behind `rdst audit` / `rdst fleet audit` Readyset testing
 and the API audit paths. The benchmark itself assumes a running cache
-container; `run_ephemeral_benchmark` wraps it in a fresh
-`ephemeral_lifecycle` for exactly one target's benchmark and always tears it
-down afterwards.
+container; `run_ephemeral_benchmark` acquires the process-wide managed
+sandbox for exactly one target's benchmark.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ import asyncio
 import re
 import shutil
 import time
+import uuid
 from typing import Any
 
 
@@ -207,10 +207,13 @@ def benchmark_queries(
     queries: list[dict[str, Any]],
     max_queries: int = 20,
     console=None,
+    cache_config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]] | None:
     """Benchmark captured queries against a running Readyset cache.
 
-    Caller manages the container lifecycle. Caches created here are dropped
+    Caller manages the container lifecycle. ``cache_config`` allows managed
+    sandboxes that are not registered as persistent targets; callers without
+    it retain target-based resolution. Caches created here are dropped
     afterwards by diffing SHOW CACHES against the pre-benchmark state and
     dropping by ReadySet's own cache ids, so a reused pre-existing container
     is restored to the caches it had before (CLD-1754).
@@ -225,7 +228,11 @@ def benchmark_queries(
     from features.cache.models import CacheInput, CacheOptions
 
     console = console or _NullConsole()
-    service = CacheService()
+    service = (
+        CacheService(cache_target_config=cache_config)
+        if cache_config is not None
+        else CacheService()
+    )
     results: list[dict[str, Any]] = []
 
     # Wait for Readyset to be ready and verify connection
@@ -431,33 +438,34 @@ def _drop_created_caches(service, CacheInput, target: str, pre_existing_ids: set
             pass
 
 
-def run_ephemeral_benchmark(
+async def run_managed_benchmark(
     target: str,
     queries: list[dict[str, Any]],
     max_queries: int = 20,
     console=None,
 ) -> dict[str, Any]:
-    """Non-interactive benchmark with a per-target container lifecycle.
-
-    Removes any stale same-named container, deploys a fresh one, benchmarks,
-    and tears it down before returning. `ephemeral_lifecycle` guarantees
-    teardown in its finally block even when readiness or benchmarking fails.
-
-    Returns {"status": "ok", "results": [...]} or
-    {"status": "docker_unavailable"|"error", "detail": str}.
-    """
+    """Benchmark one target while holding the process-wide sandbox lease."""
     if not docker_available():
         return {"status": "docker_unavailable", "detail": "Docker is not installed"}
 
-    from shared.deploy.lifecycle import ephemeral_lifecycle
+    from shared.deploy.sandbox_manager import SandboxPriority, sandbox_manager
 
+    await sandbox_manager.start()
     try:
-        with ephemeral_lifecycle(target, mode="docker", fresh=True) as outcome:
-            if outcome.error:
-                return {"status": "error", "detail": outcome.error}
+        async with sandbox_manager.lease(
+            target=target,
+            owner_id=f"audit-benchmark-{target}-{uuid.uuid4().hex}",
+            purpose="audit_benchmark",
+            priority=SandboxPriority.AUDIT_BATCH,
+        ) as lease:
             benchmark_console = console or _NullConsole()
-            results = benchmark_queries(
-                target, queries, max_queries=max_queries, console=benchmark_console,
+            results = await asyncio.to_thread(
+                benchmark_queries,
+                target,
+                queries,
+                max_queries=max_queries,
+                console=benchmark_console,
+                cache_config=lease.connection.as_target_config(),
             )
             if not results:
                 detail = (
@@ -472,6 +480,22 @@ def run_ephemeral_benchmark(
             return {"status": "ok", "results": results}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
+    finally:
+        await sandbox_manager.stop()
+
+
+def run_ephemeral_benchmark(
+    target: str,
+    queries: list[dict[str, Any]],
+    max_queries: int = 20,
+    console=None,
+) -> dict[str, Any]:
+    """Synchronous entry point for CLI and compatibility callers."""
+    return asyncio.run(
+        run_managed_benchmark(
+            target, queries, max_queries=max_queries, console=console
+        )
+    )
 
 
 def build_comparison(results: list[dict[str, Any]]) -> dict[str, Any]:

@@ -190,7 +190,9 @@ async def analyze(request: AnalyzeRequest, guard: TargetGuard = Depends(require_
     options = AnalyzeOptions(
         target=guard.target_name,
         fast=request.fast,
-        readyset_cache=getattr(request, "readyset_cache", False),
+        # Web Analyze is static by default. API callers can explicitly request
+        # temporary Readyset verification with readyset_cache=true.
+        readyset_cache=request.readyset_cache and not request.skip_readyset,
         test_rewrites=not request.skip_rewrites,
         model=request.model,
     )
@@ -203,7 +205,7 @@ async def analyze_quick(request: AnalyzeRequest, guard: TargetGuard = Depends(re
     options = AnalyzeOptions(
         target=guard.target_name,
         fast=request.fast,
-        readyset_cache=getattr(request, "readyset_cache", False),
+        readyset_cache=request.readyset_cache and not request.skip_readyset,
         model=request.model,
     )
     return EventSourceResponse(_quick_analyze_generator(input_data, options, guard.target_engine))

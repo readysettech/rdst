@@ -8,6 +8,7 @@ class AnalyzeRequest(BaseModel):
     target: Optional[str] = None
     fast: bool = False
     skip_rewrites: bool = False
+    readyset_cache: bool = False
     skip_readyset: bool = False
     skip_storage: bool = False
     model: Optional[str] = None

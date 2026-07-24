@@ -14,11 +14,11 @@ import asyncio
 import uuid
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Iterable, Literal
+from typing import Any, AsyncGenerator, Callable, Iterable, Literal
 
 from shared.service_events import ErrorEvent
 
-TERMINAL_STATUSES = ("done", "failed", "cancelled")
+TERMINAL_STATUSES = ("done", "partial", "failed", "cancelled")
 
 # Yielding this event type parks the run's status on "needs_key" until the
 # next event arrives (the adapter shows its key/trial UI in the meantime).
@@ -87,12 +87,7 @@ class RunRegistry:
         its own `complete` event's `success` flag, from the generator dying,
         or from cancellation.
         """
-        safe_target = "".join(c if c.isalnum() or c in "-_" else "-" for c in target)
-        run_id = (
-            f"{kind}_{safe_target}_"
-            f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_"
-            f"{uuid.uuid4().hex[:6]}"
-        )
+        run_id = self._new_run_id(kind, target)
         handle = _RunHandle(
             kind=kind,
             target=target,
@@ -102,7 +97,47 @@ class RunRegistry:
         )
         handle.task = asyncio.get_running_loop().create_task(self._drive(handle, gen))
         self._runs[run_id] = handle
+        handle.task.add_done_callback(
+            lambda task: self._terminalize_cancelled_before_start(handle, task)
+        )
         return run_id
+
+    def start_factory(
+        self,
+        kind: str,
+        target: str,
+        factory: Callable[[str], AsyncGenerator[Any, None]],
+        metadata: dict[str, Any] | None = None,
+        resume_event: asyncio.Event | None = None,
+        child_error_events: frozenset[str] | None = None,
+    ) -> str:
+        """Start a generator that needs its stable run ID for ownership."""
+        run_id = self._new_run_id(kind, target)
+        handle = _RunHandle(
+            kind=kind,
+            target=target,
+            metadata=dict(metadata or {}),
+            resume_event=resume_event,
+            child_error_events=child_error_events or frozenset(),
+        )
+        generator = factory(run_id)
+        handle.task = asyncio.get_running_loop().create_task(
+            self._drive(handle, generator)
+        )
+        self._runs[run_id] = handle
+        handle.task.add_done_callback(
+            lambda task: self._terminalize_cancelled_before_start(handle, task)
+        )
+        return run_id
+
+    @staticmethod
+    def _new_run_id(kind: str, target: str) -> str:
+        safe_target = "".join(c if c.isalnum() or c in "-_" else "-" for c in target)
+        return (
+            f"{kind}_{safe_target}_"
+            f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_"
+            f"{uuid.uuid4().hex[:6]}"
+        )
 
     def status(self, run_id: str) -> str | None:
         """Return the current status, or None when this process does not know it."""
@@ -137,13 +172,48 @@ class RunRegistry:
                 return run_id
         return None
 
+    def find_active_matching(
+        self,
+        kind: str,
+        target: str,
+        metadata: dict[str, Any],
+        *,
+        keys: Iterable[str],
+    ) -> str | None:
+        """Find a live run whose selected metadata fields exactly match."""
+        selected = tuple(keys)
+        for run_id, handle in reversed(self._runs.items()):
+            if (
+                handle.kind == kind
+                and handle.target == target
+                and handle.status not in TERMINAL_STATUSES
+                and all(handle.metadata.get(key) == metadata.get(key) for key in selected)
+            ):
+                return run_id
+        return None
+
     def cancel(self, run_id: str) -> bool:
         """Cancel a live run. Returns False for unknown or finished runs."""
         handle = self._runs.get(run_id)
         if handle is None or handle.status in TERMINAL_STATUSES:
             return False
+        if handle.task is None:
+            return False
         handle.task.cancel()
         return True
+
+    def cancel_target(self, target: str) -> int:
+        """Cancel every live run for a target and return the number signalled."""
+        cancelled = 0
+        for handle in self._runs.values():
+            if (
+                handle.target == target
+                and handle.status not in TERMINAL_STATUSES
+                and handle.task is not None
+            ):
+                handle.task.cancel()
+                cancelled += 1
+        return cancelled
 
     def reset(self) -> int:
         """Cancel every live run and forget all runs (local data reset).
@@ -206,7 +276,18 @@ class RunRegistry:
                 elif name not in handle.child_error_events and (
                     name == "error" or name.endswith("_error")
                 ):
-                    status = "failed"
+                    preserved_speed_result = (
+                        data.get("code") == "speed_test_cleanup_failed"
+                        and any(
+                            record["event"] == "cache_run_complete"
+                            for record in handle.events
+                        )
+                    )
+                    status = (
+                        "partial"
+                        if preserved_speed_result and status != "failed"
+                        else "failed"
+                    )
                     # Some orchestrators isolate child-track failures by
                     # yielding an error event and continuing to drain their
                     # healthy siblings. Keep consuming so closing this driver
@@ -246,6 +327,16 @@ class RunRegistry:
         for future in waiters:
             if not future.done():
                 future.set_result(None)
+
+    def _terminalize_cancelled_before_start(
+        self, handle: _RunHandle, task: asyncio.Task
+    ) -> None:
+        """Finish tasks cancelled before their driver coroutine gets a turn."""
+        if not task.cancelled() or handle.status in TERMINAL_STATUSES:
+            return
+        handle.status = "cancelled"
+        self._append(handle, RUN_END_EVENT, {"status": "cancelled"})
+        self._evict_finished()
 
     def _evict_finished(self) -> None:
         """Forget the oldest finished runs beyond the in-memory retention cap."""

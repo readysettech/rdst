@@ -76,6 +76,36 @@ class BenchmarkValidationError(Exception):
         self.code = code
 
 
+class _BenchmarkController:
+    """Thread-safe cancellation bridge for active load-test connections."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._connections: list[Any] = []
+
+    def register(self, connection: Any) -> None:
+        with self._lock:
+            self._connections.append(connection)
+
+    def unregister(self, connection: Any) -> None:
+        with self._lock:
+            if connection in self._connections:
+                self._connections.remove(connection)
+
+    def cancel(self) -> None:
+        with self._lock:
+            connections = list(self._connections)
+        for connection in connections:
+            try:
+                cancel = getattr(connection, "cancel", None)
+                if callable(cancel):
+                    cancel()
+                else:
+                    connection.close()
+            except Exception:
+                pass
+
+
 def set_session_read_only(conn: Any, engine: str) -> None:
     """Make the benchmark's DB session read-only at the database level.
 
@@ -194,6 +224,7 @@ class QueryService:
         """Stream benchmark progress events from a background worker."""
         progress_queue: Queue = Queue(maxsize=100)
         stop_event = threading.Event()
+        controller = _BenchmarkController()
 
         def run_sync() -> None:
             self._run_benchmark_sync(
@@ -206,6 +237,7 @@ class QueryService:
                 max_count=max_count,
                 progress_queue=progress_queue,
                 stop_event=stop_event,
+                controller=controller,
             )
 
         loop = asyncio.get_event_loop()
@@ -229,11 +261,21 @@ class QueryService:
                                 break
                         break
                     await asyncio.sleep(0.1)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as cancellation:
             stop_event.set()
-            raise
+            controller.cancel()
+            while not future.done():
+                try:
+                    await asyncio.shield(future)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            raise cancellation
         finally:
             stop_event.set()
+            if not future.done():
+                controller.cancel()
 
     def _run_benchmark_sync(
         self,
@@ -246,10 +288,9 @@ class QueryService:
         max_count: Optional[int],
         progress_queue: Queue,
         stop_event: threading.Event,
+        controller: _BenchmarkController,
     ) -> None:
         """Synchronous benchmark worker that reports progress events."""
-        del concurrency  # reserved for future parity with CLI concurrency mode
-
         @dataclass
         class _QueryStats:
             query_name: str
@@ -317,6 +358,12 @@ class QueryService:
                     f"Benchmark execution count is capped at {MAX_BENCHMARK_MAX_COUNT:,} "
                     f"({max_count:,} requested).",
                     code="benchmark_count_capped",
+                )
+            if mode == "concurrency" or concurrency != 1:
+                raise BenchmarkValidationError(
+                    "Concurrent workers are not supported by Query Load Test yet. "
+                    "Use fixed interval mode.",
+                    code="load_test_concurrency_unsupported",
                 )
             # Even when the caller omits max_count, bound the loop so a tight
             # loop (interval 0) can never run unbounded.
@@ -489,6 +536,7 @@ class QueryService:
                     )
 
             conn = create_direct_connection(target_config)
+            controller.register(conn)
             query_index = 0
 
             try:
@@ -552,6 +600,7 @@ class QueryService:
                     if mode == "interval" and interval_ms > 0:
                         stop_event.wait(interval_ms / 1000.0)
             finally:
+                controller.unregister(conn)
                 close_connection(conn)
 
             final = _progress("complete")

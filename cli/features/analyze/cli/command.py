@@ -496,6 +496,7 @@ class AnalyzeCommand:
         review: bool = False,
         output_json: bool = False,
         skip_warning: bool = False,
+        readyset_cache: bool = False,
         **kwargs,
     ) -> RdstResult:
         """Telemetry wrapper around `_execute_analyze_impl`.
@@ -546,6 +547,7 @@ class AnalyzeCommand:
                     review=review,
                     output_json=output_json,
                     skip_warning=skip_warning,
+                    readyset_cache=readyset_cache,
                     **kwargs,
                 )
                 if result.data:
@@ -586,6 +588,7 @@ class AnalyzeCommand:
         review: bool = False,
         output_json: bool = False,
         skip_warning: bool = False,
+        readyset_cache: bool = False,
         **kwargs,
     ) -> RdstResult:
         """
@@ -781,7 +784,7 @@ class AnalyzeCommand:
                     if not output_json:
                         print()
 
-            # Readyset analysis always runs in parallel (Docker check is soft/non-fatal)
+            # Container-backed verification runs only when explicitly requested.
 
             # EXPLAIN ANALYZE safety warning (unless --skip-warning or --fast)
             showed_warning = False
@@ -818,7 +821,7 @@ class AnalyzeCommand:
                 self._execute_analyze_async(
                     resolved_input=resolved_input,
                     target=resolved_target,
-                    readyset_cache=True,
+                    readyset_cache=readyset_cache,
                     fast=fast,
                     quiet=output_json,
                 )
@@ -1068,6 +1071,7 @@ class AnalyzeCommand:
         target: Optional[str] = None,
         fast: bool = False,
         quiet: bool = False,
+        readyset_cache: bool = False,
         **kwargs,
     ) -> tuple[bool, dict, Optional[str]]:
         """Execute analysis using AnalyzeService async generator."""
@@ -1097,7 +1101,7 @@ class AnalyzeCommand:
         options_data = AnalyzeOptions(
             target=target,
             fast=fast,
-            readyset_cache=True,
+            readyset_cache=readyset_cache,
             test_rewrites=True,
             model=None,
         )
@@ -1112,11 +1116,14 @@ class AnalyzeCommand:
 
         if isinstance(last_event, CompleteEvent):
             readyset_payload = last_event.readyset_cacheability or {}
-            readyset_analysis = {}
-            if isinstance(readyset_payload, dict) and (
+            formatted = last_event.formatted or {}
+            readyset_analysis = formatted.get("readyset_analysis", {})
+            if not isinstance(readyset_analysis, dict):
+                readyset_analysis = {}
+            if not readyset_analysis and isinstance(readyset_payload, dict) and (
                 "final_verdict" in readyset_payload
                 or "explain_cache_result" in readyset_payload
-                or "error" in readyset_payload  # Include error results
+                or "error" in readyset_payload
             ):
                 readyset_analysis = readyset_payload
 
@@ -1133,7 +1140,7 @@ class AnalyzeCommand:
                 "rewrite_test_results": last_event.rewrite_testing or {},
                 "readyset_analysis": readyset_analysis,
                 "readyset_cacheability": last_event.readyset_cacheability or {},
-                "FormatFinalResults": last_event.formatted or {},
+                "FormatFinalResults": formatted,
                 "storage_result": {"analysis_id": last_event.analysis_id},
             }
             return True, result_context, None

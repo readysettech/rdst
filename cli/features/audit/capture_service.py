@@ -539,7 +539,7 @@ class CaptureService:
                 from .readyset_benchmark import (
                     build_comparison,
                     docker_available,
-                    run_ephemeral_benchmark,
+                    run_managed_benchmark,
                 )
 
                 if not docker_available():
@@ -554,8 +554,7 @@ class CaptureService:
                         phase="readyset",
                         message=f"Benchmarking {len(queries)} captured queries against Readyset...",
                     )
-                    outcome = await asyncio.to_thread(
-                        run_ephemeral_benchmark,
+                    outcome = await run_managed_benchmark(
                         target_name,
                         [asdict(query) for query in queries],
                     )

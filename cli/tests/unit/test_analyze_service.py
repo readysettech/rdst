@@ -42,6 +42,32 @@ class TestAnalyzeServiceInit:
         assert isinstance(path, Path)
         assert "analyze_workflow_simple.json" in str(path)
 
+    @pytest.mark.asyncio
+    async def test_load_config_reads_real_targets_config(self, tmp_path, monkeypatch):
+        from shared.config.targets import TargetsConfig
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        config = TargetsConfig()
+        config.load()
+        config.upsert(
+            "origin",
+            {
+                "engine": "postgresql",
+                "host": "127.0.0.1",
+                "port": 5432,
+                "database": "app",
+                "user": "postgres",
+            },
+        )
+        config.set_default("origin")
+        config.save()
+
+        target, target_config = await AnalyzeService()._load_config(None)
+
+        assert target == "origin"
+        assert target_config is not None
+        assert target_config["database"] == "app"
+
 
 class TestStepProgress:
     """Tests for STEP_PROGRESS mapping."""
@@ -252,7 +278,7 @@ class TestAnalyzeServiceParallelExecution:
 
     @pytest.mark.asyncio
     async def test_parallel_analysis_workflow_failure(
-        self, service, input_data, options
+        self, service, input_data, options_with_readyset
     ):
         """Test parallel analysis when workflow fails."""
         events = []
@@ -267,25 +293,69 @@ class TestAnalyzeServiceParallelExecution:
             raise Exception("Workflow execution failed")
             yield
 
-        with patch.object(
-            service,
-            "_run_workflow_with_progress",
-            new_callable=AsyncMock,
-            return_value=(mock_progress_gen(), workflow_result),
+        with (
+            patch.object(
+                service,
+                "_run_workflow_with_progress",
+                new_callable=AsyncMock,
+                return_value=(mock_progress_gen(), workflow_result),
+            ),
+            patch.object(service, "_run_readyset_analysis_sync") as readyset,
         ):
             mock_path = Mock()
             mock_path.exists.return_value = True
 
             async for event in service._run_parallel_analysis(
                 input=input_data,
-                options=options,
+                options=options_with_readyset,
                 target_name="test-target",
                 target_config={"host": "localhost"},
                 workflow_path=mock_path,
             ):
                 events.append(event)
 
+        readyset.assert_not_called()
         # Should have error event
+        assert len(events) == 1
+        assert events[0].type == "error"
+        assert "Workflow execution failed" in events[0].message
+
+    @pytest.mark.asyncio
+    async def test_parallel_analysis_skips_readyset_for_failed_workflow_result(
+        self, service, input_data, options_with_readyset
+    ):
+        workflow_result = {
+            "success": False,
+            "error": "Workflow execution failed",
+        }
+
+        async def mock_progress_gen():
+            if False:
+                yield
+
+        with (
+            patch.object(
+                service,
+                "_run_workflow_with_progress",
+                new_callable=AsyncMock,
+                return_value=(mock_progress_gen(), workflow_result),
+            ),
+            patch.object(service, "_run_readyset_analysis_sync") as readyset,
+        ):
+            mock_path = Mock()
+            mock_path.exists.return_value = True
+            events = [
+                event
+                async for event in service._run_parallel_analysis(
+                    input=input_data,
+                    options=options_with_readyset,
+                    target_name="test-target",
+                    target_config={"host": "localhost"},
+                    workflow_path=mock_path,
+                )
+            ]
+
+        readyset.assert_not_called()
         assert len(events) == 1
         assert events[0].type == "error"
         assert "Workflow execution failed" in events[0].message
@@ -615,16 +685,25 @@ class TestAnalyzeServiceProcessResults:
         assert complete.readyset_cacheability["cacheable"] is None
         assert complete.readyset_cacheability["method"] == "readyset_unavailable"
 
-    def test_readyset_explain_failure_is_not_a_verdict(self, service, input_data):
-        with patch(
-            "features.analyze.service.explain_create_cache_readyset",
-            return_value={
-                "success": False,
-                "cacheable": False,
-                "error": "connection refused",
-            },
+    def test_readyset_experiment_failure_is_not_a_verdict(
+        self, service, input_data
+    ):
+        from features.cache.experiment_service import ReadysetExperimentService
+        from shared.deploy.sandbox_manager import sandbox_manager
+
+        async def failed_compare(_service, **_kwargs):
+            yield ErrorEvent(
+                type="error",
+                message="Readyset endpoint was not reachable",
+                code="speed_test_failed",
+            )
+
+        with (
+            patch.object(ReadysetExperimentService, "compare", failed_compare),
+            patch.object(sandbox_manager, "start", new=AsyncMock()),
+            patch.object(sandbox_manager, "stop", new=AsyncMock()),
         ):
-            result = service._run_readyset_analysis_inner(
+            result = service._run_readyset_analysis_sync(
                 input=input_data,
                 target_name="prod",
                 target_config={
@@ -632,19 +711,11 @@ class TestAnalyzeServiceProcessResults:
                     "database": "app",
                     "user": "admin",
                 },
-                cache_target_name="prod-cache",
-                cache_config={
-                    "engine": "postgresql",
-                    "host": "127.0.0.1",
-                    "port": 5433,
-                    "database": "app",
-                    "user": "admin",
-                },
             )
 
         assert result["success"] is False
-        assert result["checked"] is False
-        assert result["error"] == "connection refused"
+        assert result["cacheable"] is False
+        assert result["error"] == "Readyset endpoint was not reachable"
 
     @pytest.mark.asyncio
     async def test_process_results_complete_event(self, service, input_data):
@@ -676,6 +747,15 @@ class TestAnalyzeServiceProcessResults:
         assert complete_events[0].success is True
         assert complete_events[0].analysis_id == "analysis_123"
         assert complete_events[0].query_hash == "hash_456"
+        assert complete_events[0].readyset_cacheability == {
+            "checked": True,
+            "cacheable": True,
+            "confidence": "unknown",
+            "method": "static_analysis",
+            "explanation": "Static Readyset screening was not available.",
+            "issues": [],
+            "warnings": [],
+        }
 
     @pytest.mark.asyncio
     async def test_process_results_workflow_failure(self, service, input_data):

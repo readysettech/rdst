@@ -7,8 +7,10 @@ from datetime import datetime
 from sse_starlette.sse import EventSourceResponse
 import json
 import asyncio
+import hashlib
 import logging
 import time
+import uuid
 
 from shared.api.target_guard import TargetGuard, require_target_body
 
@@ -336,6 +338,30 @@ class BenchmarkRequest(BaseModel):
     max_count: Optional[int] = None
 
 
+class LoadTestRunStartResponse(BaseModel):
+    run_id: str
+
+
+def _benchmark_request_fingerprint(request: BenchmarkRequest) -> str:
+    """Identify the exact password-free load-test specification."""
+    payload = json.dumps(
+        request.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _benchmark_request_metadata(request: BenchmarkRequest) -> dict[str, Any]:
+    """Keep reload metadata useful without retaining concrete SQL text."""
+    payload = request.model_dump(mode="json")
+    payload["queries"] = [
+        ({**query, "sql": None} if isinstance(query, dict) else query)
+        for query in payload["queries"]
+    ]
+    return payload
+
+
 class QueryBenchmarkStats(BaseModel):
     """Statistics for a single query."""
 
@@ -413,20 +439,25 @@ def _progress_to_sse(progress: Any) -> dict:
 async def _benchmark_generator(
     queries, target, mode, interval_ms, concurrency, duration_seconds, max_count,
 ) -> AsyncGenerator[dict, None]:
-    """Async generator that yields SSE events from query service."""
+    """Compatibility SSE path, protected by a measurement reservation."""
     from ..service import QueryService
+    from shared.deploy.sandbox_manager import sandbox_manager
 
     service = QueryService()
-    async for progress in service.stream_benchmark(
-        queries=queries,
-        target=target,
-        mode=mode,
-        interval_ms=interval_ms,
-        concurrency=concurrency,
-        duration_seconds=duration_seconds,
-        max_count=max_count,
+    async with sandbox_manager.reserve_measurement(
+        owner_id=f"request-{uuid.uuid4().hex[:12]}",
+        purpose="load_test",
     ):
-        yield _progress_to_sse(progress)
+        async for progress in service.stream_benchmark(
+            queries=queries,
+            target=target,
+            mode=mode,
+            interval_ms=interval_ms,
+            concurrency=concurrency,
+            duration_seconds=duration_seconds,
+            max_count=max_count,
+        ):
+            yield _progress_to_sse(progress)
 
 
 @router.post("/query-registry/benchmark")
@@ -440,8 +471,78 @@ async def run_benchmark(request: BenchmarkRequest, guard: TargetGuard = Depends(
         queries=request.queries,
         target=guard.target_name,
         mode=request.mode,
-        interval_ms=request.interval_ms or 100,
-        concurrency=request.concurrency or 1,
-        duration_seconds=request.duration_seconds or 30,
+        interval_ms=request.interval_ms if request.interval_ms is not None else 100,
+        concurrency=request.concurrency if request.concurrency is not None else 1,
+        duration_seconds=(
+            request.duration_seconds
+            if request.duration_seconds is not None
+            else 30
+        ),
         max_count=request.max_count,
     ))
+
+
+@router.post(
+    "/query-registry/load-test-runs",
+    response_model=LoadTestRunStartResponse,
+)
+async def start_load_test_run(
+    request: BenchmarkRequest,
+    guard: TargetGuard = Depends(require_target_body),
+) -> LoadTestRunStartResponse:
+    """Start or attach to the target's detached origin-only load test."""
+    from shared.deploy.sandbox_manager import sandbox_manager
+    from shared.run_registry import run_registry
+    from ..service import QueryService
+
+    metadata = {
+        "request_fingerprint": _benchmark_request_fingerprint(request),
+        "query_count": len(request.queries),
+        # Keep identifiers and run settings for reload summaries, but do not
+        # retain concrete user SQL in process-level run metadata.
+        "request": _benchmark_request_metadata(request),
+    }
+    existing = run_registry.find_active_matching(
+        "load_test",
+        guard.target_name,
+        metadata,
+        keys=("request_fingerprint",),
+    )
+    if existing is not None:
+        return LoadTestRunStartResponse(run_id=existing)
+
+    async def factory(owner_id: str):
+        async with sandbox_manager.reserve_measurement(
+            owner_id=owner_id,
+            purpose="load_test",
+        ):
+            async for event in QueryService().stream_benchmark(
+                queries=request.queries,
+                target=guard.target_name,
+                mode=request.mode,
+                interval_ms=(
+                    request.interval_ms
+                    if request.interval_ms is not None
+                    else 100
+                ),
+                concurrency=(
+                    request.concurrency
+                    if request.concurrency is not None
+                    else 1
+                ),
+                duration_seconds=(
+                    request.duration_seconds
+                    if request.duration_seconds is not None
+                    else 30
+                ),
+                max_count=request.max_count,
+            ):
+                yield event
+
+    run_id = run_registry.start_factory(
+        "load_test",
+        guard.target_name,
+        factory,
+        metadata=metadata,
+    )
+    return LoadTestRunStartResponse(run_id=run_id)

@@ -86,6 +86,11 @@ def _parse_fallback(fallback: str) -> Tuple[str, str]:
 class CacheService:
     """Manages Readyset cache deployment and query caching."""
 
+    def __init__(
+        self, cache_target_config: Dict[str, Any] | None = None
+    ) -> None:
+        self._cache_target_config = cache_target_config
+
     # ------------------------------------------------------------------
     # Target resolution
     # ------------------------------------------------------------------
@@ -98,6 +103,9 @@ class CacheService:
         Tries "{target}-cache" naming convention first, then searches
         all targets for one with upstream_target matching.
         """
+        if self._cache_target_config is not None:
+            return (database_target, self._cache_target_config)
+
         config = TargetsConfig()
         config.load()
 

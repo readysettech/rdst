@@ -9,14 +9,6 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
 from shared.config.targets import TargetsConfig
-from shared.password_resolver import resolve_password_value
-from features.cache.readyset_explain_cache import (
-    create_cache_readyset,
-    drop_cache_readyset,
-    explain_create_cache_readyset,
-    get_cache_id_for_query,
-    warm_cache_and_measure,
-)
 from shared.workflow_manager import get_workflow_components
 
 from .events import (
@@ -222,10 +214,10 @@ class AnalyzeService:
         target_config: Dict[str, Any],
         workflow_path: Path,
     ) -> AsyncGenerator[AnalyzeEvent, None]:
-        """Run workflow and optional readyset analysis in parallel.
+        """Run the workflow followed by optional Readyset verification.
 
-        The workflow runs with async polling for progress updates.
-        Readyset analysis (if enabled) runs in a separate thread.
+        The workflow runs with async polling for progress updates. Explicit
+        Readyset verification runs in a separate thread after workflow success.
 
         Args:
             input: Analysis input
@@ -245,14 +237,8 @@ class AnalyzeService:
             workflow_path=workflow_path,
         )
 
-        # Always attempt Readyset analysis in parallel.
-        # Failures are non-fatal — handled when awaited at line ~272.
-        readyset_task = asyncio.to_thread(
-            self._run_readyset_analysis_sync,
-            input=input,
-            target_name=target_name,
-            target_config=target_config,
-        )
+        # Container-backed verification is explicit. Start it only after the
+        # core workflow succeeds so a workflow failure cannot orphan Docker work.
 
         workflow_result = None
         try:
@@ -270,22 +256,19 @@ class AnalyzeService:
             workflow_result = result_holder
 
         readyset_result = None
-        if readyset_task:
+        if options.readyset_cache and workflow_result.get("success"):
             try:
-                # Wait up to 60s for Readyset after workflow completes.
-                # If Docker is pulling an image or hanging, don't block the output.
-                readyset_result = await asyncio.wait_for(readyset_task, timeout=60)
+                readyset_result = await asyncio.to_thread(
+                    self._run_readyset_analysis_sync,
+                    input=input,
+                    target_name=target_name,
+                    target_config=target_config,
+                )
                 if isinstance(readyset_result, Exception):
                     readyset_result = {
                         "success": False,
                         "error": f"Readyset analysis failed: {readyset_result}",
                     }
-            except asyncio.TimeoutError:
-                readyset_result = {
-                    "success": False,
-                    "error": "Readyset analysis timed out (Docker may still be starting). "
-                             "Run 'rdst cache deploy' to set up Readyset separately.",
-                }
             except Exception as e:
                 readyset_result = {
                     "success": False,
@@ -396,221 +379,70 @@ class AnalyzeService:
         target_name: str,
         target_config: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Synchronous readyset analysis (runs in thread).
+        """Synchronous adapter for an explicit manager-owned speed test.
 
-        Uses an existing cache container if one is deployed and running.
-        Otherwise spins up an *ephemeral* container for the duration of the
-        analysis (deploy → run → tear down). If the container existed but was
-        stopped, starts it for the run and stops it again afterwards.
-
-        Flow:
-        1. Find a cache target name for this upstream (config or convention)
-        2. ephemeral_lifecycle context manager ensures it's running
-        3. Test cacheability, warm, measure, drop the cache (analysis is ephemeral
-           regardless of whether the *container* was ephemeral or not)
-        4. ephemeral_lifecycle restores original container state on exit
+        Web Analyze does not call this path. CLI callers that explicitly request
+        Readyset use the same temporary experiment service as the web speed-test
+        job, including exact cache cleanup and dirty-sandbox replacement.
         """
-        from shared.deploy.lifecycle import ephemeral_lifecycle, ProbeState
+        import hashlib
 
-        cfg = TargetsConfig()
-        cfg.load()
+        async def _run() -> Dict[str, Any]:
+            from features.cache.events import CacheRunCompleteEvent
+            from features.cache.experiment_service import ReadysetExperimentService
+            from shared.deploy.sandbox_manager import sandbox_manager
+            from shared.service_events import ErrorEvent
 
-        cache_target_name = None
-        cache_config = None
-        for name, config in cfg._data.get("targets", {}).items():
-            if (
-                config.get("target_type") == "readyset"
-                and config.get("upstream_target") == target_name
-            ):
-                cache_target_name = name
-                cache_config = config
-                break
-        if not cache_config:
-            conventional = f"{target_name}-cache"
-            check = cfg.get(conventional)
-            if check and check.get("target_type") == "readyset":
-                cache_target_name = conventional
-                cache_config = check
-
-        # Ephemeral lifecycle around the readyset run. If no cache target is
-        # configured at all, this will deploy one with the conventional name
-        # and tear it down at the end. If it's stopped, start + stop. If
-        # running, leave it alone.
-        with ephemeral_lifecycle(target_name, mode="docker") as outcome:
-            if outcome.error:
-                # Could not bring up a container — surface the original
-                # remediation message so the user gets actionable guidance.
-                return {
-                    "success": False,
-                    "no_cache_target": True,
-                    "error": outcome.error,
-                    "remediation": (
-                        f"Deploy a cache to see Readyset performance:\n"
-                        f"  rdst cache deploy --target {target_name} --mode docker"
+            await sandbox_manager.start()
+            try:
+                final = None
+                failure = None
+                async for event in ReadysetExperimentService(
+                    sandbox_manager
+                ).compare(
+                    owner_id=(
+                        "analyze-"
+                        + hashlib.sha256(input.sql.encode()).hexdigest()[:12]
                     ),
-                }
-
-            # If we just deployed, the cache target row was created during deploy.
-            # Reload config to pick it up.
-            if outcome.we_deployed and not cache_config:
-                cfg.load()
-                conventional = f"{target_name}-cache"
-                cache_config = cfg.get(conventional)
-                if cache_config:
-                    cache_target_name = conventional
-
-            if not cache_config:
-                return {
-                    "success": False,
-                    "no_cache_target": True,
-                    "error": "No Readyset cache target configured after deploy.",
-                    "remediation": (
-                        f"  rdst cache deploy --target {target_name} --mode docker"
-                    ),
-                }
-
-            return self._run_readyset_analysis_inner(
-                input=input, target_name=target_name, target_config=target_config,
-                cache_target_name=cache_target_name, cache_config=cache_config,
-                ephemeral_outcome=outcome,
-            )
-
-    def _run_readyset_analysis_inner(
-        self,
-        input: AnalyzeInput,
-        target_name: str,
-        target_config: Dict[str, Any],
-        cache_target_name: str,
-        cache_config: Dict[str, Any],
-        ephemeral_outcome=None,
-    ) -> Dict[str, Any]:
-        """Runs the actual readyset cacheability test + measure flow.
-
-        Caller is responsible for cache container lifecycle (see
-        _run_readyset_analysis_sync).
-        """
-        try:
-
-            # Cache target exists — try to connect
-            engine = cache_config.get("engine", target_config.get("engine", "postgresql"))
-            cache_host = cache_config.get("host", "localhost")
-            cache_port = cache_config.get("port", 5433 if engine == "postgresql" else 3307)
-            cache_password = resolve_password_value(cache_config)
-
-            cache_db_config = {
-                "engine": engine,
-                "host": cache_host,
-                "port": int(cache_port),
-                "database": cache_config.get("database", target_config.get("database")),
-                "user": cache_config.get("user", target_config.get("user")),
-                "password": cache_password,
-            }
-
-            # Run EXPLAIN CREATE CACHE (connectivity failures caught by outer except)
-            # All calls use quiet=True — this runs in a background thread
-            # and should not print to stdout (the main workflow handles display)
-            explain_result = explain_create_cache_readyset(
-                query=input.sql,
-                readyset_port=int(cache_port),
-                readyset_host=cache_host,
-                test_db_config=cache_db_config,
-                quiet=True,
-            )
-
-            if not explain_result.get("success"):
-                return {
-                    "success": False,
-                    "checked": False,
-                    "error": explain_result.get(
-                        "error", "Readyset cacheability verification failed."
-                    ),
-                    "error_detail": explain_result.get("error_detail"),
-                    "explain_cache_result": explain_result,
-                }
-
-            # Try to create cache, warm, measure, then DROP (analyze is ephemeral)
-            create_result = {}
-            warm_result = {}
-            cache_id = None
-
-            if explain_result.get("cacheable", False):
-                already_cached = (
-                    "already cached" in explain_result.get("explanation", "").lower()
-                )
-                if already_cached:
-                    create_result = {
-                        "success": True,
-                        "cached": True,
-                        "already_cached": True,
-                        "message": "Query already cached",
+                    target=target_name,
+                    query=input.sql,
+                    iterations=3,
+                    warmup=1,
+                ):
+                    if isinstance(event, CacheRunCompleteEvent):
+                        final = event
+                    elif isinstance(event, ErrorEvent):
+                        failure = event.message
+                if final is None:
+                    return {
+                        "success": False,
+                        "cacheable": False,
+                        "error": failure or "Readyset verification did not complete",
                     }
-                    cache_id = get_cache_id_for_query(
-                        query=input.sql,
-                        readyset_port=int(cache_port),
-                        db_config=cache_db_config,
-                    )
-                else:
-                    create_result = create_cache_readyset(
-                        query=input.sql,
-                        readyset_port=int(cache_port),
-                        readyset_host=cache_host,
-                        test_db_config=cache_db_config,
-                        quiet=True,
-                    )
-                    if create_result.get("success"):
-                        cache_id = get_cache_id_for_query(
-                            query=input.sql,
-                            readyset_port=int(cache_port),
-                            db_config=cache_db_config,
-                        )
+                return {
+                    "success": True,
+                    "cacheable": True,
+                    "confidence": "high",
+                    "method": "readyset_speed_test",
+                    "explanation": (
+                        "Verified with a temporary Readyset cache; "
+                        f"measured {final.speedup_mean:.1f}x mean speedup."
+                    ),
+                    "performance_comparison": {
+                        "original": {"stats": final.origin_stats},
+                        "readyset": {"stats": final.cache_stats},
+                        "speedup": {
+                            "mean": final.speedup_mean,
+                            "median": final.speedup_median,
+                            "improvement_pct": final.improvement_pct,
+                        },
+                        "winner": final.winner,
+                    },
+                }
+            finally:
+                await sandbox_manager.stop()
 
-                # Warm and measure
-                if create_result.get("success") or create_result.get("already_cached"):
-                    warm_result = warm_cache_and_measure(
-                        query=input.sql,
-                        readyset_port=int(cache_port),
-                        readyset_host=cache_host,
-                        test_db_config=cache_db_config,
-                        warmup_runs=2,
-                        measure_runs=3,
-                        quiet=True,
-                    )
-
-                # Always drop — analyze is not an explicit cache add
-                if cache_id and not already_cached:
-                    drop_cache_readyset(
-                        cache_name=cache_id,
-                        readyset_port=int(cache_port),
-                        readyset_host=cache_host,
-                        test_db_config=cache_db_config,
-                    )
-
-            return {
-                "success": True,
-                "checked": True,
-                "cache_target": cache_target_name,
-                "readyset_port": int(cache_port),
-                "shallow_mode": True,
-                "explain_cache_result": explain_result,
-                "create_cache_result": create_result,
-                "warm_cache_result": warm_result,
-                "final_verdict": {
-                    "cacheable": explain_result.get("cacheable", False),
-                    "confidence": explain_result.get("confidence", "unknown"),
-                    "method": "readyset_shallow",
-                    "cached": create_result.get("cached", False),
-                    "warm_time_ms": warm_result.get("avg_warm_time_ms"),
-                },
-            }
-
-        except Exception as e:
-            # Human message as the primary text; raw exception only in detail
-            # so the UI never renders a driver/connection dump verbatim (P41).
-            return {
-                "success": False,
-                "error": "The Readyset cacheability check could not be completed.",
-                "error_detail": str(e),
-            }
+        return asyncio.run(_run())
 
     async def _process_results(
         self,
@@ -682,22 +514,27 @@ class AnalyzeService:
                 best_rewrite=rewrite_results.get("best_rewrite"),
             )
 
-        # Only a successful EXPLAIN CREATE CACHE against Readyset is a
-        # cacheability verdict. Static SQL inspection and connection failures
-        # are useful diagnostics, but must not be rendered as "Not Cacheable".
+        # Only an explicitly requested, successful Readyset experiment is a
+        # verified verdict. Static SQL inspection is useful screening, but the
+        # web Analyze path must never imply that it ran a container.
         readyset_cacheability = context.get("readyset_cacheability", {})
         cacheability_payload: Dict[str, Any]
         if readyset_result and readyset_result.get("success"):
-            final_verdict = readyset_result.get("final_verdict", {})
+            # Accept both the current experiment-service shape and the legacy
+            # nested shape while CLI callers migrate.
+            final_verdict = readyset_result.get("final_verdict") or readyset_result
             explain_cache = readyset_result.get("explain_cache_result", {})
             cacheability_payload = {
                 "checked": True,
                 "cacheable": final_verdict.get("cacheable"),
                 "confidence": final_verdict.get("confidence"),
                 "method": final_verdict.get("method"),
-                "explanation": explain_cache.get("explanation"),
-                "issues": explain_cache.get("issues"),
-                "warnings": explain_cache.get("warnings"),
+                "explanation": readyset_result.get("explanation")
+                or explain_cache.get("explanation"),
+                "issues": readyset_result.get("issues")
+                or explain_cache.get("issues", []),
+                "warnings": readyset_result.get("warnings")
+                or explain_cache.get("warnings", []),
             }
         elif readyset_result:
             cacheability_payload = {
@@ -715,13 +552,23 @@ class AnalyzeService:
                 "warnings": [],
             }
         else:
+            static_checked = bool(
+                readyset_cacheability.get(
+                    "checked", "cacheable" in readyset_cacheability
+                )
+            )
             cacheability_payload = {
-                "checked": False,
-                "cacheable": None,
-                "confidence": "unknown",
+                "checked": static_checked,
+                "cacheable": readyset_cacheability.get("cacheable"),
+                "confidence": readyset_cacheability.get(
+                    "confidence", "unknown"
+                ),
                 "method": "static_analysis",
-                "explanation": "Readyset cacheability was not verified.",
-                "issues": [],
+                "explanation": readyset_cacheability.get(
+                    "explanation",
+                    "Static Readyset screening was not available.",
+                ),
+                "issues": readyset_cacheability.get("issues", []),
                 "warnings": readyset_cacheability.get("warnings", []),
             }
 

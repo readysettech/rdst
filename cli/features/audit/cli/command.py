@@ -270,29 +270,6 @@ class AuditCommand:
                 console.print(f"\n[dim]View locally: rdst audit show {snapshot_id}[/dim]")
                 console.print(f"[dim]View past audits: rdst audit list[/dim]")
 
-                # Note: ephemeral_lifecycle in _run_readyset_testing has already
-                # torn down any container we deployed for this audit. Containers
-                # that pre-existed the audit are left running. So we no longer
-                # tell the user "container is still running" — the answer
-                # depends on whether they had one before, which is fine.
-                if rs_results:
-                    import subprocess
-                    container_name = f"rdst-readyset-{target}"
-                    try:
-                        r = subprocess.run(
-                            ["docker", "inspect", "--format", "{{.State.Running}}", container_name],
-                            capture_output=True, text=True, timeout=3,
-                        )
-                        still_running = r.returncode == 0 and r.stdout.strip().lower() == "true"
-                    except Exception:
-                        still_running = False
-                    if still_running:
-                        # Container survived audit — it was pre-existing.
-                        console.print(
-                            f"\n[dim]Readyset cache for [bold]{target}[/bold] was already deployed and is still running.\n"
-                            f"  Stop it with:  rdst cache stop --target {target}\n"
-                            f"  Remove fully:  rdst cache remove --target {target}[/dim]"
-                        )
 
         # LLM insights for non-verbose, no-duration case (legacy single-target prompt).
         # Verbose mode already showed everything via _render_terminal_report.
@@ -582,17 +559,18 @@ class AuditCommand:
     def _run_readyset_testing(self, console, target, queries, max_queries=20, auto_yes=False):
         """Test audit queries against a local Readyset cache.
 
-        Uses ephemeral_lifecycle: if no cache is deployed (or one is stopped),
-        prompts the user; on yes, deploys/starts an ephemeral container, runs
-        benchmarks, and tears down to original state. Pre-existing running
-        caches are reused and left untouched.
+        Preserves the existing deploy/start consent preflight, then delegates
+        the managed sandbox lease and cache cleanup to run_ephemeral_benchmark.
 
         Returns list of {query_hash, query_text, cacheable, not_cacheable_reason,
         baseline_ms, readyset_ms, speedup} or None if RS not available.
         """
         try:
-            from features.audit.readyset_benchmark import benchmark_queries, docker_available
-            from shared.deploy.lifecycle import probe, ProbeState, ephemeral_lifecycle
+            from features.audit.readyset_benchmark import (
+                docker_available,
+                run_ephemeral_benchmark,
+            )
+            from shared.deploy.lifecycle import ProbeState, probe
         except ImportError:
             return None
 
@@ -659,13 +637,14 @@ class AuditCommand:
             console.print(f"[yellow]  Cache probe inconclusive ({pre.state.value}). Skipping benchmark.[/yellow]")
             return None
 
-        # Single ephemeral_lifecycle wrapping the benchmark. Handles deploy/start
-        # entry, wait-for-ready, and full teardown to original state on exit.
-        with ephemeral_lifecycle(target, mode="docker") as outcome:
-            if outcome.error:
-                console.print(f"[yellow]  {outcome.error}[/yellow]")
-                return None
-            return benchmark_queries(target, queries, max_queries=max_queries, console=console)
+        outcome = run_ephemeral_benchmark(
+            target, queries, max_queries=max_queries, console=console,
+        )
+        if outcome.get("status") != "ok":
+            detail = outcome.get("detail") or "Benchmark produced no results"
+            console.print(f"[yellow]  {detail}[/yellow]")
+            return None
+        return outcome["results"]
 
     # =========================================================================
     # Summary Mode (default UX)

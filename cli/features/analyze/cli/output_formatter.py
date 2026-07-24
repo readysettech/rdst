@@ -532,22 +532,10 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
             )
 
     if analysis_id:
-        readyset_analysis = workflow_result.get("readyset_analysis") or {}
-        if readyset_analysis.get("no_cache_target") or not readyset_analysis.get("success"):
-            # No cache or failed — show deploy then cache-compare as sequential steps
-            next_steps.add_step(
-                f"rdst cache deploy --target {target} --mode docker",
-                "Deploy Readyset cache",
-            )
-            next_steps.add_step(
-                f"rdst query cache-compare {analysis_id} --target {target} --count 100",
-                "Then compare upstream vs cached performance",
-            )
-        elif readyset_analysis.get("success"):
-            next_steps.add_step(
-                f"rdst query cache-compare {analysis_id} --target {target} --count 100",
-                "Compare upstream vs cached performance",
-            )
+        next_steps.add_step(
+            f"rdst query cache-compare {analysis_id} --target {target} --count 100",
+            "Measure with the temporary local Readyset sandbox",
+        )
         next_steps.add_step(
             f"rdst analyze --hash {analysis_id} --interactive",
             "Ask follow-up questions",
@@ -1097,23 +1085,31 @@ def _format_readyset_cacheability(
 ) -> List[str]:
     content_parts: List[Any] = []
 
-    # Check for no cache target or errors
-    if readyset_analysis and not readyset_analysis.get("success") and readyset_analysis.get("error"):
+    if (
+        readyset_analysis
+        and not readyset_analysis.get("success")
+        and readyset_analysis.get("error")
+    ):
         error_msg = readyset_analysis.get("error", "Unknown error")
         remediation = readyset_analysis.get("remediation")
         is_no_cache = readyset_analysis.get("no_cache_target", False)
 
         if is_no_cache:
-            # Informational — not an error, just no cache configured yet
-            content_parts.append(f"[{StyleTokens.MUTED}]{error_msg}[/{StyleTokens.MUTED}]")
+            content_parts.append(
+                f"[{StyleTokens.MUTED}]{error_msg}[/{StyleTokens.MUTED}]"
+            )
         else:
             content_parts.append(f"[{StyleTokens.ERROR}]ERROR[/{StyleTokens.ERROR}]")
             content_parts.append(Text(""))
-            content_parts.append(f"[{StyleTokens.ERROR}]{error_msg}[/{StyleTokens.ERROR}]")
+            content_parts.append(
+                f"[{StyleTokens.ERROR}]{error_msg}[/{StyleTokens.ERROR}]"
+            )
 
         if remediation:
             content_parts.append(Text(""))
-            content_parts.append(f"[{StyleTokens.WARNING}]Hint: {remediation}[/{StyleTokens.WARNING}]")
+            content_parts.append(
+                f"[{StyleTokens.WARNING}]Hint: {remediation}[/{StyleTokens.WARNING}]"
+            )
 
         return [
             _capture(
@@ -1124,98 +1120,105 @@ def _format_readyset_cacheability(
             )
         ]
 
-    content_parts.append(f"[{StyleTokens.SECONDARY}]PERFORMANCE COMPARISON[/{StyleTokens.SECONDARY}]")
-    content_parts.append(Text(""))
-
     if readyset_analysis.get("success"):
-        final_verdict = readyset_analysis.get("final_verdict") or {}
-        cacheable = final_verdict.get("cacheable", False)
-        confidence = final_verdict.get("confidence", "unknown")
-        method = final_verdict.get("method", "unknown")
-        cached = final_verdict.get("cached", False)
+        content_parts.append(
+            f"[{StyleTokens.SECONDARY}]VERIFIED READYSET SPEED TEST"
+            f"[/{StyleTokens.SECONDARY}]"
+        )
+        content_parts.append(Text(""))
+        verdict = readyset_analysis.get("final_verdict") or readyset_analysis
+        section_title = f"{Icons.ROCKET} Readyset Performance"
+    else:
+        content_parts.append(
+            f"[{StyleTokens.SECONDARY}]STATIC COMPATIBILITY CHECK"
+            f"[/{StyleTokens.SECONDARY}]"
+        )
+        content_parts.append(Text(""))
+        verdict = readyset_cacheability
+        section_title = f"{Icons.ROCKET} Readyset Compatibility"
 
+    checked = bool(
+        verdict.get("checked", "cacheable" in verdict)
+        or readyset_analysis.get("success")
+    )
+    cacheable = verdict.get("cacheable")
+    if checked and cacheable is not None:
         status_style = StyleTokens.SUCCESS if cacheable else StyleTokens.ERROR
         status_icon = Icons.CHECK if cacheable else Icons.CROSS
         status_text = "CACHEABLE" if cacheable else "NOT CACHEABLE"
-
         content_parts.append(
             StatusLine(
                 "Status",
                 f"[{status_style}]{status_text} {status_icon}[/{status_style}]",
             )
         )
-        content_parts.append(StatusLine("Confidence", confidence))
-        content_parts.append(StatusLine("Method", method))
+    else:
+        content_parts.append(
+            StatusLine(
+                "Status",
+                f"[{StyleTokens.WARNING}]NOT CHECKED[/{StyleTokens.WARNING}]",
+            )
+        )
 
-        # Display cache performance data if available
-        warm_time_ms = final_verdict.get("warm_time_ms")
+    content_parts.append(
+        StatusLine("Confidence", verdict.get("confidence", "unknown"))
+    )
+    content_parts.append(StatusLine("Method", verdict.get("method", "unknown")))
 
-        if warm_time_ms is not None:
-            content_parts.append(Text(""))
-            content_parts.append(f"[{StyleTokens.SECONDARY}]CACHE PERFORMANCE[/{StyleTokens.SECONDARY}]")
-            content_parts.append(StatusLine("Cached query time", f"[{StyleTokens.SUCCESS}]{warm_time_ms:.2f}ms[/{StyleTokens.SUCCESS}]"))
-
+    performance = readyset_analysis.get("performance_comparison") or {}
+    original_stats = performance.get("original", {}).get("stats", {})
+    readyset_stats = performance.get("readyset", {}).get("stats", {})
+    speedup = performance.get("speedup", {})
+    if performance:
         content_parts.append(Text(""))
-
-        explain_result = readyset_analysis.get("explain_cache_result") or {}
-        if explain_result:
-            explanation = explain_result.get("explanation", "")
-            if explanation:
-                content_parts.append(
-                    f"[{StyleTokens.MUTED}]Explanation:[/{StyleTokens.MUTED}] {explanation}"
-                )
-
-            issues = explain_result.get("issues", [])
-            if issues:
-                content_parts.append(Text(""))
-                content_parts.append(
-                    f"[{StyleTokens.WARNING}]Issues:[/{StyleTokens.WARNING}]"
-                )
-                for issue in issues:
-                    content_parts.append(
-                        f"  [{StyleTokens.MUTED}]•[/{StyleTokens.MUTED}] {issue}"
-                    )
-
-    elif readyset_cacheability.get("success"):
-        # Fallback to LLM-based analysis if container-based analysis not available
-        status_style = (
-            StyleTokens.SUCCESS
-            if readyset_cacheability.get("cacheable", False)
-            else StyleTokens.ERROR
-        )
-        status_icon = (
-            Icons.CHECK
-            if readyset_cacheability.get("cacheable", False)
-            else Icons.CROSS
-        )
-        status_text = (
-            "CACHEABLE"
-            if readyset_cacheability.get("cacheable", False)
-            else "NOT CACHEABLE"
-        )
-        confidence = readyset_cacheability.get("confidence", "unknown")
-        method = readyset_cacheability.get("method", "unknown")
-
         content_parts.append(
-            StatusLine(
-                "Status",
-                f"[{status_style}]{status_text} {status_icon}[/{status_style}]",
-            )
+            f"[{StyleTokens.SECONDARY}]MEASURED PERFORMANCE"
+            f"[/{StyleTokens.SECONDARY}]"
         )
-        content_parts.append(StatusLine("Confidence", confidence))
-        content_parts.append(StatusLine("Method", method))
-
-        explanation = readyset_cacheability.get("explanation", "")
-        if explanation:
-            content_parts.append(Text(""))
+        if original_stats.get("mean") is not None:
             content_parts.append(
-                f"[{StyleTokens.MUTED}]{explanation}[/{StyleTokens.MUTED}]"
+                StatusLine("Origin mean", f"{original_stats['mean']:.2f}ms")
             )
+        if readyset_stats.get("mean") is not None:
+            content_parts.append(
+                StatusLine("Readyset mean", f"{readyset_stats['mean']:.2f}ms")
+            )
+        if speedup.get("mean") is not None:
+            content_parts.append(
+                StatusLine("Mean speedup", f"{speedup['mean']:.1f}x")
+            )
+
+    explain_result = readyset_analysis.get("explain_cache_result") or {}
+    explanation = readyset_analysis.get("explanation") or verdict.get(
+        "explanation"
+    ) or explain_result.get("explanation")
+    if explanation:
+        content_parts.append(Text(""))
+        content_parts.append(
+            f"[{StyleTokens.MUTED}]{explanation}[/{StyleTokens.MUTED}]"
+        )
+
+    issues = verdict.get("issues") or explain_result.get("issues", [])
+    warnings = verdict.get("warnings", [])
+    if issues:
+        content_parts.append(Text(""))
+        content_parts.append(
+            f"[{StyleTokens.WARNING}]Issues:[/{StyleTokens.WARNING}]"
+        )
+        for issue in issues:
+            content_parts.append(f"  - {issue}")
+    if warnings:
+        content_parts.append(Text(""))
+        content_parts.append(
+            f"[{StyleTokens.WARNING}]Warnings:[/{StyleTokens.WARNING}]"
+        )
+        for warning in warnings:
+            content_parts.append(f"  - {warning}")
 
     return [
         _capture(
             SectionBox(
-                f"{Icons.ROCKET} Readyset Performance",
+                section_title,
                 content=Group(*content_parts),
             )
         )
@@ -1322,20 +1325,10 @@ def _format_next_steps(
                 "Improved performance for commonly used columns",
             )
 
-    if not readyset_checked:
-        next_steps.add_step(
-            f"rdst cache deploy --target {target} --mode docker",
-            "Deploy Readyset cache",
-        )
-        next_steps.add_step(
-            f"rdst query cache-compare {analysis_id} --target {target} --count 100",
-            "Then compare upstream vs cached performance",
-        )
-    else:
-        next_steps.add_step(
-            f"rdst query cache-compare {analysis_id} --target {target} --count 100",
-            "Compare upstream vs cached performance",
-        )
+    next_steps.add_step(
+        f"rdst query cache-compare {analysis_id} --target {target} --count 100",
+        "Measure with the temporary local Readyset sandbox",
+    )
     next_steps.add_step(
         f"rdst analyze --hash {analysis_id} --interactive",
         "Ask follow-up questions",

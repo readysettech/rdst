@@ -22,6 +22,63 @@ from features.configure.events import (
 from features.configure.models import ConfigureInput, ConfigureOptions
 
 
+@pytest.mark.asyncio
+async def test_remove_target_cancels_runs_and_retires_sandbox_before_config(
+    monkeypatch,
+):
+    from features.configure.service import ConfigureService
+
+    actions: list[str] = []
+
+    class Config:
+        def get(self, name):
+            return {"engine": "postgresql"} if name == "app" else None
+
+        def remove(self, name):
+            assert name == "app"
+            actions.append("config")
+
+        def save(self):
+            actions.append("save")
+
+    class Registry:
+        def cancel_target(self, name):
+            assert name == "app"
+            actions.append("runs")
+            return 1
+
+    class Manager:
+        async def start(self):
+            actions.append("start")
+
+        async def remove_target(self, name):
+            assert name == "app"
+            actions.append("sandbox")
+            return True
+
+        async def stop(self):
+            actions.append("stop")
+
+    service = ConfigureService()
+    monkeypatch.setattr(service, "_load_config", lambda: Config())
+    monkeypatch.setattr("shared.run_registry.run_registry", Registry())
+    monkeypatch.setattr(
+        "shared.deploy.sandbox_manager.sandbox_manager", Manager()
+    )
+
+    events = [event async for event in service.remove_target("app")]
+
+    assert any(isinstance(event, ConfigureSuccessEvent) for event in events)
+    assert actions == [
+        "runs",
+        "start",
+        "sandbox",
+        "stop",
+        "config",
+        "save",
+    ]
+
+
 class TestConfigureServiceInit:
     """Tests for ConfigureService initialization."""
 
