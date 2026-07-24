@@ -247,6 +247,48 @@ describe('ConfigWarning env secret flow', () => {
     });
   });
 
+  it('never gates a feature page once a target exists, even if init never completed', async () => {
+    mockPathname = '/analyze';
+    // A target added outside the guided flow (configure page, fleet add, or a
+    // partially-failed onboarding submit) leaves init.completed unset; that
+    // must not lock the user out of the app.
+    vi.mocked(fetchInitStatus).mockResolvedValue({
+      initialized: false,
+      targets: [{ name: 'prod', engine: 'postgresql', has_password: true, is_default: true }],
+      default_target: 'prod',
+      llm_configured: false,
+    });
+
+    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+
+    await waitFor(() => expect(vi.mocked(fetchInitStatus)).toHaveBeenCalled());
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps a zero-target install on fleet for CSV import and AWS discovery', async () => {
+    mockPathname = '/fleet';
+    vi.mocked(fetchStatus).mockResolvedValue({
+      configured: false,
+      default_target: null,
+      targets: [],
+      version: '1.0.0',
+      error: null,
+    });
+    vi.mocked(fetchInitStatus).mockResolvedValue({
+      initialized: false,
+      targets: [],
+      default_target: null,
+      llm_configured: false,
+    });
+
+    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+
+    await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled());
+    // Fleet's import flows are themselves ways to connect databases, so the
+    // lockout must not bounce them to onboarding.
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it('keeps a zero-target install on settings instead of onboarding', async () => {
     mockPathname = '/configure';
     vi.mocked(fetchStatus).mockResolvedValue({

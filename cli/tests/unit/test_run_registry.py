@@ -289,6 +289,38 @@ class TestLifecycle:
         assert registry.status(first) == "done"
         assert registry.status(second) == "done"
 
+    @pytest.mark.asyncio
+    async def test_reset_cancels_live_runs_and_forgets_everything(self):
+        registry = RunRegistry()
+        finished = registry.start("bootstrap", "imdb", _steps(1))
+        await _wait_status(registry, finished, "done")
+        running_gate = asyncio.Event()
+        running = registry.start(
+            "bootstrap", "imdb", _gated(running_gate, ["step0"], ["never"])
+        )
+        parked_gate = asyncio.Event()
+        parked = registry.start(
+            "bootstrap",
+            "analytics",
+            _gated(parked_gate, ["needs_key"], ["never"]),
+            resume_event=parked_gate,
+        )
+        await _wait_status(registry, running, "running")
+        await _wait_status(registry, parked, "needs_key")
+        collector = asyncio.create_task(_collect(registry, running))
+        await asyncio.sleep(0.01)
+
+        assert registry.reset() == 2
+
+        # Attached subscribers still settle on the cancelled terminal record.
+        events = await collector
+        assert events[-1]["event"] == "run_end"
+        assert events[-1]["data"]["status"] == "cancelled"
+        # The registry no longer knows any run, finished ones included.
+        for run_id in (finished, running, parked):
+            assert registry.status(run_id) is None
+        assert registry.reset() == 0
+
 
 class TestEviction:
     @pytest.mark.asyncio

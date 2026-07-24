@@ -592,9 +592,12 @@ export function useBackgroundRun(
     .find((run) => run.kind === kind && run.target === target)
 }
 
-export function __resetBackgroundRunsForTests(
-  options: { reconnectBaseMs?: number; reconnectMaxMs?: number } = {}
-): void {
+/**
+ * Forget every run: abort live streams, drop in-memory state, and clear the
+ * persisted records. Used when local data is reset, so a wiped install does
+ * not resurface chips for jobs whose data no longer exists.
+ */
+export function clearAllBackgroundRuns(): void {
   streamGeneration += 1
   for (const controller of streamControllers.values()) controller.abort()
   runs.clear()
@@ -603,9 +606,6 @@ export function __resetBackgroundRunsForTests(
   streamControllers.clear()
   probing.clear()
   reconnectStatuses.clear()
-  reattachStarted = false
-  reconnectBaseMs = options.reconnectBaseMs ?? 1000
-  reconnectMaxMs = options.reconnectMaxMs ?? 30_000
   try {
     localStorage.removeItem(STORAGE_KEY)
     localStorage.removeItem(LEGACY_STORAGE_KEY)
@@ -613,4 +613,13 @@ export function __resetBackgroundRunsForTests(
     // ignore
   }
   for (const listener of listeners) listener()
+}
+
+export function __resetBackgroundRunsForTests(
+  options: { reconnectBaseMs?: number; reconnectMaxMs?: number } = {}
+): void {
+  clearAllBackgroundRuns()
+  reattachStarted = false
+  reconnectBaseMs = options.reconnectBaseMs ?? 1000
+  reconnectMaxMs = options.reconnectMaxMs ?? 30_000
 }

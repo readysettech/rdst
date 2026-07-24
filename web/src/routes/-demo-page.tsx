@@ -1621,7 +1621,11 @@ function PatternTable({
       {/* Fixed height with internal scroll: rows may reorder within it, but the
           table's position and size never shift the page. */}
       <div className="max-h-[440px] overflow-auto">
-        <table className="w-full border-collapse text-label-medium">
+        {/* Fixed table layout: the query column absorbs whatever width the
+            viewport offers (titles and SQL previews truncate inside it), so
+            the trailing status + cache columns stay on screen. Below the
+            min width the wrapper above scrolls the whole table. */}
+        <table className="w-full min-w-[880px] table-fixed border-collapse text-label-medium">
           <thead className="sticky top-0 z-10 bg-surface-layout-1">
             <tr className="border-b border-border-layout-1">
               <th className="w-8 px-3 py-3" />
@@ -1636,7 +1640,7 @@ function PatternTable({
                   Query{sortMark('query')}
                 </button>
               </TableHeaderCell>
-              <TableHeaderCell align="right">
+              <TableHeaderCell align="right" className="w-28">
                 <button
                   className="disabled:cursor-default"
                   disabled={tourActive}
@@ -1645,7 +1649,7 @@ function PatternTable({
                   Postgres hits{sortMark('postgres_hits')}
                 </button>
               </TableHeaderCell>
-              <TableHeaderCell align="right">
+              <TableHeaderCell align="right" className="w-28">
                 <button
                   className="disabled:cursor-default"
                   disabled={tourActive}
@@ -1654,7 +1658,7 @@ function PatternTable({
                   Readyset hits{sortMark('readyset_hits')}
                 </button>
               </TableHeaderCell>
-              <TableHeaderCell align="right">
+              <TableHeaderCell align="right" className="w-28">
                 <button
                   className="disabled:cursor-default"
                   disabled={tourActive}
@@ -1663,7 +1667,7 @@ function PatternTable({
                   Postgres avg{sortMark('direct_avg_ms')}
                 </button>
               </TableHeaderCell>
-              <TableHeaderCell align="right">
+              <TableHeaderCell align="right" className="w-28">
                 <button
                   className="disabled:cursor-default"
                   disabled={tourActive}
@@ -1672,7 +1676,7 @@ function PatternTable({
                   Readyset avg{sortMark('router_avg_ms')}
                 </button>
               </TableHeaderCell>
-              <TableHeaderCell>
+              <TableHeaderCell className="w-44">
                 <button
                   className="disabled:cursor-default"
                   disabled={tourActive}
@@ -1681,7 +1685,7 @@ function PatternTable({
                   Status{sortMark('status')}
                 </button>
               </TableHeaderCell>
-              <TableHeaderCell>Cache status</TableHeaderCell>
+              <TableHeaderCell className="w-24">Cache status</TableHeaderCell>
             </tr>
           </thead>
           <tbody>
@@ -1693,6 +1697,7 @@ function PatternTable({
               // "waiting for traffic" pill with no manual toggle, so the pre-load
               // table isn't a wall of amber alarms. [T16, audit MEDIUM #3]
               const isWaiting = row.hits === 0 && row.status === 'not_eligible'
+              const sqlText = parameterizeSql(row.sql).text
               return (
                 <Fragment key={row.key}>
                   <tr
@@ -1715,25 +1720,26 @@ function PatternTable({
                         {expanded ? '▾' : '▸'}
                       </button>
                     </td>
-                    <td className="max-w-[360px] px-3 py-2">
+                    <td className="px-3 py-2">
                       <button
-                        className="block text-left"
+                        className="block w-full text-left"
+                        title={sqlText}
                         onClick={() => toggleSql(row.key)}
                       >
                         <Text
                           as="div"
                           level="body-small"
                           data-testid="pattern-title"
-                          className="whitespace-nowrap font-medium text-content-layout-1"
+                          className="truncate font-medium text-content-layout-1"
                         >
                           {row.title}
                         </Text>
                         <Text
                           as="div"
                           level="mono-small"
-                          className="max-w-[340px] truncate text-content-layout-3"
+                          className="truncate text-content-layout-3"
                         >
-                          {parameterizeSql(row.sql).text}
+                          {sqlText}
                         </Text>
                       </button>
                     </td>

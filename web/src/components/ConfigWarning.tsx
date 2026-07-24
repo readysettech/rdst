@@ -248,9 +248,16 @@ export function ConfigWarning() {
       // manages keys and can reset local data. Redirecting it away traps a
       // fresh or wiped install with no way back in.
       location.pathname === '/configure' ||
+      // Fleet stays reachable with zero targets: its CSV import and AWS
+      // discovery flows are themselves ways to connect databases.
+      location.pathname === '/fleet' ||
       location.pathname.startsWith('/demo')
     ) return;
-    if (initStatus.initialized === false || status.targets.length === 0) {
+    // Targets are the one true signal: a database added from ANY surface
+    // (onboarding form, configure, fleet discovery, CSV import) ends the
+    // lockout, even if the guided init flow never ran or a later step of it
+    // failed after the target was created.
+    if (status.targets.length === 0) {
       // Route to Connect preserving where the user was headed, so they land
       // back there after connecting (configure-and-identity open-dep #4).
       navigate({ to: '/onboarding', search: { redirect: location.pathname } });

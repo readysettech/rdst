@@ -406,6 +406,11 @@ describe('DemoPage', () => {
     });
     render(<DemoPage />);
 
+    // Collapsed row: the query cell truncates its one-line preview and exposes
+    // the full parameterized SQL as a hover tooltip on the row button.
+    const rowButton = screen.getByTitle('SELECT id, status FROM orders WHERE id = $1');
+    expect(rowButton.querySelector('.truncate')).toBeTruthy();
+
     fireEvent.click(screen.getByText('Order receipt by id'));
     const display = screen.getByTestId('sql-display');
     expect(display.textContent).toContain('WHERE id = $1');

@@ -127,6 +127,21 @@ class RunRegistry:
         handle.task.cancel()
         return True
 
+    def reset(self) -> int:
+        """Cancel every live run and forget all runs (local data reset).
+
+        Attached subscribers still settle: their generators hold the handle,
+        and cancellation appends the terminal record that wakes them.
+        Returns the number of runs cancelled.
+        """
+        cancelled = 0
+        for handle in self._runs.values():
+            if handle.status not in TERMINAL_STATUSES and handle.task is not None:
+                handle.task.cancel()
+                cancelled += 1
+        self._runs.clear()
+        return cancelled
+
     def wake_needs_key(self) -> int:
         """Wake every run currently parked on the shared key gate."""
         woken = 0

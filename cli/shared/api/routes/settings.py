@@ -221,7 +221,13 @@ async def reset_local_data(request: Request) -> ResetLocalDataResponse:
 
     from shared.constants import rdst_data_dir
     from shared.env_requirements_service import EnvRequirementsService
+    from shared.run_registry import run_registry
     from shared.secret_store_service import SecretStoreService
+
+    # Background runs (bootstrap, annotation, cache tests) belong to the
+    # wiped state: cancel them and forget their history so a fresh install
+    # does not resurface jobs for data that no longer exists.
+    run_registry.reset()
 
     data_dir = rdst_data_dir()
     shutil.rmtree(data_dir, ignore_errors=True)

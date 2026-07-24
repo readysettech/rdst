@@ -5,6 +5,7 @@ import {
   __resetBackgroundRunsForTests,
   acknowledgeBackgroundRun,
   cancelBackgroundRun,
+  clearAllBackgroundRuns,
   dismissBackgroundRun,
   getBackgroundRuns,
   reattachBackgroundRuns,
@@ -107,6 +108,33 @@ describe('background run store', () => {
       '/api/runs/bootstrap_imdb_x/events?after_seq=0',
       { signal: expect.any(AbortSignal) }
     )
+  })
+
+  it('clears every run and its persisted record on local data reset', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        sseResponse(
+          frames([
+            'bootstrap_stage',
+            { stage: 'structure', message: 'Reading schema', seq: 1 },
+          ])
+        )
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    startBootstrapRun('imdb')
+    await waitFor(() =>
+      expect(run('bootstrap_imdb_x')?.status).toBeDefined()
+    )
+    expect(localStorage.getItem('rdst_background_runs')).toContain(
+      'bootstrap_imdb_x'
+    )
+
+    clearAllBackgroundRuns()
+
+    expect(getBackgroundRuns()).toEqual([])
+    expect(localStorage.getItem('rdst_background_runs')).toBeNull()
   })
 
   it('tracks table progress for manual annotation', async () => {

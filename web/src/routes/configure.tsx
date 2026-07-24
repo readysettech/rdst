@@ -26,7 +26,10 @@ import {
   type EnvRequirement,
   resetLocalData,
 } from '../lib/api'
-import { startBootstrapRun } from '../lib/backgroundRuns'
+import {
+  clearAllBackgroundRuns,
+  startBootstrapRun,
+} from '../lib/backgroundRuns'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
@@ -121,8 +124,13 @@ function ConfigurePage() {
   const resetMutation = useMutation({
     mutationFn: resetLocalData,
     // A wiped ~/.rdst invalidates every piece of client state at once; a
-    // full reload lands on the fresh-install experience.
-    onSuccess: () => window.location.reload(),
+    // full reload lands on the fresh-install experience. Background-run
+    // records must go first, or the reloaded page would rehydrate chips for
+    // jobs the server just cancelled.
+    onSuccess: () => {
+      clearAllBackgroundRuns()
+      window.location.reload()
+    },
     onError: () => setResetArmed(false),
   })
   const handleResetLocalData = () => {
