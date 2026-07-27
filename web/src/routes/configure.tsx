@@ -5,19 +5,29 @@
 import { Alert } from '@rs/ui-new/alert'
 import { Button } from '@rs/ui-new/button'
 import { CopyButton } from '@rs/ui-new/copy-button'
+import { ErrorState } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { m } from '@rs/ui-new/motion'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, useLocation, useRouter } from '@tanstack/react-router'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  createFileRoute,
+  useLocation,
+  useNavigate,
+  useRouter,
+} from '@tanstack/react-router'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AwsConnectionPanel } from '../components/aws/AwsConnectionPanel'
+import {
+  AddTargetsDrawer,
   ConfigureForm,
   ConfigureTargetList,
   DevSettingsSection,
+  MoveToGroupDialog,
   SettingsSection,
+  TargetGroupView,
 } from '../components/configure'
 import { EnvSecretsDialog } from '../components/EnvSecretsDialog'
 import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
@@ -30,26 +40,37 @@ import {
   clearAllBackgroundRuns,
   startBootstrapRun,
 } from '../lib/backgroundRuns'
+import { invalidateTargetQueries } from '../lib/targetQueries'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
 } from '../lib/trialQueries'
 import { useAnthropicValidity } from '../lib/useAnthropicValidity'
 import { useConfigure } from '../lib/useConfigure'
+import {
+  fetchFleetAwsStatus,
+  fetchFleetTargets,
+  useFleetStatus,
+} from '../lib/useFleet'
 import { useSystemStatus } from '../lib/useSystemStatus'
+import { classifyError, TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract'
 import type {
   ConfigureFormData,
+  ConfigureTarget,
   ConfigureTargetDetail,
 } from '../types/configure'
 
 // Deep-link params for the routable notices (configure-and-identity return
 // trips): `edit` opens a connection's edit form, `section=ai` focuses the AI
-// key card, and `returnTo` sends the user back to the feature after the fix.
+// key card, `returnTo` sends the user back to the feature after the fix, and
+// `add` opens the Add Targets drawer on that source tab (the relocation target
+// for the retired /fleet route).
 // Parse-only — never throw here (keeps the app shell intact; B1 lesson).
 type ConfigureSearch = {
   edit?: string
   section?: 'ai'
   returnTo?: string
+  add?: 'aws' | 'csv'
 }
 
 export const Route = createFileRoute('/configure')({
@@ -57,27 +78,64 @@ export const Route = createFileRoute('/configure')({
     edit: typeof search.edit === 'string' ? search.edit : undefined,
     section: search.section === 'ai' ? 'ai' : undefined,
     returnTo: typeof search.returnTo === 'string' ? search.returnTo : undefined,
+    add: search.add === 'aws' || search.add === 'csv' ? search.add : undefined,
   }),
   component: ConfigurePage,
 })
+
+/** One segment of the list/groups switch above the connection list. */
+function ViewToggle({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className="h-8 px-3 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
+        data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
+        data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
+      data-active={active}
+    >
+      {label}
+    </button>
+  )
+}
 
 function keyValidationVariant(
   v: AnthropicKeyValidation
 ): 'positive' | 'negative' | 'warning' {
   if (v.valid) return 'positive'
-  if (v.reason === 'rejected') return 'negative'
+  if (v.reason === 'rejected' || v.reason === 'exhausted') return 'negative'
   return 'warning'
 }
 
 function keyValidationLabel(v: AnthropicKeyValidation): string {
-  if (v.valid) return 'Key is valid — Anthropic accepted it.'
+  const isTrial = v.source === 'trial' || v.source === 'trial_exhausted'
+  if (v.valid) {
+    return isTrial
+      ? 'Trial token accepted — validated by the Readyset trial service.'
+      : 'Key is valid — Anthropic accepted it.'
+  }
   switch (v.reason) {
+    case 'exhausted':
+      return TRIAL_EXHAUSTED_MESSAGE
     case 'rejected':
-      return 'Key rejected by Anthropic. Update it with a valid key.'
+      return isTrial
+        ? 'Trial token rejected by the Readyset trial service. Request a new one or add your own key.'
+        : 'Key rejected by Anthropic. Update it with a valid key.'
     case 'no_key':
-      return 'No Anthropic key is configured yet.'
+      return 'No Anthropic key or trial token is configured yet.'
     default:
-      return "Couldn't reach Anthropic to verify the key. Check your connection and try again."
+      return isTrial
+        ? "Couldn't reach the Readyset trial service to verify your token. Check your connection and try again."
+        : "Couldn't reach Anthropic to verify the key. Check your connection and try again."
   }
 }
 
@@ -103,6 +161,7 @@ function scrollSectionIntoView(id: string): () => void {
 function ConfigurePage() {
   const queryClient = useQueryClient()
   const router = useRouter()
+  const navigate = useNavigate()
   const search = Route.useSearch()
   // Router-reactive hash (TanStack strips the leading "#"): drives the
   // /configure#dev deep-link so the effect fires once the redirect's hash is
@@ -112,6 +171,9 @@ function ConfigurePage() {
   const [editingTarget, setEditingTarget] =
     useState<ConfigureTargetDetail | null>(null)
   const [showAnthropicDialog, setShowAnthropicDialog] = useState(false)
+  const [passwordDialogTarget, setPasswordDialogTarget] = useState<string | null>(
+    null
+  )
   const [showTrialDialog, setShowTrialDialog] = useState(false)
   // Two-click destructive reset: first click arms with an explicit warning,
   // second click deletes; arming auto-expires.
@@ -140,11 +202,13 @@ function ConfigurePage() {
     }
     resetMutation.mutate()
   }
-  // Which connection is being tested (drives the inline per-row spinner), and
-  // whether the current inline result has been dismissed.
+  // Which connection is being tested (drives the inline per-row spinner).
   const [testingTarget, setTestingTarget] = useState<string | null>(null)
-  const [testDismissed, setTestDismissed] = useState(false)
   const deepLinkHandledRef = useRef(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerTab, setDrawerTab] = useState<'aws' | 'csv'>('aws')
+  const [moveTarget, setMoveTarget] = useState<ConfigureTarget | null>(null)
+  const [view, setView] = useState<'list' | 'groups'>('groups')
 
   const {
     listTargets,
@@ -153,13 +217,77 @@ function ConfigurePage() {
     updateTarget,
     removeTarget,
     setDefaultTarget,
-    testConnection,
-    state,
     targets,
-    connectionTestResult,
     error,
     loading,
   } = useConfigure()
+
+  // Groups and tags are fleet-side attributes; the row set and its CRUD stay
+  // with useConfigure, and this list is joined by name purely for the labels.
+  const { data: fleetTargets } = useQuery({
+    queryKey: ['fleet-targets'],
+    queryFn: () => fetchFleetTargets(),
+    staleTime: 30_000,
+  })
+  const { data: awsStatus } = useQuery({
+    queryKey: ['fleet-aws-status', ''],
+    queryFn: () => fetchFleetAwsStatus(),
+    staleTime: 5_000,
+    retry: false,
+  })
+
+  const fleetByName = useMemo(
+    () =>
+      new Map((fleetTargets?.members ?? []).map((member) => [member.name, member])),
+    [fleetTargets]
+  )
+  const groupOf = useCallback(
+    (target: ConfigureTarget) => fleetByName.get(target.name)?.group ?? null,
+    [fleetByName]
+  )
+  const groups = useMemo(() => {
+    const seen = new Set<string>()
+    for (const target of targets) {
+      const group = groupOf(target)
+      if (group) seen.add(group)
+    }
+    return [...seen]
+  }, [targets, groupOf])
+
+  const {
+    check,
+    state: connectivityState,
+    results: connectivity,
+    error: connectivityError,
+  } = useFleetStatus()
+  const checking = connectivityState === 'running'
+  // The connectivity endpoint only knows fleet targets, so Readyset-proxy rows
+  // are never checkable: name them explicitly rather than sweeping blind. Until
+  // the fleet list answers, every row stays offerable so a slow or failing
+  // lookup can't strand the whole section.
+  const checkableNames = useMemo(
+    () =>
+      targets
+        .map(({ name }) => name)
+        .filter((name) => !fleetTargets || fleetByName.has(name)),
+    [targets, fleetTargets, fleetByName]
+  )
+  const checkableTargets = useMemo(
+    () => (fleetTargets ? new Set(checkableNames) : undefined),
+    [fleetTargets, checkableNames]
+  )
+  const checkAll = useCallback(() => {
+    if (checkableNames.length === 0) return
+    void check(undefined, checkableNames)
+  }, [check, checkableNames])
+
+  // Sweep connectivity once per mount, as soon as the targets are known.
+  const didAutoCheck = useRef(false)
+  useEffect(() => {
+    if (didAutoCheck.current || checkableNames.length === 0) return
+    didAutoCheck.current = true
+    checkAll()
+  }, [checkableNames.length, checkAll])
 
   const { data: statusData } = useSystemStatus()
   const dataDirectory = statusData?.data_directory ?? null
@@ -208,7 +336,7 @@ function ConfigurePage() {
             : 'Anthropic API Key Missing'
 
   const anthropicStatusDescription = isTrialExhausted
-    ? 'Your trial has run out. Add your own Anthropic API key to continue using AI analysis.'
+    ? TRIAL_EXHAUSTED_MESSAGE
     : keyRejected
       ? 'Anthropic rejected this key. Update it with a valid key to keep AI analysis working.'
       : keyChecking
@@ -284,6 +412,22 @@ function ConfigurePage() {
     return scrollSectionIntoView('dev')
   }, [locationHash])
 
+  // Deep-link /configure#connections — where the retired /fleet route lands.
+  useEffect(() => {
+    if (locationHash !== 'connections') return
+    return scrollSectionIntoView('connections')
+  }, [locationHash])
+
+  // ?add=aws|csv (onboarding's discovery link, or an old /fleet?add= link)
+  // opens the Add Targets drawer directly on that tab. Runs once.
+  const addDeepLinkHandledRef = useRef(false)
+  useEffect(() => {
+    if (!search.add || addDeepLinkHandledRef.current) return
+    addDeepLinkHandledRef.current = true
+    setDrawerTab(search.add)
+    setDrawerOpen(true)
+  }, [search.add])
+
   // After a fix reached via a routable notice, send the user back to the
   // feature they came from so the flow resumes in place. [USE-021, USE-077]
   const returnToFeature = () => {
@@ -341,25 +485,68 @@ function ConfigurePage() {
     await setDefaultTarget(targetName)
   }
 
-  const handleTest = (targetName: string) => {
+  const handleTest = async (targetName: string) => {
     setTestingTarget(targetName)
-    setTestDismissed(false)
-    testConnection(targetName)
-  }
-
-  // Drop the per-row spinner once the test settles (a result arrived, or it
-  // errored without one). Render-gates the loading state to the tested row.
-  useEffect(() => {
-    if (connectionTestResult || state === 'error') {
+    try {
+      await check(undefined, [targetName])
+    } finally {
       setTestingTarget(null)
     }
-  }, [connectionTestResult, state])
+  }
 
-  const visibleTestResult = testDismissed ? null : connectionTestResult
+  // A saved password changes what the row says about itself: `has_password`
+  // rides on the target list, and this page holds that list plus its
+  // connectivity verdicts in state the dialog does not own. Republish the rows
+  // the same way the drawer does, then re-check exactly the saved target.
+  const publishSavedPassword = async (targetName: string) => {
+    await invalidateTargetQueries(queryClient)
+    await listTargets()
+    await handleTest(targetName)
+  }
+
+  const openDrawer = (tab: 'aws' | 'csv') => {
+    setDrawerTab(tab)
+    setDrawerOpen(true)
+  }
+
+  const passwordDialogRequirements = useMemo(
+    () =>
+      (envRequirements?.requirements ?? []).filter(
+        (requirement) =>
+          requirement.kind === 'target_password' &&
+          requirement.target === passwordDialogTarget
+      ),
+    [envRequirements, passwordDialogTarget]
+  )
 
   const handleTestKey = () => {
     void keyValidityQuery.refetch()
   }
+
+  const countsLabel = `${targets.length} ${
+    targets.length === 1 ? 'target' : 'targets'
+  } · ${groups.length} ${groups.length === 1 ? 'group' : 'groups'}`
+
+  // Both views render the same row-cards; the grouped view only nests them
+  // under collapsible headers.
+  const renderTargets = (rows: ConfigureTarget[]) => (
+    <ConfigureTargetList
+      targets={rows}
+      onEdit={(target) => void handleEditClick(target.name)}
+      onTest={(name) => void handleTest(name)}
+      onDelete={handleDelete}
+      onSetDefault={handleSetDefault}
+      onAdd={handleAddClick}
+      onDiscover={() => openDrawer('aws')}
+      onMoveToGroup={setMoveTarget}
+      isLoading={loading}
+      connectivity={connectivity}
+      checkableTargets={checkableTargets}
+      testingTargetName={testingTarget}
+      connectivityBusy={checking}
+      onSetPassword={(target) => setPasswordDialogTarget(target.name)}
+    />
+  )
 
   const editingInitialData = editingTarget
     ? {
@@ -414,18 +601,29 @@ function ConfigurePage() {
         {/* ── Database connections — primary section; Add moves in here ── */}
         <SettingsSection
           className="pt-8 pb-10"
+          id="connections"
           title="Database connections"
           description="The databases RDST can analyze. Add one and test it connects."
           action={
             !showForm ? (
-              <Button
-                variant="rising"
-                modifier="solid"
-                icon="add"
-                iconPosition="left"
-                label="Add Target"
-                onClick={handleAddClick}
-              />
+              <HStack className="gap-2 items-center flex-wrap">
+                <Button
+                  variant="rising"
+                  modifier="solid"
+                  icon="add"
+                  iconPosition="left"
+                  label="Add Target"
+                  onClick={handleAddClick}
+                />
+                <Button
+                  variant="primary"
+                  modifier="outline"
+                  icon="search"
+                  iconPosition="left"
+                  label="Discover & import"
+                  onClick={() => openDrawer('aws')}
+                />
+              </HStack>
             ) : undefined
           }
         >
@@ -436,12 +634,38 @@ function ConfigurePage() {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
               >
-                <Alert
-                  variant="negative"
-                  modifier="outline"
-                  label={`Error: ${error}`}
+                <ErrorState
+                  errorClass={classifyError({ code: '', message: error ?? '' })}
+                  title="Connection action failed"
+                  message={
+                    error ??
+                    'The last action on your connections could not complete.'
+                  }
+                  trustworthy="Your saved connections are unchanged."
+                  onRetry={() => void listTargets()}
+                  retryLabel="Reload connections"
                 />
               </m.div>
+            </Show>
+
+            <Show when={!!connectivityError}>
+              <ErrorState
+                errorClass={classifyError({
+                  code: '',
+                  message: connectivityError ?? '',
+                })}
+                title="Connectivity check failed"
+                message={
+                  connectivityError ?? 'The connectivity check could not run.'
+                }
+                trustworthy="The connection list is unaffected — only the live reachability of each row is stale."
+                onRetry={checkAll}
+                retryLabel="Check again"
+              />
+            </Show>
+
+            <Show when={targets.length > 0 && !!awsStatus?.has_credentials}>
+              <AwsConnectionPanel compact />
             </Show>
 
             {/* Form replaces the list while adding/editing. */}
@@ -463,27 +687,67 @@ function ConfigurePage() {
               </m.div>
             </Show>
 
+            {/* Toolbar — the view switch appears only once a group exists, so a
+                flat install never grows an "Ungrouped" band it can't use. */}
+            <Show when={!showForm && targets.length > 0}>
+              <HStack className="justify-between items-center gap-3 flex-wrap">
+                <HStack className="gap-3 items-center flex-wrap">
+                  <Show when={groups.length > 0}>
+                    <HStack className="gap-1" role="group" aria-label="Target view">
+                      <ViewToggle
+                        active={view === 'list'}
+                        label="List"
+                        onClick={() => setView('list')}
+                      />
+                      <ViewToggle
+                        active={view === 'groups'}
+                        label="Groups"
+                        onClick={() => setView('groups')}
+                      />
+                    </HStack>
+                  </Show>
+                  <Text level="caption" className="text-content-layout-3">
+                    {countsLabel}
+                  </Text>
+                </HStack>
+                <Button
+                  variant="primary"
+                  modifier="outline"
+                  size="small"
+                  icon="connect"
+                  iconPosition="left"
+                  label="Check all"
+                  loading={checking}
+                  disabled={checking || checkableNames.length === 0}
+                  onClick={checkAll}
+                />
+              </HStack>
+            </Show>
+
             {/* The list — and, at zero targets, its polished hero empty-state
                 (the "Add your first connection" surface) render here. [VIS-102].
-                The connection-test result renders inline under the tested row. */}
+                Connectivity and the unreachable notice render per row. */}
             <Show when={!showForm}>
               <m.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, delay: 0.1 }}
               >
-                <ConfigureTargetList
-                  targets={targets}
-                  onEdit={(target) => void handleEditClick(target.name)}
-                  onTest={handleTest}
-                  onDelete={handleDelete}
-                  onSetDefault={handleSetDefault}
-                  onAdd={handleAddClick}
-                  isLoading={loading}
-                  connectionTestResult={visibleTestResult}
-                  testingTargetName={testingTarget}
-                  onDismissTestResult={() => setTestDismissed(true)}
-                />
+                {view === 'groups' && targets.length > 0 ? (
+                  <TargetGroupView
+                    targets={targets}
+                    groupOf={groupOf}
+                    renderTargets={renderTargets}
+                    onHealthCheckGroup={(group) =>
+                      void navigate({
+                        to: '/audit',
+                        search: { scope: 'group', group },
+                      })
+                    }
+                  />
+                ) : (
+                  renderTargets(targets)
+                )}
               </m.div>
             </Show>
           </VStack>
@@ -670,6 +934,39 @@ function ConfigurePage() {
       </div>
 
       <EnvSecretsDialog
+        isOpen={passwordDialogTarget !== null}
+        onClose={() => setPasswordDialogTarget(null)}
+        requirements={passwordDialogRequirements}
+        keyringAvailable={Boolean(envRequirements?.keyring_available)}
+        onSuccess={() => {
+          const target = passwordDialogTarget
+          setPasswordDialogTarget(null)
+          if (target) void publishSavedPassword(target)
+        }}
+      />
+
+      <AddTargetsDrawer
+        open={drawerOpen}
+        initialTab={drawerTab}
+        onClose={() => setDrawerOpen(false)}
+        onTargetsAdded={() => void listTargets()}
+        onCredentialsClosed={checkAll}
+        onRecheckTargets={(names) => {
+          if (names.length > 0) void check(undefined, names)
+        }}
+      />
+
+      <MoveToGroupDialog
+        target={
+          moveTarget
+            ? { name: moveTarget.name, group: groupOf(moveTarget) }
+            : null
+        }
+        groups={groups}
+        onClose={() => setMoveTarget(null)}
+      />
+
+      <EnvSecretsDialog
         isOpen={showAnthropicDialog}
         onClose={() => setShowAnthropicDialog(false)}
         requirements={anthropicDialogRequirements}
@@ -683,11 +980,8 @@ function ConfigurePage() {
         }
         onSuccess={() => {
           void invalidateTrialRelatedQueries(queryClient)
-          // Key changed: drop the cached validity verdict and re-check so the
-          // status line reflects the new key, not the old result.
-          void queryClient.invalidateQueries({
-            queryKey: ['anthropic-validity'],
-          })
+          // Re-check right away so the status line reflects the new key even
+          // while the requirements refresh is still in flight.
           void keyValidityQuery.refetch()
           // If a routable "needs a key" notice sent us here, resume the feature.
           returnToFeature()
@@ -699,9 +993,6 @@ function ConfigurePage() {
         onClose={() => setShowTrialDialog(false)}
         onSuccess={() => {
           void invalidateTrialRelatedQueries(queryClient)
-          void queryClient.invalidateQueries({
-            queryKey: ['anthropic-validity'],
-          })
           returnToFeature()
         }}
       />

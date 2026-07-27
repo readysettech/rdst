@@ -1,9 +1,4 @@
-import {
-  clearTargets,
-  expect,
-  setBackendFixtures,
-  test,
-} from './fixtures'
+import { clearTargets, expect, setBackendFixtures, test } from './fixtures'
 
 test('completes first-run onboarding and persists the target', async ({
   page,
@@ -47,7 +42,6 @@ test('completes first-run onboarding and persists the target', async ({
   await page.locator('[name="database"]').fill('app')
   await page.locator('[name="user"]').fill('e2e')
   await page.locator('[name="password"]').fill('test-password')
-  await page.locator('[name="password_env"]').fill('TEST_DB_PASSWORD')
   await page.getByRole('button', { name: 'Test & connect' }).click()
 
   // Landing on the design-system home with the job launcher proves the

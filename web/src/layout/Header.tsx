@@ -43,7 +43,6 @@ const routeConfig: Record<string, RouteConfig> = {
   '/audit': { label: 'Health Check', icon: 'document-validation' },
   '/guards': { label: 'Guards', icon: 'user-shield' },
   '/agents': { label: 'Agents', icon: 'message-multiple' },
-  '/fleet': { label: 'Fleet', icon: 'building' },
   '/readyset': { label: 'Readyset Testing', icon: 'test-tube' },
   '/configure': { label: 'Settings', icon: 'settings' },
   '/onboarding': { label: 'Get Started', icon: 'querypilot' },

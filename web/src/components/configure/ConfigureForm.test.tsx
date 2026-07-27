@@ -1,22 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ConfigureForm } from './ConfigureForm'
 
-class ResizeObserverMock {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 describe('ConfigureForm connection URL parsing', () => {
-  beforeAll(() => {
-    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
-  })
-
-  afterAll(() => {
-    vi.unstubAllGlobals()
-  })
-
   afterEach(() => {
     cleanup()
   })
@@ -53,32 +39,37 @@ describe('ConfigureForm connection URL parsing', () => {
     )
   })
 
-  it('defaults the password environment name from the target name', () => {
+  it('generates the internal password lookup name from the target name', () => {
     const onSubmit = vi.fn()
 
     render(<ConfigureForm onSubmit={onSubmit} />)
 
+    fireEvent.change(
+      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
+      {
+        target: {
+          // Fictional fixture credentials for the URL parser.
+          value: 'postgresql://alice:secret@db.example.com:5432/app_db', // trufflehog:ignore
+        },
+      }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
     fireEvent.change(screen.getByPlaceholderText('my-database'), {
       target: { value: 'customer prod' },
     })
+    fireEvent.click(screen.getByRole('button', { name: 'Add Target' }))
 
-    expect(
-      (screen.getByPlaceholderText('RDST_MY_DATABASE_PASSWORD') as HTMLInputElement)
-        .value,
-    ).toBe('RDST_CUSTOMER_PROD_PASSWORD')
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'customer prod',
+        password_env: 'RDST_CUSTOMER_PROD_PASSWORD',
+      })
+    )
   })
 })
 
 
 describe('ConfigureForm deploy option', () => {
-  beforeAll(() => {
-    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
-  })
-
-  afterAll(() => {
-    vi.unstubAllGlobals()
-  })
-
   afterEach(() => {
     cleanup()
   })

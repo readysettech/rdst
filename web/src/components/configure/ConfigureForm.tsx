@@ -478,26 +478,6 @@ export function ConfigureForm({ initialData, onSubmit, onCancel, isLoading, subm
                   </Text>
                 </div>
 
-                <div>
-                  <FieldLabel htmlFor="cfg-password-env">
-                    Password Environment Variable {isAddMode ? '*' : ''}
-                  </FieldLabel>
-                  <BaseInputText
-                    id="cfg-password-env"
-                    name="password_env"
-                    value={passwordEnv}
-                    onChange={(e) => {
-                      setPasswordEnv(e.target.value);
-                      setPasswordEnvCustomized(true);
-                    }}
-                    placeholder="RDST_MY_DATABASE_PASSWORD"
-                    disabled={isLoading}
-                    required={isAddMode}
-                  />
-                  <Text level="caption" className="text-content-layout-3 mt-1">
-                    Advanced: the name RDST uses to look up this password
-                  </Text>
-                </div>
               </div>
             </Disclosure>
 

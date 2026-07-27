@@ -1,18 +1,12 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-
+import {
+  __resetAuditSessionForTests,
+  beginAuditSession,
+  finishAuditSession,
+} from '../lib/auditSession'
 import { Sidebar } from './Sidebar'
-
-// Radix ScrollArea (the nav's Scrollable) needs ResizeObserver; jsdom has none.
-vi.stubGlobal(
-  'ResizeObserver',
-  class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-)
 
 vi.mock('@tanstack/react-router', () => ({
   useRouterState: () => ({ location: { pathname: '/' } }),
@@ -72,7 +66,10 @@ function Harness({ open, onClose }: { open: boolean; onClose: () => void }) {
 }
 
 describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    __resetAuditSessionForTests()
+  })
 
   it('closes on Escape while open', () => {
     const onClose = vi.fn()
@@ -138,5 +135,28 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
       })
     )
     expect(install).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows and clears the Health Check running indicator from audit session state', () => {
+    const sessionId = beginAuditSession({
+      kind: 'fleet',
+      targetLabel: '2 targets',
+      targetNames: ['alpha', 'beta'],
+      durationSeconds: 60,
+      startedAt: Date.now(),
+      phase: 'capture',
+      statusMessage: 'Capturing',
+      cancel: vi.fn(),
+    })
+
+    render(<Sidebar />)
+    expect(
+      screen.getByRole('status', { name: 'Health Check is running' })
+    ).toBeTruthy()
+
+    act(() => finishAuditSession(sessionId!))
+    expect(
+      screen.queryByRole('status', { name: 'Health Check is running' })
+    ).toBeNull()
   })
 })

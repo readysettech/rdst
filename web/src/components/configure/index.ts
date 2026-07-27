@@ -1,5 +1,7 @@
+export { AddTargetsDrawer } from './AddTargetsDrawer';
 export { ConfigureForm } from './ConfigureForm';
 export { ConfigureTargetList } from './ConfigureTargetList';
-export { ConfigureConnectionTest } from './ConfigureConnectionTest';
+export { MoveToGroupDialog } from './MoveToGroupDialog';
 export { SettingsSection } from './SettingsSection';
 export { DevSettingsSection } from './DevSettingsSection';
+export { TargetGroupView } from './TargetGroupView';

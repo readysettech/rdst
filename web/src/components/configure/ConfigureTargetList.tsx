@@ -3,10 +3,11 @@
  *
  * Each connection is an elevated row-card (surface-layout-2, lifting to
  * surface-rising-soft + shadow-small on hover/focus). The connection name is the
- * click-to-edit trigger; exactly one visible action (Test) sits beside two status
- * badges (Default + health); the remaining actions (Edit / Set as default /
- * Delete) live behind an always-visible overflow "⋯" menu. The connection-test
- * result renders inline beneath the row that was tested. [VIS-011/022/104/117,
+ * click-to-edit trigger; exactly one visible action (Test) sits beside the
+ * status badges (Default + health) and the row's live connectivity; the
+ * remaining actions (Edit / Set as default / Move to group / Delete) live behind
+ * an always-visible overflow "⋯" menu. An unreachable connection keeps a notice
+ * beneath its row until the next check clears it. [VIS-011/022/104/117,
  * USE-005/018/099]
  */
 
@@ -21,11 +22,13 @@ import { Show } from "@rs/ui-new/show";
 import { Dropdown } from "@rs/ui-new/dropdown";
 import { ConfirmDialog } from "@rs/ui-new/confirm-dialog";
 import { m } from "@rs/ui-new/motion";
-import type {
-  ConfigureTarget,
-  ConfigureConnectionStatus,
-} from "../../types/configure";
-import { ConfigureConnectionTest } from "./ConfigureConnectionTest";
+import type { ConfigureTarget } from "../../types/configure";
+import type { FleetConnectivityEvent } from "../../types/fleet";
+import {
+  isUnreachable,
+  TargetConnectivity,
+  UnreachableNotice,
+} from "./TargetConnectivity";
 
 interface ConfigureTargetListProps {
   targets: ConfigureTarget[];
@@ -34,12 +37,19 @@ interface ConfigureTargetListProps {
   onDelete?: (targetName: string) => void;
   onSetDefault?: (targetName: string) => void;
   onAdd?: () => void;
+  /** Empty-state secondary action: open the discovery drawer. */
+  onDiscover?: () => void;
+  onMoveToGroup?: (target: ConfigureTarget) => void;
   isLoading?: boolean;
-  /** Result of the most recent connection test (null once dismissed). */
-  connectionTestResult?: ConfigureConnectionStatus | null;
+  /** Latest connectivity result per target name. */
+  connectivity?: Record<string, FleetConnectivityEvent>;
+  /** Names the connectivity check covers; others cannot be tested from here. */
+  checkableTargets?: Set<string>;
   /** Name of the connection currently being tested (drives the inline spinner). */
   testingTargetName?: string | null;
-  onDismissTestResult?: () => void;
+  /** A connectivity check is in flight; per-row tests stay disabled meanwhile. */
+  connectivityBusy?: boolean;
+  onSetPassword?: (target: ConfigureTarget) => void;
 }
 
 /** `engine · host:port` — the quiet identity line under the name. */
@@ -57,10 +67,14 @@ export function ConfigureTargetList({
   onDelete,
   onSetDefault,
   onAdd,
+  onDiscover,
+  onMoveToGroup,
   isLoading,
-  connectionTestResult,
+  connectivity,
+  checkableTargets,
   testingTargetName,
-  onDismissTestResult,
+  connectivityBusy,
+  onSetPassword,
 }: ConfigureTargetListProps) {
   const [deleteTargetName, setDeleteTargetName] = useState<string | null>(null);
 
@@ -81,17 +95,32 @@ export function ConfigureTargetList({
                 connection string to start.
               </Text>
             </VStack>
-            <Show when={!!onAdd}>
-              <Button
-                variant="rising"
-                modifier="solid"
-                icon="add"
-                iconPosition="left"
-                label="Add your first connection"
-                onClick={onAdd}
-                disabled={isLoading}
-              />
-            </Show>
+            <HStack className="gap-3 items-center flex-wrap justify-center">
+              <Show when={!!onAdd}>
+                <Button
+                  variant="rising"
+                  modifier="solid"
+                  icon="add"
+                  iconPosition="left"
+                  label="Add your first connection"
+                  onClick={onAdd}
+                  disabled={isLoading}
+                />
+              </Show>
+              {/* The zero-target lockout exempts Settings precisely because
+                  discovery lives here, so the empty state has to offer it. */}
+              <Show when={!!onDiscover}>
+                <Button
+                  variant="primary"
+                  modifier="outline"
+                  icon="search"
+                  iconPosition="left"
+                  label="or discover in AWS"
+                  onClick={onDiscover}
+                  disabled={isLoading}
+                />
+              </Show>
+            </HStack>
           </VStack>
         </Card.Content>
       </Card>
@@ -104,11 +133,8 @@ export function ConfigureTargetList({
         {targets.map((target, index) => {
           const meta = connectionMeta(target);
           const isTesting = testingTargetName === target.name;
-          const rowResult =
-            connectionTestResult && connectionTestResult.target === target.name
-              ? connectionTestResult
-              : null;
-          const showTestBlock = isTesting || !!rowResult;
+          const status = connectivity?.[target.name];
+          const checkable = !checkableTargets || checkableTargets.has(target.name);
 
           return (
             <m.div
@@ -145,37 +171,46 @@ export function ConfigureTargetList({
                         Default
                       </span>
                     </Show>
-
-                    {/* Health — icon + text + color, never color alone [USE-005] */}
-                    {target.has_password ? (
-                      <Tag
-                        size="small"
-                        variant="positive"
-                        modifier="ghost"
-                        icon="tick"
-                        iconPosition="left"
-                        label="Password set"
-                      />
-                    ) : (
-                      <Tag
-                        size="small"
-                        variant="warning"
-                        modifier="ghost"
-                        icon="alert"
-                        iconPosition="left"
-                        label="Password needed"
-                      />
-                    )}
                   </HStack>
 
-                  <Show when={!!meta}>
-                    <Text level="body-small" className="text-content-layout-2 truncate max-w-full">
-                      {meta}
-                    </Text>
-                  </Show>
+                  {/* The password chip opens the meta line in every row, so its
+                      position never drifts with the length of the name above
+                      it. Health reads as icon + text + color, never color
+                      alone. [USE-005] */}
+                  <HStack className="gap-2 min-w-0 w-full">
+                    <span className="shrink-0">
+                      {target.has_password ? (
+                        <Tag
+                          size="small"
+                          variant="positive"
+                          modifier="ghost"
+                          icon="tick"
+                          iconPosition="left"
+                          label="Password set"
+                        />
+                      ) : (
+                        <Tag
+                          size="small"
+                          variant="warning"
+                          modifier="ghost"
+                          icon="alert"
+                          iconPosition="left"
+                          label="Password needed"
+                        />
+                      )}
+                    </span>
+
+                    <Show when={!!meta}>
+                      <Text level="body-small" className="text-content-layout-2 truncate min-w-0">
+                        {meta}
+                      </Text>
+                    </Show>
+                  </HStack>
                 </VStack>
 
-                <HStack className="gap-1.5 items-center shrink-0">
+                <HStack className="gap-2 items-center shrink-0">
+                  <TargetConnectivity result={status} />
+
                   {/* The one visible per-row action [VIS-022] */}
                   <Button
                     variant="primary"
@@ -184,9 +219,14 @@ export function ConfigureTargetList({
                     icon="connect"
                     iconPosition="left"
                     label="Test"
-                    title="Test connection"
+                    title={
+                      checkable
+                        ? "Test connection"
+                        : "Connectivity checks cover database targets only"
+                    }
                     onClick={() => onTest?.(target.name)}
-                    disabled={isLoading}
+                    loading={isTesting}
+                    disabled={isLoading || connectivityBusy || !checkable}
                   />
 
                   {/* Overflow — tertiary actions [VIS-114, USE-018] */}
@@ -215,6 +255,13 @@ export function ConfigureTargetList({
                           onClick={() => onSetDefault?.(target.name)}
                         />
                       </Show>
+                      <Show when={!!onMoveToGroup}>
+                        <Dropdown.Item
+                          leftIcon="layers"
+                          label="Move to group…"
+                          onClick={() => onMoveToGroup?.(target)}
+                        />
+                      </Show>
                       <Dropdown.Separator />
                       <Dropdown.Item
                         leftIcon="trash"
@@ -227,14 +274,14 @@ export function ConfigureTargetList({
                 </HStack>
               </div>
 
-              {/* Inline test result / spinner, next to the tested row [USE-099] */}
-              <Show when={showTestBlock}>
+              {/* Unreachable stays stated next to the row it belongs to, with
+                  the raw failure behind Details [USE-099] */}
+              <Show when={isUnreachable(status)}>
                 <div className="mt-3">
-                  <ConfigureConnectionTest
-                    result={rowResult}
-                    isLoading={isTesting}
-                    targetName={target.name}
-                    onDismiss={onDismissTestResult}
+                  <UnreachableNotice
+                    target={target}
+                    result={status}
+                    onSetPassword={() => onSetPassword?.(target)}
                   />
                 </div>
               </Show>

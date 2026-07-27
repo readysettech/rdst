@@ -1,3 +1,4 @@
+import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
@@ -137,6 +138,29 @@ export function ConnectPage({
             wins.
           </Text>
         </VStack>
+
+        {/* AWS-first path: one click into the Settings discovery drawer for
+            the common case of databases living in RDS/Aurora, ahead of the
+            manual form. */}
+        <div className="mb-6 flex items-center justify-between gap-3 rounded-[1.25rem] border border-border-layout-1 bg-surface-raised px-5 py-4 shadow-elevation-1">
+          <VStack className="gap-0.5 items-start">
+            <Text level="label-medium" className="text-content-layout-1">
+              Databases on AWS?
+            </Text>
+            <Text level="caption" className="text-content-layout-3">
+              Sign in with AWS and import your RDS/Aurora instances
+              automatically.
+            </Text>
+          </VStack>
+          <Button
+            variant="primary"
+            modifier="outline"
+            label="Discover from AWS"
+            icon="search"
+            iconPosition="left"
+            onClick={() => navigate({ to: '/configure', search: { add: 'aws' } })}
+          />
+        </div>
 
         {/* One raised card on the hero surface: the form, its inline test
             state, and its single primary CTA read as one grouped unit — no dead

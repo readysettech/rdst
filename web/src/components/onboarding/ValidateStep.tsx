@@ -13,6 +13,7 @@ import { TrialRegistrationDialog } from "../TrialRegistrationDialog";
 import { type EnvRequirement } from "../../lib/api";
 import { useEnvRequirements } from "../../lib/useEnvRequirements";
 import { invalidateTrialRelatedQueries } from "../../lib/trialQueries";
+import { TRIAL_EXHAUSTED_MESSAGE } from "../../lib/errorContract";
 
 interface ValidateStepProps {
   targetNames: string[];
@@ -97,7 +98,7 @@ export function ValidateStep({
       icon: "alert",
       iconClass: "text-content-negative-soft",
       title: "Trial Credits Exhausted",
-      body: "Your free trial tokens have been used up. Set an Anthropic API key to continue.",
+      body: TRIAL_EXHAUSTED_MESSAGE,
       badgeLabel: "Exhausted",
     },
     optional: {
@@ -250,7 +251,9 @@ export function ValidateStep({
                                   level="caption"
                                   className="break-words text-content-negative-soft"
                                 >
-                                  {result.error}
+                                  {targetNeedsPassword
+                                    ? `Enter the password for '${result.name}' again.`
+                                    : result.error}
                                 </Text>
                               )}
                             </VStack>
@@ -273,15 +276,15 @@ export function ValidateStep({
                                 Database password required
                               </Text>
                               <Text level="body-small" className="text-content-layout-3">
-                                Set required DB password env vars in this step to continue testing.
+                                Enter the password for this database again to continue testing.
                               </Text>
                             </VStack>
                             <Button
                               variant="primary"
-                              modifier="outline"
+                              modifier="solid"
                               icon="key"
                               iconPosition="left"
-                              label="Set"
+                              label="Set password"
                               onClick={() => openSecretsDialog(getDialogData(result.name))}
                             />
                           </div>

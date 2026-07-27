@@ -3,7 +3,7 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 
 // A warning-toned notice marking a feature as experimental / not yet ready for
-// production. Shown at the top of Code Scan, Agents, Guards, and Fleet.
+// production. Shown at the top of Code Scan, Agents, and Guards.
 export function ExperimentalBanner({ name }: { name?: string }) {
   return (
     <div className="rounded-xl border border-border-warning-soft bg-surface-warning-soft p-4">

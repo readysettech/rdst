@@ -6,12 +6,14 @@ import { Text } from '@rs/ui-new/text'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
+import { ActivityPulse } from '../components/audit/ActivityPulse'
 import { BackgroundRuns } from '../components/BackgroundRuns'
 import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ReportDialog } from '../components/ReportDialog'
 import { TargetDropdown } from '../components/TargetDropdown'
 import { TrialBalanceBadge } from '../components/TrialBalanceBadge'
 import { useTarget } from '../hooks/useTarget'
+import { useAuditSessionActive } from '../lib/auditSession'
 import type { DesktopUpdateState } from '../lib/desktop'
 import { useSystemStatus } from '../lib/useSystemStatus'
 
@@ -22,10 +24,13 @@ function SidebarIdentity() {
     queryFn: async () => {
       const response = await fetch('/api/settings/email')
       if (!response.ok) return null
+      // Shared cache key with EmailReportDialog, so the shape carries
+      // `verified` even though this identity line does not render it.
       return (await response.json()) as {
         email: string | null
         first_name: string | null
         last_name: string | null
+        verified: boolean
       }
     },
     staleTime: 60_000,
@@ -145,7 +150,6 @@ const advancedItems: NavItem[] = [
   { label: 'Code Scan', icon: 'search', to: '/scan' },
   { label: 'Agents', icon: 'message-multiple', to: '/agents' },
   { label: 'Guards', icon: 'user-shield', to: '/guards' },
-  { label: 'Fleet', icon: 'building', to: '/fleet' },
 ]
 
 // Configuration recedes off the daily nav: after first connect the only global
@@ -163,10 +167,12 @@ const ADVANCED_STORAGE_KEY = 'rdst-sidebar-advanced'
 function NavLink({
   item,
   active,
+  running = false,
   onNavigate,
 }: {
   item: NavItem
   active: boolean
+  running?: boolean
   onNavigate?: () => void
 }) {
   return (
@@ -183,6 +189,11 @@ function NavLink({
         }`}
       />
       <span>{item.label}</span>
+      {running && (
+        <span className="ml-auto">
+          <ActivityPulse label={`${item.label} is running`} compact />
+        </span>
+      )}
     </Link>
   )
 }
@@ -218,6 +229,7 @@ export function Sidebar({
   const router = useRouterState()
   const currentPath = router.location.pathname
   const { target: selectedTarget, setTarget: setSelectedTarget } = useTarget()
+  const auditRunning = useAuditSessionActive()
   const [reportOpen, setReportOpen] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(
     () => localStorage.getItem(ADVANCED_STORAGE_KEY) === 'open'
@@ -408,7 +420,12 @@ export function Sidebar({
               <div key={section.title} className="flex flex-col gap-1">
                 <SectionTitle title={section.title} />
                 {section.items.map((item) => (
-                  <NavLink key={item.to} item={item} active={isActive(item)} />
+                  <NavLink
+                    key={item.to}
+                    item={item}
+                    active={isActive(item)}
+                    running={item.to === '/audit' && auditRunning}
+                  />
                 ))}
               </div>
             ))}

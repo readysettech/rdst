@@ -12,7 +12,9 @@ import { HStack, VStack } from '@rs/ui-new/stack';
 import { Show } from '@rs/ui-new/show';
 import { Spinner } from '@rs/ui-new/spinner';
 import { m } from '@rs/ui-new/motion';
+import { Button } from '@rs/ui-new/button';
 import type { ConfigureConnectionStatus } from '../../types/configure';
+import { condenseServerVersion } from './TargetConnectivity';
 
 interface ConfigureConnectionTestProps {
   result: ConfigureConnectionStatus | null;
@@ -20,18 +22,7 @@ interface ConfigureConnectionTestProps {
   /** Name of the target being tested — shown while loading (no result yet). */
   targetName?: string;
   onDismiss?: () => void;
-}
-
-/**
- * Condense the raw server banner to product + version.
- * "PostgreSQL 17.10 (Debian 17.10-1) on aarch64-…, compiled by gcc …"
- *   → "PostgreSQL 17.10"
- */
-function condenseServerVersion(raw?: string): string | null {
-  if (!raw) return null;
-  const head = raw.split(/[(,]/)[0]?.trim() ?? '';
-  if (!head) return null;
-  return head.length > 60 ? `${head.slice(0, 57)}…` : head;
+  onSetPassword?: () => void;
 }
 
 export function ConfigureConnectionTest({
@@ -39,6 +30,7 @@ export function ConfigureConnectionTest({
   isLoading,
   targetName,
   onDismiss,
+  onSetPassword,
 }: ConfigureConnectionTestProps) {
   if (isLoading) {
     return (
@@ -61,6 +53,9 @@ export function ConfigureConnectionTest({
   }
 
   const version = condenseServerVersion(result.engine);
+  const passwordRequired =
+    result.code === 'TARGET_PASSWORD_REQUIRED' ||
+    /environment variable|password_env|export\s+/i.test(result.error ?? '');
 
   return (
     <m.div
@@ -94,8 +89,21 @@ export function ConfigureConnectionTest({
             </Text>
             <Show when={!!result.error}>
               <Text level="caption" className="text-content-negative-soft">
-                {result.error}
+                {passwordRequired
+                  ? `Enter the password for '${result.target}' again.`
+                  : result.error}
               </Text>
+            </Show>
+            <Show when={passwordRequired && !!onSetPassword}>
+              <Button
+                variant="primary"
+                modifier="solid"
+                size="small"
+                icon="key"
+                iconPosition="left"
+                label="Set password"
+                onClick={onSetPassword}
+              />
             </Show>
           </VStack>
         </HStack>

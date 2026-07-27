@@ -14,6 +14,7 @@ import { useInitStatus } from '../lib/useInitStatus';
 import { useSystemStatus } from '../lib/useSystemStatus';
 import { TrialRegistrationDialog } from './TrialRegistrationDialog';
 import { invalidateTrialRelatedQueries, useTrialSource } from '../lib/trialQueries';
+import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract';
 
 interface WarningConfig {
   title: string;
@@ -41,7 +42,7 @@ function getWarningConfig(
   if (trialState?.active && trialState.percent_remaining != null && trialState.percent_remaining <= 0) {
     return {
       title: 'Trial Credits Exhausted',
-      description: 'Your free trial tokens have been used up. Set an Anthropic API key to continue using AI analysis.',
+      description: TRIAL_EXHAUSTED_MESSAGE,
       severity: 'error',
       actionLabel: 'Set API Key',
       actionType: 'open-env-dialog',
@@ -245,18 +246,15 @@ export function ConfigWarning() {
       location.pathname === '/' ||
       location.pathname === '/onboarding' ||
       // Settings must stay reachable with zero targets: it's where the user
-      // manages keys and can reset local data. Redirecting it away traps a
-      // fresh or wiped install with no way back in.
+      // manages keys, resets local data, and reaches the discovery drawer (CSV
+      // import + AWS), which is itself a way to connect databases. Redirecting
+      // it away traps a fresh or wiped install with no way back in.
       location.pathname === '/configure' ||
-      // Fleet stays reachable with zero targets: its CSV import and AWS
-      // discovery flows are themselves ways to connect databases.
-      location.pathname === '/fleet' ||
       location.pathname.startsWith('/demo')
     ) return;
     // Targets are the one true signal: a database added from ANY surface
-    // (onboarding form, configure, fleet discovery, CSV import) ends the
-    // lockout, even if the guided init flow never ran or a later step of it
-    // failed after the target was created.
+    // (onboarding form, AWS discovery, CSV import) ends the lockout, even
+    // if the guided init flow never ran.
     if (status.targets.length === 0) {
       // Route to Connect preserving where the user was headed, so they land
       // back there after connecting (configure-and-identity open-dep #4).
@@ -289,7 +287,13 @@ export function ConfigWarning() {
   // The banner only belongs on pages that use the key (Ask, Audit, ...).
   // The home page stays welcome-clean (the Ask card carries its own "needs a
   // key" chip), and the demo runs entirely without an Anthropic key.
-  if (location.pathname === '/' || location.pathname.startsWith('/demo')) {
+  // The audit page runs its own AI-key gate (preflight row + trial sign-up),
+  // so the global banner would say the same thing twice there.
+  if (
+    location.pathname === '/' ||
+    location.pathname.startsWith('/demo') ||
+    location.pathname.startsWith('/audit')
+  ) {
     return null;
   }
 

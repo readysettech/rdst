@@ -27,7 +27,6 @@ test('adds, updates, defaults, and deletes a database target', async ({
   await page.locator('[name="database"]').fill('application')
   await page.locator('[name="user"]').fill('rdst_e2e')
   await page.locator('[name="password"]').fill('test-password')
-  await page.locator('[name="password_env"]').fill('TEST_DB_PASSWORD')
   await page.getByRole('button', { name: 'Add Target' }).click()
 
   let targetRow = page

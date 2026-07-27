@@ -1,6 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createTestQueryClient, renderWithClient } from '@/test-utils';
 
 import { ConfigWarning } from './ConfigWarning';
 import {
@@ -93,12 +95,8 @@ vi.mock('./TrialRegistrationDialog', () => ({
     ) : null,
 }));
 
-function renderWarning(queryClient: QueryClient) {
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <ConfigWarning />
-    </QueryClientProvider>
-  );
+function renderWarning(queryClient: QueryClient = createTestQueryClient()) {
+  return renderWithClient(<ConfigWarning />, queryClient);
 }
 
 describe('ConfigWarning env secret flow', () => {
@@ -137,9 +135,7 @@ describe('ConfigWarning env secret flow', () => {
   });
 
   it('shows trial and key actions when Anthropic requirement is missing', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
 
     renderWarning(queryClient);
 
@@ -151,9 +147,7 @@ describe('ConfigWarning env secret flow', () => {
 
   it('stays off the demo page even when the key is missing', async () => {
     mockPathname = '/demo';
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
 
     renderWarning(queryClient);
 
@@ -164,9 +158,7 @@ describe('ConfigWarning env secret flow', () => {
 
   it('stays off the home page even when the key is missing', async () => {
     mockPathname = '/';
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
 
     renderWarning(queryClient);
 
@@ -191,7 +183,7 @@ describe('ConfigWarning env secret flow', () => {
       llm_configured: false,
     });
 
-    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    renderWarning();
 
     await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled());
     expect(mockNavigate).not.toHaveBeenCalled();
@@ -213,7 +205,7 @@ describe('ConfigWarning env secret flow', () => {
       llm_configured: false,
     });
 
-    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    renderWarning();
 
     await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled());
     expect(mockNavigate).not.toHaveBeenCalled();
@@ -235,7 +227,7 @@ describe('ConfigWarning env secret flow', () => {
       llm_configured: false,
     });
 
-    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    renderWarning();
 
     await waitFor(() => {
       // Routes to Connect preserving the intended destination so the user
@@ -249,8 +241,8 @@ describe('ConfigWarning env secret flow', () => {
 
   it('never gates a feature page once a target exists, even if init never completed', async () => {
     mockPathname = '/analyze';
-    // A target added outside the guided flow (configure page, fleet add, or a
-    // partially-failed onboarding submit) leaves init.completed unset; that
+    // A target added outside the guided flow (configure page, bulk import, or
+    // a partially-failed onboarding submit) leaves init.completed unset; that
     // must not lock the user out of the app.
     vi.mocked(fetchInitStatus).mockResolvedValue({
       initialized: false,
@@ -259,33 +251,9 @@ describe('ConfigWarning env secret flow', () => {
       llm_configured: false,
     });
 
-    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    renderWarning();
 
     await waitFor(() => expect(vi.mocked(fetchInitStatus)).toHaveBeenCalled());
-    expect(mockNavigate).not.toHaveBeenCalled();
-  });
-
-  it('keeps a zero-target install on fleet for CSV import and AWS discovery', async () => {
-    mockPathname = '/fleet';
-    vi.mocked(fetchStatus).mockResolvedValue({
-      configured: false,
-      default_target: null,
-      targets: [],
-      version: '1.0.0',
-      error: null,
-    });
-    vi.mocked(fetchInitStatus).mockResolvedValue({
-      initialized: false,
-      targets: [],
-      default_target: null,
-      llm_configured: false,
-    });
-
-    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
-
-    await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled());
-    // Fleet's import flows are themselves ways to connect databases, so the
-    // lockout must not bounce them to onboarding.
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
@@ -305,10 +273,11 @@ describe('ConfigWarning env secret flow', () => {
       llm_configured: false,
     });
 
-    renderWarning(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    renderWarning();
 
     await waitFor(() => expect(vi.mocked(fetchStatus)).toHaveBeenCalled());
-    // Settings stays reachable so keys and the reset control are usable.
+    // Settings stays reachable so keys, the reset control, and the discovery
+    // drawer (CSV import + AWS) stay usable on a fresh or wiped install.
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
@@ -326,9 +295,7 @@ describe('ConfigWarning env secret flow', () => {
       ],
     });
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
 
     renderWarning(queryClient);
 
@@ -358,9 +325,7 @@ describe('ConfigWarning env secret flow', () => {
       ],
     });
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
 
     renderWarning(queryClient);
     fireEvent.click(await screen.findByRole('button', { name: /Set API Key/i }));
@@ -372,9 +337,7 @@ describe('ConfigWarning env secret flow', () => {
   });
 
   it('invalidates relevant queries after successful secret save', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
     renderWarning(queryClient);
@@ -419,9 +382,7 @@ describe('ConfigWarning env secret flow', () => {
       ],
     });
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
 
     renderWarning(queryClient);
 
@@ -432,9 +393,7 @@ describe('ConfigWarning env secret flow', () => {
   });
 
   it('does not show a trial warning when source is no longer trial even if trial status cache is exhausted', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
     queryClient.setQueryData(['trial-status'], {
       active: false,
       status: 'exhausted',
