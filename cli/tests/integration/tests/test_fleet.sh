@@ -101,6 +101,29 @@ EOF
   assert_contains "\"sizing\"" "audit has sizing"
   assert_contains "\"cache_opportunity\"" "audit has cache_opportunity"
   assert_contains "fleet-${DB_ENGINE}" "audit target matches"
+  if ! "$PYTHON_BIN" - "$LAST_OUTPUT_FILE" <<'PYEOF'
+import json
+import sys
+
+with open(sys.argv[1]) as output:
+    content = output.read()
+lines = content.splitlines()
+json_start = next(
+    (i for i, line in enumerate(lines) if line.strip().startswith(("{", "["))),
+    None,
+)
+if json_start is None:
+    raise AssertionError("audit output did not contain JSON")
+data = json.loads("\n".join(lines[json_start:]))
+assert "instance_class" in data and data["instance_class"] is None
+assert "instance_class_source" in data and data["instance_class_source"] is None
+sizing = data.get("sizing") or {}
+assert "current_monthly_cost_usd" in sizing
+assert sizing["current_monthly_cost_usd"] is None
+PYEOF
+  then
+    fail "Expected local target audit pricing and instance provenance to be null"
+  fi
   echo "PASS: Single-target audit ${DB_ENGINE} JSON"
 
   # --------------------------------------------------------------------------
@@ -270,9 +293,9 @@ EOF
 
     run_cmd "Query run --file --analyze" "${RDST_CMD[@]}" query run \
       --file "$ANALYZE_CSV" --target "${TARGET_NAME}" --count 3 --analyze
-    if echo "$LAST_OUTPUT" | grep -q "Benchmark Analysis"; then
+    if grep -q "Benchmark Analysis" "$LAST_OUTPUT_FILE"; then
       echo "PASS: Query run --file with --analyze"
-    elif echo "$LAST_OUTPUT" | grep -q "No module named"; then
+    elif grep -q "No module named" "$LAST_OUTPUT_FILE"; then
       echo "SKIP: Query run --file with --analyze (anthropic module not installed)"
     else
       echo "PASS: Query run --file with --analyze (analysis skipped)"
@@ -311,22 +334,35 @@ EOF
     assert_contains "\"health_analysis\"" "audit+RS json has health_analysis"
     assert_contains "\"health_score\"" "audit+RS json has health_score in analysis"
     # RS cache was deployed → readyset_results should have entries with speedup > 1
-    if echo "$LAST_OUTPUT" | grep -q '"readyset_results".*\[{'; then
-      # At least one query must show speedup > 1.0 (RS faster than DB)
-      if echo "$LAST_OUTPUT" | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-rs = d.get('readyset_results') or []
-fast = [r for r in rs if (r.get('speedup') or 0) > 1.0]
-sys.exit(0 if fast else 1)
-" 2>/dev/null; then
+    local READYSET_STATUS
+    READYSET_STATUS=$("$PYTHON_BIN" - "$LAST_OUTPUT_FILE" <<'PYEOF'
+import json
+import sys
+
+with open(sys.argv[1]) as output:
+    content = output.read()
+lines = content.splitlines()
+json_start = next(
+    (i for i, line in enumerate(lines) if line.strip().startswith("{")),
+    None,
+)
+data = json.loads("\n".join(lines[json_start:])) if json_start is not None else {}
+results = data.get("readyset_results") or []
+if not results:
+    print("empty")
+elif any((result.get("speedup") or 0) > 1.0 for result in results):
+    print("fast")
+else:
+    print("slow")
+PYEOF
+    )
+    if [[ "$READYSET_STATUS" == "fast" ]]; then
         echo "PASS: At least one query shows RS speedup > 1.0x"
-      else
-        echo "FAIL: readyset_results present but no query shows speedup > 1.0x"
-        exit 1
-      fi
-    else
+    elif [[ "$READYSET_STATUS" == "empty" ]]; then
       echo "INFO: readyset_results empty — RS cache may not have benchmarked queries"
+    else
+      echo "FAIL: readyset_results present but no query shows speedup > 1.0x"
+      exit 1
     fi
     echo "PASS: Audit with duration + RS JSON output"
   else
@@ -337,7 +373,9 @@ sys.exit(0 if fast else 1)
   # Test 24: Fleet audit with --duration + verbose
   # ==========================================================================
 
-  if [[ -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
+  if [[ "${SKIP_READYSET_CACHE_TESTS:-false}" == "true" ]]; then
+    echo "SKIP: Fleet audit duration + verbose (SKIP_READYSET_CACHE_TESTS=true)"
+  elif [[ -n "${ANTHROPIC_API_KEY:-}" && "${SKIP_LLM_INSIGHT_TESTS:-false}" != "true" ]]; then
     echo ""
     echo "=== TEST 24: Fleet audit + duration + verbose (${DB_ENGINE}) ==="
 
@@ -349,8 +387,72 @@ sys.exit(0 if fast else 1)
     assert_contains "Individual Target" "fleet+duration has individual links"
     echo "PASS: Fleet audit with duration + verbose"
   else
-    echo "SKIP: Fleet audit duration + verbose (no ANTHROPIC_API_KEY)"
+    echo "SKIP: Fleet audit duration + verbose (no ANTHROPIC_API_KEY or SKIP_LLM_INSIGHT_TESTS=true)"
   fi
+
+  # ==========================================================================
+  # Test 25: Fleet audit duration capture without LLM insights
+  # ==========================================================================
+
+  local fleet_capture_script="${SCRIPT_DIR}/lib/top_${DB_ENGINE}_workload.py"
+  local fleet_capture_pid=""
+  local fleet_capture_log="${TMP_RUN}/fleet_capture_workload.log"
+  if [[ -f "$fleet_capture_script" ]]; then
+    "$PYTHON_BIN" "$fleet_capture_script" > "$fleet_capture_log" 2>&1 &
+    fleet_capture_pid=$!
+    sleep 3
+    # A generator that dies on startup (bad creds, missing driver) leaves the
+    # capture window empty. Keep its log and drop the captured-query
+    # expectation instead of failing on traffic we never generated.
+    if ! kill -0 "$fleet_capture_pid" 2>/dev/null; then
+      echo "WARN: workload generator exited early; see $fleet_capture_log"
+      sed -n '1,10p' "$fleet_capture_log" 2>/dev/null || true
+      fleet_capture_pid=""
+    fi
+  fi
+
+  run_cmd "Fleet: audit duration without insights" "${RDST_CMD[@]}" fleet audit \
+    --group integration-group --duration 10s --no-insights --no-save --json
+
+  if [[ -n "$fleet_capture_pid" ]]; then
+    kill "$fleet_capture_pid" 2>/dev/null || true
+    wait "$fleet_capture_pid" 2>/dev/null || true
+  fi
+
+  assert_json "fleet duration without insights json valid"
+
+  if ! "$PYTHON_BIN" - "$LAST_OUTPUT_FILE" "${fleet_capture_pid:+1}" <<'PYEOF'
+import json
+import sys
+
+# Captured queries are asserted only when a workload generator ran for the
+# window AND the engine exposes query statistics. The MySQL fixture's
+# `testuser` has no performance_schema grants, so its capture is always empty;
+# the audit itself is validated either way.
+generator_ran = len(sys.argv) > 2 and sys.argv[2] == "1"
+
+with open(sys.argv[1]) as output:
+    content = output.read()
+lines = content.splitlines()
+json_start = next(
+    (i for i, line in enumerate(lines) if line.strip().startswith("{")),
+    None,
+)
+if json_start is None:
+    raise AssertionError("fleet audit output did not contain JSON")
+data = json.loads("\n".join(lines[json_start:]))
+results = data.get("results") or []
+assert results, "fleet audit returned no results"
+for result in results:
+    workload = result.get("workload") or {}
+    assert (workload.get("duration_seconds") or 0) > 0
+    if generator_ran and (result.get("engine") or "").startswith("postgres"):
+        assert workload.get("queries"), "fleet workload queries were not captured"
+PYEOF
+  then
+    fail "Expected fleet duration audit to capture workload queries"
+  fi
+  echo "PASS: Fleet audit duration without LLM insights"
 
   echo ""
   echo "=== All Fleet & Audit Integration Tests PASSED (${DB_ENGINE}) ==="

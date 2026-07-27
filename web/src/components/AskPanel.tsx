@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@rs/ui-new/button";
 import { Show } from "@rs/ui-new/show";
 import { TableHeaderCell } from "./TableHeaderCell";
@@ -18,8 +18,14 @@ import { useAsk } from "../lib/ask";
 import type { AskClarificationQuestion, AskStatusEvent, AskSchemaLoadedEvent } from "../lib/ask";
 import { fetchAskExamples, fetchAskHistory, type AskHistoryItem } from "../lib/api";
 import { formatTimestamp } from "../lib/formatters";
-import { classifyError } from "../lib/errorContract";
+import {
+  classifyError,
+  isTrialExhaustedError,
+  TRIAL_EXHAUSTED_MESSAGE,
+} from "../lib/errorContract";
+import { invalidateTrialRelatedQueries } from "../lib/trialQueries";
 import { RoutableNotice } from "./RoutableNotice";
+import { TrialRegistrationDialog } from "./TrialRegistrationDialog";
 import { createCsvFilename, downloadCsv, toCsv } from "../lib/csv";
 import { SQLDisplay } from "./SQLDisplay";
 
@@ -87,6 +93,7 @@ function HistoryRail({
 }
 
 export function AskPanel({ target, disabled = false }: AskPanelProps) {
+  const queryClient = useQueryClient();
   const [question, setQuestion] = useState("");
   // The post-validation SQL is trust evidence, not the headline: collapsed by
   // default so the answer table leads. [ask.md answer-first; VIS-011]
@@ -97,6 +104,7 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
   // existing answer. schema_loaded's backend-resolved target wins; this
   // submit-time stamp is the fallback for streams that never emit it.
   const [askedTarget, setAskedTarget] = useState<string | null>(null);
+  const [showTrialDialog, setShowTrialDialog] = useState(false);
   const navigate = useNavigate();
   const {
     ask,
@@ -490,9 +498,22 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.3 }}
         >
-          <ErrorState error={error} onRetry={handleRetry} onNewQuestion={handleNewQuestion} />
+          <ErrorState
+            error={error}
+            onRetry={handleRetry}
+            onNewQuestion={handleNewQuestion}
+            onStartTrial={() => setShowTrialDialog(true)}
+          />
         </m.div>
       )}
+      <TrialRegistrationDialog
+        isOpen={showTrialDialog}
+        onClose={() => setShowTrialDialog(false)}
+        onSuccess={() => {
+          void invalidateTrialRelatedQueries(queryClient);
+          setShowTrialDialog(false);
+        }}
+      />
     </VStack>
   );
 }
@@ -826,10 +847,12 @@ function ErrorState({
   error,
   onRetry,
   onNewQuestion,
+  onStartTrial,
 }: {
   error: { message: string; phase?: string | null };
   onRetry: () => void;
   onNewQuestion: () => void;
+  onStartTrial: () => void;
 }) {
   // Route by structured error class, not a message regex: an AI-credential
   // failure (provider / trial keyservice) renders the routable credential
@@ -839,6 +862,7 @@ function ErrorState({
   const errorClass = classifyError({ code: '', message: error.message });
   const isAuthenticationError =
     errorClass === 'provider' || errorClass === 'rdst-service';
+  const trialExhausted = isTrialExhaustedError(error.message);
   const phaseLabels: Record<string, string> = {
     config: 'Configuration',
     schema: 'Loading database schema',
@@ -853,9 +877,13 @@ function ErrorState({
     return (
       <VStack className="gap-3 items-start">
         <RoutableNotice
-          kind={errorClass === 'rdst-service' ? 'trial-exhausted' : 'key-needed'}
+          kind={trialExhausted ? 'trial-exhausted' : 'key-needed'}
           title="AI service authentication failed"
-          message={error.message}
+          message={
+            trialExhausted ? TRIAL_EXHAUSTED_MESSAGE : error.message
+          }
+          onRetry={trialExhausted ? onStartTrial : undefined}
+          retryLabel={trialExhausted ? "Start trial" : undefined}
           className="w-full"
         />
         {phaseLabel && (

@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from features.fleet.discovery import _parse_instance, _ENGINE_MAP
+from features.fleet.discovery import _parse_instance, _ENGINE_MAP, discover_aurora_cluster
 
 
 class TestEngineMapping:
@@ -44,7 +44,7 @@ class TestParseInstance:
         assert member.port == 5432
         assert member.instance_class == "db.r6g.xlarge"
         assert member.region == "us-east-1"
-        assert member.group == "us-east-1"  # Auto-grouped by region
+        assert member.group is None  # Standalone: no fabricated region group
 
     def test_mysql_instance(self):
         instance = self._make_instance(Engine="mysql", Endpoint={"Address": "h1", "Port": 3306})
@@ -120,6 +120,110 @@ class TestParseInstance:
             password_env="PASS", default_user=None, default_group=None,
         )
         assert member is None
+
+
+class TestAuroraClusterDiscovery:
+    def _make_cluster(self, **overrides):
+        base = {
+            "DBClusterIdentifier": "prod-aurora",
+            "Engine": "aurora-postgresql",
+            "Status": "available",
+            "Endpoint": "prod-aurora.cluster-abc.us-east-1.rds.amazonaws.com",
+            "Port": 5432,
+            "DatabaseName": "app",
+            "MasterUsername": "postgres",
+            "DBClusterMembers": [
+                {"DBInstanceIdentifier": "prod-aurora-instance-1", "IsClusterWriter": True},
+                {"DBInstanceIdentifier": "prod-aurora-reader-1", "IsClusterWriter": False},
+                {"DBInstanceIdentifier": "prod-aurora-reader-2", "IsClusterWriter": False},
+            ],
+        }
+        base.update(overrides)
+        return base
+
+    def _make_client(self):
+        client = MagicMock()
+
+        def describe_db_instances(Filters=None):
+            reader_id = Filters[0]["Values"][0]
+            return {
+                "DBInstances": [
+                    {
+                        "DBInstanceIdentifier": reader_id,
+                        "Endpoint": {
+                            "Address": f"{reader_id}.abc.us-east-1.rds.amazonaws.com",
+                            "Port": 5432,
+                        },
+                        "DBInstanceClass": "db.r6g.large",
+                    }
+                ]
+            }
+
+        client.describe_db_instances.side_effect = describe_db_instances
+        return client
+
+    def _discover(self, cluster=None, **kwargs):
+        return discover_aurora_cluster(
+            cluster=cluster or self._make_cluster(),
+            client=self._make_client(),
+            region="us-east-1",
+            engine_filter=None,
+            name_pattern=None,
+            password_env="PASS",
+            default_user=None,
+            **kwargs,
+        )
+
+    def test_members_grouped_by_cluster_id_with_role_tags(self):
+        members = self._discover()
+        assert len(members) == 3  # 1 writer + 2 readers
+        assert {m.group for m in members} == {"prod-aurora"}
+        writer = next(m for m in members if m.name == "prod-aurora-writer")
+        assert "role:writer" in writer.tags
+        readers = [m for m in members if "role:reader" in m.tags]
+        assert {m.name for m in readers} == {"prod-aurora-reader-1", "prod-aurora-reader-2"}
+
+    def test_explicit_group_overrides_cluster_id(self):
+        members = self._discover(default_group="production")
+        assert {m.group for m in members} == {"production"}
+
+    def test_standalone_instance_stays_ungrouped(self):
+        instance = {
+            "DBInstanceIdentifier": "standalone-db",
+            "Engine": "postgres",
+            "DBInstanceStatus": "available",
+            "Endpoint": {"Address": "standalone-db.abc.us-east-1.rds.amazonaws.com", "Port": 5432},
+            "DBName": "mydb",
+            "MasterUsername": "postgres",
+            "DBInstanceClass": "db.r6g.xlarge",
+            "TagList": [],
+        }
+        member = _parse_instance(
+            instance, region="us-east-1", engine_filter=None, name_pattern=None,
+            password_env="PASS", default_user=None, default_group=None,
+        )
+        assert member.group is None
+
+    def test_instance_with_cluster_identifier_groups_by_cluster(self):
+        instance = {
+            "DBInstanceIdentifier": "prod-aurora-instance-1",
+            "Engine": "aurora-postgresql",
+            "DBInstanceStatus": "available",
+            "Endpoint": {
+                "Address": "prod-aurora-instance-1.abc.us-east-1.rds.amazonaws.com",
+                "Port": 5432,
+            },
+            "DBClusterIdentifier": "prod-aurora",
+            "DBName": "app",
+            "MasterUsername": "postgres",
+            "DBInstanceClass": "db.r6g.large",
+            "TagList": [],
+        }
+        member = _parse_instance(
+            instance, region="us-east-1", engine_filter=None, name_pattern=None,
+            password_env="PASS", default_user=None, default_group=None,
+        )
+        assert member.group == "prod-aurora"
 
 
 class TestSecretsResolver:

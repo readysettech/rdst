@@ -4,6 +4,7 @@
 // file imports `ResultsPage` only for its `component:` wrapper; the tests import
 // it from here. See evidence/gates-final.md §Defect D-1.
 import { useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import { Button } from '@rs/ui-new/button';
 import { Text } from '@rs/ui-new/text';
@@ -16,6 +17,8 @@ import { useAnalyze } from '../lib/sse';
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock';
 import { useTarget } from '../hooks/useTarget';
 import { ParameterDialog, hasParameters } from '../components/top';
+import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog';
+import { invalidateTrialRelatedQueries } from '../lib/trialQueries';
 import { useCacheAction } from '../lib/useCacheAction';
 import type { ResultsSearch } from './results';
 
@@ -24,6 +27,7 @@ interface ResultsPageProps {
 }
 
 export function ResultsPage({ search }: ResultsPageProps) {
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { query, target, fast, params: paramsJson } = search;
   const storedParams = useMemo(() => {
@@ -38,6 +42,7 @@ export function ResultsPage({ search }: ResultsPageProps) {
   const { setTarget } = useTarget();
   const passwordLock = useTargetPasswordLock(target);
   const [isInteractiveOpen, setIsInteractiveOpen] = useState(false);
+  const [showTrialDialog, setShowTrialDialog] = useState(false);
 
   // Cache integration
   const { cacheQuery, isPending: isCachePending } = useCacheAction({ target: target || null });
@@ -252,9 +257,18 @@ export function ResultsPage({ search }: ResultsPageProps) {
         onSetUpCaching={handleSetUpCaching}
         onRecover={handleRecover}
         onRetry={handleRetryAnalyze}
+        onStartTrial={() => setShowTrialDialog(true)}
         isCaching={isCachePending}
         onAskFollowUp={() => setIsInteractiveOpen(true)}
         hasExistingChat={hasExistingChat}
+      />
+      <TrialRegistrationDialog
+        isOpen={showTrialDialog}
+        onClose={() => setShowTrialDialog(false)}
+        onSuccess={() => {
+          void invalidateTrialRelatedQueries(queryClient);
+          setShowTrialDialog(false);
+        }}
       />
 
       {/* Interactive panel */}

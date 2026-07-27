@@ -40,6 +40,8 @@ class ConfigureConnectionTestEvent:
     status: Literal["in_progress", "success", "failed"]
     message: Optional[str] = None
     server_version: Optional[str] = None
+    code: Optional[str] = None
+    password_env: Optional[str] = None
 
 
 @dataclass

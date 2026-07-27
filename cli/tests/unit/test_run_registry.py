@@ -20,6 +20,12 @@ class Ev:
     payload: str = ""
 
 
+@dataclass
+class CompleteEv:
+    type: str
+    success: bool
+
+
 async def _collect(registry, run_id, after_seq=0):
     async def _go():
         return [e async for e in registry.events(run_id, after_seq=after_seq)]
@@ -320,6 +326,72 @@ class TestLifecycle:
         for run_id in (finished, running, parked):
             assert registry.status(run_id) is None
         assert registry.reset() == 0
+
+
+class TestChildErrorEvents:
+    """Runs that isolate per-child failures report their own outcome."""
+
+    FLEET = frozenset({"target_error"})
+
+    @pytest.mark.asyncio
+    async def test_declared_child_error_leaves_the_run_successful(self):
+        registry = RunRegistry()
+
+        async def gen():
+            yield Ev("target_error", payload="db2 unreachable")
+            yield Ev("target_complete", payload="db1")
+            yield CompleteEv("complete", success=True)
+
+        run_id = registry.start(
+            "fleet_audit", "prod", gen(), child_error_events=self.FLEET
+        )
+        events = await _collect(registry, run_id)
+
+        assert registry.status(run_id) == "done"
+        assert events[-1]["data"]["status"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_unsuccessful_complete_fails_the_run(self):
+        registry = RunRegistry()
+
+        async def gen():
+            yield Ev("target_error", payload="db1 unreachable")
+            yield CompleteEv("complete", success=False)
+
+        run_id = registry.start(
+            "fleet_audit", "prod", gen(), child_error_events=self.FLEET
+        )
+        events = await _collect(registry, run_id)
+
+        assert registry.status(run_id) == "failed"
+        assert events[-1]["data"]["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_undeclared_error_still_fails_the_run(self):
+        registry = RunRegistry()
+
+        async def gen():
+            yield Ev("error", payload="too many targets")
+
+        run_id = registry.start(
+            "fleet_audit", "prod", gen(), child_error_events=self.FLEET
+        )
+        await _collect(registry, run_id)
+
+        assert registry.status(run_id) == "failed"
+
+    @pytest.mark.asyncio
+    async def test_kinds_without_the_opt_in_keep_failing_on_child_errors(self):
+        registry = RunRegistry()
+
+        async def gen():
+            yield Ev("target_error", payload="db1 unreachable")
+            yield CompleteEv("complete", success=True)
+
+        run_id = registry.start("audit", "db1", gen())
+        await _collect(registry, run_id)
+
+        assert registry.status(run_id) == "failed"
 
 
 class TestEviction:

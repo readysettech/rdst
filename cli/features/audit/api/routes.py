@@ -1,33 +1,32 @@
 """Audit API routes.
 
-`POST /audit` streams a metrics-only audit run over SSE; the run history
-endpoints read the same on-disk stores the CLI's `audit list` / `audit show`
-use, so runs started from either surface show up in both.
+`POST /audit` and `POST /audit/capture` schedule detached background runs
+whose events are read back through `/api/runs/{run_id}/events`, so a reload
+or a closed tab does not kill the work. The run history endpoints read the
+same on-disk stores the CLI's `audit list` / `audit show` use, so runs
+started from either surface show up in both.
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import asdict
-from typing import Any, AsyncGenerator, Optional
+import asyncio
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from sse_starlette.sse import EventSourceResponse
-
-from shared.api.target_guard import TargetGuard, require_target_body
+from shared.api.target_guard import TargetGuard, require_target, require_target_body
+from shared.run_registry import AUDIT_RUN_KINDS, run_registry
 
 from ..capture_service import CaptureService
+from ..report.delivery import RunEmailRequest, RunEmailResponse, deliver_run_report
 from ..service import AuditService
 from ..storage import find_audit_run, list_audit_runs
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
-# Targets with a capture in flight. Captures hold a database connection for
-# their whole duration, so a second concurrent capture against the same
-# target is rejected rather than queued.
-_active_captures: set[str] = set()
+# Tests replace this with an isolated registry instance.
+_registry = run_registry
 
 
 class AuditRunRequest(BaseModel):
@@ -36,9 +35,17 @@ class AuditRunRequest(BaseModel):
     save: bool = True
 
 
+class AuditRunStartResponse(BaseModel):
+    run_id: str
+    # True when an audit was already in flight and the caller was handed that
+    # run instead of starting a second one.
+    reused: bool = False
+
+
 class AuditRunSummary(BaseModel):
     run_id: str
     target_name: str
+    engine: str = ""
     started_at: str
     duration_seconds: int = 0
     total_queries: int = 0
@@ -51,24 +58,22 @@ class AuditRunListResponse(BaseModel):
     count: int
 
 
-@router.post("")
+@router.post("", response_model=AuditRunStartResponse)
 async def run_audit(
     request: AuditRunRequest,
     guard: TargetGuard = Depends(require_target_body),
-):
-    """Run a metrics-only audit on a target (SSE stream)."""
+) -> AuditRunStartResponse:
+    """Start a metrics-only audit as a detached background run."""
+    existing = _registry.find_active(AUDIT_RUN_KINDS)
+    if existing is not None:
+        return AuditRunStartResponse(run_id=existing, reused=True)
+
     service = AuditService()
-
-    async def _generator() -> AsyncGenerator[dict, None]:
-        async for event in service.audit_single(
-            guard.target_name, insights=request.insights, save=request.save,
-        ):
-            yield {
-                "event": event.type,
-                "data": json.dumps(asdict(event), default=str),
-            }
-
-    return EventSourceResponse(_generator())
+    generator = service.audit_single(
+        guard.target_name, insights=request.insights, save=request.save,
+    )
+    run_id = _registry.start("audit", guard.target_name, generator)
+    return AuditRunStartResponse(run_id=run_id)
 
 
 class AuditCaptureRequest(BaseModel):
@@ -78,50 +83,88 @@ class AuditCaptureRequest(BaseModel):
     limit: int = 50
     analysis: bool = True
     save: bool = True
+    # Benchmark captured queries against an ephemeral Readyset container;
+    # the comparison lands in the complete event's summary.
+    readyset: bool = False
 
 
-@router.post("/capture")
+@router.post("/capture", response_model=AuditRunStartResponse)
 async def run_capture(
     request: AuditCaptureRequest,
     guard: TargetGuard = Depends(require_target_body),
-):
-    """Capture live workload for a duration (SSE stream of WorkloadEvent).
+) -> AuditRunStartResponse:
+    """Start a live workload capture as a detached background run.
 
-    Long-lived: the stream stays open for the whole capture window. Client
-    disconnect cancels the capture and releases the database connection.
+    The capture holds a database connection for the whole window; cancelling
+    the run through `DELETE /api/runs/{run_id}` releases it.
     """
+    existing = _registry.find_active(AUDIT_RUN_KINDS)
+    if existing is not None:
+        return AuditRunStartResponse(run_id=existing, reused=True)
+
     service = CaptureService()
-    duration = max(10, min(request.duration, 3600))
-    target_name = guard.target_name
+    generator = service.run_capture(
+        target_name=guard.target_name,
+        duration_seconds=max(10, min(request.duration, 3600)),
+        source=request.source,
+        limit=request.limit,
+        run_analysis=request.analysis,
+        collect_metrics_audit=True,
+        save_capture=request.save,
+        readyset_testing=request.readyset,
+    )
+    run_id = _registry.start("audit_capture", guard.target_name, generator)
+    return AuditRunStartResponse(run_id=run_id)
 
-    async def _generator() -> AsyncGenerator[dict, None]:
-        if target_name in _active_captures:
-            yield {
-                "event": "error",
-                "data": json.dumps({
-                    "message": f"A capture is already running for '{target_name}'.",
-                    "phase": "start",
-                }),
-            }
-            return
-        _active_captures.add(target_name)
+
+class AuditRequirementsResponse(BaseModel):
+    target: str
+    engine: str
+    query_stats: str
+    detail: str = ""
+    remediation: Optional[str] = None
+    docker_available: bool = False
+
+
+@router.get("/requirements")
+async def get_capture_requirements(
+    guard: TargetGuard = Depends(require_target),
+) -> AuditRequirementsResponse:
+    """Check capture prerequisites for a target.
+
+    Reports whether pg_stat_statements (PG) / performance_schema (MySQL)
+    is available, with setup instructions when it is not. Connection
+    failures surface as query_stats "error".
+    """
+
+    def _check() -> dict[str, Any]:
+        from shared.db_connection import create_direct_connection
+
         try:
-            async for event in service.run_capture(
-                target_name=target_name,
-                duration_seconds=duration,
-                source=request.source,
-                limit=request.limit,
-                run_analysis=request.analysis,
-                save_capture=request.save,
-            ):
-                yield {
-                    "event": event.type,
-                    "data": json.dumps(asdict(event), default=str),
-                }
+            connection = create_direct_connection(guard.target_config, connect_timeout=5)
+        except Exception as exc:
+            detail = str(exc).splitlines()[0][:300] if str(exc) else "Connection failed"
+            return {"status": "error", "detail": detail, "remediation": None}
+        try:
+            return CaptureService.check_query_stats(connection, guard.target_engine)
         finally:
-            _active_captures.discard(target_name)
+            try:
+                connection.close()
+            except Exception:
+                pass
 
-    return EventSourceResponse(_generator())
+    from features.audit.readyset_benchmark import docker_available
+
+    result = await asyncio.to_thread(_check)
+    has_docker = await asyncio.to_thread(docker_available)
+    return AuditRequirementsResponse(
+        target=guard.target_name,
+        engine=guard.target_engine,
+        query_stats=result["status"],
+        detail=result.get("detail") or "",
+        remediation=result.get("remediation"),
+        docker_available=has_docker,
+    )
 
 
 @router.get("/runs")
@@ -135,6 +178,7 @@ async def get_audit_runs(
         AuditRunSummary(
             run_id=run.get("run_id", ""),
             target_name=run.get("target_name", ""),
+            engine=run.get("engine", "") or "",
             started_at=run.get("started_at", ""),
             duration_seconds=run.get("duration_seconds", 0) or 0,
             total_queries=run.get("total_queries", 0) or 0,
@@ -156,3 +200,14 @@ async def get_audit_run(
     if data is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     return data
+
+
+@router.post("/runs/{run_id}/email")
+async def email_audit_run(
+    run_id: str, request: Request, body: RunEmailRequest
+) -> RunEmailResponse:
+    """Email the report for a saved audit run.
+
+    The report is not gated on email: this is an explicit, optional send.
+    """
+    return await deliver_run_report(run_id, request, body)

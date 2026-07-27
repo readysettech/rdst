@@ -27,6 +27,12 @@ NEEDS_KEY_EVENT = "needs_key"
 # Appended as the final record of every run so subscribers settle cleanly.
 RUN_END_EVENT = "run_end"
 
+# A quick audit, a duration capture, and a fleet audit all hold database
+# connections for their whole duration, and the web client shows one
+# health-check indicator, so only one of these kinds runs at a time across
+# every target.
+AUDIT_RUN_KINDS = ("audit", "audit_capture", "fleet_audit")
+
 
 @dataclass
 class _RunHandle:
@@ -37,6 +43,7 @@ class _RunHandle:
     events: list[dict] = field(default_factory=list)
     waiters: list[asyncio.Future] = field(default_factory=list)
     resume_event: asyncio.Event | None = None
+    child_error_events: frozenset[str] = frozenset()
     task: asyncio.Task | None = None
 
 
@@ -70,8 +77,16 @@ class RunRegistry:
         gen: AsyncGenerator[Any, None],
         metadata: dict[str, Any] | None = None,
         resume_event: asyncio.Event | None = None,
+        child_error_events: frozenset[str] | None = None,
     ) -> str:
-        """Schedule a run and return its run_id immediately."""
+        """Schedule a run and return its run_id immediately.
+
+        `child_error_events` names events that report an isolated failure of
+        one child track inside an orchestrated run (one target of a fleet,
+        say). Those never fail the run: an opted-in run's outcome comes from
+        its own `complete` event's `success` flag, from the generator dying,
+        or from cancellation.
+        """
         safe_target = "".join(c if c.isalnum() or c in "-_" else "-" for c in target)
         run_id = (
             f"{kind}_{safe_target}_"
@@ -83,6 +98,7 @@ class RunRegistry:
             target=target,
             metadata=dict(metadata or {}),
             resume_event=resume_event,
+            child_error_events=child_error_events or frozenset(),
         )
         handle.task = asyncio.get_running_loop().create_task(self._drive(handle, gen))
         self._runs[run_id] = handle
@@ -107,13 +123,15 @@ class RunRegistry:
             "metadata": handle.metadata,
         }
 
-    def find_active(self, kinds: str | Iterable[str], target: str) -> str | None:
-        """Find an active run for a target, newest first."""
+    def find_active(
+        self, kinds: str | Iterable[str], target: str | None = None
+    ) -> str | None:
+        """Find an active run, newest first. A target of None matches any target."""
         accepted = {kinds} if isinstance(kinds, str) else set(kinds)
         for run_id, handle in reversed(self._runs.items()):
             if (
                 handle.kind in accepted
-                and handle.target == target
+                and (target is None or handle.target == target)
                 and handle.status not in TERMINAL_STATUSES
             ):
                 return run_id
@@ -180,7 +198,14 @@ class RunRegistry:
             async for event in gen:
                 name, data = _event_payload(event)
                 self._append(handle, name, data)
-                if name == "error" or name.endswith("_error"):
+                if name == "complete" and handle.child_error_events:
+                    # A run that isolates child failures reports its own
+                    # outcome; one failed child must not condemn the run.
+                    if data.get("success") is False:
+                        status = "failed"
+                elif name not in handle.child_error_events and (
+                    name == "error" or name.endswith("_error")
+                ):
                     status = "failed"
                     # Some orchestrators isolate child-track failures by
                     # yielding an error event and continuing to drain their

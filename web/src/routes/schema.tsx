@@ -126,7 +126,12 @@ function SchemaPage() {
   const needsApiKey = anthropicRequirement
     ? !anthropicRequirement.satisfied
     : false
-  const keyValidity = useAnthropicValidity(!needsApiKey).data
+  // Probe only once requirements have resolved: probing while they load asks
+  // the provider about a key that may not exist, and that "no key" verdict is
+  // cached long enough to keep every AI gate blocked after a key is set.
+  const keyValidity = useAnthropicValidity(
+    !keyRequirementPending && !needsApiKey
+  ).data
   const keyRejected =
     keyValidity?.valid === false && keyValidity.reason === 'rejected'
   // Fail closed while requirements load so a quick click cannot start an AI

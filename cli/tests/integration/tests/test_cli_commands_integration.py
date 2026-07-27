@@ -5,8 +5,11 @@ Tests end-to-end CLI command execution with mocked dependencies.
 Verifies that commands properly integrate services and renderers.
 """
 
+import json
+
 import pytest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 # Note: These tests use the full CLI command classes but mock external dependencies
@@ -193,18 +196,6 @@ class TestConfigureCommandIntegration:
 class TestAnalyzeCommandIntegration:
     """Integration tests for rdst analyze command."""
 
-    @pytest.fixture
-    def mock_targets_config(self):
-        """Create mock TargetsConfig."""
-        cfg = Mock()
-        cfg.get_default.return_value = "test-target"
-        cfg.get.return_value = {
-            "engine": "postgresql",
-            "host": "localhost",
-        }
-        cfg.load = Mock()
-        return cfg
-
     def test_analyze_command_uses_service(self, mock_targets_config):
         """Test analyze command uses AnalyzeService."""
         from features.analyze.service import AnalyzeService
@@ -247,18 +238,6 @@ class TestAnalyzeCommandIntegration:
 class TestAskCommandIntegration:
     """Integration tests for rdst ask command."""
 
-    @pytest.fixture
-    def mock_targets_config(self):
-        """Create mock TargetsConfig."""
-        cfg = Mock()
-        cfg.get_default.return_value = "test-target"
-        cfg.get.return_value = {
-            "engine": "postgresql",
-            "host": "localhost",
-        }
-        cfg.load = Mock()
-        return cfg
-
     def test_ask_command_uses_service(self, mock_targets_config):
         """Test ask command uses AskService."""
         from features.ask.service import AskService
@@ -295,6 +274,233 @@ class TestAskCommandIntegration:
 
         assert len(status_events) >= 1
         assert len(error_events) == 1
+
+
+class TestFleetCommandIntegration:
+    """Integration tests for FleetCommand orchestration and persistence."""
+
+    @staticmethod
+    def _audit_args(*, output_json=True):
+        return SimpleNamespace(
+            group="test-cluster",
+            tag=None,
+            save_name=None,
+            no_save=True,
+            output_json=output_json,
+            no_insights=True,
+            duration="10s",
+            verbose=not output_json,
+            auto_yes=False,
+        )
+
+    @staticmethod
+    def _audit_config():
+        config = Mock()
+        config.list_fleet_targets.return_value = ["writer", "reader"]
+        config.get.side_effect = lambda name: {
+            "writer": {"engine": "postgresql", "host": "writer.example.com"},
+            "reader": {"engine": "postgresql", "host": "reader.example.com"},
+        }.get(name)
+        return config
+
+    @staticmethod
+    def _audit_service():
+        service = Mock()
+        service.audit_target.side_effect = lambda name, config: {
+            "target_name": name,
+            "engine": config["engine"],
+            "metrics": {},
+            "sizing": {},
+            "cache_opportunity": {},
+            "top_queries": [],
+        }
+        return service
+
+    def test_duration_capture_then_benchmark_runs_for_each_target(self, capsys):
+        """Duration captures complete before each target is benchmarked."""
+        from features.fleet.cli.command import FleetCommand
+
+        events = []
+
+        class FakeCaptureService:
+            async def run_capture(self, **kwargs):
+                events.append(("capture", kwargs["target_name"]))
+                yield SimpleNamespace(
+                    type="complete",
+                    summary={
+                        "duration_seconds": kwargs["duration_seconds"],
+                        "queries": [
+                            {
+                                "query_hash": f"{kwargs['target_name']}-query",
+                                "query_text": "SELECT 1",
+                                "avg_time_ms": 10.0,
+                            }
+                        ],
+                    },
+                    analysis=None,
+                )
+
+        config = self._audit_config()
+        service = self._audit_service()
+        benchmark_results = [
+            {
+                "query_hash": "query",
+                "cacheable": True,
+                "baseline_ms": 10.0,
+                "readyset_ms": 1.0,
+                "speedup": 10.0,
+            }
+        ]
+
+        def run_benchmark(console, target, queries, **kwargs):
+            events.append(("benchmark", target))
+            return benchmark_results
+
+        with (
+            patch("features.fleet.cli.command.TargetsConfig", return_value=config),
+            patch("features.fleet.cli.command.AuditService", return_value=service),
+            patch("features.fleet.cli.command.CaptureService", FakeCaptureService),
+            patch("shared.db_connection.create_direct_connection") as connect,
+            patch(
+                "features.audit.readyset_benchmark.docker_available",
+                return_value=True,
+            ),
+            patch(
+                "features.audit.readyset_benchmark.build_comparison",
+                return_value={"cacheable_queries": 1},
+            ),
+            patch(
+                "features.audit.cli.command.AuditCommand._run_readyset_testing",
+                side_effect=run_benchmark,
+            ) as benchmark,
+        ):
+            result = FleetCommand()._handle_audit(self._audit_args())
+
+        assert result.ok is True
+        assert {target for phase, target in events if phase == "capture"} == {
+            "writer",
+            "reader",
+        }
+        assert benchmark.call_count == 2
+        assert {call.args[1] for call in benchmark.call_args_list} == {
+            "writer",
+            "reader",
+        }
+        first_benchmark = next(i for i, event in enumerate(events) if event[0] == "benchmark")
+        assert all(phase == "capture" for phase, _target in events[:first_benchmark])
+        assert len(events[:first_benchmark]) == 2
+        output = capsys.readouterr().out
+        payload = json.loads(output)
+        assert {item["target_name"] for item in payload["results"]} == {
+            "writer",
+            "reader",
+        }
+        assert all("readyset_comparison" in item for item in payload["results"])
+        assert connect.call_count == 2
+
+    def test_duration_skips_benchmarks_without_docker(self, capsys):
+        """Fleet duration audit reports the Docker gate and does not benchmark."""
+        from features.fleet.cli.command import FleetCommand
+
+        class FakeCaptureService:
+            async def run_capture(self, **kwargs):
+                yield SimpleNamespace(
+                    type="complete",
+                    summary={
+                        "duration_seconds": kwargs["duration_seconds"],
+                        "queries": [{"query_hash": "query", "query_text": "SELECT 1"}],
+                    },
+                    analysis=None,
+                )
+
+        config = self._audit_config()
+        service = self._audit_service()
+
+        with (
+            patch("features.fleet.cli.command.TargetsConfig", return_value=config),
+            patch("features.fleet.cli.command.AuditService", return_value=service),
+            patch("features.fleet.cli.command.CaptureService", FakeCaptureService),
+            patch("shared.db_connection.create_direct_connection"),
+            patch(
+                "features.audit.readyset_benchmark.docker_available",
+                return_value=False,
+            ),
+            patch(
+                "features.audit.cli.command.AuditCommand._run_readyset_testing"
+            ) as benchmark,
+        ):
+            result = FleetCommand()._handle_audit(
+                self._audit_args(output_json=False)
+            )
+
+        assert result.ok is True
+        assert "Skipping Readyset cache benchmarks" in capsys.readouterr().out
+        benchmark.assert_not_called()
+
+    def test_discover_persists_cluster_groups_and_role_tags(self):
+        """Discovered Aurora members retain cluster and role metadata."""
+        from features.fleet.cli.command import FleetCommand
+        from features.fleet.models import FleetMember
+
+        members = [
+            FleetMember(
+                name="orders-writer",
+                engine="postgresql",
+                host="orders.cluster.example.com",
+                port=5432,
+                database="orders",
+                user="postgres",
+                password_env="FLEET_PASS",
+                group="orders-cluster",
+                tags=["aurora", "writer", "role:writer"],
+            ),
+            FleetMember(
+                name="orders-reader",
+                engine="postgresql",
+                host="orders.reader.example.com",
+                port=5432,
+                database="orders",
+                user="postgres",
+                password_env="FLEET_PASS",
+                group="orders-cluster",
+                tags=["aurora", "reader", "role:reader"],
+            ),
+        ]
+        config = Mock()
+        config.list_targets.return_value = []
+        config.get.return_value = None
+        args = SimpleNamespace(
+            regions="us-east-1",
+            engine_filter="all",
+            name_pattern=None,
+            password_env="FLEET_PASS",
+            user=None,
+            group=None,
+            default_database=None,
+            dry_run=False,
+        )
+
+        with (
+            patch(
+                "features.fleet.cli.command.detect_aws_credentials",
+                return_value=(True, "ok"),
+            ),
+            patch(
+                "features.fleet.cli.command.discover_rds_instances",
+                return_value=members,
+            ),
+            patch("features.fleet.cli.command.TargetsConfig", return_value=config),
+            patch.object(FleetCommand, "_setup_credentials_after_discover"),
+        ):
+            result = FleetCommand()._handle_discover(args)
+
+        assert result.ok is True
+        saved = {call.args[0]: call.args[1] for call in config.upsert.call_args_list}
+        assert saved["orders-writer"]["group"] == "orders-cluster"
+        assert "role:writer" in saved["orders-writer"]["tags"]
+        assert saved["orders-reader"]["group"] == "orders-cluster"
+        assert "role:reader" in saved["orders-reader"]["tags"]
+        config.save.assert_called_once_with()
 
 
 class TestCLIServiceIntegration:

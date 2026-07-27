@@ -1,7 +1,12 @@
 import { act, renderHook } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import React, { type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import {
+  createTestQueryClient,
+  jsonResponse,
+  queryClientWrapper,
+  sseResponse,
+} from '@/test-utils'
 
 // Mock the openapi-fetch client. In jsdom+Node, openapi-fetch's internal
 // `new Request(..., { signal })` throws on the AbortSignal brand check
@@ -27,23 +32,6 @@ import { useConfigure } from './useConfigure'
 import { api } from './client'
 import { setEnvSecret } from './api'
 
-function sseResponse(payload: string): Response {
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(payload))
-      controller.close()
-    },
-  })
-  return new Response(stream, { status: 200 })
-}
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
-
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.clearAllMocks()
@@ -67,9 +55,7 @@ describe('useConfigure unknown events', () => {
       response: jsonResponse({}),
     } as any)
 
-    const queryClient = new QueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      React.createElement(QueryClientProvider, { client: queryClient }, children)
+    const wrapper = queryClientWrapper()
     const { result } = renderHook(() => useConfigure(), { wrapper })
 
     await act(async () => {
@@ -100,9 +86,7 @@ describe('useConfigure unknown events', () => {
       )
     )
 
-    const queryClient = new QueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      React.createElement(QueryClientProvider, { client: queryClient }, children)
+    const wrapper = queryClientWrapper()
 
     const { result } = renderHook(() => useConfigure(), { wrapper })
 
@@ -113,6 +97,34 @@ describe('useConfigure unknown events', () => {
 
     expect(result.current.error).toBeNull()
     expect(result.current.state).not.toBe('error')
+  })
+
+  it('keeps an in-flight connection test alive across a target list refresh', async () => {
+    let testSignal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        testSignal = init?.signal ?? undefined
+        return Promise.resolve(sseResponse('event: status\ndata: {}\n\n'))
+      })
+    )
+    vi.mocked(api.GET).mockResolvedValue({
+      data: { targets: [], default_target: null },
+      response: jsonResponse({}),
+    } as any)
+
+    const wrapper = queryClientWrapper()
+
+    const { result } = renderHook(() => useConfigure(), { wrapper })
+
+    await act(async () => {
+      result.current.testConnection('prod')
+      await result.current.listTargets()
+    })
+
+    // Each action owns its own AbortController: refreshing the list must not
+    // cancel the test the user just started.
+    expect(testSignal?.aborted).toBe(false)
   })
 
   it('invalidates status query after removing a target', async () => {
@@ -135,10 +147,9 @@ describe('useConfigure unknown events', () => {
       response: jsonResponse({}),
     } as any)
 
-    const queryClient = new QueryClient()
+    const queryClient = createTestQueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      React.createElement(QueryClientProvider, { client: queryClient }, children)
+    const wrapper = queryClientWrapper(queryClient)
 
     const { result } = renderHook(() => useConfigure(), { wrapper })
 
@@ -171,9 +182,7 @@ describe('useConfigure unknown events', () => {
       response: jsonResponse({}),
     } as any)
 
-    const queryClient = new QueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      React.createElement(QueryClientProvider, { client: queryClient }, children)
+    const wrapper = queryClientWrapper()
 
     const { result } = renderHook(() => useConfigure(), { wrapper })
 

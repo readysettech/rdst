@@ -1,5 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { InlineNotice } from '@rs/ui-new/error-state';
+import { TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract';
 
 /**
  * The routable-error primitive for the return-trip half of the identity flow
@@ -32,6 +33,9 @@ interface RoutableNoticeProps {
   /** Secondary in-place action (e.g. "Set here"), rendered beside the route. */
   onRetry?: () => void;
   retryLabel?: string;
+  /** Replace the routed primary action with an in-place recovery flow. */
+  onPrimaryAction?: () => void;
+  primaryActionLabel?: string;
   /** Runs just before routing (e.g. close a parent dialog). */
   onBeforeRoute?: () => void;
   className?: string;
@@ -45,6 +49,8 @@ export function RoutableNotice({
   message,
   onRetry,
   retryLabel,
+  onPrimaryAction,
+  primaryActionLabel,
   onBeforeRoute,
   className,
 }: RoutableNoticeProps) {
@@ -69,9 +75,8 @@ export function RoutableNotice({
       errorClass: 'rdst-service' as const,
       icon: 'sparkles' as const,
       title: 'Free trial used up',
-      message:
-        'Your free-trial credit is used up — add your own Anthropic key to keep going.',
-      actionLabel: 'Add your key',
+      message: TRIAL_EXHAUSTED_MESSAGE,
+      actionLabel: 'Set key',
       search: { section: 'ai' as const, returnTo: currentReturn },
     },
     'key-needed': {
@@ -93,9 +98,13 @@ export function RoutableNotice({
       title={title ?? kindDefaults.title}
       message={message ?? kindDefaults.message}
       action={{
-        label: kindDefaults.actionLabel,
-        icon: 'arrow-right',
+        label: primaryActionLabel ?? kindDefaults.actionLabel,
+        icon: onPrimaryAction ? 'key' : 'arrow-right',
         onClick: () => {
+          if (onPrimaryAction) {
+            onPrimaryAction()
+            return
+          }
           onBeforeRoute?.();
           navigate({ to: '/configure', search: kindDefaults.search });
         },

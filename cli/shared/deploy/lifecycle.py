@@ -123,13 +123,16 @@ class EphemeralOutcome:
     we_started: bool = False   # we started a stopped container; stop on exit
     container_name: Optional[str] = None
     error: Optional[str] = None  # set if entry failed
+    removed_stale: bool = False
 
 
 @contextmanager
-def ephemeral_lifecycle(target_name: str, mode: str = "docker"):
+def ephemeral_lifecycle(
+    target_name: str, mode: str = "docker", *, fresh: bool = False,
+):
     """Ensure a cache container is running for the duration of the block.
 
-    Entry semantics:
+    Default entry semantics:
       - DEPLOYED_RUNNING → reuse, untouched on exit
       - DEPLOYED_STOPPED → `cache start`; on exit, `cache stop` (back to stopped)
       - NOT_DEPLOYED → `cache deploy`; on exit, `cache remove` (full teardown)
@@ -139,10 +142,16 @@ def ephemeral_lifecycle(target_name: str, mode: str = "docker"):
     in `~/.rdst/config.toml` after entry, so callers continue using
     `_resolve_cache_target` etc. as before.
 
+    With ``fresh=True``, any same-named Docker container and its generated
+    cache-target config are removed first. A newly deployed container is then
+    unconditionally removed on exit. Audit benchmarks use this mode so a stale
+    or unhealthy prior container is never silently reused.
+
     Currently Docker mode only; other modes yield with `error` set so the caller
     can fall back to legacy "cache target must already exist" behavior.
     """
     outcome = EphemeralOutcome(pre_state=ProbeState.UNKNOWN)
+    fresh_cleanup_required = False
     try:
         # Only Docker is implemented; other modes punt to the caller.
         if mode != "docker":
@@ -153,6 +162,27 @@ def ephemeral_lifecycle(target_name: str, mode: str = "docker"):
         pre = probe(target_name, mode=mode)
         outcome.pre_state = pre.state
         outcome.container_name = pre.container_id
+
+        if fresh:
+            fresh_cleanup_required = True
+            cleanup_error = _cleanup_ephemeral_deploy(target_name, mode=mode)
+            if cleanup_error:
+                outcome.error = f"could not remove stale Readyset container: {cleanup_error}"
+                yield outcome
+                return
+            outcome.removed_stale = pre.state != ProbeState.NOT_DEPLOYED
+            # Cleanup also removes a stale generated config row. Confirm Docker
+            # agrees before deploying, otherwise DeployCommand may promote/reuse
+            # the very container this run intended to replace.
+            after_cleanup = probe(target_name, mode=mode)
+            if after_cleanup.state != ProbeState.NOT_DEPLOYED:
+                outcome.error = (
+                    "stale Readyset container still exists after cleanup "
+                    f"({after_cleanup.detail or after_cleanup.state.value})"
+                )
+                yield outcome
+                return
+            pre = after_cleanup
 
         if pre.state == ProbeState.DEPLOYED_RUNNING:
             yield outcome
@@ -181,7 +211,11 @@ def ephemeral_lifecycle(target_name: str, mode: str = "docker"):
             outcome.we_deployed = True
             # Wait until the cache port is reachable. ReadySet takes several
             # seconds to start its SQL listener after `docker run` returns.
-            _wait_for_cache_ready(target_name, mode=mode, timeout_s=90)
+            ready = _wait_for_cache_ready(target_name, mode=mode, timeout_s=90)
+            if fresh and not ready:
+                outcome.error = "fresh Readyset container did not become healthy within 90s"
+                yield outcome
+                return
             yield outcome
             return
 
@@ -190,7 +224,7 @@ def ephemeral_lifecycle(target_name: str, mode: str = "docker"):
 
     finally:
         # Tear down to original state on exit, regardless of how the block ended.
-        if outcome.we_deployed:
+        if fresh_cleanup_required or outcome.we_deployed:
             try:
                 _cleanup_ephemeral_deploy(target_name, mode=mode)
             except Exception:
@@ -222,7 +256,9 @@ def _wait_for_cache_ready(target_name: str, mode: str = "docker", timeout_s: int
     return False
 
 
-def _cleanup_ephemeral_deploy(target_name: str, mode: str = "docker") -> None:
+def _cleanup_ephemeral_deploy(
+    target_name: str, mode: str = "docker",
+) -> Optional[str]:
     """Tear down an ephemerally-deployed cache: stop+rm container, drop config row.
 
     Used by ephemeral_lifecycle. Does not invoke CacheCommands.remove() because
@@ -230,16 +266,19 @@ def _cleanup_ephemeral_deploy(target_name: str, mode: str = "docker") -> None:
     here we want a silent, idempotent teardown.
     """
     if mode != "docker":
-        return
+        return None
     import subprocess
     container_name = f"rdst-readyset-{target_name}"
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["docker", "rm", "-f", container_name],
-            capture_output=True, timeout=15,
+            capture_output=True, text=True, timeout=15,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
+        # "No such container" is the desired idempotent end state.
+        if result.returncode != 0 and "no such container" not in result.stderr.lower():
+            return result.stderr.strip() or "docker rm -f failed"
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+        return str(exc)
     # Remove the cache-target row from config (the deploy path adds one named
     # `{upstream}-cache`). Idempotent: missing row is fine.
     try:
@@ -255,3 +294,4 @@ def _cleanup_ephemeral_deploy(target_name: str, mode: str = "docker") -> None:
             cfg.save()
     except Exception:
         pass
+    return None

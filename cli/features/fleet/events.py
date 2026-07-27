@@ -77,6 +77,8 @@ class FleetConnectivityEvent:
     latency_ms: float | None = None
     error: str | None = None
     server_version: str | None = None
+    code: str | None = None
+    password_env: str | None = None
 
 
 @dataclass

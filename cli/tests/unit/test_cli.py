@@ -64,10 +64,16 @@ class TestWrapText:
 class TestDivider:
     """Tests for _divider function."""
 
-    def test_divider_length(self):
-        """Test divider has correct length."""
+    def test_divider_length(self, monkeypatch):
+        """Test divider fills the console width edge to edge."""
+        # The Rule sizes itself to the ambient console, which follows the
+        # host terminal; pin an 80-wide console so the assertion holds on
+        # any agent regardless of tty or COLUMNS.
+        from shared.ui.console import get_console as _get_shared_console
+
+        pinned = type(_get_shared_console())(width=80)
+        monkeypatch.setattr(output_formatter, "get_console", lambda: pinned)
         result = _divider()
-        # Rule component renders as 80-char horizontal line
         assert len(result) == 80
         assert "─" * 80 in result or len(result.strip()) == 80
 

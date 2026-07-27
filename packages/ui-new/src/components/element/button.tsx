@@ -1,4 +1,5 @@
 import { tv, type VariantProps } from '@rs/tailwind-base'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import {
   type ButtonHTMLAttributes,
   forwardRef,
@@ -6,7 +7,6 @@ import {
   type ReactNode,
 } from 'react'
 import { Icon } from '../svg/icon'
-import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { IconWithSpinner } from '../svg/icon-with-spinner'
 
 const buttonStyles = tv({
@@ -332,7 +332,7 @@ const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonProps>(
           hasIcon={Boolean(hasLeftIcon || hasJustIcon)}
           rightGap={!hasJustIcon}
           icon={icon as IconStrokeName}
-          label={label}
+          label={hasJustIcon ? label : ''}
         />
         <div className={styles.inner({ class: innerClassName })}>
           {children}
@@ -340,7 +340,7 @@ const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonProps>(
           {!hasJustIcon && hasRightIcon && (
             <>
               <div className="h-1 w-1" />
-              <Icon name={icon} label={label} />
+              <Icon name={icon} label="" aria-hidden="true" />
             </>
           )}
         </div>

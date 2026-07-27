@@ -14,6 +14,30 @@ export interface ApiErrorEnvelope {
 
 export type { ErrorClass }
 
+export const TRIAL_EXHAUSTED_MESSAGE =
+  'Your free trial credit is used up — add your own Anthropic API key or a new trial token.'
+
+export function isTrialExhaustedError(
+  error: Pick<ApiErrorEnvelope, 'code' | 'message'> | string | undefined
+): boolean {
+  const code =
+    typeof error === 'string' || error == null ? '' : (error.code ?? '')
+  const message =
+    typeof error === 'string'
+      ? error
+      : error == null
+        ? ''
+        : (error.message ?? '')
+  const value = `${code} ${message}`.toLowerCase()
+  return (
+    /trial[_\s-]*exhausted/.test(value) ||
+    /free[-\s]*trial.*(?:used up|run out|exhausted|no (?:credit|tokens?) left)/.test(
+      value
+    ) ||
+    /trial (?:credit|tokens?).*(?:used up|run out|exhausted)/.test(value)
+  )
+}
+
 /** One routed recovery action: a human label + an app route to send them to. */
 export interface RecoveryTarget {
   label: string
@@ -186,6 +210,15 @@ export function sanitizeWebError(
 ): string {
   let text = (raw ?? '').trim()
   if (!text) return fallback
+  if (
+    /environment variable|password_env|export\s+\w+/i.test(text) &&
+    /password|locked|not set|export/i.test(text)
+  ) {
+    const target = text.match(/Target\s+['"]([^'"]+)['"]/i)?.[1]
+    return target
+      ? `Enter the password for '${target}' again.`
+      : 'Enter the database password again.'
+  }
   // "Run 'rdst init'." / "Run `rdst configure add`" and bare `rdst <cmd> …`.
   text = text.replace(/\bRun\s+['"`]?rdst\b[^'"`.\n]*['"`]?\.?/gi, '').trim()
   text = text

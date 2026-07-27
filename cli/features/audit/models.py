@@ -67,6 +67,9 @@ class AuditResult:
     host: str
     region: str | None = None
     instance_class: str | None = None
+    # "aws" when instance_class came from config/discovery metadata,
+    # "estimated" when inferred from shared_buffers, None otherwise.
+    instance_class_source: str | None = None
     group: str | None = None
     tags: list[str] = field(default_factory=list)
     metrics: AuditMetrics | None = None
@@ -199,6 +202,7 @@ class WorkloadRun:
     total_queries: int = 0
     total_query_time_ms: float = 0.0
     analysis: WorkloadAnalysis | None = None
+    readyset_comparison: dict[str, Any] | None = None
     version: str = "1.0"
 
 

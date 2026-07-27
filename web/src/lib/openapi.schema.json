@@ -919,7 +919,6 @@
         "type": "object"
       },
       "AnnotateCompleteEvent": {
-        "description": "Annotation process completed, possibly with individual table failures.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -959,7 +958,6 @@
         "type": "object"
       },
       "AnnotateErrorEvent": {
-        "description": "Annotation process encountered an error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -979,7 +977,6 @@
         "type": "object"
       },
       "AnnotateProgressEvent": {
-        "description": "Progress update during annotation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1043,7 +1040,6 @@
         "type": "object"
       },
       "AnnotateStartedEvent": {
-        "description": "Annotation process started.",
         "properties": {
           "completed_tables": {
             "default": 0,
@@ -1073,7 +1069,6 @@
         "type": "object"
       },
       "AnnotateTableCompleteEvent": {
-        "description": "A table has been annotated.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -1143,10 +1138,22 @@
               "ok",
               "rejected",
               "no_key",
-              "provider_error"
+              "provider_error",
+              "exhausted"
             ],
             "title": "Reason",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           },
           "valid": {
             "title": "Valid",
@@ -1161,7 +1168,6 @@
         "type": "object"
       },
       "AskClarificationNeededEvent": {
-        "description": "Clarification needed from the user.",
         "properties": {
           "interpretations": {
             "items": {
@@ -1197,7 +1203,6 @@
         "type": "object"
       },
       "AskClarificationQuestion": {
-        "description": "A clarification question for the user.",
         "properties": {
           "id": {
             "title": "Id",
@@ -1224,7 +1229,6 @@
         "type": "object"
       },
       "AskErrorEvent": {
-        "description": "Ask encountered an error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1356,7 +1360,6 @@
         "type": "object"
       },
       "AskInterpretation": {
-        "description": "A possible interpretation of the user's question.",
         "properties": {
           "assumptions": {
             "items": {
@@ -1477,7 +1480,6 @@
         "type": "object"
       },
       "AskResultEvent": {
-        "description": "Ask completed with results.",
         "properties": {
           "columns": {
             "items": {
@@ -1551,7 +1553,6 @@
         "type": "object"
       },
       "AskSchemaLoadedEvent": {
-        "description": "Schema has been loaded.",
         "properties": {
           "source": {
             "title": "Source",
@@ -1589,7 +1590,6 @@
         "type": "object"
       },
       "AskSqlGeneratedEvent": {
-        "description": "SQL has been generated.",
         "properties": {
           "explanation": {
             "anyOf": [
@@ -1621,7 +1621,6 @@
         "type": "object"
       },
       "AskStatusEvent": {
-        "description": "Status update during ask execution.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1668,6 +1667,11 @@
             "default": 50,
             "title": "Limit",
             "type": "integer"
+          },
+          "readyset": {
+            "default": false,
+            "title": "Readyset",
+            "type": "boolean"
           },
           "save": {
             "default": true,
@@ -1867,6 +1871,50 @@
         "title": "AuditMetricsCollectedEvent",
         "type": "object"
       },
+      "AuditRequirementsResponse": {
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "docker_available": {
+            "default": false,
+            "title": "Docker Available",
+            "type": "boolean"
+          },
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "query_stats": {
+            "title": "Query Stats",
+            "type": "string"
+          },
+          "remediation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remediation"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "engine",
+          "query_stats"
+        ],
+        "title": "AuditRequirementsResponse",
+        "type": "object"
+      },
       "AuditRunListResponse": {
         "properties": {
           "count": {
@@ -1915,12 +1963,35 @@
         "title": "AuditRunRequest",
         "type": "object"
       },
+      "AuditRunStartResponse": {
+        "properties": {
+          "reused": {
+            "default": false,
+            "title": "Reused",
+            "type": "boolean"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "AuditRunStartResponse",
+        "type": "object"
+      },
       "AuditRunSummary": {
         "properties": {
           "duration_seconds": {
             "default": 0,
             "title": "Duration Seconds",
             "type": "integer"
+          },
+          "engine": {
+            "default": "",
+            "title": "Engine",
+            "type": "string"
           },
           "has_analysis": {
             "default": false,
@@ -2003,6 +2074,18 @@
       },
       "AuditStatusEvent": {
         "properties": {
+          "elapsed_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Elapsed Seconds"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -2010,6 +2093,42 @@
           "phase": {
             "title": "Phase",
             "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Step"
+          },
+          "target_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Name"
+          },
+          "total_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Total Seconds"
           },
           "type": {
             "const": "status",
@@ -2123,6 +2242,57 @@
         "title": "AuditTargetStartEvent",
         "type": "object"
       },
+      "AwsLoginRequest": {
+        "properties": {
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "title": "AwsLoginRequest",
+        "type": "object"
+      },
+      "AwsProfileCreateRequest": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "sso_account_id": {
+            "title": "Sso Account Id",
+            "type": "string"
+          },
+          "sso_region": {
+            "title": "Sso Region",
+            "type": "string"
+          },
+          "sso_role_name": {
+            "title": "Sso Role Name",
+            "type": "string"
+          },
+          "sso_start_url": {
+            "title": "Sso Start Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "sso_start_url",
+          "sso_region",
+          "sso_account_id",
+          "sso_role_name",
+          "region"
+        ],
+        "title": "AwsProfileCreateRequest",
+        "type": "object"
+      },
       "BackgroundRunCancelResponse": {
         "properties": {
           "cancelled": {
@@ -2166,6 +2336,63 @@
           },
           {
             "$ref": "#/components/schemas/AnnotateErrorEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditStatusEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditTargetStartEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditMetricsCollectedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditTargetCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditTargetErrorEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditLlmInsightsEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditSnapshotSavedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditDiffEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AuditErrorEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadStatusEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadConnectedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadSnapshotEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadCaptureProgressEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadCaptureCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadAnalysisProgressEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadQueriesSavedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadCompleteEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadErrorEvent"
           },
           {
             "$ref": "#/components/schemas/ProgressEvent"
@@ -2350,7 +2577,6 @@
         ]
       },
       "BootstrapNeedsKeyEvent": {
-        "description": "The run reached the annotate gate without a usable Anthropic key.\n\nThe event name doubles as the run registry's gating signal: the run's\nstatus parks on needs_key until the next event arrives.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2388,7 +2614,6 @@
         "type": "object"
       },
       "BootstrapStageEvent": {
-        "description": "Progress of one bootstrap stage.\n\nstatus is started | progress | done | failed | skipped. Child-service\nevents surface as status=\"progress\" with the child's payload in detail,\nso the stream stays one flat, typed union.",
         "properties": {
           "detail": {
             "anyOf": [
@@ -2902,7 +3127,6 @@
         "type": "object"
       },
       "CacheRunCompleteEvent": {
-        "description": "Performance comparison result (origin vs cache).",
         "properties": {
           "cache_stats": {
             "additionalProperties": {
@@ -3368,7 +3592,6 @@
         "type": "object"
       },
       "ChatToolResultEvent": {
-        "description": "Result of one tool execution.\n\nFor query_database, `data` carries sql/columns/rows/row_count/\nexecution_time_ms/truncated/query_hash/query_tag; for get_schema it\ncarries tables/source.",
         "properties": {
           "content": {
             "title": "Content",
@@ -3995,7 +4218,6 @@
         "type": "object"
       },
       "ErrorEvent": {
-        "description": "Error event for service workflows.\n\n``code`` and ``detail`` mirror the shared HTTP error envelope\n(``shared.api.app._error_envelope``) so an SSE failure carries the same\n{code, message, detail} shape the client normalizes in ``lib/sse.ts``.\nBoth stay optional so existing producers that only set ``message`` keep\nworking; the client derives a code when one is absent.",
         "properties": {
           "code": {
             "anyOf": [
@@ -4296,6 +4518,17 @@
       },
       "FleetAuditRequest": {
         "properties": {
+          "duration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
           "group": {
             "anyOf": [
               {
@@ -4338,13 +4571,56 @@
               }
             ],
             "title": "Tag"
+          },
+          "targets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targets"
           }
         },
         "title": "FleetAuditRequest",
         "type": "object"
       },
+      "FleetBulkAddRequest": {
+        "properties": {
+          "members": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Members",
+            "type": "array"
+          }
+        },
+        "required": [
+          "members"
+        ],
+        "title": "FleetBulkAddRequest",
+        "type": "object"
+      },
       "FleetConnectivityEvent": {
         "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Code"
+          },
           "error": {
             "anyOf": [
               {
@@ -4368,6 +4644,18 @@
             ],
             "default": null,
             "title": "Latency Ms"
+          },
+          "password_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Password Env"
           },
           "server_version": {
             "anyOf": [
@@ -4522,6 +4810,44 @@
         "title": "FleetDiscoverEvent",
         "type": "object"
       },
+      "FleetDiscoverPreviewRequest": {
+        "properties": {
+          "engine_filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Filter"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
+          },
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "regions"
+        ],
+        "title": "FleetDiscoverPreviewRequest",
+        "type": "object"
+      },
       "FleetDiscoverRequest": {
         "properties": {
           "default_database": {
@@ -4577,6 +4903,17 @@
             "default": "FLEET_PASS",
             "title": "Password Env",
             "type": "string"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
           },
           "regions": {
             "items": {
@@ -4742,9 +5079,27 @@
       },
       "FleetImportRequest": {
         "properties": {
+          "csv_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Csv Content"
+          },
           "csv_file": {
-            "title": "Csv File",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Csv File"
           },
           "dry_run": {
             "default": false,
@@ -4782,9 +5137,6 @@
             "title": "Tags"
           }
         },
-        "required": [
-          "csv_file"
-        ],
         "title": "FleetImportRequest",
         "type": "object"
       },
@@ -4846,6 +5198,11 @@
             "title": "Created At",
             "type": "string"
           },
+          "duration_seconds": {
+            "default": 0,
+            "title": "Duration Seconds",
+            "type": "integer"
+          },
           "kind": {
             "default": "fleet",
             "title": "Kind",
@@ -4858,6 +5215,14 @@
           "snapshot_id": {
             "title": "Snapshot Id",
             "type": "string"
+          },
+          "target_names": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Names",
+            "type": "array"
           },
           "targets_audited": {
             "title": "Targets Audited",
@@ -4895,6 +5260,23 @@
           "message"
         ],
         "title": "FleetStatusEvent",
+        "type": "object"
+      },
+      "FleetTargetGroupRequest": {
+        "properties": {
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          }
+        },
+        "title": "FleetTargetGroupRequest",
         "type": "object"
       },
       "FleetTargetsResponse": {
@@ -6181,7 +6563,6 @@
         "type": "object"
       },
       "ProgressEvent": {
-        "description": "Progress update during a multi-step operation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -6211,7 +6592,6 @@
         "type": "object"
       },
       "QueryBenchmarkCompleteEvent": {
-        "description": "Benchmark finished; carries the final tally.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6259,7 +6639,6 @@
         "type": "object"
       },
       "QueryBenchmarkErrorEvent": {
-        "description": "Benchmark failed (or was rejected by a safety rail) before completion.\n\nCarries the shared error envelope ({code, message, detail}, B7/T24) so the\nclient normalizes a benchmark failure exactly like every other SSE error.\n``message`` stays humane and safe to show; ``detail`` holds only the\nexception class name for correlation \u2014 never the raw ``str(e)``, which can\nembed host / DSN / SQL material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -6316,7 +6695,6 @@
         ]
       },
       "QueryBenchmarkProgressEvent": {
-        "description": "Benchmark progress tick.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6364,7 +6742,6 @@
         "type": "object"
       },
       "QueryBenchmarkStats": {
-        "description": "Statistics for a single benchmarked query.",
         "properties": {
           "avg_ms": {
             "title": "Avg Ms",
@@ -7545,8 +7922,47 @@
         "title": "RowsProcessed",
         "type": "object"
       },
+      "RunEmailRequest": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "title": "RunEmailRequest",
+        "type": "object"
+      },
+      "RunEmailResponse": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "email",
+          "verified"
+        ],
+        "title": "RunEmailResponse",
+        "type": "object"
+      },
       "RunEndEvent": {
-        "description": "Terminal event appended by the registry after every run.",
         "properties": {
           "status": {
             "title": "Status",
@@ -7566,7 +7982,6 @@
         "type": "object"
       },
       "ScanCompleteEvent": {
-        "description": "Scan completed.",
         "properties": {
           "success": {
             "title": "Success",
@@ -7592,7 +8007,6 @@
         "type": "object"
       },
       "ScanErrorEvent": {
-        "description": "Scan error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -7652,7 +8066,6 @@
         ]
       },
       "ScanFilesFoundEvent": {
-        "description": "Files with ORM patterns discovered.",
         "properties": {
           "files": {
             "items": {
@@ -7748,7 +8161,6 @@
         "type": "string"
       },
       "ScanProgressEvent": {
-        "description": "Progress update within a scan phase.",
         "properties": {
           "current": {
             "title": "Current",
@@ -7790,7 +8202,6 @@
         "type": "object"
       },
       "ScanQueryResultEvent": {
-        "description": "Individual query result from scan.",
         "properties": {
           "query": {
             "additionalProperties": true,
@@ -7811,7 +8222,6 @@
         "type": "object"
       },
       "ScanRegistryEvent": {
-        "description": "Registry save results.",
         "properties": {
           "new_queries": {
             "title": "New Queries",
@@ -7927,7 +8337,6 @@
         "type": "object"
       },
       "ScanStatusEvent": {
-        "description": "Status update during scan.",
         "properties": {
           "message": {
             "title": "Message",
@@ -9266,7 +9675,6 @@
         "type": "object"
       },
       "TopCompleteEvent": {
-        "description": "Operation completed.",
         "properties": {
           "newly_saved": {
             "title": "Newly Saved",
@@ -9304,7 +9712,6 @@
         "type": "object"
       },
       "TopConnectedEvent": {
-        "description": "Database connection established.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -9362,7 +9769,6 @@
         "type": "object"
       },
       "TopDbLimitWarningEvent": {
-        "description": "Database query size limit is below recommended threshold.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -9397,7 +9803,6 @@
         "type": "object"
       },
       "TopErrorEvent": {
-        "description": "Error occurred.\n\n``code`` and ``detail`` mirror the shared error envelope (B7/T24):\n``message`` stays humane, ``detail`` carries the exception class name for\ncorrelation \u2014 never the raw ``str(e)``, which can embed host/DSN material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -9561,7 +9966,6 @@
         "type": "object"
       },
       "TopQueriesEvent": {
-        "description": "Batch of top queries.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -9623,7 +10027,6 @@
         "type": "object"
       },
       "TopQueryData": {
-        "description": "Individual query data.",
         "properties": {
           "avg_time": {
             "title": "Avg Time",
@@ -9802,7 +10205,6 @@
         "type": "object"
       },
       "TopQuerySavedEvent": {
-        "description": "Query saved to registry.",
         "properties": {
           "is_new": {
             "title": "Is New",
@@ -9827,7 +10229,6 @@
         "type": "object"
       },
       "TopSourceFallbackEvent": {
-        "description": "Source fallback occurred.",
         "properties": {
           "from_source": {
             "title": "From Source",
@@ -9857,7 +10258,6 @@
         "type": "object"
       },
       "TopStatusEvent": {
-        "description": "Progress status update.",
         "properties": {
           "message": {
             "title": "Message",
@@ -11397,7 +11797,7 @@
     },
     "/api/audit": {
       "post": {
-        "description": "Run a metrics-only audit on a target (SSE stream).",
+        "description": "Start a metrics-only audit as a detached background run.",
         "operationId": "run_audit_api_audit_post",
         "requestBody": {
           "content": {
@@ -11413,11 +11813,8 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
-              },
-              "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuditEvent"
+                  "$ref": "#/components/schemas/AuditRunStartResponse"
                 }
               }
             },
@@ -11443,7 +11840,7 @@
     },
     "/api/audit/capture": {
       "post": {
-        "description": "Capture live workload for a duration (SSE stream of WorkloadEvent).\n\nLong-lived: the stream stays open for the whole capture window. Client\ndisconnect cancels the capture and releases the database connection.",
+        "description": "Start a live workload capture as a detached background run.\n\nThe capture holds a database connection for the whole window; cancelling\nthe run through `DELETE /api/runs/{run_id}` releases it.",
         "operationId": "run_capture_api_audit_capture_post",
         "requestBody": {
           "content": {
@@ -11459,11 +11856,8 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
-              },
-              "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkloadEvent"
+                  "$ref": "#/components/schemas/AuditRunStartResponse"
                 }
               }
             },
@@ -11481,6 +11875,52 @@
           }
         },
         "summary": "Run Capture",
+        "tags": [
+          "audit",
+          "audit"
+        ]
+      }
+    },
+    "/api/audit/requirements": {
+      "get": {
+        "description": "Check capture prerequisites for a target.\n\nReports whether pg_stat_statements (PG) / performance_schema (MySQL)\nis available, with setup instructions when it is not. Connection\nfailures surface as query_stats \"error\".",
+        "operationId": "get_capture_requirements_api_audit_requirements_get",
+        "parameters": [
+          {
+            "description": "Target database name",
+            "in": "query",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "description": "Target database name",
+              "title": "Target",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditRequirementsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Capture Requirements",
         "tags": [
           "audit",
           "audit"
@@ -11606,6 +12046,60 @@
           }
         },
         "summary": "Get Audit Run",
+        "tags": [
+          "audit",
+          "audit"
+        ]
+      }
+    },
+    "/api/audit/runs/{run_id}/email": {
+      "post": {
+        "description": "Email the report for a saved audit run.\n\nThe report is not gated on email: this is an explicit, optional send.",
+        "operationId": "email_audit_run_api_audit_runs__run_id__email_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunEmailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Email Audit Run",
         "tags": [
           "audit",
           "audit"
@@ -13423,7 +13917,7 @@
     },
     "/api/fleet/audit": {
       "post": {
-        "description": "Audit all fleet targets concurrently (SSE stream of AuditEvent).",
+        "description": "Start a fleet-wide audit as one detached background run.\n\nTargets come from an explicit `targets` list, or from the fleet filtered\nby group/tag (all fleet targets when neither is given). The whole fleet\nis a single run, so its events read back through\n`/api/runs/{run_id}/events` and one cancel stops every target.",
         "operationId": "run_fleet_audit_api_fleet_audit_post",
         "requestBody": {
           "content": {
@@ -13439,11 +13933,8 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
-              },
-              "text/event-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuditEvent"
+                  "$ref": "#/components/schemas/AuditRunStartResponse"
                 }
               }
             },
@@ -13461,6 +13952,204 @@
           }
         },
         "summary": "Run Fleet Audit",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/aws-login": {
+      "post": {
+        "description": "Start AWS CLI SSO login without blocking the local web request.",
+        "operationId": "start_fleet_aws_login_api_fleet_aws_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AwsLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Fleet Aws Login",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/aws-login/{login_id}": {
+      "get": {
+        "description": "Poll an AWS CLI login and verify the resulting STS session.",
+        "operationId": "get_fleet_aws_login_api_fleet_aws_login__login_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login_id",
+            "required": true,
+            "schema": {
+              "title": "Login Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fleet Aws Login",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/aws-logout": {
+      "post": {
+        "description": "Sign out of AWS SSO (clears the CLI's cached SSO sessions).",
+        "operationId": "fleet_aws_logout_api_fleet_aws_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Fleet Aws Logout",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/aws-profiles": {
+      "post": {
+        "description": "Create a modern AWS CLI SSO profile in the user's local config.",
+        "operationId": "create_fleet_aws_profile_api_fleet_aws_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AwsProfileCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Fleet Aws Profile",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/aws-status": {
+      "get": {
+        "description": "Report local AWS credential state for the discovery UI.",
+        "operationId": "get_fleet_aws_status_api_fleet_aws_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Fleet Aws Status Api Fleet Aws Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fleet Aws Status",
         "tags": [
           "fleet",
           "fleet"
@@ -13566,9 +14255,50 @@
         ]
       }
     },
+    "/api/fleet/discover-preview": {
+      "post": {
+        "description": "List discoverable RDS/Aurora instances without importing them.",
+        "operationId": "discover_preview_api_fleet_discover_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetDiscoverPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discover Preview",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/import": {
       "post": {
-        "description": "Import fleet targets from a local CSV file (SSE stream).",
+        "description": "Import fleet targets from a CSV file or uploaded content (SSE stream).",
         "operationId": "import_fleet_api_fleet_import_post",
         "requestBody": {
           "content": {
@@ -13751,6 +14481,60 @@
         ]
       }
     },
+    "/api/fleet/snapshots/{snapshot_id}/email": {
+      "post": {
+        "description": "Email the report for a saved fleet snapshot.\n\nSame artifact and delivery path as the single-target audit run endpoint.",
+        "operationId": "email_fleet_snapshot_api_fleet_snapshots__snapshot_id__email_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunEmailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Email Fleet Snapshot",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/status": {
       "get": {
         "description": "Check connectivity for fleet targets (SSE stream).",
@@ -13786,6 +14570,25 @@
                 }
               ],
               "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "targets",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Targets"
             }
           }
         ],
@@ -13882,6 +14685,103 @@
           }
         },
         "summary": "List Fleet Targets",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/targets/bulk-add": {
+      "post": {
+        "description": "Add previously previewed members as fleet targets.",
+        "operationId": "bulk_add_targets_api_fleet_targets_bulk_add_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetBulkAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bulk Add Targets",
+        "tags": [
+          "fleet",
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/targets/{name}": {
+      "patch": {
+        "description": "Set or clear a configured fleet target's group.",
+        "operationId": "patch_fleet_target_group_api_fleet_targets__name__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetTargetGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Fleet Target Group Api Fleet Targets  Name  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Fleet Target Group",
         "tags": [
           "fleet",
           "fleet"

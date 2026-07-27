@@ -8,27 +8,16 @@ real.
 
 from __future__ import annotations
 
+import pytest
+
 from unittest.mock import patch
 
 from features.agent.runtime import AgentResponse
-from shared.config.targets import TargetsConfig
 
 
-def _seed_target(name: str = "agenttest", env: str = "AGENT_PASSWORD") -> None:
-    cfg = TargetsConfig()
-    cfg.load()
-    cfg.upsert(
-        name,
-        {
-            "engine": "postgresql",
-            "host": "127.0.0.1",
-            "port": 5432,
-            "database": "appdb",
-            "user": "appuser",
-            "password_env": env,
-        },
-    )
-    cfg.save()
+@pytest.fixture
+def seeded_target_defaults() -> dict:
+    return {"name": "agenttest", "env": "AGENT_PASSWORD"}
 
 
 def _agent_body(name: str = "sales-agent", **overrides) -> dict:
@@ -44,8 +33,8 @@ def _agent_body(name: str = "sales-agent", **overrides) -> dict:
     return body
 
 
-async def test_agent_crud_roundtrip(client, tmp_rdst_home):
-    _seed_target()
+async def test_agent_crud_roundtrip(client, tmp_rdst_home, seed_target):
+    seed_target()
 
     response = await client.get("/api/agents")
     assert response.status_code == 200
@@ -79,8 +68,8 @@ async def test_agent_crud_roundtrip(client, tmp_rdst_home):
     assert response.status_code == 404
 
 
-async def test_agent_create_validates_target_and_guard(client, tmp_rdst_home):
-    _seed_target()
+async def test_agent_create_validates_target_and_guard(client, tmp_rdst_home, seed_target):
+    seed_target()
 
     response = await client.post(
         "/api/agents", json=_agent_body(target="no-such-target")
@@ -98,8 +87,8 @@ async def test_agent_create_validates_target_and_guard(client, tmp_rdst_home):
     assert response.status_code == 422
 
 
-async def test_agent_create_with_guard_reference(client, tmp_rdst_home):
-    _seed_target()
+async def test_agent_create_with_guard_reference(client, tmp_rdst_home, seed_target):
+    seed_target()
     response = await client.post(
         "/api/guards",
         json={"name": "pii-safe", "guards": {"require_where": True}},
@@ -120,8 +109,8 @@ async def test_agent_delete_404_for_unknown(client, tmp_rdst_home):
     assert response.status_code == 404
 
 
-async def test_agent_ask_returns_result(client, tmp_rdst_home, monkeypatch):
-    _seed_target()
+async def test_agent_ask_returns_result(client, tmp_rdst_home, monkeypatch, seed_target):
+    seed_target()
     monkeypatch.setenv("AGENT_PASSWORD", "irrelevant")
     await client.post("/api/agents", json=_agent_body())
 
@@ -149,8 +138,8 @@ async def test_agent_ask_returns_result(client, tmp_rdst_home, monkeypatch):
     mock_ask.assert_called_once_with("What is customer 1 called?")
 
 
-async def test_agent_ask_locked_when_password_missing(client, tmp_rdst_home, monkeypatch):
-    _seed_target(env="MISSING_AGENT_PASSWORD")
+async def test_agent_ask_locked_when_password_missing(client, tmp_rdst_home, monkeypatch, seed_target):
+    seed_target(env="MISSING_AGENT_PASSWORD")
     monkeypatch.delenv("MISSING_AGENT_PASSWORD", raising=False)
     await client.post("/api/agents", json=_agent_body())
 
@@ -168,8 +157,8 @@ async def test_agent_ask_404_for_unknown_agent(client, tmp_rdst_home):
     assert response.status_code == 404
 
 
-async def test_agent_schema_summary(client, tmp_rdst_home, monkeypatch):
-    _seed_target()
+async def test_agent_schema_summary(client, tmp_rdst_home, monkeypatch, seed_target):
+    seed_target()
     monkeypatch.setenv("AGENT_PASSWORD", "irrelevant")
     await client.post("/api/agents", json=_agent_body())
 

@@ -12,29 +12,49 @@ import {
   type BackgroundRunState,
   cancelBackgroundRun,
   dismissBackgroundRun,
+  isAuditKind,
+  isHealthCheckKind,
   reattachBackgroundRuns,
   useBackgroundRuns,
 } from '../lib/backgroundRuns'
 import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
+import { resumeAuditSessions } from '../lib/useAudit'
 import { TrialRegistrationDialog } from './TrialRegistrationDialog'
 
 function titleFor(run: BackgroundRunState): string {
   if (run.kind === 'bootstrap') return `Setting up ${run.target}`
   if (run.kind === 'cache_test')
     return `Testing ${run.queryLabel || run.queryHash || run.target}`
+  if (run.kind === 'audit') return `Health check on ${run.target}`
+  if (run.kind === 'fleet_audit') return 'Fleet health check'
+  if (run.kind === 'audit_capture') return `Capturing ${run.target}`
   return `Annotating ${run.target}`
 }
 
+function doneLabel(run: BackgroundRunState): string {
+  if (run.kind === 'bootstrap') return `${run.target} is ready`
+  if (run.kind === 'cache_test')
+    return run.message || 'Performance test complete'
+  if (run.kind === 'fleet_audit')
+    return run.message || 'Fleet health check complete'
+  if (isAuditKind(run.kind))
+    return run.message || `${run.target} health check complete`
+  return run.message || `${run.target} annotation complete`
+}
+
 function terminalLabel(run: BackgroundRunState): string {
-  if (run.kind === 'cache_test' && run.status === 'cancelled')
-    return 'Performance test cancelled'
+  if (run.status === 'cancelled') {
+    if (run.kind === 'cache_test') return 'Performance test cancelled'
+    if (isHealthCheckKind(run.kind)) return 'Health check cancelled'
+  }
   if (run.status !== 'done')
     return run.message || 'Background task did not finish'
-  return run.kind === 'bootstrap'
-    ? `${run.target} is ready`
-    : run.kind === 'cache_test'
-      ? run.message || 'Performance test complete'
-      : run.message || `${run.target} annotation complete`
+  return doneLabel(run)
+}
+
+/** Kinds whose card opens the screen showing that job's result. */
+function isOpenable(run: BackgroundRunState): boolean {
+  return run.kind === 'cache_test' || isHealthCheckKind(run.kind)
 }
 
 function isTerminal(run: BackgroundRunState): boolean {
@@ -72,7 +92,7 @@ function detailFor(run: BackgroundRunState): string {
     run.total !== null &&
     run.total > 0
   ) {
-    return run.kind === 'cache_test'
+    return isOpenable(run)
       ? `${run.message} · ${run.current}%`
       : `${run.current} of ${run.total} tables`
   }
@@ -131,8 +151,8 @@ function RunCard({
           <span className="mt-0.5 h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-content-primary-soft border-t-transparent" />
           <button
             type="button"
-            onClick={run.kind === 'cache_test' ? onOpen : undefined}
-            className={`min-w-0 flex-1 text-left ${run.kind === 'cache_test' ? 'cursor-pointer' : 'cursor-default'}`}
+            onClick={isOpenable(run) ? onOpen : undefined}
+            className={`min-w-0 flex-1 text-left ${isOpenable(run) ? 'cursor-pointer' : 'cursor-default'}`}
           >
             <VStack className="min-w-0 items-start gap-0">
               <Text
@@ -217,7 +237,7 @@ function RunCard({
         type="button"
         onClick={onOpen}
         className="min-w-0 flex-1 cursor-pointer overflow-hidden text-left"
-        title={run.kind === 'cache_test' ? 'View results' : 'Dismiss job'}
+        title={isOpenable(run) ? 'View results' : 'Dismiss job'}
       >
         {content}
       </button>
@@ -236,6 +256,8 @@ function RunCard({
 /** Process-wide background tasks survive route changes and browser reloads. */
 export function BackgroundRuns() {
   const allRuns = useBackgroundRuns()
+  // Health checks list here like every other kind; the banner is an additional
+  // indicator for the run, not a replacement for its card.
   const visibleRuns = allRuns.filter((run) => !run.hidden)
   const latestRun = visibleRuns[visibleRuns.length - 1]
   const runs = visibleRuns
@@ -255,6 +277,7 @@ export function BackgroundRuns() {
 
   useEffect(() => {
     reattachBackgroundRuns()
+    resumeAuditSessions()
   }, [])
 
   if (!latestRun || !triggerRun) return null
@@ -282,10 +305,22 @@ export function BackgroundRuns() {
 
   const openRun = (run: BackgroundRunState) => {
     if (isTerminal(run)) {
-      if (run.kind === 'cache_test') acknowledgeBackgroundRun(run.runId)
+      if (isOpenable(run)) acknowledgeBackgroundRun(run.runId)
       else dismissBackgroundRun(run.runId)
     }
     setJobsOpen(false)
+    if (isHealthCheckKind(run.kind)) {
+      // A fleet run spans many targets, so it carries a scope label rather
+      // than a target the sidebar could switch to.
+      if (isAuditKind(run.kind)) setTarget(run.target)
+      void (run.snapshotId
+        ? navigate({
+            to: '/audit/runs/$runId',
+            params: { runId: run.snapshotId },
+          })
+        : navigate({ to: '/audit' }))
+      return
+    }
     if (run.kind !== 'cache_test' || !run.queryHash) return
     setTarget(run.target)
     void navigate({

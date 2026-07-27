@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
+import { throwIfApiError } from './httpError';
 import type {
   GuardCheckResponse,
   GuardDetail,
@@ -18,35 +19,9 @@ const guardDetailKey = (name: string) => ['guards', name] as const;
 // API functions
 // ---------------------------------------------------------------------------
 
-// openapi-fetch parses the response body itself, so on a non-2xx status the
-// parsed payload is returned as `error` (not readable again from `response`).
-// FastAPI errors travel as {detail: string | {message, ...}}; prefer that
-// message so callers surface the backend's reason (409 exists, 422 invalid
-// name, 502 LLM failure, 423 locked target) over a bare status.
-function throwIfNotOk(response: Response, error: unknown, ctx: string): void {
-  if (response.ok) return;
-  const detail = extractDetail(error);
-  throw new Error(detail || `${ctx}: ${response.status}`);
-}
-
-function extractDetail(error: unknown): string {
-  if (!error || typeof error !== 'object') {
-    return typeof error === 'string' ? error : '';
-  }
-  const detail = (error as { detail?: unknown }).detail;
-  if (typeof detail === 'string') return detail;
-  if (detail && typeof detail === 'object') {
-    const message = (detail as { message?: unknown }).message;
-    if (typeof message === 'string') return message;
-    return JSON.stringify(detail);
-  }
-  const message = (error as { message?: unknown }).message;
-  return typeof message === 'string' ? message : '';
-}
-
 export async function fetchGuards(): Promise<GuardListResponse> {
   const { data, error, response } = await api.GET('/api/guards');
-  throwIfNotOk(response, error, 'Failed to fetch guards');
+  throwIfApiError(response, error, 'Failed to fetch guards');
   if (!data) throw new Error('Missing response body');
   return data;
 }
@@ -55,14 +30,14 @@ export async function fetchGuard(name: string): Promise<GuardDetail> {
   const { data, error, response } = await api.GET('/api/guards/{name}', {
     params: { path: { name } },
   });
-  throwIfNotOk(response, error, 'Failed to fetch guard');
+  throwIfApiError(response, error, 'Failed to fetch guard');
   if (!data) throw new Error('Missing response body');
   return data;
 }
 
 export async function createGuard(detail: GuardDetail): Promise<GuardWriteResponse> {
   const { data, error, response } = await api.POST('/api/guards', { body: detail });
-  throwIfNotOk(response, error, 'Failed to create guard');
+  throwIfApiError(response, error, 'Failed to create guard');
   if (!data) throw new Error('Missing response body');
   return data;
 }
@@ -75,7 +50,7 @@ export async function updateGuard(
     params: { path: { name } },
     body: detail,
   });
-  throwIfNotOk(response, error, 'Failed to update guard');
+  throwIfApiError(response, error, 'Failed to update guard');
   if (!data) throw new Error('Missing response body');
   return data;
 }
@@ -84,7 +59,7 @@ export async function deleteGuard(name: string): Promise<GuardWriteResponse> {
   const { data, error, response } = await api.DELETE('/api/guards/{name}', {
     params: { path: { name } },
   });
-  throwIfNotOk(response, error, 'Failed to delete guard');
+  throwIfApiError(response, error, 'Failed to delete guard');
   if (!data) throw new Error('Missing response body');
   return data;
 }
@@ -99,7 +74,7 @@ export async function deriveGuard(
   const { data, error, response } = await api.POST('/api/guards/derive', {
     body: { name, intent, schema_context: schemaContext ?? null },
   });
-  throwIfNotOk(response, error, 'Failed to derive guard');
+  throwIfApiError(response, error, 'Failed to derive guard');
   if (!data) throw new Error('Missing response body');
   return data;
 }
@@ -115,7 +90,7 @@ export async function checkGuardSql(
     params: { path: { name } },
     body: { sql, target: target ?? null },
   });
-  throwIfNotOk(response, error, 'Failed to check guard');
+  throwIfApiError(response, error, 'Failed to check guard');
   if (!data) throw new Error('Missing response body');
   return data;
 }

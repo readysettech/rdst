@@ -203,3 +203,38 @@ def mock_config_manager():
     config.readyset_data_exchange_s3_bucket = "test-bucket"
     config.enable_async_query_caching = False
     return config
+
+
+@pytest.fixture
+def tmp_rdst_home(monkeypatch, tmp_path: Path) -> Path:
+    """Relocate ``~/.rdst/`` to a fresh tmp dir for the duration of one test.
+
+    Setting ``HOME`` is sufficient because every callsite resolves the
+    data directory at *call* time (via ``shared.constants.rdst_data_dir()``
+    or ``Path.home()``), not at module import. Per-feature paths
+    (agents, guards, slack, scan corpus/snippets, semantic-layer) are
+    likewise functions, so they pick up the new HOME on first use.
+    """
+    rdst_home = tmp_path / "home"
+    rdst_data_dir = rdst_home / ".rdst"
+    rdst_data_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("HOME", str(rdst_home))
+
+    return rdst_data_dir
+
+
+@pytest.fixture
+def run_blocking_inline(monkeypatch):
+    """Run ``asyncio.to_thread`` work on the caller's event loop.
+
+    Mocked blocking boundaries have nothing real to block on, and a worker
+    thread makes the interleaving non-deterministic. Modules that mock those
+    boundaries opt in with ``pytest.mark.usefixtures("run_blocking_inline")``.
+    """
+    import asyncio
+
+    async def _inline(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", _inline)

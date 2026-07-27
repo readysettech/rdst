@@ -1,6 +1,8 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
+import { cleanup, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createTestQueryClient, renderWithClient } from '@/test-utils';
 
 import { TrialBalanceBadge } from './TrialBalanceBadge';
 import { fetchEnvRequirements, fetchTrialStatus } from '../lib/api';
@@ -15,11 +17,7 @@ vi.mock('../lib/api', async () => {
 });
 
 function renderBadge(queryClient: QueryClient) {
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <TrialBalanceBadge />
-    </QueryClientProvider>,
-  );
+  return renderWithClient(<TrialBalanceBadge />, queryClient);
 }
 
 describe('TrialBalanceBadge', () => {
@@ -52,9 +50,7 @@ describe('TrialBalanceBadge', () => {
       limit_tokens_display: '100',
     });
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
 
     renderBadge(queryClient);
 
@@ -83,9 +79,7 @@ describe('TrialBalanceBadge', () => {
       limit_tokens_display: '100',
     });
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
 
     renderBadge(queryClient);
 
@@ -93,9 +87,7 @@ describe('TrialBalanceBadge', () => {
   });
 
   it('hides stale trial UI when source is no longer trial', () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = createTestQueryClient();
     queryClient.setQueryData(['trial-status'], {
       active: false,
       status: 'exhausted',

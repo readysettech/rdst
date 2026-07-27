@@ -29,12 +29,17 @@ class AuditStorage:
             return f"audit_{target_name}_{timestamp}"
         return f"{timestamp}_{uuid.uuid4().hex[:6]}"
 
-    def save_run(self, run: WorkloadRun) -> str:
+    def save_run(self, run: WorkloadRun, extra: dict[str, Any] | None = None) -> str:
+        """Persist a run. `extra` carries audit fields that live alongside the
+        WorkloadRun shape in the saved JSON."""
         target_dir = self.base_dir / run.target_name
         target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / f"{run.run_id}.json"
+        data = asdict(run)
+        if extra:
+            data.update(extra)
         with open(path, "w") as file_obj:
-            json.dump(asdict(run), file_obj, indent=2, default=str)
+            json.dump(data, file_obj, indent=2, default=str)
         return str(path)
 
     def load_run(self, target: str, run_id: str) -> dict[str, Any] | None:
@@ -78,6 +83,9 @@ class AuditStorage:
                     {
                         "run_id": data.get("run_id", path.stem),
                         "target_name": data.get("target_name", target_dir.name),
+                        # A capture that merged an audit carries both keys; the
+                        # audit's engine wins, matching the report header.
+                        "engine": data.get("engine") or data.get("db_engine", ""),
                         "started_at": data.get("started_at", ""),
                         "duration_seconds": data.get("duration_seconds", 0),
                         "total_queries": data.get("total_queries", 0),
@@ -133,6 +141,7 @@ def list_audit_runs(
                     {
                         "run_id": path.stem,
                         "target_name": snap_target,
+                        "engine": data.get("engine", ""),
                         "started_at": (data.get("audited_at") or "")[:19],
                         "duration_seconds": 0,
                         "total_queries": len(data.get("top_queries", [])),

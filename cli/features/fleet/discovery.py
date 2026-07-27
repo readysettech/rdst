@@ -41,6 +41,7 @@ def discover_rds_instances(
     default_group: str | None = None,
     default_database: str | None = None,
     errors: list[str] | None = None,
+    profile: str | None = None,
 ):
     """Discover RDS instances across regions using botocore.
 
@@ -49,10 +50,23 @@ def discover_rds_instances(
     appended so callers can distinguish "region is empty" from "region
     could not be listed".
     """
+    # Stamp members with the account they came from so later flows (audit
+    # preflight, credential checks) can detect a signed-in-account mismatch.
+    account_tag = None
+    try:
+        from .auth import get_botocore_session
+
+        sts = get_botocore_session(profile=profile).create_client("sts")
+        account_id = sts.get_caller_identity().get("Account")
+        if account_id:
+            account_tag = f"aws-account:{account_id}"
+    except Exception:
+        pass
+
     for region in regions:
         logger.info("Discovering RDS instances in %s...", region)
         try:
-            client = get_rds_client(region)
+            client = get_rds_client(region, profile=profile)
             aurora_cluster_ids = set()
 
             try:
@@ -67,11 +81,14 @@ def discover_rds_instances(
                             name_pattern=name_pattern,
                             password_env=password_env,
                             default_user=default_user,
+                            default_group=default_group,
                             default_database=default_database,
                         )
                         if cluster_members:
                             aurora_cluster_ids.add(cluster.get("DBClusterIdentifier", ""))
                             for member in cluster_members:
+                                if account_tag:
+                                    member.tags.append(account_tag)
                                 yield member
             except Exception as exc:
                 logger.debug("Could not list Aurora clusters in %s: %s", region, exc)
@@ -93,6 +110,8 @@ def discover_rds_instances(
                         default_database=default_database,
                     )
                     if member is not None:
+                        if account_tag:
+                            member.tags.append(account_tag)
                         yield member
         except Exception as exc:
             error_message = str(exc)
@@ -120,9 +139,13 @@ def discover_aurora_cluster(
     name_pattern: str | None,
     password_env: str,
     default_user: str | None,
+    default_group: str | None = None,
     default_database: str | None = None,
 ) -> list[FleetMember]:
-    """Parse an Aurora cluster into multiple FleetMembers."""
+    """Parse an Aurora cluster into multiple FleetMembers.
+
+    Members are grouped by the cluster identifier (an explicit
+    `default_group` overrides) and tagged with their cluster role."""
     aws_engine = cluster.get("Engine", "")
     status = cluster.get("Status", "")
     cluster_id = cluster.get("DBClusterIdentifier", "")
@@ -148,6 +171,7 @@ def discover_aurora_cluster(
     if not writer_host:
         return []
 
+    group = default_group or cluster_id
     members = [
         FleetMember(
             name=f"{cluster_id}-writer",
@@ -157,8 +181,8 @@ def discover_aurora_cluster(
             database=database,
             user=user,
             password_env=password_env,
-            group=cluster_id,
-            tags=["aurora", "writer"],
+            group=group,
+            tags=["aurora", "writer", "role:writer"],
             instance_class=None,
             region=region,
         )
@@ -188,8 +212,8 @@ def discover_aurora_cluster(
                                 database=database,
                                 user=user,
                                 password_env=password_env,
-                                group=cluster_id,
-                                tags=["aurora", "reader"],
+                                group=group,
+                                tags=["aurora", "reader", "role:reader"],
                                 instance_class=instance.get("DBInstanceClass"),
                                 region=region,
                             )
@@ -241,7 +265,10 @@ def _parse_instance(
         "MasterUsername", "postgres" if rdst_engine == "postgresql" else "admin"
     )
     instance_class = instance.get("DBInstanceClass")
-    group = default_group or region
+    # Aurora members group by their cluster. Standalone instances stay
+    # ungrouped: a region is metadata, not a group identity, and a lone
+    # instance should not manufacture one.
+    group = default_group or instance.get("DBClusterIdentifier")
     tags = [f"{tag['Key']}={tag['Value']}" for tag in instance.get("TagList", [])]
 
     return FleetMember(

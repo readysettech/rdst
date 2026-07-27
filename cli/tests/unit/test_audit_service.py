@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -68,8 +69,7 @@ class TestAuditSingle:
         assert complete.result["metrics"]["max_connections"] == 100
 
     @pytest.mark.asyncio
-    async def test_save_persists_snapshot(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HOME", str(tmp_path))
+    async def test_save_persists_snapshot(self, tmp_rdst_home):
         service = AuditService(config=_FakeConfig({"mydb": {"engine": "postgresql"}}))
 
         with patch.object(AuditService, "audit_target", return_value=_fake_result()):
@@ -79,7 +79,7 @@ class TestAuditSingle:
         assert saved.snapshot_id.startswith("audit_mydb_")
         assert events[-1].snapshot_id == saved.snapshot_id
 
-        snapshot_path = tmp_path / ".rdst" / "fleet" / "snapshots" / f"{saved.snapshot_id}.json"
+        snapshot_path = tmp_rdst_home / "fleet" / "snapshots" / f"{saved.snapshot_id}.json"
         assert snapshot_path.exists()
         assert json.loads(snapshot_path.read_text())["target_name"] == "mydb"
 
@@ -116,9 +116,8 @@ class TestAuditSingle:
 class TestAuditFleet:
     @pytest.mark.asyncio
     async def test_fleet_streams_per_target_and_saves_combined_snapshot(
-        self, tmp_path, monkeypatch
+        self, tmp_rdst_home
     ):
-        monkeypatch.setenv("HOME", str(tmp_path))
         config = _FakeConfig({
             "db1": {"engine": "postgresql"},
             "db2": {"engine": "postgresql"},
@@ -152,7 +151,7 @@ class TestAuditFleet:
         }
 
         import json
-        snapshots_dir = tmp_path / ".rdst" / "fleet" / "snapshots"
+        snapshots_dir = tmp_rdst_home / "fleet" / "snapshots"
         combined = json.loads((snapshots_dir / "fleet_test.json").read_text())
         assert combined["targets_audited"] == 2
         assert combined["targets_failed"] == 1
@@ -164,9 +163,8 @@ class TestAuditFleet:
 
     @pytest.mark.asyncio
     async def test_fleet_insights_land_in_summary_and_snapshot(
-        self, tmp_path, monkeypatch
+        self, tmp_rdst_home
     ):
-        monkeypatch.setenv("HOME", str(tmp_path))
         service = AuditService(config=_FakeConfig({"db1": {"engine": "postgresql"}}))
         insights = {"health_score": 80, "fleet_findings": []}
 
@@ -182,13 +180,12 @@ class TestAuditFleet:
 
         import json
         snapshot = json.loads(
-            (tmp_path / ".rdst" / "fleet" / "snapshots" / "fleet_ins.json").read_text()
+            (tmp_rdst_home / "fleet" / "snapshots" / "fleet_ins.json").read_text()
         )
         assert snapshot["fleet_insights"] == insights
 
     @pytest.mark.asyncio
-    async def test_fleet_no_save(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HOME", str(tmp_path))
+    async def test_fleet_no_save(self, tmp_rdst_home):
         service = AuditService(config=_FakeConfig({"db1": {"engine": "postgresql"}}))
 
         with patch.object(AuditService, "audit_target", return_value=_fake_result("db1")):
@@ -197,37 +194,158 @@ class TestAuditFleet:
         types = [e.type for e in events]
         assert "snapshot_saved" not in types
         assert events[-1].snapshot_id is None
-        assert not (tmp_path / ".rdst" / "fleet").exists()
+        assert not (tmp_rdst_home / "fleet").exists()
+
+
+class TestInstanceClassSource:
+    def _audit(self, host, extra_config=None, shared_buffers_mb=4096.0):
+        service = AuditService(config=_FakeConfig({}))
+        metrics = AuditMetrics(shared_buffers_mb=shared_buffers_mb)
+        target_config = {"engine": "postgresql", "host": host, **(extra_config or {})}
+        with (
+            patch("features.audit.service.collect_metrics", return_value=metrics),
+            patch.object(AuditService, "_collect_top_queries", return_value=[]),
+            patch.object(AuditService, "_enrich_aws_storage"),
+            patch(
+                "features.audit.health.collect_health_report",
+                side_effect=Exception("skipped"),
+            ),
+            patch(
+                "features.fleet.cloudwatch_metrics.collect_cloudwatch_cpu",
+                return_value=None,
+            ),
+            patch(
+                "features.fleet.cloudwatch_metrics.derive_rds_identifier",
+                return_value=None,
+            ),
+        ):
+            return service.audit_target("t1", target_config)
+
+    def test_local_host_gets_no_estimate(self):
+        result = self._audit("localhost")
+        assert result.instance_class is None
+        assert result.instance_class_source is None
+
+    def test_rds_host_without_metadata_is_estimated(self):
+        result = self._audit("mydb.abc123.us-east-1.rds.amazonaws.com")
+        assert result.instance_class is not None
+        assert result.instance_class_source == "estimated"
+
+    def test_configured_instance_class_is_aws(self):
+        result = self._audit("localhost", extra_config={"instance_class": "db.r6g.xlarge"})
+        assert result.instance_class == "db.r6g.xlarge"
+        assert result.instance_class_source == "aws"
+
+
+class TestAuditFleetDuration:
+    @pytest.mark.asyncio
+    async def test_duration_runs_capture_and_attaches_workload(self):
+        from features.audit.capture_service import CaptureService
+        from features.audit.events import WorkloadCompleteEvent
+
+        service = AuditService(config=_FakeConfig({"db1": {"engine": "postgresql"}}))
+        seen_kwargs: dict = {}
+
+        async def fake_run_capture(self, **kwargs):
+            seen_kwargs.update(kwargs)
+            yield WorkloadCompleteEvent(
+                type="complete",
+                success=True,
+                run_id="r1",
+                summary={
+                    "duration_seconds": kwargs["duration_seconds"],
+                    "unique_queries": 2,
+                },
+                analysis={"health_score": 70},
+            )
+
+        with (
+            patch.object(AuditService, "audit_target", return_value=_fake_result("db1")),
+            patch.object(AuditService, "run_fleet_insights", return_value={}),
+            patch.object(CaptureService, "run_capture", fake_run_capture),
+        ):
+            events = [
+                e async for e in service.audit_fleet(
+                    ["db1"], duration_seconds=45, insights=True,
+                )
+            ]
+
+        complete = next(e for e in events if e.type == "target_complete")
+        workload = complete.result["workload"]
+        assert workload["duration_seconds"] == 45
+        assert workload["analysis"] == {"health_score": 70}
+        assert seen_kwargs["target_name"] == "db1"
+        assert seen_kwargs["run_analysis"] is True
+        assert seen_kwargs["save_capture"] is False
+
+    @pytest.mark.asyncio
+    async def test_no_duration_skips_capture(self):
+        from features.audit.capture_service import CaptureService
+
+        service = AuditService(config=_FakeConfig({"db1": {"engine": "postgresql"}}))
+
+        with (
+            patch.object(AuditService, "audit_target", return_value=_fake_result("db1")),
+            patch.object(
+                CaptureService, "run_capture",
+                side_effect=AssertionError("capture should not run"),
+            ),
+        ):
+            events = [e async for e in service.audit_fleet(["db1"])]
+
+        complete = next(e for e in events if e.type == "target_complete")
+        assert "workload" not in complete.result
+
+    @pytest.mark.asyncio
+    async def test_capture_error_recorded_without_failing_target(self):
+        from features.audit.capture_service import CaptureService
+        from features.audit.events import WorkloadErrorEvent
+
+        service = AuditService(config=_FakeConfig({"db1": {"engine": "postgresql"}}))
+
+        async def fake_run_capture(self, **kwargs):
+            yield WorkloadErrorEvent(type="error", message="capture boom", phase="capture")
+
+        with (
+            patch.object(AuditService, "audit_target", return_value=_fake_result("db1")),
+            patch.object(CaptureService, "run_capture", fake_run_capture),
+        ):
+            events = [
+                e async for e in service.audit_fleet(["db1"], duration_seconds=30)
+            ]
+
+        complete = next(e for e in events if e.type == "target_complete")
+        assert complete.result["workload"] == {"error": "capture boom"}
+        assert events[-1].success is True
 
 
 class TestAuditRunHistory:
     def _seed_snapshot(self, home, snapshot_id: str, data: dict) -> None:
-        snapshots = home / ".rdst" / "fleet" / "snapshots"
+        snapshots = home / "fleet" / "snapshots"
         snapshots.mkdir(parents=True, exist_ok=True)
         (snapshots / f"{snapshot_id}.json").write_text(json.dumps(data))
 
     def _seed_capture(self, home, target: str, run_id: str, data: dict) -> None:
-        captures = home / ".rdst" / "audits" / target
+        captures = home / "audits" / target
         captures.mkdir(parents=True, exist_ok=True)
         (captures / f"{run_id}.json").write_text(json.dumps(data))
 
-    def test_list_merges_snapshots_and_captures(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HOME", str(tmp_path))
+    def test_list_merges_snapshots_and_captures(self, tmp_rdst_home):
         from features.audit.storage import list_audit_runs
 
-        self._seed_snapshot(tmp_path, "audit_mydb_20260706_010101", {
+        self._seed_snapshot(tmp_rdst_home, "audit_mydb_20260706_010101", {
             "target_name": "mydb",
             "audited_at": "2026-07-06T01:01:01+00:00",
             "top_queries": [{"query_hash": "abc"}],
             "health_analysis": {"health_score": 90},
         })
-        self._seed_snapshot(tmp_path, "audit_mydb_20260704_010101", {
+        self._seed_snapshot(tmp_rdst_home, "audit_mydb_20260704_010101", {
             "target_name": "mydb",
             "audited_at": "2026-07-04T01:01:01+00:00",
             "top_queries": [],
             "health_analysis": {"error": "Claude error: HTTP 401"},
         })
-        self._seed_capture(tmp_path, "mydb", "audit_mydb_20260705_010101", {
+        self._seed_capture(tmp_rdst_home, "mydb", "audit_mydb_20260705_010101", {
             "run_id": "audit_mydb_20260705_010101",
             "target_name": "mydb",
             "started_at": "2026-07-05T01:01:01+00:00",
@@ -251,14 +369,13 @@ class TestAuditRunHistory:
 
         assert list_audit_runs(target="otherdb") == []
 
-    def test_find_run_prefers_snapshots_and_matches_prefix(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HOME", str(tmp_path))
+    def test_find_run_prefers_snapshots_and_matches_prefix(self, tmp_rdst_home):
         from features.audit.storage import find_audit_run
 
-        self._seed_snapshot(tmp_path, "audit_mydb_20260706_010101", {
+        self._seed_snapshot(tmp_rdst_home, "audit_mydb_20260706_010101", {
             "target_name": "mydb", "audited_at": "2026-07-06T01:01:01+00:00",
         })
-        self._seed_capture(tmp_path, "mydb", "capture_xyz", {
+        self._seed_capture(tmp_rdst_home, "mydb", "capture_xyz", {
             "run_id": "capture_xyz", "target_name": "mydb",
             "started_at": "2026-07-05T01:01:01+00:00",
         })

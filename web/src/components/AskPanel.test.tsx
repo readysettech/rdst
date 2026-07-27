@@ -207,6 +207,30 @@ describe("AskPanel", () => {
     expect(screen.queryByText("Something went wrong")).toBeNull();
   });
 
+  it("shows actionable recovery when a trial is exhausted mid-ask", () => {
+    vi.mocked(useAsk).mockReturnValue({
+      ...baseUseAskState,
+      state: "error",
+      result: undefined,
+      error: {
+        type: "error",
+        message: "TRIAL_EXHAUSTED",
+        phase: "generate",
+      },
+    });
+
+    renderPanel(<AskPanel />);
+
+    expect(
+      screen.getByText(
+        "Your free trial credit is used up — add your own Anthropic API key or a new trial token.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Set key/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Start trial" })).toBeTruthy();
+    expect(screen.queryByText("TRIAL_EXHAUSTED")).toBeNull();
+  });
+
   it("re-runs the SAME question on Try again without wiping the input", () => {
     const askSpy = vi.fn();
     vi.mocked(useAsk).mockReturnValue({

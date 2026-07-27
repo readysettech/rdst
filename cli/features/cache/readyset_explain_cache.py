@@ -40,7 +40,7 @@ def explain_create_cache_readyset(
     **kwargs,
 ) -> Dict[str, Any]:
     """
-    Execute EXPLAIN CREATE CACHE against Readyset instance.
+    Execute EXPLAIN CREATE SHALLOW CACHE against Readyset instance.
 
     This determines real cacheability from the actual Readyset container,
     not static analysis.
@@ -74,12 +74,12 @@ def explain_create_cache_readyset(
         password = test_db_config.get("password", "")
         engine = (test_db_config.get("engine") or "postgresql").lower()
 
-        # Build EXPLAIN CREATE CACHE command
-        explain_query = f"EXPLAIN CREATE CACHE FROM {query}"
+        # Be explicit: this helper assesses the shallow-cache path.
+        explain_query = f"EXPLAIN CREATE SHALLOW CACHE FROM {query}"
 
         if not quiet:
             print(
-                f"Running EXPLAIN CREATE CACHE against Readyset on port {readyset_port}..."
+                f"Running EXPLAIN CREATE SHALLOW CACHE against Readyset on port {readyset_port}..."
             )
 
         if engine == "mysql":

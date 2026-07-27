@@ -1,5 +1,8 @@
 import { cn } from '@rs/tailwind-base'
+import { Button } from '@rs/ui-new/button'
 import { ErrorState } from '@rs/ui-new/error-state'
+import { HStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
 import {
   createRootRoute,
   type ErrorComponentProps,
@@ -7,12 +10,19 @@ import {
   useNavigate,
 } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
+import { ActivityPulse } from '../components/audit/ActivityPulse'
 // Direct import: the components barrel re-exports the SQL editor stack,
 // which would statically pull CodeMirror into the eager entry chunk.
 import { ConfigWarning } from '../components/ConfigWarning'
 import { Header } from '../layout/Header'
 import { Main } from '../layout/Main'
 import { Sidebar } from '../layout/Sidebar'
+import {
+  cancelActiveAudit,
+  requestAuditRunView,
+  useAuditPresentation,
+  useAuditSession,
+} from '../lib/auditSession'
 import { isDesktopLinux, isDesktopMac } from '../lib/desktop'
 import { useDesktopUpdates } from '../lib/useDesktopUpdates'
 
@@ -76,8 +86,61 @@ function RootComponent() {
   return (
     <AppShell>
       <ConfigWarning />
+      <AuditRunBanner />
       <Outlet />
     </AppShell>
+  )
+}
+
+function AuditRunBanner() {
+  const navigate = useNavigate()
+  const active = useAuditSession()
+  const { completed, runViewVisible } = useAuditPresentation()
+  const session = active ?? completed
+  if (!session || runViewVisible) return null
+  const targetLabel =
+    'targetNames' in session && session.targetNames.length === 1
+      ? session.targetNames[0]
+      : 'targetNames' in session && session.targetNames.length > 1
+        ? `${session.targetNames.length} targets`
+        : session.targetLabel
+
+  const view = () => {
+    requestAuditRunView()
+    void navigate({ to: '/audit' })
+  }
+
+  return (
+    <HStack className="sticky top-0 z-30 mb-4 justify-between items-center gap-3 rounded-xl border border-border-primary-soft bg-surface-primary-soft px-4 py-2.5 shadow-elevation-1 flex-wrap">
+      <HStack className="gap-2 items-center">
+        {active ? (
+          <ActivityPulse label="Health check running" />
+        ) : (
+          <span className="text-content-positive-soft">✓</span>
+        )}
+        <Text level="body-small" className="text-content-layout-1">
+          Health check {active ? 'running' : 'complete'} on {targetLabel}
+        </Text>
+      </HStack>
+      <HStack className="gap-2 items-center">
+        <Button
+          variant="primary"
+          modifier="ghost"
+          size="small"
+          label="View"
+          onClick={view}
+        />
+        {active && (
+          <Button
+            variant="negative"
+            modifier="ghost"
+            size="small"
+            label="Cancel"
+            onClick={cancelActiveAudit}
+          />
+        )}
+      </HStack>
+    </HStack>
   )
 }
 

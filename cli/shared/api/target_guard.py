@@ -55,15 +55,7 @@ def ensure_target_password(target: Optional[str] = None) -> TargetGuard:
         return TargetGuard(target_name, target_config, target_engine)
 
     password_env = target_config.get("password_env")
-    if password_env:
-        message = (
-            f"Target '{target_name}' is locked until '{password_env}' is set. "
-            "Use Set in Web to provide the secret."
-        )
-    else:
-        message = (
-            f"Target '{target_name}' is locked because no password is configured for it."
-        )
+    message = f"Set the password for '{target_name}' to run this."
 
     raise HTTPException(
         status_code=423,

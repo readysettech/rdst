@@ -27,6 +27,25 @@ def _load_trial_config(cfg: Any | None = None) -> dict[str, Any]:
     return trial_config if isinstance(trial_config, dict) else {}
 
 
+def _mark_trial_active(cfg: Any | None = None) -> None:
+    """Clear a stale local trial 'exhausted' status once the keyservice proves
+    the trial still has credit."""
+    try:
+        config = cfg
+        if config is None:
+            from shared.config.targets import TargetsConfig
+
+            config = TargetsConfig()
+            config.load()
+        trial = config.get_trial_config() or {}
+        if trial.get("status") == "exhausted" and trial.get("token"):
+            trial["status"] = "active"
+            config.set_trial_config(trial)
+            config.save()
+    except Exception:
+        pass
+
+
 def get_anthropic_source(
     secret_store: Any | None = None,
     cfg: Any | None = None,
@@ -151,6 +170,8 @@ def validate_anthropic_key(
     from shared.llm_manager import LLMError, LLMManager
     from shared.llm_manager.claude_provider import AnthropicModel
 
+    source = get_anthropic_source(secret_store=secret_store, cfg=cfg)
+    is_trial = source in ("trial", "trial_exhausted")
     model = AnthropicModel.HAIKU_4_5.value
     try:
         LLMManager().query(
@@ -160,16 +181,26 @@ def validate_anthropic_key(
             max_tokens=1,
             temperature=0,
         )
-        result: dict[str, Any] = {"valid": True, "reason": "ok", "model": model}
+        result: dict[str, Any] = {
+            "valid": True, "reason": "ok", "model": model, "source": source,
+        }
+        # A successful trial ping means the keyservice still has credit, so a
+        # stale local "exhausted" status is wrong — heal it so Settings and the
+        # audit page agree.
+        if source == "trial_exhausted":
+            _mark_trial_active(cfg)
+            result["source"] = "trial"
     except LLMError as exc:
         rejected = exc.code in ("ANTHROPIC_AUTH_INVALID", "TRIAL_AUTH_INVALID")
+        exhausted = exc.code in ("TRIAL_EXHAUSTED", "TRIAL_LIMIT_REACHED")
         result = {
             "valid": False,
-            "reason": "rejected" if rejected else "provider_error",
+            "reason": "exhausted" if exhausted else "rejected" if rejected else "provider_error",
             "model": model,
+            "source": source,
         }
     except Exception:
-        result = {"valid": False, "reason": "provider_error", "model": model}
+        result = {"valid": False, "reason": "provider_error", "model": model, "source": source}
 
     _validity_cache[fingerprint] = (result, now + _VALIDITY_TTL_SECONDS)
     return result

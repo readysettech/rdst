@@ -164,6 +164,10 @@ def _event_to_sse(event: ConfigureEvent) -> dict:
             data["message"] = event.message
         if event.server_version:
             data["server_version"] = event.server_version
+        if event.code:
+            data["code"] = event.code
+        if event.password_env:
+            data["password_env"] = event.password_env
         return {
             "event": "connection_test",
             "data": json.dumps(data),

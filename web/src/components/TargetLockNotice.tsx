@@ -50,8 +50,8 @@ export function TargetLockNotice({
         kind="password-needed"
         target={lockedTarget}
         message={message}
-        onRetry={canSetInWeb ? () => setDialogOpen(true) : undefined}
-        retryLabel="Set here"
+        onPrimaryAction={canSetInWeb ? () => setDialogOpen(true) : undefined}
+        primaryActionLabel={canSetInWeb ? "Set password" : undefined}
       />
 
       <EnvSecretsDialog

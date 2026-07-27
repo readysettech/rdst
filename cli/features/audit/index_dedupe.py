@@ -74,4 +74,34 @@ def filter_existing_indexes(
     return filtered
 
 
-__all__ = ["filter_existing_indexes"]
+def normalize_index_rec_sql(
+    index_recs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Guarantee each recommendation carries a runnable CREATE INDEX statement.
+
+    The two analysis prompts disagree on the field name (`sql` vs
+    `create_index_sql`), and the LLM sometimes returns neither. Reports need
+    the actual DDL, so canonicalize: prefer whichever field the model set,
+    else synthesize from table + columns. Both keys are set to the same value
+    so any renderer finds it.
+    """
+    for rec in index_recs:
+        ddl = (rec.get("create_index_sql") or rec.get("sql") or "").strip()
+        if not ddl:
+            table = (rec.get("table") or "").strip()
+            cols = [str(c).strip() for c in (rec.get("columns") or []) if str(c).strip()]
+            expr = (rec.get("expression") or "").strip()
+            target = ", ".join(cols) if cols else expr
+            if table and target:
+                idx_name = "idx_" + "_".join(
+                    [table] + (cols if cols else [expr])
+                ).lower().replace(" ", "_").replace(".", "_").replace("(", "").replace(")", "")
+                idx_name = idx_name[:63]
+                ddl = f"CREATE INDEX {idx_name} ON {table} ({target});"
+        if ddl:
+            rec["create_index_sql"] = ddl
+            rec["sql"] = ddl
+    return index_recs
+
+
+__all__ = ["filter_existing_indexes", "normalize_index_rec_sql"]

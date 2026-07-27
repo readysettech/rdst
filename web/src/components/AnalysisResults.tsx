@@ -16,9 +16,12 @@ import type {
 import {
   type ApiErrorEnvelope,
   classifyError,
+  isTrialExhaustedError,
   recoveryFor,
   retryHelps,
+  TRIAL_EXHAUSTED_MESSAGE,
 } from "../lib/errorContract";
+import { RoutableNotice } from "./RoutableNotice";
 import {
   type ValidIconName,
   resolveRewriteTesting,
@@ -48,6 +51,7 @@ interface AnalysisResultsProps {
   onRecover?: (to: string) => void;
   /** Re-run the analysis; only surfaced when a retry can plausibly help. */
   onRetry?: () => void;
+  onStartTrial?: () => void;
   isCaching?: boolean;
   /** Open the interactive chat drawer — surfaced as a quiet footer link. */
   onAskFollowUp?: () => void;
@@ -191,6 +195,7 @@ export function AnalysisResults({
   onSetUpCaching,
   onRecover,
   onRetry,
+  onStartTrial,
   isCaching,
   onAskFollowUp,
   hasExistingChat,
@@ -421,6 +426,7 @@ export function AnalysisResults({
         "An unknown error occurred while analyzing the query. Please try again.",
     };
     const errorClass = classifyError(envelope);
+    const trialExhausted = isTrialExhaustedError(envelope)
     const isInvalidSql = envelope.code === "invalid_sql";
     const title = isInvalidSql ? "Analysis Failed" : "Analysis could not complete";
 
@@ -432,6 +438,18 @@ export function AnalysisResults({
       if (rec && onRecover) {
         action = { label: rec.label, onClick: () => onRecover(rec.to) };
       }
+    }
+
+    if (trialExhausted) {
+      return (
+        <RoutableNotice
+          kind="trial-exhausted"
+          message={TRIAL_EXHAUSTED_MESSAGE}
+          primaryActionLabel="Set key"
+          onRetry={onStartTrial}
+          retryLabel={onStartTrial ? "Start trial" : undefined}
+        />
+      )
     }
 
     return (

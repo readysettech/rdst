@@ -47,8 +47,15 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  * {
-    scroll-behavior: smooth;
+  /* Deliberately NOT `*`. A global smooth scroll-behavior animates the
+     browser's own anchor/hash navigation; when report content expands while
+     that animation is still in flight, the scroll container wedges and the
+     user cannot scroll at all until a reload. Code that wants an animated
+     jump asks for it explicitly via scrollIntoView({ behavior: 'smooth' }). */
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
   }
 
   /* Transparent chrome lets the desktop app's native glass show through;

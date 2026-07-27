@@ -11,6 +11,24 @@ from typing import Any
 from .models import FleetAuditSnapshot, FleetDiff, FleetDiffEntry
 
 
+def _snapshot_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per-target result dicts: a fleet snapshot's `results`, or the
+    single-target snapshot itself."""
+    results = data.get("results")
+    if isinstance(results, list):
+        return [result for result in results if isinstance(result, dict)]
+    return [data]
+
+
+def _capture_duration(entry: dict[str, Any]) -> int:
+    """Capture window of one audited target; 0 for a metrics-only audit."""
+    workload = entry.get("workload")
+    value = workload.get("duration_seconds") if isinstance(workload, dict) else None
+    if not value:
+        value = entry.get("duration_seconds")
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
 class SnapshotStore:
     """Manages audit snapshots at ~/.rdst/fleet/snapshots/."""
 
@@ -59,12 +77,21 @@ class SnapshotStore:
                 with open(path) as file_obj:
                     data = json.load(file_obj)
                 is_fleet = isinstance(data.get("results"), list)
+                entries = _snapshot_entries(data)
                 snapshots.append(
                     {
                         "snapshot_id": data.get("snapshot_id", path.stem),
                         "name": data.get("name", path.stem),
                         "created_at": data.get("created_at", ""),
                         "targets_audited": data.get("targets_audited", 0),
+                        "target_names": [
+                            str(name)
+                            for entry in entries
+                            if (name := entry.get("target_name"))
+                        ],
+                        "duration_seconds": max(
+                            (_capture_duration(entry) for entry in entries), default=0
+                        ),
                         "kind": "fleet" if is_fleet else "single",
                         "path": str(path),
                     }
@@ -76,6 +103,8 @@ class SnapshotStore:
                         "name": path.stem,
                         "created_at": "",
                         "targets_audited": 0,
+                        "target_names": [],
+                        "duration_seconds": 0,
                         "kind": "single",
                         "path": str(path),
                     }

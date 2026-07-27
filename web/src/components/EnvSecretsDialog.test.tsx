@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ReactElement } from 'react';
+
+import { createTestQueryClient, renderWithClient } from '@/test-utils';
 
 import { EnvSecretsDialog } from './EnvSecretsDialog';
 import { setEnvSecret } from '../lib/api';
@@ -14,18 +14,31 @@ vi.mock('../lib/api', async () => {
   };
 });
 
+/**
+ * The dialog under an exhausted trial: the one requirement shape the rerender
+ * tests below share, so each frame only re-states its `isOpen`.
+ */
+function exhaustedDialog(onClose: () => void, isOpen = true) {
+  return (
+    <EnvSecretsDialog
+      isOpen={isOpen}
+      onClose={onClose}
+      keyringAvailable
+      showManualAnthropicInput
+      requirements={[
+        {
+          kind: 'anthropic_api_key',
+          accepted_names: ['ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
+          target: null,
+          satisfied: true,
+          source: 'trial_exhausted',
+        },
+      ]}
+    />
+  );
+}
+
 describe('EnvSecretsDialog', () => {
-  const renderWithClient = (ui: ReactElement) => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
-
-    return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
-  };
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -108,56 +121,15 @@ describe('EnvSecretsDialog', () => {
 
   it('preserves typed values and validation state when parent rerenders while open', async () => {
     const onClose = vi.fn();
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
+    const queryClient = createTestQueryClient();
 
-    const { rerender } = render(
-      <QueryClientProvider client={queryClient}>
-        <EnvSecretsDialog
-          isOpen
-          onClose={onClose}
-          keyringAvailable
-          showManualAnthropicInput
-          requirements={[
-            {
-              kind: 'anthropic_api_key',
-              accepted_names: ['ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
-              target: null,
-              satisfied: true,
-              source: 'trial_exhausted',
-            },
-          ]}
-        />
-      </QueryClientProvider>
-    );
+    const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient);
 
     const input = screen.getByPlaceholderText('Enter Anthropic API Key');
     fireEvent.change(input, { target: { value: 'sk-ant-typed' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Secrets/i }));
 
-    rerender(
-      <QueryClientProvider client={queryClient}>
-        <EnvSecretsDialog
-          isOpen
-          onClose={onClose}
-          keyringAvailable
-          showManualAnthropicInput
-          requirements={[
-            {
-              kind: 'anthropic_api_key',
-              accepted_names: ['ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
-              target: null,
-              satisfied: true,
-              source: 'trial_exhausted',
-            },
-          ]}
-        />
-      </QueryClientProvider>
-    );
+    rerender(exhaustedDialog(onClose));
 
     expect((screen.getByPlaceholderText('Enter Anthropic API Key') as HTMLInputElement).value).toBe(
       'sk-ant-typed'
@@ -166,131 +138,31 @@ describe('EnvSecretsDialog', () => {
 
   it('preserves validation state when parent rerenders while open', () => {
     const onClose = vi.fn();
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
+    const queryClient = createTestQueryClient();
 
-    const { rerender } = render(
-      <QueryClientProvider client={queryClient}>
-        <EnvSecretsDialog
-          isOpen
-          onClose={onClose}
-          keyringAvailable
-          showManualAnthropicInput
-          requirements={[
-            {
-              kind: 'anthropic_api_key',
-              accepted_names: ['ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
-              target: null,
-              satisfied: true,
-              source: 'trial_exhausted',
-            },
-          ]}
-        />
-      </QueryClientProvider>
-    );
+    const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient);
 
     fireEvent.click(screen.getByRole('button', { name: /Save Secrets/i }));
     expect(screen.getByText(/Enter at least one secret value before saving\./i)).toBeTruthy();
 
-    rerender(
-      <QueryClientProvider client={queryClient}>
-        <EnvSecretsDialog
-          isOpen
-          onClose={onClose}
-          keyringAvailable
-          showManualAnthropicInput
-          requirements={[
-            {
-              kind: 'anthropic_api_key',
-              accepted_names: ['ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
-              target: null,
-              satisfied: true,
-              source: 'trial_exhausted',
-            },
-          ]}
-        />
-      </QueryClientProvider>
-    );
+    rerender(exhaustedDialog(onClose));
 
     expect(screen.getByText(/Enter at least one secret value before saving\./i)).toBeTruthy();
   });
 
   it('resets form state after close and reopen', () => {
     const onClose = vi.fn();
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
+    const queryClient = createTestQueryClient();
 
-    const { rerender } = render(
-      <QueryClientProvider client={queryClient}>
-        <EnvSecretsDialog
-          isOpen
-          onClose={onClose}
-          keyringAvailable
-          showManualAnthropicInput
-          requirements={[
-            {
-              kind: 'anthropic_api_key',
-              accepted_names: ['ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
-              target: null,
-              satisfied: true,
-              source: 'trial_exhausted',
-            },
-          ]}
-        />
-      </QueryClientProvider>
-    );
+    const { rerender } = renderWithClient(exhaustedDialog(onClose), queryClient);
 
     const input = screen.getByPlaceholderText('Enter Anthropic API Key');
     fireEvent.change(input, { target: { value: 'sk-ant-typed' } });
     fireEvent.click(screen.getByRole('button', { name: /Save Secrets/i }));
 
-    rerender(
-      <QueryClientProvider client={queryClient}>
-        <EnvSecretsDialog
-          isOpen={false}
-          onClose={onClose}
-          keyringAvailable
-          showManualAnthropicInput
-          requirements={[
-            {
-              kind: 'anthropic_api_key',
-              accepted_names: ['ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
-              target: null,
-              satisfied: true,
-              source: 'trial_exhausted',
-            },
-          ]}
-        />
-      </QueryClientProvider>
-    );
+    rerender(exhaustedDialog(onClose, false));
 
-    rerender(
-      <QueryClientProvider client={queryClient}>
-        <EnvSecretsDialog
-          isOpen
-          onClose={onClose}
-          keyringAvailable
-          showManualAnthropicInput
-          requirements={[
-            {
-              kind: 'anthropic_api_key',
-              accepted_names: ['ANTHROPIC_API_KEY', 'RDST_TRIAL_TOKEN'],
-              target: null,
-              satisfied: true,
-              source: 'trial_exhausted',
-            },
-          ]}
-        />
-      </QueryClientProvider>
-    );
+    rerender(exhaustedDialog(onClose));
 
     expect((screen.getByPlaceholderText('Enter Anthropic API Key') as HTMLInputElement).value).toBe('');
     expect(screen.queryByText(/Enter at least one secret value before saving\./i)).toBeNull();

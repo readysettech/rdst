@@ -276,7 +276,7 @@ export interface paths {
         put?: never;
         /**
          * Run Audit
-         * @description Run a metrics-only audit on a target (SSE stream).
+         * @description Start a metrics-only audit as a detached background run.
          */
         post: operations["run_audit_api_audit_post"];
         delete?: never;
@@ -296,12 +296,36 @@ export interface paths {
         put?: never;
         /**
          * Run Capture
-         * @description Capture live workload for a duration (SSE stream of WorkloadEvent).
+         * @description Start a live workload capture as a detached background run.
          *
-         *     Long-lived: the stream stays open for the whole capture window. Client
-         *     disconnect cancels the capture and releases the database connection.
+         *     The capture holds a database connection for the whole window; cancelling
+         *     the run through `DELETE /api/runs/{run_id}` releases it.
          */
         post: operations["run_capture_api_audit_capture_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/requirements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Capture Requirements
+         * @description Check capture prerequisites for a target.
+         *
+         *     Reports whether pg_stat_statements (PG) / performance_schema (MySQL)
+         *     is available, with setup instructions when it is not. Connection
+         *     failures surface as query_stats "error".
+         */
+        get: operations["get_capture_requirements_api_audit_requirements_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -342,6 +366,28 @@ export interface paths {
         get: operations["get_audit_run_api_audit_runs__run_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/runs/{run_id}/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email Audit Run
+         * @description Email the report for a saved audit run.
+         *
+         *     The report is not gated on email: this is an explicit, optional send.
+         */
+        post: operations["email_audit_run_api_audit_runs__run_id__email_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1180,9 +1226,114 @@ export interface paths {
         put?: never;
         /**
          * Run Fleet Audit
-         * @description Audit all fleet targets concurrently (SSE stream of AuditEvent).
+         * @description Start a fleet-wide audit as one detached background run.
+         *
+         *     Targets come from an explicit `targets` list, or from the fleet filtered
+         *     by group/tag (all fleet targets when neither is given). The whole fleet
+         *     is a single run, so its events read back through
+         *     `/api/runs/{run_id}/events` and one cancel stops every target.
          */
         post: operations["run_fleet_audit_api_fleet_audit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/aws-login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Fleet Aws Login
+         * @description Start AWS CLI SSO login without blocking the local web request.
+         */
+        post: operations["start_fleet_aws_login_api_fleet_aws_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/aws-login/{login_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fleet Aws Login
+         * @description Poll an AWS CLI login and verify the resulting STS session.
+         */
+        get: operations["get_fleet_aws_login_api_fleet_aws_login__login_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/aws-logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fleet Aws Logout
+         * @description Sign out of AWS SSO (clears the CLI's cached SSO sessions).
+         */
+        post: operations["fleet_aws_logout_api_fleet_aws_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/aws-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Fleet Aws Profile
+         * @description Create a modern AWS CLI SSO profile in the user's local config.
+         */
+        post: operations["create_fleet_aws_profile_api_fleet_aws_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/aws-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fleet Aws Status
+         * @description Report local AWS credential state for the discovery UI.
+         */
+        get: operations["get_fleet_aws_status_api_fleet_aws_status_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1229,6 +1380,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/discover-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discover Preview
+         * @description List discoverable RDS/Aurora instances without importing them.
+         */
+        post: operations["discover_preview_api_fleet_discover_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/import": {
         parameters: {
             query?: never;
@@ -1240,7 +1411,7 @@ export interface paths {
         put?: never;
         /**
          * Import Fleet
-         * @description Import fleet targets from a local CSV file (SSE stream).
+         * @description Import fleet targets from a CSV file or uploaded content (SSE stream).
          */
         post: operations["import_fleet_api_fleet_import_post"];
         delete?: never;
@@ -1296,6 +1467,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/snapshots/{snapshot_id}/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email Fleet Snapshot
+         * @description Email the report for a saved fleet snapshot.
+         *
+         *     Same artifact and delivery path as the single-target audit run endpoint.
+         */
+        post: operations["email_fleet_snapshot_api_fleet_snapshots__snapshot_id__email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/status": {
         parameters: {
             query?: never;
@@ -1334,6 +1527,46 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/targets/bulk-add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Add Targets
+         * @description Add previously previewed members as fleet targets.
+         */
+        post: operations["bulk_add_targets_api_fleet_targets_bulk_add_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/targets/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Fleet Target Group
+         * @description Set or clear a configured fleet target's group.
+         */
+        patch: operations["patch_fleet_target_group_api_fleet_targets__name__patch"];
         trace?: never;
     };
     "/api/guards": {
@@ -2848,10 +3081,7 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /**
-         * AnnotateCompleteEvent
-         * @description Annotation process completed, possibly with individual table failures.
-         */
+        /** AnnotateCompleteEvent */
         AnnotateCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -2869,10 +3099,7 @@ export interface components {
              */
             type: "annotate_complete";
         };
-        /**
-         * AnnotateErrorEvent
-         * @description Annotation process encountered an error.
-         */
+        /** AnnotateErrorEvent */
         AnnotateErrorEvent: {
             /** Message */
             message: string;
@@ -2882,10 +3109,7 @@ export interface components {
              */
             type: "annotate_error";
         };
-        /**
-         * AnnotateProgressEvent
-         * @description Progress update during annotation.
-         */
+        /** AnnotateProgressEvent */
         AnnotateProgressEvent: {
             /** Message */
             message: string;
@@ -2913,10 +3137,7 @@ export interface components {
             /** Target */
             target: string;
         };
-        /**
-         * AnnotateStartedEvent
-         * @description Annotation process started.
-         */
+        /** AnnotateStartedEvent */
         AnnotateStartedEvent: {
             /**
              * Completed Tables
@@ -2933,10 +3154,7 @@ export interface components {
              */
             type: "annotate_started";
         };
-        /**
-         * AnnotateTableCompleteEvent
-         * @description A table has been annotated.
-         */
+        /** AnnotateTableCompleteEvent */
         AnnotateTableCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -2970,14 +3188,13 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "ok" | "rejected" | "no_key" | "provider_error";
+            reason: "ok" | "rejected" | "no_key" | "provider_error" | "exhausted";
+            /** Source */
+            source?: string | null;
             /** Valid */
             valid: boolean;
         };
-        /**
-         * AskClarificationNeededEvent
-         * @description Clarification needed from the user.
-         */
+        /** AskClarificationNeededEvent */
         AskClarificationNeededEvent: {
             /** Interpretations */
             interpretations: components["schemas"]["AskInterpretation"][];
@@ -2991,10 +3208,7 @@ export interface components {
              */
             type: "clarification_needed";
         };
-        /**
-         * AskClarificationQuestion
-         * @description A clarification question for the user.
-         */
+        /** AskClarificationQuestion */
         AskClarificationQuestion: {
             /** Id */
             id: string;
@@ -3003,10 +3217,7 @@ export interface components {
             /** Question */
             question: string;
         };
-        /**
-         * AskErrorEvent
-         * @description Ask encountered an error.
-         */
+        /** AskErrorEvent */
         AskErrorEvent: {
             /** Message */
             message: string;
@@ -3049,10 +3260,7 @@ export interface components {
             /** Items */
             items: components["schemas"]["AskHistoryItem"][];
         };
-        /**
-         * AskInterpretation
-         * @description A possible interpretation of the user's question.
-         */
+        /** AskInterpretation */
         AskInterpretation: {
             /** Assumptions */
             assumptions: string[];
@@ -3101,10 +3309,7 @@ export interface components {
              */
             timeout?: number;
         };
-        /**
-         * AskResultEvent
-         * @description Ask completed with results.
-         */
+        /** AskResultEvent */
         AskResultEvent: {
             /** Columns */
             columns: string[];
@@ -3143,10 +3348,7 @@ export interface components {
              */
             type: "result";
         };
-        /**
-         * AskSchemaLoadedEvent
-         * @description Schema has been loaded.
-         */
+        /** AskSchemaLoadedEvent */
         AskSchemaLoadedEvent: {
             /** Source */
             source: string;
@@ -3165,10 +3367,7 @@ export interface components {
              */
             type: "schema_loaded";
         };
-        /**
-         * AskSqlGeneratedEvent
-         * @description SQL has been generated.
-         */
+        /** AskSqlGeneratedEvent */
         AskSqlGeneratedEvent: {
             /**
              * Explanation
@@ -3183,10 +3382,7 @@ export interface components {
              */
             type: "sql_generated";
         };
-        /**
-         * AskStatusEvent
-         * @description Status update during ask execution.
-         */
+        /** AskStatusEvent */
         AskStatusEvent: {
             /** Message */
             message: string;
@@ -3215,6 +3411,11 @@ export interface components {
              * @default 50
              */
             limit?: number;
+            /**
+             * Readyset
+             * @default false
+             */
+            readyset?: boolean;
             /**
              * Save
              * @default true
@@ -3302,6 +3503,27 @@ export interface components {
              */
             type: "metrics_collected";
         };
+        /** AuditRequirementsResponse */
+        AuditRequirementsResponse: {
+            /**
+             * Detail
+             * @default
+             */
+            detail?: string;
+            /**
+             * Docker Available
+             * @default false
+             */
+            docker_available?: boolean;
+            /** Engine */
+            engine: string;
+            /** Query Stats */
+            query_stats: string;
+            /** Remediation */
+            remediation?: string | null;
+            /** Target */
+            target: string;
+        };
         /** AuditRunListResponse */
         AuditRunListResponse: {
             /** Count */
@@ -3324,6 +3546,16 @@ export interface components {
             /** Target */
             target?: string | null;
         };
+        /** AuditRunStartResponse */
+        AuditRunStartResponse: {
+            /**
+             * Reused
+             * @default false
+             */
+            reused?: boolean;
+            /** Run Id */
+            run_id: string;
+        };
         /** AuditRunSummary */
         AuditRunSummary: {
             /**
@@ -3331,6 +3563,11 @@ export interface components {
              * @default 0
              */
             duration_seconds?: number;
+            /**
+             * Engine
+             * @default
+             */
+            engine?: string;
             /**
              * Has Analysis
              * @default false
@@ -3375,10 +3612,30 @@ export interface components {
         };
         /** AuditStatusEvent */
         AuditStatusEvent: {
+            /**
+             * Elapsed Seconds
+             * @default null
+             */
+            elapsed_seconds?: number | null;
             /** Message */
             message: string;
             /** Phase */
             phase: string;
+            /**
+             * Step
+             * @default null
+             */
+            step?: string | null;
+            /**
+             * Target Name
+             * @default null
+             */
+            target_name?: string | null;
+            /**
+             * Total Seconds
+             * @default null
+             */
+            total_seconds?: number | null;
             /**
              * Type
              * @constant
@@ -3433,6 +3690,26 @@ export interface components {
              */
             type: "target_start";
         };
+        /** AwsLoginRequest */
+        AwsLoginRequest: {
+            /** Profile */
+            profile: string;
+        };
+        /** AwsProfileCreateRequest */
+        AwsProfileCreateRequest: {
+            /** Name */
+            name: string;
+            /** Region */
+            region: string;
+            /** Sso Account Id */
+            sso_account_id: string;
+            /** Sso Region */
+            sso_region: string;
+            /** Sso Role Name */
+            sso_role_name: string;
+            /** Sso Start Url */
+            sso_start_url: string;
+        };
         /** BackgroundRunCancelResponse */
         BackgroundRunCancelResponse: {
             /** Cancelled */
@@ -3440,7 +3717,7 @@ export interface components {
             /** Run Id */
             run_id: string;
         };
-        BackgroundRunEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"] | components["schemas"]["AnnotateStartedEvent"] | components["schemas"]["AnnotateProgressEvent"] | components["schemas"]["AnnotateTableCompleteEvent"] | components["schemas"]["AnnotateCompleteEvent"] | components["schemas"]["AnnotateErrorEvent"] | components["schemas"]["ProgressEvent"] | components["schemas"]["CacheRunCompleteEvent"] | components["schemas"]["RunEndEvent"];
+        BackgroundRunEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"] | components["schemas"]["AnnotateStartedEvent"] | components["schemas"]["AnnotateProgressEvent"] | components["schemas"]["AnnotateTableCompleteEvent"] | components["schemas"]["AnnotateCompleteEvent"] | components["schemas"]["AnnotateErrorEvent"] | components["schemas"]["AuditStatusEvent"] | components["schemas"]["AuditTargetStartEvent"] | components["schemas"]["AuditMetricsCollectedEvent"] | components["schemas"]["AuditTargetCompleteEvent"] | components["schemas"]["AuditTargetErrorEvent"] | components["schemas"]["AuditLlmInsightsEvent"] | components["schemas"]["AuditSnapshotSavedEvent"] | components["schemas"]["AuditDiffEvent"] | components["schemas"]["AuditCompleteEvent"] | components["schemas"]["AuditErrorEvent"] | components["schemas"]["WorkloadStatusEvent"] | components["schemas"]["WorkloadConnectedEvent"] | components["schemas"]["WorkloadSnapshotEvent"] | components["schemas"]["WorkloadCaptureProgressEvent"] | components["schemas"]["WorkloadCaptureCompleteEvent"] | components["schemas"]["WorkloadAnalysisProgressEvent"] | components["schemas"]["WorkloadQueriesSavedEvent"] | components["schemas"]["WorkloadCompleteEvent"] | components["schemas"]["WorkloadErrorEvent"] | components["schemas"]["ProgressEvent"] | components["schemas"]["CacheRunCompleteEvent"] | components["schemas"]["RunEndEvent"];
         /** BackgroundRunResponse */
         BackgroundRunResponse: {
             /** Kind */
@@ -3502,13 +3779,7 @@ export interface components {
             target?: string | null;
         };
         BootstrapEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"];
-        /**
-         * BootstrapNeedsKeyEvent
-         * @description The run reached the annotate gate without a usable Anthropic key.
-         *
-         *     The event name doubles as the run registry's gating signal: the run's
-         *     status parks on needs_key until the next event arrives.
-         */
+        /** BootstrapNeedsKeyEvent */
         BootstrapNeedsKeyEvent: {
             /** Message */
             message: string;
@@ -3525,14 +3796,7 @@ export interface components {
             /** Status */
             status: string;
         };
-        /**
-         * BootstrapStageEvent
-         * @description Progress of one bootstrap stage.
-         *
-         *     status is started | progress | done | failed | skipped. Child-service
-         *     events surface as status="progress" with the child's payload in detail,
-         *     so the stream stays one flat, typed union.
-         */
+        /** BootstrapStageEvent */
         BootstrapStageEvent: {
             /**
              * Detail
@@ -3720,10 +3984,7 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /**
-         * CacheRunCompleteEvent
-         * @description Performance comparison result (origin vs cache).
-         */
+        /** CacheRunCompleteEvent */
         CacheRunCompleteEvent: {
             /** Cache Stats */
             cache_stats: {
@@ -3916,14 +4177,7 @@ export interface components {
              */
             type: "tool_call";
         };
-        /**
-         * ChatToolResultEvent
-         * @description Result of one tool execution.
-         *
-         *     For query_database, `data` carries sql/columns/rows/row_count/
-         *     execution_time_ms/truncated/query_hash/query_tag; for get_schema it
-         *     carries tables/source.
-         */
+        /** ChatToolResultEvent */
         ChatToolResultEvent: {
             /** Content */
             content: string;
@@ -4156,16 +4410,7 @@ export interface components {
             /** Success */
             success: boolean;
         };
-        /**
-         * ErrorEvent
-         * @description Error event for service workflows.
-         *
-         *     ``code`` and ``detail`` mirror the shared HTTP error envelope
-         *     (``shared.api.app._error_envelope``) so an SSE failure carries the same
-         *     {code, message, detail} shape the client normalizes in ``lib/sse.ts``.
-         *     Both stay optional so existing producers that only set ``message`` keep
-         *     working; the client derives a code when one is absent.
-         */
+        /** ErrorEvent */
         ErrorEvent: {
             /**
              * Code
@@ -4310,6 +4555,8 @@ export interface components {
         };
         /** FleetAuditRequest */
         FleetAuditRequest: {
+            /** Duration */
+            duration?: number | null;
             /** Group */
             group?: string | null;
             /**
@@ -4326,9 +4573,23 @@ export interface components {
             save_name?: string | null;
             /** Tag */
             tag?: string | null;
+            /** Targets */
+            targets?: string[] | null;
+        };
+        /** FleetBulkAddRequest */
+        FleetBulkAddRequest: {
+            /** Members */
+            members: {
+                [key: string]: unknown;
+            }[];
         };
         /** FleetConnectivityEvent */
         FleetConnectivityEvent: {
+            /**
+             * Code
+             * @default null
+             */
+            code?: string | null;
             /**
              * Error
              * @default null
@@ -4339,6 +4600,11 @@ export interface components {
              * @default null
              */
             latency_ms?: number | null;
+            /**
+             * Password Env
+             * @default null
+             */
+            password_env?: string | null;
             /**
              * Server Version
              * @default null
@@ -4398,6 +4664,15 @@ export interface components {
              */
             type: "discover";
         };
+        /** FleetDiscoverPreviewRequest */
+        FleetDiscoverPreviewRequest: {
+            /** Engine Filter */
+            engine_filter?: string | null;
+            /** Profile */
+            profile?: string | null;
+            /** Regions */
+            regions: string[];
+        };
         /** FleetDiscoverRequest */
         FleetDiscoverRequest: {
             /** Default Database */
@@ -4418,6 +4693,8 @@ export interface components {
              * @default FLEET_PASS
              */
             password_env?: string;
+            /** Profile */
+            profile?: string | null;
             /** Regions */
             regions: string[];
             /** User */
@@ -4477,8 +4754,10 @@ export interface components {
         };
         /** FleetImportRequest */
         FleetImportRequest: {
+            /** Csv Content */
+            csv_content?: string | null;
             /** Csv File */
-            csv_file: string;
+            csv_file?: string | null;
             /**
              * Dry Run
              * @default false
@@ -4520,6 +4799,11 @@ export interface components {
             /** Created At */
             created_at: string;
             /**
+             * Duration Seconds
+             * @default 0
+             */
+            duration_seconds?: number;
+            /**
              * Kind
              * @default fleet
              */
@@ -4528,6 +4812,11 @@ export interface components {
             name: string;
             /** Snapshot Id */
             snapshot_id: string;
+            /**
+             * Target Names
+             * @default []
+             */
+            target_names?: string[];
             /** Targets Audited */
             targets_audited: number;
         };
@@ -4542,6 +4831,11 @@ export interface components {
              * @constant
              */
             type: "status";
+        };
+        /** FleetTargetGroupRequest */
+        FleetTargetGroupRequest: {
+            /** Group */
+            group?: string | null;
         };
         /** FleetTargetsResponse */
         FleetTargetsResponse: {
@@ -5059,10 +5353,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /**
-         * ProgressEvent
-         * @description Progress update during a multi-step operation.
-         */
+        /** ProgressEvent */
         ProgressEvent: {
             /** Message */
             message: string;
@@ -5076,10 +5367,7 @@ export interface components {
              */
             type: "progress";
         };
-        /**
-         * QueryBenchmarkCompleteEvent
-         * @description Benchmark finished; carries the final tally.
-         */
+        /** QueryBenchmarkCompleteEvent */
         QueryBenchmarkCompleteEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -5099,16 +5387,7 @@ export interface components {
              */
             type: "complete";
         };
-        /**
-         * QueryBenchmarkErrorEvent
-         * @description Benchmark failed (or was rejected by a safety rail) before completion.
-         *
-         *     Carries the shared error envelope ({code, message, detail}, B7/T24) so the
-         *     client normalizes a benchmark failure exactly like every other SSE error.
-         *     ``message`` stays humane and safe to show; ``detail`` holds only the
-         *     exception class name for correlation — never the raw ``str(e)``, which can
-         *     embed host / DSN / SQL material.
-         */
+        /** QueryBenchmarkErrorEvent */
         QueryBenchmarkErrorEvent: {
             /**
              * Code
@@ -5129,10 +5408,7 @@ export interface components {
             type: "error";
         };
         QueryBenchmarkEvent: components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"];
-        /**
-         * QueryBenchmarkProgressEvent
-         * @description Benchmark progress tick.
-         */
+        /** QueryBenchmarkProgressEvent */
         QueryBenchmarkProgressEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -5152,10 +5428,7 @@ export interface components {
              */
             type: "progress";
         };
-        /**
-         * QueryBenchmarkStats
-         * @description Statistics for a single benchmarked query.
-         */
+        /** QueryBenchmarkStats */
         QueryBenchmarkStats: {
             /** Avg Ms */
             avg_ms: number;
@@ -5654,10 +5927,21 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /**
-         * RunEndEvent
-         * @description Terminal event appended by the registry after every run.
-         */
+        /** RunEmailRequest */
+        RunEmailRequest: {
+            /** Email */
+            email?: string | null;
+        };
+        /** RunEmailResponse */
+        RunEmailResponse: {
+            /** Email */
+            email: string;
+            /** Status */
+            status: string;
+            /** Verified */
+            verified: boolean;
+        };
+        /** RunEndEvent */
         RunEndEvent: {
             /** Status */
             status: string;
@@ -5667,10 +5951,7 @@ export interface components {
              */
             type: "run_end";
         };
-        /**
-         * ScanCompleteEvent
-         * @description Scan completed.
-         */
+        /** ScanCompleteEvent */
         ScanCompleteEvent: {
             /** Success */
             success: boolean;
@@ -5684,10 +5965,7 @@ export interface components {
              */
             type: "complete";
         };
-        /**
-         * ScanErrorEvent
-         * @description Scan error.
-         */
+        /** ScanErrorEvent */
         ScanErrorEvent: {
             /** Message */
             message: string;
@@ -5703,10 +5981,7 @@ export interface components {
             type: "error";
         };
         ScanEvent: components["schemas"]["ScanStatusEvent"] | components["schemas"]["ScanFilesFoundEvent"] | components["schemas"]["ScanProgressEvent"] | components["schemas"]["ScanQueryResultEvent"] | components["schemas"]["ScanRegistryEvent"] | components["schemas"]["ScanCompleteEvent"] | components["schemas"]["ScanErrorEvent"];
-        /**
-         * ScanFilesFoundEvent
-         * @description Files with ORM patterns discovered.
-         */
+        /** ScanFilesFoundEvent */
         ScanFilesFoundEvent: {
             /** Files */
             files: {
@@ -5749,10 +6024,7 @@ export interface components {
          * @enum {string}
          */
         ScanPhase: "config" | "discovery" | "extraction" | "conversion" | "registry" | "analysis";
-        /**
-         * ScanProgressEvent
-         * @description Progress update within a scan phase.
-         */
+        /** ScanProgressEvent */
         ScanProgressEvent: {
             /** Current */
             current: number;
@@ -5768,10 +6040,7 @@ export interface components {
              */
             type: "progress";
         };
-        /**
-         * ScanQueryResultEvent
-         * @description Individual query result from scan.
-         */
+        /** ScanQueryResultEvent */
         ScanQueryResultEvent: {
             /** Query */
             query: {
@@ -5783,10 +6052,7 @@ export interface components {
              */
             type: "query_result";
         };
-        /**
-         * ScanRegistryEvent
-         * @description Registry save results.
-         */
+        /** ScanRegistryEvent */
         ScanRegistryEvent: {
             /** New Queries */
             new_queries: number;
@@ -5856,10 +6122,7 @@ export interface components {
              */
             warn_threshold?: number;
         };
-        /**
-         * ScanStatusEvent
-         * @description Status update during scan.
-         */
+        /** ScanStatusEvent */
         ScanStatusEvent: {
             /** Message */
             message: string;
@@ -6323,10 +6586,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /**
-         * TopCompleteEvent
-         * @description Operation completed.
-         */
+        /** TopCompleteEvent */
         TopCompleteEvent: {
             /** Newly Saved */
             newly_saved: number;
@@ -6342,10 +6602,7 @@ export interface components {
              */
             type: "complete";
         };
-        /**
-         * TopConnectedEvent
-         * @description Database connection established.
-         */
+        /** TopConnectedEvent */
         TopConnectedEvent: {
             /** Db Engine */
             db_engine: string;
@@ -6370,10 +6627,7 @@ export interface components {
             /** Setting Name */
             setting_name: string;
         };
-        /**
-         * TopDbLimitWarningEvent
-         * @description Database query size limit is below recommended threshold.
-         */
+        /** TopDbLimitWarningEvent */
         TopDbLimitWarningEvent: {
             /** Db Engine */
             db_engine: string;
@@ -6389,14 +6643,7 @@ export interface components {
              */
             type: "db_limit_warning";
         };
-        /**
-         * TopErrorEvent
-         * @description Error occurred.
-         *
-         *     ``code`` and ``detail`` mirror the shared error envelope (B7/T24):
-         *     ``message`` stays humane, ``detail`` carries the exception class name for
-         *     correlation — never the raw ``str(e)``, which can embed host/DSN material.
-         */
+        /** TopErrorEvent */
         TopErrorEvent: {
             /**
              * Code
@@ -6446,10 +6693,7 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /**
-         * TopQueriesEvent
-         * @description Batch of top queries.
-         */
+        /** TopQueriesEvent */
         TopQueriesEvent: {
             /** Db Engine */
             db_engine: string;
@@ -6475,10 +6719,7 @@ export interface components {
              */
             type: "queries";
         };
-        /**
-         * TopQueryData
-         * @description Individual query data.
-         */
+        /** TopQueryData */
         TopQueryData: {
             /** Avg Time */
             avg_time: string;
@@ -6540,10 +6781,7 @@ export interface components {
             /** Total Time */
             total_time: string;
         };
-        /**
-         * TopQuerySavedEvent
-         * @description Query saved to registry.
-         */
+        /** TopQuerySavedEvent */
         TopQuerySavedEvent: {
             /** Is New */
             is_new: boolean;
@@ -6555,10 +6793,7 @@ export interface components {
              */
             type: "query_saved";
         };
-        /**
-         * TopSourceFallbackEvent
-         * @description Source fallback occurred.
-         */
+        /** TopSourceFallbackEvent */
         TopSourceFallbackEvent: {
             /** From Source */
             from_source: string;
@@ -6572,10 +6807,7 @@ export interface components {
              */
             type: "source_fallback";
         };
-        /**
-         * TopStatusEvent
-         * @description Progress status update.
-         */
+        /** TopStatusEvent */
         TopStatusEvent: {
             /** Message */
             message: string;
@@ -7410,8 +7642,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                    "text/event-stream": components["schemas"]["AuditEvent"];
+                    "application/json": components["schemas"]["AuditRunStartResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7444,8 +7675,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
-                    "text/event-stream": components["schemas"]["WorkloadEvent"];
+                    "application/json": components["schemas"]["AuditRunStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_capture_requirements_api_audit_requirements_get: {
+        parameters: {
+            query: {
+                /** @description Target database name */
+                target: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditRequirementsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7513,6 +7775,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    email_audit_run_api_audit_runs__run_id__email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunEmailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8859,8 +9156,157 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/json": components["schemas"]["AuditRunStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_fleet_aws_login_api_fleet_aws_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AwsLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": unknown;
-                    "text/event-stream": components["schemas"]["AuditEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fleet_aws_login_api_fleet_aws_login__login_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                login_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fleet_aws_logout_api_fleet_aws_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    create_fleet_aws_profile_api_fleet_aws_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AwsProfileCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fleet_aws_status_api_fleet_aws_status_get: {
+        parameters: {
+            query?: {
+                profile?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -8927,6 +9373,39 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                     "text/event-stream": components["schemas"]["FleetEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discover_preview_api_fleet_discover_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetDiscoverPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -9072,11 +9551,47 @@ export interface operations {
             };
         };
     };
+    email_fleet_snapshot_api_fleet_snapshots__snapshot_id__email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunEmailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     check_fleet_status_api_fleet_status_get: {
         parameters: {
             query?: {
                 group?: string | null;
                 tag?: string | null;
+                targets?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -9124,6 +9639,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FleetTargetsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_add_targets_api_fleet_targets_bulk_add_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetBulkAddRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_fleet_target_group_api_fleet_targets__name__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetTargetGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

@@ -124,7 +124,7 @@ def create_direct_connection(target_config: Dict[str, Any], connect_timeout: int
 
     password = resolve_password_value(target_config)
     if password == "" and password_env:
-        raise ValueError(f"Password not available for target (password_env='{password_env}')")
+        raise ValueError("Password not available for target")
 
     if engine == 'postgresql':
         return _create_postgres_connection(host, port, user, password, database, use_tls, connect_timeout=connect_timeout)

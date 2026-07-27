@@ -3,23 +3,20 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from shared.api.guards import is_loopback_request, same_host_from_headers
+from shared.api.email import EMAIL_RE as _EMAIL_RE
+from shared.api.email import normalized_email as _normalized_email
+from shared.api.guards import is_loopback_request, require_local_request
 from shared.config.targets import TargetsConfig
 
 router = APIRouter(prefix="/settings")
 logger = logging.getLogger(__name__)
 
-# Kept byte-for-byte in sync with the client gate regex in
-# web-apps/apps/rdst/src/components/emailValidation.ts. The parity test
-# (tests/unit/test_settings_email_route.py + emailValidation.test.tsx) drives
-# both against the same fixture so a divergence turns a suite red.
-_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+__all__ = ["router", "_EMAIL_RE", "_normalized_email"]
 
 
 class EmailRequest(BaseModel):
@@ -51,15 +48,6 @@ class EmailUpdateResponse(BaseModel):
 
 class VerifyPollResponse(BaseModel):
     verified: bool
-
-
-def _normalized_email(email: str) -> str:
-    """Trim, lowercase, and format-validate. Lowercasing makes the stored
-    identity canonical so the same human maps to one PostHog person."""
-    value = (email or "").strip().lower()
-    if not _EMAIL_RE.match(value):
-        raise HTTPException(status_code=400, detail="Invalid email address")
-    return value
 
 
 def _make_resolver():
@@ -145,10 +133,7 @@ async def get_email(request: Request) -> EmailResponse:
 
 @router.post("/email")
 async def set_email(request: Request, body: EmailRequest) -> EmailUpdateResponse:
-    if not is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not same_host_from_headers(request):
-        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+    require_local_request(request)
     email = _normalized_email(body.email)
     domain = email.split("@", 1)[1]
     if _domain_has_mx(domain) is False:
@@ -211,10 +196,7 @@ async def reset_local_data(request: Request) -> ResetLocalDataResponse:
     this install to a fresh state. Server-side accounts (trial
     registration) are untouched - re-entering a registered email recovers
     the trial token by email."""
-    if not is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not same_host_from_headers(request):
-        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+    require_local_request(request)
 
     import os
     import shutil

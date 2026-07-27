@@ -143,6 +143,53 @@ export async function clearQueryRegistry(request: APIRequestContext) {
   }
 }
 
+/** Serialize events into an SSE response body. */
+export function sseBody(events: Record<string, unknown>[]): string {
+  return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
+}
+
+/** Report a satisfied, valid Anthropic key so the AI gate never blocks a run. */
+export async function mockAiKeyReady(page: Page) {
+  await page.route('**/api/env/requirements', (route) =>
+    route.fulfill({
+      json: {
+        keyring_available: false,
+        requirements: [
+          {
+            kind: 'anthropic_api_key',
+            satisfied: true,
+            source: 'process_env',
+            target: null,
+            accepted_names: ['ANTHROPIC_API_KEY'],
+          },
+        ],
+      },
+    })
+  )
+  await page.route('**/api/env/anthropic/validate', (route) =>
+    route.fulfill({
+      json: { valid: true, reason: 'ok', model: 'claude-haiku' },
+    })
+  )
+}
+
+/**
+ * Pin the connectivity probe to a settled `ok` result. Left unstubbed, the
+ * page probes the target for real and the reachability verdict lands at an
+ * arbitrary moment, relocating rows between the available and unavailable
+ * sections while a test is mid-click.
+ */
+export async function mockConnectivityOk(page: Page, target = 'e2e-guard') {
+  await page.route('**/api/fleet/status*', (route) =>
+    route.fulfill({
+      headers: { 'content-type': 'text/event-stream' },
+      body: sseBody([
+        { type: 'connectivity', target_name: target, status: 'ok' },
+      ]),
+    })
+  )
+}
+
 export async function fillCodeMirror(editor: Locator, sql: string) {
   const content = editor.locator('.cm-content[contenteditable="true"]')
   await content.fill(sql)

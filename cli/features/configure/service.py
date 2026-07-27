@@ -337,6 +337,8 @@ class ConfigureService:
                     target_name=name,
                     status="failed",
                     message=result.get("message", "Connection failed"),
+                    code=result.get("code"),
+                    password_env=result.get("password_env"),
                 )
 
         except Exception as e:
@@ -364,8 +366,9 @@ class ConfigureService:
             if password_env:
                 return {
                     "success": False,
-                    "message": f"Environment variable '{password_env}' is not set. "
-                    f'Set it with: export {password_env}="your_password"',
+                    "code": "TARGET_PASSWORD_REQUIRED",
+                    "password_env": password_env,
+                    "message": "Enter the password for this target again.",
                 }
 
         try:

@@ -18,6 +18,7 @@ from shared.secret_store_service import SecretStoreService
 from shared.ui import ElapsedMessage, Status, get_console
 
 from features.audit.capture_service import CaptureService, _parse_duration
+from features.audit.report.artifact import save_report_locally
 from features.audit.service import AuditService
 from features.fleet import (
     FleetAuditSnapshot,
@@ -853,18 +854,6 @@ class FleetCommand:
         except Exception:
             return None
 
-    @staticmethod
-    def _save_report_locally(snapshot_id, html_content):
-        """Save HTML report to ~/.rdst/reports/."""
-        try:
-            from pathlib import Path
-            reports_dir = Path.home() / ".rdst" / "reports"
-            reports_dir.mkdir(parents=True, exist_ok=True)
-            report_path = reports_dir / f"{snapshot_id}.html"
-            report_path.write_text(html_content)
-        except Exception:
-            pass
-
     def _email_fleet_report(self, console, html_content, group_name):
         """Prompt for email confirmation and send the fleet report via hosted link."""
         import re
@@ -1244,13 +1233,6 @@ class FleetCommand:
             estimate = "quick audit" if not duration_seconds else f"~{duration_seconds}s capture per target"
             console.print(f"\n[bold]Auditing {n} targets...[/bold] ({estimate})")
 
-        # Pre-flight cache deployment removed: each per-target audit now manages
-        # its own ephemeral cache lifecycle via _run_readyset_testing. Pre-deploying
-        # was the source of CLD-1750 (containers leaking after fleet audit).
-        # caches_available is a legacy bool downstream readyset gating could use;
-        # leave as None so the per-target path takes over.
-        caches_available = None
-
         # Run audits concurrently
         max_workers = min(n, 10)
         from shared.ui import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
@@ -1393,26 +1375,38 @@ class FleetCommand:
                         if len(completed_targets) < n:
                             _time.sleep(0.5)
 
-        # Run Readyset cache benchmarking on captured queries (sequential)
-        if caches_available and duration_seconds:
+        # Readyset cache benchmarking on captured queries. Sequential by
+        # design: each target's _run_readyset_testing wraps one
+        # ephemeral_lifecycle — deploy (or reuse a running container),
+        # benchmark, tear down to the pre-run state — before the next
+        # target starts, so at most one container is alive at a time.
+        if duration_seconds:
             try:
                 from features.audit.cli.command import AuditCommand
-                audit_cmd = AuditCommand()
-                for r in all_results:
-                    if r.get("error"):
-                        continue
-                    wl = r.get("workload") or {}
-                    queries = wl.get("queries") or []
-                    if not queries:
-                        continue
-                    target_name = r.get("target_name", "")
+                from features.audit.readyset_benchmark import build_comparison, docker_available
+
+                if not docker_available():
                     if not output_json:
-                        console.print(f"[dim]  Testing {target_name} queries against Readyset...[/dim]")
-                    rs_results = audit_cmd._run_readyset_testing(
-                        console, target_name, queries, max_queries=20,
-                    )
-                    if rs_results:
-                        r["readyset_results"] = rs_results
+                        console.print("[dim]  Skipping Readyset cache benchmarks (Docker not installed)[/dim]")
+                else:
+                    audit_cmd = AuditCommand()
+                    for r in all_results:
+                        if r.get("error"):
+                            continue
+                        wl = r.get("workload") or {}
+                        queries = wl.get("queries") or []
+                        if not queries:
+                            continue
+                        target_name = r.get("target_name", "")
+                        if not output_json:
+                            console.print(f"[dim]  Testing {target_name} queries against Readyset...[/dim]")
+                        rs_results = audit_cmd._run_readyset_testing(
+                            console, target_name, queries, max_queries=20,
+                            auto_yes=auto_yes,
+                        )
+                        if rs_results:
+                            r["readyset_results"] = rs_results
+                            r["readyset_comparison"] = build_comparison(rs_results)
             except Exception:
                 pass
 
@@ -1606,7 +1600,7 @@ class FleetCommand:
             )
             if html_content:
                 snapshot_id = save_name or "fleet_audit"
-                self._save_report_locally(snapshot_id, html_content)
+                save_report_locally(snapshot_id, html_content)
                 try:
                     self._email_fleet_report(console, html_content, group or "fleet")
                 except Exception:

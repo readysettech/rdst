@@ -97,7 +97,8 @@ def test_ensure_target_password_raises_423_with_structured_detail(monkeypatch):
     assert exc.detail["code"] == TARGET_PASSWORD_REQUIRED_CODE
     assert exc.detail["target"] == "prod"
     assert exc.detail["password_env"] == "PROD_DB_PASSWORD"
-    assert "locked" in exc.detail["message"].lower()
+    assert exc.detail["message"] == "Set the password for 'prod' to run this."
+    assert "PROD_DB_PASSWORD" not in exc.detail["message"]
 
 
 def test_ensure_target_password_allows_keychain_password(monkeypatch):

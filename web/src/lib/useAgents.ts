@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { useTargetSwitchLock } from './targetSwitchLock';
+import { throwIfApiError } from './httpError';
 import type {
   AgentCreateRequest,
   AgentListResponse,
@@ -19,49 +20,19 @@ import type {
 const AGENTS_KEY = ['agents'] as const;
 
 // ---------------------------------------------------------------------------
-// Error extraction
-// ---------------------------------------------------------------------------
-
-// openapi-fetch parses the response body itself, so on a non-2xx status the
-// parsed payload is returned as `error`. FastAPI errors travel as
-// {detail: string | {message, code, ...}}; prefer that message so callers
-// surface the backend's reason (409 exists, 422 invalid, 404 unknown,
-// 423 locked target) over a bare status.
-function throwIfNotOk(response: Response, error: unknown, ctx: string): void {
-  if (response.ok) return;
-  const detail = extractDetail(error);
-  throw new Error(detail || `${ctx}: ${response.status}`);
-}
-
-function extractDetail(error: unknown): string {
-  if (!error || typeof error !== 'object') {
-    return typeof error === 'string' ? error : '';
-  }
-  const detail = (error as { detail?: unknown }).detail;
-  if (typeof detail === 'string') return detail;
-  if (detail && typeof detail === 'object') {
-    const message = (detail as { message?: unknown }).message;
-    if (typeof message === 'string') return message;
-    return JSON.stringify(detail);
-  }
-  const message = (error as { message?: unknown }).message;
-  return typeof message === 'string' ? message : '';
-}
-
-// ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
 
 export async function fetchAgents(): Promise<AgentListResponse> {
   const { data, error, response } = await api.GET('/api/agents');
-  throwIfNotOk(response, error, 'Failed to fetch agents');
+  throwIfApiError(response, error, 'Failed to fetch agents');
   if (!data) throw new Error('Missing response body');
   return data;
 }
 
 export async function createAgent(body: AgentCreateRequest): Promise<AgentWriteResponse> {
   const { data, error, response } = await api.POST('/api/agents', { body });
-  throwIfNotOk(response, error, 'Failed to create agent');
+  throwIfApiError(response, error, 'Failed to create agent');
   if (!data) throw new Error('Missing response body');
   return data;
 }
@@ -70,7 +41,7 @@ export async function deleteAgent(name: string): Promise<AgentWriteResponse> {
   const { data, error, response } = await api.DELETE('/api/agents/{name}', {
     params: { path: { name } },
   });
-  throwIfNotOk(response, error, 'Failed to delete agent');
+  throwIfApiError(response, error, 'Failed to delete agent');
   if (!data) throw new Error('Missing response body');
   return data;
 }
@@ -142,7 +113,7 @@ async function createChatSession(agentName: string): Promise<ChatSessionCreateRe
     '/api/agents/{name}/chat/sessions',
     { params: { path: { name: agentName } } },
   );
-  throwIfNotOk(response, error, 'Failed to start chat session');
+  throwIfApiError(response, error, 'Failed to start chat session');
   if (!data) throw new Error('Missing response body');
   return data;
 }

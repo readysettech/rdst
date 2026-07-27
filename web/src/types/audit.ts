@@ -38,9 +38,17 @@ export interface WorkloadQuery {
 
 export interface WorkloadIndexRecommendation {
   sql?: string;
+  // Audit analysis currently asks the LLM for this key. Older/simpler
+  // payloads use `sql`, so report renderers accept both.
+  create_index_sql?: string;
   reason?: string;
   table?: string;
+  columns?: string[];
+  expression?: string;
   estimated_impact?: string;
+  affected_queries?: string[];
+  query_hashes?: string[];
+  queries?: string[];
 }
 
 // An optimization priority from the capture LLM. It is an untyped dict whose
@@ -73,14 +81,42 @@ export interface WorkloadAnalysis {
   optimization_priorities?: (string | WorkloadOptimizationPriority)[];
 }
 
+export interface ReadysetComparisonQuery {
+  query_hash?: string;
+  query_text?: string;
+  supported?: boolean;
+  reason?: string;
+  upstream_ms?: number;
+  readyset_ms?: number;
+  speedup?: number;
+  upstream_source?: string;
+  deep_supported?: boolean | null;
+  deep_reason?: string | null;
+  static_cacheable?: boolean | null;
+  static_reason?: string | null;
+}
+
+export interface ReadysetComparison {
+  queries_tested?: number;
+  supported_count?: number;
+  unsupported_count?: number;
+  avg_speedup?: number;
+  deep_supported_count?: number;
+  deep_unsupported_count?: number;
+  deep_unknown_count?: number;
+  queries?: ReadysetComparisonQuery[];
+}
+
 export interface WorkloadSummary {
   unique_queries?: number;
   total_executions?: number;
+  total_queries?: number;
   total_query_time_ms?: number;
   duration_seconds?: number;
   path?: string | null;
   has_analysis?: boolean;
   queries?: WorkloadQuery[];
+  readyset_comparison?: ReadysetComparison | null;
 }
 
 export interface WorkloadSnapshot {
@@ -90,9 +126,32 @@ export interface WorkloadSnapshot {
 }
 
 // Full payload returned by GET /api/audit/runs/{id} for capture runs.
-export interface WorkloadRun {
+//
+// Duration captures may be enriched with the metrics audit collected for the
+// same target, so saved captures and fleet results share the complete report
+// layout; those shared fields are picked from AuditReport.
+export interface WorkloadRun
+  extends Pick<
+    AuditReport,
+    | 'target_name'
+    | 'engine'
+    | 'host'
+    | 'region'
+    | 'group'
+    | 'tags'
+    | 'instance_class'
+    | 'instance_class_source'
+    | 'audited_at'
+    | 'metrics'
+    | 'sizing'
+    | 'cache_opportunity'
+    | 'top_queries'
+    | 'health_analysis'
+    | 'cloudwatch_cpu'
+    | 'health_report'
+    | 'readyset_comparison'
+  > {
   run_id?: string;
-  target_name?: string;
   db_engine?: string;
   started_at?: string | null;
   duration_seconds?: number;
@@ -123,6 +182,8 @@ export interface AuditMetrics {
   total_query_time_ms?: number;
   uptime_seconds?: number;
   stats_window_seconds?: number;
+  stats_reset_at?: string | null;
+  collected_at?: string | null;
   storage_allocated_gb?: number | null;
   storage_used_pct?: number | null;
   storage_type?: string | null;
@@ -135,6 +196,12 @@ export interface AuditSizing {
   suggested_instance_class?: string | null;
   suggested_monthly_cost_usd?: number | null;
   potential_savings_usd?: number | null;
+  readyset_projected_class?: string | null;
+  readyset_projected_cost_usd?: number | null;
+  readyset_projected_savings_usd?: number | null;
+  readyset_offload_pct?: number | null;
+  concurrent_query_load?: number | null;
+  estimated_cpu_pct?: number | null;
 }
 
 export interface AuditCacheOpportunity {
@@ -179,12 +246,37 @@ export interface HealthAnalysis {
   error?: string;
 }
 
+export interface CloudwatchCpu {
+  avg_cpu?: number;
+  max_cpu?: number;
+  min_cpu?: number;
+  hours?: number;
+  [key: string]: unknown;
+}
+
+export interface AuditHealthReport {
+  engine?: string;
+  vacuum_bloat?: Record<string, unknown> | null;
+  index_health?: Record<string, unknown> | null;
+  connections?: Record<string, unknown> | null;
+  config_audit?: Record<string, unknown> | null;
+  replication?: Record<string, unknown> | null;
+  collection_error?: string | null;
+  section_errors?: Record<string, string>;
+  [key: string]: unknown;
+}
+
 export interface AuditReport {
   target_name?: string;
   engine?: string;
   host?: string;
+  database?: string | null;
   region?: string | null;
+  group?: string | null;
+  tags?: string[];
   instance_class?: string | null;
+  /** Where the instance class came from: "aws" metadata, an "estimated" guess, or unknown. */
+  instance_class_source?: 'aws' | 'estimated' | string | null;
   audited_at?: string | null;
   error?: string | null;
   metrics?: AuditMetrics | null;
@@ -192,6 +284,8 @@ export interface AuditReport {
   cache_opportunity?: AuditCacheOpportunity | null;
   top_queries?: AuditTopQuery[];
   health_analysis?: HealthAnalysis | null;
-  cloudwatch_cpu?: Record<string, unknown> | null;
-  health_report?: Record<string, unknown> | null;
+  cloudwatch_cpu?: CloudwatchCpu | null;
+  health_report?: AuditHealthReport | null;
+  workload?: WorkloadSummary & { analysis?: WorkloadAnalysis | null; error?: string };
+  readyset_comparison?: ReadysetComparison | null;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifyError,
+  isTrialExhaustedError,
   friendlySqlError,
   normalizeHttpError,
   normalizeSseError,
@@ -10,6 +11,20 @@ import {
 } from './errorContract'
 
 describe('classifyError', () => {
+  it('detects structured and legacy trial-exhausted failures', () => {
+    expect(
+      isTrialExhaustedError({
+        code: 'TRIAL_EXHAUSTED',
+        message: 'credit unavailable',
+      })
+    ).toBe(true)
+    expect(
+      isTrialExhaustedError('Your free trial tokens have been used up')
+    ).toBe(true)
+    expect(isTrialExhaustedError('Anthropic is temporarily unavailable')).toBe(
+      false
+    )
+  })
   it('maps missing-credential failures to user-config', () => {
     expect(
       classifyError({

@@ -496,18 +496,25 @@ class CacheService:
             conn = self._connection_kwargs(cache_config)
             query = input_data.query
 
-            # Static cacheability check
+            # The static check is advisory only. ReadySet's own EXPLAIN result is
+            # authoritative; rejecting here can produce false negatives when the
+            # static rules lag ReadySet's supported query surface.
             from .readyset_cacheability import check_readyset_cacheability
 
-            static = check_readyset_cacheability(query=query)
-            if not static.get("cacheable"):
-                issues = static.get("issues") or ["Unknown issue"]
-                yield ErrorEvent(
-                    type="error",
-                    message=f"Query not cacheable: {'; '.join(issues)}",
-                    stage="add",
-                )
-                return
+            try:
+                static = check_readyset_cacheability(query=query)
+            except Exception as exc:
+                static = {
+                    "cacheable": None,
+                    "issues": [f"Static cacheability check unavailable: {exc}"],
+                }
+            static_issues = static.get("issues") or []
+            static_cacheable = static.get("cacheable")
+            static_advisory = (
+                "Static advisory: "
+                f"cacheable={static_cacheable if static_cacheable is not None else 'unknown'}"
+                + (f"; issues={'; '.join(static_issues)}" if static_issues else "")
+            )
 
             yield ProgressEvent(
                 type="progress", stage="explain", percent=30,
@@ -525,17 +532,20 @@ class CacheService:
             engine = (cache_config or {}).get("engine", "postgresql")
             readyset_query = denormalize_for_readyset(query, engine=engine)
 
-            # EXPLAIN CREATE CACHE — also returns the canonical `q_<hash>`
+            # EXPLAIN CREATE SHALLOW CACHE — also returns the canonical `q_<hash>`
             # query_id (fixes CLD-1754: stop using our own hash for DROP CACHE).
             explain_result = await asyncio.to_thread(
                 self._run_readyset_sql,
-                f"EXPLAIN CREATE CACHE FROM {readyset_query}",
+                f"EXPLAIN CREATE SHALLOW CACHE FROM {readyset_query}",
                 **conn,
             )
             if not explain_result["success"]:
                 yield ErrorEvent(
                     type="error",
-                    message=f"EXPLAIN CREATE CACHE failed: {explain_result.get('error', '')}",
+                    message=(
+                        "EXPLAIN CREATE SHALLOW CACHE failed: "
+                        f"{explain_result.get('error', '')}"
+                    ),
                     stage="add",
                 )
                 return
@@ -554,7 +564,7 @@ class CacheService:
                     success=True,
                     supported=not is_unsupported,
                     query=query,
-                    detail=output,
+                    detail=f"{output}\n{static_advisory}".strip(),
                 )
                 return
 
@@ -564,7 +574,7 @@ class CacheService:
                     success=True,
                     supported=False,
                     query=query,
-                    detail=output,
+                    detail=f"{output}\n{static_advisory}".strip(),
                 )
                 return
 
@@ -604,6 +614,7 @@ class CacheService:
                 supported=True,
                 query=query,
                 query_hash=saved_hash,
+                detail=static_advisory,
             )
         except Exception as e:
             yield ErrorEvent(type="error", message=str(e), stage="add")

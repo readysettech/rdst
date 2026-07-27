@@ -64,7 +64,7 @@ def client(config_path, monkeypatch):
     # Treat every test request as loopback + same-host; the 403 guard paths are
     # exercised separately with the real guards.
     monkeypatch.setattr(settings_mod, "is_loopback_request", lambda request: True)
-    monkeypatch.setattr(settings_mod, "same_host_from_headers", lambda request: True)
+    monkeypatch.setattr(settings_mod, "require_local_request", lambda request: None)
     # Default: MX check passes. Individual tests override.
     monkeypatch.setattr(settings_mod, "_domain_has_mx", lambda domain, resolver=None: True)
     app = FastAPI()

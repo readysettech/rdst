@@ -2,14 +2,10 @@ import { render, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('@tanstack/react-router')>();
+  const { fileRouteModuleMock } = await import('@/test-utils');
   return {
-    ...mod,
-    createFileRoute: () => (opts: unknown) => opts,
-    Link: ({ children, ...rest }: { children: React.ReactNode }) => (
-      <a {...rest}>{children}</a>
-    ),
-    useNavigate: () => vi.fn(),
+    ...(await importOriginal<typeof import('@tanstack/react-router')>()),
+    ...fileRouteModuleMock({ useNavigate: () => vi.fn() }),
   };
 });
 

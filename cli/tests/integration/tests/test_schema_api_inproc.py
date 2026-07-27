@@ -6,21 +6,17 @@ to the realdb suite.
 
 from __future__ import annotations
 
-from shared.config.targets import TargetsConfig
+import pytest
 
 
-def _seed_target(name: str = "schematest") -> None:
-    cfg = TargetsConfig()
-    cfg.load()
-    cfg.upsert(name, {
-        "engine": "postgresql", "host": "127.0.0.1", "port": 5432,
-        "database": "appdb", "user": "appuser", "password_env": "SCHEMA_PASSWORD",
-    })
-    cfg.save()
+
+@pytest.fixture
+def seeded_target_defaults() -> dict:
+    return {"name": "schematest", "env": "SCHEMA_PASSWORD"}
 
 
-async def test_refresh_without_semantic_layer(client, tmp_rdst_home, monkeypatch):
-    _seed_target()
+async def test_refresh_without_semantic_layer(client, tmp_rdst_home, monkeypatch, seed_target):
+    seed_target()
     monkeypatch.setenv("SCHEMA_PASSWORD", "irrelevant")
 
     response = await client.post(
@@ -32,8 +28,8 @@ async def test_refresh_without_semantic_layer(client, tmp_rdst_home, monkeypatch
     assert "No semantic layer found" in body["message"]
 
 
-async def test_profile_without_semantic_layer(client, tmp_rdst_home, monkeypatch):
-    _seed_target()
+async def test_profile_without_semantic_layer(client, tmp_rdst_home, monkeypatch, seed_target):
+    seed_target()
     monkeypatch.setenv("SCHEMA_PASSWORD", "irrelevant")
 
     response = await client.post(
@@ -45,8 +41,8 @@ async def test_profile_without_semantic_layer(client, tmp_rdst_home, monkeypatch
     assert "No semantic layer" in body["message"]
 
 
-async def test_refresh_locked_when_password_missing(client, tmp_rdst_home, monkeypatch):
-    _seed_target()
+async def test_refresh_locked_when_password_missing(client, tmp_rdst_home, monkeypatch, seed_target):
+    seed_target()
     monkeypatch.delenv("SCHEMA_PASSWORD", raising=False)
 
     response = await client.post(

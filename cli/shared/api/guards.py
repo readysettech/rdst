@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
@@ -44,3 +44,15 @@ def same_host_from_headers(request: Request) -> bool:
         if expected_host and parsed_host != expected_host:
             return False
     return True
+
+
+def require_local_request(request: Request) -> None:
+    """Reject anything that is not a same-host loopback call.
+
+    Call this from inside the handler rather than through Depends, so
+    request-body validation keeps its precedence over the guard.
+    """
+    if not is_loopback_request(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not same_host_from_headers(request):
+        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")

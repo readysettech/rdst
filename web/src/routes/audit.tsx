@@ -1,349 +1,111 @@
-import { cn } from '@rs/tailwind-base'
+/**
+ * Health Check route. The report bodies live under `components/audit/report/`
+ * so this eager route reference module never pulls the CodeMirror SQL stack
+ * into the entry chunk; `AuditPage` is local, so the code-splitter relocates it
+ * (and its report imports) into the lazy route chunk.
+ */
+
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
-import { BaseInputSelect } from '@rs/ui-new/base-input-select'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
+import { ErrorState, InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
-import { AnimatePresence, m } from '@rs/ui-new/motion'
 import { Show } from '@rs/ui-new/show'
-import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
-import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
+import { toast } from '@rs/ui-new/use-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, Link } from '@tanstack/react-router'
-import { useState } from 'react'
-import { TargetLockNotice } from '../components'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { EnvSecretsDialog, TargetLockNotice } from '../components'
+import { FleetRunSection } from '../components/audit/FleetRunSection'
+import { PreflightChecklist } from '../components/audit/PreflightChecklist'
+import { RunHistory } from '../components/audit/RunHistory'
+import { RunLauncher } from '../components/audit/RunLauncher'
+import { RunProgress } from '../components/audit/RunProgress'
+import { ScopeSelector } from '../components/audit/ScopeSelector'
+import { RoutableNotice } from '../components/RoutableNotice'
+import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
 import { useTarget } from '../hooks/useTarget'
-import { useTrialSource } from '../lib/trialQueries'
-import { useAnthropicValidity } from '../lib/useAnthropicValidity'
-import { fetchAuditRuns, useAuditCapture, useAuditRun } from '../lib/useAudit'
+import { buildHistory, type HistoryEntry } from '../lib/auditHistory'
+import {
+  type AuditPreflightResult,
+  checkAuditPreflight,
+  isAuditPreflightBlocked,
+} from '../lib/auditPreflight'
+import {
+  buildTargetSelectionRequest,
+  parseAuditSearch,
+  selectionFromAuditSearch,
+} from '../lib/auditScope'
+import {
+  type ActiveAuditSession,
+  clearCompletedAudit,
+  setAuditRunViewVisible,
+  useAuditPresentation,
+  useAuditSession,
+} from '../lib/auditSession'
+import {
+  classifyError,
+  isTrialExhaustedError,
+  recoveryFor,
+  sanitizeWebError,
+  TRIAL_EXHAUSTED_MESSAGE,
+} from '../lib/errorContract'
+import {
+  invalidateAiGateQueries,
+  invalidateTrialRelatedQueries,
+} from '../lib/trialQueries'
+import { useAiGate } from '../lib/useAiGate'
+import { fetchAuditRuns, useAuditCapture } from '../lib/useAudit'
+import { useEnvRequirements } from '../lib/useEnvRequirements'
+import {
+  fetchFleetSnapshots,
+  fetchFleetTargets,
+  useFleetAudit,
+  useFleetStatus,
+} from '../lib/useFleet'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
-
-const CAPTURE_DURATIONS: Array<{
-  label: string
-  long: string
-  seconds: number
-}> = [
-  { label: '30s', long: '30 seconds', seconds: 30 },
-  { label: '1m', long: '1 minute', seconds: 60 },
-  { label: '5m', long: '5 minutes', seconds: 300 },
-  { label: '15m', long: '15 minutes', seconds: 900 },
-]
 
 export const Route = createFileRoute('/audit')({
   component: AuditPage,
+  // Parse-only: never throw here — /audit must render for any search params.
+  validateSearch: parseAuditSearch,
 })
 
-// Report / workload views live in the route-ignored `-audit-views` sibling so
-// the shared `SQLDisplay` → CodeMirror import stays out of this eager route
-// reference module (see that file's header + Defect D-1). AuditPage consumes
-// them here; the standalone run-detail route imports them from the same sibling.
-import {
-  AuditReportView,
-  formatDate,
-  formatDuration,
-  SectionCard,
-  StatCard,
-  WorkloadReportView,
-} from './-audit-views'
-
-// ---------------------------------------------------------------------------
-// Idle-view launcher
-// ---------------------------------------------------------------------------
-
 /**
- * Pre-run status: the AI-insights dependency, surfaced up front instead of
- * after a wasted run (H-4; USE-065, USE-077). Renders the *actual* key state,
- * not a static "needs a key": a valid key reads "ready", the pre-resolve window
- * reads "Checking…", and only a missing/rejected key shows the config-needed
- * warning + Configure link. Reuses the cached `useAnthropicValidity` probe
- * (C-04) gated on key presence — no new endpoint. [C-09]
+ * Owns the half-second capture clock so the ticking elapsed time re-renders
+ * only the progress readout. Mounted for capture sessions only; a fleet run
+ * keeps its own timer inside `FleetRunSection`.
  */
-function AiInsightsBadge() {
-  const { anthropicRequirement, isTrialSource, trialStatus } = useTrialSource()
-  const isTrialExhausted =
-    isTrialSource &&
-    (trialStatus?.status === 'exhausted' || trialStatus?.active === false)
-  // Presence gates the probe so we never ping the provider without a key.
-  const hasKey =
-    (Boolean(anthropicRequirement?.satisfied) || isTrialSource) &&
-    !isTrialExhausted
-  const validityQuery = useAnthropicValidity(hasKey)
-  const validity = validityQuery.data
-  // Enabled-but-unresolved is the neutral "unknown" window, not a green claim.
-  const checking = hasKey && validityQuery.isFetching && !validity
-
-  // Valid → say so (accent positive); unknown → neutral "Checking…".
-  if (validity?.valid) {
-    return (
-      <HStack className="gap-2 items-center rounded-xl border border-border-positive-soft bg-surface-positive-soft/30 px-3 py-1.5">
-        <Icon
-          name="sparkles"
-          label=""
-          aria-hidden="true"
-          className="w-3.5 h-3.5 text-content-positive-soft shrink-0"
-        />
-        <Text level="caption" className="text-content-positive-soft">
-          AI insights: ready
-        </Text>
-      </HStack>
-    )
-  }
-
-  if (checking) {
-    return (
-      <HStack className="gap-2 items-center rounded-xl border border-border-layout-1 bg-surface-layout-2/40 px-3 py-1.5">
-        <Icon
-          name="sparkles"
-          label=""
-          aria-hidden="true"
-          className="w-3.5 h-3.5 text-content-layout-3 shrink-0"
-        />
-        <Text level="caption" className="text-content-layout-3">
-          AI insights: checking…
-        </Text>
-      </HStack>
-    )
-  }
-
-  // Missing or rejected → the original config-needed copy + Configure link.
-  return (
-    <HStack className="gap-2 items-center rounded-xl border border-border-warning-soft bg-surface-warning-soft/30 px-3 py-1.5">
-      <Icon
-        name="sparkles"
-        label=""
-        aria-hidden="true"
-        className="w-3.5 h-3.5 text-content-warning-soft shrink-0"
-      />
-      <Text level="caption" className="text-content-warning-soft">
-        AI insights: needs a key
-      </Text>
-      <Text level="caption" className="text-content-layout-3">
-        ·
-      </Text>
-      <Link
-        to="/configure"
-        className="hover:underline inline-flex items-center gap-0.5"
-      >
-        <Text level="caption" className="text-content-warning-soft">
-          Configure
-        </Text>
-        <Icon
-          name="chevron-right"
-          label=""
-          aria-hidden="true"
-          className="w-3 h-3 text-content-warning-soft"
-        />
-      </Link>
-    </HStack>
-  )
-}
-
-/**
- * Data-handling disclosure, adjacent to the actions (H-1; USE-065, USE-066).
- * Corrects the discovery-era fear that audit emails the report — the web path
- * does not. (Presentational only: the queries_saved event stays untouched.)
- */
-function DataHandlingNote() {
-  return (
-    <HStack className="gap-2 items-start">
-      <Icon
-        name="info"
-        label=""
-        aria-hidden="true"
-        className="w-3.5 h-3.5 mt-0.5 text-content-layout-3 shrink-0"
-      />
-      <Text level="caption" className="text-content-layout-3">
-        Runs locally on your machine. The report is saved here — nothing is
-        emailed. Captured queries are added to your Queries.
-      </Text>
-    </HStack>
-  )
-}
-
-/**
- * One path (icon, title, meta, optional controls, action). Full-width and
- * stacked (not a side-by-side grid) so both cards read at the same width and
- * the eye travels top-to-bottom [Audit#1; ref 21.55.38, VIS-113]. The emphasized
- * card is raised via the elevation token; the quieter card recedes to
- * content-layout weight — emphasis is bought by de-emphasizing the neighbor,
- * not by adding colour (VIS-016, VIS-108/109). The CTA lives in a footer row,
- * right-aligned and `size="small"`, with any inline control (e.g. "Record for")
- * on its left [VIS-022/023 action hierarchy; §6.1 size ranks].
- */
-function ModeCard({
-  emphasized = false,
-  icon,
-  title,
-  meta,
-  controls,
-  action,
+function CaptureElapsed({
+  session,
+  phase,
+  statusMessage,
+  progressElapsedSeconds,
 }: {
-  emphasized?: boolean
-  icon: IconStrokeName
-  title: string
-  meta: string
-  controls?: React.ReactNode
-  action: React.ReactNode
+  session: ActiveAuditSession
+  phase: string | undefined
+  statusMessage: string | undefined
+  progressElapsedSeconds: number | undefined
 }) {
-  return (
-    <div
-      className={cn(
-        'rounded-[1.25rem] p-5 w-full',
-        emphasized
-          ? 'bg-surface-raised shadow-elevation-1 border border-border-primary-soft'
-          : 'bg-surface-layout-1 border border-border-layout-1'
-      )}
-    >
-      <VStack className="gap-4 items-stretch">
-        {/* Identity: icon + title/meta on one line so the card reads wide. */}
-        <HStack className="gap-3 items-start">
-          <div
-            className={cn(
-              'w-10 h-10 rounded-xl flex items-center justify-center shrink-0',
-              emphasized ? 'bg-surface-primary-soft' : 'bg-surface-layout-2'
-            )}
-          >
-            <Icon
-              name={icon}
-              label=""
-              aria-hidden="true"
-              className={cn(
-                'w-5 h-5',
-                emphasized
-                  ? 'text-content-primary-soft'
-                  : 'text-content-layout-2'
-              )}
-            />
-          </div>
-          <VStack className="gap-1 items-start min-w-0">
-            <Text level="subtitle-2" className="text-content-layout-1">
-              {title}
-            </Text>
-            <Text level="body-small" className="text-content-layout-2">
-              {meta}
-            </Text>
-          </VStack>
-        </HStack>
-
-        {/* Action row: optional inline control at left, small CTA right. */}
-        <HStack className="gap-3 items-end justify-between flex-wrap">
-          <div className="min-w-0">{controls}</div>
-          <div className="shrink-0">{action}</div>
-        </HStack>
-      </VStack>
-    </div>
+  const [clock, setClock] = useState(Date.now())
+  useEffect(() => {
+    setClock(Date.now())
+    const timer = window.setInterval(() => setClock(Date.now()), 500)
+    return () => window.clearInterval(timer)
+  }, [session.id])
+  const elapsedSeconds = Math.min(
+    session.durationSeconds || Number.POSITIVE_INFINITY,
+    Math.max(progressElapsedSeconds ?? 0, (clock - session.startedAt) / 1000)
   )
-}
-
-/**
- * The idle-view launcher: two self-explanatory mode cards. `hero` renders the
- * polished empty-state above them (illustration + one-line job); the compact
- * form ("Run another check") sits under a report so both paths stay reachable
- * without a second wall of controls (VIS-102, VIS-011; H-2).
- */
-function RunLauncher({
-  hero,
-  disabled,
-  runLoading,
-  runLabel,
-  onRun,
-  onCapture,
-  captureDuration,
-  onDurationChange,
-}: {
-  hero: boolean
-  disabled: boolean
-  runLoading: boolean
-  runLabel: string
-  onRun: () => void
-  onCapture: () => void
-  captureDuration: number
-  onDurationChange: (seconds: number) => void
-}) {
-  const durationOptions = CAPTURE_DURATIONS.map((d) => ({
-    value: String(d.seconds),
-    label: d.long,
-  }))
-
   return (
-    <VStack className="gap-6 items-stretch">
-      {/* Idle no longer repeats an icon + verdict sentence — that duplicated
-          the page header. Only the "Run another check" label remains, and only
-          after a report, so idle shows page header + the two cards [Health 1;
-          VIS-011, VIS-016, USE-025]. */}
-      {!hero && (
-        <Text
-          level="overline"
-          className="text-content-layout-3 uppercase tracking-wider"
-        >
-          Run another check
-        </Text>
-      )}
-
-      {/* Stacked full-width, equal width — not a side-by-side grid. [Audit#1] */}
-      <VStack className="gap-4 items-stretch">
-        {/* PRIMARY — instant snapshot */}
-        <ModeCard
-          emphasized
-          icon="speedometer"
-          title="Instant snapshot"
-          meta="~10s · reads current metrics now"
-          action={
-            <Button
-              variant="primary"
-              modifier="solid"
-              size="small"
-              label={runLabel}
-              icon="play"
-              iconPosition="left"
-              onClick={onRun}
-              loading={runLoading}
-              disabled={disabled}
-            />
-          }
-        />
-
-        {/* SECONDARY — live capture */}
-        <ModeCard
-          icon="observe"
-          title="Live capture"
-          meta="records real traffic, then analyzes what ran"
-          controls={
-            <HStack className="gap-2 items-center">
-              <Text level="caption" className="text-content-layout-3 shrink-0">
-                Record for
-              </Text>
-              <div className="w-40">
-                <BaseInputSelect
-                  name="capture-duration"
-                  options={durationOptions}
-                  value={String(captureDuration)}
-                  onValueChange={(v) => onDurationChange(Number(v))}
-                  disabled={disabled}
-                  triggerClassName="h-9 w-full"
-                />
-              </div>
-            </HStack>
-          }
-          action={
-            <Button
-              variant="rising"
-              modifier="outline"
-              size="small"
-              label="Start capture"
-              icon="observe"
-              iconPosition="left"
-              onClick={onCapture}
-              disabled={disabled}
-            />
-          }
-        />
-      </VStack>
-
-      <DataHandlingNote />
-    </VStack>
+    <RunProgress
+      phase={phase}
+      statusMessage={statusMessage}
+      durationSeconds={session.durationSeconds}
+      elapsedSeconds={elapsedSeconds}
+    />
   )
 }
 
@@ -353,113 +115,406 @@ function RunLauncher({
 
 function AuditPage() {
   const queryClient = useQueryClient()
-  const { target } = useTarget()
-  const passwordLock = useTargetPasswordLock(target)
+  const navigate = useNavigate({ from: '/audit' })
+  const search = Route.useSearch()
+  const { target: appTarget } = useTarget()
+  const aiGate = useAiGate()
+  const activeSession = useAuditSession()
+  const auditPresentation = useAuditPresentation()
 
-  const {
-    run,
-    state: runState,
-    statusMessage,
-    report: liveReport,
-    error: runError,
-    reset,
-  } = useAuditRun()
+  // Inventory feeding the always-visible target picker.
+  const { data: inventory } = useQuery({
+    queryKey: ['fleet-targets'],
+    queryFn: () => fetchFleetTargets(),
+    staleTime: 30_000,
+  })
+  const members = useMemo(() => inventory?.members ?? [], [inventory])
+  const [selectedTargets, setSelectedTargets] = useState<string[]>([])
+  const initializedSelection = useRef('')
+  useEffect(() => {
+    if (members.length === 0) return
+    const key = `${search.scope ?? ''}|${search.group ?? ''}|${
+      search.target ?? ''
+    }|${search.targets ?? ''}|${appTarget ?? ''}`
+    if (initializedSelection.current === key) return
+    initializedSelection.current = key
+    setSelectedTargets(selectionFromAuditSearch(search, members, appTarget))
+  }, [appTarget, members, search])
+
+  const singleTarget = selectedTargets.length === 1 ? selectedTargets[0] : null
+  const passwordLock = useTargetPasswordLock(singleTarget)
+  const { data: envRequirements } = useEnvRequirements()
+
+  // Connectivity feeds healthy-first ordering and the unavailable disclosure.
+  const { check: checkConnectivity, results: connectivity } = useFleetStatus()
+  const didConnectivityCheck = useRef(false)
+  useEffect(() => {
+    if (didConnectivityCheck.current) return
+    if (members.length === 0) return
+    didConnectivityCheck.current = true
+    void checkConnectivity()
+  }, [members.length, checkConnectivity])
 
   const {
     run: runCapture,
-    cancel: cancelCapture,
     reset: resetCapture,
     state: captureState,
     statusMessage: captureStatus,
+    phase: capturePhase,
     analysisWarning,
+    readysetNotice,
     progress: captureProgress,
-    result: captureResult,
     error: captureError,
   } = useAuditCapture()
 
-  const [captureDuration, setCaptureDuration] = useState<number>(60)
+  const fleetAudit = useFleetAudit()
 
-  const isRunning = runState === 'running'
+  const [captureDuration, setCaptureDuration] = useState<number>(60)
+  const [view, setView] = useState<'run' | 'history'>(
+    search.tab === 'history' ? 'history' : 'run'
+  )
+
+  // Per-target preflight is shown before every run and cached for one minute.
+  const [preflight, setPreflight] = useState<AuditPreflightResult | null>(null)
+  const [requirementsBusy, setRequirementsBusy] = useState(false)
+  const [runPasswordTarget, setRunPasswordTarget] = useState<string | null>(
+    null
+  )
+  const [showRunTrialDialog, setShowRunTrialDialog] = useState(false)
+
+  useEffect(() => {
+    setPreflight(null)
+  }, [selectedTargets.join('\u0000')])
+
+  const selectedMembers = useMemo(
+    () => members.filter((member) => selectedTargets.includes(member.name)),
+    [members, selectedTargets]
+  )
+  const awsPreflightRequired = selectedMembers.some(
+    (member) =>
+      !!member.region ||
+      !!member.instance_class ||
+      member.instance_class_source === 'aws'
+  )
+
+  const checkRequirements = async (
+    force = false
+  ): Promise<AuditPreflightResult | null> => {
+    if (selectedTargets.length === 0) return null
+    setRequirementsBusy(true)
+    const targetAccounts: Record<string, string> = {}
+    for (const member of selectedMembers) {
+      const accountTag = (member.tags ?? []).find((tag) =>
+        tag.startsWith('aws-account:')
+      )
+      if (accountTag) {
+        targetAccounts[member.name] = accountTag.slice('aws-account:'.length)
+      }
+    }
+    // The checklist reports the AI gate next to the database and Docker
+    // probes, so a re-check re-resolves the key and trial balance too.
+    const [result] = await Promise.all([
+      checkAuditPreflight(selectedTargets, {
+        force,
+        awsRequired: awsPreflightRequired,
+        targetAccounts,
+      }),
+      invalidateAiGateQueries(queryClient),
+    ])
+    setPreflight(result)
+    setRequirementsBusy(false)
+    return result
+  }
+
   const isCapturing =
     captureState === 'capturing' || captureState === 'analyzing'
-  const busy = isRunning || isCapturing
-  // Past runs now open on their own route (/audit/runs/$runId); this page only
-  // stages the just-run live result.
-  const report = liveReport
+  const isFleetRunning = fleetAudit.state === 'running'
+  const busy = !!activeSession || isCapturing || isFleetRunning
+  useEffect(() => {
+    setAuditRunViewVisible(view === 'run')
+    return () => setAuditRunViewVisible(false)
+  }, [view])
+  useEffect(() => {
+    if (view !== 'history') return
+    const saved = Number(
+      sessionStorage.getItem('rdst-audit-history-scroll') || 0
+    )
+    requestAnimationFrame(() => window.scrollTo({ top: saved }))
+  }, [view])
 
-  const { data: runsData, refetch: refetchRuns } = useQuery({
-    queryKey: ['audit-runs', target],
-    queryFn: () => fetchAuditRuns(target!),
-    enabled: !!target,
+  // Unified history: single-target runs + fleet snapshots.
+  const { data: runsData } = useQuery({
+    queryKey: ['audit-runs'],
+    queryFn: () => fetchAuditRuns(),
     staleTime: 30_000,
   })
-  const runs = runsData?.runs || []
+  const { data: snapshotsData } = useQuery({
+    queryKey: ['fleet-snapshots'],
+    queryFn: fetchFleetSnapshots,
+    staleTime: 30_000,
+  })
+  const history = useMemo(
+    () => buildHistory(runsData?.runs ?? [], snapshotsData?.snapshots ?? []),
+    [runsData, snapshotsData]
+  )
+
+  const invalidateHistory = () => {
+    queryClient.invalidateQueries({ queryKey: ['audit-runs'] })
+    queryClient.invalidateQueries({ queryKey: ['fleet-snapshots'] })
+  }
+
+  const runFleetSelection = async (durationSeconds?: number) => {
+    resetCapture()
+    setView('run')
+    const request = buildTargetSelectionRequest(
+      selectedTargets,
+      durationSeconds
+    )
+    await fleetAudit.runAudit(request)
+    invalidateHistory()
+  }
 
   const handleRun = async () => {
-    if (!target) return
-    resetCapture()
-    await run(target)
-    queryClient.invalidateQueries({ queryKey: ['audit-runs', target] })
-    refetchRuns()
+    if (activeSession || selectedTargets.length === 0) return
+    const checked = await checkRequirements()
+    if (
+      !checked ||
+      isAuditPreflightBlocked(checked, {
+        requireQueryStats: captureDuration > 0,
+      })
+    ) {
+      // Never swallow the click: the checklist above shows exactly which
+      // item is blocking.
+      toast({
+        title: "Health check can't start yet",
+        description:
+          'Resolve the requirement checklist items above, then run again.',
+        variant: 'warning',
+      })
+      return
+    }
+    if (selectedTargets.length > 1) {
+      await runFleetSelection(captureDuration || undefined)
+      return
+    }
+    if (!singleTarget) return
+    fleetAudit.reset()
+    setView('run')
+    await runCapture(singleTarget, { duration: captureDuration })
+    invalidateHistory()
   }
 
-  const handleCapture = async () => {
-    if (!target) return
-    reset()
-    await runCapture(target, { duration: captureDuration })
-    queryClient.invalidateQueries({ queryKey: ['audit-runs', target] })
-    refetchRuns()
+  const handleRetryTarget = (name: string) => {
+    void navigate({
+      replace: true,
+      search: { scope: undefined, group: undefined, target: name },
+    })
+    setSelectedTargets([name])
+    fleetAudit.reset()
+    setView('run')
+    void runCapture(name, { duration: captureDuration })
   }
 
-  // A capture result currently occupies the stage (fresh live capture).
-  const captureComplete = captureState === 'complete' && !!captureResult
-  // Something already fills the stage (live report / capture result).
-  const showStageResult = !!report || captureComplete
-  // Idle, pre-run: the empty-state hero + the AI-insights badge belong here.
-  const isIdle = !busy && !showStageResult
+  const handleOpenHistory = async (entry: HistoryEntry) => {
+    sessionStorage.setItem('rdst-audit-history-scroll', String(window.scrollY))
+    await navigate({ to: '/audit/runs/$runId', params: { runId: entry.id } })
+  }
 
-  const launcherDisabled = busy || !target || passwordLock.isLocked
-  const runActionLabel = report ? 'Run new audit' : 'Run audit'
+  const handledCompletion = useRef<number | null>(null)
+  useEffect(() => {
+    const completed = auditPresentation.completed
+    if (
+      view !== 'run' ||
+      !completed ||
+      handledCompletion.current === completed.id
+    )
+      return
+    handledCompletion.current = completed.id
+    clearCompletedAudit(completed.id)
+    void navigate({
+      to: '/audit/runs/$runId',
+      params: { runId: completed.runId },
+    })
+  }, [auditPresentation.completed?.id, view])
+
+  const handledViewRequest = useRef(0)
+  useEffect(() => {
+    if (auditPresentation.viewRequestId <= handledViewRequest.current) return
+    handledViewRequest.current = auditPresentation.viewRequestId
+    if (activeSession) {
+      setView('run')
+      return
+    }
+    const completed = auditPresentation.completed
+    if (!completed) return
+    handledCompletion.current = completed.id
+    clearCompletedAudit(completed.id)
+    void navigate({
+      to: '/audit/runs/$runId',
+      params: { runId: completed.runId },
+    })
+  }, [auditPresentation.viewRequestId])
+
+  useEffect(() => {
+    if (view !== 'run' || activeSession) return
+    if (captureState === 'complete' || captureState === 'error') {
+      resetCapture()
+    }
+    if (fleetAudit.state === 'complete' || fleetAudit.state === 'error') {
+      fleetAudit.reset()
+    }
+  }, [view])
+
+  const showFleetRun =
+    fleetAudit.state === 'running' || fleetAudit.state === 'error'
+
+  const aiBlocked = aiGate.status === 'blocked' || aiGate.status === 'checking'
+  const selectionReady =
+    selectedTargets.length > 0 &&
+    (selectedTargets.length > 1 || !passwordLock.isLocked)
+  const preflightBlocksLaunch = preflight
+    ? isAuditPreflightBlocked(preflight, {
+        requireQueryStats: captureDuration > 0,
+      })
+    : captureDuration > 0
+  const launcherDisabled =
+    busy ||
+    requirementsBusy ||
+    aiBlocked ||
+    !selectionReady ||
+    preflightBlocksLaunch
+  const fleetTargetNames =
+    activeSession?.kind === 'fleet' && activeSession.targetNames.length > 0
+      ? activeSession.targetNames
+      : Object.keys(fleetAudit.targets).length > 0
+        ? Object.keys(fleetAudit.targets)
+        : selectedTargets
+  const fleetScopeLabel =
+    fleetTargetNames.length === 1
+      ? `Running on ${fleetTargetNames[0]}`
+      : `Running on ${fleetTargetNames.length} targets: ${fleetTargetNames.join(', ')}`
+
+  const scopeControl = (
+    <VStack className="gap-2 items-stretch">
+      <ScopeSelector
+        members={members}
+        connectivity={connectivity}
+        selection={selectedTargets}
+        onSelectionChange={setSelectedTargets}
+        disabled={busy}
+        collapsed={busy}
+      />
+      <HStack className="justify-end items-center gap-1">
+        <Text level="caption" className="text-content-layout-3">
+          Not seeing a target you expected?
+        </Text>
+        <Link to="/configure" hash="connections">
+          <Button
+            variant="primary"
+            modifier="ghost"
+            size="small"
+            label="Manage targets in Settings"
+          />
+        </Link>
+      </HStack>
+    </VStack>
+  )
+
+  const requirementsNotice = preflight ? (
+    <PreflightChecklist
+      result={preflight}
+      busy={requirementsBusy}
+      onRecheck={() => void checkRequirements(true)}
+      liveCapture={captureDuration > 0}
+      aiGate={aiGate}
+      passwordRequirements={
+        envRequirements?.requirements.filter(
+          (requirement) => requirement.kind === 'target_password'
+        ) ?? []
+      }
+      anthropicRequirement={envRequirements?.requirements.find(
+        (requirement) => requirement.kind === 'anthropic_api_key'
+      )}
+      keyringAvailable={envRequirements?.keyring_available ?? false}
+    />
+  ) : null
+
+  const launcher = (
+    <RunLauncher
+      scopeControl={scopeControl}
+      requirementsNotice={requirementsNotice}
+      showRequirementsButton={selectedTargets.length > 0}
+      requirementsBusy={requirementsBusy}
+      onCheckRequirements={() => void checkRequirements(true)}
+      disabled={launcherDisabled}
+      active={busy}
+      onRun={() => void handleRun()}
+      captureDuration={captureDuration}
+      onDurationChange={setCaptureDuration}
+      selectedTargets={selectedTargets}
+      runSolid={
+        !preflight?.aws.required || !!preflight.aws.status?.has_credentials
+      }
+    />
+  )
+
+  const activePhase = capturePhase ?? activeSession?.phase
+
+  const captureErrorClass = captureError
+    ? classifyError({ code: '', message: captureError })
+    : 'database'
+  const readysetSkippedNoQueries =
+    !!readysetNotice &&
+    /no (?:live |captured |capture )?queries/i.test(readysetNotice)
+
+  const recoveryAction = (errorClass: ReturnType<typeof classifyError>) => {
+    if (errorClass === 'database') {
+      return {
+        label: 'Check connectivity in Settings',
+        icon: 'chevron-right' as IconStrokeName,
+        onClick: () => void navigate({ to: '/configure', hash: 'connections' }),
+      }
+    }
+    const recovery = recoveryFor(errorClass)
+    return recovery
+      ? {
+          label: recovery.label,
+          onClick: () => void navigate({ to: recovery.to }),
+        }
+      : undefined
+  }
 
   return (
     <div className="space-y-6 w-full">
-      {/* Hero Header */}
-      <m.div
-        className="space-y-4"
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
-        <HStack className="justify-between items-start gap-4 flex-wrap">
-          <HStack className="gap-4 items-center">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
-              <Icon
-                name="document-validation"
-                label="Health Check"
-                className="w-6 h-6 text-content-info-soft"
-              />
-            </div>
-            <VStack className="gap-1 items-start">
-              <Text
-                as="h1"
-                level="headline-3"
-                className="text-content-layout-1"
-              >
-                Health Check
-              </Text>
-              <Text level="body-small" className="text-content-layout-3">
-                Full audit of "{target}": sizing verdict, slow spots, and cache
-                opportunities.
-              </Text>
-            </VStack>
-          </HStack>
-          {/* Status slot: pre-run AI-insights dependency (H-4). */}
-          {isIdle && <AiInsightsBadge />}
-        </HStack>
-      </m.div>
+      <Text as="h1" level="headline-3" className="text-content-layout-1">
+        Health Check
+      </Text>
 
-      {/* Password lock */}
-      {passwordLock.isLocked && (
+      <div
+        role="tablist"
+        aria-label="Health Check sections"
+        className="flex gap-1 border-b border-border-layout-1"
+      >
+        {(['run', 'history'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={view === tab}
+            onClick={() => setView(tab)}
+            className={`px-4 py-2 text-sm capitalize cursor-pointer border-b-2 ${
+              view === tab
+                ? 'border-border-primary-soft text-content-primary-soft'
+                : 'border-transparent text-content-layout-3 hover:text-content-layout-2'
+            }`}
+          >
+            {tab === 'history' ? 'Reports' : 'Run'}
+          </button>
+        ))}
+      </div>
+
+      {/* Password lock for a single selected target. */}
+      {view === 'run' && !!singleTarget && passwordLock.isLocked && (
         <TargetLockNotice
           message={passwordLock.message}
           requirements={passwordLock.missingTargetRequirements}
@@ -467,334 +522,162 @@ function AuditPage() {
         />
       )}
 
-      {/* Run progress */}
-      <AnimatePresence>
-        {isRunning && (
-          <m.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <Card className="w-full">
-              <Card.Content>
-                <HStack className="gap-3 items-center p-2">
-                  <Spinner size="base" />
-                  <Text level="body-small" className="text-content-layout-2">
-                    {statusMessage || 'Auditing ' + (target ?? '') + '…'}
-                  </Text>
-                </HStack>
-              </Card.Content>
-            </Card>
-          </m.div>
-        )}
-      </AnimatePresence>
+      {view === 'run' && launcher}
 
-      {/* Run error */}
-      <Show when={runState === 'error' && !!runError}>
-        <div className="px-5 py-3 bg-surface-negative-soft/30 border border-border-negative-soft rounded-xl">
-          <HStack className="gap-2 items-center">
-            <Icon
-              name="alert"
-              label="Error"
-              className="w-4 h-4 text-content-negative-soft"
-            />
-            <Text level="body-small" className="text-content-negative-soft">
-              {runError}
+      {view === 'run' && activeSession?.kind !== 'fleet' && activeSession && (
+        <VStack className="gap-3 items-stretch">
+          <div
+            className="truncate"
+            title={activeSession.targetNames.join(', ')}
+          >
+            <Text level="label-small" className="text-content-layout-1">
+              {activeSession.targetNames.length === 1
+                ? `Running on ${activeSession.targetNames[0]}`
+                : `Running on ${activeSession.targetNames.length} targets: ${activeSession.targetNames.join(', ')}`}
             </Text>
-          </HStack>
-        </div>
-      </Show>
-
-      {/* Live capture panel */}
-      <AnimatePresence>
-        {isCapturing && (
-          <m.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <Card className="w-full">
-              <Card.Content>
-                <VStack className="gap-4 items-stretch p-2">
-                  <HStack className="gap-3 items-center justify-between flex-wrap">
-                    <HStack className="gap-3 items-center">
-                      <Spinner size="base" />
-                      <Text
-                        level="body-small"
-                        className="text-content-layout-2"
-                      >
-                        {captureState === 'analyzing'
-                          ? captureStatus || 'Analyzing captured workload...'
-                          : captureStatus || 'Capturing live workload...'}
-                      </Text>
-                    </HStack>
-                    <HStack className="gap-3 items-center">
-                      {captureProgress && (
-                        <Text
-                          level="mono-small"
-                          className="text-content-layout-3 tabular-nums shrink-0"
-                        >
-                          {Math.round(captureProgress.elapsedSeconds)}s
-                          {captureProgress.totalSeconds
-                            ? ` / ${captureProgress.totalSeconds}s`
-                            : ''}
-                        </Text>
-                      )}
-                      <Button
-                        variant="negative"
-                        modifier="outline"
-                        size="small"
-                        label="Cancel"
-                        icon="close"
-                        iconPosition="left"
-                        onClick={cancelCapture}
-                      />
-                    </HStack>
-                  </HStack>
-
-                  {captureProgress?.totalSeconds ? (
-                    <div className="h-2 w-full rounded-full bg-surface-layout-2 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-surface-primary-solid transition-[width] duration-500 ease-linear"
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            (captureProgress.elapsedSeconds /
-                              captureProgress.totalSeconds) *
-                              100
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                  ) : null}
-
-                  {captureProgress && (
-                    <div className="grid grid-cols-2 tablet:grid-cols-4 gap-4">
-                      <StatCard
-                        label="Unique Queries"
-                        value={`${captureProgress.uniqueQueries}`}
-                      />
-                      <StatCard
-                        label="Executions"
-                        value={captureProgress.totalExecutions.toLocaleString()}
-                      />
-                      <StatCard
-                        label="TPS"
-                        value={captureProgress.tps.toFixed(1)}
-                      />
-                      <StatCard
-                        label="Cache Hit"
-                        value={
-                          captureProgress.cacheHitRatio != null
-                            ? `${captureProgress.cacheHitRatio.toFixed(1)}%`
-                            : '-'
-                        }
-                        hint={`${captureProgress.activeConnections} conns`}
-                      />
-                    </div>
-                  )}
-                </VStack>
-              </Card.Content>
-            </Card>
-          </m.div>
-        )}
-      </AnimatePresence>
+          </div>
+          <CaptureElapsed
+            session={activeSession}
+            phase={activePhase}
+            statusMessage={captureStatus ?? activeSession.statusMessage}
+            progressElapsedSeconds={captureProgress?.elapsedSeconds}
+          />
+        </VStack>
+      )}
 
       {/* Capture analysis warning (graceful degradation) */}
-      <Show when={!!analysisWarning}>
-        <div className="px-5 py-3 bg-surface-warning-soft/20 border border-border-warning-soft rounded-xl">
-          <HStack className="gap-2 items-center">
-            <Icon
-              name="alert"
-              label="Warning"
-              className="w-4 h-4 text-content-warning-soft"
-            />
-            <Text level="body-small" className="text-content-warning-soft">
-              {analysisWarning}
-            </Text>
-          </HStack>
-        </div>
+      <Show when={view === 'run' && !!analysisWarning}>
+        {isTrialExhaustedError(analysisWarning) ? (
+          <RoutableNotice
+            kind="trial-exhausted"
+            message={TRIAL_EXHAUSTED_MESSAGE}
+            onRetry={() => setShowRunTrialDialog(true)}
+            retryLabel="Start trial"
+          />
+        ) : (
+          <InlineNotice
+            errorClass="provider"
+            title="Analysis skipped"
+            message={analysisWarning ?? ''}
+            trustworthy="The captured queries and totals below are complete and unaffected."
+          />
+        )}
+      </Show>
+
+      <Show when={view === 'run' && !!readysetNotice}>
+        {readysetSkippedNoQueries ? (
+          <Card className="w-full">
+            <Card.Content>
+              <HStack className="gap-3 items-start">
+                <Icon
+                  name="info"
+                  label="Information"
+                  className="w-4 h-4 mt-0.5 text-content-layout-3 shrink-0"
+                />
+                <VStack className="gap-1 items-start">
+                  <Text level="label-small" className="text-content-layout-1">
+                    Readyset benchmark not needed
+                  </Text>
+                  <Text level="body-small" className="text-content-layout-3">
+                    No live queries were captured. The database health check and
+                    saved results are complete.
+                  </Text>
+                </VStack>
+              </HStack>
+            </Card.Content>
+          </Card>
+        ) : (
+          <InlineNotice
+            errorClass="valid-negative"
+            title="Readyset benchmark skipped"
+            message={readysetNotice ?? ''}
+            trustworthy="The database capture and saved query data are complete."
+          />
+        )}
       </Show>
 
       {/* Capture error */}
-      <Show when={captureState === 'error' && !!captureError}>
-        <div className="px-5 py-3 bg-surface-negative-soft/30 border border-border-negative-soft rounded-xl">
-          <HStack className="gap-2 items-center">
-            <Icon
-              name="alert"
-              label="Error"
-              className="w-4 h-4 text-content-negative-soft"
-            />
-            <Text level="body-small" className="text-content-negative-soft">
-              {captureError}
-            </Text>
-          </HStack>
-        </div>
-      </Show>
-
-      {/* Idle empty-state hero + two mode cards (the launcher) */}
-      {isIdle && (
-        <m.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
-          <RunLauncher
-            hero
-            disabled={launcherDisabled}
-            runLoading={isRunning}
-            runLabel={runActionLabel}
-            onRun={handleRun}
-            onCapture={handleCapture}
-            captureDuration={captureDuration}
-            onDurationChange={setCaptureDuration}
+      <Show when={view === 'run' && captureState === 'error' && !!captureError}>
+        {isTrialExhaustedError(captureError) ? (
+          <RoutableNotice
+            kind="trial-exhausted"
+            message={TRIAL_EXHAUSTED_MESSAGE}
+            onRetry={() => setShowRunTrialDialog(true)}
+            retryLabel="Start trial"
           />
-        </m.div>
-      )}
-
-      {/* Live capture result */}
-      {captureComplete && (
-        <m.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <VStack className="gap-3 items-stretch">
-            <HStack className="gap-2 items-center">
-              <Text
-                level="overline"
-                className="text-content-layout-3 uppercase tracking-wider"
-              >
-                Latest capture: {captureResult!.runId}
-              </Text>
-            </HStack>
-            <WorkloadReportView
-              summary={captureResult!.summary}
-              analysis={captureResult!.analysis}
-              queries={captureResult!.summary?.queries || []}
-              durationSeconds={
-                captureResult!.summary?.duration_seconds ?? captureDuration
-              }
-            />
-          </VStack>
-        </m.div>
-      )}
-
-      {/* Report — the just-run live audit result */}
-      {report && !isRunning && (
-        <m.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <VStack className="gap-3 items-stretch">
-            <HStack className="justify-between items-center">
-              <HStack className="gap-2 items-center">
-                <Text
-                  level="overline"
-                  className="text-content-layout-3 uppercase tracking-wider"
-                >
-                  Latest audit
-                </Text>
-                <Text level="caption" className="text-content-layout-3">
-                  Saved · {formatDate(report.audited_at)}
-                </Text>
-              </HStack>
-            </HStack>
-            <AuditReportView report={report} />
-          </VStack>
-        </m.div>
-      )}
-
-      {/* Run another check — keeps both paths reachable after a result. */}
-      {!busy && showStageResult && (
-        <RunLauncher
-          hero={false}
-          disabled={launcherDisabled}
-          runLoading={isRunning}
-          runLabel={runActionLabel}
-          onRun={handleRun}
-          onCapture={handleCapture}
-          captureDuration={captureDuration}
-          onDurationChange={setCaptureDuration}
-        />
-      )}
-
-      {/* Past runs — hidden entirely until at least one run exists (VIS-103). */}
-      <Show when={runs.length > 0}>
-        <SectionCard icon="folder-file" title={`Past Runs (${runs.length})`}>
-          <div className="divide-y divide-border-layout-1">
-            {runs.map((summary) => {
-              const isCapture = (summary.duration_seconds ?? 0) > 0
-              const runLabel = isCapture ? 'Workload capture' : 'Quick audit'
-              return (
-                <Link
-                  key={summary.run_id}
-                  to="/audit/runs/$runId"
-                  params={{ runId: summary.run_id }}
-                  className="group block w-full text-left px-5 py-3 hover:bg-surface-layout-2/50 transition-colors cursor-pointer"
-                >
-                  <HStack className="justify-between items-center gap-4">
-                    <VStack className="gap-0.5 items-start min-w-0">
-                      <HStack className="gap-2 items-baseline min-w-0">
-                        <Text
-                          level="label-medium"
-                          className="text-content-layout-1 shrink-0"
-                        >
-                          {runLabel}
-                        </Text>
-                        <Text
-                          level="caption"
-                          className="text-content-layout-3 truncate"
-                        >
-                          {formatDate(summary.started_at)}
-                        </Text>
-                      </HStack>
-                      <Text
-                        level="mono-small"
-                        className="text-content-layout-3 truncate"
-                      >
-                        {summary.run_id}
-                      </Text>
-                    </VStack>
-                    <HStack className="gap-2 items-center shrink-0">
-                      {isCapture && (
-                        <Tag
-                          size="small"
-                          variant="warning"
-                          modifier="ghost"
-                          label={formatDuration(summary.duration_seconds)}
-                        />
-                      )}
-                      {summary.has_analysis && (
-                        <Tag
-                          size="small"
-                          variant="positive"
-                          modifier="ghost"
-                          label="Analyzed"
-                        />
-                      )}
-                      <Tag
-                        size="small"
-                        variant="informative"
-                        modifier="ghost"
-                        label={summary.source || 'audit'}
-                      />
-                      <Icon
-                        name="chevron-right"
-                        label="Open run"
-                        className="w-4 h-4 text-content-layout-3 opacity-0 group-hover:opacity-100 transition-opacity"
-                      />
-                    </HStack>
-                  </HStack>
-                </Link>
-              )
-            })}
-          </div>
-        </SectionCard>
+        ) : (
+          <ErrorState
+            errorClass={captureErrorClass}
+            title="Capture failed"
+            message={sanitizeWebError(
+              captureError,
+              'The capture could not be completed.'
+            )}
+            trustworthy="No capture was saved; earlier reports are unaffected."
+            action={recoveryAction(captureErrorClass)}
+            onRetry={() => void handleRun()}
+            retryLabel="Retry"
+          />
+        )}
       </Show>
+
+      {/* Fleet/group/multi run progress + results */}
+      <Show when={view === 'run' && showFleetRun}>
+        <FleetRunSection
+          scopeLabel={fleetScopeLabel}
+          state={fleetAudit.state}
+          phase={fleetAudit.phase}
+          targets={fleetAudit.targets}
+          statusMessage={fleetAudit.statusMessage}
+          summary={fleetAudit.summary}
+          snapshotId={fleetAudit.snapshotId}
+          error={fleetAudit.error}
+          errorCode={fleetAudit.errorCode}
+          onRetryTarget={handleRetryTarget}
+          onSetPassword={setRunPasswordTarget}
+          onAdjustTargets={() => setView('run')}
+          captureDuration={captureDuration}
+        />
+      </Show>
+
+      <EnvSecretsDialog
+        isOpen={runPasswordTarget !== null}
+        onClose={() => setRunPasswordTarget(null)}
+        requirements={
+          envRequirements?.requirements.filter(
+            (requirement) =>
+              requirement.kind === 'target_password' &&
+              requirement.target === runPasswordTarget
+          ) ?? []
+        }
+        keyringAvailable={envRequirements?.keyring_available ?? false}
+        onSuccess={() => {
+          setRunPasswordTarget(null)
+          void queryClient.invalidateQueries({
+            queryKey: ['env-requirements'],
+          })
+          void checkRequirements(true)
+        }}
+      />
+      <TrialRegistrationDialog
+        isOpen={showRunTrialDialog}
+        onClose={() => setShowRunTrialDialog(false)}
+        onSuccess={() => {
+          void invalidateTrialRelatedQueries(queryClient)
+          setShowRunTrialDialog(false)
+        }}
+      />
+
+      {view === 'history' && (
+        <div id="history">
+          <RunHistory
+            entries={history}
+            activeId={null}
+            loadingId={null}
+            onOpen={(entry) => void handleOpenHistory(entry)}
+          />
+        </div>
+      )}
     </div>
   )
 }

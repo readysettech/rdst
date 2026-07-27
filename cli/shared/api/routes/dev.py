@@ -3,10 +3,10 @@
 from __future__ import annotations
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from shared.api.routes.env import _is_loopback_request, _same_host_from_headers
+from shared.api.guards import require_local_request
 from shared.config.targets import TargetsConfig
 from shared.env_requirements_service import EnvRequirementsService
 from shared.secret_store_service import SecretStoreService
@@ -23,10 +23,7 @@ class ClearKeyringResponse(BaseModel):
 
 @router.post("/dev/clear-keyring")
 async def clear_keyring(request: Request) -> ClearKeyringResponse:
-    if not _is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not _same_host_from_headers(request):
-        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+    require_local_request(request)
 
     env_service = EnvRequirementsService()
     names = env_service.get_allowed_secret_names()

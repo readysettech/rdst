@@ -1,6 +1,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  __resetAuditSessionForTests,
+  beginAuditSession,
+} from '../lib/auditSession'
 import * as backgroundRuns from '../lib/backgroundRuns'
 import { BackgroundRuns } from './BackgroundRuns'
 
@@ -19,10 +23,14 @@ vi.mock('../hooks/useTarget', () => ({
 
 vi.mock('../lib/backgroundRuns', () => ({
   useBackgroundRuns: vi.fn(),
+  getBackgroundRuns: vi.fn(() => []),
   reattachBackgroundRuns: vi.fn(),
   acknowledgeBackgroundRun: vi.fn(),
   dismissBackgroundRun: vi.fn(),
   cancelBackgroundRun: vi.fn(),
+  isAuditKind: (kind: string) => kind === 'audit' || kind === 'audit_capture',
+  isHealthCheckKind: (kind: string) =>
+    kind === 'audit' || kind === 'audit_capture' || kind === 'fleet_audit',
 }))
 
 vi.mock('../lib/trialQueries', () => ({
@@ -64,7 +72,10 @@ function run(
 
 describe('BackgroundRuns', () => {
   beforeEach(() => vi.clearAllMocks())
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    __resetAuditSessionForTests()
+  })
 
   it('renders nothing when idle and probes stored runs on mount', () => {
     useRuns.mockReturnValue([])
@@ -289,6 +300,121 @@ describe('BackgroundRuns', () => {
       'cache_test_imdb_failed'
     )
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('opens a finished health check on its saved run', () => {
+    useRuns.mockReturnValue([
+      run({
+        runId: 'audit_imdb_x',
+        kind: 'audit',
+        status: 'done',
+        stage: 'storage',
+        message: 'Health check complete',
+        snapshotId: 'audit_imdb_20260727_000000',
+      }),
+    ])
+
+    render(<BackgroundRuns />)
+    expect(screen.getByTestId('jobs-trigger').textContent).toContain(
+      'Health check on imdb'
+    )
+    openJobs()
+    fireEvent.click(screen.getByTitle('View results'))
+
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/audit/runs/$runId',
+      params: { runId: 'audit_imdb_20260727_000000' },
+    })
+    expect(backgroundRuns.acknowledgeBackgroundRun).toHaveBeenCalledWith(
+      'audit_imdb_x'
+    )
+  })
+
+  it('shows one card for a whole fleet health check and opens its snapshot', () => {
+    useRuns.mockReturnValue([
+      run({
+        runId: 'fleet_audit_prod_x',
+        kind: 'fleet_audit',
+        target: 'prod',
+        status: 'partial',
+        stage: 'storage',
+        message: 'Fleet health check complete',
+        hasWarnings: true,
+        snapshotId: 'fleet_20260727_000000',
+      }),
+    ])
+
+    render(<BackgroundRuns />)
+    expect(screen.getByTestId('jobs-trigger').textContent).toContain(
+      'Fleet health check'
+    )
+    openJobs()
+    // One run means one card: a fleet audit never decomposes into subtasks.
+    expect(screen.getByLabelText('Background jobs').textContent).toContain(
+      '1 total'
+    )
+    expect(screen.getByText('Partially complete')).toBeTruthy()
+    fireEvent.click(screen.getByTitle('View results'))
+
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/audit/runs/$runId',
+      params: { runId: 'fleet_20260727_000000' },
+    })
+    // The fleet scope is not a target the sidebar could switch to.
+    expect(setTarget).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the audit page for a capture with no saved run', () => {
+    useRuns.mockReturnValue([
+      run({
+        runId: 'audit_capture_imdb_x',
+        kind: 'audit_capture',
+        status: 'failed',
+        stage: 'capture',
+        message: 'Connection lost',
+        snapshotId: undefined,
+      }),
+    ])
+
+    render(<BackgroundRuns />)
+    openJobs()
+    expect(screen.getAllByText('Capturing imdb')).toHaveLength(2)
+    fireEvent.click(screen.getByTitle('View results'))
+
+    expect(navigate).toHaveBeenCalledWith({ to: '/audit' })
+  })
+
+  it('lists a running health check alongside its banner session', () => {
+    beginAuditSession({
+      kind: 'snapshot',
+      targetLabel: 'imdb',
+      targetNames: ['imdb'],
+      durationSeconds: 60,
+      startedAt: Date.now(),
+      phase: 'capture',
+      statusMessage: 'Capturing queries...',
+      cancel: vi.fn(),
+    })
+    useRuns.mockReturnValue([
+      run({
+        runId: 'audit_imdb_running',
+        kind: 'audit',
+        status: 'running',
+        stage: 'capture',
+        message: 'Capturing queries',
+        current: null,
+        total: null,
+      }),
+    ])
+
+    render(<BackgroundRuns />)
+
+    // The banner is an extra indicator, not a replacement: the job keeps its
+    // card and counts towards the running total like every other kind.
+    expect(screen.getByTestId('running-job-spinner')).toBeTruthy()
+    openJobs()
+    expect(screen.getByTestId('background-run-audit_imdb_running')).toBeTruthy()
+    expect(screen.getByText('1 job running')).toBeTruthy()
   })
 
   it('shows partial annotation completion as a warning', () => {

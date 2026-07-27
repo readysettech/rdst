@@ -54,7 +54,7 @@ function toMissingEntries(requirements: EnvRequirement[]): MissingEntry[] {
           : 'Anthropic API Key';
       const hint =
         item.kind === 'target_password'
-          ? `Set ${envName} for database authentication.`
+          ? `Enter the password${item.target ? ` for ${item.target}` : ''}.`
           : 'Paste your Anthropic API key or your Readyset trial token.';
       return {
         key: `${item.kind}:${envName}:${item.target || 'global'}`,
@@ -113,7 +113,7 @@ export function EnvSecretsDialog({
       for (const payload of payloads) {
         const response = await setEnvSecret(payload);
         if (!response.success) {
-          throw new Error(response.message || `Failed to set ${payload.name}`);
+          throw new Error(response.message || 'Could not save this secret.');
         }
         if (response.session_only) {
           resolvedResultMessage = response.message || 'Saved for this session only.';
@@ -182,7 +182,7 @@ export function EnvSecretsDialog({
         <ModalContent size="base" className="p-0 overflow-hidden">
           <ModalTitle className="sr-only">{dialogTitle}</ModalTitle>
           <ModalDescription className="sr-only">
-            Enter missing environment variable values for database and AI access.
+            Enter the missing passwords or API keys.
           </ModalDescription>
           <div className="px-6 py-5 border-b border-border-layout-1 bg-surface-layout-2">
             <HStack className="gap-3 items-center">
@@ -204,7 +204,7 @@ export function EnvSecretsDialog({
               <Alert
                 variant="warning"
                 modifier="outline"
-                label="A key set in RDST's process environment will override this until the app restarts."
+                label="A key supplied when RDST started will override this until the app restarts."
               />
             </div>
           )}

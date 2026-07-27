@@ -563,9 +563,7 @@ class TopService:
         password = resolve_password_value(target_config)
 
         if not password:
-            raise ValueError(
-                f"No password found. Set environment variable {target_config.get('password_env', 'DB_PASSWORD')}"
-            )
+            raise ValueError("No password found for this target. Set its password, then try again.")
 
         # Create connection config
         connection_config = ConnectionConfig(

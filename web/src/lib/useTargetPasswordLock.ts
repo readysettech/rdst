@@ -44,15 +44,7 @@ export function useTargetPasswordLock(
 
     let message = ''
     if (isLocked && targetName) {
-      if (missingTargetRequirements.length > 0) {
-        const vars = missingTargetRequirements
-          .map((item) => item.accepted_names[0])
-          .filter(Boolean)
-          .join(', ')
-        message = `Target '${targetName}' is locked until DB password env vars are set: ${vars}.`
-      } else {
-        message = `Target '${targetName}' is locked because a DB password is not configured.`
-      }
+      message = `Enter the password for '${targetName}' again.`
     }
 
     return {

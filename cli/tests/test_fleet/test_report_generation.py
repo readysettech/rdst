@@ -1,19 +1,10 @@
-"""Unit tests for HTML report generation.
+"""Unit tests for the current unified audit/fleet HTML report renderer."""
 
-Tests that report_data factories and html_report renderers produce correct
-output from mock audit data. No database or network required.
-"""
-
-import pytest
-
-
-# ============================================================================
-# Mock Data Factories
-# ============================================================================
+from features.audit.report.report import compute_fleet_savings, render_report_html
 
 
 def _mock_audit_result(**overrides):
-    """Create a mock audit result dict matching AuditService output."""
+    """Create a representative audit result dict."""
     base = {
         "target_name": "test-db",
         "engine": "postgresql",
@@ -59,7 +50,10 @@ def _mock_audit_result(**overrides):
             },
             {
                 "query_hash": "b7d9e2a1f3c4",
-                "query_text": "SELECT p.* FROM products p JOIN categories c ON p.category_id = c.id",
+                "query_text": (
+                    "SELECT p.* FROM products p "
+                    "JOIN categories c ON p.category_id = c.id"
+                ),
                 "calls": 8700,
                 "avg_time_ms": 3.4,
                 "pct_total_time": 14.1,
@@ -67,12 +61,12 @@ def _mock_audit_result(**overrides):
             },
         ],
     }
+    base["workload"] = {"queries": list(base["top_queries"])}
     base.update(overrides)
     return base
 
 
 def _mock_rs_results():
-    """Mock Readyset test results."""
     return [
         {
             "query_hash": "a3f2c1b8d9e1",
@@ -91,229 +85,166 @@ def _mock_rs_results():
     ]
 
 
-def _mock_insights():
-    """Mock LLM insights data."""
+def _mock_fleet_insights():
     return {
         "health_score": 72,
-        "readyset_verdict": "strong_candidate",
-        "readyset_summary": "Strong caching candidate.",
-        "estimated_cacheable_pct": 80,
-        "index_recommendations": [
-            {
-                "table": "orders",
-                "columns": "user_id, created_at",
-                "reason": "Frequently filtered",
-                "impact": "High",
-                "sql": "CREATE INDEX idx_orders_user ON orders (user_id, created_at);",
-            },
+        "health_label": "Good",
+        "executive_summary": "Fleet is healthy.",
+        "fleet_findings": [
+            {"severity": "ok", "title": "Healthy fleet", "body": "Stable load"}
         ],
-        "optimization_priorities": [
+        "next_steps": [
             {
-                "priority": 1,
-                "action": "Deploy Readyset",
-                "category": "Caching",
-                "effort": "low",
-                "impact": "high",
-            },
+                "rank": 1,
+                "title": "Deploy Readyset",
+                "body": "Validate caching in staging.",
+            }
         ],
-        "key_findings": ["87% read traffic", "4 of 5 queries cacheable"],
     }
 
 
-# ============================================================================
-# Report Data Tests
-# ============================================================================
+class TestComputeFleetSavings:
+    def test_basic_savings(self):
+        savings = compute_fleet_savings([_mock_audit_result()])
+        assert savings["total_current_usd"] == 397.0
+        assert savings["rightsize_usd"] == 198.0
+        assert savings["cache_infra_usd"] == 198.5
+        assert savings["total_savings_usd"] == 0.0
 
+    def test_replica_elimination(self):
+        primary = _mock_audit_result()
+        replica = _mock_audit_result(
+            target_name="replica",
+            metrics={**primary["metrics"], "is_replica": True},
+        )
+        savings = compute_fleet_savings([primary, replica])
+        assert savings["replica_eliminate_usd"] == 397.0
+        assert savings["total_savings_usd"] == 396.5
 
-class TestBuildSingleReport:
-    def test_basic_build(self):
-        from features.audit.report.report_data import build_single_report
-        report = build_single_report(_mock_audit_result())
-        assert report.metadata.target_name == "test-db"
-        assert report.metadata.engine == "postgresql"
-        assert report.overview.server_version == "PostgreSQL 15.4"
-        assert report.health.sizing_verdict == "oversized"
-        assert report.cache_opportunity.score == 82
-        assert len(report.top_queries) == 2
-
-    def test_with_readyset_results(self):
-        from features.audit.report.report_data import build_single_report
-        report = build_single_report(_mock_audit_result(), rs_results=_mock_rs_results())
-        assert len(report.readyset_results) == 2
-        assert report.readyset_results[0].cacheable is True
-        assert report.readyset_results[0].speedup == 15.0
-        assert report.readyset_results[1].cacheable is False
-        assert report.cache_opportunity.cacheable_query_count == 1
-
-    def test_with_insights(self):
-        from features.audit.report.report_data import build_single_report
-        report = build_single_report(_mock_audit_result(), insights=_mock_insights())
-        assert report.insights is not None
-        assert report.insights.readyset_verdict == "strong_candidate"
-        assert len(report.insights.index_recommendations) == 1
-        assert len(report.insights.optimization_priorities) == 1
-
-    def test_empty_metrics(self):
-        from features.audit.report.report_data import build_single_report
-        result = _mock_audit_result(metrics={}, sizing={}, cache_opportunity={}, top_queries=[])
-        report = build_single_report(result)
-        assert report.overview.server_version == ""
-        assert report.health.sizing_verdict == "unknown"
-        assert report.cache_opportunity.score == 0
-        assert len(report.top_queries) == 0
-
-    def test_none_fields(self):
-        from features.audit.report.report_data import build_single_report
-        result = _mock_audit_result(metrics=None, sizing=None, cache_opportunity=None)
-        report = build_single_report(result)
-        assert report.overview.database_size_mb == 0.0
-
-
-class TestBuildFleetReport:
-    def test_basic_fleet(self):
-        from features.audit.report.report_data import build_fleet_report
-        results = [_mock_audit_result(), _mock_audit_result(target_name="test-db-2")]
-        report = build_fleet_report(results, group_name="test-cluster")
-        assert report.metadata.target_name == "test-cluster"
-        assert report.metadata.report_type == "fleet"
-        assert report.total_targets == 2
-        assert report.targets_succeeded == 2
-        assert report.targets_failed == 0
-        assert len(report.targets) == 2
-
-    def test_fleet_with_failures(self):
-        from features.audit.report.report_data import build_fleet_report
-        results = [
-            _mock_audit_result(),
-            {"target_name": "failed-db", "engine": "mysql", "host": "x", "error": "Connection refused"},
-        ]
-        report = build_fleet_report(results)
-        assert report.targets_succeeded == 1
-        assert report.targets_failed == 1
-        assert report.targets[1].error == "Connection refused"
-
-    def test_fleet_with_insights(self):
-        from features.audit.report.report_data import build_fleet_report
-        fleet_insights = {
-            "fleet_health_summary": "Fleet is healthy.",
-            "fleet_readyset_summary": "Good caching opportunity.",
-            "immediate_actions": ["Deploy Readyset"],
-            "estimated_monthly_savings_usd": 450,
-            "per_target": [
-                {"target_name": "test-db", "readyset_verdict": "strong_candidate", "readyset_summary": "Great.", "estimated_cacheable_pct": 80, "key_findings": ["High read"]},
-            ],
-        }
-        report = build_fleet_report([_mock_audit_result()], fleet_insights=fleet_insights)
-        assert report.fleet_health_summary == "Fleet is healthy."
-        assert report.estimated_monthly_savings_usd == 450
-        assert report.targets[0].readyset_verdict == "strong_candidate"
-
-
-# ============================================================================
-# HTML Render Tests
-# ============================================================================
+    def test_missing_pricing_returns_empty(self):
+        result = _mock_audit_result(sizing={})
+        assert compute_fleet_savings([result]) == {}
 
 
 class TestRenderSingleTargetHtml:
     def test_valid_html(self):
-        from features.audit.report.report_data import build_single_report
-        from features.audit.report.html_report import render_single_target_html
-        report = build_single_report(_mock_audit_result())
-        html = render_single_target_html(report)
+        html = render_report_html([_mock_audit_result()])
         assert html.startswith("<!DOCTYPE html>")
         assert "</html>" in html
 
-    def test_has_all_sections(self):
-        from features.audit.report.report_data import build_single_report
-        from features.audit.report.html_report import render_single_target_html
-        report = build_single_report(_mock_audit_result(), insights=_mock_insights())
-        html = render_single_target_html(report)
+    def test_has_core_sections(self):
+        html = render_report_html([_mock_audit_result()])
         assert "Database Overview" in html
-        assert "Health" in html
-        assert "Top Queries" in html or "Captured Queries" in html
-        assert "Index Recommendations" in html
-        assert "Optimization Priorities" in html
-        assert "Next Steps" in html
+        assert "Detailed Analysis" in html
+        assert "Sizing &amp; Savings" in html
 
     def test_readyset_data_in_queries_table(self):
-        from features.audit.report.report_data import build_single_report
-        from features.audit.report.html_report import render_single_target_html
-        report = build_single_report(_mock_audit_result(), rs_results=_mock_rs_results())
-        html = render_single_target_html(report)
-        assert "Captured Queries" in html
+        result = _mock_audit_result(readyset_results=_mock_rs_results())
+        html = render_report_html([result])
+        assert "Captured Queries &amp; Performance" in html
         assert "Readyset" in html
-        assert "Speedup" in html
         assert "15.0x" in html or "15x" in html
 
     def test_readyset_section_absent_when_no_results(self):
-        from features.audit.report.report_data import build_single_report
-        from features.audit.report.html_report import render_single_target_html
-        report = build_single_report(_mock_audit_result())
-        html = render_single_target_html(report)
+        html = render_report_html([_mock_audit_result()])
         assert "Readyset Performance" not in html
 
     def test_cover_has_kpis(self):
-        from features.audit.report.report_data import build_single_report
-        from features.audit.report.html_report import render_single_target_html
-        report = build_single_report(_mock_audit_result())
-        html = render_single_target_html(report)
-        assert "OVERSIZED" in html  # sizing verdict
-        assert "$397" in html  # cost in cover
-        assert "test-db" in html  # target name
+        html = render_report_html([_mock_audit_result()])
+        assert "OVERSIZED" in html
+        assert "$397" in html
+        assert "test-db" in html
 
     def test_queries_in_table(self):
-        from features.audit.report.report_data import build_single_report
-        from features.audit.report.html_report import render_single_target_html
-        report = build_single_report(_mock_audit_result())
-        html = render_single_target_html(report)
+        html = render_report_html([_mock_audit_result()])
         assert "a3f2c1b8d9e1" in html
-        assert "12,400" in html  # calls formatted with commas
+        assert "12,400" in html
 
     def test_footer_present(self):
-        from features.audit.report.report_data import build_single_report
-        from features.audit.report.html_report import render_single_target_html
-        report = build_single_report(_mock_audit_result())
-        html = render_single_target_html(report)
+        html = render_report_html([_mock_audit_result()])
         assert "RDST" in html
-        assert "Readyset Diagnostics" in html
+        assert "Generated" in html
 
     def test_html_escapes_special_chars(self):
-        from features.audit.report.report_data import build_single_report
-        from features.audit.report.html_report import render_single_target_html
         result = _mock_audit_result(target_name="test<script>alert(1)</script>")
-        report = build_single_report(result)
-        html = render_single_target_html(report)
+        html = render_report_html([result])
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
+
+    def test_empty_metrics_render(self):
+        result = _mock_audit_result(
+            metrics={}, sizing={}, cache_opportunity={}, top_queries=[]
+        )
+        html = render_report_html([result])
+        assert "test-db" in html
+        assert "No results" not in html
+
+    def test_none_fields_render(self):
+        result = _mock_audit_result(
+            metrics=None, sizing=None, cache_opportunity=None, top_queries=None
+        )
+        assert "</html>" in render_report_html([result])
+
+    def test_workload_recommendations_render(self):
+        result = _mock_audit_result(
+            workload={
+                "analysis": {
+                    "index_recommendations": [
+                        {
+                            "table": "orders",
+                            "reason": "Frequently filtered",
+                            "sql": "CREATE INDEX idx_orders_user ON orders (user_id);",
+                        }
+                    ],
+                    "optimization_priorities": [
+                        {"action": "Deploy Readyset", "details": "Test in staging"}
+                    ],
+                }
+            }
+        )
+        html = render_report_html([result])
+        assert "Index Recommendations" in html
+        assert "Deploy Readyset" in html
 
 
 class TestRenderFleetHtml:
     def test_valid_html(self):
-        from features.audit.report.report_data import build_fleet_report
-        from features.audit.report.html_report import render_fleet_html
-        report = build_fleet_report([_mock_audit_result()], group_name="test")
-        html = render_fleet_html(report)
+        html = render_report_html(
+            [_mock_audit_result(), _mock_audit_result(target_name="db-2")],
+            title="test-cluster",
+        )
         assert html.startswith("<!DOCTYPE html>")
         assert "</html>" in html
 
     def test_fleet_overview_section(self):
-        from features.audit.report.report_data import build_fleet_report
-        from features.audit.report.html_report import render_fleet_html
         results = [_mock_audit_result(), _mock_audit_result(target_name="db-2")]
-        report = build_fleet_report(results, group_name="test")
-        html = render_fleet_html(report)
-        assert "Fleet Overview" in html
+        html = render_report_html(results, title="test")
+        assert ">Overview<" in html
         assert "test-db" in html
         assert "db-2" in html
 
     def test_fleet_with_failed_target(self):
-        from features.audit.report.report_data import build_fleet_report
-        from features.audit.report.html_report import render_fleet_html
         results = [
             _mock_audit_result(),
-            {"target_name": "broken", "engine": "mysql", "host": "x", "error": "Auth failed"},
+            {
+                "target_name": "broken",
+                "engine": "mysql",
+                "host": "x",
+                "error": "Auth failed",
+            },
         ]
-        report = build_fleet_report(results)
-        html = render_fleet_html(report)
-        assert "Auth failed" in html
-        assert "FAILED" in html
+        html = render_report_html(results)
+        assert "broken" in html
+        assert "Mysql" in html
+
+    def test_fleet_insights_render(self):
+        results = [_mock_audit_result(), _mock_audit_result(target_name="db-2")]
+        html = render_report_html(results, fleet_insights=_mock_fleet_insights())
+        assert "Fleet is healthy." in html
+        assert "Healthy fleet" in html
+        assert "Deploy Readyset" in html
+
+    def test_empty_results_render(self):
+        html = render_report_html([])
+        assert html.startswith("<!DOCTYPE html>")
+        assert "No results" in html

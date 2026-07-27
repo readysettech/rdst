@@ -1,11 +1,6 @@
 import type { components as apiComponents } from './api.generated';
 import { api as typedClient } from './client';
-
-async function throwIfNotOk(response: Response, ctx: string): Promise<void> {
-  if (response.ok) return;
-  const body = await response.text().catch(() => '');
-  throw new Error(body || `${ctx}: ${response.status}`);
-}
+import { throwIfNotOk } from './httpError';
 
 export type AnalyzeRequest = apiComponents['schemas']['AnalyzeRequest'];
 
@@ -102,8 +97,10 @@ export async function setEnvSecret(payload: SetEnvSecretRequest): Promise<SetEnv
 
 export type AnthropicKeyValidation = {
   valid: boolean;
-  reason: 'ok' | 'rejected' | 'no_key' | 'provider_error';
+  reason: 'ok' | 'rejected' | 'no_key' | 'provider_error' | 'exhausted';
   model: string | null;
+  // 'trial' | 'trial_exhausted' | 'process_env' | 'keyring' | 'none' etc.
+  source?: string | null;
 };
 
 // Validity, not just presence: pings Anthropic with the resolved key so the UI
@@ -243,6 +240,31 @@ export async function submitReport(request: ReportRequest): Promise<ReportRespon
     throw new Error(`Failed to submit report: ${response.status}`);
   }
   return response.json();
+}
+
+// Report delivery: emails the exact HTML artifact the CLI sends. `email` is
+// optional — omitted, the server uses the machine's stored identity.
+
+export type RunEmailResponse = apiComponents['schemas']['RunEmailResponse'];
+
+export async function emailAuditReport(runId: string, email?: string): Promise<RunEmailResponse> {
+  const { data, response } = await typedClient.POST('/api/audit/runs/{run_id}/email', {
+    params: { path: { run_id: runId } },
+    body: { email: email ?? null },
+  });
+  await throwIfNotOk(response, 'Failed to email report');
+  if (!data) throw new Error('Missing response body');
+  return data;
+}
+
+export async function emailFleetReport(snapshotId: string, email?: string): Promise<RunEmailResponse> {
+  const { data, response } = await typedClient.POST('/api/fleet/snapshots/{snapshot_id}/email', {
+    params: { path: { snapshot_id: snapshotId } },
+    body: { email: email ?? null },
+  });
+  await throwIfNotOk(response, 'Failed to email report');
+  if (!data) throw new Error('Missing response body');
+  return data;
 }
 
 // Benchmark Types

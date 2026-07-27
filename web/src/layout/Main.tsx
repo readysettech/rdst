@@ -10,6 +10,17 @@ export function Main({ children, isElectronMac = false }: MainProps) {
   return (
     <ScrollArea.Root asChild>
       <main
+        // The ScrollArea root is `overflow-y-hidden`, but hidden containers are
+        // still scrollable programmatically: an anchor/hash jump (or any
+        // scrollIntoView) scrolls EVERY scrollable ancestor, so the root ends up
+        // offset and drags the scroll viewport out of view. The user can never
+        // scroll it back — the page looks frozen with dead space until a reload.
+        // Pin the root at the origin so only the viewport ever scrolls.
+        onScroll={(event) => {
+          const root = event.currentTarget
+          if (root.scrollTop !== 0) root.scrollTop = 0
+          if (root.scrollLeft !== 0) root.scrollLeft = 0
+        }}
         className={cn(
           // Sidebar offset only from tablet up; below that the sidebar is
           // off-canvas so content spans full width (responsive chrome, T19).
@@ -17,13 +28,13 @@ export function Main({ children, isElectronMac = false }: MainProps) {
           isElectronMac ? 'bg-surface-layout-2/30' : 'bg-surface-layout-2'
         )}
       >
-        {/* `[&>div]:!block` overrides Radix's internal `display:table;
-            min-width:100%` viewport wrapper. As a table it shrink-wraps to a
-            child's max-width, so `max-w-6xl` grew it past the sidebar-narrowed
-            viewport and the overflow-x-hidden viewport clipped feature CTAs at
-            1280×720 (P21/P22/P23). As a block it stays 100% wide, so the fluid
-            content column below fits and the CTAs stay reachable. */}
-        <ScrollArea.Viewport className="w-full h-full overflow-auto custom-scrollbar [&>div]:!block">
+        {/* Radix's direct child is a `display:table; min-width:100%`
+            measurement wrapper. Keep it as a table so its height tracks
+            dynamically expanding report content, but pin it to the viewport
+            with fixed table layout. That prevents wide descendants from
+            shrink-wrapping it past the sidebar-narrowed viewport and clipping
+            feature CTAs at 1280×720 (P21/P22/P23). */}
+        <ScrollArea.Viewport className="w-full h-full overflow-auto custom-scrollbar [&>div]:!w-full [&>div]:!table-fixed">
           {/* Fluid content column: w-full + max-w + min-w-0, never the fixed
               `container` width (which computes off the viewport, ignoring the
               264px sidebar). Centered by mx-auto on wide screens. */}

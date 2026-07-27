@@ -153,6 +153,78 @@ class EmailService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def queue_report(
+        self,
+        email: str,
+        html_body: str,
+        subject: str,
+        report_token: Optional[str] = None,
+        mode: str = "link",
+        ttl_days: int = 30,
+        summary: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Send a report, or hand it to the keyservice to release once the
+        recipient clicks their verification link.
+
+        Same delivery semantics as `send_report_with_verification` minus the
+        blocking wait, so it is safe to call from a request handler. A stale
+        `report_token` comes back as `stale_token=True` so the caller can drop
+        it from local config; `queued=True` means verification is pending.
+        """
+        stale_token = False
+        if report_token:
+            result = self.send_report(
+                report_token, html_body, subject,
+                mode=mode, ttl_days=ttl_days, summary=summary,
+            )
+            if result.get("success"):
+                return {**result, "report_token": report_token, "queued": False}
+            err = (result.get("error") or "").lower()
+            if "invalid" in err or "not yet verified" in err or "unverified" in err:
+                stale_token = True
+            else:
+                return {**result, "report_token": report_token}
+
+        reg = self.register_email(
+            email,
+            html=html_body,
+            subject=subject,
+            summary=summary,
+            ttl_days=ttl_days,
+            mode=mode,
+        )
+        if not reg.get("success"):
+            return {
+                "success": False,
+                "stale_token": stale_token,
+                "error": reg.get("error", "Registration failed"),
+            }
+
+        token = reg.get("report_token")
+        if reg.get("verified"):
+            if reg.get("report_sent"):
+                return {
+                    "success": True, "report_token": token,
+                    "queued": False, "stale_token": stale_token,
+                }
+            if token:
+                result = self.send_report(
+                    token, html_body, subject,
+                    mode=mode, ttl_days=ttl_days, summary=summary,
+                )
+                return {
+                    **result, "report_token": token,
+                    "queued": False, "stale_token": stale_token,
+                }
+            return {"success": False, "error": "Keyservice returned verified=true with no token"}
+
+        return {
+            "success": True,
+            "queued": True,
+            "stale_token": stale_token,
+            "report_queued": bool(reg.get("report_queued")),
+        }
+
     def send_report_with_verification(
         self,
         email: str,

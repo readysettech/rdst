@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
+from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import keyring
@@ -20,6 +20,7 @@ from httpx import ASGITransport, AsyncClient
 from keyring.backend import KeyringBackend
 
 from shared.api.app import create_app
+from shared.config.targets import TargetsConfig
 from shared.secret_store_service import SecretStoreService
 
 
@@ -67,25 +68,6 @@ def collect_sse_events():
         return events
 
     return _collect
-
-
-@pytest.fixture
-def tmp_rdst_home(monkeypatch, tmp_path: Path) -> Path:
-    """Relocate ``~/.rdst/`` to a fresh tmp dir for the duration of one test.
-
-    Setting ``HOME`` is sufficient because every callsite resolves the
-    data directory at *call* time (via ``shared.constants.rdst_data_dir()``
-    or ``Path.home()``), not at module import. Per-feature paths
-    (agents, guards, slack, scan corpus/snippets, semantic-layer) are
-    likewise functions, so they pick up the new HOME on first use.
-    """
-    rdst_home = tmp_path / "home"
-    rdst_data_dir = rdst_home / ".rdst"
-    rdst_data_dir.mkdir(parents=True, exist_ok=True)
-
-    monkeypatch.setenv("HOME", str(rdst_home))
-
-    return rdst_data_dir
 
 
 @pytest.fixture
@@ -231,3 +213,111 @@ def db_target_payload(db_engine: str) -> dict:
             "password_env": "RDST_TEST_PASSWORD",
         }
     raise ValueError(f"Unknown RDST_TEST_ENGINE={db_engine!r}")
+
+
+@pytest.fixture
+def seeded_target_defaults() -> dict:
+    """Name and password env a bare ``seed_target()`` writes; override per
+    module."""
+    return {"name": "testtarget", "env": "TEST_PASSWORD"}
+
+
+@pytest.fixture
+def seed_target(seeded_target_defaults):
+    """Write one PostgreSQL target into the isolated ``~/.rdst/config.toml``.
+
+    Requesting this fixture only builds the writer; call it per target. Every
+    caller runs under ``tmp_rdst_home``, so the config never touches real HOME.
+    """
+
+    def _seed(
+        name: str | None = None,
+        *,
+        env: str | None = None,
+        group: str | None = None,
+        tags: list[str] | None = None,
+        **extra,
+    ) -> None:
+        name = name or seeded_target_defaults["name"]
+        password_env = env or seeded_target_defaults["env"]
+        cfg = TargetsConfig()
+        cfg.load()
+        entry: dict = {
+            "engine": "postgresql",
+            "host": "127.0.0.1",
+            "port": 5432,
+            "database": "appdb",
+            "user": "appuser",
+            "password_env": password_env,
+        }
+        if group:
+            entry["group"] = group
+        if tags:
+            entry["tags"] = tags
+        entry.update(extra)
+        cfg.upsert(name, entry)
+        cfg.save()
+
+    return _seed
+
+
+@pytest.fixture
+def override_target_guard(app):
+    """Force ``require_target`` to resolve a named target for one block.
+
+    The override is popped on exit so it never leaks into the next test.
+    """
+
+    @contextmanager
+    def _override(target_name: str):
+        from shared.api.target_guard import ensure_target_password, require_target
+
+        async def target_guard():
+            return ensure_target_password(target_name)
+
+        app.dependency_overrides[require_target] = target_guard
+        try:
+            yield
+        finally:
+            app.dependency_overrides.pop(require_target, None)
+
+    return _override
+
+
+@pytest.fixture
+def fleet_member():
+    """Build a `FleetMember` for the discovery/import routes.
+
+    Defaults describe a writer-style RDS PostgreSQL instance; MySQL members
+    override ``engine`` and ``port``.
+    """
+    from features.fleet.models import FleetMember
+
+    def _member(name: str, **overrides):
+        fields: dict = {
+            "name": name,
+            "engine": "postgresql",
+            "host": f"{name}.abc.us-east-1.rds.amazonaws.com",
+            "port": 5432,
+            "database": "app",
+            "user": "postgres",
+            "password_env": "FLEET_PASS",
+        }
+        fields.update(overrides)
+        return FleetMember(**fields)
+
+    return _member
+
+
+@pytest.fixture
+def mock_targets_config():
+    """A minimal mocked `TargetsConfig` for CLI command tests.
+
+    Classes whose command reads more of the config override this fixture with
+    the extra attributes they need.
+    """
+    cfg = MagicMock()
+    cfg.get_default.return_value = "test-target"
+    cfg.get.return_value = {"engine": "postgresql", "host": "localhost"}
+    cfg.load = MagicMock()
+    return cfg

@@ -1,10 +1,17 @@
 import { useSyncExternalStore } from 'react'
 import type { CacheRunResult, CacheTestRunRequest } from '../types/cache'
+import type { components } from './api.generated'
 import { api } from './client'
 import { normalizeSseError } from './errorContract'
 import { consumeSseResponse } from './sseReader'
 
-export type BackgroundRunKind = 'bootstrap' | 'schema_annotation' | 'cache_test'
+export type BackgroundRunKind =
+  | 'bootstrap'
+  | 'schema_annotation'
+  | 'cache_test'
+  | 'audit'
+  | 'audit_capture'
+  | 'fleet_audit'
 export type BackgroundRunStatus =
   | 'running'
   | 'reconnecting'
@@ -29,6 +36,18 @@ export interface BackgroundRunState {
   queryLabel?: string
   result?: CacheRunResult
   hidden?: boolean
+  /** Saved audit/capture run to deep-link to once the run has produced one. */
+  snapshotId?: string
+}
+
+/** Single-target health-check kinds (a fleet audit covers many targets). */
+export function isAuditKind(kind: BackgroundRunKind): boolean {
+  return kind === 'audit' || kind === 'audit_capture'
+}
+
+/** Every kind the health-check screen owns, fleet runs included. */
+export function isHealthCheckKind(kind: BackgroundRunKind): boolean {
+  return isAuditKind(kind) || kind === 'fleet_audit'
 }
 
 type StoredRun = BackgroundRunState
@@ -41,6 +60,15 @@ const TERMINAL: BackgroundRunStatus[] = [
   'failed',
   'cancelled',
 ]
+
+const INITIAL_STAGES: Record<BackgroundRunKind, string> = {
+  bootstrap: 'connection_test',
+  schema_annotation: 'annotate',
+  cache_test: 'connecting',
+  audit: 'config',
+  audit_capture: 'config',
+  fleet_audit: 'config',
+}
 
 const BOOTSTRAP_STAGE_LABELS: Record<string, string> = {
   connection_test: 'Testing connection',
@@ -129,12 +157,7 @@ function attachRun(
     runId,
     kind,
     target,
-    stage:
-      kind === 'bootstrap'
-        ? 'connection_test'
-        : kind === 'cache_test'
-          ? 'connecting'
-          : 'annotate',
+    stage: INITIAL_STAGES[kind],
     status: 'running',
     message,
     lastSeq: 0,
@@ -255,6 +278,99 @@ export async function startCacheTestRun(
       request.target ?? '',
       error instanceof Error ? error.message : 'Cache test could not start',
       metadata
+    )
+    return null
+  }
+}
+
+/** A background audit the caller can subscribe to for its own richer state. */
+export interface AuditRunStart {
+  runId: string
+  reused: boolean
+}
+
+/** Start (or attach to) a metrics-only health check that survives reloads. */
+export async function startAuditRun(
+  target: string,
+  options: { insights?: boolean } = {}
+): Promise<AuditRunStart | null> {
+  try {
+    const { data, error } = await api.POST('/api/audit', {
+      body: { target, insights: options.insights ?? true },
+    })
+    if (error || !data) {
+      throw new Error(normalizeSseError(error).message)
+    }
+    attachRun(data.run_id, 'audit', target, 'Starting health check...')
+    return { runId: data.run_id, reused: data.reused ?? false }
+  } catch (error) {
+    kickoffFailed(
+      'audit',
+      target,
+      error instanceof Error ? error.message : 'Health check could not start'
+    )
+    return null
+  }
+}
+
+/** Start (or attach to) a duration capture that survives reloads. */
+export async function startAuditCaptureRun(
+  target: string,
+  options: { duration?: number; analysis?: boolean } = {}
+): Promise<AuditRunStart | null> {
+  try {
+    const { data, error } = await api.POST('/api/audit/capture', {
+      body: {
+        target,
+        duration: options.duration ?? 60,
+        analysis: options.analysis ?? true,
+        readyset: true,
+      },
+    })
+    if (error || !data) {
+      throw new Error(normalizeSseError(error).message)
+    }
+    attachRun(data.run_id, 'audit_capture', target, 'Starting capture...')
+    return { runId: data.run_id, reused: data.reused ?? false }
+  } catch (error) {
+    kickoffFailed(
+      'audit_capture',
+      target,
+      error instanceof Error ? error.message : 'Capture could not start'
+    )
+    return null
+  }
+}
+
+/**
+ * Start (or attach to) a fleet-wide health check. The whole fleet is one run,
+ * so the Jobs list shows a single card no matter how many targets it covers.
+ */
+export async function startFleetAuditRun(
+  request: components['schemas']['FleetAuditRequest']
+): Promise<AuditRunStart | null> {
+  const scope = request.group ?? 'fleet'
+  try {
+    const { data, error } = await api.POST('/api/fleet/audit', {
+      body: request,
+    })
+    if (error || !data) {
+      throw new Error(normalizeSseError(error).message)
+    }
+    attachRun(
+      data.run_id,
+      'fleet_audit',
+      scope,
+      'Starting fleet health check...'
+    )
+    return { runId: data.run_id, reused: data.reused ?? false }
+  } catch (error) {
+    kickoffFailed(
+      'fleet_audit',
+      scope,
+      error instanceof Error
+        ? error.message
+        : 'Fleet health check could not start'
     )
     return null
   }
@@ -507,6 +623,96 @@ function applyFrame(runId: string, event: string, data: unknown): void {
         hasWarnings:
           run.hasWarnings || tablesFailed > 0 || payload.success === false,
         message: String(payload.message ?? 'Annotation complete'),
+      })
+      break
+    }
+    case 'status':
+      updateRun(runId, {
+        ...base,
+        stage: String(payload.phase ?? run.stage),
+        message: String(payload.message ?? run.message),
+      })
+      break
+    case 'target_start': {
+      // A fleet audit announces every target up front, so name the fleet
+      // rather than whichever target happened to be announced last.
+      const total = Number(payload.total ?? 0)
+      updateRun(runId, {
+        ...base,
+        stage: 'collect',
+        message:
+          run.kind === 'fleet_audit'
+            ? `Auditing ${total} ${total === 1 ? 'target' : 'targets'}...`
+            : `Auditing ${String(payload.target_name ?? run.target)}...`,
+      })
+      break
+    }
+    case 'capture_progress': {
+      const elapsed = Number(payload.elapsed_seconds ?? 0)
+      const total = Number(payload.total_seconds ?? 0)
+      updateRun(runId, {
+        ...base,
+        stage: 'capture',
+        message: total
+          ? `Capturing ${Math.round(elapsed)}s of ${Math.round(total)}s`
+          : `Capturing ${Math.round(elapsed)}s`,
+        current: total
+          ? Math.min(100, Math.round((elapsed / total) * 100))
+          : null,
+        total: total ? 100 : null,
+      })
+      break
+    }
+    case 'snapshot_saved':
+      updateRun(runId, {
+        ...base,
+        snapshotId: String(payload.snapshot_id ?? ''),
+      })
+      break
+    case 'target_error': {
+      // One unreachable target warns; the fleet run carries on and still
+      // completes with whatever its healthy siblings produced.
+      const failed = String(payload.target_name ?? '')
+      const reason = String(payload.error ?? run.message)
+      updateRun(runId, {
+        ...base,
+        hasWarnings: true,
+        message:
+          run.kind === 'fleet_audit' && failed
+            ? `${failed}: ${reason}`
+            : reason,
+      })
+      break
+    }
+    case 'target_complete':
+      updateRun(runId, {
+        ...base,
+        stage: run.kind === 'fleet_audit' ? run.stage : 'storage',
+        message:
+          run.kind === 'fleet_audit'
+            ? `Audited ${String(payload.target_name ?? run.target)}`
+            : 'Collected metrics',
+      })
+      break
+    case 'complete': {
+      // A quick audit reports its saved snapshot, a capture its workload run;
+      // either is the run detail this job's card deep-links to.
+      const saved = payload.snapshot_id ?? payload.run_id
+      updateRun(runId, {
+        ...base,
+        stage: 'storage',
+        hasWarnings: run.hasWarnings || payload.success === false,
+        snapshotId: typeof saved === 'string' ? saved : run.snapshotId,
+        message:
+          payload.success === false
+            ? run.message
+            : run.kind === 'audit_capture'
+              ? 'Capture complete'
+              : run.kind === 'fleet_audit'
+                ? 'Fleet health check complete'
+                : 'Health check complete',
+        current: 100,
+        total: 100,
       })
       break
     }

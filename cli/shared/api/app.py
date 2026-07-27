@@ -171,6 +171,8 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
     BackgroundRunEvent = (
         BootstrapEvent
         | AnnotateEvent
+        | AuditEvent
+        | WorkloadEvent
         | ProgressEvent
         | CacheRunCompleteEvent
         | ErrorEvent
@@ -180,7 +182,10 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
     return {
         "AnalyzeEvent": (AnalyzeEvent, ["/api/analyze", "/api/analyze/quick"]),
         "AskEvent": (AskEvent, ["/api/ask"]),
-        "AuditEvent": (AuditEvent, ["/api/audit", "/api/fleet/audit"]),
+        # Single-target and fleet audit events alike reach the client through
+        # the background-run stream; the union is still published so the
+        # frontend keeps its typed variants.
+        "AuditEvent": (AuditEvent, []),
         "BootstrapEvent": (
             BootstrapEvent,
             ["/api/bootstrap/runs/{run_id}/events"],
@@ -190,7 +195,9 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
             ["/api/runs/{run_id}/events"],
         ),
         "ChatEvent": (ChatEvent, ["/api/agents/chat/sessions/{session_id}/message"]),
-        "WorkloadEvent": (WorkloadEvent, ["/api/audit/capture"]),
+        # Capture events reach the client through the background-run stream;
+        # the union is still published so the frontend keeps its typed variants.
+        "WorkloadEvent": (WorkloadEvent, []),
         "FleetEvent": (FleetEvent, ["/api/fleet/status", "/api/fleet/import", "/api/fleet/discover"]),
         "QueryBenchmarkEvent": (
             QueryBenchmarkEvent,

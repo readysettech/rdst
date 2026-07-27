@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from features.trial.service import TrialService
-from shared.api.guards import is_loopback_request, same_host_from_headers
+from shared.api.guards import is_loopback_request, require_local_request
 from shared.run_registry import run_registry
 
 router = APIRouter()
@@ -68,10 +68,7 @@ class TrialSimulationResponse(BaseModel):
 async def register_trial(
     request: Request, body: TrialRegisterRequest
 ) -> TrialRegisterResponse:
-    if not is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not same_host_from_headers(request):
-        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+    require_local_request(request)
 
     service = TrialService()
     result = await service.register(body.email, source="web")
@@ -94,10 +91,7 @@ async def register_trial(
 async def activate_trial(
     request: Request, body: TrialActivateRequest
 ) -> TrialActivateResponse:
-    if not is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not same_host_from_headers(request):
-        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+    require_local_request(request)
 
     service = TrialService()
     result = await service.activate(
@@ -133,10 +127,7 @@ async def get_trial_status(request: Request) -> TrialStatusResponse:
 
 @router.post("/trial/simulate/exhaust")
 async def simulate_trial_exhaustion(request: Request) -> TrialSimulationResponse:
-    if not is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not same_host_from_headers(request):
-        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+    require_local_request(request)
 
     service = TrialService()
     result = service.simulate_exhausted()

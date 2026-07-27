@@ -51,4 +51,6 @@ export interface ConfigureConnectionStatus {
   connected: boolean;
   error?: string;
   engine?: string;
+  code?: string;
+  passwordEnv?: string;
 }

@@ -25,7 +25,7 @@ from .events import (
     WorkloadSnapshotEvent,
     WorkloadStatusEvent,
 )
-from .index_dedupe import filter_existing_indexes
+from .index_dedupe import filter_existing_indexes, normalize_index_rec_sql
 from .models import WorkloadAnalysis, WorkloadQuery, WorkloadRun
 from .prompts import build_audit_capture_prompt
 from .storage import AuditStorage
@@ -33,6 +33,28 @@ from . import query_stats as query_stats_module
 
 logger = logging.getLogger(__name__)
 _LITERAL_RE = re.compile(r"'[^']*'|\b\d+\.?\d*\b")
+
+# Keep capture reports aligned with the full metrics audit produced by the
+# CLI. These fields are added to both the persisted WorkloadRun JSON and the
+# complete event summary. Workload-only fields remain owned by WorkloadRun.
+_AUDIT_CAPTURE_FIELDS = (
+    "target_name",
+    "engine",
+    "host",
+    "region",
+    "instance_class",
+    "instance_class_source",
+    "group",
+    "tags",
+    "metrics",
+    "sizing",
+    "cache_opportunity",
+    "top_queries",
+    "audited_at",
+    "cloudwatch_cpu",
+    "health_report",
+    "health_analysis",
+)
 
 
 def _normalize(sql: str) -> str:
@@ -81,6 +103,99 @@ class CaptureService:
     def request_stop(self) -> None:
         self._stop_requested = True
 
+    async def _collect_metrics_audit(
+        self,
+        target_name: str,
+        target_config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Collect the full audit payload for API captures, best-effort.
+
+        CLI and fleet captures pass an already-collected ``audit_result`` to
+        ``run_capture``. The web capture endpoint does not, so it reaches this
+        fallback. A metrics failure must never prevent workload capture.
+        """
+        try:
+            from .service import AuditService
+
+            result = await asyncio.to_thread(
+                AuditService(config=self._get_config()).audit_target,
+                target_name,
+                target_config,
+            )
+            if result.error:
+                logger.warning("Metrics audit failed during capture: %s", result.error)
+                return None
+            return asdict(result)
+        except Exception as exc:
+            logger.warning("Metrics audit failed during capture: %s", exc)
+            return None
+
+    @staticmethod
+    def _audit_capture_payload(audit_result: dict[str, Any] | None) -> dict[str, Any]:
+        if not audit_result or audit_result.get("error"):
+            return {}
+        return {
+            key: audit_result[key]
+            for key in _AUDIT_CAPTURE_FIELDS
+            if key in audit_result
+        }
+
+    @staticmethod
+    def check_query_stats(connection, db_engine: str) -> dict[str, Any]:
+        """Check that query tracking is available on an open connection.
+
+        pg_stat_statements (PG) or performance_schema (MySQL) must be ON for
+        capture to produce query data. Returns
+        {"status": "ok"|"missing"|"error", "detail": str, "remediation": str|None}.
+        """
+        cursor = None
+        try:
+            cursor = connection.cursor()
+            if db_engine == "postgresql":
+                cursor.execute("SELECT 1 FROM pg_stat_statements LIMIT 1")
+            elif db_engine == "mysql":
+                cursor.execute("SHOW VARIABLES LIKE 'performance_schema'")
+                row = cursor.fetchone()
+                # pymysql returns tuple or dict depending on cursor type
+                value = row.get("Value", "") if isinstance(row, dict) else (row[1] if row else "")
+                if str(value).upper() != "ON":
+                    return {
+                        "status": "missing",
+                        "detail": "MySQL performance_schema is OFF. Query capture requires it to be enabled.",
+                        "remediation": (
+                            "Fix: create a custom RDS parameter group with performance_schema=ON, "
+                            "attach it to the instance, and reboot.\n"
+                            "For non-RDS: add performance_schema=ON to my.cnf and restart MySQL."
+                        ),
+                    }
+            return {
+                "status": "ok",
+                "detail": (
+                    "pg_stat_statements is available"
+                    if db_engine == "postgresql"
+                    else "performance_schema is ON"
+                ),
+                "remediation": None,
+            }
+        except Exception as exc:
+            err = str(exc)
+            if db_engine == "postgresql" and "pg_stat_statements" in err.lower():
+                return {
+                    "status": "missing",
+                    "detail": "pg_stat_statements extension is not installed. Query capture requires it.",
+                    "remediation": (
+                        "Fix: CREATE EXTENSION pg_stat_statements;\n"
+                        "For RDS: add pg_stat_statements to shared_preload_libraries in the parameter group."
+                    ),
+                }
+            return {"status": "error", "detail": err, "remediation": None}
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
     async def run_capture(
         self,
         target_name: str,
@@ -96,9 +211,17 @@ class CaptureService:
         delay: float = 0.1,
         cumulative_top_queries: list | None = None,
         audit_result: dict | None = None,
+        collect_metrics_audit: bool = False,
         save_capture: bool = True,
+        readyset_testing: bool = False,
     ):
-        """Capture a workload from a database target."""
+        """Capture a workload from a database target.
+
+        When `readyset_testing` is set, captured queries are benchmarked
+        against an ephemeral Readyset container after analysis; the
+        comparison lands in the complete event's summary under
+        "readyset_comparison".
+        """
         from shared.db_connection import create_direct_connection
 
         config = self._get_config()
@@ -113,6 +236,15 @@ class CaptureService:
         storage = AuditStorage()
         run_id = storage.generate_run_id(target_name)
 
+        if audit_result is None and collect_metrics_audit:
+            yield WorkloadStatusEvent(
+                type="status",
+                phase="audit",
+                message="Collecting health and sizing metrics...",
+            )
+            audit_result = await self._collect_metrics_audit(target_name, target_config)
+        audit_payload = self._audit_capture_payload(audit_result)
+
         yield WorkloadStatusEvent(
             type="status", phase="config", message=f"Connecting to {target_name}..."
         )
@@ -122,48 +254,19 @@ class CaptureService:
             yield WorkloadErrorEvent(type="error", message=str(exc), phase="connect")
             return
 
-        # Preflight: verify query tracking is enabled before spending time on capture.
-        # pg_stat_statements (PG) or performance_schema (MySQL) must be ON.
+        # Preflight: verify query tracking is enabled before spending time on
+        # capture. "error" results (unrelated failures) let the capture proceed
+        # and get handled downstream; only a definitive "missing" aborts.
         if duration_seconds and not snapshot_only:
-            try:
-                _pfcur = connection.cursor()
-                if db_engine == "postgresql":
-                    _pfcur.execute("SELECT 1 FROM pg_stat_statements LIMIT 1")
-                elif db_engine == "mysql":
-                    _pfcur.execute("SHOW VARIABLES LIKE 'performance_schema'")
-                    _pf_row = _pfcur.fetchone()
-                    # pymysql returns tuple or dict depending on cursor type
-                    _pf_val = _pf_row.get("Value", "") if isinstance(_pf_row, dict) else (_pf_row[1] if _pf_row else "")
-                    if str(_pf_val).upper() != "ON":
-                        _pfcur.close()
-                        yield WorkloadErrorEvent(
-                            type="error",
-                            message=(
-                                "MySQL performance_schema is OFF. Query capture requires it to be enabled.\n"
-                                "Fix: create a custom RDS parameter group with performance_schema=ON, "
-                                "attach it to the instance, and reboot.\n"
-                                "For non-RDS: add performance_schema=ON to my.cnf and restart MySQL."
-                            ),
-                            phase="preflight",
-                        )
-                        connection.close()
-                        return
-                _pfcur.close()
-            except Exception as _pf_exc:
-                err_str = str(_pf_exc)
-                if db_engine == "postgresql" and "pg_stat_statements" in err_str.lower():
-                    yield WorkloadErrorEvent(
-                        type="error",
-                        message=(
-                            "pg_stat_statements extension is not installed. Query capture requires it.\n"
-                            "Fix: CREATE EXTENSION pg_stat_statements;\n"
-                            "For RDS: add pg_stat_statements to shared_preload_libraries in the parameter group."
-                        ),
-                        phase="preflight",
-                    )
-                    connection.close()
-                    return
-                # Other errors — let the capture proceed and handle downstream
+            preflight = self.check_query_stats(connection, db_engine)
+            if preflight["status"] == "missing":
+                yield WorkloadErrorEvent(
+                    type="error",
+                    message=f"{preflight['detail']}\n{preflight['remediation']}",
+                    phase="preflight",
+                )
+                connection.close()
+                return
 
         yield WorkloadConnectedEvent(
             type="connected",
@@ -400,9 +503,11 @@ class CaptureService:
                     analysis_dict["raw_response"] = raw_text
                     if schema_context:
                         analysis_dict["schema_context"] = schema_context
-                    deduped_index_recs = filter_existing_indexes(
-                        analysis_dict.get("index_recommendations") or [],
-                        schema_context or "",
+                    deduped_index_recs = normalize_index_rec_sql(
+                        filter_existing_indexes(
+                            analysis_dict.get("index_recommendations") or [],
+                            schema_context or "",
+                        )
                     )
                     analysis_dict["index_recommendations"] = deduped_index_recs
                     run.analysis = WorkloadAnalysis(
@@ -428,6 +533,41 @@ class CaptureService:
                         phase="analysis",
                         message=f"Analysis failed: {exc}",
                     )
+
+            readyset_comparison = None
+            if readyset_testing and queries and not snapshot_only:
+                from .readyset_benchmark import (
+                    build_comparison,
+                    docker_available,
+                    run_ephemeral_benchmark,
+                )
+
+                if not docker_available():
+                    yield WorkloadStatusEvent(
+                        type="status",
+                        phase="readyset",
+                        message="Docker is not available — skipped Readyset cache benchmark",
+                    )
+                else:
+                    yield WorkloadStatusEvent(
+                        type="status",
+                        phase="readyset",
+                        message=f"Benchmarking {len(queries)} captured queries against Readyset...",
+                    )
+                    outcome = await asyncio.to_thread(
+                        run_ephemeral_benchmark,
+                        target_name,
+                        [asdict(query) for query in queries],
+                    )
+                    if outcome.get("status") == "ok":
+                        readyset_comparison = build_comparison(outcome["results"])
+                        run.readyset_comparison = readyset_comparison
+                    else:
+                        yield WorkloadStatusEvent(
+                            type="status",
+                            phase="readyset",
+                            message=f"Readyset benchmark skipped: {outcome.get('detail')}",
+                        )
 
             number_to_save = save_top_queries if save_top_queries is not None else len(queries)
             saved_hashes: list[str] = []
@@ -468,24 +608,28 @@ class CaptureService:
             path = ""
             if save_capture:
                 yield WorkloadStatusEvent(type="status", phase="storage", message="Saving audit capture...")
-                path = storage.save_run(run)
+                path = storage.save_run(run, extra=audit_payload)
 
             query_dicts = [asdict(query) for query in queries] if queries else []
+            summary = {
+                "run_id": run_id,
+                "target": target_name,
+                "duration_seconds": actual_duration if not snapshot_only else 0,
+                "unique_queries": len(queries),
+                "total_executions": total_executions,
+                "total_query_time_ms": round(total_query_time, 1),
+                "path": path,
+                "has_analysis": analysis_dict is not None,
+                "queries": query_dicts,
+            }
+            if readyset_comparison:
+                summary["readyset_comparison"] = readyset_comparison
+            summary.update(audit_payload)
             yield WorkloadCompleteEvent(
                 type="complete",
                 success=True,
                 run_id=run_id,
-                summary={
-                    "run_id": run_id,
-                    "target": target_name,
-                    "duration_seconds": actual_duration if not snapshot_only else 0,
-                    "unique_queries": len(queries),
-                    "total_executions": total_executions,
-                    "total_query_time_ms": round(total_query_time, 1),
-                    "path": path,
-                    "has_analysis": analysis_dict is not None,
-                    "queries": query_dicts,
-                },
+                summary=summary,
                 analysis=analysis_dict,
             )
         except Exception as exc:

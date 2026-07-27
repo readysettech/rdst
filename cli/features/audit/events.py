@@ -25,6 +25,13 @@ class AuditStatusEvent:
     type: Literal["status"]
     phase: str
     message: str
+    # Fleet audit status can be scoped to one target. These fields are
+    # optional so existing single-target/global status consumers keep the
+    # exact same contract.
+    target_name: str | None = None
+    elapsed_seconds: float | None = None
+    total_seconds: float | None = None
+    step: str | None = None
 
 
 @dataclass

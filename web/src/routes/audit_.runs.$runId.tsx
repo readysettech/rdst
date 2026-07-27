@@ -3,12 +3,11 @@
  *
  * Past runs used to open inline inside /audit (component-local `loadedReport`
  * state, URL frozen at /audit — not deep-linkable, back did nothing). This route
- * gives each saved run its own URL: the Past Runs list links here, the loader
+ * gives each saved run its own URL: the Reports list links here, the loader
  * fetches the saved run, and browser back returns to the launcher.
  *
  * The report / workload body lives in the route-ignored `-audit-run-detail-page`
- * sibling (which imports the shared views from `-audit-views`) so the CodeMirror
- * SQL stack stays code-split — an exported page in this eager route reference
+ * sibling so the CodeMirror SQL stack stays code-split — an exported page in this eager route reference
  * module would pin CodeMirror into the eager graph. [FIX-1 / Defect D-1;
  * feedback-triage-2 §1.3, USE-041/042/097]
  */
@@ -19,10 +18,27 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { fetchRunDetail } from '../lib/useAudit'
+import { fetchFleetSnapshotDetail } from '../lib/useFleet'
 import { AuditRunDetailPage } from './-audit-run-detail-page'
 
 export const Route = createFileRoute('/audit_/runs/$runId')({
-  loader: ({ params }) => fetchRunDetail(params.runId),
+  loader: async ({ params }) => {
+    try {
+      return {
+        kind: 'audit' as const,
+        data: await fetchRunDetail(params.runId),
+      }
+    } catch (auditError) {
+      try {
+        return {
+          kind: 'fleet' as const,
+          data: await fetchFleetSnapshotDetail(params.runId),
+        }
+      } catch {
+        throw auditError
+      }
+    }
+  },
   component: AuditRunDetailRoute,
   pendingComponent: AuditRunDetailPending,
   errorComponent: AuditRunDetailError,
@@ -44,6 +60,8 @@ function BackToHealthCheck() {
   return (
     <Link
       to="/audit"
+      search={{ tab: 'history' }}
+      hash="history"
       className="inline-flex items-center gap-1.5 text-content-layout-3 hover:text-content-layout-1 transition-colors"
     >
       <Icon
@@ -52,7 +70,7 @@ function BackToHealthCheck() {
         aria-hidden="true"
         className="w-4 h-4"
       />
-      <Text level="label-small">Back to Health Check</Text>
+      <Text level="label-small">Back to Reports</Text>
     </Link>
   )
 }

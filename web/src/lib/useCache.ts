@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useTargetSwitchLock } from './targetSwitchLock';
 import type { ProgressEvent } from './api';
 import { api } from './client';
+import { throwIfNotOk } from './httpError';
 import type { components } from './api.generated';
 import type {
   CacheDeployState,
@@ -24,12 +25,6 @@ export type CacheAddResult = CacheAddResponse | CacheErrorResponse;
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
-
-async function throwIfNotOk(response: Response, ctx: string): Promise<void> {
-  if (response.ok) return;
-  const body = await response.text().catch(() => '');
-  throw new Error(body || `${ctx}: ${response.status}`);
-}
 
 export async function fetchCacheStatus(target: string): Promise<CacheStatusResponse> {
   const { data, response } = await api.GET('/api/cache/status', { params: { query: { target } } });

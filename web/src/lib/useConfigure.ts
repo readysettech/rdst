@@ -6,6 +6,7 @@ import { useState, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { setEnvSecret } from './api';
+import { throwIfNotOk } from './httpError';
 import type {
   ConfigureTarget,
   ConfigureTargetDetail,
@@ -14,10 +15,27 @@ import type {
   ConfigureConnectionStatus,
 } from '../types/configure';
 
-async function throwIfNotOk(response: Response, ctx: string): Promise<void> {
-  if (response.ok) return;
-  const body = await response.text().catch(() => '');
-  throw new Error(body || `${ctx}: ${response.status}`);
+type ActionControllers = Record<string, AbortController | null>;
+
+/** Start an action, superseding only a previous run of that same action. */
+function beginRequest(
+  controllers: ActionControllers,
+  action: string,
+): AbortController {
+  controllers[action]?.abort();
+  const controller = new AbortController();
+  controllers[action] = controller;
+  return controller;
+}
+
+function endRequest(
+  controllers: ActionControllers,
+  action: string,
+  controller: AbortController,
+): void {
+  if (controllers[action] === controller) {
+    controllers[action] = null;
+  }
 }
 
 interface UseConfigureReturn {
@@ -29,7 +47,6 @@ interface UseConfigureReturn {
   removeTarget: (name: string) => Promise<void>;
   setDefaultTarget: (name: string) => Promise<void>;
   testConnection: (name: string) => void;
-  stopTest: () => void;
 
   // State
   state: ConfigureState;
@@ -49,7 +66,10 @@ export function useConfigure(): UseConfigureReturn {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // One AbortController per action, keyed by action name: a target-list refresh
+  // must not cancel an in-flight connection test, and adding a target must
+  // survive the list refresh it triggers itself.
+  const controllers = useRef<ActionControllers>({});
 
   // Invalidate the status query so TargetDropdown updates
   const invalidateStatus = useCallback(() => {
@@ -58,12 +78,7 @@ export function useConfigure(): UseConfigureReturn {
 
   // List all targets
   const listTargets = useCallback(async () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = beginRequest(controllers.current, 'listTargets');
 
     setState('loading');
     setLoading(true);
@@ -90,17 +105,12 @@ export function useConfigure(): UseConfigureReturn {
       setState('error');
     } finally {
       setLoading(false);
-      abortControllerRef.current = null;
+      endRequest(controllers.current, 'listTargets', controller);
     }
   }, []);
 
   const getTarget = useCallback(async (name: string) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = beginRequest(controllers.current, 'getTarget');
 
     setState('loading');
     setLoading(true);
@@ -143,18 +153,13 @@ export function useConfigure(): UseConfigureReturn {
       return null;
     } finally {
       setLoading(false);
-      abortControllerRef.current = null;
+      endRequest(controllers.current, 'getTarget', controller);
     }
   }, []);
 
   // Add new target
   const addTarget = useCallback(async (data: ConfigureFormData) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = beginRequest(controllers.current, 'addTarget');
 
     setState('loading');
     setLoading(true);
@@ -210,18 +215,13 @@ export function useConfigure(): UseConfigureReturn {
       throw err;
     } finally {
       setLoading(false);
-      abortControllerRef.current = null;
+      endRequest(controllers.current, 'addTarget', controller);
     }
   }, [listTargets, invalidateStatus]);
 
   // Update existing target
   const updateTarget = useCallback(async (name: string, data: ConfigureFormData) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = beginRequest(controllers.current, 'updateTarget');
 
     setState('loading');
     setLoading(true);
@@ -276,18 +276,13 @@ export function useConfigure(): UseConfigureReturn {
       throw err;
     } finally {
       setLoading(false);
-      abortControllerRef.current = null;
+      endRequest(controllers.current, 'updateTarget', controller);
     }
   }, [listTargets]);
 
   // Remove target
   const removeTarget = useCallback(async (name: string) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = beginRequest(controllers.current, 'removeTarget');
 
     setState('loading');
     setLoading(true);
@@ -317,18 +312,13 @@ export function useConfigure(): UseConfigureReturn {
       setState('error');
     } finally {
       setLoading(false);
-      abortControllerRef.current = null;
+      endRequest(controllers.current, 'removeTarget', controller);
     }
   }, [listTargets, invalidateStatus]);
 
   // Set default target
   const setDefaultTarget = useCallback(async (name: string) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = beginRequest(controllers.current, 'setDefaultTarget');
 
     setState('loading');
     setLoading(true);
@@ -358,18 +348,13 @@ export function useConfigure(): UseConfigureReturn {
       setState('error');
     } finally {
       setLoading(false);
-      abortControllerRef.current = null;
+      endRequest(controllers.current, 'setDefaultTarget', controller);
     }
   }, [listTargets]);
 
   // Test connection (SSE streaming)
   const testConnection = useCallback((name: string) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const controller = beginRequest(controllers.current, 'testConnection');
 
     setState('loading');
     setLoading(true);
@@ -439,6 +424,8 @@ export function useConfigure(): UseConfigureReturn {
                       connected: isSuccess,
                       error: isSuccess ? undefined : data.message,
                       engine: data.server_version,
+                      code: data.code,
+                      passwordEnv: data.password_env,
                     });
                     break;
                   }
@@ -477,24 +464,12 @@ export function useConfigure(): UseConfigureReturn {
         setState('error');
         setLoading(false);
       } finally {
-        abortControllerRef.current = null;
+        endRequest(controllers.current, 'testConnection', controller);
       }
     };
 
     streamSSE();
   }, []);
-
-  // Stop connection test
-  const stopTest = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    if (state === 'loading') {
-      setState('idle');
-      setLoading(false);
-    }
-  }, [state]);
 
   return {
     // Actions
@@ -505,7 +480,6 @@ export function useConfigure(): UseConfigureReturn {
     removeTarget,
     setDefaultTarget,
     testConnection,
-    stopTest,
 
     // State
     state,

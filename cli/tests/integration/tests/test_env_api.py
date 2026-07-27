@@ -151,7 +151,11 @@ async def test_set_env_secret_rejects_non_allowlisted_name(
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is False
-    assert "not allowed" in (body.get("message") or "").lower()
+    assert body["name"] == "NOT_ALLOWED"
+    assert body["persisted"] is False
+    message = (body.get("message") or "").lower()
+    assert message
+    assert "export" not in message
 
 
 async def test_set_env_secret_rejects_mismatched_origin(

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime
+import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from typing import Any
 
@@ -27,6 +29,8 @@ from .models import AuditResult
 from .query_stats import collect_mysql_digest_stats, collect_pg_stat_statements
 from .scoring import compute_cache_opportunity, compute_sizing_verdict
 
+logger = logging.getLogger(__name__)
+
 
 class AuditService:
     """Service layer for audit operations."""
@@ -39,6 +43,18 @@ class AuditService:
             self._config = TargetsConfig()
             self._config.load()
         return self._config
+
+    @staticmethod
+    def _save_report_artifact(snapshot_id: str, result: dict[str, Any]) -> None:
+        """Render and persist the run's HTML report. Best-effort: a failure
+        here costs the emailable artifact, never the audit."""
+        try:
+            from .report.artifact import save_report_locally
+            from .report.report import render_v3_single_html
+
+            save_report_locally(snapshot_id, render_v3_single_html(result))
+        except Exception as exc:
+            logger.warning("Could not render report for %s: %s", snapshot_id, exc)
 
     async def audit_single(
         self, target_name: str, *, insights: bool = False, save: bool = True
@@ -119,6 +135,9 @@ class AuditService:
 
             snapshot_id = f"audit_{target_name}_{datetime.datetime.now():%Y%m%d_%H%M%S}"
             path = await asyncio.to_thread(SnapshotStore().save_raw, snapshot_id, final_result)
+            # Persist the same HTML artifact the CLI emails, so "email me this
+            # report" from the web ships identical output.
+            await asyncio.to_thread(self._save_report_artifact, snapshot_id, final_result)
             yield AuditSnapshotSavedEvent(
                 type="snapshot_saved", snapshot_id=snapshot_id, path=path,
             )
@@ -139,37 +158,96 @@ class AuditService:
         concurrency: int = 10,
         insights: bool = False,
         save_name: str | None = None,
+        duration_seconds: int | None = None,
     ):
         """Run audits across multiple targets concurrently.
 
-        Collection runs in a bounded thread pool; per-target events stream
-        out as each audit finishes. Unreachable targets surface as
+        Collection runs concurrently; per-target events stream while each
+        audit and capture progresses. Unreachable targets surface as
         target_error events with the connection failure. When `insights` is
         set, fleet-level LLM insights over the successful results land in
         the complete event's summary. When `save_name` is set, successful
         results are saved as individual snapshots plus a combined
-        FleetAuditSnapshot under that name.
+        FleetAuditSnapshot under that name. When `duration_seconds` is set,
+        each successful audit runs a live workload capture (same path as
+        the CLI's `fleet audit --duration`); the capture summary lands in
+        the target_complete result under "workload", and the captured
+        queries are benchmarked against an ephemeral Readyset container.
+        All targets capture in parallel first, then Readyset benchmarks run
+        sequentially so at most one container is alive at a time.
         """
         import asyncio
 
         config = self._get_config()
         total = len(targets)
 
-        yield AuditStatusEvent(type="status", phase="start", message=f"Auditing {total} targets...")
+        message = f"Auditing {total} targets..."
+        if duration_seconds:
+            message = f"Auditing {total} targets with {duration_seconds}s capture per target..."
+        yield AuditStatusEvent(type="status", phase="start", message=message)
 
-        semaphore = asyncio.Semaphore(max(1, min(total, concurrency)))
+        docker_ok = False
+        if duration_seconds:
+            from .readyset_benchmark import docker_available
+            docker_ok = docker_available()
 
-        async def _audit_one(name: str) -> AuditResult:
+        # A duration audit intentionally overlaps every target's independent
+        # capture window. The caller's collection limit still applies to the
+        # metrics-only path.
+        capture_concurrency = total if duration_seconds else min(total, concurrency)
+        semaphore = asyncio.Semaphore(max(1, capture_concurrency))
+
+        async def _audit_one(
+            name: str,
+            emit: Callable[[AuditStatusEvent], Awaitable[None]] | None = None,
+        ) -> dict[str, Any]:
             async with semaphore:
                 target_config = config.get(name)
                 if target_config is None:
-                    return AuditResult(
+                    return asdict(AuditResult(
                         target_name=name,
                         engine="unknown",
                         host="unknown",
                         error="Target config not found",
+                    ))
+                if emit:
+                    await emit(AuditStatusEvent(
+                        type="status",
+                        phase="collect",
+                        message=f"{name}: Collecting database metrics...",
+                        target_name=name,
+                        step="collecting",
+                    ))
+                result = await asyncio.to_thread(self.audit_target, name, target_config)
+                result_dict = asdict(result)
+                if duration_seconds and not result.error:
+                    if emit:
+                        await emit(AuditStatusEvent(
+                            type="status",
+                            phase="capture",
+                            message=f"{name}: Capturing live workload for {duration_seconds}s...",
+                            target_name=name,
+                            elapsed_seconds=0,
+                            total_seconds=float(duration_seconds),
+                            step="capturing",
+                        ))
+                    workload = await self._capture_workload(
+                        name, duration_seconds, insights=insights, audit_result=result_dict,
+                        on_progress=emit,
                     )
-                return await asyncio.to_thread(self.audit_target, name, target_config)
+                    if workload:
+                        result_dict["workload"] = workload
+                    if emit:
+                        await emit(AuditStatusEvent(
+                            type="status",
+                            phase="capture_complete",
+                            message=f"{name}: Capture complete; queued for Readyset",
+                            target_name=name,
+                            elapsed_seconds=float(duration_seconds),
+                            total_seconds=float(duration_seconds),
+                            step="queued",
+                        ))
+                return result_dict
 
         index_by_target = {name: index for index, name in enumerate(targets)}
         for index, target_name in enumerate(targets):
@@ -177,32 +255,150 @@ class AuditService:
                 type="target_start", target_name=target_name, index=index, total=total
             )
 
-        tasks = [asyncio.ensure_future(_audit_one(name)) for name in targets]
-        results: list[AuditResult] = []
-        for future in asyncio.as_completed(tasks):
-            result = await future
-            results.append(result)
-            # Events stream in completion order; index matches the target's
-            # position from its target_start event so clients can correlate.
-            index = index_by_target.get(result.target_name, 0)
-            if result.error:
-                yield AuditTargetErrorEvent(
-                    type="target_error",
-                    target_name=result.target_name,
-                    error=result.error,
-                    index=index,
-                    total=total,
+        results: list[dict[str, Any]] = []
+
+        def _target_error_event(result: dict[str, Any]) -> AuditTargetErrorEvent:
+            target_name = result.get("target_name", "")
+            index = index_by_target.get(target_name, 0)
+            return AuditTargetErrorEvent(
+                type="target_error",
+                target_name=target_name,
+                error=result["error"],
+                index=index,
+                total=total,
+            )
+
+        def _target_complete_event(result: dict[str, Any]) -> AuditTargetCompleteEvent:
+            target_name = result.get("target_name", "")
+            return AuditTargetCompleteEvent(
+                type="target_complete",
+                target_name=target_name,
+                result=result,
+                index=index_by_target.get(target_name, 0),
+                total=total,
+            )
+
+        async def _benchmark_events(result: dict[str, Any]):
+            """Run only the best-effort Readyset phase for one captured target."""
+            target_name = result.get("target_name", "")
+            workload = result.get("workload") or {}
+            captured = workload.get("queries") or []
+            reason: str | None = None
+
+            if not docker_ok:
+                reason = "Docker is not available"
+            elif workload.get("error"):
+                reason = f"capture failed: {workload['error']}"
+            elif not captured:
+                yield AuditStatusEvent(
+                    type="status",
+                    phase="readyset",
+                    message=(
+                        f"{target_name}: Readyset benchmark skipped; "
+                        "no live queries were captured"
+                    ),
+                    target_name=target_name,
+                    step="skipped",
                 )
             else:
-                yield AuditTargetCompleteEvent(
-                    type="target_complete",
-                    target_name=result.target_name,
-                    result=asdict(result),
-                    index=index,
-                    total=total,
+                yield AuditStatusEvent(
+                    type="status",
+                    phase="readyset",
+                    message=(
+                        f"{target_name}: Starting Readyset to benchmark "
+                        f"{len(captured)} captured queries..."
+                    ),
+                    target_name=target_name,
+                    step="deploying",
+                )
+                try:
+                    outcome = await asyncio.to_thread(
+                        self.run_readyset_comparison, target_name, captured,
+                    )
+                except Exception as exc:
+                    outcome = {"status": "error", "detail": str(exc)}
+                if outcome.get("status") == "ok":
+                    result["readyset_comparison"] = outcome["comparison"]
+                    yield AuditStatusEvent(
+                        type="status",
+                        phase="readyset",
+                        message=f"{target_name}: Readyset benchmark complete",
+                        target_name=target_name,
+                        step="done",
+                    )
+                else:
+                    reason = outcome.get("detail") or "benchmark produced no comparison"
+
+            if reason:
+                yield AuditStatusEvent(
+                    type="status",
+                    phase="readyset",
+                    message=f"{target_name}: Readyset benchmark could not run: {reason}",
+                    target_name=target_name,
+                    step="failed",
                 )
 
-        all_results = [asdict(result) for result in results]
+            yield _target_complete_event(result)
+
+        if duration_seconds:
+            # Phase 1: every target collects and captures concurrently. A queue
+            # lets lifecycle/progress events escape the worker tasks immediately
+            # instead of waiting for their capture window to finish.
+            event_queue: asyncio.Queue[
+                tuple[str, str, AuditStatusEvent | dict[str, Any]]
+            ] = asyncio.Queue()
+
+            async def _emit_capture(event: AuditStatusEvent) -> None:
+                await event_queue.put(("event", event.target_name or "", event))
+
+            async def _capture_one(name: str) -> None:
+                try:
+                    result = await _audit_one(name, _emit_capture)
+                except Exception as exc:
+                    result = asdict(AuditResult(
+                        target_name=name,
+                        engine="unknown",
+                        host="unknown",
+                        error=str(exc),
+                    ))
+                await event_queue.put(("result", name, result))
+
+            tasks = [asyncio.create_task(_capture_one(name)) for name in targets]
+            results_by_target: dict[str, dict[str, Any]] = {}
+            completed = 0
+            while completed < total:
+                kind, name, payload = await event_queue.get()
+                if kind == "event":
+                    yield payload
+                    continue
+                result = payload
+                assert isinstance(result, dict)
+                results_by_target[name] = result
+                completed += 1
+                if result.get("error"):
+                    yield _target_error_event(result)
+            await asyncio.gather(*tasks)
+
+            # Phase 2: benchmark captured targets strictly in requested order.
+            # Each benchmark owns one fresh ephemeral container and tears it
+            # down before this loop advances to the next target.
+            results = [results_by_target[name] for name in targets]
+            for result in results:
+                if result.get("error"):
+                    continue
+                async for event in _benchmark_events(result):
+                    yield event
+        else:
+            tasks = [asyncio.ensure_future(_audit_one(name)) for name in targets]
+            for future in asyncio.as_completed(tasks):
+                result = await future
+                results.append(result)
+                if result.get("error"):
+                    yield _target_error_event(result)
+                else:
+                    yield _target_complete_event(result)
+
+        all_results = results
         successful = [r for r in all_results if not r.get("error")]
         failures = total - len(successful)
 
@@ -236,6 +432,86 @@ class AuditService:
             snapshot_id=snapshot_id,
             summary=summary,
         )
+
+    async def _capture_workload(
+        self,
+        target_name: str,
+        duration_seconds: int,
+        *,
+        insights: bool,
+        audit_result: dict[str, Any],
+        on_progress: Callable[[AuditStatusEvent], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
+        """Run a duration capture for one fleet target.
+
+        Mirrors the CLI's per-target capture path (analysis when insights is
+        on, capture not saved separately). Capture failures land in
+        {"error": ...} instead of failing the audit.
+        """
+        from .capture_service import CaptureService
+
+        workload: dict[str, Any] = {}
+        try:
+            capture = CaptureService(config=self._config)
+            async for event in capture.run_capture(
+                target_name=target_name,
+                duration_seconds=duration_seconds,
+                source="auto",
+                limit=50,
+                run_analysis=insights,
+                cumulative_top_queries=audit_result.get("top_queries") or [],
+                audit_result=audit_result,
+                save_capture=False,
+            ):
+                if on_progress and event.type == "capture_progress":
+                    await on_progress(AuditStatusEvent(
+                        type="status",
+                        phase="capture",
+                        message=f"{target_name}: Capturing live workload...",
+                        target_name=target_name,
+                        elapsed_seconds=event.elapsed_seconds,
+                        total_seconds=event.total_seconds,
+                        step="capturing",
+                    ))
+                elif on_progress and (
+                    event.type == "analysis_progress"
+                    or (event.type == "status" and event.phase == "analysis")
+                ):
+                    await on_progress(AuditStatusEvent(
+                        type="status",
+                        phase="analysis",
+                        message=f"{target_name}: {event.message}",
+                        target_name=target_name,
+                        step="analyzing",
+                    ))
+                if event.type == "error":
+                    workload.setdefault("error", event.message)
+                elif event.type == "complete":
+                    workload = event.summary or {}
+                    if event.analysis:
+                        workload["analysis"] = event.analysis
+        except Exception as exc:
+            workload = {"error": str(exc)}
+        return workload
+
+    @staticmethod
+    def run_readyset_comparison(
+        target_name: str, queries: list[dict[str, Any]], max_queries: int = 20,
+    ) -> dict[str, Any]:
+        """Benchmark captured queries against an ephemeral Readyset container.
+
+        Blocking; run in a thread. Returns a status plus either the comparison
+        or a clear failure detail. A failed benchmark never fails the audit.
+        """
+        from .readyset_benchmark import build_comparison, run_ephemeral_benchmark
+
+        outcome = run_ephemeral_benchmark(target_name, queries, max_queries=max_queries)
+        if outcome.get("status") != "ok":
+            return {
+                "status": "error",
+                "detail": outcome.get("detail") or "benchmark produced no results",
+            }
+        return {"status": "ok", "comparison": build_comparison(outcome["results"])}
 
     @staticmethod
     def run_fleet_insights(successful_results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -287,6 +563,32 @@ class AuditService:
             targets_failed=failures,
             results=all_results,
         )
+        successful = [result for result in all_results if not result.get("error")]
+        monthly_costs = [
+            sizing["current_monthly_cost_usd"]
+            for result in successful
+            if (sizing := result.get("sizing"))
+            and sizing.get("current_monthly_cost_usd") is not None
+        ]
+        potential_savings = [
+            sizing["potential_savings_usd"]
+            for result in successful
+            if (sizing := result.get("sizing"))
+            and sizing.get("potential_savings_usd") is not None
+        ]
+        cache_scores = [
+            cache["score"]
+            for result in successful
+            if (cache := result.get("cache_opportunity"))
+            and cache.get("score") is not None
+        ]
+        snapshot.total_monthly_cost_usd = sum(monthly_costs) if monthly_costs else None
+        snapshot.potential_savings_usd = (
+            sum(potential_savings) if potential_savings else None
+        )
+        snapshot.avg_cache_opportunity = (
+            sum(cache_scores) / len(cache_scores) if cache_scores else None
+        )
         if fleet_insights:
             snapshot.fleet_insights = fleet_insights
         return store.save_raw(save_name, asdict(snapshot))
@@ -321,8 +623,17 @@ class AuditService:
 
         if not region:
             region = detect_region_from_hostname(host)
-        if not instance_class and metrics.shared_buffers_mb > 0:
+        # Only infer an instance class from shared_buffers for real RDS
+        # endpoints — the heuristic mislabels local/self-hosted databases.
+        instance_class_source = "aws" if instance_class else None
+        if (
+            not instance_class
+            and metrics.shared_buffers_mb > 0
+            and (host or "").endswith(".rds.amazonaws.com")
+        ):
             instance_class = estimate_class_from_shared_buffers(metrics.shared_buffers_mb)
+            if instance_class:
+                instance_class_source = "estimated"
 
         sizing = compute_sizing_verdict(metrics, instance_class=instance_class)
         cache_opportunity = compute_cache_opportunity(metrics)
@@ -390,6 +701,7 @@ class AuditService:
             host=host,
             region=region,
             instance_class=instance_class,
+            instance_class_source=instance_class_source,
             group=group,
             tags=tags,
             metrics=metrics,

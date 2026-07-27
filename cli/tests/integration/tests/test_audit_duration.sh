@@ -34,8 +34,8 @@ test_audit_duration_commands() {
     sleep 3
   fi
 
-  run_cmd "Audit: with --duration 15s" "${RDST_CMD[@]}" audit \
-    --target "${AUDIT_TARGET}" --duration 15s --no-insights --no-save --json
+  run_cmd "Audit: with --duration 5s" "${RDST_CMD[@]}" audit \
+    --target "${AUDIT_TARGET}" --duration 5s --no-insights --no-save --json
   assert_json "audit duration json valid"
   assert_contains "\"target_name\"" "audit duration has target_name"
 
@@ -44,7 +44,7 @@ test_audit_duration_commands() {
     wait "$capture_pid" 2>/dev/null || true
   fi
 
-  echo "PASS: Audit with --duration 15s"
+  echo "PASS: Audit with --duration 5s"
 
   # ============================================================================
   # Test 3: Audit list (browse past runs)
@@ -209,8 +209,6 @@ for i, line in enumerate(lines):
         break
 " 2>/dev/null) || RUN_A=""
 
-  sleep 1
-
   run_cmd "Audit: run B" "${RDST_CMD[@]}" audit \
     --target "${AUDIT_TARGET}" --duration 5s --no-insights --no-save --json
   local RUN_B
@@ -249,7 +247,7 @@ for i, line in enumerate(lines):
     fi
 
     run_cmd "Audit: duration with insights" "${RDST_CMD[@]}" audit \
-      --target "${AUDIT_TARGET}" --duration 15s --json
+      --target "${AUDIT_TARGET}" --duration 5s --json
     assert_json "audit duration insights json valid"
     assert_contains "\"target_name\"" "audit duration insights has target"
 
@@ -293,22 +291,36 @@ for i, line in enumerate(lines):
     assert_json "audit+RS json valid"
     assert_contains "\"health_report\"" "audit+RS has health_report"
     assert_contains "\"health_analysis\"" "audit+RS has health_analysis"
-    if echo "$LAST_OUTPUT" | grep -q '"readyset_results".*\[{'; then
-      # Assert at least one query is faster via RS (speedup > 1.0)
-      if echo "$LAST_OUTPUT" | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-rs = d.get('readyset_results') or []
-fast = [r for r in rs if (r.get('speedup') or 0) > 1.0]
-sys.exit(0 if fast else 1)
-" 2>/dev/null; then
+    assert_contains "\"readyset_comparison\"" "audit+RS has readyset_comparison"
+    local READYSET_STATUS
+    READYSET_STATUS=$("$PYTHON_BIN" - "$LAST_OUTPUT_FILE" <<'PYEOF'
+import json
+import sys
+
+with open(sys.argv[1]) as output:
+    content = output.read()
+lines = content.splitlines()
+json_start = next(
+    (i for i, line in enumerate(lines) if line.strip().startswith("{")),
+    None,
+)
+data = json.loads("\n".join(lines[json_start:])) if json_start is not None else {}
+results = data.get("readyset_results") or []
+if not results:
+    print("empty")
+elif any((result.get("speedup") or 0) > 1.0 for result in results):
+    print("fast")
+else:
+    print("slow")
+PYEOF
+    )
+    if [[ "$READYSET_STATUS" == "fast" ]]; then
         echo "PASS: At least one query shows RS speedup > 1.0x"
-      else
-        echo "FAIL: readyset_results present but no query shows speedup > 1.0x"
-        exit 1
-      fi
-    else
+    elif [[ "$READYSET_STATUS" == "empty" ]]; then
       echo "INFO: readyset_results empty — RS may not have benchmarked queries"
+    else
+      echo "FAIL: readyset_results present but no query shows speedup > 1.0x"
+      exit 1
     fi
 
     # Verify local report was saved

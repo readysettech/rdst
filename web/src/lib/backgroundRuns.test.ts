@@ -1,6 +1,7 @@
 import { waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { sseFrames as frames, sseResponse } from '@/test-utils'
 import {
   __resetBackgroundRunsForTests,
   acknowledgeBackgroundRun,
@@ -9,8 +10,11 @@ import {
   dismissBackgroundRun,
   getBackgroundRuns,
   reattachBackgroundRuns,
+  startAuditCaptureRun,
+  startAuditRun,
   startBootstrapRun,
   startCacheTestRun,
+  startFleetAuditRun,
   startSchemaAnnotationRun,
 } from './backgroundRuns'
 import { api } from './client'
@@ -19,26 +23,16 @@ vi.mock('./client', () => ({
   api: { POST: vi.fn(), GET: vi.fn(), DELETE: vi.fn() },
 }))
 
-function sseResponse(payload: string): Response {
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(payload))
-      controller.close()
-    },
-  })
-  return new Response(stream, { status: 200 })
-}
-
-function frames(...items: Array<[string, Record<string, unknown>]>): string {
-  return items
-    .map(
-      ([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
-    )
-    .join('')
-}
-
 function run(runId: string) {
   return getBackgroundRuns().find((item) => item.runId === runId)
+}
+
+const RUN_IDS: Record<string, string> = {
+  '/api/bootstrap': 'bootstrap_imdb_x',
+  '/api/cache/test-runs': 'cache_test_imdb_z',
+  '/api/audit': 'audit_imdb_a',
+  '/api/audit/capture': 'audit_capture_imdb_b',
+  '/api/fleet/audit': 'fleet_audit_prod_c',
 }
 
 describe('background run store', () => {
@@ -47,14 +41,7 @@ describe('background run store', () => {
     vi.mocked(api.POST).mockImplementation(
       async (path: string) =>
         ({
-          data: {
-            run_id:
-              path === '/api/bootstrap'
-                ? 'bootstrap_imdb_x'
-                : path === '/api/cache/test-runs'
-                  ? 'cache_test_imdb_z'
-                  : 'schema_annotation_imdb_y',
-          },
+          data: { run_id: RUN_IDS[path] ?? 'schema_annotation_imdb_y' },
           error: undefined,
         }) as never
     )
@@ -257,6 +244,125 @@ describe('background run store', () => {
     expect(localStorage.getItem('rdst_background_runs')).toContain(
       'cache_test_imdb_z'
     )
+  })
+
+  it('tracks a health check through to its saved snapshot', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        sseResponse(
+          frames(
+            ['status', { phase: 'collect', message: 'Collecting...', seq: 1 }],
+            ['target_start', { target_name: 'imdb', index: 0, total: 1, seq: 2 }],
+            ['snapshot_saved', { snapshot_id: 'audit_imdb_20260727', seq: 3 }],
+            ['complete', { success: true, snapshot_id: 'audit_imdb_20260727', seq: 4 }],
+            ['run_end', { status: 'done', seq: 5 }]
+          )
+        )
+      )
+    )
+
+    const started = await startAuditRun('imdb', { insights: false })
+
+    expect(started).toEqual({ runId: 'audit_imdb_a', reused: false })
+    await waitFor(() => expect(run('audit_imdb_a')?.status).toBe('done'))
+    expect(run('audit_imdb_a')).toMatchObject({
+      kind: 'audit',
+      stage: 'storage',
+      message: 'Health check complete',
+      snapshotId: 'audit_imdb_20260727',
+    })
+    expect(api.POST).toHaveBeenCalledWith('/api/audit', {
+      body: { target: 'imdb', insights: false },
+    })
+  })
+
+  it('keeps a whole fleet health check in one warning-tinted run', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        sseResponse(
+          frames(
+            ['target_start', { target_name: 'db1', index: 0, total: 2, seq: 1 }],
+            ['target_start', { target_name: 'db2', index: 1, total: 2, seq: 2 }],
+            [
+              'target_complete',
+              { target_name: 'db1', result: {}, index: 0, total: 2, seq: 3 },
+            ],
+            [
+              'target_error',
+              {
+                target_name: 'db2',
+                error: 'connection refused',
+                index: 1,
+                total: 2,
+                seq: 4,
+              },
+            ],
+            ['snapshot_saved', { snapshot_id: 'fleet_20260727', seq: 5 }],
+            [
+              'complete',
+              {
+                success: true,
+                snapshot_id: 'fleet_20260727',
+                summary: { successes: 1, failures: 1 },
+                seq: 6,
+              },
+            ],
+            ['run_end', { status: 'done', seq: 7 }]
+          )
+        )
+      )
+    )
+
+    const started = await startFleetAuditRun({ group: 'prod' })
+
+    expect(started).toEqual({ runId: 'fleet_audit_prod_c', reused: false })
+    // One failed target warns; the run still completes.
+    await waitFor(() =>
+      expect(run('fleet_audit_prod_c')?.status).toBe('partial')
+    )
+    expect(run('fleet_audit_prod_c')).toMatchObject({
+      kind: 'fleet_audit',
+      target: 'prod',
+      hasWarnings: true,
+      message: 'Fleet health check complete',
+      snapshotId: 'fleet_20260727',
+    })
+    expect(getBackgroundRuns()).toHaveLength(1)
+    expect(api.POST).toHaveBeenCalledWith('/api/fleet/audit', {
+      body: { group: 'prod' },
+    })
+  })
+
+  it('reports capture progress as a percentage of the capture window', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        sseResponse(
+          frames(
+            [
+              'capture_progress',
+              { elapsed_seconds: 15, total_seconds: 60, seq: 1 },
+            ],
+            ['complete', { success: true, run_id: 'cap_imdb_1', seq: 2 }],
+            ['run_end', { status: 'done', seq: 3 }]
+          )
+        )
+      )
+    )
+
+    await startAuditCaptureRun('imdb', { duration: 60 })
+
+    await waitFor(() => expect(run('audit_capture_imdb_b')?.status).toBe('done'))
+    expect(run('audit_capture_imdb_b')).toMatchObject({
+      kind: 'audit_capture',
+      message: 'Capture complete',
+      snapshotId: 'cap_imdb_1',
+    })
+    expect(api.POST).toHaveBeenCalledWith('/api/audit/capture', {
+      body: { target: 'imdb', duration: 60, analysis: true, readyset: true },
+    })
   })
 
   it('keeps partial annotation completion as a warning terminal state', async () => {

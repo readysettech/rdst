@@ -1,18 +1,26 @@
-import { useState, useCallback, useRef } from 'react';
-import { api } from './client';
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
+import type { AuditReport } from '../types/audit'
 import type {
   AuditEvent,
   FleetConnectivityEvent,
-  FleetDiffResponse,
   FleetEvent,
   FleetImportCompleteEvent,
   FleetImportProgressEvent,
+  FleetMember,
   FleetSnapshotListResponse,
   FleetStreamState,
   FleetTargets,
-} from '../types/fleet';
-import type { components } from './api.generated';
-import type { AuditReport } from '../types/audit';
+} from '../types/fleet'
+import {
+  beginAuditSession,
+  completeAuditSession,
+  finishAuditSession,
+  updateAuditSession,
+} from './auditSession'
+import { cancelBackgroundRun, startFleetAuditRun } from './backgroundRuns'
+import { api } from './client'
+import { throwIfNotOk } from './httpError'
+import { consumeSseResponse } from './sseReader'
 
 // ---------------------------------------------------------------------------
 // API functions
@@ -21,101 +29,269 @@ import type { AuditReport } from '../types/audit';
 export async function fetchFleetTargets(group?: string): Promise<FleetTargets> {
   const { data, response } = await api.GET('/api/fleet/targets', {
     params: { query: group ? { group } : {} },
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(body || `Failed to fetch fleet targets: ${response.status}`);
-  }
-  if (!data) throw new Error('Missing response body');
+  })
+  await throwIfNotOk(response, 'Failed to fetch fleet targets')
+  if (!data) throw new Error('Missing response body')
   // Members travel as free-form dicts in the OpenAPI schema; FleetMember
   // narrows them to the shape FleetService.list_fleet actually emits.
-  return data as unknown as FleetTargets;
+  return data as unknown as FleetTargets
 }
 
 export async function fetchFleetSnapshots(): Promise<FleetSnapshotListResponse> {
-  const { data, response } = await api.GET('/api/fleet/snapshots');
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(body || `Failed to fetch fleet snapshots: ${response.status}`);
-  }
-  if (!data) throw new Error('Missing response body');
-  return data;
+  const { data, response } = await api.GET('/api/fleet/snapshots')
+  await throwIfNotOk(response, 'Failed to fetch fleet snapshots')
+  if (!data) throw new Error('Missing response body')
+  return data
 }
 
 // Snapshot detail travels as a free-form dict in the OpenAPI schema; these
 // interfaces narrow the fields the fleet page reads, mirroring the payload
 // FleetService writes for a saved fleet audit.
-export interface FleetSnapshotResult {
-  target_name: string;
-  sizing?: { verdict?: string | null } | null;
-  cache_opportunity?: { score?: number | null } | null;
+export interface FleetSnapshotResult extends AuditReport {
+  target_name: string
 }
 
 export interface FleetSnapshotDetail {
-  snapshot_id: string;
-  name: string;
-  created_at: string;
-  targets_audited: number;
-  results?: FleetSnapshotResult[];
+  snapshot_id: string
+  name: string
+  created_at: string
+  targets_audited: number
+  targets_failed?: number
+  total_monthly_cost_usd?: number | null
+  potential_savings_usd?: number | null
+  avg_cache_opportunity?: number | null
+  fleet_insights?: Record<string, unknown> | null
+  results?: FleetSnapshotResult[]
 }
 
-export interface FleetTargetVerdict {
-  verdict?: string;
-  cacheScore?: number;
+export async function fetchFleetSnapshotDetail(
+  snapshotId: string
+): Promise<FleetSnapshotDetail> {
+  const { data, response } = await api.GET(
+    '/api/fleet/snapshots/{snapshot_id}',
+    {
+      params: { path: { snapshot_id: snapshotId } },
+    }
+  )
+  await throwIfNotOk(response, 'Failed to fetch snapshot')
+  if (!data) throw new Error('Missing response body')
+  return data as unknown as FleetSnapshotDetail
 }
 
-/** Map a snapshot's per-target results to their sizing verdict and cache score. */
-export function mapSnapshotVerdicts(
-  detail: FleetSnapshotDetail | undefined,
-): Record<string, FleetTargetVerdict> {
-  const map: Record<string, FleetTargetVerdict> = {};
-  for (const result of detail?.results ?? []) {
-    if (!result.target_name) continue;
-    map[result.target_name] = {
-      verdict: result.sizing?.verdict ?? undefined,
-      cacheScore: result.cache_opportunity?.score ?? undefined,
-    };
+// Local AWS credential state for the discovery UI (GET /api/fleet/aws-status).
+// Untyped by the generated client until gen:api runs.
+export interface FleetAwsStatus {
+  has_credentials: boolean
+  method: string | null
+  identity_arn: string | null
+  account: string | null
+  active_profile: string | null
+  available_profiles: string[]
+  region: string | null
+}
+
+export async function fetchFleetAwsStatus(
+  profile?: string
+): Promise<FleetAwsStatus> {
+  // Pass the user's selected profile: a fresh SSO session lives on that
+  // profile and the default credential chain knows nothing about it.
+  const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
+  const response = await fetch(`/api/fleet/aws-status${query}`)
+  await throwIfNotOk(response, 'Failed to check AWS credentials')
+  return (await response.json()) as FleetAwsStatus
+}
+
+// Discovery preview + selective add (POST /api/fleet/discover-preview and
+// /api/fleet/targets/bulk-add). Hand-typed until gen:api runs.
+export interface DiscoveredFleetMember {
+  name: string
+  engine: string
+  host: string
+  port: number
+  database: string
+  user: string
+  password_env: string
+  group: string | null
+  tags: string[]
+  instance_class: string | null
+  region: string | null
+  already_exists: boolean
+}
+
+export async function fetchFleetDiscoverPreview(input: {
+  regions: string[]
+  profile?: string
+}): Promise<{ members: DiscoveredFleetMember[]; errors: string[] }> {
+  const response = await fetch('/api/fleet/discover-preview', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  await throwIfNotOk(response, 'Discovery failed')
+  return (await response.json()) as {
+    members: DiscoveredFleetMember[]
+    errors: string[]
   }
-  return map;
 }
 
-export async function fetchFleetSnapshotDetail(snapshotId: string): Promise<FleetSnapshotDetail> {
-  const { data, response } = await api.GET('/api/fleet/snapshots/{snapshot_id}', {
-    params: { path: { snapshot_id: snapshotId } },
-  });
+export async function bulkAddFleetTargets(
+  members: DiscoveredFleetMember[]
+): Promise<{ imported: number; skipped: number; target_names: string[] }> {
+  const response = await fetch('/api/fleet/targets/bulk-add', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ members }),
+  })
+  await throwIfNotOk(response, 'Adding targets failed')
+  return (await response.json()) as {
+    imported: number
+    skipped: number
+    target_names: string[]
+  }
+}
+
+export interface FleetAwsLoginStart {
+  login_id: string
+  state: 'started' | 'already_signed_in'
+  detail: string
+}
+
+export interface FleetAwsLoginStatus {
+  state: 'running' | 'success' | 'failed' | 'timeout'
+  detail: string
+  verification_url?: string | null
+  fallback_command?: string | null
+}
+
+export class FleetAwsLoginError extends Error {
+  code?: string
+  fallbackCommand?: string
+  constructor(message: string, code?: string, fallbackCommand?: string) {
+    super(message)
+    this.code = code
+    this.fallbackCommand = fallbackCommand
+  }
+}
+
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+  return (await response.json().catch(() => ({}))) as Record<string, unknown>
+}
+
+export async function startFleetAwsLogin(
+  profile: string
+): Promise<FleetAwsLoginStart> {
+  const response = await fetch('/api/fleet/aws-login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ profile }),
+  })
+  const body = await readJson(response)
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(body || `Failed to fetch snapshot: ${response.status}`);
+    throw new FleetAwsLoginError(
+      String(body.detail || body.message || 'Could not start AWS sign-in.'),
+      typeof body.code === 'string' ? body.code : undefined,
+      typeof body.fallback_command === 'string'
+        ? body.fallback_command
+        : undefined
+    )
   }
-  if (!data) throw new Error('Missing response body');
-  return data as unknown as FleetSnapshotDetail;
+  return body as unknown as FleetAwsLoginStart
 }
 
-export async function deleteFleetSnapshot(snapshotId: string): Promise<{ success: boolean }> {
-  const { data, response } = await api.DELETE('/api/fleet/snapshots/{snapshot_id}', {
-    params: { path: { snapshot_id: snapshotId } },
-  });
+export async function fleetAwsLogout(): Promise<void> {
+  const response = await fetch('/api/fleet/aws-logout', { method: 'POST' })
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(body || `Failed to delete snapshot: ${response.status}`);
+    const body = await readJson(response)
+    throw new FleetAwsLoginError(
+      String(body.detail || 'Could not sign out of AWS.')
+    )
   }
-  if (!data) throw new Error('Missing response body');
-  return { success: data.success };
 }
 
-export async function fetchFleetDiff(
-  baseline: string,
-  current: string,
-): Promise<FleetDiffResponse> {
-  const { data, response } = await api.GET('/api/fleet/diff', {
-    params: { query: { baseline, current } },
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(body || `Failed to diff snapshots: ${response.status}`);
+export async function fetchFleetAwsLogin(
+  loginId: string
+): Promise<FleetAwsLoginStatus> {
+  const response = await fetch(
+    `/api/fleet/aws-login/${encodeURIComponent(loginId)}`
+  )
+  const body = await readJson(response)
+  if (!response.ok)
+    throw new FleetAwsLoginError(
+      String(body.detail || 'Could not check AWS sign-in.')
+    )
+  return body as unknown as FleetAwsLoginStatus
+}
+
+export interface FleetAwsProfileInput {
+  name: string
+  sso_start_url: string
+  sso_region: string
+  sso_account_id: string
+  sso_role_name: string
+  region: string
+}
+
+export async function createFleetAwsProfile(
+  input: FleetAwsProfileInput
+): Promise<{ created: boolean; profile: string }> {
+  const response = await fetch('/api/fleet/aws-profiles', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const body = await readJson(response)
+  if (!response.ok)
+    throw new FleetAwsLoginError(
+      String(body.detail || body.message || 'Could not create the AWS profile.')
+    )
+  return body as unknown as { created: boolean; profile: string }
+}
+
+export async function updateFleetTargetGroup(
+  name: string,
+  group: string | null
+): Promise<void> {
+  const response = await fetch(
+    `/api/fleet/targets/${encodeURIComponent(name)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ group }),
+    }
+  )
+  await throwIfNotOk(response, 'Failed to update target group')
+}
+
+export async function updateFleetTargetCredentials(
+  member: FleetMember,
+  user: string,
+  passwordEnv: string
+): Promise<void> {
+  const response = await fetch(
+    `/api/configure/targets/${encodeURIComponent(member.name)}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        target: {
+          engine: member.engine,
+          host: member.host,
+          port: member.port,
+          database: member.database,
+          user,
+          password_env: passwordEnv,
+          tls: member.tls ?? false,
+          read_only: member.read_only ?? false,
+        },
+      }),
+    }
+  )
+  const body = await readJson(response)
+  if (!response.ok || body.success === false) {
+    throw new Error(
+      String(body.message || body.detail || `Failed to update ${member.name}`)
+    )
   }
-  if (!data) throw new Error('Missing response body');
-  return data;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,34 +300,34 @@ export async function fetchFleetDiff(
 
 async function consumeFleetStream<E = FleetEvent>(
   response: Response,
-  onEvent: (event: E) => void,
+  onEvent: (event: E) => void
 ): Promise<void> {
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`HTTP error ${response.status}: ${errorText}`);
+    const errorText = await response.text()
+    throw new Error(`HTTP error ${response.status}: ${errorText}`)
   }
-  if (!response.body) throw new Error('No response body');
+  if (!response.body) throw new Error('No response body')
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
 
   while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+    const { done, value } = await reader.read()
+    if (done) break
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
 
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith('data:')) continue;
-      const dataStr = trimmed.substring(5).trim();
+      const trimmed = line.trim()
+      if (!trimmed || !trimmed.startsWith('data:')) continue
+      const dataStr = trimmed.substring(5).trim()
       try {
-        onEvent(JSON.parse(dataStr) as E);
+        onEvent(JSON.parse(dataStr) as E)
       } catch (e) {
-        if (!(e instanceof SyntaxError)) throw e;
+        if (!(e instanceof SyntaxError)) throw e
       }
     }
   }
@@ -162,200 +338,192 @@ async function consumeFleetStream<E = FleetEvent>(
 // ---------------------------------------------------------------------------
 
 interface UseFleetStatusReturn {
-  check: (group?: string) => Promise<void>;
-  state: FleetStreamState;
-  results: Record<string, FleetConnectivityEvent>;
-  error: string | undefined;
-  reset: () => void;
+  check: (group?: string, targets?: string[]) => Promise<void>
+  state: FleetStreamState
+  results: Record<string, FleetConnectivityEvent>
+  error: string | undefined
+  reset: () => void
 }
 
 export function useFleetStatus(): UseFleetStatusReturn {
-  const [state, setState] = useState<FleetStreamState>('idle');
-  const [results, setResults] = useState<Record<string, FleetConnectivityEvent>>({});
-  const [error, setError] = useState<string | undefined>(undefined);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [state, setState] = useState<FleetStreamState>('idle')
+  const [results, setResults] = useState<
+    Record<string, FleetConnectivityEvent>
+  >({})
+  const [error, setError] = useState<string | undefined>(undefined)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const reset = useCallback(() => {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    setState('idle');
-    setResults({});
-    setError(undefined);
-  }, []);
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    setState('idle')
+    setResults({})
+    setError(undefined)
+  }, [])
 
-  const check = useCallback(async (group?: string) => {
-    abortControllerRef.current?.abort();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+  const check = useCallback(async (group?: string, targets?: string[]) => {
+    abortControllerRef.current?.abort()
+    const controller = new AbortController()
+    abortControllerRef.current = controller
 
-    setState('running');
-    setResults({});
-    setError(undefined);
+    setState('running')
+    setResults((current) => {
+      if (!targets?.length) return {}
+      const selected = new Set(targets)
+      return Object.fromEntries(
+        Object.entries(current).filter(([name]) => !selected.has(name))
+      )
+    })
+    setError(undefined)
 
     try {
-      const params = group ? `?group=${encodeURIComponent(group)}` : '';
-      const response = await fetch(`/api/fleet/status${params}`, {
+      const params = new URLSearchParams()
+      if (group) params.set('group', group)
+      for (const target of targets ?? []) params.append('targets', target)
+      const query = params.size > 0 ? `?${params.toString()}` : ''
+      const response = await fetch(`/api/fleet/status${query}`, {
         signal: controller.signal,
-      });
+      })
       await consumeFleetStream(response, (event) => {
         if (event.type === 'connectivity') {
-          setResults((prev) => ({ ...prev, [event.target_name]: event }));
+          setResults((prev) => ({ ...prev, [event.target_name]: event }))
         } else if (event.type === 'error') {
-          setError(event.message);
+          setError(event.message)
         }
-      });
-      setState((prev) => (prev === 'running' ? 'complete' : prev));
+      })
+      setState((prev) => (prev === 'running' ? 'complete' : prev))
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : 'An error occurred');
-      setState('error');
+      if (err instanceof Error && err.name === 'AbortError') return
+      setError(err instanceof Error ? err.message : 'An error occurred')
+      setState('error')
     } finally {
-      abortControllerRef.current = null;
+      abortControllerRef.current = null
     }
-  }, []);
+  }, [])
 
-  return { check, state, results, error, reset };
+  return { check, state, results, error, reset }
 }
 
 // ---------------------------------------------------------------------------
 // Import / discover hooks (SSE)
 //
-// CSV import and AWS discover both POST a JSON body and stream the same
-// FleetEvent union: per-instance `import_progress`, a terminal
-// `import_complete`, and `error`. Discover additionally emits `discover`
-// (instances found). They share one internal hook parameterized by URL.
+// CSV import POSTs a JSON body and streams the FleetEvent union: per-instance
+// `import_progress`, a terminal `import_complete`, and `error`.
 // ---------------------------------------------------------------------------
 
 interface UseFleetStreamReturn {
-  run: (body: unknown) => Promise<FleetImportCompleteEvent | undefined>;
-  state: FleetStreamState;
-  progress: FleetImportProgressEvent[];
-  result: FleetImportCompleteEvent | undefined;
-  errors: string[];
-  instancesFound: number | undefined;
-  reset: () => void;
+  run: (body: unknown) => Promise<FleetImportCompleteEvent | undefined>
+  state: FleetStreamState
+  progress: FleetImportProgressEvent[]
+  result: FleetImportCompleteEvent | undefined
+  errors: string[]
+  reset: () => void
 }
 
 function useFleetPostStream(url: string): UseFleetStreamReturn {
-  const [state, setState] = useState<FleetStreamState>('idle');
-  const [progress, setProgress] = useState<FleetImportProgressEvent[]>([]);
-  const [result, setResult] = useState<FleetImportCompleteEvent | undefined>(undefined);
-  const [errors, setErrors] = useState<string[]>([]);
-  const [instancesFound, setInstancesFound] = useState<number | undefined>(undefined);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [state, setState] = useState<FleetStreamState>('idle')
+  const [progress, setProgress] = useState<FleetImportProgressEvent[]>([])
+  const [result, setResult] = useState<FleetImportCompleteEvent | undefined>(
+    undefined
+  )
+  const [errors, setErrors] = useState<string[]>([])
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const reset = useCallback(() => {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    setState('idle');
-    setProgress([]);
-    setResult(undefined);
-    setErrors([]);
-    setInstancesFound(undefined);
-  }, []);
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    setState('idle')
+    setProgress([])
+    setResult(undefined)
+    setErrors([])
+  }, [])
 
   const run = useCallback(
     async (body: unknown) => {
-      abortControllerRef.current?.abort();
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
+      abortControllerRef.current?.abort()
+      const controller = new AbortController()
+      abortControllerRef.current = controller
 
-      setState('running');
-      setProgress([]);
-      setResult(undefined);
-      setErrors([]);
-      setInstancesFound(undefined);
+      setState('running')
+      setProgress([])
+      setResult(undefined)
+      setErrors([])
 
-      let completion: FleetImportCompleteEvent | undefined;
+      let completion: FleetImportCompleteEvent | undefined
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
           signal: controller.signal,
-        });
+        })
         await consumeFleetStream(response, (event) => {
           switch (event.type) {
-            case 'discover':
-              setInstancesFound(event.instances_found);
-              break;
             case 'import_progress':
-              setProgress((prev) => [...prev, event]);
-              break;
+              setProgress((prev) => [...prev, event])
+              break
             case 'import_complete':
-              completion = event;
-              setResult(event);
-              setState(event.success ? 'complete' : 'error');
-              break;
+              completion = event
+              setResult(event)
+              setState(event.success ? 'complete' : 'error')
+              break
             case 'error':
-              setErrors((prev) => [...prev, event.message]);
-              setState('error');
-              break;
+              setErrors((prev) => [...prev, event.message])
+              setState('error')
+              break
             default:
-              break;
+              break
           }
-        });
-        setState((prev) => (prev === 'running' ? 'complete' : prev));
+        })
+        setState((prev) => (prev === 'running' ? 'complete' : prev))
       } catch (err: unknown) {
-        if (err instanceof Error && err.name === 'AbortError') return undefined;
-        setErrors((prev) => [...prev, err instanceof Error ? err.message : 'An error occurred']);
-        setState('error');
+        if (err instanceof Error && err.name === 'AbortError') return undefined
+        setErrors((prev) => [
+          ...prev,
+          err instanceof Error ? err.message : 'An error occurred',
+        ])
+        setState('error')
       } finally {
-        abortControllerRef.current = null;
+        abortControllerRef.current = null
       }
-      return completion;
+      return completion
     },
-    [url],
-  );
+    [url]
+  )
 
-  return { run, state, progress, result, errors, instancesFound, reset };
+  return { run, state, progress, result, errors, reset }
 }
 
 export interface FleetImportRequest {
-  csv_file: string;
-  password_env?: string;
-  group?: string;
-  tags?: string[];
-  dry_run?: boolean;
+  // Server-local path or raw CSV text from the browser file picker; provide
+  // exactly one.
+  csv_file?: string
+  csv_content?: string
+  password_env?: string
+  group?: string
+  tags?: string[]
+  dry_run?: boolean
 }
 
 interface UseFleetImportReturn {
-  runImport: (request: FleetImportRequest) => Promise<void>;
-  state: FleetStreamState;
-  progress: FleetImportProgressEvent[];
-  result: FleetImportCompleteEvent | undefined;
-  errors: string[];
-  reset: () => void;
+  runImport: (
+    request: FleetImportRequest
+  ) => Promise<FleetImportCompleteEvent | undefined>
+  state: FleetStreamState
+  progress: FleetImportProgressEvent[]
+  result: FleetImportCompleteEvent | undefined
+  errors: string[]
+  reset: () => void
 }
 
 export function useFleetImport(): UseFleetImportReturn {
-  const { run, state, progress, result, errors, reset } = useFleetPostStream('/api/fleet/import');
+  const { run, state, progress, result, errors, reset } =
+    useFleetPostStream('/api/fleet/import')
   const runImport = useCallback(
-    async (request: FleetImportRequest) => {
-      await run(request);
-    },
-    [run],
-  );
-  return { runImport, state, progress, result, errors, reset };
-}
-
-export type FleetDiscoverRequest = components['schemas']['FleetDiscoverRequest'];
-
-interface UseFleetDiscoverReturn {
-  runDiscover: (request: FleetDiscoverRequest) => Promise<FleetImportCompleteEvent | undefined>;
-  state: FleetStreamState;
-  progress: FleetImportProgressEvent[];
-  result: FleetImportCompleteEvent | undefined;
-  errors: string[];
-  instancesFound: number | undefined;
-  reset: () => void;
-}
-
-export function useFleetDiscover(): UseFleetDiscoverReturn {
-  const { run, state, progress, result, errors, instancesFound, reset } =
-    useFleetPostStream('/api/fleet/discover');
-  const runDiscover = useCallback((request: FleetDiscoverRequest) => run(request), [run]);
-  return { runDiscover, state, progress, result, errors, instancesFound, reset };
+    (request: FleetImportRequest) => run(request),
+    [run]
+  )
+  return { runImport, state, progress, result, errors, reset }
 }
 
 // ---------------------------------------------------------------------------
@@ -363,144 +531,444 @@ export function useFleetDiscover(): UseFleetDiscoverReturn {
 // ---------------------------------------------------------------------------
 
 export interface FleetAuditRequest {
-  group?: string;
-  tag?: string;
-  insights?: boolean;
-  save?: boolean;
-  save_name?: string;
+  group?: string
+  tag?: string
+  /** Explicit target selection; mutually exclusive with group/tag. */
+  targets?: string[]
+  insights?: boolean
+  save?: boolean
+  save_name?: string
+  /** Live-capture window per target in seconds; absent = metrics-only audit. */
+  duration?: number
 }
 
-export type FleetAuditTargetStatus = 'running' | 'done' | 'error';
+export type FleetAuditTargetStatus = 'pending' | 'running' | 'done' | 'error'
 
 export interface FleetAuditTargetState {
-  status: FleetAuditTargetStatus;
-  verdict?: string;
-  cacheScore?: number;
-  error?: string;
+  status: FleetAuditTargetStatus
+  index?: number
+  phase?: string
+  phaseStartedAt?: number
+  statusMessage?: string
+  startedAt?: number
+  captureStartedAt?: number
+  captureElapsedSeconds?: number
+  captureTotalSeconds?: number
+  benchmarkStartedAt?: number
+  benchmarkStep?: string
+  verdict?: string
+  cacheScore?: number
+  error?: string
+  notice?: string
 }
 
 export interface FleetAuditSummary {
-  targets_audited?: number;
-  successes?: number;
-  failures?: number;
-  fleet_insights?: Record<string, unknown> | null;
+  targets_audited?: number
+  successes?: number
+  failures?: number
+  fleet_insights?: Record<string, unknown> | null
 }
 
 interface UseFleetAuditReturn {
-  runAudit: (request?: FleetAuditRequest) => Promise<void>;
-  state: FleetStreamState;
-  targets: Record<string, FleetAuditTargetState>;
-  statusMessage: string | undefined;
-  summary: FleetAuditSummary | undefined;
-  snapshotId: string | undefined;
-  error: string | undefined;
-  running: boolean;
-  reset: () => void;
+  runAudit: (request?: FleetAuditRequest) => Promise<void>
+  state: FleetStreamState
+  targets: Record<string, FleetAuditTargetState>
+  phase: string | undefined
+  statusMessage: string | undefined
+  summary: FleetAuditSummary | undefined
+  snapshotId: string | undefined
+  error: string | undefined
+  /** Machine-readable code from the SSE error event (e.g. the target cap). */
+  errorCode: string | undefined
+  running: boolean
+  cancel: () => void
+  reset: () => void
+}
+
+interface FleetAuditSnapshot {
+  state: FleetStreamState
+  targets: Record<string, FleetAuditTargetState>
+  phase: string | undefined
+  statusMessage: string | undefined
+  summary: FleetAuditSummary | undefined
+  snapshotId: string | undefined
+  error: string | undefined
+  errorCode: string | undefined
+}
+
+const EMPTY_FLEET_AUDIT: FleetAuditSnapshot = {
+  state: 'idle',
+  targets: {},
+  phase: undefined,
+  statusMessage: undefined,
+  summary: undefined,
+  snapshotId: undefined,
+  error: undefined,
+  errorCode: undefined,
+}
+let fleetAuditSnapshot = EMPTY_FLEET_AUDIT
+const fleetAuditListeners = new Set<() => void>()
+let fleetAuditController: AbortController | null = null
+let fleetAuditSessionId: number | null = null
+let fleetAuditRunId: string | null = null
+
+function setFleetAuditSnapshot(
+  update:
+    | Partial<FleetAuditSnapshot>
+    | ((current: FleetAuditSnapshot) => Partial<FleetAuditSnapshot>)
+) {
+  const patch =
+    typeof update === 'function' ? update(fleetAuditSnapshot) : update
+  fleetAuditSnapshot = { ...fleetAuditSnapshot, ...patch }
+  fleetAuditListeners.forEach((listener) => listener())
+}
+
+function subscribeFleetAudit(listener: () => void) {
+  fleetAuditListeners.add(listener)
+  return () => fleetAuditListeners.delete(listener)
+}
+
+function cancelFleetAudit() {
+  // Cancelling the background run is what releases the database connection
+  // every target in the fleet holds for the length of the run.
+  fleetAuditController?.abort()
+  fleetAuditController = null
+  if (fleetAuditRunId !== null) void cancelBackgroundRun(fleetAuditRunId)
+  fleetAuditRunId = null
+  setFleetAuditSnapshot({
+    state: 'idle',
+    phase: undefined,
+    statusMessage: undefined,
+  })
+  if (fleetAuditSessionId !== null) finishAuditSession(fleetAuditSessionId)
+  fleetAuditSessionId = null
+}
+
+/**
+ * Subscribe to a fleet health check's replayable event stream.
+ *
+ * The registry promotes each event's `type` to the SSE `event:` name, so the
+ * frame name is the discriminator that has to be put back before the payload
+ * can be read as an AuditEvent.
+ */
+async function followFleetAudit(
+  runId: string,
+  sessionId: number,
+  initialTargets: string[] = []
+): Promise<void> {
+  const controller = new AbortController()
+  fleetAuditController = controller
+  fleetAuditRunId = runId
+  updateAuditSession(sessionId, { runId })
+  const sessionTargetNames = new Set(initialTargets)
+  let terminal = false
+
+  try {
+    const response = await fetch(`/api/runs/${runId}/events?after_seq=0`, {
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}: ${await response.text()}`)
+    }
+    await consumeSseResponse(response, (name, data) => {
+      const payload = (data ?? {}) as Record<string, unknown>
+      if (name === 'run_end') {
+        // The registry's terminal record. A run that ended without its own
+        // completion event must not leave the session lock engaged.
+        if (terminal) return
+        terminal = true
+        if (payload.status === 'cancelled') {
+          setFleetAuditSnapshot({
+            state: 'idle',
+            phase: undefined,
+            statusMessage: undefined,
+          })
+        } else {
+          setFleetAuditSnapshot((current) => ({
+            error:
+              current.error || 'Fleet health check ended before completing',
+            state: 'error',
+          }))
+        }
+        finishAuditSession(sessionId)
+        return
+      }
+
+      const event = { ...payload, type: name } as unknown as AuditEvent
+      switch (event.type) {
+        case 'status':
+          setFleetAuditSnapshot((current) => {
+            const targetName = event.target_name ?? undefined
+            if (!targetName) {
+              return {
+                phase: event.phase,
+                statusMessage: event.message,
+              }
+            }
+            const previous = current.targets[targetName] ?? {
+              status: 'pending' as const,
+            }
+            const now = Date.now()
+            const enteringPhase = event.phase !== previous.phase
+            const enteringCapture =
+              event.phase === 'capture' && previous.phase !== 'capture'
+            const enteringBenchmark =
+              event.phase === 'readyset' && previous.phase !== 'readyset'
+            const benchmarkFailed =
+              event.phase === 'readyset' && event.step === 'failed'
+            const benchmarkSkipped =
+              event.phase === 'readyset' && event.step === 'skipped'
+            return {
+              phase: event.phase,
+              statusMessage: event.message,
+              targets: {
+                ...current.targets,
+                [targetName]: {
+                  ...previous,
+                  status:
+                    previous.status === 'done' || previous.status === 'error'
+                      ? previous.status
+                      : 'running',
+                  phase: event.phase,
+                  phaseStartedAt: enteringPhase ? now : previous.phaseStartedAt,
+                  statusMessage: event.message,
+                  startedAt: previous.startedAt ?? now,
+                  ...(enteringCapture ? { captureStartedAt: now } : {}),
+                  ...(event.elapsed_seconds != null
+                    ? { captureElapsedSeconds: event.elapsed_seconds }
+                    : {}),
+                  ...(event.total_seconds != null
+                    ? { captureTotalSeconds: event.total_seconds }
+                    : {}),
+                  ...(enteringBenchmark ? { benchmarkStartedAt: now } : {}),
+                  ...(event.phase === 'readyset' && event.step
+                    ? { benchmarkStep: event.step }
+                    : {}),
+                  ...(benchmarkFailed || benchmarkSkipped
+                    ? { notice: event.message }
+                    : {}),
+                },
+              },
+            }
+          })
+          updateAuditSession(sessionId, {
+            statusMessage: event.message,
+            phase: event.phase,
+          })
+          break
+        case 'target_start':
+          setFleetAuditSnapshot((current) => {
+            const now = Date.now()
+            return {
+              phase: 'collect',
+              targets: {
+                ...current.targets,
+                [event.target_name]: {
+                  ...(current.targets[event.target_name] ?? {}),
+                  status: 'running',
+                  index: event.index,
+                  phase: 'collect',
+                  phaseStartedAt:
+                    current.targets[event.target_name]?.phaseStartedAt ?? now,
+                  startedAt:
+                    current.targets[event.target_name]?.startedAt ?? now,
+                },
+              },
+            }
+          })
+          {
+            sessionTargetNames.add(event.target_name)
+            const names = [...sessionTargetNames]
+            updateAuditSession(sessionId, {
+              targetNames: names,
+              targetLabel:
+                names.length === 1 ? names[0] : `${names.length} targets`,
+            })
+          }
+          break
+        case 'target_complete': {
+          const result = event.result as AuditReport
+          setFleetAuditSnapshot((current) => {
+            const targets = {
+              ...current.targets,
+              [event.target_name]: {
+                status: 'done' as const,
+                verdict: result.sizing?.verdict ?? undefined,
+                cacheScore: result.cache_opportunity?.score,
+                ...(current.targets[event.target_name]?.notice
+                  ? { notice: current.targets[event.target_name].notice }
+                  : {}),
+              },
+            }
+            return { targets }
+          })
+          break
+        }
+        case 'target_error':
+          setFleetAuditSnapshot((current) => {
+            const targets = {
+              ...current.targets,
+              [event.target_name]: {
+                status: 'error' as const,
+                error: event.error,
+              },
+            }
+            return { targets }
+          })
+          break
+        case 'snapshot_saved':
+          setFleetAuditSnapshot({ snapshotId: event.snapshot_id })
+          break
+        case 'complete': {
+          terminal = true
+          setFleetAuditSnapshot({
+            summary: (event.summary ?? undefined) as
+              | FleetAuditSummary
+              | undefined,
+            snapshotId: event.snapshot_id || fleetAuditSnapshot.snapshotId,
+            state: event.success ? 'complete' : 'error',
+          })
+          const completedId = event.snapshot_id || fleetAuditSnapshot.snapshotId
+          if (event.success && completedId) {
+            completeAuditSession(sessionId, completedId)
+          } else {
+            finishAuditSession(sessionId)
+          }
+          break
+        }
+        case 'error':
+          terminal = true
+          setFleetAuditSnapshot({
+            error: event.message,
+            errorCode: (event as { code?: string }).code,
+            state: 'error',
+          })
+          // The cap error travels with a `code` field that is not part of
+          // the typed AuditEvent union yet.
+          finishAuditSession(sessionId)
+          break
+        default:
+          break
+      }
+    })
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'AbortError') return
+    setFleetAuditSnapshot({
+      error: err instanceof Error ? err.message : 'An error occurred',
+      state: 'error',
+    })
+    finishAuditSession(sessionId)
+  } finally {
+    if (fleetAuditController === controller) fleetAuditController = null
+    if (fleetAuditSessionId === sessionId) fleetAuditSessionId = null
+    if (fleetAuditRunId === runId) fleetAuditRunId = null
+  }
+}
+
+/**
+ * Re-seed the fleet health-check session from a run this browser left in
+ * flight, so a reload restores the banner and the one-at-a-time block.
+ */
+export function resumeFleetAuditSession(run: {
+  runId: string
+  target: string
+  stage: string
+  message: string
+}): void {
+  const sessionId = beginAuditSession({
+    kind: 'fleet',
+    targetLabel: run.target,
+    targetNames: [],
+    durationSeconds: 0,
+    startedAt: Date.now(),
+    phase: run.stage,
+    statusMessage: run.message,
+    runId: run.runId,
+    cancel: cancelFleetAudit,
+  })
+  if (sessionId === null) return
+
+  fleetAuditSessionId = sessionId
+  setFleetAuditSnapshot({
+    state: 'running',
+    phase: run.stage,
+    statusMessage: run.message,
+  })
+  void followFleetAudit(run.runId, sessionId)
 }
 
 export function useFleetAudit(): UseFleetAuditReturn {
-  const [state, setState] = useState<FleetStreamState>('idle');
-  const [targets, setTargets] = useState<Record<string, FleetAuditTargetState>>({});
-  const [statusMessage, setStatusMessage] = useState<string | undefined>(undefined);
-  const [summary, setSummary] = useState<FleetAuditSummary | undefined>(undefined);
-  const [snapshotId, setSnapshotId] = useState<string | undefined>(undefined);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const snapshot = useSyncExternalStore(
+    subscribeFleetAudit,
+    () => fleetAuditSnapshot,
+    () => fleetAuditSnapshot
+  )
 
   const reset = useCallback(() => {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-    setState('idle');
-    setTargets({});
-    setStatusMessage(undefined);
-    setSummary(undefined);
-    setSnapshotId(undefined);
-    setError(undefined);
-  }, []);
+    cancelFleetAudit()
+    setFleetAuditSnapshot(EMPTY_FLEET_AUDIT)
+  }, [])
+
+  const cancel = useCallback(cancelFleetAudit, [])
 
   const runAudit = useCallback(async (request?: FleetAuditRequest) => {
-    abortControllerRef.current?.abort();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    const targetNames = request?.targets ?? []
+    const targetLabel = request?.group
+      ? `group ${request.group}`
+      : targetNames.length === 1
+        ? targetNames[0]
+        : targetNames.length > 1
+          ? `${targetNames.length} targets`
+          : 'fleet'
+    const sessionId = beginAuditSession({
+      kind: 'fleet',
+      targetLabel,
+      targetNames,
+      durationSeconds: request?.duration ?? 0,
+      startedAt: Date.now(),
+      phase: 'config',
+      statusMessage: 'Starting health check...',
+      cancel: cancelFleetAudit,
+    })
+    if (sessionId === null) return
+    fleetAuditSessionId = sessionId
 
-    setState('running');
-    setTargets({});
-    setStatusMessage(undefined);
-    setSummary(undefined);
-    setSnapshotId(undefined);
-    setError(undefined);
+    setFleetAuditSnapshot({
+      state: 'running',
+      targets: Object.fromEntries(
+        targetNames.map((name, index) => [
+          name,
+          { status: 'pending' as const, index },
+        ])
+      ),
+      phase: 'config',
+      statusMessage: undefined,
+      summary: undefined,
+      snapshotId: undefined,
+      error: undefined,
+      errorCode: undefined,
+    })
 
-    try {
-      const response = await fetch('/api/fleet/audit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request ?? {}),
-        signal: controller.signal,
-      });
-      await consumeFleetStream<AuditEvent>(response, (event) => {
-        switch (event.type) {
-          case 'status':
-            setStatusMessage(event.message);
-            break;
-          case 'target_start':
-            setTargets((prev) => ({
-              ...prev,
-              [event.target_name]: { status: 'running' },
-            }));
-            break;
-          case 'target_complete': {
-            const result = event.result as AuditReport;
-            setTargets((prev) => ({
-              ...prev,
-              [event.target_name]: {
-                status: 'done',
-                verdict: result.sizing?.verdict ?? undefined,
-                cacheScore: result.cache_opportunity?.score,
-              },
-            }));
-            break;
-          }
-          case 'target_error':
-            setTargets((prev) => ({
-              ...prev,
-              [event.target_name]: { status: 'error', error: event.error },
-            }));
-            break;
-          case 'snapshot_saved':
-            setSnapshotId(event.snapshot_id);
-            break;
-          case 'complete':
-            setSummary((event.summary ?? undefined) as FleetAuditSummary | undefined);
-            if (event.snapshot_id) setSnapshotId(event.snapshot_id);
-            setState(event.success ? 'complete' : 'error');
-            break;
-          case 'error':
-            setError(event.message);
-            setState('error');
-            break;
-          default:
-            break;
-        }
-      });
-      setState((prev) => (prev === 'running' ? 'complete' : prev));
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : 'An error occurred');
-      setState('error');
-    } finally {
-      abortControllerRef.current = null;
+    // A `reused` response hands back the fleet audit already in flight, which
+    // is the same thing this hook wants to follow.
+    const started = await startFleetAuditRun(request ?? {})
+    if (!started) {
+      setFleetAuditSnapshot({
+        error: 'Fleet health check could not start',
+        state: 'error',
+      })
+      finishAuditSession(sessionId)
+      fleetAuditSessionId = null
+      return
     }
-  }, []);
+    await followFleetAudit(started.runId, sessionId, targetNames)
+  }, [])
 
   return {
     runAudit,
-    state,
-    targets,
-    statusMessage,
-    summary,
-    snapshotId,
-    error,
-    running: state === 'running',
+    ...snapshot,
+    running: snapshot.state === 'running',
+    cancel,
     reset,
-  };
+  }
 }

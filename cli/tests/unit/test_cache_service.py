@@ -323,7 +323,9 @@ class TestCacheList:
 # ============================================================================
 
 
+@pytest.mark.usefixtures("run_blocking_inline")
 class TestCacheAdd:
+
     @pytest.mark.asyncio
     async def test_add_dry_run_supported(self):
         from features.cache.service import CacheService
@@ -334,7 +336,10 @@ class TestCacheAdd:
             "host": "127.0.0.1", "port": 5433, "user": "admin",
             "database": "myapp",
         }
-        with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
+        with (
+            patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)),
+            patch.object(service, "_connection_kwargs", return_value={}),
+        ):
             with patch("features.cache.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": True}):
                 with patch.object(service, "_run_readyset_sql", return_value={"success": True, "output": "yes, supported"}):
                     events = [e async for e in service.add_cache(
@@ -355,7 +360,10 @@ class TestCacheAdd:
             "host": "127.0.0.1", "port": 5433, "user": "admin",
             "database": "myapp",
         }
-        with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
+        with (
+            patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)),
+            patch.object(service, "_connection_kwargs", return_value={}),
+        ):
             with patch("features.cache.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": True}):
                 with patch.object(service, "_run_readyset_sql", return_value={"success": True, "output": "unsupported: subquery"}):
                     events = [e async for e in service.add_cache(
@@ -376,7 +384,10 @@ class TestCacheAdd:
             "host": "127.0.0.1", "port": 5433, "user": "admin",
             "database": "myapp",
         }
-        with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
+        with (
+            patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)),
+            patch.object(service, "_connection_kwargs", return_value={}),
+        ):
             with patch("features.cache.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": True}):
                 with patch.object(service, "_run_readyset_sql", return_value={"success": True, "output": "yes"}):
                     with patch.object(service, "_save_to_registry", return_value="abc123def456"):
@@ -390,7 +401,7 @@ class TestCacheAdd:
         assert add_evts[0].query_hash == "abc123def456"
 
     @pytest.mark.asyncio
-    async def test_add_static_check_fails(self):
+    async def test_add_static_check_is_advisory(self):
         from features.cache.service import CacheService
 
         service = CacheService()
@@ -399,15 +410,24 @@ class TestCacheAdd:
             "host": "127.0.0.1", "port": 5433, "user": "admin",
             "database": "myapp",
         }
-        with patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)):
+        with (
+            patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)),
+            patch.object(service, "_connection_kwargs", return_value={}),
+        ):
             with patch("features.cache.readyset_cacheability.check_readyset_cacheability", return_value={"cacheable": False, "issues": ["Uses window function"]}):
-                events = [e async for e in service.add_cache(
-                    CacheInput(target="mydb", query="SELECT ROW_NUMBER() OVER()"),
-                    CacheOptions(dry_run=True),
-                )]
-        error_evts = [e for e in events if hasattr(e, "type") and e.type == "error"]
-        assert len(error_evts) == 1
-        assert "window function" in error_evts[0].message.lower()
+                with patch.object(
+                    service, "_run_readyset_sql",
+                    return_value={"success": True, "output": "readyset supported\tyes"},
+                ) as run_sql:
+                    events = [e async for e in service.add_cache(
+                        CacheInput(target="mydb", query="SELECT ROW_NUMBER() OVER()"),
+                        CacheOptions(dry_run=True),
+                    )]
+        add_event = next(event for event in events if event.type == "cache_add")
+        assert add_event.success is True
+        assert add_event.supported is True
+        assert "window function" in add_event.detail.lower()
+        assert run_sql.call_args.args[0].startswith("EXPLAIN CREATE SHALLOW CACHE FROM ")
 
     @pytest.mark.asyncio
     async def test_add_no_cache_target(self):

@@ -35,6 +35,19 @@ for (const name of ['localStorage', 'sessionStorage'] as const) {
   })
 }
 
+// jsdom has no ResizeObserver, and Radix primitives (ScrollArea, Select) probe
+// for it at mount. Defined rather than vi.stubGlobal'd so suites that call
+// vi.unstubAllGlobals() keep it.
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  value: class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  },
+  configurable: true,
+  writable: true,
+})
+
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()

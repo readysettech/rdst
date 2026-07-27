@@ -642,7 +642,7 @@ function HomePage() {
   })
 
   const { data: auditRuns } = useQuery({
-    queryKey: ['home', 'audit-runs'],
+    queryKey: ['audit-runs'],
     queryFn: () => fetchAuditRuns(),
     staleTime: 60_000,
     enabled: hasTargets,
@@ -744,7 +744,7 @@ function HomePage() {
       </m.div>
 
       <Text level="caption" className="text-content-layout-3">
-        Looking for Agents, Guards, Fleet, or Benchmark? They live under
+        Looking for Agents, Guards, or Benchmark? They live under
         Advanced in the sidebar. Databases, AI Settings, and Schema now live
         under Set up.
       </Text>

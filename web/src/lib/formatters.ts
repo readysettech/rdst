@@ -26,6 +26,22 @@ export function formatDuration(ms?: number): string {
   return `${ms.toFixed(1)}ms`;
 }
 
+/** Clock-style seconds readout: `Xm Ys`, or `Ys` under a minute. */
+export function formatSecondsClock(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safe / 60);
+  const remainder = safe % 60;
+  return minutes > 0 ? `${minutes}m ${remainder}s` : `${remainder}s`;
+}
+
+/** Short seconds readout: drops a zero remainder, so `5m` rather than `5m 0s`. */
+export function formatSecondsShort(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const mins = Math.floor(seconds / 60);
+  const rem = Math.round(seconds % 60);
+  return rem ? `${mins}m ${rem}s` : `${mins}m`;
+}
+
 /**
  * Canonical sub-second-aware ms formatter for latency/duration readouts:
  * `<1ms` under a millisecond, `X.Xms` under a second, `X.XXs` above.

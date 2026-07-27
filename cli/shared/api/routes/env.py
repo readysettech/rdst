@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 from typing import List, Literal, Optional
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, SecretStr
 
 from shared.anthropic_env import ANTHROPIC_API_KEY_NAMES
+from shared.api.guards import is_loopback_request, require_local_request
 from shared.env_requirements_service import EnvRequirementsService
 from shared.run_registry import run_registry
 
@@ -22,8 +22,6 @@ EnvRequirementSource = Literal[
 ]
 
 router = APIRouter()
-
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 class EnvRequirement(BaseModel):
@@ -55,50 +53,16 @@ class EnvSetResponse(BaseModel):
 
 class AnthropicValidateResponse(BaseModel):
     valid: bool
-    reason: Literal["ok", "rejected", "no_key", "provider_error"]
+    reason: Literal["ok", "rejected", "no_key", "provider_error", "exhausted"]
     model: Optional[str] = None
-
-
-def _normalize_host(host: str) -> str:
-    if host.startswith("::ffff:"):
-        return host.split("::ffff:", 1)[1]
-    return host
-
-
-def _is_loopback_request(request: Request) -> bool:
-    client = request.client
-    if not client:
-        return False
-    host = _normalize_host(client.host or "")
-    return host in _LOOPBACK_HOSTS
-
-
-def _same_host_from_headers(request: Request) -> bool:
-    host_header = request.headers.get("host")
-    expected_host = None
-    if host_header:
-        expected_host = urlsplit(f"http://{host_header}").hostname
-        if expected_host:
-            expected_host = _normalize_host(expected_host)
-
-    for header in ("origin", "referer"):
-        value = request.headers.get(header)
-        if not value:
-            continue
-        parsed_host = urlsplit(value).hostname
-        if not parsed_host:
-            return False
-        parsed_host = _normalize_host(parsed_host)
-        if parsed_host not in _LOOPBACK_HOSTS:
-            return False
-        if expected_host and parsed_host != expected_host:
-            return False
-    return True
+    # Which key backed the check, so the UI can say "trial token accepted by
+    # Readyset" vs "Anthropic accepted it" instead of always crediting Anthropic.
+    source: Optional[str] = None
 
 
 @router.get("/env/requirements")
 async def get_env_requirements(request: Request) -> EnvRequirementsResponse:
-    if not _is_loopback_request(request):
+    if not is_loopback_request(request):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     service = EnvRequirementsService()
@@ -111,10 +75,7 @@ async def get_env_requirements(request: Request) -> EnvRequirementsResponse:
 
 @router.post("/env/set")
 async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetResponse:
-    if not _is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not _same_host_from_headers(request):
-        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+    require_local_request(request)
 
     service = EnvRequirementsService()
     allowed = set(service.get_allowed_secret_names())
@@ -124,7 +85,7 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
             name=body.name,
             persisted=False,
             session_only=True,
-            message="Environment variable is not allowed.",
+            message="This secret cannot be set here.",
         )
 
     result = service.secret_store.set_secret(
@@ -153,10 +114,7 @@ async def validate_anthropic_key(request: Request) -> AnthropicValidateResponse:
     "configured" key from a "working" one. Loopback + same-host guarded; the
     blocking provider call is offloaded off the event loop.
     """
-    if not _is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not _same_host_from_headers(request):
-        raise HTTPException(status_code=403, detail="Origin/Referer host mismatch")
+    require_local_request(request)
 
     import asyncio
 

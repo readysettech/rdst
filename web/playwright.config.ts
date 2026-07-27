@@ -34,6 +34,9 @@ export default defineConfig({
   ],
   use: {
     baseURL,
+    // Animations never settle on GPU-less CI runners, so actionability
+    // checks (e.g. checkbox stability) time out without this.
+    contextOptions: { reducedMotion: 'reduce' },
     // Retain the original failure instead of only tracing its retry. This
     // makes local failures and CI flakes diagnosable from the same artifact.
     trace: 'retain-on-failure',
@@ -41,7 +44,10 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command: `pnpm run build && uv run --directory "${rdstDir}" uvicorn tests.web_e2e.server:app --host 127.0.0.1 --port 8787`,
+    // `python -m uvicorn` resolves inside the project interpreter, so a venv
+    // whose console-script shebangs have gone stale (e.g. after the repo
+    // moved on disk) still serves.
+    command: `pnpm run build && uv run --directory "${rdstDir}" python -m uvicorn tests.web_e2e.server:app --host 127.0.0.1 --port 8787`,
     cwd: appDir,
     env: {
       ...process.env,

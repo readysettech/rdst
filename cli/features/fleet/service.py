@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 from typing import Any
 
 from shared.config.targets import TargetsConfig
 from shared.db_connection import create_direct_connection
+from shared.password_resolver import resolve_password
+from shared.secret_store_service import SecretStoreService
 
 from .csv_importer import parse_csv
 from .events import (
@@ -21,6 +24,44 @@ from .events import (
     FleetStatusEvent,
 )
 from .models import FleetMember
+
+
+def fleet_member_shape(
+    name: str,
+    target_config: dict[str, Any],
+    secret_store: SecretStoreService | None = None,
+) -> dict[str, Any]:
+    """Return the public member shape used by the fleet targets API.
+
+    `secret_store` is reused across members so a listing opens the OS
+    keychain once instead of once per target."""
+    return {
+        "name": name,
+        "engine": target_config.get("engine", ""),
+        "host": target_config.get("host", ""),
+        "port": target_config.get("port", 0),
+        "database": target_config.get("database", ""),
+        "user": target_config.get("user", ""),
+        "password_env": target_config.get("password_env", ""),
+        "has_password": resolve_password(target_config, secret_store).available,
+        "group": target_config.get("group"),
+        "tags": target_config.get("tags", []),
+        "instance_class": target_config.get("instance_class"),
+        "target_type": target_config.get("target_type", "database"),
+        "region": target_config.get("region"),
+        "tls": target_config.get("tls", False),
+        "read_only": target_config.get("read_only", False),
+    }
+
+
+def _existing_hosts(config: TargetsConfig) -> set[str]:
+    """Lowercased hosts of every configured target, for dedupe on import."""
+    hosts: set[str] = set()
+    for name in config.list_targets():
+        target_config = config.get(name)
+        if target_config:
+            hosts.add(target_config.get("host", "").lower())
+    return hosts
 
 
 class FleetService:
@@ -135,6 +176,75 @@ class FleetService:
             target_names=imported_names,
         )
 
+    async def discover_preview(
+        self,
+        regions: list[str],
+        *,
+        engine_filter: str | None = None,
+        profile: str | None = None,
+    ) -> dict:
+        """Discover RDS/Aurora instances without importing anything.
+
+        Returns the full member list (with an `already_exists` flag per
+        member) so the caller can choose which targets to add.
+        """
+        from .auth import detect_aws_credentials
+        from .discovery import discover_rds_instances
+
+        has_creds, message = await asyncio.to_thread(detect_aws_credentials, profile)
+        if not has_creds:
+            return {"members": [], "errors": [message]}
+
+        discovery_errors: list[str] = []
+
+        def _discover_all() -> list[FleetMember]:
+            return list(
+                discover_rds_instances(
+                    regions=regions,
+                    engine_filter=engine_filter,
+                    errors=discovery_errors,
+                    profile=profile,
+                )
+            )
+
+        members = await asyncio.to_thread(_discover_all)
+
+        config = self._get_config()
+        existing_hosts = _existing_hosts(config)
+
+        shaped = []
+        for member in members:
+            shaped.append({
+                **dataclasses.asdict(member),
+                "already_exists": bool(
+                    config.get(member.name) or member.host.lower() in existing_hosts
+                ),
+            })
+        return {"members": shaped, "errors": discovery_errors}
+
+    def add_members(self, members: list[dict]) -> dict:
+        """Add pre-discovered members as targets, skipping existing ones."""
+        allowed = {f.name for f in dataclasses.fields(FleetMember)}
+        config = self._get_config()
+        existing_hosts = _existing_hosts(config)
+
+        imported_names: list[str] = []
+        skipped = 0
+        for raw in members:
+            member = FleetMember(**{k: v for k, v in raw.items() if k in allowed})
+            if config.get(member.name) or member.host.lower() in existing_hosts:
+                skipped += 1
+                continue
+            config.upsert(member.name, member.to_target_config())
+            imported_names.append(member.name)
+        if imported_names:
+            config.save()
+        return {
+            "imported": len(imported_names),
+            "skipped": skipped,
+            "target_names": imported_names,
+        }
+
     async def discover(
         self,
         regions: list[str],
@@ -146,17 +256,19 @@ class FleetService:
         default_group: str | None = None,
         default_database: str | None = None,
         dry_run: bool = False,
+        profile: str | None = None,
     ):
         """Discover RDS/Aurora instances from AWS and add them as targets.
 
-        Uses the local AWS credential chain (env vars, ~/.aws, SSO). Emits
-        import_progress per instance and import_complete with the totals,
-        matching the CSV import event flow.
+        Uses the local AWS credential chain (env vars, ~/.aws, SSO), or the
+        named AWS profile when `profile` is given. Emits import_progress per
+        instance and import_complete with the totals, matching the CSV
+        import event flow.
         """
         from .auth import detect_aws_credentials
         from .discovery import discover_rds_instances
 
-        has_creds, message = await asyncio.to_thread(detect_aws_credentials)
+        has_creds, message = await asyncio.to_thread(detect_aws_credentials, profile)
         if not has_creds:
             yield FleetErrorEvent(type="error", message=message, phase="discover")
             return
@@ -180,6 +292,7 @@ class FleetService:
                     default_group=default_group,
                     default_database=default_database,
                     errors=discovery_errors,
+                    profile=profile,
                 )
             )
 
@@ -209,11 +322,7 @@ class FleetService:
         )
 
         config = self._get_config()
-        existing_hosts = set()
-        for name in config.list_targets():
-            target_config = config.get(name)
-            if target_config:
-                existing_hosts.add(target_config.get("host", "").lower())
+        existing_hosts = _existing_hosts(config)
 
         imported = 0
         skipped = 0
@@ -269,32 +378,38 @@ class FleetService:
         config = self._get_config()
         target_names = config.list_fleet_targets(group=group, tag=tag)
 
-        members: list[dict[str, Any]] = []
-        for name in target_names:
-            target_config = config.get(name)
-            if target_config is None:
-                continue
-            members.append(
-                {
-                    "name": name,
-                    "engine": target_config.get("engine", ""),
-                    "host": target_config.get("host", ""),
-                    "port": target_config.get("port", 0),
-                    "database": target_config.get("database", ""),
-                    "group": target_config.get("group"),
-                    "tags": target_config.get("tags", []),
-                    "instance_class": target_config.get("instance_class"),
-                    "target_type": target_config.get("target_type", "database"),
-                    "region": target_config.get("region"),
-                }
-            )
+        def _shape_members() -> list[dict[str, Any]]:
+            secret_store = SecretStoreService()
+            members: list[dict[str, Any]] = []
+            for name in target_names:
+                target_config = config.get(name)
+                if target_config is None:
+                    continue
+                members.append(fleet_member_shape(name, target_config, secret_store))
+            return members
+
+        # Password resolution can block on the OS keychain, so it stays off
+        # the event loop.
+        members = await asyncio.to_thread(_shape_members)
 
         yield FleetListEvent(type="fleet_list", members=members, groups=config.list_groups())
 
-    async def check_status(self, group: str | None = None, tag: str | None = None):
+    async def check_status(
+        self,
+        group: str | None = None,
+        tag: str | None = None,
+        targets: list[str] | None = None,
+    ):
         """Check connectivity for fleet targets."""
         config = self._get_config()
-        target_names = config.list_fleet_targets(group=group, tag=tag)
+        configured_names = config.list_fleet_targets(group=group, tag=tag)
+        if targets is None:
+            target_names = configured_names
+        else:
+            configured = set(configured_names)
+            target_names = [
+                name for name in dict.fromkeys(targets) if name in configured
+            ]
 
         if not target_names:
             yield FleetErrorEvent(
@@ -321,6 +436,18 @@ class FleetService:
                     target_name=name,
                     status="failed",
                     error="Target config not found",
+                )
+                continue
+
+            password_env = target_config.get("password_env")
+            if password_env and not resolve_password(target_config).available:
+                yield FleetConnectivityEvent(
+                    type="connectivity",
+                    target_name=name,
+                    status="failed",
+                    error=f"Enter the password for '{name}' again.",
+                    code="TARGET_PASSWORD_REQUIRED",
+                    password_env=password_env,
                 )
                 continue
 

@@ -446,7 +446,7 @@ class TestConfigureServiceIntegration:
             # Mock the actual connection test
             with patch.object(
                 service,
-                "_perform_connection_test",
+                "perform_connection_test",
                 new_callable=AsyncMock,
                 return_value={
                     "success": True,
@@ -458,16 +458,14 @@ class TestConfigureServiceIntegration:
                 async for event in service.test_connection("test_db"):
                     events.append(event)
 
-                # Should have status and connection test events
-                status_events = [
-                    e for e in events if isinstance(e, ConfigureStatusEvent)
-                ]
-                assert len(status_events) >= 1
-
+                # The connection-test events are the contract: an in_progress
+                # event followed by the terminal success/failed one.
                 test_events = [
                     e for e in events if isinstance(e, ConfigureConnectionTestEvent)
                 ]
-                assert len(test_events) >= 1
+                assert len(test_events) >= 2
+                assert test_events[0].status == "in_progress"
+                assert test_events[-1].status == "success"
 
                 # Final event should be success
                 final_test = test_events[-1]
@@ -492,7 +490,7 @@ class TestConfigureServiceIntegration:
             # Mock the actual connection test to fail
             with patch.object(
                 service,
-                "_perform_connection_test",
+                "perform_connection_test",
                 new_callable=AsyncMock,
                 return_value={
                     "success": False,
@@ -856,7 +854,7 @@ class TestConfigureAPIIntegration:
                 ),
                 patch.object(
                     ConfigureService,
-                    "_perform_connection_test",
+                    "perform_connection_test",
                     new_callable=AsyncMock,
                     return_value={
                         "success": True,

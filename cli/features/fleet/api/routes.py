@@ -2,29 +2,48 @@
 
 Targets listing is plain JSON (config read, no database access). Status
 checks and CSV import stream FleetEvent payloads over SSE. `rdst web` runs
-on the user's machine, so the import endpoint takes a local CSV path, same
-as the CLI's `fleet import --from`.
+on the user's machine, so the import endpoint takes a local CSV path (same
+as the CLI's `fleet import --from`) or raw CSV text from the browser's
+file picker.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from dataclasses import asdict
 from typing import Any, AsyncGenerator, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from sse_starlette.sse import EventSourceResponse
 
-from ..service import FleetService
+from features.audit.api.routes import AuditRunStartResponse
+from features.audit.report.delivery import (
+    RunEmailRequest,
+    RunEmailResponse,
+    deliver_run_report,
+)
+from shared.run_registry import AUDIT_RUN_KINDS, run_registry
+from shared.service_events import ErrorEvent
+
+from ..service import FleetService, fleet_member_shape
 from ..snapshot_store import SnapshotStore
 
 router = APIRouter(prefix="/fleet", tags=["fleet"])
 
+# Tests replace this with an isolated registry instance.
+_registry = run_registry
+
 
 class FleetImportRequest(BaseModel):
-    csv_file: str
+    # Either a server-local path or the raw CSV text (from the browser file
+    # picker). Exactly one must be provided; csv_content wins when both are.
+    csv_file: Optional[str] = None
+    csv_content: Optional[str] = None
     password_env: str = "FLEET_PASS"
     group: Optional[str] = None
     tags: Optional[list[str]] = None
@@ -35,6 +54,23 @@ class FleetTargetsResponse(BaseModel):
     members: list[dict[str, Any]]
     groups: list[str]
     count: int
+
+
+class FleetTargetGroupRequest(BaseModel):
+    group: Optional[str] = None
+
+
+class AwsLoginRequest(BaseModel):
+    profile: str
+
+
+class AwsProfileCreateRequest(BaseModel):
+    name: str
+    sso_start_url: str
+    sso_region: str
+    sso_account_id: str
+    sso_role_name: str
+    region: str
 
 
 def _event_to_sse(event: Any) -> dict:
@@ -57,16 +93,42 @@ async def list_fleet_targets(
     return FleetTargetsResponse(members=members, groups=groups, count=len(members))
 
 
+@router.patch("/targets/{name}")
+async def patch_fleet_target_group(
+    name: str, request: FleetTargetGroupRequest
+) -> dict[str, Any]:
+    """Set or clear a configured fleet target's group."""
+    from shared.config.targets import TargetsConfig
+
+    config = TargetsConfig()
+    config.load()
+    target = config.get(name)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"Target '{name}' not found")
+    if request.group is None:
+        target.pop("group", None)
+    else:
+        target["group"] = request.group
+    config.upsert(name, target)
+    config.save()
+    return fleet_member_shape(name, target)
+
+
 @router.get("/status")
 async def check_fleet_status(
     group: Optional[str] = Query(default=None),
     tag: Optional[str] = Query(default=None),
+    targets: Optional[list[str]] = Query(default=None),
 ):
     """Check connectivity for fleet targets (SSE stream)."""
     service = FleetService()
 
     async def _generator() -> AsyncGenerator[dict, None]:
-        async for event in service.check_status(group=group, tag=tag):
+        async for event in service.check_status(
+            group=group,
+            tag=tag,
+            targets=targets,
+        ):
             yield _event_to_sse(event)
 
     return EventSourceResponse(_generator())
@@ -81,6 +143,142 @@ class FleetDiscoverRequest(BaseModel):
     default_database: Optional[str] = None
     group: Optional[str] = None
     dry_run: bool = False
+    # Named AWS profile to discover with; null = default credential chain.
+    profile: Optional[str] = None
+
+
+@router.get("/aws-status")
+async def get_fleet_aws_status(profile: Optional[str] = None) -> dict[str, Any]:
+    """Report local AWS credential state for the discovery UI."""
+    from ..auth import get_aws_status
+
+    return await asyncio.to_thread(get_aws_status, 3.0, profile)
+
+
+@router.post("/aws-login")
+async def start_fleet_aws_login(request: AwsLoginRequest):
+    """Start AWS CLI SSO login without blocking the local web request."""
+    from ..aws_login import (
+        AwsCliMissing,
+        AwsCliSpawnError,
+        AwsSdkUnavailable,
+        UnknownAwsProfile,
+        fallback_command,
+        start_login,
+    )
+
+    try:
+        return await asyncio.to_thread(start_login, request.profile)
+    except UnknownAwsProfile as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"code": "unknown_profile", "detail": str(exc)},
+        )
+    except AwsSdkUnavailable as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"code": "aws_sdk_missing", "detail": str(exc)},
+        )
+    except AwsCliMissing as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": "aws_cli_missing",
+                "detail": str(exc),
+                "fallback_command": fallback_command(request.profile),
+            },
+        )
+    except AwsCliSpawnError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": "aws_cli_spawn_failed",
+                "detail": str(exc),
+                "fallback_command": fallback_command(request.profile),
+            },
+        )
+
+
+@router.post("/aws-logout")
+async def fleet_aws_logout():
+    """Sign out of AWS SSO (clears the CLI's cached SSO sessions)."""
+    from ..aws_login import AwsCliMissing, AwsCliSpawnError, logout
+
+    try:
+        return await asyncio.to_thread(logout)
+    except AwsCliMissing as exc:
+        return JSONResponse(status_code=409, content={"code": "aws_cli_missing", "detail": str(exc)})
+    except AwsCliSpawnError as exc:
+        return JSONResponse(status_code=409, content={"code": "aws_logout_failed", "detail": str(exc)})
+
+
+@router.get("/aws-login/{login_id}")
+async def get_fleet_aws_login(login_id: str):
+    """Poll an AWS CLI login and verify the resulting STS session."""
+    from ..aws_login import get_login_status
+
+    try:
+        return await asyncio.to_thread(get_login_status, login_id)
+    except KeyError:
+        return JSONResponse(
+            status_code=404,
+            content={"code": "unknown_login", "detail": "AWS login was not found"},
+        )
+
+
+@router.post("/aws-profiles")
+async def create_fleet_aws_profile(request: AwsProfileCreateRequest):
+    """Create a modern AWS CLI SSO profile in the user's local config."""
+    from ..aws_profiles import AwsProfileExists, InvalidAwsProfile, create_sso_profile
+
+    try:
+        return await asyncio.to_thread(create_sso_profile, **request.model_dump())
+    except InvalidAwsProfile as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"code": "invalid_profile", "detail": str(exc)},
+        )
+    except AwsProfileExists as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"code": "profile_exists", "detail": str(exc)},
+        )
+
+
+class FleetDiscoverPreviewRequest(BaseModel):
+    regions: list[str]
+    engine_filter: Optional[str] = None
+    profile: Optional[str] = None
+
+
+class FleetBulkAddRequest(BaseModel):
+    members: list[dict[str, Any]]
+
+
+@router.post("/discover-preview")
+async def discover_preview(request: FleetDiscoverPreviewRequest):
+    """List discoverable RDS/Aurora instances without importing them."""
+    if not request.regions:
+        raise HTTPException(status_code=400, detail="At least one region is required")
+    service = FleetService()
+    engine_filter = (
+        request.engine_filter if request.engine_filter not in (None, "all") else None
+    )
+    return await service.discover_preview(
+        request.regions, engine_filter=engine_filter, profile=request.profile
+    )
+
+
+@router.post("/targets/bulk-add")
+async def bulk_add_targets(request: FleetBulkAddRequest):
+    """Add previously previewed members as fleet targets."""
+    if not request.members:
+        raise HTTPException(status_code=400, detail="No members provided")
+    service = FleetService()
+    try:
+        return await asyncio.to_thread(service.add_members, request.members)
+    except TypeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid member shape: {exc}")
 
 
 @router.post("/discover")
@@ -105,6 +303,7 @@ async def discover_fleet(request: FleetDiscoverRequest):
             default_group=request.group,
             default_database=request.default_database,
             dry_run=request.dry_run,
+            profile=request.profile,
         ):
             yield _event_to_sse(event)
 
@@ -114,40 +313,104 @@ async def discover_fleet(request: FleetDiscoverRequest):
 class FleetAuditRequest(BaseModel):
     group: Optional[str] = None
     tag: Optional[str] = None
+    # Explicit target names to audit; mutually exclusive with group/tag.
+    targets: Optional[list[str]] = None
     insights: bool = True
     save: bool = True
     save_name: Optional[str] = None
+    # Live capture window per target in seconds (clamped 10-3600).
+    # Absent/null = metrics-only audit.
+    duration: Optional[int] = None
 
 
-@router.post("/audit")
-async def run_fleet_audit(request: FleetAuditRequest):
-    """Audit all fleet targets concurrently (SSE stream of AuditEvent)."""
+# Fleet audits are capped: each target holds a database connection for the
+# whole run, and duration captures multiply the cost. The cap applies to the
+# resolved target set regardless of how it was selected.
+MAX_FLEET_AUDIT_TARGETS = 8
+
+# One failed target is isolated: the fleet audit keeps auditing its siblings
+# and still completes, so this event must not fail the whole run.
+FLEET_CHILD_ERROR_EVENTS = frozenset({"target_error"})
+
+
+@router.post("/audit", response_model=AuditRunStartResponse)
+async def run_fleet_audit(request: FleetAuditRequest) -> AuditRunStartResponse:
+    """Start a fleet-wide audit as one detached background run.
+
+    Targets come from an explicit `targets` list, or from the fleet filtered
+    by group/tag (all fleet targets when neither is given). The whole fleet
+    is a single run, so its events read back through
+    `/api/runs/{run_id}/events` and one cancel stops every target.
+    """
     import datetime
 
     from features.audit.service import AuditService
     from shared.config.targets import TargetsConfig
 
+    existing = _registry.find_active(AUDIT_RUN_KINDS)
+    if existing is not None:
+        return AuditRunStartResponse(run_id=existing, reused=True)
+
     config = TargetsConfig()
     config.load()
-    targets = config.list_fleet_targets(group=request.group, tag=request.tag)
+    if request.targets is not None and (request.group or request.tag):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_request",
+                "message": "'targets' cannot be combined with 'group' or 'tag'",
+            },
+        )
+    if request.targets is not None:
+        known = set(config.list_fleet_targets())
+        unknown = [name for name in request.targets if name not in known]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "unknown_targets",
+                    "message": f"Unknown targets: {', '.join(unknown)}",
+                    "targets": unknown,
+                },
+            )
+        # Dedupe while preserving request order.
+        targets = list(dict.fromkeys(request.targets))
+    else:
+        targets = config.list_fleet_targets(group=request.group, tag=request.tag)
     save_name = request.save_name
     if save_name is None and request.save:
         save_name = f"fleet_{datetime.datetime.now():%Y%m%d_%H%M%S}"
+    duration = max(10, min(request.duration, 3600)) if request.duration else None
     service = AuditService(config=config)
 
-    async def _generator() -> AsyncGenerator[dict, None]:
+    async def _generator() -> AsyncGenerator[Any, None]:
         if not targets:
-            yield {
-                "event": "error",
-                "data": json.dumps({"message": "No targets found", "phase": "start"}),
-            }
+            yield ErrorEvent(type="error", message="No targets found", stage="start")
+            return
+        if len(targets) > MAX_FLEET_AUDIT_TARGETS:
+            yield ErrorEvent(
+                type="error",
+                message=(
+                    f"Audit up to {MAX_FLEET_AUDIT_TARGETS} targets at once — "
+                    f"filter by group or tag ({len(targets)} targets selected)"
+                ),
+                code="too_many_targets",
+                stage="start",
+            )
             return
         async for event in service.audit_fleet(
             targets, insights=request.insights, save_name=save_name,
+            duration_seconds=duration,
         ):
-            yield _event_to_sse(event)
+            yield event
 
-    return EventSourceResponse(_generator())
+    run_id = _registry.start(
+        "fleet_audit",
+        request.group or "fleet",
+        _generator(),
+        child_error_events=FLEET_CHILD_ERROR_EVENTS,
+    )
+    return AuditRunStartResponse(run_id=run_id)
 
 
 class FleetSnapshotSummary(BaseModel):
@@ -155,6 +418,10 @@ class FleetSnapshotSummary(BaseModel):
     name: str
     created_at: str
     targets_audited: int
+    # Names of the audited targets and the longest capture window across
+    # them, so the history list needs no per-snapshot detail fetch.
+    target_names: list[str] = []
+    duration_seconds: int = 0
     kind: str = "fleet"
 
 
@@ -202,6 +469,8 @@ async def list_fleet_snapshots(
             name=snap.get("name", ""),
             created_at=snap.get("created_at", "") or "",
             targets_audited=snap.get("targets_audited", 0) or 0,
+            target_names=snap.get("target_names") or [],
+            duration_seconds=snap.get("duration_seconds", 0) or 0,
             kind=snap.get("kind", "fleet"),
         )
         for snap in snapshots
@@ -216,6 +485,17 @@ async def get_fleet_snapshot(snapshot_id: str) -> dict[str, Any]:
     if data is None:
         raise HTTPException(status_code=404, detail=f"Snapshot '{snapshot_id}' not found")
     return data
+
+
+@router.post("/snapshots/{snapshot_id}/email")
+async def email_fleet_snapshot(
+    snapshot_id: str, request: Request, body: RunEmailRequest
+) -> RunEmailResponse:
+    """Email the report for a saved fleet snapshot.
+
+    Same artifact and delivery path as the single-target audit run endpoint.
+    """
+    return await deliver_run_report(snapshot_id, request, body)
 
 
 @router.delete("/snapshots/{snapshot_id}")
@@ -260,17 +540,43 @@ async def diff_fleet_snapshots(
 
 @router.post("/import")
 async def import_fleet(request: FleetImportRequest):
-    """Import fleet targets from a local CSV file (SSE stream)."""
+    """Import fleet targets from a CSV file or uploaded content (SSE stream)."""
+    import tempfile
+
     service = FleetService()
 
     async def _generator() -> AsyncGenerator[dict, None]:
-        async for event in service.import_fleet(
-            request.csv_file,
-            password_env=request.password_env,
-            default_group=request.group,
-            default_tags=request.tags,
-            dry_run=request.dry_run,
-        ):
-            yield _event_to_sse(event)
+        csv_file = request.csv_file
+        tmp_path: Optional[str] = None
+        if request.csv_content is not None:
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".csv", delete=False, encoding="utf-8"
+            )
+            tmp.write(request.csv_content)
+            tmp.close()
+            csv_file = tmp_path = tmp.name
+        if not csv_file:
+            yield {
+                "event": "error",
+                "data": json.dumps(
+                    {"message": "Provide csv_file or csv_content", "phase": "import"}
+                ),
+            }
+            return
+        try:
+            async for event in service.import_fleet(
+                csv_file,
+                password_env=request.password_env,
+                default_group=request.group,
+                default_tags=request.tags,
+                dry_run=request.dry_run,
+            ):
+                yield _event_to_sse(event)
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     return EventSourceResponse(_generator())

@@ -20,6 +20,7 @@ from shared.query_registry import QueryRegistry
 from shared.ui import ElapsedMessage, Status, get_console
 
 from features.audit.capture_service import CaptureService, _parse_duration
+from features.audit.report.artifact import save_report_locally
 from features.audit.service import AuditService
 from features.audit.storage import AuditStorage
 from features.fleet import SnapshotStore, build_single_target_insights_prompt
@@ -211,7 +212,9 @@ class AuditCommand:
                     auto_yes=auto_yes,
                 )
                 if rs_results:
+                    from features.audit.readyset_benchmark import build_comparison
                     final_result["readyset_results"] = rs_results
+                    final_result["readyset_comparison"] = build_comparison(rs_results)
             except Exception:
                 pass
 
@@ -253,15 +256,18 @@ class AuditCommand:
                 (workload_result or {}).get("analysis"),
             )
 
+        # The snapshot and its HTML report must land under the same id, so it
+        # is computed once here and reused by the report step below.
+        import datetime as _dt
+        snapshot_id = save_name or f"audit_{target}_{_dt.datetime.now():%Y%m%d_%H%M%S}"
+
         # Verbose mode already printed everything via _render_terminal_report.
         # Always save audit result (unless --no-save)
         if not no_save and final_result:
-            import datetime as _dt
-            auto_name = save_name or f"audit_{target}_{_dt.datetime.now():%Y%m%d_%H%M%S}"
             store = SnapshotStore()
-            path = store.save_raw(auto_name, final_result)
+            path = store.save_raw(snapshot_id, final_result)
             if not output_json:
-                console.print(f"\n[dim]View locally: rdst audit show {auto_name}[/dim]")
+                console.print(f"\n[dim]View locally: rdst audit show {snapshot_id}[/dim]")
                 console.print(f"[dim]View past audits: rdst audit list[/dim]")
 
                 # Note: ephemeral_lifecycle in _run_readyset_testing has already
@@ -330,9 +336,7 @@ class AuditCommand:
                 rs_results=rs_results,
             )
             if html_content and final_result:
-                import datetime as _dt
-                snapshot_id = save_name or f"audit_{target}_{_dt.datetime.now():%Y%m%d_%H%M%S}"
-                self._save_report_locally(snapshot_id, html_content)
+                save_report_locally(snapshot_id, html_content)
                 try:
                     self._email_report(console, html_content, target, snapshot_id=snapshot_id)
                 except Exception as e:
@@ -422,6 +426,8 @@ class AuditCommand:
         rs_save = sizing.get("readyset_projected_savings_usd")
         if cost:
             console.print(f"[dim]Sizing:[/dim] [bold]{verdict}[/bold]  ·  ${int(cost):,}/mo current")
+        else:
+            console.print(f"[dim]Sizing:[/dim] [bold]{verdict}[/bold]")
             if rs_save and rs_save > 0 and rs_cost:
                 pct = int(rs_save / cost * 100) if cost else 0
                 console.print(
@@ -573,60 +579,6 @@ class AuditCommand:
             concerns_text = "\n".join(f"  {c}" for c in concerns)
             console.print(StyledPanel(concerns_text, title="Concerns"))
 
-    @staticmethod
-    def _substitute_params(sql):
-        """Replace $1, $2, etc. with sample values so parameterized queries can be executed.
-
-        Returns the substituted SQL, or the original if no params found.
-        Returns None if the query is a system/internal query that shouldn't be benchmarked.
-        """
-        import re
-
-        # Skip system/internal queries (PG + MySQL)
-        lower = sql.lower()
-        if any(s in lower for s in [
-            # PostgreSQL system
-            "pg_stat_", "pg_settings", "pg_indexes", "information_schema",
-            "pg_catalog", "pg_database_size", "pg_backend_pid",
-            # MySQL system
-            "performance_schema", "@@",
-            "mysql.", "sys.",
-        ]):
-            return None
-
-        # MySQL DIGEST_TEXT adds spaces around function parens and dot notation
-        # that break execution: "SUM ( x )" → "SUM(x)", "`u` . `name`" → "`u`.`name`"
-        # Fix these before param substitution.
-        result_sql = sql
-        result_sql = re.sub(r'(\w)\s+\(', r'\1(', result_sql)      # SUM ( → SUM(
-        result_sql = re.sub(r'`\s+\.\s+`', '`.`', result_sql)       # ` . ` → `.`
-
-        if "$" not in result_sql and "?" not in result_sql:
-            return result_sql
-
-        # Replace $N parameters with sample values based on context
-        def _replace_param(match):
-            # Look at surrounding context to guess a reasonable value
-            pos = match.start()
-            before = sql[max(0, pos - 40):pos].lower()
-            if any(k in before for k in ["limit", "offset"]):
-                return "10"
-            if any(k in before for k in [">", "<", ">=", "<="]):
-                return "100"
-            if any(k in before for k in ["= '", "like", "ilike"]):
-                return "'sample'"
-            if "in (" in before:
-                return "1"
-            if "between" in before:
-                return "'2026-01-01'"
-            return "1"
-
-        result = re.sub(r'\$\d+', _replace_param, result_sql)
-        result = result.replace("?", "1")
-        # Replace :p1, :p2 style params too
-        result = re.sub(r':p\d+', '1', result)
-        return result
-
     def _run_readyset_testing(self, console, target, queries, max_queries=20, auto_yes=False):
         """Test audit queries against a local Readyset cache.
 
@@ -639,17 +591,14 @@ class AuditCommand:
         baseline_ms, readyset_ms, speedup} or None if RS not available.
         """
         try:
-            from features.cache.service import CacheService
-            from features.cache.models import CacheInput, CacheOptions
+            from features.audit.readyset_benchmark import benchmark_queries, docker_available
             from shared.deploy.lifecycle import probe, ProbeState, ephemeral_lifecycle
         except ImportError:
             return None
 
-        import asyncio
-        import shutil
         import sys
 
-        if not shutil.which("docker"):
+        if not docker_available():
             console.print("[dim]  Skipping Readyset cache testing (Docker not installed)[/dim]")
             return None
 
@@ -716,211 +665,7 @@ class AuditCommand:
             if outcome.error:
                 console.print(f"[yellow]  {outcome.error}[/yellow]")
                 return None
-            service = CacheService()
-            results = self._run_readyset_testing_inner(
-                console, target, queries, max_queries, service,
-                CacheInput, CacheOptions, asyncio,
-            )
-            return results
-
-    def _run_readyset_testing_inner(
-        self, console, target, queries, max_queries, service,
-        CacheInput, CacheOptions, asyncio,
-    ):
-        """Inner benchmark loop — caller manages container lifecycle."""
-        results = []
-
-        # Wait for Readyset to be ready and verify connection
-        import time as _t
-        _resolved = service._resolve_cache_target(target)
-        if not _resolved:
-            console.print("[yellow]  Cache target not found after deploy[/yellow]")
-            return None
-        _cache_name, _cache_cfg = _resolved
-        console.print("[dim]  Waiting for Readyset to be ready...[/dim]")
-        _ready = False
-        _last_err = None
-        for _attempt in range(20):
-            _t.sleep(1)
-            try:
-                from shared.db_connection import create_direct_connection
-                _test_conn = create_direct_connection(_cache_cfg)
-                _test_conn.close()
-                _ready = True
-                break
-            except Exception as e:
-                _last_err = e
-        if not _ready:
-            err_str = str(_last_err)
-            if "Access denied" in err_str or "password" in err_str.lower():
-                _pw_env = _cache_cfg.get("password_env", "")
-                console.print(
-                    f"[yellow]  Cannot connect to Readyset cache: {_pw_env} is not set.[/yellow]\n"
-                    f"[yellow]  Export it first: export {_pw_env}=\"your_password\"[/yellow]"
-                )
-            else:
-                console.print(f"[yellow]  Readyset not ready after 20s: {_last_err}[/yellow]")
-            return None
-
-        # Step 2: Record pre-existing caches
-        pre_existing_ids = set()
-        try:
-            async def _list_caches():
-                async for event in service.list_caches(CacheInput(target=target)):
-                    if event.type == "cache_list":
-                        for c in (event.caches or []):
-                            pre_existing_ids.add(c.get("query_id", c.get("id", "")))
-            asyncio.run(_list_caches())
-        except Exception:
-            pass
-
-        # Step 3: Create caches and benchmark
-        created_ids = set()
-        console.print(f"\n[dim]  Testing {min(len(queries), max_queries)} queries against Readyset...[/dim]")
-
-        for q in queries[:max_queries]:
-            sql = q.get("query_text") or q.get("normalized_query", "")
-            q_hash = q.get("query_hash", q.get("hash", ""))[:12]
-            baseline_ms = q.get("avg_time_ms", 0.0)
-
-            if not sql.strip():
-                continue
-
-            # Check cacheability
-            try:
-                from features.cache.readyset_cacheability import check_readyset_cacheability
-                check = check_readyset_cacheability(query=sql)
-                if not check.get("cacheable", False):
-                    results.append({
-                        "query_hash": q_hash,
-                        "query_text": sql[:200],
-                        "cacheable": False,
-                        "not_cacheable_reason": "; ".join(check.get("issues", ["Unknown"])),
-                        "baseline_ms": baseline_ms,
-                        "readyset_ms": 0,
-                        "speedup": 0,
-                    })
-                    continue
-            except Exception:
-                pass
-
-            cache_id = None
-            cache_create_error = None
-            try:
-                async def _add_cache():
-                    nonlocal cache_id, cache_create_error
-                    async for event in service.add_cache(
-                        CacheInput(target=target, query=sql),
-                        CacheOptions(),
-                    ):
-                        if event.type == "cache_add":
-                            if event.success:
-                                cache_id = getattr(event, "cache_id", None) or q_hash
-                                if cache_id not in pre_existing_ids:
-                                    created_ids.add(cache_id)
-                            else:
-                                cache_create_error = (
-                                    getattr(event, "error", None)
-                                    or getattr(event, "message", None)
-                                    or "CREATE CACHE failed"
-                                )
-                asyncio.run(_add_cache())
-            except Exception as exc:
-                cache_create_error = f"CREATE CACHE raised: {exc}"
-
-            if cache_create_error and cache_id is None:
-                results.append({
-                    "query_hash": q_hash,
-                    "query_text": sql[:200],
-                    "cacheable": False,
-                    "not_cacheable_reason": cache_create_error,
-                    "baseline_ms": baseline_ms,
-                    "readyset_ms": 0,
-                    "speedup": 0,
-                })
-                continue
-
-            # Benchmark against Readyset (3 runs: 1 warmup + 2 measured)
-            # For parameterized queries, substitute sample values so we can execute them
-            readyset_ms = 0.0
-            bench_sql = self._substitute_params(sql)
-            if not bench_sql:
-                # Query was filtered (system query or truncated) — skip with reason
-                reason = "system query" if any(s in sql.lower() for s in [
-                    "pg_stat_", "performance_schema", "@@", "information_schema",
-                ]) else "truncated query"
-                results.append({
-                    "query_hash": q_hash,
-                    "query_text": sql[:200],
-                    "cacheable": False,
-                    "not_cacheable_reason": reason,
-                    "baseline_ms": baseline_ms,
-                    "readyset_ms": 0,
-                    "speedup": 0,
-                })
-                continue
-            if bench_sql:
-                try:
-                    cache_target = service._resolve_cache_target(target)
-                    if cache_target:
-                        cache_name, cache_config = cache_target
-                        from shared.db_connection import create_direct_connection
-                        conn = create_direct_connection(cache_config)
-                        times = []
-                        for i in range(3):
-                            start = time.perf_counter()
-                            try:
-                                cursor = conn.cursor()
-                                cursor.execute(bench_sql)
-                                cursor.fetchall()
-                                cursor.close()
-                            except Exception:
-                                break
-                            elapsed_ms = (time.perf_counter() - start) * 1000
-                            if i > 0:  # Skip warmup
-                                times.append(elapsed_ms)
-                        conn.close()
-                        if times:
-                            readyset_ms = sum(times) / len(times)
-                except Exception as e:
-                    if not getattr(self, '_rs_conn_error_shown', False):
-                        console.print(f"[yellow]  Could not connect to Readyset cache: {e}[/yellow]")
-                        self._rs_conn_error_shown = True
-                    return None
-
-            speedup = baseline_ms / readyset_ms if readyset_ms > 0 and baseline_ms > 0 else 0.0
-
-            results.append({
-                "query_hash": q_hash,
-                "query_text": sql[:200],
-                "cacheable": True,
-                "not_cacheable_reason": "",
-                "baseline_ms": baseline_ms,
-                "readyset_ms": round(readyset_ms, 3),
-                "speedup": round(speedup, 1),
-            })
-
-        # CLD-1754: created_ids holds RDST hashes, not Readyset's
-        # q_<hash> cache names — DROP fails silently here. Tracked.
-        if created_ids:
-            for cid in created_ids:
-                try:
-                    async def _delete(cache_id=cid):
-                        async for event in service.delete_cache(CacheInput(target=target, cache_id=cache_id)):
-                            pass
-                    asyncio.run(_delete())
-                except Exception:
-                    pass
-
-        cached_count = sum(1 for r in results if r["cacheable"])
-        if cached_count > 0:
-            speedups = [r["speedup"] for r in results if r["cacheable"] and r["speedup"] > 0]
-            avg = sum(speedups) / len(speedups) if speedups else 0
-            console.print(f"  [green]{cached_count} queries cached, avg speedup {avg:.1f}x[/green]")
-        else:
-            console.print(f"  [dim]No queries cacheable[/dim]")
-
-        return results if results else None
+            return benchmark_queries(target, queries, max_queries=max_queries, console=console)
 
     # =========================================================================
     # Summary Mode (default UX)
@@ -1004,17 +749,6 @@ class AuditCommand:
             return render_report_html([r], fleet_insights=None, title=r.get("target_name"))
         except Exception:
             return None
-
-    def _save_report_locally(self, snapshot_id, html_content):
-        """Save HTML report to ~/.rdst/reports/."""
-        try:
-            from pathlib import Path
-            reports_dir = Path.home() / ".rdst" / "reports"
-            reports_dir.mkdir(parents=True, exist_ok=True)
-            report_path = reports_dir / f"{snapshot_id}.html"
-            report_path.write_text(html_content)
-        except Exception:
-            pass
 
     def _email_report(self, console, html_content, target, snapshot_id=None):
         """Prompt for email and send the HTML report with verified delivery."""
@@ -1672,6 +1406,7 @@ class AuditCommand:
 
             # Merge audit-level fields that the capture doesn't have
             for key in ("target_name", "engine", "host", "region", "instance_class",
+                        "instance_class_source",
                         "group", "tags", "metrics", "sizing", "cache_opportunity",
                         "top_queries"):
                 if key in audit_result and key not in data:
