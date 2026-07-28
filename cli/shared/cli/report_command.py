@@ -2,7 +2,7 @@
 RDST Report Command
 
 Allows users to submit feedback about RDST analysis results.
-Feedback is sent to PostHog for analytics and Slack for immediate visibility.
+Feedback is sent to PostHog for analytics and workflow notifications.
 """
 
 import sys

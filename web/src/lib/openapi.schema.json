@@ -16523,7 +16523,7 @@
     },
     "/api/report": {
       "post": {
-        "description": "Submit user feedback.\n\nFeedback is sent to PostHog for analytics and Slack for immediate visibility.\nIf a query_hash is provided, the query context is loaded from the registry.",
+        "description": "Submit user feedback.\n\nFeedback is sent to PostHog for analytics and workflow notifications.\nIf a query_hash is provided, the query context is loaded from the registry.",
         "operationId": "submit_report_api_report_post",
         "requestBody": {
           "content": {

@@ -8,7 +8,7 @@ import os
 # `shared.telemetry_manager`. The `tmp_rdst_home` fixture gives each test
 # a fresh empty `~/.rdst/`, so without this gate every test that touches
 # `device_id` would generate a new UUID and fire a PostHog `installation`
-# event (and a Slack install webhook if configured). The CLI shell suite
+# event. The CLI shell suite
 # already does this via `tests/integration/lib/setup.sh`.
 os.environ.setdefault("RDST_TESTING", "true")
 

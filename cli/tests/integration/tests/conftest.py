@@ -80,7 +80,7 @@ def isolated_telemetry(monkeypatch, tmp_rdst_home):
     `from shared.telemetry import telemetry` imports — those bind at
     module import time, so each consumer needs its own patch.
 
-    Disabled side effects: PostHog send, Sentry init, Slack webhooks.
+    Disabled side effects: PostHog send and Sentry init.
     Enabled bookkeeping: `_get_stats`, `_increment_stat`, finalizer
     dispatch — these all run for real, so tests can assert on
     counters too.
@@ -96,8 +96,6 @@ def isolated_telemetry(monkeypatch, tmp_rdst_home):
 
     # Capture every track() call without doing real network work.
     tm.track = MagicMock()
-    tm._slack_notify = MagicMock()
-    tm._slack_notify_first_analyze = MagicMock()
 
     monkeypatch.setattr("shared.telemetry.telemetry", tm)
     for mod in (

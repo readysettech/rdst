@@ -5,7 +5,6 @@ Handles:
 - Device ID generation and persistence
 - PostHog event tracking
 - Sentry crash reporting
-- Slack webhook notifications
 - Usage statistics tracking
 - Privacy controls (opt-out)
 """
@@ -148,7 +147,6 @@ class TelemetryManager:
     - Pseudonymous device ID (stored in ~/.rdst/device_id)
     - PostHog for usage analytics
     - Sentry for crash reporting
-    - Slack webhooks for alerts
     - Cumulative usage stats per device
     - Privacy controls (opt-out via env var or config)
     """
@@ -157,13 +155,13 @@ class TelemetryManager:
     # PostHog write-only ingest key — safe to embed (cannot read data, only write events)
     # Override via RDST_POSTHOG_KEY env var if needed
     # RDST_SENTRY_DSN: Sentry DSN for crash reporting
-    # RDST_SLACK_WEBHOOK_*: Slack webhooks for notifications
     POSTHOG_API_KEY = os.environ.get("RDST_POSTHOG_KEY", "phc_WPINnbS1CUiADz01QFeDZCr4Wn7jXfNPxe1EK0V2ZzP")
     POSTHOG_HOST = "https://us.i.posthog.com"
     SENTRY_DSN = os.environ.get("RDST_SENTRY_DSN", "")
-    SLACK_WEBHOOK_INSTALLS = os.environ.get("RDST_SLACK_WEBHOOK_INSTALLS", "")
-    SLACK_WEBHOOK_FEEDBACK = os.environ.get("RDST_SLACK_WEBHOOK_FEEDBACK", "")
-    SLACK_WEBHOOK_ANALYZE = os.environ.get("RDST_SLACK_WEBHOOK_ANALYZE", "")
+    INTERNAL_INSTALL_PROBE_URL = "http://readyset-canary/"
+    INTERNAL_INSTALL_REQUEST_TIMEOUT = (1, 1)
+    INTERNAL_INSTALL_TOTAL_TIMEOUT_SECONDS = 2
+    BACKGROUND_FLUSH_TIMEOUT_SECONDS = 5
 
     def __init__(self):
         self._device_id: Optional[str] = None
@@ -172,6 +170,12 @@ class TelemetryManager:
         self._stats: Optional[Dict[str, int]] = None
         self._rdst_dir = rdst_data_dir()
         self._lock = threading.Lock()
+        self._background_threads: set[threading.Thread] = set()
+        self._background_threads_lock = threading.RLock()
+        self._internal_user_lock = threading.RLock()
+        self._internal_user_result: Optional[bool] = None
+        self._pending_posthog_sends: list[Callable[[bool], None]] = []
+        self._internal_user_resolution_started = False
         # Per-command finalizer dispatch table. Bound methods, so they
         # close over `self` correctly. Features can extend via
         # `register_command_finalizer`.
@@ -214,6 +218,63 @@ class TelemetryManager:
 
             self._initialized = True
 
+    def _start_background(self, target: Callable[[], None]) -> None:
+        """Start background work and track it for shutdown draining."""
+        thread: threading.Thread
+
+        def run():
+            try:
+                target()
+            except Exception:
+                pass
+            finally:
+                with self._background_threads_lock:
+                    self._background_threads.discard(thread)
+
+        try:
+            thread = threading.Thread(target=run, daemon=True)
+        except Exception:
+            try:
+                target()
+            except Exception:
+                pass
+            return
+
+        start_failed = False
+        with self._background_threads_lock:
+            self._background_threads.add(thread)
+            try:
+                thread.start()
+            except RuntimeError:
+                self._background_threads.discard(thread)
+                start_failed = True
+
+        if start_failed:
+            try:
+                target()
+            except Exception:
+                pass
+
+    def _wait_for_background_threads(self, deadline: Optional[float] = None) -> None:
+        if deadline is None:
+            deadline = time.monotonic() + self.BACKGROUND_FLUSH_TIMEOUT_SECONDS
+        current = threading.current_thread()
+
+        while True:
+            with self._background_threads_lock:
+                threads = [
+                    thread
+                    for thread in self._background_threads
+                    if thread is not current and thread.is_alive()
+                ]
+            if not threads:
+                return
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            threads[0].join(timeout=remaining)
+
     @property
     def device_id(self) -> str:
         """Get or create a persistent device ID."""
@@ -237,14 +298,16 @@ class TelemetryManager:
         is_new_install = True
 
         # Persist
+        persisted = False
         try:
             self._rdst_dir.mkdir(parents=True, exist_ok=True)
             device_id_file.write_text(self._device_id)
+            persisted = True
         except Exception:
             pass
 
         # Track new installation (deferred to avoid recursion)
-        if is_new_install:
+        if is_new_install and persisted:
             self._schedule_installation_tracking()
 
         return self._device_id
@@ -270,8 +333,7 @@ class TelemetryManager:
                 pass
 
         # Run in background to not block
-        thread = threading.Thread(target=track, daemon=True)
-        thread.start()
+        self._start_background(track)
 
     def is_enabled(self) -> bool:
         """Check if telemetry is enabled."""
@@ -424,9 +486,9 @@ class TelemetryManager:
                 all_props.update(properties)
             self._add_stored_email_properties(all_props)
 
-            # Fire and forget in background thread
-            def send():
+            def send(internal_user: bool):
                 try:
+                    all_props["internal_user"] = internal_user
                     # If email is in properties, identify the user so PostHog
                     # links this device to the email across sessions/devices.
                     email = all_props.get("email")
@@ -450,8 +512,7 @@ class TelemetryManager:
                 except Exception:
                     pass
 
-            thread = threading.Thread(target=send, daemon=True)
-            thread.start()
+            self._enqueue_posthog_send(send)
 
         except Exception:
             pass
@@ -499,7 +560,7 @@ class TelemetryManager:
     ) -> bool:
         """Fire `event` exactly once per device, gated by stats `flag`.
 
-        Used for "first X" Slack alerts (first_audit, first_fleet_audit,
+        Used for "first X" PostHog alerts (first_audit, first_fleet_audit,
         etc.) where the per-device gate is a boolean flag in stats.json
         rather than a counter check. Returns True if the event was
         fired, False if it had already fired previously.
@@ -610,7 +671,6 @@ class TelemetryManager:
                     "feedback": feedback,
                     "email": email or None,
                 })
-                self._slack_notify_first_analyze_feedback("negative", feedback, email or None)
                 console.print(f"[{StyleTokens.SUCCESS}]Thanks for the feedback! We'll work on it.[/{StyleTokens.SUCCESS}]")
                 return True
 
@@ -638,7 +698,7 @@ class TelemetryManager:
         """Show micro-feedback prompt after the user's first successful analyze.
 
         Returns True if user responded, False if skipped.
-        Sends results to both PostHog and Slack.
+        Sends results to PostHog.
         """
         if not self._is_interactive():
             return False
@@ -665,7 +725,6 @@ class TelemetryManager:
 
             if response == "1":
                 self.track("first_analyze_feedback", {"rating": "positive"})
-                self._slack_notify_first_analyze_feedback("positive", None, None)
                 console.print(f"[{StyleTokens.SUCCESS}]Glad to hear it![/{StyleTokens.SUCCESS}]")
                 return True
 
@@ -691,7 +750,6 @@ class TelemetryManager:
                     "feedback": feedback,
                     "email": email or None,
                 })
-                self._slack_notify_first_analyze_feedback("negative", feedback, email or None)
                 console.print(f"[{StyleTokens.SUCCESS}]Thanks for the feedback -- we'll work on it.[/{StyleTokens.SUCCESS}]")
                 return True
 
@@ -706,40 +764,81 @@ class TelemetryManager:
             self._save_stats()
             return False
 
-    def _slack_notify_first_analyze_feedback(
-        self, sentiment: str, feedback: Optional[str], email: Optional[str]
-    ):
-        """Send first-analyze feedback to Slack."""
-        if not self.SLACK_WEBHOOK_FEEDBACK:
-            return
-
-        emoji = ":+1:" if sentiment == "positive" else ":-1:"
-
-        text = (
-            f"*First Analyze Feedback* {emoji}\n"
-            f"Device: `{self.device_id}`\n"
-            f"Rating: {sentiment}"
-        )
-        if feedback:
-            text += f"\nFeedback: {feedback[:1500]}"
-        if email:
-            text += f"\nEmail: {email}"
-
-        payload = {
-            "text": f"First analyze feedback from {self.device_id}",
-            "blocks": [
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": text},
-                }
-            ],
-        }
-
-        self._slack_notify(self.SLACK_WEBHOOK_FEEDBACK, payload)
-
     # =========================================================================
     # Specific Event Trackers
     # =========================================================================
+
+    def _detect_internal_user(self) -> bool:
+        """Probe the tailnet canary with a hard overall deadline."""
+        deadline = time.monotonic() + self.INTERNAL_INSTALL_TOTAL_TIMEOUT_SECONDS
+        done = threading.Event()
+        result = False
+
+        def probe():
+            nonlocal result
+            session = None
+            try:
+                requests = _get_requests()
+                if requests:
+                    session = requests.Session()
+                    session.trust_env = False
+                    response = session.head(
+                        self.INTERNAL_INSTALL_PROBE_URL,
+                        allow_redirects=False,
+                        timeout=self.INTERNAL_INSTALL_REQUEST_TIMEOUT,
+                    )
+                    result = response.status_code == 200
+            except Exception:
+                pass
+            finally:
+                if session is not None:
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
+                done.set()
+
+        try:
+            threading.Thread(target=probe, daemon=True).start()
+        except RuntimeError:
+            return False
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not done.wait(remaining):
+            return False
+        return result
+
+    def _resolve_internal_user(self) -> None:
+        internal_user = False
+        try:
+            internal_user = self._detect_internal_user()
+        finally:
+            with self._internal_user_lock:
+                if self._internal_user_result is None:
+                    self._internal_user_result = internal_user
+                else:
+                    internal_user = self._internal_user_result
+                pending_sends = self._pending_posthog_sends
+                self._pending_posthog_sends = []
+
+            for send in pending_sends:
+                try:
+                    send(internal_user)
+                except Exception:
+                    pass
+
+    def _enqueue_posthog_send(self, send: Callable[[bool], None]) -> None:
+        with self._internal_user_lock:
+            if self._internal_user_result is None:
+                self._pending_posthog_sends.append(send)
+                if self._internal_user_resolution_started:
+                    return
+                self._internal_user_resolution_started = True
+                self._start_background(self._resolve_internal_user)
+                return
+            internal_user = self._internal_user_result
+
+        self._start_background(lambda: send(internal_user))
 
     def track_installation(self, install_method: str = "unknown"):
         """Track a new installation."""
@@ -753,7 +852,6 @@ class TelemetryManager:
         }
 
         self.track_with_stats("installation", properties)
-        self._slack_notify_install(properties)
 
     def track_analyze(
         self,
@@ -797,7 +895,7 @@ class TelemetryManager:
 
         self.track_with_stats("analyze_run", properties)
 
-        # Track first successful analyze as a separate event for Slack alerts
+        # Track first successful analyze for PostHog alert workflows
         if is_first_success:
             first_analyze_props: Dict[str, Any] = {
                 "display_name": "RDST First Analyze",
@@ -821,7 +919,6 @@ class TelemetryManager:
             except Exception:
                 pass
             self.track("first_analyze", first_analyze_props)
-            self._slack_notify_first_analyze(target_engine, duration_ms)
 
     # Per-command stat keys (incremented by `_generic_finalizer`).
     # Commands with bespoke finalizers manage their own counters.
@@ -839,9 +936,8 @@ class TelemetryManager:
     def _analyze_finalizer(self, run: "CommandRun") -> None:
         """Bespoke finalizer for analyze.
 
-        Routes through `track_analyze` to preserve `first_analyze` PostHog
-        event, the Slack alert on first success, and `successful_analyzes`
-        bookkeeping.
+        Routes through `track_analyze` to preserve the `first_analyze`
+        PostHog event and `successful_analyzes` bookkeeping.
         """
         self.track_analyze(
             query_hash=str(run.extra.get("query_hash") or "unknown"),
@@ -1204,151 +1300,7 @@ class TelemetryManager:
             except Exception:
                 pass
 
-        # Track in PostHog
         self.track_with_stats("feedback_submitted", properties)
-
-        # Notify Slack with full details
-        self._slack_notify_feedback(
-            reason=reason,
-            query_hash=query_hash,
-            query_sql=query_sql if include_query else None,
-            suggestion_text=suggestion_text,
-            sentiment=sentiment,
-            email=email,
-        )
-
-    # =========================================================================
-    # Slack Notifications
-    # =========================================================================
-
-    def _slack_notify(self, webhook_url: str, payload: Dict[str, Any]):
-        """Send a Slack notification."""
-        if not webhook_url:
-            return
-
-        requests = _get_requests()
-        if not requests:
-            return
-
-        def send():
-            try:
-                requests.post(webhook_url, json=payload, timeout=5)
-            except Exception:
-                pass
-
-        thread = threading.Thread(target=send, daemon=True)
-        thread.start()
-
-    def _slack_notify_install(self, properties: Dict[str, Any]):
-        """Notify Slack of a new installation."""
-        if not self.SLACK_WEBHOOK_INSTALLS:
-            return
-
-        # Get system info directly
-        os_name = platform.system()
-        os_version = platform.release()
-        python_version = platform.python_version()
-
-        payload = {
-            "text": f"New RDST Installation",
-            "blocks": [
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*New RDST Installation*\n"
-                                f"Device: `{self.device_id}`\n"
-                                f"OS: {os_name} {os_version}\n"
-                                f"Python: {python_version}\n"
-                                f"Method: {properties.get('install_method', 'unknown')}"
-                    }
-                }
-            ]
-        }
-
-        self._slack_notify(self.SLACK_WEBHOOK_INSTALLS, payload)
-
-    def _slack_notify_feedback(
-        self,
-        reason: str,
-        query_hash: Optional[str],
-        query_sql: Optional[str],
-        suggestion_text: Optional[str],
-        sentiment: str,
-        email: Optional[str],
-    ):
-        """Notify Slack of user feedback."""
-        if not self.SLACK_WEBHOOK_FEEDBACK:
-            return
-
-        emoji = {"positive": ":+1:", "negative": ":-1:", "neutral": ":neutral_face:"}.get(sentiment, "")
-
-        blocks = [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*RDST Feedback* {emoji}\n"
-                            f"Device: `{self.device_id}`\n"
-                            f"Sentiment: {sentiment}\n"
-                            f"Email: {email or 'not provided'}"
-                }
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Feedback:*\n{reason[:2000]}"
-                }
-            }
-        ]
-
-        if query_hash:
-            blocks.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*Query Hash:* `{query_hash}`"}
-            })
-
-        if query_sql:
-            # Show full query (Slack truncates at ~3000 chars per block anyway)
-            blocks.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*Query:*\n```{query_sql[:2000]}```"}
-            })
-
-        if suggestion_text:
-            blocks.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*RDST Suggestions:*\n{suggestion_text[:1500]}"}
-            })
-
-        payload = {
-            "text": f"New RDST feedback from {self.device_id}",
-            "blocks": blocks
-        }
-
-        self._slack_notify(self.SLACK_WEBHOOK_FEEDBACK, payload)
-
-    def _slack_notify_first_analyze(self, target_engine: str, duration_ms: int):
-        """Send Slack notification for first successful analyze.
-
-        Note: Query text is intentionally NOT included for privacy.
-        Users can explicitly share queries via 'rdst report' if they choose.
-        """
-        if not self.SLACK_WEBHOOK_ANALYZE:
-            return
-
-        payload = {
-            "text": f"First successful analyze! Device: {self.device_id}",
-            "blocks": [
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"*First Successful Analyze!* :tada:\nDevice: `{self.device_id}`\nEngine: {target_engine}\nDuration: {duration_ms}ms"}
-                }
-            ]
-        }
-
-        self._slack_notify(self.SLACK_WEBHOOK_ANALYZE, payload)
 
     # =========================================================================
     # Cleanup
@@ -1356,6 +1308,19 @@ class TelemetryManager:
 
     def flush(self):
         """Flush any pending events (call before exit)."""
+        deadline = time.monotonic() + self.BACKGROUND_FLUSH_TIMEOUT_SECONDS
+
+        # Enqueue registers the resolver while holding this lock. Crossing the
+        # lock prevents flush from missing an event between queueing and thread
+        # registration.
+        remaining = deadline - time.monotonic()
+        acquired = remaining > 0 and self._internal_user_lock.acquire(
+            timeout=remaining
+        )
+        if acquired:
+            self._internal_user_lock.release()
+
+        self._wait_for_background_threads(deadline)
         posthog = _get_posthog()
         if posthog:
             try:

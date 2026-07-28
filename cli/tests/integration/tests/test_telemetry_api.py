@@ -102,7 +102,7 @@ async def test_analyze_fires_analyze_run_and_first_analyze(
 ):
     """First successful analyze on a fresh device must emit both
     `analyze_run` (with `source=web`, `target_engine`, `query_hash`,
-    `success=True`) and the `first_analyze` Slack-alert event."""
+    `success=True`) and the `first_analyze` PostHog alert event."""
     await _add_target(client, db_target_payload)
 
     await _drain_sse(

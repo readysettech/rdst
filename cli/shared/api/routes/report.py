@@ -2,7 +2,7 @@
 RDST Report API Route
 
 Allows web users to submit feedback about RDST analysis results.
-Feedback is sent to PostHog for analytics and Slack for immediate visibility.
+Feedback is sent to PostHog for analytics and workflow notifications.
 """
 
 from fastapi import APIRouter
@@ -37,7 +37,7 @@ async def submit_report(request: ReportRequest) -> ReportResponse:
     """
     Submit user feedback.
 
-    Feedback is sent to PostHog for analytics and Slack for immediate visibility.
+    Feedback is sent to PostHog for analytics and workflow notifications.
     If a query_hash is provided, the query context is loaded from the registry.
     """
     try:
