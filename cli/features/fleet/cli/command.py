@@ -24,10 +24,9 @@ from features.fleet import (
     FleetAuditSnapshot,
     SnapshotStore,
     build_fleet_insights_prompt,
-    detect_aws_credentials,
-    discover_rds_instances,
 )
 from features.fleet.service import FleetService
+from features.providers import detect_aws_credentials, discover_rds_instances
 from shared.json_parse import parse_llm_json
 
 

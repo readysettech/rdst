@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from features.fleet import aws_login
+from features.providers import aws_login
 
 
 pytestmark = pytest.mark.usefixtures("run_blocking_inline")
@@ -53,22 +53,22 @@ def _register_login(
 
 class TestAwsLoginStart:
     def test_unknown_profile(self, client):
-        with patch("features.fleet.aws_login.available_profiles", return_value=["prod"]):
-            response = client.post("/api/fleet/aws-login", json={"profile": "dev"})
+        with patch("features.providers.aws_login.available_profiles", return_value=["prod"]):
+            response = client.post("/api/providers/aws-login", json={"profile": "dev"})
 
         assert response.status_code == 400
         assert response.json()["code"] == "unknown_profile"
 
     def test_already_signed_in(self, client):
         with (
-            patch("features.fleet.aws_login.available_profiles", return_value=["dev"]),
+            patch("features.providers.aws_login.available_profiles", return_value=["dev"]),
             patch(
-                "features.fleet.aws_login.verify_profile",
+                "features.providers.aws_login.verify_profile",
                 return_value=(True, "Signed in as arn:aws:iam::123:user/test"),
             ),
-            patch("features.fleet.aws_login.subprocess.Popen") as popen,
+            patch("features.providers.aws_login.subprocess.Popen") as popen,
         ):
-            response = client.post("/api/fleet/aws-login", json={"profile": "dev"})
+            response = client.post("/api/providers/aws-login", json={"profile": "dev"})
 
         assert response.status_code == 200
         assert response.json() == {
@@ -81,14 +81,14 @@ class TestAwsLoginStart:
     def test_spawn_started(self, client):
         process = _process()
         with (
-            patch("features.fleet.aws_login.available_profiles", return_value=["dev"]),
+            patch("features.providers.aws_login.available_profiles", return_value=["dev"]),
             patch(
-                "features.fleet.aws_login.verify_profile",
+                "features.providers.aws_login.verify_profile",
                 return_value=(False, "expired"),
             ),
-            patch("features.fleet.aws_login.subprocess.Popen", return_value=process) as popen,
+            patch("features.providers.aws_login.subprocess.Popen", return_value=process) as popen,
         ):
-            response = client.post("/api/fleet/aws-login", json={"profile": "dev"})
+            response = client.post("/api/providers/aws-login", json={"profile": "dev"})
 
         assert response.status_code == 200
         body = response.json()
@@ -104,14 +104,14 @@ class TestAwsLoginStart:
 
     def test_missing_cli_returns_fallback(self, client):
         with (
-            patch("features.fleet.aws_login.available_profiles", return_value=["dev"]),
-            patch("features.fleet.aws_login.verify_profile", return_value=(False, "expired")),
+            patch("features.providers.aws_login.available_profiles", return_value=["dev"]),
+            patch("features.providers.aws_login.verify_profile", return_value=(False, "expired")),
             patch(
-                "features.fleet.aws_login.subprocess.Popen",
+                "features.providers.aws_login.subprocess.Popen",
                 side_effect=FileNotFoundError,
             ),
         ):
-            response = client.post("/api/fleet/aws-login", json={"profile": "dev"})
+            response = client.post("/api/providers/aws-login", json={"profile": "dev"})
 
         assert response.status_code == 409
         assert response.json() == {
@@ -132,9 +132,9 @@ class TestAwsLoginStatus:
         _register_login("running", process, output=output)
 
         with patch(
-            "features.fleet.aws_login.verify_profile", return_value=(False, "not yet")
+            "features.providers.aws_login.verify_profile", return_value=(False, "not yet")
         ):
-            response = client.get("/api/fleet/aws-login/running")
+            response = client.get("/api/providers/aws-login/running")
 
         assert response.status_code == 200
         body = response.json()
@@ -151,16 +151,16 @@ class TestAwsLoginStatus:
         _register_login("success", process)
 
         with patch(
-            "features.fleet.aws_login.verify_profile",
+            "features.providers.aws_login.verify_profile",
             return_value=(True, "Signed in as arn:aws:sts::123:assumed-role/dev/user"),
         ):
-            response = client.get("/api/fleet/aws-login/success")
+            response = client.get("/api/providers/aws-login/success")
 
         assert response.status_code == 200
         assert response.json()["state"] == "success"
         assert "success" in aws_login.LOGIN_REGISTRY
 
-        repeated = client.get("/api/fleet/aws-login/success")
+        repeated = client.get("/api/providers/aws-login/success")
         assert repeated.status_code == 200
         assert repeated.json() == response.json()
 
@@ -172,7 +172,7 @@ class TestAwsLoginStatus:
             output="first line\nThe SSO session has expired or is invalid\n",
         )
 
-        response = client.get("/api/fleet/aws-login/failed")
+        response = client.get("/api/providers/aws-login/failed")
 
         assert response.status_code == 200
         body = response.json()
@@ -180,7 +180,7 @@ class TestAwsLoginStatus:
         assert "session has expired" in body["detail"]
         assert "failed" in aws_login.LOGIN_REGISTRY
 
-        repeated = client.get("/api/fleet/aws-login/failed")
+        repeated = client.get("/api/providers/aws-login/failed")
         assert repeated.status_code == 200
         assert repeated.json() == body
 
@@ -188,14 +188,14 @@ class TestAwsLoginStatus:
         process = _process()
         _register_login("timeout", process, age_seconds=301)
 
-        response = client.get("/api/fleet/aws-login/timeout")
+        response = client.get("/api/providers/aws-login/timeout")
 
         assert response.status_code == 200
         assert response.json()["state"] == "timeout"
         process.kill.assert_called_once_with()
         assert "timeout" in aws_login.LOGIN_REGISTRY
 
-        repeated = client.get("/api/fleet/aws-login/timeout")
+        repeated = client.get("/api/providers/aws-login/timeout")
         assert repeated.status_code == 200
         assert repeated.json() == response.json()
 
@@ -203,7 +203,7 @@ class TestAwsLoginStatus:
         process = _process(return_code=255)
         _register_login("expired", process, output="login failed")
 
-        response = client.get("/api/fleet/aws-login/expired")
+        response = client.get("/api/providers/aws-login/expired")
         assert response.status_code == 200
         completed_at = aws_login.LOGIN_REGISTRY["expired"]["completed_at"]
 
@@ -211,10 +211,10 @@ class TestAwsLoginStatus:
         # subject to float cancellation ((t + 60.0) - t can be 59.999...),
         # which made this flake on hosts with large monotonic clocks.
         with patch(
-            "features.fleet.aws_login.time.monotonic",
+            "features.providers.aws_login.time.monotonic",
             return_value=completed_at + aws_login.TERMINAL_RETENTION_SECONDS + 1.0,
         ):
-            expired = client.get("/api/fleet/aws-login/expired")
+            expired = client.get("/api/providers/aws-login/expired")
 
         assert expired.status_code == 404
         assert expired.json()["code"] == "unknown_login"

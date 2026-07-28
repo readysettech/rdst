@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from .auth import get_rds_client
-from .models import FleetMember
+from features.fleet.models import FleetMember
 
 logger = logging.getLogger(__name__)
 

@@ -362,6 +362,11 @@ export function CredentialsStep({
               'RDST session and can be re-entered later.'}
         </Text>
       )}
+      {saved && keyringAvailable && !persistenceNote && (
+        <Text level="caption" className="text-content-positive-soft">
+          Saved to your OS keyring.
+        </Text>
+      )}
 
       <HStack className="justify-between gap-3 items-center">
         <Button

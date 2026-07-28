@@ -144,7 +144,7 @@ async function mockTargets(
         }))
   )
   await page.route(
-    '**/api/fleet/aws-status*',
+    '**/api/providers/aws-status*',
     overrides.awsStatus ?? ((route) => route.fulfill({ json: awsSignedIn }))
   )
 }
@@ -257,7 +257,7 @@ test('/fleet?add=aws lands with the discovery drawer open on the AWS tab', async
 }) => {
   await configureTestTarget(page, { hasPassword: true })
   await mockTargets(page)
-  await page.route('**/api/fleet/discover-preview', (route) =>
+  await page.route('**/api/providers/discover-preview', (route) =>
     route.fulfill({ json: { members: [], errors: [] } })
   )
 
@@ -294,12 +294,12 @@ test('completes the signed-out AWS SSO browser flow and polls to success', async
             },
       }),
   })
-  await page.route('**/api/fleet/aws-login', (route) =>
+  await page.route('**/api/providers/aws-login', (route) =>
     route.fulfill({
       json: { login_id: 'login-1', state: 'started', detail: 'Browser opened' },
     })
   )
-  await page.route('**/api/fleet/aws-login/login-1', (route) => {
+  await page.route('**/api/providers/aws-login/login-1', (route) => {
     polls += 1
     if (polls >= 2) {
       signedIn = true
@@ -465,12 +465,12 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
     })
   })
   let previewBody: Record<string, unknown> | undefined
-  await page.route('**/api/fleet/discover-preview', (route) => {
+  await page.route('**/api/providers/discover-preview', (route) => {
     previewBody = route.request().postDataJSON()
     return route.fulfill({ json: { members: discoveredTargets, errors: [] } })
   })
   let bulkBody: { members: typeof discoveredTargets } | undefined
-  await page.route('**/api/fleet/targets/bulk-add', (route) => {
+  await page.route('**/api/providers/bulk-add', (route) => {
     bulkBody = route.request().postDataJSON()
     added = true
     return route.fulfill({
@@ -480,7 +480,7 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
 
   await page.goto('/configure')
   await page.getByRole('button', { name: 'Discover & import' }).click()
-  await page.getByRole('button', { name: 'Discover AWS' }).click()
+  await page.getByRole('button', { name: 'AWS', exact: true }).click()
   await page.getByRole('button', { name: 'Discover', exact: true }).click()
 
   await expect(
@@ -576,7 +576,7 @@ test('CSV picker posts browser file content instead of a server path', async ({
     'browser-csv,browser.test,postgresql,5432,app,app_user\n'
   await page.goto('/configure')
   await page.getByRole('button', { name: 'Discover & import' }).click()
-  await page.getByRole('button', { name: 'Import CSV' }).click()
+  await page.getByRole('button', { name: 'Import from a CSV file', exact: true }).click()
   await page.locator('input[type="file"]').setInputFiles({
     name: 'fleet.csv',
     mimeType: 'text/csv',

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import builtins
 
-from features.fleet.auth import get_aws_status
+from features.providers.auth import get_aws_status
 
 
 def test_aws_status_without_botocore(monkeypatch):

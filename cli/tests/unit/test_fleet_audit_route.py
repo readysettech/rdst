@@ -1,4 +1,4 @@
-"""Tests for POST /api/fleet/audit (one background run) and /api/fleet/aws-status."""
+"""Tests for POST /api/fleet/audit (one background run) and /api/providers/aws-status."""
 
 from __future__ import annotations
 
@@ -287,8 +287,8 @@ class TestAwsStatusRoute:
             "available_profiles": ["default", "dev"],
             "region": "us-east-1",
         }
-        with patch("features.fleet.auth.get_aws_status", return_value=payload):
-            response = client.get("/api/fleet/aws-status")
+        with patch("features.providers.auth.get_aws_status", return_value=payload):
+            response = client.get("/api/providers/aws-status")
 
         assert response.status_code == 200
         assert response.json() == payload

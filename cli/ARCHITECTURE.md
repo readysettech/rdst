@@ -85,6 +85,7 @@ Current feature-owned domains:
 - `guard`
 - `init`
 - `interactive`
+- `providers`
 - `qpdemo`
 - `qprouter`
 - `query_registry`
@@ -106,10 +107,11 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 - `cache`: Readyset setup, cacheability, deployment, cache command flows
 - `configure`: target configuration, connection profiles, setup wizard, config API
 - `demo`: demo setup and sample data loading
-- `fleet`: fleet discovery, fleet modeling, fleet snapshots, pricing/scoring support
+- `fleet`: fleet modeling, multi-target status/audit, fleet snapshots, pricing/scoring support
 - `guard`: guardrail configuration, masking, intent checks, guard CLI
 - `init`: first-run setup and environment/bootstrap validation
 - `interactive`: interactive query status and interactive command flow
+- `providers`: cloud-provider sign-in and target discovery (AWS RDS, Supabase, Neon, DigitalOcean), OAuth broker client
 - `qpdemo`: QueryPilot web demo orchestration, dual-path load, demo API
 - `qprouter`: SQP router deploy and clients, pattern/reason engine
 - `query_registry`: saved query management, registry APIs, query execution helpers

@@ -129,11 +129,12 @@ def run_api_client(run_registry, run_api_target):
 
     from features.audit.api import routes as audit_routes
     from features.fleet.api import routes as fleet_routes
+    from features.providers.api import routes as providers_routes
     from shared.api.routes import runs as run_routes
     from shared.api.target_guard import TargetGuard, require_target_body
 
     app = FastAPI()
-    for module in (audit_routes, fleet_routes, run_routes):
+    for module in (audit_routes, fleet_routes, providers_routes, run_routes):
         app.include_router(module.router, prefix="/api")
     app.dependency_overrides[require_target_body] = lambda: TargetGuard(
         run_api_target, {"engine": "postgresql"}, "postgresql"

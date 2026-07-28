@@ -6,8 +6,7 @@ import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import { useMemo, useState } from 'react'
-import { splitByAvailability } from '../../lib/auditScope'
+import { useMemo } from 'react'
 import type { FleetConnectivityEvent, FleetMember } from '../../types/fleet'
 
 function TargetRow({
@@ -25,17 +24,36 @@ function TargetRow({
   disabled: boolean
   nested?: boolean
 }) {
+  const toggle = () => {
+    if (!disabled) onToggle(member.name, !checked)
+  }
   return (
-    <label
+    // The row is the single click target; the checkbox is display-only
+    // (pointer-events-none). A native <label> around a Radix checkbox
+    // re-dispatches the click to it, firing onCheckedChange twice and
+    // toggling the selection right back off.
+    <div
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={`Select ${member.name}`}
+      aria-disabled={disabled}
+      tabIndex={disabled ? -1 : 0}
+      onClick={toggle}
+      onKeyDown={(event) => {
+        if (event.key === ' ' || event.key === 'Enter') {
+          event.preventDefault()
+          toggle()
+        }
+      }}
       className={`flex items-center gap-3 pr-3 py-2 border-t border-border-layout-1 hover:bg-surface-layout-2/50 transition-colors cursor-pointer ${
         nested ? 'pl-10' : 'pl-3'
       }`}
     >
       <BaseInputCheckbox
         checked={checked}
-        onCheckedChange={(next) => onToggle(member.name, next === true)}
         disabled={disabled}
-        aria-label={`Select ${member.name}`}
+        aria-hidden
+        className="pointer-events-none"
       />
       <VStack className="gap-0 items-start min-w-0">
         <HStack className="gap-2 items-center">
@@ -55,7 +73,7 @@ function TargetRow({
           {[member.engine, member.group].filter(Boolean).join(' · ')}
         </Text>
       </VStack>
-    </label>
+    </div>
   )
 }
 
@@ -75,27 +93,10 @@ export function ScopeSelector({
   disabled?: boolean
   collapsed?: boolean
 }) {
-  const [showUnavailable, setShowUnavailable] = useState(false)
   const selected = useMemo(() => new Set(selection), [selection])
-  // A selected target keeps its place in the list even once a probe reports it
-  // unreachable, so a late verdict never collapses a row out from under the
-  // pointer. It carries an Unreachable badge instead.
-  const { available, unavailable } = useMemo(() => {
-    const split = splitByAvailability(members, connectivity)
-    const pinned = split.unavailable.filter((member) => selected.has(member.name))
-    if (pinned.length === 0) return split
-    const pinnedNames = new Set(pinned.map((member) => member.name))
-    return {
-      available: members.filter(
-        (member) =>
-          pinnedNames.has(member.name) ||
-          !split.unavailable.some((other) => other.name === member.name)
-      ),
-      unavailable: split.unavailable.filter(
-        (member) => !pinnedNames.has(member.name)
-      ),
-    }
-  }, [members, connectivity, selected])
+  // Every target holds a fixed position in the delivered inventory order. A
+  // late connectivity verdict or a selection never reorders a row: an
+  // unreachable target stays exactly where it is, carrying an Unreachable badge.
 
   const isUnreachable = (name: string) => {
     const status = connectivity[name]?.status
@@ -105,12 +106,12 @@ export function ScopeSelector({
     () =>
       Array.from(
         new Set(
-          available
+          members
             .map((member) => member.group)
             .filter((group): group is string => !!group)
         )
       ),
-    [available]
+    [members]
   )
 
   const toggle = (name: string, next: boolean) => {
@@ -145,7 +146,7 @@ export function ScopeSelector({
     )
   }
 
-  const ungrouped = available.filter((member) => !member.group)
+  const ungrouped = members.filter((member) => !member.group)
 
   return (
     <div className="rounded-xl border border-border-layout-1 bg-surface-layout-1 overflow-hidden">
@@ -179,13 +180,10 @@ export function ScopeSelector({
       <Scrollable className="max-h-72">
         <VStack className="gap-2 items-stretch p-2">
           {groupNames.map((group) => {
-            const allGroupMembers = members.filter(
+            const groupMembers = members.filter(
               (member) => member.group === group
             )
-            const visibleMembers = available.filter(
-              (member) => member.group === group
-            )
-            const names = allGroupMembers.map((member) => member.name)
+            const names = groupMembers.map((member) => member.name)
             const checked =
               names.length > 0 && names.every((name) => selected.has(name))
             const partial = !checked && names.some((name) => selected.has(name))
@@ -195,12 +193,26 @@ export function ScopeSelector({
                 data-testid={`target-group-${group}`}
                 className="overflow-hidden rounded-lg border border-border-layout-1"
               >
-                <label className="flex items-center gap-3 px-3 py-2.5 bg-surface-layout-2/80 hover:bg-surface-layout-2 transition-colors cursor-pointer">
+                <div
+                  role="checkbox"
+                  aria-checked={partial ? 'mixed' : checked}
+                  aria-label={`Select group ${group}`}
+                  aria-disabled={disabled}
+                  tabIndex={disabled ? -1 : 0}
+                  onClick={() => !disabled && toggleNames(names)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault()
+                      if (!disabled) toggleNames(names)
+                    }
+                  }}
+                  className="flex items-center gap-3 px-3 py-2.5 bg-surface-layout-2/80 hover:bg-surface-layout-2 transition-colors cursor-pointer"
+                >
                   <BaseInputCheckbox
                     checked={partial ? 'indeterminate' : checked}
-                    onCheckedChange={() => toggleNames(names)}
                     disabled={disabled}
-                    aria-label={`Select group ${group}`}
+                    aria-hidden
+                    className="pointer-events-none"
                   />
                   <HStack className="gap-2 items-center">
                     <Icon
@@ -216,8 +228,8 @@ export function ScopeSelector({
                       {names.length} {names.length === 1 ? 'target' : 'targets'}
                     </Text>
                   </HStack>
-                </label>
-                {visibleMembers.map((member) => (
+                </div>
+                {groupMembers.map((member) => (
                   <TargetRow
                     key={member.name}
                     member={member}
@@ -263,35 +275,6 @@ export function ScopeSelector({
                 />
               ))}
             </div>
-          </Show>
-          <Show when={unavailable.length > 0}>
-            <button
-              type="button"
-              aria-expanded={showUnavailable}
-              onClick={() => setShowUnavailable((value) => !value)}
-              className="flex items-center gap-1.5 px-3 py-2 cursor-pointer text-content-layout-3 hover:text-content-layout-2 transition-colors"
-            >
-              <Icon
-                name={showUnavailable ? 'chevron-down' : 'chevron-right'}
-                label=""
-                aria-hidden="true"
-                className="w-3.5 h-3.5"
-              />
-              <Text level="caption">Unavailable ({unavailable.length})</Text>
-            </button>
-            <Show when={showUnavailable}>
-              {unavailable.map((member) => (
-                <TargetRow
-                  key={member.name}
-                  member={member}
-                  unreachable
-                  checked={selected.has(member.name)}
-                  onToggle={toggle}
-                  disabled={disabled}
-                  nested={!!member.group}
-                />
-              ))}
-            </Show>
           </Show>
         </VStack>
       </Scrollable>

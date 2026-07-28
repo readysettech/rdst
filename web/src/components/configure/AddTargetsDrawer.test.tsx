@@ -5,7 +5,11 @@ import { fetchEnvRequirements, setEnvSecret } from '../../lib/api'
 import {
   bulkAddFleetTargets,
   type DiscoveredFleetMember,
+  fetchFleetAwsStatus,
+  fetchFleetDigitaloceanStatus,
   fetchFleetDiscoverPreview,
+  fetchFleetNeonStatus,
+  fetchFleetSupabaseStatus,
   fetchFleetTargets,
   useFleetImport,
 } from '../../lib/useFleet'
@@ -17,15 +21,33 @@ vi.mock('../../lib/api', () => ({
 }))
 vi.mock('../../lib/useFleet', () => ({
   bulkAddFleetTargets: vi.fn(),
+  fetchFleetAwsStatus: vi.fn(),
+  fetchFleetDigitaloceanStatus: vi.fn(),
   fetchFleetDiscoverPreview: vi.fn(),
+  fetchFleetNeonStatus: vi.fn(),
+  fetchFleetSupabaseStatus: vi.fn(),
   fetchFleetTargets: vi.fn(),
   useFleetImport: vi.fn(),
   updateFleetTargetCredentials: vi.fn(),
   useFleetStatus: vi.fn(() => fleetStatusStub({ state: 'idle' })),
 }))
-// The AWS panel owns its own credential polling; the drawer only hosts it.
+// The provider panels own their own credential polling; the drawer only hosts
+// them.
 vi.mock('../aws/AwsConnectionPanel', () => ({
   AwsConnectionPanel: () => <div data-testid="aws-connection-panel" />,
+}))
+vi.mock('../supabase/SupabaseConnectionPanel', () => ({
+  SupabaseConnectionPanel: () => (
+    <div data-testid="supabase-connection-panel" />
+  ),
+}))
+vi.mock('../neon/NeonConnectionPanel', () => ({
+  NeonConnectionPanel: () => <div data-testid="neon-connection-panel" />,
+}))
+vi.mock('../digitalocean/DigitalOceanConnectionPanel', () => ({
+  DigitalOceanConnectionPanel: () => (
+    <div data-testid="digitalocean-connection-panel" />
+  ),
 }))
 
 const discovered: DiscoveredFleetMember[] = [
@@ -97,6 +119,17 @@ describe('AddTargetsDrawer', () => {
       groups: [],
       count: 0,
     })
+    // AWS Discovery is gated on a signed-in account; default the drawer's
+    // shared status query to signed-in so the AWS tab can discover.
+    vi.mocked(fetchFleetAwsStatus).mockResolvedValue({
+      has_credentials: true,
+      method: 'sso',
+      identity_arn: 'arn:aws:sts::1:assumed-role/dev/mike',
+      account: '1',
+      active_profile: 'dev',
+      available_profiles: ['dev'],
+      region: 'us-east-1',
+    })
     vi.mocked(fetchFleetDiscoverPreview).mockResolvedValue({
       members: discovered,
       errors: [],
@@ -134,6 +167,12 @@ describe('AddTargetsDrawer', () => {
   it('previews discovered instances and adds only the new checked ones', async () => {
     const { onTargetsAdded } = renderDrawer({ initialTab: 'aws' })
 
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
 
     await waitFor(() =>
@@ -158,12 +197,142 @@ describe('AddTargetsDrawer', () => {
     )
   })
 
+  it('discovers Supabase projects without a region picker', async () => {
+    vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
+      connected: true,
+      method: 'oauth',
+      detail: null,
+      organizations: [{ slug: 'acme', name: 'Acme' }],
+    })
+    renderDrawer({ initialTab: 'supabase' })
+
+    expect(screen.queryByText('Regions')).toBeNull()
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+
+    await waitFor(() =>
+      expect(fetchFleetDiscoverPreview).toHaveBeenCalledWith({
+        provider: 'supabase',
+      })
+    )
+    expect(
+      screen.getByText('Choose which databases to add to your fleet.')
+    ).toBeTruthy()
+  })
+
+  it('discovers Neon projects once the API key is connected', async () => {
+    vi.mocked(fetchFleetNeonStatus).mockResolvedValue({
+      connected: true,
+      method: 'api_key',
+      detail: null,
+    })
+    renderDrawer({ initialTab: 'neon' })
+
+    expect(screen.queryByText('Regions')).toBeNull()
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+
+    await waitFor(() =>
+      expect(fetchFleetDiscoverPreview).toHaveBeenCalledWith({
+        provider: 'neon',
+      })
+    )
+    expect(
+      screen.getByText('Choose which databases to add to your fleet.')
+    ).toBeTruthy()
+  })
+
+  it('discovers DigitalOcean databases once the account is signed in', async () => {
+    vi.mocked(fetchFleetDigitaloceanStatus).mockResolvedValue({
+      connected: true,
+      method: 'oauth',
+      detail: null,
+    })
+    renderDrawer({ initialTab: 'digitalocean' })
+
+    expect(screen.queryByText('Regions')).toBeNull()
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+
+    await waitFor(() =>
+      expect(fetchFleetDiscoverPreview).toHaveBeenCalledWith({
+        provider: 'digitalocean',
+      })
+    )
+    expect(
+      screen.getByText('Choose which databases to add to your fleet.')
+    ).toBeTruthy()
+  })
+
+  it('keeps Neon discovery disarmed until a key is stored', async () => {
+    vi.mocked(fetchFleetNeonStatus).mockResolvedValue({
+      connected: false,
+      method: null,
+      detail: null,
+    })
+    renderDrawer({ initialTab: 'neon' })
+
+    expect(screen.getByTestId('neon-connection-panel')).toBeTruthy()
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(true)
+    )
+    expect(fetchFleetDiscoverPreview).not.toHaveBeenCalled()
+  })
+
+  it('keeps AWS discovery disarmed until the account is signed in', async () => {
+    vi.mocked(fetchFleetAwsStatus).mockResolvedValue({
+      has_credentials: false,
+      method: null,
+      identity_arn: null,
+      account: null,
+      active_profile: null,
+      available_profiles: ['dev'],
+      region: null,
+    })
+    renderDrawer({ initialTab: 'aws' })
+
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(true)
+    )
+    expect(
+      screen.getByText('Sign in with AWS to discover instances')
+    ).toBeTruthy()
+    expect(fetchFleetDiscoverPreview).not.toHaveBeenCalled()
+  })
+
   it('surfaces a discovery failure without leaving the regions step', async () => {
     vi.mocked(fetchFleetDiscoverPreview).mockRejectedValue(
       new Error('No AWS credentials')
     )
     renderDrawer({ initialTab: 'aws' })
 
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
 
     await waitFor(() =>
@@ -195,6 +364,12 @@ describe('AddTargetsDrawer', () => {
       initialTab: 'aws',
     })
 
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
     await waitFor(() =>
       expect(
@@ -229,6 +404,12 @@ describe('AddTargetsDrawer', () => {
   it('asks for a fresh connectivity sweep when the credentials step is left', async () => {
     const { onCredentialsClosed, onClose } = renderDrawer({ initialTab: 'aws' })
 
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
     await waitFor(() =>
       expect(

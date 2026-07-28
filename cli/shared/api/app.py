@@ -198,7 +198,7 @@ def _sse_event_unions() -> dict[str, tuple[Any, list[str]]]:
         # Capture events reach the client through the background-run stream;
         # the union is still published so the frontend keeps its typed variants.
         "WorkloadEvent": (WorkloadEvent, []),
-        "FleetEvent": (FleetEvent, ["/api/fleet/status", "/api/fleet/import", "/api/fleet/discover"]),
+        "FleetEvent": (FleetEvent, ["/api/fleet/status", "/api/fleet/import", "/api/providers/discover"]),
         "QueryBenchmarkEvent": (
             QueryBenchmarkEvent,
             ["/api/query-registry/benchmark"],
@@ -305,6 +305,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     from features.audit.api import routes as audit
     from features.bootstrap.api import routes as bootstrap
     from features.fleet.api import routes as fleet
+    from features.providers.api import routes as providers
     from features.guard.api import routes as guard
     from features.cache.api import readyset_routes as readyset
     from features.cache.api import routes as cache
@@ -326,6 +327,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(bootstrap.router, prefix="/api", tags=["bootstrap"])
     app.include_router(browse.router, prefix="/api", tags=["browse"])
     app.include_router(fleet.router, prefix="/api", tags=["fleet"])
+    app.include_router(providers.router, prefix="/api", tags=["providers"])
     app.include_router(guard.router, prefix="/api")
     app.include_router(cache.router, prefix="/api", tags=["cache"])
     app.include_router(ask.router, prefix="/api", tags=["ask"])
@@ -355,9 +357,19 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     if dist_dir:
         index_file = dist_dir / "index.html"
 
+        # index.html names the current hashed asset bundle, so it must never be
+        # served stale: without this a browser's heuristic cache can pin an old
+        # index that points at deleted JS, leaving the user on a prior build
+        # after every update. Hashed assets are content-addressed, so they take
+        # the opposite treatment -- cache them hard.
+        def _index_response() -> FileResponse:
+            return FileResponse(
+                str(index_file), headers={"Cache-Control": "no-cache"}
+            )
+
         @app.get("/", include_in_schema=False)
         async def serve_index_root():
-            return FileResponse(str(index_file))
+            return _index_response()
 
         @app.get("/{path:path}", include_in_schema=False)
         async def serve_spa(path: str):
@@ -366,9 +378,16 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
 
             resolved_path = (dist_dir / path).resolve()
             if dist_dir in resolved_path.parents and resolved_path.is_file():
-                return FileResponse(str(resolved_path))
+                cache = (
+                    "public, max-age=31536000, immutable"
+                    if "/assets/" in f"/{path}"
+                    else "no-cache"
+                )
+                return FileResponse(
+                    str(resolved_path), headers={"Cache-Control": cache}
+                )
 
-            return FileResponse(str(index_file))
+            return _index_response()
 
     def custom_openapi() -> dict[str, Any]:
         if app.openapi_schema:

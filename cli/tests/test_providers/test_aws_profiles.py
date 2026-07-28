@@ -27,7 +27,7 @@ def test_create_profile_uses_aws_config_file(monkeypatch, tmp_path):
     config_path = tmp_path / "custom" / "aws-config"
     monkeypatch.setenv("AWS_CONFIG_FILE", str(config_path))
 
-    response = _client().post("/api/fleet/aws-profiles", json=_profile_body())
+    response = _client().post("/api/providers/aws-profiles", json=_profile_body())
 
     assert response.status_code == 200
     assert response.json() == {"created": True, "profile": "dev"}
@@ -54,7 +54,7 @@ def test_invalid_profile_name_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("AWS_CONFIG_FILE", str(config_path))
 
     response = _client().post(
-        "/api/fleet/aws-profiles", json=_profile_body("dev; echo injected")
+        "/api/providers/aws-profiles", json=_profile_body("dev; echo injected")
     )
 
     assert response.status_code == 400
@@ -67,8 +67,8 @@ def test_duplicate_profile_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("AWS_CONFIG_FILE", str(config_path))
     client = _client()
 
-    assert client.post("/api/fleet/aws-profiles", json=_profile_body()).status_code == 200
-    response = client.post("/api/fleet/aws-profiles", json=_profile_body())
+    assert client.post("/api/providers/aws-profiles", json=_profile_body()).status_code == 200
+    response = client.post("/api/providers/aws-profiles", json=_profile_body())
 
     assert response.status_code == 409
     assert response.json()["code"] == "profile_exists"

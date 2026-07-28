@@ -32,7 +32,7 @@ def resolve_secret(
         region = "us-east-1"
 
     try:
-        from features.fleet.auth import get_secretsmanager_client
+        from features.providers.auth import get_secretsmanager_client
 
         client = get_secretsmanager_client(region)
         response = client.get_secret_value(SecretId=secret_arn)

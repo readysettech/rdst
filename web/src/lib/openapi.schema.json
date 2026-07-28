@@ -2293,6 +2293,57 @@
         "title": "AwsProfileCreateRequest",
         "type": "object"
       },
+      "AwsSsoFinalizeRequest": {
+        "properties": {
+          "account_id": {
+            "title": "Account Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "role_name": {
+            "title": "Role Name",
+            "type": "string"
+          },
+          "start_url": {
+            "title": "Start Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "start_url",
+          "region",
+          "account_id",
+          "role_name"
+        ],
+        "title": "AwsSsoFinalizeRequest",
+        "type": "object"
+      },
+      "AwsSsoLoginRequest": {
+        "properties": {
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "start_url": {
+            "title": "Start Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start_url",
+          "region"
+        ],
+        "title": "AwsSsoLoginRequest",
+        "type": "object"
+      },
       "BackgroundRunCancelResponse": {
         "properties": {
           "cancelled": {
@@ -4834,7 +4885,13 @@
             ],
             "title": "Profile"
           },
+          "provider": {
+            "default": "aws",
+            "title": "Provider",
+            "type": "string"
+          },
           "regions": {
+            "default": [],
             "items": {
               "type": "string"
             },
@@ -4842,9 +4899,6 @@
             "type": "array"
           }
         },
-        "required": [
-          "regions"
-        ],
         "title": "FleetDiscoverPreviewRequest",
         "type": "object"
       },
@@ -6589,6 +6643,19 @@
           "message"
         ],
         "title": "ProgressEvent",
+        "type": "object"
+      },
+      "ProviderTokenRequest": {
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "ProviderTokenRequest",
         "type": "object"
       },
       "QueryBenchmarkCompleteEvent": {
@@ -13958,204 +14025,6 @@
         ]
       }
     },
-    "/api/fleet/aws-login": {
-      "post": {
-        "description": "Start AWS CLI SSO login without blocking the local web request.",
-        "operationId": "start_fleet_aws_login_api_fleet_aws_login_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AwsLoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Start Fleet Aws Login",
-        "tags": [
-          "fleet",
-          "fleet"
-        ]
-      }
-    },
-    "/api/fleet/aws-login/{login_id}": {
-      "get": {
-        "description": "Poll an AWS CLI login and verify the resulting STS session.",
-        "operationId": "get_fleet_aws_login_api_fleet_aws_login__login_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "login_id",
-            "required": true,
-            "schema": {
-              "title": "Login Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Fleet Aws Login",
-        "tags": [
-          "fleet",
-          "fleet"
-        ]
-      }
-    },
-    "/api/fleet/aws-logout": {
-      "post": {
-        "description": "Sign out of AWS SSO (clears the CLI's cached SSO sessions).",
-        "operationId": "fleet_aws_logout_api_fleet_aws_logout_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Fleet Aws Logout",
-        "tags": [
-          "fleet",
-          "fleet"
-        ]
-      }
-    },
-    "/api/fleet/aws-profiles": {
-      "post": {
-        "description": "Create a modern AWS CLI SSO profile in the user's local config.",
-        "operationId": "create_fleet_aws_profile_api_fleet_aws_profiles_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AwsProfileCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Fleet Aws Profile",
-        "tags": [
-          "fleet",
-          "fleet"
-        ]
-      }
-    },
-    "/api/fleet/aws-status": {
-      "get": {
-        "description": "Report local AWS credential state for the discovery UI.",
-        "operationId": "get_fleet_aws_status_api_fleet_aws_status_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "profile",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Profile"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Fleet Aws Status Api Fleet Aws Status Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Fleet Aws Status",
-        "tags": [
-          "fleet",
-          "fleet"
-        ]
-      }
-    },
     "/api/fleet/diff": {
       "get": {
         "description": "Compare two snapshots' per-target metrics and sizing verdicts.",
@@ -14203,93 +14072,6 @@
           }
         },
         "summary": "Diff Fleet Snapshots",
-        "tags": [
-          "fleet",
-          "fleet"
-        ]
-      }
-    },
-    "/api/fleet/discover": {
-      "post": {
-        "description": "Discover RDS/Aurora instances from AWS and add them as targets (SSE stream).",
-        "operationId": "discover_fleet_api_fleet_discover_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FleetDiscoverRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              },
-              "text/event-stream": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetEvent"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Discover Fleet",
-        "tags": [
-          "fleet",
-          "fleet"
-        ]
-      }
-    },
-    "/api/fleet/discover-preview": {
-      "post": {
-        "description": "List discoverable RDS/Aurora instances without importing them.",
-        "operationId": "discover_preview_api_fleet_discover_preview_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FleetDiscoverPreviewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Discover Preview",
         "tags": [
           "fleet",
           "fleet"
@@ -14685,47 +14467,6 @@
           }
         },
         "summary": "List Fleet Targets",
-        "tags": [
-          "fleet",
-          "fleet"
-        ]
-      }
-    },
-    "/api/fleet/targets/bulk-add": {
-      "post": {
-        "description": "Add previously previewed members as fleet targets.",
-        "operationId": "bulk_add_targets_api_fleet_targets_bulk_add_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FleetBulkAddRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Bulk Add Targets",
         "tags": [
           "fleet",
           "fleet"
@@ -15375,6 +15116,893 @@
         "summary": "Get Conversation Status",
         "tags": [
           "interactive"
+        ]
+      }
+    },
+    "/api/providers/aws-login": {
+      "post": {
+        "description": "Start AWS CLI SSO login without blocking the local web request.",
+        "operationId": "start_fleet_aws_login_api_providers_aws_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AwsLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Fleet Aws Login",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/aws-login/{login_id}": {
+      "get": {
+        "description": "Poll an AWS CLI login and verify the resulting STS session.",
+        "operationId": "get_fleet_aws_login_api_providers_aws_login__login_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login_id",
+            "required": true,
+            "schema": {
+              "title": "Login Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fleet Aws Login",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/aws-logout": {
+      "post": {
+        "description": "Sign out of AWS SSO (clears the CLI's cached SSO sessions).",
+        "operationId": "fleet_aws_logout_api_providers_aws_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Fleet Aws Logout",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/aws-profiles": {
+      "post": {
+        "description": "Create a modern AWS CLI SSO profile in the user's local config.",
+        "operationId": "create_fleet_aws_profile_api_providers_aws_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AwsProfileCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Fleet Aws Profile",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/aws-sso-accounts": {
+      "get": {
+        "description": "List AWS accounts available from the cached SSO token for start_url.",
+        "operationId": "list_fleet_aws_sso_accounts_api_providers_aws_sso_accounts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start_url",
+            "required": true,
+            "schema": {
+              "title": "Start Url",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Fleet Aws Sso Accounts",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/aws-sso-finalize": {
+      "post": {
+        "description": "Write the chosen account/role as a profile and verify it assumes.\n\nReuses create_sso_profile, then runs the STS check. A ForbiddenException\nat GetRoleCredentials surfaces as an actionable error naming the account\nand role rather than a raw botocore trace.",
+        "operationId": "finalize_fleet_aws_sso_profile_api_providers_aws_sso_finalize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AwsSsoFinalizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Finalize Fleet Aws Sso Profile",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/aws-sso-login": {
+      "post": {
+        "description": "Device-authorize an SSO token from a start URL + region alone.\n\nNo account or role is needed yet: the browser flow caches a token that\nthe accounts/roles endpoints read. Poll the returned login_id through the\nshared GET /providers/aws-login/{login_id} endpoint.",
+        "operationId": "start_fleet_aws_sso_login_api_providers_aws_sso_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AwsSsoLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Fleet Aws Sso Login",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/aws-sso-roles": {
+      "get": {
+        "description": "List roles available in one account from the cached SSO token.",
+        "operationId": "list_fleet_aws_sso_roles_api_providers_aws_sso_roles_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start_url",
+            "required": true,
+            "schema": {
+              "title": "Start Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Fleet Aws Sso Roles",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/aws-status": {
+      "get": {
+        "description": "Report local AWS credential state for the discovery UI.",
+        "operationId": "get_fleet_aws_status_api_providers_aws_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Fleet Aws Status Api Providers Aws Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fleet Aws Status",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/bulk-add": {
+      "post": {
+        "description": "Add previously previewed members as fleet targets.",
+        "operationId": "bulk_add_targets_api_providers_bulk_add_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetBulkAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bulk Add Targets",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/digitalocean-login": {
+      "post": {
+        "description": "Start a DigitalOcean OAuth sign-in and hand the browser the authorize URL.",
+        "operationId": "start_fleet_digitalocean_login_api_providers_digitalocean_login_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start Fleet Digitalocean Login",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/digitalocean-login/{login_id}": {
+      "get": {
+        "description": "Poll a DigitalOcean OAuth sign-in started on this server.",
+        "operationId": "get_fleet_digitalocean_login_api_providers_digitalocean_login__login_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login_id",
+            "required": true,
+            "schema": {
+              "title": "Login Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fleet Digitalocean Login",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/digitalocean-logout": {
+      "post": {
+        "description": "Clear the in-process DigitalOcean session.",
+        "operationId": "fleet_digitalocean_logout_api_providers_digitalocean_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Fleet Digitalocean Logout",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/digitalocean-status": {
+      "get": {
+        "description": "Report DigitalOcean API credential state for the discovery UI.",
+        "operationId": "get_fleet_digitalocean_status_api_providers_digitalocean_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Fleet Digitalocean Status Api Providers Digitalocean Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Fleet Digitalocean Status",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/discover": {
+      "post": {
+        "description": "Discover RDS/Aurora instances from AWS and add them as targets (SSE stream).",
+        "operationId": "discover_fleet_api_providers_discover_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetDiscoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetEvent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discover Fleet",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/discover-preview": {
+      "post": {
+        "description": "List discoverable provider databases without importing them.",
+        "operationId": "discover_preview_api_providers_discover_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetDiscoverPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discover Preview",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/neon-key": {
+      "post": {
+        "description": "Store a Neon API key after validating it.",
+        "operationId": "set_fleet_neon_key_api_providers_neon_key_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Fleet Neon Key",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/neon-logout": {
+      "post": {
+        "description": "Clear the stored Neon API key.",
+        "operationId": "fleet_neon_logout_api_providers_neon_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Fleet Neon Logout",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/neon-status": {
+      "get": {
+        "description": "Report Neon API credential state for the discovery UI.",
+        "operationId": "get_fleet_neon_status_api_providers_neon_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Fleet Neon Status Api Providers Neon Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Fleet Neon Status",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/supabase-callback": {
+      "get": {
+        "description": "Complete the Supabase OAuth exchange and tell the user to go back.",
+        "operationId": "fleet_supabase_callback_api_providers_supabase_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fleet Supabase Callback",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/supabase-login": {
+      "post": {
+        "description": "Start a Supabase OAuth sign-in and hand the browser the authorize URL.",
+        "operationId": "start_fleet_supabase_login_api_providers_supabase_login_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start Fleet Supabase Login",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/supabase-login/{login_id}": {
+      "get": {
+        "description": "Poll a Supabase OAuth sign-in started on this server.",
+        "operationId": "get_fleet_supabase_login_api_providers_supabase_login__login_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login_id",
+            "required": true,
+            "schema": {
+              "title": "Login Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fleet Supabase Login",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/supabase-logout": {
+      "post": {
+        "description": "Revoke and clear stored Supabase credentials.",
+        "operationId": "fleet_supabase_logout_api_providers_supabase_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Fleet Supabase Logout",
+        "tags": [
+          "providers",
+          "providers"
+        ]
+      }
+    },
+    "/api/providers/supabase-status": {
+      "get": {
+        "description": "Report Supabase Management API credential state for the discovery UI.",
+        "operationId": "get_fleet_supabase_status_api_providers_supabase_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Fleet Supabase Status Api Providers Supabase Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Fleet Supabase Status",
+        "tags": [
+          "providers",
+          "providers"
         ]
       }
     },

@@ -29,7 +29,11 @@ import {
   SettingsSection,
   TargetGroupView,
 } from '../components/configure'
+import { type AddTab, parseAddTab } from '../components/configure/addTabs'
+import { DigitalOceanConnectionPanel } from '../components/digitalocean/DigitalOceanConnectionPanel'
 import { EnvSecretsDialog } from '../components/EnvSecretsDialog'
+import { NeonConnectionPanel } from '../components/neon/NeonConnectionPanel'
+import { SupabaseConnectionPanel } from '../components/supabase/SupabaseConnectionPanel'
 import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
 import {
   type AnthropicKeyValidation,
@@ -40,6 +44,7 @@ import {
   clearAllBackgroundRuns,
   startBootstrapRun,
 } from '../lib/backgroundRuns'
+import { classifyError, TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract'
 import { invalidateTargetQueries } from '../lib/targetQueries'
 import {
   invalidateTrialRelatedQueries,
@@ -47,13 +52,8 @@ import {
 } from '../lib/trialQueries'
 import { useAnthropicValidity } from '../lib/useAnthropicValidity'
 import { useConfigure } from '../lib/useConfigure'
-import {
-  fetchFleetAwsStatus,
-  fetchFleetTargets,
-  useFleetStatus,
-} from '../lib/useFleet'
+import { fetchFleetTargets, useFleetStatus } from '../lib/useFleet'
 import { useSystemStatus } from '../lib/useSystemStatus'
-import { classifyError, TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract'
 import type {
   ConfigureFormData,
   ConfigureTarget,
@@ -70,7 +70,7 @@ type ConfigureSearch = {
   edit?: string
   section?: 'ai'
   returnTo?: string
-  add?: 'aws' | 'csv'
+  add?: AddTab
 }
 
 export const Route = createFileRoute('/configure')({
@@ -78,7 +78,7 @@ export const Route = createFileRoute('/configure')({
     edit: typeof search.edit === 'string' ? search.edit : undefined,
     section: search.section === 'ai' ? 'ai' : undefined,
     returnTo: typeof search.returnTo === 'string' ? search.returnTo : undefined,
-    add: search.add === 'aws' || search.add === 'csv' ? search.add : undefined,
+    add: parseAddTab(search.add),
   }),
   component: ConfigurePage,
 })
@@ -171,9 +171,9 @@ function ConfigurePage() {
   const [editingTarget, setEditingTarget] =
     useState<ConfigureTargetDetail | null>(null)
   const [showAnthropicDialog, setShowAnthropicDialog] = useState(false)
-  const [passwordDialogTarget, setPasswordDialogTarget] = useState<string | null>(
-    null
-  )
+  const [passwordDialogTarget, setPasswordDialogTarget] = useState<
+    string | null
+  >(null)
   const [showTrialDialog, setShowTrialDialog] = useState(false)
   // Two-click destructive reset: first click arms with an explicit warning,
   // second click deletes; arming auto-expires.
@@ -206,7 +206,7 @@ function ConfigurePage() {
   const [testingTarget, setTestingTarget] = useState<string | null>(null)
   const deepLinkHandledRef = useRef(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerTab, setDrawerTab] = useState<'aws' | 'csv'>('aws')
+  const [drawerTab, setDrawerTab] = useState<AddTab>('aws')
   const [moveTarget, setMoveTarget] = useState<ConfigureTarget | null>(null)
   const [view, setView] = useState<'list' | 'groups'>('groups')
 
@@ -229,16 +229,11 @@ function ConfigurePage() {
     queryFn: () => fetchFleetTargets(),
     staleTime: 30_000,
   })
-  const { data: awsStatus } = useQuery({
-    queryKey: ['fleet-aws-status', ''],
-    queryFn: () => fetchFleetAwsStatus(),
-    staleTime: 5_000,
-    retry: false,
-  })
-
   const fleetByName = useMemo(
     () =>
-      new Map((fleetTargets?.members ?? []).map((member) => [member.name, member])),
+      new Map(
+        (fleetTargets?.members ?? []).map((member) => [member.name, member])
+      ),
     [fleetTargets]
   )
   const groupOf = useCallback(
@@ -418,8 +413,9 @@ function ConfigurePage() {
     return scrollSectionIntoView('connections')
   }, [locationHash])
 
-  // ?add=aws|csv (onboarding's discovery link, or an old /fleet?add= link)
-  // opens the Add Targets drawer directly on that tab. Runs once.
+  // ?add=aws|supabase|neon|digitalocean|csv (onboarding's discovery link, or
+  // an old /fleet?add= link) opens the Add Targets drawer directly on that
+  // tab. Runs once.
   const addDeepLinkHandledRef = useRef(false)
   useEffect(() => {
     if (!search.add || addDeepLinkHandledRef.current) return
@@ -504,7 +500,7 @@ function ConfigurePage() {
     await handleTest(targetName)
   }
 
-  const openDrawer = (tab: 'aws' | 'csv') => {
+  const openDrawer = (tab: AddTab) => {
     setDrawerTab(tab)
     setDrawerOpen(true)
   }
@@ -664,8 +660,34 @@ function ConfigurePage() {
               />
             </Show>
 
-            <Show when={targets.length > 0 && !!awsStatus?.has_credentials}>
-              <AwsConnectionPanel compact />
+            {/* Provider sessions are otherwise only visible inside the discover
+                drawer, so a signed-in account looks like no account at all.
+                Each row states its own connection, and stays quiet when the
+                user has never signed into that provider. */}
+            <Show when={targets.length > 0}>
+              <VStack className="gap-1.5 items-stretch">
+                <Text level="caption" className="text-content-layout-3">
+                  Connections
+                </Text>
+                <div className="grid grid-cols-1 tablet:grid-cols-2 gap-3 items-stretch">
+                  <AwsConnectionPanel
+                    compact
+                    onSignIn={() => openDrawer('aws')}
+                  />
+                  <SupabaseConnectionPanel
+                    compact
+                    onSignIn={() => openDrawer('supabase')}
+                  />
+                  <NeonConnectionPanel
+                    compact
+                    onSignIn={() => openDrawer('neon')}
+                  />
+                  <DigitalOceanConnectionPanel
+                    compact
+                    onSignIn={() => openDrawer('digitalocean')}
+                  />
+                </div>
+              </VStack>
             </Show>
 
             {/* Form replaces the list while adding/editing. */}
@@ -693,7 +715,11 @@ function ConfigurePage() {
               <HStack className="justify-between items-center gap-3 flex-wrap">
                 <HStack className="gap-3 items-center flex-wrap">
                   <Show when={groups.length > 0}>
-                    <HStack className="gap-1" role="group" aria-label="Target view">
+                    <HStack
+                      className="gap-1"
+                      role="group"
+                      aria-label="Target view"
+                    >
                       <ViewToggle
                         active={view === 'list'}
                         label="List"

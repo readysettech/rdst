@@ -8,13 +8,12 @@
  */
 
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { type AddTab, parseAddTab } from '../components/configure/addTabs'
 
 export const Route = createFileRoute('/fleet')({
-  validateSearch: (
-    search: Record<string, unknown>
-  ): { add?: 'aws' | 'csv' } => {
-    const add = search.add
-    return add === 'aws' || add === 'csv' ? { add } : {}
+  validateSearch: (search: Record<string, unknown>): { add?: AddTab } => {
+    const add = parseAddTab(search.add)
+    return add ? { add } : {}
   },
   // `throw redirect` is honored in `beforeLoad`, keeping the app shell intact
   // while forwarding the ?add tab through to the drawer.

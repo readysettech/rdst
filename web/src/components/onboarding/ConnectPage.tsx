@@ -1,15 +1,61 @@
-import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useRouter } from '@tanstack/react-router'
+import type { ReactNode } from 'react'
 import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { useConfigure } from '../../lib/useConfigure'
 import { useOnboarding } from '../../lib/useOnboarding'
 import type { ConfigureFormData } from '../../types/configure'
 import { ConfigureForm } from '../configure'
+import type { AddTab } from '../configure/addTabs'
+import {
+  AwsLogo,
+  DigitalOceanLogo,
+  NeonLogo,
+  SupabaseLogo,
+} from '../providers/ProviderLogos'
+
+// The provider-first paths, in the order they read on the page. They all read
+// the same way so no provider looks like the afterthought.
+const PROVIDER_CARDS = [
+  { tab: 'aws', logo: <AwsLogo size={16} className="text-content-layout-2" />, label: 'AWS' },
+  { tab: 'supabase', logo: <SupabaseLogo size={16} />, label: 'Supabase' },
+  { tab: 'neon', logo: <NeonLogo size={16} />, label: 'Neon' },
+  { tab: 'digitalocean', logo: <DigitalOceanLogo size={16} />, label: 'DigitalOcean' },
+] as const satisfies readonly {
+  tab: AddTab
+  logo: ReactNode
+  label: string
+}[]
+
+/** Compact one-click hand-off into a provider's discovery drawer. */
+function ProviderDiscoverTile({
+  logo,
+  label,
+  onDiscover,
+}: {
+  logo: ReactNode
+  label: string
+  onDiscover: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onDiscover}
+      className="flex items-center gap-2 rounded-xl border border-border-layout-1 bg-surface-raised px-3 h-11 shadow-elevation-1 transition-colors hover:border-surface-primary-solid cursor-pointer"
+    >
+      <span className="shrink-0 inline-flex" aria-hidden="true">
+        {logo}
+      </span>
+      <Text level="label-small" className="text-content-layout-1">
+        {label}
+      </Text>
+    </button>
+  )
+}
 
 /**
  * First-run "Connect your database" — a single, exitable page that replaces the
@@ -139,28 +185,26 @@ export function ConnectPage({
           </Text>
         </VStack>
 
-        {/* AWS-first path: one click into the Settings discovery drawer for
-            the common case of databases living in RDS/Aurora, ahead of the
-            manual form. */}
-        <div className="mb-6 flex items-center justify-between gap-3 rounded-[1.25rem] border border-border-layout-1 bg-surface-raised px-5 py-4 shadow-elevation-1">
-          <VStack className="gap-0.5 items-start">
-            <Text level="label-medium" className="text-content-layout-1">
-              Databases on AWS?
-            </Text>
-            <Text level="caption" className="text-content-layout-3">
-              Sign in with AWS and import your RDS/Aurora instances
-              automatically.
-            </Text>
-          </VStack>
-          <Button
-            variant="primary"
-            modifier="outline"
-            label="Discover from AWS"
-            icon="search"
-            iconPosition="left"
-            onClick={() => navigate({ to: '/configure', search: { add: 'aws' } })}
-          />
-        </div>
+        {/* Provider-first paths, compact: one click into the discovery drawer
+            pre-selected on that provider, kept to two rows so the manual form
+            below stays visible without scrolling. */}
+        <VStack className="gap-1.5 items-stretch mb-6">
+          <Text level="caption" className="text-content-layout-3">
+            Have databases at a cloud provider? Discover them
+          </Text>
+          <div className="grid grid-cols-2 tablet:grid-cols-4 gap-2">
+            {PROVIDER_CARDS.map((card) => (
+              <ProviderDiscoverTile
+                key={card.tab}
+                logo={card.logo}
+                label={card.label}
+                onDiscover={() =>
+                  navigate({ to: '/configure', search: { add: card.tab } })
+                }
+              />
+            ))}
+          </div>
+        </VStack>
 
         {/* One raised card on the hero surface: the form, its inline test
             state, and its single primary CTA read as one grouped unit — no dead

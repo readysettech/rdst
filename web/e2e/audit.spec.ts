@@ -281,7 +281,7 @@ test('AWS preflight appears only for AWS targets and hard-gates when signed out'
       },
     })
   )
-  await page.route('**/api/fleet/aws-status', (route) =>
+  await page.route('**/api/providers/aws-status', (route) =>
     route.fulfill({
       json: {
         has_credentials: false,

@@ -15,6 +15,7 @@ import type { AuditPreflightResult } from '../../lib/auditPreflight'
 import { TRIAL_EXHAUSTED_MESSAGE } from '../../lib/errorContract'
 import { invalidateTrialRelatedQueries } from '../../lib/trialQueries'
 import type { AiGate } from '../../lib/useAiGate'
+import type { FleetMember } from '../../types/fleet'
 import { AwsConnectionPanel } from '../aws/AwsConnectionPanel'
 import { EnvSecretsDialog } from '../EnvSecretsDialog'
 import { TrialRegistrationDialog } from '../TrialRegistrationDialog'
@@ -59,6 +60,7 @@ export function PreflightChecklist({
   onRecheck,
   liveCapture,
   aiGate,
+  members,
   passwordRequirements,
   anthropicRequirement,
   keyringAvailable,
@@ -68,6 +70,7 @@ export function PreflightChecklist({
   onRecheck: () => void
   liveCapture: boolean
   aiGate: AiPreflightGate
+  members: FleetMember[]
   passwordRequirements: EnvRequirement[]
   anthropicRequirement?: EnvRequirement
   keyringAvailable: boolean
@@ -77,6 +80,39 @@ export function PreflightChecklist({
   const [showKeyDialog, setShowKeyDialog] = useState(false)
   const [passwordTarget, setPasswordTarget] = useState<string | null>(null)
   const rows = Object.values(result.requirements)
+
+  // A connection failure (auth error, timeout) is often just a wrong or
+  // expired password, so any failing target can update its password — not only
+  // targets whose password is missing. Reuse the target_password requirement
+  // the env probe reported, or synthesize an equivalent one from the member's
+  // configured password_env so a target that already has a password set can
+  // still be updated.
+  const hasPassword = (targetName: string) =>
+    members.find((member) => member.name === targetName)?.has_password ?? false
+  const passwordRequirementFor = (
+    targetName: string,
+    passwordEnv?: string | null
+  ): EnvRequirement | null => {
+    const existing = passwordRequirements.find(
+      (requirement) =>
+        requirement.kind === 'target_password' &&
+        requirement.target === targetName
+    )
+    if (existing) return existing
+    const envName =
+      passwordEnv ??
+      members.find((member) => member.name === targetName)?.password_env
+    if (!envName) return null
+    return {
+      kind: 'target_password',
+      target: targetName,
+      accepted_names: [envName],
+      satisfied: false,
+      source: 'missing',
+    }
+  }
+  const passwordButtonLabel = (targetName: string) =>
+    hasPassword(targetName) ? 'Update password' : 'Set password'
   const dockerAvailable =
     rows.length > 0 && rows.every((row) => row.docker_available)
   const aiReady = aiGate.status === 'ready' || aiGate.status === 'unverified'
@@ -146,15 +182,35 @@ export function PreflightChecklist({
                     </pre>
                   </div>
                 )}
+              {row.query_stats === 'error' &&
+                passwordRequirementFor(row.target) && (
+                  <div className="mt-1 pl-5">
+                    <Text
+                      level="caption"
+                      className="text-content-layout-3 block mb-1.5"
+                    >
+                      A connection failure is often a wrong or expired password.
+                    </Text>
+                    <Button
+                      variant="primary"
+                      modifier="solid"
+                      size="small"
+                      icon="key"
+                      iconPosition="left"
+                      label={passwordButtonLabel(row.target)}
+                      onClick={() => setPasswordTarget(row.target)}
+                    />
+                  </div>
+                )}
             </VStack>
           </div>
         ))}
         {Object.entries(result.errors).map(([target, error]) => {
+          const targetName = error.target ?? target
           const passwordRequired = error.code === 'TARGET_PASSWORD_REQUIRED'
-          const targetRequirements = passwordRequirements.filter(
-            (requirement) =>
-              requirement.kind === 'target_password' &&
-              requirement.target === (error.target ?? target)
+          const requirement = passwordRequirementFor(
+            targetName,
+            error.passwordEnv
           )
           return (
             <div
@@ -169,20 +225,28 @@ export function PreflightChecklist({
                 label="Database reachable"
                 detail={
                   passwordRequired
-                    ? `Enter the password for '${error.target ?? target}' again.`
+                    ? `Enter the password for '${targetName}' again.`
                     : error.message
                 }
               />
-              {passwordRequired && targetRequirements.length > 0 && (
+              {requirement && (
                 <div className="mt-2 pl-5">
+                  {!passwordRequired && (
+                    <Text
+                      level="caption"
+                      className="text-content-layout-3 block mb-1.5"
+                    >
+                      A connection failure is often a wrong or expired password.
+                    </Text>
+                  )}
                   <Button
                     variant="primary"
                     modifier="solid"
                     size="small"
                     icon="key"
                     iconPosition="left"
-                    label="Set password"
-                    onClick={() => setPasswordTarget(error.target ?? target)}
+                    label={passwordButtonLabel(targetName)}
+                    onClick={() => setPasswordTarget(targetName)}
                   />
                 </div>
               )}
@@ -337,11 +401,13 @@ export function PreflightChecklist({
       <EnvSecretsDialog
         isOpen={passwordTarget !== null}
         onClose={() => setPasswordTarget(null)}
-        requirements={passwordRequirements.filter(
-          (requirement) =>
-            requirement.kind === 'target_password' &&
-            requirement.target === passwordTarget
-        )}
+        requirements={
+          passwordTarget
+            ? ([passwordRequirementFor(passwordTarget)].filter(
+                Boolean
+              ) as EnvRequirement[])
+            : []
+        }
         keyringAvailable={keyringAvailable}
         onSuccess={() => {
           setPasswordTarget(null)

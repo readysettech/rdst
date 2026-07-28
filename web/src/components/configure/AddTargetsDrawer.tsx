@@ -1,6 +1,7 @@
 /**
  * Bulk-add drawer for the Settings target list: discover AWS RDS/Aurora
- * instances or import a CSV, then set credentials for whatever landed.
+ * instances, discover Supabase, Neon or DigitalOcean databases, or import a
+ * CSV, then set credentials for whatever landed.
  *
  * Discovery is preview-first — everything found is listed, the user picks, and
  * only the picked instances are added. Passwords never travel in the CSV; the
@@ -33,12 +34,24 @@ import {
   TooltipTrigger,
 } from '@rs/ui-new/tooltip'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type ComponentType,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { fetchEnvRequirements } from '../../lib/api'
 import {
   bulkAddFleetTargets,
   type DiscoveredFleetMember,
+  type FleetDiscoverInput,
+  fetchFleetAwsStatus,
+  fetchFleetDigitaloceanStatus,
   fetchFleetDiscoverPreview,
+  fetchFleetNeonStatus,
+  fetchFleetSupabaseStatus,
   fetchFleetTargets,
   useFleetImport,
 } from '../../lib/useFleet'
@@ -47,6 +60,18 @@ import type {
   FleetImportProgressEvent,
 } from '../../types/fleet'
 import { AwsConnectionPanel } from '../aws/AwsConnectionPanel'
+import { DigitalOceanConnectionPanel } from '../digitalocean/DigitalOceanConnectionPanel'
+import { NeonConnectionPanel } from '../neon/NeonConnectionPanel'
+import {
+  AwsLogo,
+  AzureLogo,
+  DigitalOceanLogo,
+  GcpLogo,
+  NeonLogo,
+  SupabaseLogo,
+} from '../providers/ProviderLogos'
+import { SupabaseConnectionPanel } from '../supabase/SupabaseConnectionPanel'
+import { ADD_TABS, type AddTab } from './addTabs'
 import { CredentialsStep } from './CredentialsStep'
 import { groupTargets } from './TargetGroupView'
 
@@ -91,6 +116,64 @@ const engineLabel = (engine: string | null | undefined) =>
 /** "role:writer" -> "writer"; other tags return null. */
 const roleOfTag = (tag: string): string | null =>
   tag.startsWith('role:') ? tag.slice('role:'.length) : null
+
+/** The account providers, whose discovery reads one connected account. */
+type AccountTab = Exclude<AddTab, 'aws' | 'csv'>
+
+interface ProviderTab {
+  label: string
+  Logo: (props: { size?: number }) => ReactNode
+  /** Shown when discovery came back with nothing. */
+  emptyMessage: string
+  /** Absent for AWS, whose discovery is driven by a region form instead. */
+  account?: {
+    fetchStatus: () => Promise<{ connected: boolean }>
+    Panel: ComponentType
+  }
+}
+
+const PROVIDERS: Record<Exclude<AddTab, 'csv'>, ProviderTab> = {
+  aws: {
+    label: 'AWS',
+    Logo: AwsLogo,
+    emptyMessage: 'No databases found in the selected regions.',
+  },
+  supabase: {
+    label: 'Supabase',
+    Logo: SupabaseLogo,
+    emptyMessage: 'No projects found in your Supabase organizations.',
+    account: {
+      fetchStatus: fetchFleetSupabaseStatus,
+      Panel: SupabaseConnectionPanel,
+    },
+  },
+  neon: {
+    label: 'Neon',
+    Logo: NeonLogo,
+    emptyMessage: 'No projects found in your Neon account.',
+    account: { fetchStatus: fetchFleetNeonStatus, Panel: NeonConnectionPanel },
+  },
+  digitalocean: {
+    label: 'DigitalOcean',
+    Logo: DigitalOceanLogo,
+    emptyMessage: 'No databases found in your DigitalOcean account.',
+    account: {
+      fetchStatus: fetchFleetDigitaloceanStatus,
+      Panel: DigitalOceanConnectionPanel,
+    },
+  },
+}
+
+const CLOUD_TABS = ADD_TABS.filter(
+  (tab): tab is Exclude<AddTab, 'csv'> => tab !== 'csv'
+)
+
+// Providers on the roadmap, shown as disabled tiles so the picker previews
+// what is coming without offering a dead click.
+const COMING_SOON_PROVIDERS = [
+  { label: 'Azure', Logo: AzureLogo },
+  { label: 'GCP', Logo: GcpLogo },
+]
 
 function StreamLog({
   progress,
@@ -183,21 +266,44 @@ function StreamLog({
 function AddTargetsTab({
   active,
   label,
+  logo,
   onClick,
+  comingSoon = false,
 }: {
   active: boolean
   label: string
-  onClick: () => void
+  logo: ReactNode
+  onClick?: () => void
+  comingSoon?: boolean
 }) {
+  if (comingSoon) {
+    return (
+      <div
+        className="h-9 px-3 rounded-lg text-sm font-medium border border-dashed border-border-layout-1 bg-surface-layout-1 text-content-layout-3 whitespace-nowrap inline-flex items-center gap-2 cursor-default opacity-70"
+        aria-disabled="true"
+      >
+        <span className="shrink-0 inline-flex" aria-hidden="true">
+          {logo}
+        </span>
+        {label}
+        <span className="ml-auto text-xs text-content-layout-3">
+          Coming soon
+        </span>
+      </div>
+    )
+  }
   return (
     <button
       type="button"
       onClick={onClick}
-      className="h-9 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
+      className="h-9 px-3 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap inline-flex items-center gap-2
         data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
         data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
       data-active={active}
     >
+      <span className="shrink-0 inline-flex" aria-hidden="true">
+        {logo}
+      </span>
       {label}
     </button>
   )
@@ -206,7 +312,7 @@ function AddTargetsTab({
 export interface AddTargetsDrawerProps {
   open: boolean
   /** Which source tab the drawer opens on. */
-  initialTab?: 'aws' | 'csv'
+  initialTab?: AddTab
   onClose: () => void
   /** Targets landed in the config: refresh the page's target rows. */
   onTargetsAdded: () => void
@@ -226,7 +332,7 @@ export function AddTargetsDrawer({
 }: AddTargetsDrawerProps) {
   const queryClient = useQueryClient()
   const [step, setStep] = useState<'source' | 'credentials'>('source')
-  const [addTab, setAddTab] = useState<'csv' | 'aws'>(initialTab)
+  const [addTab, setAddTab] = useState<AddTab>(initialTab)
   const [credentialTargetNames, setCredentialTargetNames] = useState<string[]>(
     []
   )
@@ -250,6 +356,25 @@ export function AddTargetsDrawer({
     staleTime: 5_000,
     enabled: open,
   })
+  // Supabase, Neon and DigitalOcean each discover from one connected account:
+  // no region form, and a single Discover button armed by that provider's
+  // connection.
+  const accountTab: AccountTab | undefined =
+    addTab !== 'csv' && PROVIDERS[addTab].account
+      ? (addTab as AccountTab)
+      : undefined
+  // Shares its cache entry with that provider's connection panel, so signing in
+  // there arms the Discover button here.
+  const { data: accountStatus } = useQuery({
+    queryKey: [`fleet-${accountTab}-status`],
+    queryFn: () => PROVIDERS[accountTab as AccountTab].account?.fetchStatus(),
+    staleTime: 300_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+    enabled: open && !!accountTab,
+  })
+  const accountConnected = Boolean(accountStatus?.connected)
+  const AccountPanel = accountTab && PROVIDERS[accountTab].account?.Panel
 
   // Import form. The CSV comes through the browser's file picker as raw text.
   const [csvUpload, setCsvUpload] = useState<{
@@ -281,6 +406,21 @@ export function AddTargetsDrawer({
   const [previewLoading, setPreviewLoading] = useState(false)
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set())
   const [addingTargets, setAddingTargets] = useState(false)
+
+  // Shares the AWS connection panel's cache entry (same key + profile), so
+  // signing in or out there arms or disarms the Discover button here.
+  const { data: awsStatus } = useQuery({
+    queryKey: ['fleet-aws-status', discoverProfile],
+    queryFn: () => fetchFleetAwsStatus(discoverProfile || undefined),
+    staleTime: 5_000,
+    retry: false,
+    enabled: open && addTab === 'aws',
+  })
+  const awsConnected = Boolean(awsStatus?.has_credentials)
+  // The provider driving the active tab's discovery: AWS by its credentials,
+  // the account providers by their connection, and CSV never gates.
+  const activeConnected =
+    addTab === 'aws' ? awsConnected : accountTab ? accountConnected : true
 
   const toggleRegion = (region: string) =>
     setSelectedRegions((current) =>
@@ -350,15 +490,11 @@ export function AddTargetsDrawer({
     }
   }
 
-  const handleDiscoverPreview = async () => {
-    if (selectedRegions.length === 0) return
+  const handleDiscoverPreview = async (input: FleetDiscoverInput) => {
     setPreviewLoading(true)
     setPreviewErrors([])
     try {
-      const preview = await fetchFleetDiscoverPreview({
-        regions: selectedRegions,
-        profile: discoverProfile || undefined,
-      })
+      const preview = await fetchFleetDiscoverPreview(input)
       setPreviewMembers(preview.members)
       setPreviewErrors(preview.errors)
       setSelectedNames(
@@ -401,6 +537,41 @@ export function AddTargetsDrawer({
     }
   }
 
+  // A preview belongs to the provider that produced it, so switching source
+  // clears it rather than showing another provider's databases.
+  const selectTab = (tab: AddTab) => {
+    setAddTab(tab)
+    setPreviewMembers(null)
+    setPreviewErrors([])
+  }
+
+  // Signing out of the active provider retires whatever it discovered: the
+  // listed databases can no longer be added, so drop the preview and selection
+  // the instant its connection flips off.
+  const wasConnected = useRef(activeConnected)
+  useEffect(() => {
+    if (wasConnected.current && !activeConnected) {
+      setPreviewMembers(null)
+      setSelectedNames(new Set())
+      setPreviewErrors([])
+    }
+    wasConnected.current = activeConnected
+  }, [activeConnected])
+
+  // A preview belongs to the AWS profile it was discovered under. Switching
+  // profiles (accounts) must drop it -- otherwise an empty result from one
+  // account keeps showing over the Discover form and blocks re-discovering
+  // under the next.
+  const previewProfile = useRef(discoverProfile)
+  useEffect(() => {
+    if (previewProfile.current !== discoverProfile) {
+      previewProfile.current = discoverProfile
+      setPreviewMembers(null)
+      setSelectedNames(new Set())
+      setPreviewErrors([])
+    }
+  }, [discoverProfile])
+
   const closeDrawer = () => {
     const leftCredentials = step === 'credentials'
     setStep('source')
@@ -437,21 +608,54 @@ export function AddTargetsDrawer({
               <DrawerDescription>
                 {step === 'credentials'
                   ? 'Secure the new database targets and verify their connections.'
-                  : 'Bulk-add database targets by importing a CSV or discovering AWS RDS/Aurora instances.'}
+                  : 'Bulk-add database targets by discovering them at your cloud provider or importing a CSV.'}
               </DrawerDescription>
               {step === 'source' && (
-                <HStack className="gap-1 pt-3">
-                  <AddTargetsTab
-                    active={addTab === 'aws'}
-                    label="Discover AWS"
-                    onClick={() => setAddTab('aws')}
-                  />
-                  <AddTargetsTab
-                    active={addTab === 'csv'}
-                    label="Import CSV"
-                    onClick={() => setAddTab('csv')}
-                  />
-                </HStack>
+                <VStack className="gap-1.5 items-stretch pt-3">
+                  <Text level="caption" className="text-content-layout-3">
+                    Choose a source
+                  </Text>
+                  <div className="grid grid-cols-1 tablet:grid-cols-2 gap-2">
+                    {CLOUD_TABS.map((tab) => {
+                      const { label, Logo } = PROVIDERS[tab]
+                      return (
+                        <AddTargetsTab
+                          key={tab}
+                          active={addTab === tab}
+                          label={label}
+                          logo={<Logo size={16} />}
+                          onClick={() => selectTab(tab)}
+                        />
+                      )
+                    })}
+                    {COMING_SOON_PROVIDERS.map(({ label, Logo }) => (
+                      <AddTargetsTab
+                        key={label}
+                        active={false}
+                        comingSoon
+                        label={label}
+                        logo={<Logo size={16} />}
+                      />
+                    ))}
+                  </div>
+                  {/* CSV import is the fallback source, set apart at the bottom
+                      so the cloud providers read as the primary path. */}
+                  <div className="border-t border-border-layout-1 mt-1.5 pt-2.5">
+                    <AddTargetsTab
+                      active={addTab === 'csv'}
+                      label="Import from a CSV file"
+                      logo={
+                        <Icon
+                          name="folder-file"
+                          label=""
+                          aria-hidden="true"
+                          className="w-4 h-4"
+                        />
+                      }
+                      onClick={() => selectTab('csv')}
+                    />
+                  </div>
+                </VStack>
               )}
             </DrawerHeader>
 
@@ -543,66 +747,30 @@ export function AddTargetsDrawer({
                     </VStack>
                   </Show>
 
-                  <Show when={addTab === 'aws'}>
+                  {/* Every cloud provider shares everything below the
+                      connection panel: only the discover form differs. */}
+                  <Show when={addTab !== 'csv'}>
                     <VStack className="gap-4 items-stretch">
-                      <AwsConnectionPanel
-                        enabled={open && addTab === 'aws'}
-                        profile={discoverProfile}
-                        onProfileChange={setDiscoverProfile}
-                        onRegionPrefill={(region) => {
-                          if (!PRESET_REGIONS.includes(region)) {
-                            setCustomRegions((current) =>
-                              current.includes(region)
-                                ? current
-                                : [...current, region]
-                            )
-                          }
-                          selectRegion(region)
-                        }}
-                      />
-                      {previewMembers === null ? (
-                        <>
-                          <div>
-                            <Text
-                              level="caption"
-                              className="text-content-layout-3 mb-1 block"
-                            >
-                              Regions
-                            </Text>
-                            <HStack className="gap-1 flex-wrap">
-                              {[...PRESET_REGIONS, ...customRegions].map(
-                                (region) => (
-                                  <button
-                                    key={region}
-                                    type="button"
-                                    onClick={() => toggleRegion(region)}
-                                    className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
-                                      data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
-                                      data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
-                                    data-active={selectedRegions.includes(
-                                      region
-                                    )}
-                                  >
-                                    {region}
-                                  </button>
-                                )
-                              )}
-                            </HStack>
-                            <div className="mt-2 max-w-72">
-                              <BaseInputSelect
-                                name="fleet-discover-add-region"
-                                placeholder="Add another region…"
-                                value=""
-                                onValueChange={promoteRegion}
-                                options={OTHER_REGIONS.filter(
-                                  (region) => !customRegions.includes(region)
-                                ).map((region) => ({
-                                  value: region,
-                                  label: region,
-                                }))}
-                              />
-                            </div>
-                          </div>
+                      {AccountPanel ? (
+                        <AccountPanel />
+                      ) : (
+                        <AwsConnectionPanel
+                          profile={discoverProfile}
+                          onProfileChange={setDiscoverProfile}
+                          onRegionPrefill={(region) => {
+                            if (!PRESET_REGIONS.includes(region)) {
+                              setCustomRegions((current) =>
+                                current.includes(region)
+                                  ? current
+                                  : [...current, region]
+                              )
+                            }
+                            selectRegion(region)
+                          }}
+                        />
+                      )}
+                      {previewMembers === null &&
+                        (accountTab ? (
                           <HStack className="gap-3 items-center justify-end">
                             <Button
                               variant="primary"
@@ -612,21 +780,98 @@ export function AddTargetsDrawer({
                               }
                               icon="search"
                               iconPosition="left"
-                              onClick={handleDiscoverPreview}
-                              disabled={
-                                selectedRegions.length === 0 || previewLoading
+                              onClick={() =>
+                                void handleDiscoverPreview({
+                                  provider: accountTab,
+                                })
                               }
+                              disabled={!accountConnected || previewLoading}
                             />
                           </HStack>
-                        </>
-                      ) : (
+                        ) : (
+                          <>
+                            <div>
+                              <Text
+                                level="caption"
+                                className="text-content-layout-3 mb-1 block"
+                              >
+                                Regions
+                              </Text>
+                              <HStack className="gap-1 flex-wrap">
+                                {[...PRESET_REGIONS, ...customRegions].map(
+                                  (region) => (
+                                    <button
+                                      key={region}
+                                      type="button"
+                                      onClick={() => toggleRegion(region)}
+                                      className="h-10 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer border whitespace-nowrap
+                                      data-[active=true]:bg-surface-primary-soft/30 data-[active=true]:border-surface-primary-solid data-[active=true]:text-content-layout-1
+                                      data-[active=false]:bg-surface-layout-2 data-[active=false]:border-border-layout-1 data-[active=false]:text-content-layout-3"
+                                      data-active={selectedRegions.includes(
+                                        region
+                                      )}
+                                    >
+                                      {region}
+                                    </button>
+                                  )
+                                )}
+                              </HStack>
+                              <div className="mt-2 max-w-72">
+                                <BaseInputSelect
+                                  name="fleet-discover-add-region"
+                                  placeholder="Add another region…"
+                                  value=""
+                                  onValueChange={promoteRegion}
+                                  options={OTHER_REGIONS.filter(
+                                    (region) => !customRegions.includes(region)
+                                  ).map((region) => ({
+                                    value: region,
+                                    label: region,
+                                  }))}
+                                />
+                              </div>
+                            </div>
+                            <VStack className="gap-1.5 items-end">
+                              <Button
+                                variant="primary"
+                                modifier="solid"
+                                label={
+                                  previewLoading ? 'Discovering…' : 'Discover'
+                                }
+                                icon="search"
+                                iconPosition="left"
+                                onClick={() =>
+                                  void handleDiscoverPreview({
+                                    regions: selectedRegions,
+                                    profile: discoverProfile || undefined,
+                                  })
+                                }
+                                disabled={
+                                  selectedRegions.length === 0 ||
+                                  previewLoading ||
+                                  !awsConnected
+                                }
+                              />
+                              {!awsConnected && (
+                                <Text
+                                  level="caption"
+                                  className="text-content-layout-3"
+                                >
+                                  Sign in with AWS to discover instances
+                                </Text>
+                              )}
+                            </VStack>
+                          </>
+                        ))}
+                      {previewMembers !== null && (
                         <>
                           <Text
                             level="body-small"
                             className="text-content-layout-2"
                           >
                             {previewMembers.length === 0
-                              ? 'No databases found in the selected regions.'
+                              ? PROVIDERS[addTab as Exclude<AddTab, 'csv'>]
+                                  .emptyMessage
                               : 'Choose which databases to add to your fleet.'}
                           </Text>
                           <VStack className="gap-4 items-stretch">
@@ -759,7 +1004,7 @@ export function AddTargetsDrawer({
                               variant="primary"
                               modifier="ghost"
                               size="small"
-                              label="Back to regions"
+                              label={accountTab ? 'Back' : 'Back to regions'}
                               onClick={() => setPreviewMembers(null)}
                               disabled={addingTargets}
                             />

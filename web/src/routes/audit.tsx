@@ -17,7 +17,7 @@ import { toast } from '@rs/ui-new/use-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { EnvSecretsDialog, TargetLockNotice } from '../components'
+import { EnvSecretsDialog } from '../components'
 import { FleetRunSection } from '../components/audit/FleetRunSection'
 import { PreflightChecklist } from '../components/audit/PreflightChecklist'
 import { RunHistory } from '../components/audit/RunHistory'
@@ -65,7 +65,6 @@ import {
   useFleetAudit,
   useFleetStatus,
 } from '../lib/useFleet'
-import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 
 export const Route = createFileRoute('/audit')({
   component: AuditPage,
@@ -142,7 +141,6 @@ function AuditPage() {
   }, [appTarget, members, search])
 
   const singleTarget = selectedTargets.length === 1 ? selectedTargets[0] : null
-  const passwordLock = useTargetPasswordLock(singleTarget)
   const { data: envRequirements } = useEnvRequirements()
 
   // Connectivity feeds healthy-first ordering and the unavailable disclosure.
@@ -190,11 +188,15 @@ function AuditPage() {
     () => members.filter((member) => selectedTargets.includes(member.name)),
     [members, selectedTargets]
   )
+  // Provider-discovered targets (Supabase, Neon, DigitalOcean) also carry a
+  // region and instance_class, so the AWS gate keys off the real AWS signals
+  // only and never fires for a provider target.
   const awsPreflightRequired = selectedMembers.some(
     (member) =>
-      !!member.region ||
-      !!member.instance_class ||
-      member.instance_class_source === 'aws'
+      !(member.tags ?? []).some((tag) => tag.startsWith('provider:')) &&
+      (member.instance_class_source === 'aws' ||
+        (member.tags ?? []).some((tag) => tag.startsWith('aws-account:')) ||
+        (member.host ?? '').endsWith('.rds.amazonaws.com'))
   )
 
   const checkRequirements = async (
@@ -369,9 +371,10 @@ function AuditPage() {
     fleetAudit.state === 'running' || fleetAudit.state === 'error'
 
   const aiBlocked = aiGate.status === 'blocked' || aiGate.status === 'checking'
-  const selectionReady =
-    selectedTargets.length > 0 &&
-    (selectedTargets.length > 1 || !passwordLock.isLocked)
+  // Selecting a target never blocks on a missing password. A locked target is
+  // surfaced at preflight (the checklist's inline "Set password"), not on the
+  // pick, so choosing targets stays friction-free.
+  const selectionReady = selectedTargets.length > 0
   const preflightBlocksLaunch = preflight
     ? isAuditPreflightBlocked(preflight, {
         requireQueryStats: captureDuration > 0,
@@ -427,6 +430,7 @@ function AuditPage() {
       onRecheck={() => void checkRequirements(true)}
       liveCapture={captureDuration > 0}
       aiGate={aiGate}
+      members={selectedMembers}
       passwordRequirements={
         envRequirements?.requirements.filter(
           (requirement) => requirement.kind === 'target_password'
@@ -512,15 +516,6 @@ function AuditPage() {
           </button>
         ))}
       </div>
-
-      {/* Password lock for a single selected target. */}
-      {view === 'run' && !!singleTarget && passwordLock.isLocked && (
-        <TargetLockNotice
-          message={passwordLock.message}
-          requirements={passwordLock.missingTargetRequirements}
-          keyringAvailable={passwordLock.keyringAvailable}
-        />
-      )}
 
       {view === 'run' && launcher}
 

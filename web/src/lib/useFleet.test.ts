@@ -364,7 +364,7 @@ describe('fetchFleetAwsStatus', () => {
 
     const result = await fetchFleetAwsStatus()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/fleet/aws-status')
+    expect(fetchMock).toHaveBeenCalledWith('/api/providers/aws-status')
     expect(result.has_credentials).toBe(true)
     expect(result.available_profiles).toEqual(['dev', 'prod'])
   })
@@ -387,7 +387,7 @@ describe('fetchFleetAwsStatus', () => {
       active_profile: 'production sso',
     })
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/fleet/aws-status?profile=production%20sso'
+      '/api/providers/aws-status?profile=production%20sso'
     )
   })
 
@@ -402,7 +402,7 @@ describe('AWS SSO and group-edit contracts', () => {
     const fetchMock = stubFetch(jsonResponse({ signed_out: true }))
 
     await expect(fleetAwsLogout()).resolves.toBeUndefined()
-    expect(fetchMock).toHaveBeenCalledWith('/api/fleet/aws-logout', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/providers/aws-logout', {
       method: 'POST',
     })
   })
@@ -425,13 +425,13 @@ describe('AWS SSO and group-edit contracts', () => {
     })
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/fleet/aws-login',
+      '/api/providers/aws-login',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ profile: 'dev' }),
       })
     )
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/fleet/aws-login/l1')
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/providers/aws-login/l1')
   })
 
   it('preserves the CLI-missing fallback contract', async () => {
@@ -468,7 +468,7 @@ describe('AWS SSO and group-edit contracts', () => {
       profile: 'dev',
     })
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/fleet/aws-profiles',
+      '/api/providers/aws-profiles',
       expect.objectContaining({ method: 'POST', body: JSON.stringify(input) })
     )
   })
@@ -537,7 +537,7 @@ describe('fleet discovery preview contracts', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/fleet/discover-preview',
+      '/api/providers/discover-preview',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
@@ -548,7 +548,7 @@ describe('fleet discovery preview contracts', () => {
     )
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      '/api/fleet/targets/bulk-add',
+      '/api/providers/bulk-add',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ members: [preview.members[0]] }),

@@ -46,7 +46,7 @@ describe('ScopeSelector', () => {
     expect(screen.getAllByText('Unreachable').length).toBeGreaterThan(0)
   })
 
-  it('collapses an unreachable target that the user has not selected', () => {
+  it('keeps an unreachable, unselected target in place with a badge', () => {
     render(
       <ScopeSelector
         members={members}
@@ -56,7 +56,25 @@ describe('ScopeSelector', () => {
       />
     )
 
-    expect(screen.queryByLabelText('Select beta')).toBeNull()
-    expect(screen.getByText('Unavailable (1)')).toBeTruthy()
+    // The row holds its position (never collapsed into a separate section) and
+    // is honestly labelled as unreachable.
+    expect(screen.getByLabelText('Select beta')).toBeTruthy()
+    expect(screen.getAllByText('Unreachable').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/^Unavailable/)).toBeNull()
+  })
+
+  it('renders every target in the delivered order regardless of connectivity', () => {
+    render(
+      <ScopeSelector
+        members={members}
+        connectivity={unreachable('alpha')}
+        selection={['beta']}
+        onSelectionChange={() => {}}
+      />
+    )
+    const labels = screen
+      .getAllByRole('checkbox')
+      .map((node) => node.getAttribute('aria-label'))
+    expect(labels).toEqual(['Select alpha', 'Select beta'])
   })
 })

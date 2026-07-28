@@ -66,6 +66,11 @@ def fallback_command(profile: str) -> str:
     return shlex.join(["aws", "sso", "login", "--profile", profile])
 
 
+def sso_session_fallback_command(session_name: str) -> str:
+    """Return the manual fallback command for the sso-session login path."""
+    return shlex.join(["aws", "sso", "login", "--sso-session", session_name])
+
+
 def logout() -> dict[str, Any]:
     """Sign out of AWS SSO by clearing the CLI's cached SSO tokens.
 
@@ -150,18 +155,9 @@ def _drain_output(process: subprocess.Popen[str], buffer: OutputBuffer) -> None:
             pass
 
 
-def start_login(profile: str) -> dict[str, Any]:
-    """Validate a profile, verify it, or start a non-blocking AWS CLI login."""
-    if profile not in available_profiles():
-        raise UnknownAwsProfile(f"Unknown AWS profile: {profile}")
-
-    signed_in, detail = verify_profile(profile)
-    if signed_in:
-        return {"login_id": None, "state": "already_signed_in", "detail": detail}
-
-    command = ["aws", "sso", "login", "--profile", profile]
+def _spawn_login_process(command: list[str]) -> subprocess.Popen[str]:
     try:
-        process = subprocess.Popen(
+        return subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -173,25 +169,83 @@ def start_login(profile: str) -> dict[str, Any]:
     except OSError as exc:
         raise AwsCliSpawnError(f"Unable to start AWS CLI: {exc}") from exc
 
+
+def _register_login(entry: dict[str, Any]) -> str:
     login_id = uuid.uuid4().hex
-    buffer = OutputBuffer()
-    entry = {
-        "process": process,
-        "profile": profile,
-        "started_at": time.monotonic(),
-        "buffer": buffer,
-    }
     with _REGISTRY_LOCK:
         LOGIN_REGISTRY[login_id] = entry
-
     reader = threading.Thread(
         target=_drain_output,
-        args=(process, buffer),
+        args=(entry["process"], entry["buffer"]),
         name=f"rdst-aws-login-{login_id[:8]}",
         daemon=True,
     )
     reader.start()
+    return login_id
 
+
+def start_login(profile: str) -> dict[str, Any]:
+    """Validate a profile, verify it, or start a non-blocking AWS CLI login."""
+    if profile not in available_profiles():
+        raise UnknownAwsProfile(f"Unknown AWS profile: {profile}")
+
+    signed_in, detail = verify_profile(profile)
+    if signed_in:
+        return {"login_id": None, "state": "already_signed_in", "detail": detail}
+
+    process = _spawn_login_process(["aws", "sso", "login", "--profile", profile])
+    login_id = _register_login(
+        {
+            "process": process,
+            "profile": profile,
+            "started_at": time.monotonic(),
+            "buffer": OutputBuffer(),
+        }
+    )
+    return {
+        "login_id": login_id,
+        "state": "started",
+        "detail": "AWS SSO login started; approve the request in your browser",
+    }
+
+
+def start_sso_session_login(start_url: str, region: str) -> dict[str, Any]:
+    """Device-authorize a token from a start URL alone, without a profile yet.
+
+    Writes the stable `[sso-session <name>]` block for this start URL, then
+    runs `aws sso login --sso-session <name>` so the browser device flow
+    caches a token keyed to that session. Both account listing and every
+    finalized profile reuse this session, so the cached token is exactly the
+    one botocore loads for credentials. Reports already_signed_in only when a
+    non-expired token is loadable for this session specifically; a token
+    cached under a different session (a user's own login) does not count.
+    """
+    from .aws_profiles import ensure_sso_session
+    from .aws_sso import load_session_token, stable_session_name
+
+    session_name = stable_session_name(start_url)
+    ensure_sso_session(name=session_name, sso_start_url=start_url, sso_region=region)
+
+    token, _region = load_session_token(session_name)
+    if token:
+        return {
+            "login_id": None,
+            "state": "already_signed_in",
+            "detail": "AWS SSO session is already active",
+        }
+
+    process = _spawn_login_process(
+        ["aws", "sso", "login", "--sso-session", session_name]
+    )
+    login_id = _register_login(
+        {
+            "process": process,
+            "start_url": start_url,
+            "session_name": session_name,
+            "started_at": time.monotonic(),
+            "buffer": OutputBuffer(),
+        }
+    )
     return {
         "login_id": login_id,
         "state": "started",
@@ -244,15 +298,40 @@ def _status_payload(
     *,
     state: str,
     detail: str,
-    profile: str,
+    fallback: str,
     verification_url: Optional[str] = None,
 ) -> dict[str, Any]:
     return {
         "state": state,
         "detail": detail,
         "verification_url": verification_url,
-        "fallback_command": fallback_command(profile),
+        "fallback_command": fallback,
     }
+
+
+def _entry_fallback(entry: dict[str, Any]) -> str:
+    profile = entry.get("profile")
+    if profile:
+        return fallback_command(profile)
+    return sso_session_fallback_command(entry.get("session_name", ""))
+
+
+def _verify_login(entry: dict[str, Any]) -> tuple[bool, str]:
+    """Detect a completed login for either a named profile or an sso-session.
+
+    Profile logins verify with STS; sso-session logins have no role yet, so a
+    freshly cached device token is the success signal.
+    """
+    profile = entry.get("profile")
+    if profile:
+        return verify_profile(profile)
+
+    from .aws_sso import load_session_token
+
+    token, _region = load_session_token(entry.get("session_name", ""))
+    if token:
+        return True, "AWS SSO session is active"
+    return False, "Waiting for AWS SSO browser approval"
 
 
 def get_login_status(login_id: str) -> dict[str, Any]:
@@ -271,8 +350,8 @@ def get_login_status(login_id: str) -> dict[str, Any]:
         return terminal_payload
 
     process: subprocess.Popen[str] = entry["process"]
-    profile: str = entry["profile"]
     buffer: OutputBuffer = entry["buffer"]
+    fallback = _entry_fallback(entry)
     verification_url = parse_verification_url(buffer.text())
 
     if time.monotonic() - entry["started_at"] > LOGIN_TIMEOUT_SECONDS:
@@ -286,14 +365,14 @@ def get_login_status(login_id: str) -> dict[str, Any]:
             _status_payload(
                 state="timeout",
                 detail="AWS SSO login timed out after 300 seconds",
-                profile=profile,
+                fallback=fallback,
                 verification_url=verification_url,
             ),
         )
 
     return_code = process.poll()
     if return_code is None:
-        signed_in, identity_detail = verify_profile(profile)
+        signed_in, identity_detail = _verify_login(entry)
         if signed_in:
             try:
                 process.terminate()
@@ -304,7 +383,7 @@ def get_login_status(login_id: str) -> dict[str, Any]:
                 _status_payload(
                     state="success",
                     detail=identity_detail,
-                    profile=profile,
+                    fallback=fallback,
                     verification_url=verification_url,
                 ),
             )
@@ -312,19 +391,19 @@ def get_login_status(login_id: str) -> dict[str, Any]:
         return _status_payload(
             state="running",
             detail=output_detail or "Waiting for AWS SSO browser approval",
-            profile=profile,
+            fallback=fallback,
             verification_url=verification_url,
         )
 
     if return_code == 0:
-        signed_in, identity_detail = verify_profile(profile)
+        signed_in, identity_detail = _verify_login(entry)
         if signed_in:
             return _retain_terminal_login(
                 login_id,
                 _status_payload(
                     state="success",
                     detail=identity_detail,
-                    profile=profile,
+                    fallback=fallback,
                     verification_url=verification_url,
                 ),
             )
@@ -332,8 +411,8 @@ def get_login_status(login_id: str) -> dict[str, Any]:
             login_id,
             _status_payload(
                 state="failed",
-                detail=f"AWS CLI exited successfully, but STS verification failed: {identity_detail}",
-                profile=profile,
+                detail=f"AWS CLI exited successfully, but SSO verification failed: {identity_detail}",
+                fallback=fallback,
                 verification_url=verification_url,
             ),
         )
@@ -344,7 +423,7 @@ def get_login_status(login_id: str) -> dict[str, Any]:
         _status_payload(
             state="failed",
             detail=output_detail or f"AWS CLI exited with status {return_code}",
-            profile=profile,
+            fallback=fallback,
             verification_url=verification_url,
         ),
     )

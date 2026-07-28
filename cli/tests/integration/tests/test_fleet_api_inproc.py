@@ -378,13 +378,13 @@ async def test_discover_imports_and_dedupes(client, tmp_rdst_home, collect_sse_e
         ),
     ]
 
-    with patch("features.fleet.auth.detect_aws_credentials", return_value=(True, "ok")):
+    with patch("features.providers.auth.detect_aws_credentials", return_value=(True, "ok")):
         with patch(
-            "features.fleet.discovery.discover_rds_instances",
+            "features.providers.discovery.discover_rds_instances",
             return_value=iter(members),
         ):
             events = await collect_sse_events(
-                client, "POST", "/api/fleet/discover",
+                client, "POST", "/api/providers/discover",
                 json_body={"regions": ["us-east-1"], "group": "aws"},
             )
 
@@ -414,10 +414,10 @@ async def test_discover_surfaces_region_errors(client, tmp_rdst_home, collect_ss
         "the request is expired"
     )
 
-    with patch("features.fleet.auth.detect_aws_credentials", return_value=(True, "ok")):
-        with patch("features.fleet.discovery.get_rds_client", side_effect=boto_error):
+    with patch("features.providers.auth.detect_aws_credentials", return_value=(True, "ok")):
+        with patch("features.providers.discovery.get_rds_client", side_effect=boto_error):
             events = await collect_sse_events(
-                client, "POST", "/api/fleet/discover",
+                client, "POST", "/api/providers/discover",
                 json_body={"regions": ["us-east-1", "us-west-2"], "dry_run": True},
             )
 
@@ -446,10 +446,10 @@ async def test_discover_partial_region_failure_still_imports(
             errors.append("us-west-2: error discovering instances: boom")
         yield member
 
-    with patch("features.fleet.auth.detect_aws_credentials", return_value=(True, "ok")):
-        with patch("features.fleet.discovery.discover_rds_instances", fake_discover):
+    with patch("features.providers.auth.detect_aws_credentials", return_value=(True, "ok")):
+        with patch("features.providers.discovery.discover_rds_instances", fake_discover):
             events = await collect_sse_events(
-                client, "POST", "/api/fleet/discover",
+                client, "POST", "/api/providers/discover",
                 json_body={"regions": ["us-east-1", "us-west-2"], "dry_run": True},
             )
 
@@ -464,11 +464,11 @@ async def test_discover_without_aws_credentials(client, tmp_rdst_home, collect_s
     from unittest.mock import patch
 
     with patch(
-        "features.fleet.auth.detect_aws_credentials",
+        "features.providers.auth.detect_aws_credentials",
         return_value=(False, "No AWS credentials found. Run: aws sso login"),
     ):
         events = await collect_sse_events(
-            client, "POST", "/api/fleet/discover", json_body={"regions": ["us-east-1"]},
+            client, "POST", "/api/providers/discover", json_body={"regions": ["us-east-1"]},
         )
 
     assert events[-1]["event"] == "error"
@@ -479,13 +479,13 @@ async def test_discover_dry_run_does_not_persist(client, tmp_rdst_home, collect_
     from unittest.mock import patch
 
     member = fleet_member("dry-db", host="dry.rds.amazonaws.com")
-    with patch("features.fleet.auth.detect_aws_credentials", return_value=(True, "ok")):
+    with patch("features.providers.auth.detect_aws_credentials", return_value=(True, "ok")):
         with patch(
-            "features.fleet.discovery.discover_rds_instances",
+            "features.providers.discovery.discover_rds_instances",
             return_value=iter([member]),
         ):
             events = await collect_sse_events(
-                client, "POST", "/api/fleet/discover",
+                client, "POST", "/api/providers/discover",
                 json_body={"regions": ["us-east-1"], "dry_run": True},
             )
 
@@ -521,16 +521,16 @@ async def test_discover_preview_is_non_mutating_and_bulk_add_is_selective(
 
     with (
         patch(
-            "features.fleet.auth.detect_aws_credentials",
+            "features.providers.auth.detect_aws_credentials",
             return_value=(True, "ok"),
         ),
         patch(
-            "features.fleet.discovery.discover_rds_instances",
+            "features.providers.discovery.discover_rds_instances",
             return_value=iter(members),
         ),
     ):
         preview_response = await client.post(
-            "/api/fleet/discover-preview",
+            "/api/providers/discover-preview",
             json={"regions": ["us-east-1"], "profile": "dev"},
         )
 
@@ -549,7 +549,7 @@ async def test_discover_preview_is_non_mutating_and_bulk_add_is_selective(
     assert cfg.get("not-selected") is None
 
     add_response = await client.post(
-        "/api/fleet/targets/bulk-add",
+        "/api/providers/bulk-add",
         json={"members": [by_name["existing-copy"], by_name["selected"]]},
     )
     assert add_response.status_code == 200
@@ -578,10 +578,10 @@ async def test_aws_status_passes_selected_profile(client, tmp_rdst_home):
     }
 
     with patch(
-        "features.fleet.auth.get_aws_status", return_value=status
+        "features.providers.auth.get_aws_status", return_value=status
     ) as get_status:
         response = await client.get(
-            "/api/fleet/aws-status?profile=production%20sso"
+            "/api/providers/aws-status?profile=production%20sso"
         )
 
     assert response.status_code == 200
@@ -602,8 +602,8 @@ async def test_aws_status_without_credentials(client, tmp_rdst_home, monkeypatch
         "region": "us-east-1",
     }
 
-    with patch("features.fleet.auth.get_aws_status", return_value=status):
-        response = await client.get("/api/fleet/aws-status")
+    with patch("features.providers.auth.get_aws_status", return_value=status):
+        response = await client.get("/api/providers/aws-status")
 
     assert response.status_code == 200
     body = response.json()
@@ -691,11 +691,11 @@ async def test_discover_passes_profile_to_service(
             target_names=[],
         )
 
-    with patch("features.fleet.api.routes.FleetService.discover", fake_discover):
+    with patch("features.providers.api.routes.ProvidersService.discover", fake_discover):
         events = await collect_sse_events(
             client,
             "POST",
-            "/api/fleet/discover",
+            "/api/providers/discover",
             json_body={
                 "regions": ["us-east-1"],
                 "profile": "production-sso",

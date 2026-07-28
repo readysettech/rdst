@@ -78,7 +78,7 @@ export async function fetchFleetSnapshotDetail(
   return data as unknown as FleetSnapshotDetail
 }
 
-// Local AWS credential state for the discovery UI (GET /api/fleet/aws-status).
+// Local AWS credential state for the discovery UI (GET /api/providers/aws-status).
 // Untyped by the generated client until gen:api runs.
 export interface FleetAwsStatus {
   has_credentials: boolean
@@ -96,13 +96,13 @@ export async function fetchFleetAwsStatus(
   // Pass the user's selected profile: a fresh SSO session lives on that
   // profile and the default credential chain knows nothing about it.
   const query = profile ? `?profile=${encodeURIComponent(profile)}` : ''
-  const response = await fetch(`/api/fleet/aws-status${query}`)
+  const response = await fetch(`/api/providers/aws-status${query}`)
   await throwIfNotOk(response, 'Failed to check AWS credentials')
   return (await response.json()) as FleetAwsStatus
 }
 
-// Discovery preview + selective add (POST /api/fleet/discover-preview and
-// /api/fleet/targets/bulk-add). Hand-typed until gen:api runs.
+// Discovery preview + selective add (POST /api/providers/discover-preview and
+// /api/providers/bulk-add). Hand-typed until gen:api runs.
 export interface DiscoveredFleetMember {
   name: string
   engine: string
@@ -118,11 +118,18 @@ export interface DiscoveredFleetMember {
   already_exists: boolean
 }
 
-export async function fetchFleetDiscoverPreview(input: {
-  regions: string[]
-  profile?: string
-}): Promise<{ members: DiscoveredFleetMember[]; errors: string[] }> {
-  const response = await fetch('/api/fleet/discover-preview', {
+// Regions and profile belong to AWS alone; the account providers discover
+// whatever databases the connected account can see.
+export type FleetDiscoverInput =
+  | { provider?: 'aws'; regions: string[]; profile?: string }
+  | { provider: 'supabase' }
+  | { provider: 'neon' }
+  | { provider: 'digitalocean' }
+
+export async function fetchFleetDiscoverPreview(
+  input: FleetDiscoverInput
+): Promise<{ members: DiscoveredFleetMember[]; errors: string[] }> {
+  const response = await fetch('/api/providers/discover-preview', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
@@ -137,7 +144,7 @@ export async function fetchFleetDiscoverPreview(input: {
 export async function bulkAddFleetTargets(
   members: DiscoveredFleetMember[]
 ): Promise<{ imported: number; skipped: number; target_names: string[] }> {
-  const response = await fetch('/api/fleet/targets/bulk-add', {
+  const response = await fetch('/api/providers/bulk-add', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ members }),
@@ -180,7 +187,7 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
 export async function startFleetAwsLogin(
   profile: string
 ): Promise<FleetAwsLoginStart> {
-  const response = await fetch('/api/fleet/aws-login', {
+  const response = await fetch('/api/providers/aws-login', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ profile }),
@@ -199,7 +206,7 @@ export async function startFleetAwsLogin(
 }
 
 export async function fleetAwsLogout(): Promise<void> {
-  const response = await fetch('/api/fleet/aws-logout', { method: 'POST' })
+  const response = await fetch('/api/providers/aws-logout', { method: 'POST' })
   if (!response.ok) {
     const body = await readJson(response)
     throw new FleetAwsLoginError(
@@ -212,7 +219,7 @@ export async function fetchFleetAwsLogin(
   loginId: string
 ): Promise<FleetAwsLoginStatus> {
   const response = await fetch(
-    `/api/fleet/aws-login/${encodeURIComponent(loginId)}`
+    `/api/providers/aws-login/${encodeURIComponent(loginId)}`
   )
   const body = await readJson(response)
   if (!response.ok)
@@ -234,7 +241,7 @@ export interface FleetAwsProfileInput {
 export async function createFleetAwsProfile(
   input: FleetAwsProfileInput
 ): Promise<{ created: boolean; profile: string }> {
-  const response = await fetch('/api/fleet/aws-profiles', {
+  const response = await fetch('/api/providers/aws-profiles', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
@@ -246,6 +253,285 @@ export async function createFleetAwsProfile(
     )
   return body as unknown as { created: boolean; profile: string }
 }
+
+// Guided SSO sign-in: authorize a token from a start URL + region alone, then
+// let AWS enumerate the accounts and roles the user can actually assume, so
+// nothing is hand-typed. The login is polled through the shared
+// fetchFleetAwsLogin endpoint.
+export interface FleetAwsSsoLoginStart {
+  login_id: string | null
+  state: 'started' | 'already_signed_in'
+  detail: string
+}
+
+export interface FleetAwsSsoAccount {
+  account_id: string
+  account_name: string
+}
+
+export async function startFleetAwsSsoLogin(input: {
+  start_url: string
+  region: string
+  session_name?: string
+}): Promise<FleetAwsSsoLoginStart> {
+  const response = await fetch('/api/providers/aws-sso-login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const body = await readJson(response)
+  if (!response.ok)
+    throw new FleetAwsLoginError(
+      String(body.detail || body.message || 'Could not start AWS sign-in.'),
+      typeof body.code === 'string' ? body.code : undefined,
+      typeof body.fallback_command === 'string'
+        ? body.fallback_command
+        : undefined
+    )
+  return body as unknown as FleetAwsSsoLoginStart
+}
+
+export async function fetchFleetAwsSsoAccounts(
+  startUrl: string
+): Promise<{ accounts: FleetAwsSsoAccount[]; error: string | null }> {
+  const response = await fetch(
+    `/api/providers/aws-sso-accounts?start_url=${encodeURIComponent(startUrl)}`
+  )
+  const body = await readJson(response)
+  if (!response.ok)
+    throw new FleetAwsLoginError(
+      String(body.detail || body.message || 'Could not list AWS accounts.'),
+      typeof body.code === 'string' ? body.code : undefined
+    )
+  return body as unknown as {
+    accounts: FleetAwsSsoAccount[]
+    error: string | null
+  }
+}
+
+export async function fetchFleetAwsSsoRoles(
+  startUrl: string,
+  accountId: string
+): Promise<{ roles: string[]; error: string | null }> {
+  const response = await fetch(
+    `/api/providers/aws-sso-roles?start_url=${encodeURIComponent(
+      startUrl
+    )}&account_id=${encodeURIComponent(accountId)}`
+  )
+  const body = await readJson(response)
+  if (!response.ok)
+    throw new FleetAwsLoginError(
+      String(body.detail || body.message || 'Could not list AWS roles.'),
+      typeof body.code === 'string' ? body.code : undefined
+    )
+  return body as unknown as { roles: string[]; error: string | null }
+}
+
+export interface FleetAwsSsoFinalizeInput {
+  name: string
+  start_url: string
+  region: string
+  account_id: string
+  role_name: string
+}
+
+export async function finalizeFleetAwsSsoProfile(
+  input: FleetAwsSsoFinalizeInput
+): Promise<{ created: boolean; profile: string; detail?: string }> {
+  const response = await fetch('/api/providers/aws-sso-finalize', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const body = await readJson(response)
+  if (!response.ok)
+    throw new FleetAwsLoginError(
+      String(body.detail || body.message || 'Could not create the AWS profile.'),
+      typeof body.code === 'string' ? body.code : undefined
+    )
+  return body as unknown as { created: boolean; profile: string; detail?: string }
+}
+
+// ---------------------------------------------------------------------------
+// Account providers (Supabase, Neon, DigitalOcean)
+//
+// Every account provider speaks the same four-endpoint dialect under
+// /api/fleet/<slug>-<action>, so one client factory covers all of them. Only
+// the credential endpoint is named per provider, and only the two providers
+// that accept a pasted token have one.
+// ---------------------------------------------------------------------------
+
+export type FleetProviderSlug = 'supabase' | 'neon' | 'digitalocean'
+
+export class FleetProviderError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.code = code
+  }
+}
+
+export interface FleetProviderLoginStart {
+  login_id: string
+  authorize_url: string
+}
+
+export interface FleetProviderLoginStatus {
+  state: 'running' | 'success' | 'failed'
+  detail?: string
+}
+
+export interface FleetSupabaseOrganization {
+  slug: string
+  name: string
+}
+
+export interface FleetSupabaseStatus {
+  connected: boolean
+  method: 'oauth' | null
+  detail: string | null
+  organizations?: FleetSupabaseOrganization[]
+}
+
+// Neon authenticates with an API key alone, so there is no browser sign-in to
+// start or poll.
+export interface FleetNeonStatus {
+  connected: boolean
+  method: 'api_key' | null
+  detail: string | null
+}
+
+// DigitalOcean authenticates through the Readyset OAuth broker alone, so there
+// is no token field to fall back to.
+export interface FleetDigitaloceanStatus {
+  connected: boolean
+  method: 'oauth' | null
+  detail: string | null
+}
+
+async function getFleetJson<T>(
+  path: string,
+  fallbackMessage: string
+): Promise<T> {
+  const response = await fetch(path)
+  const body = await readJson(response)
+  if (!response.ok)
+    throw new FleetProviderError(
+      String(body.detail || body.message || fallbackMessage),
+      typeof body.code === 'string' ? body.code : undefined
+    )
+  return body as T
+}
+
+async function postFleetJson<T>(
+  path: string,
+  body: unknown,
+  fallbackMessage: string
+): Promise<T> {
+  const response = await fetch(path, {
+    method: 'POST',
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+  })
+  const parsed = await readJson(response)
+  if (!response.ok)
+    throw new FleetProviderError(
+      String(parsed.detail || parsed.message || fallbackMessage),
+      typeof parsed.code === 'string' ? parsed.code : undefined
+    )
+  return parsed as T
+}
+
+interface FleetProviderSpec {
+  label: string
+  /** Credential endpoint, for the providers that accept a pasted token. */
+  tokenPath?: string
+  tokenFallback?: string
+}
+
+const FLEET_PROVIDERS: Record<FleetProviderSlug, FleetProviderSpec> = {
+  supabase: { label: 'Supabase' },
+  neon: {
+    label: 'Neon',
+    tokenPath: '/api/providers/neon-key',
+    tokenFallback: 'Could not save the API key.',
+  },
+  digitalocean: { label: 'DigitalOcean' },
+}
+
+export interface FleetProviderClient<S> {
+  fetchStatus: () => Promise<S>
+  startLogin: () => Promise<FleetProviderLoginStart>
+  pollLogin: (loginId: string) => Promise<FleetProviderLoginStatus>
+  logout: () => Promise<void>
+  /** Present only where a pasted token is a credential path. */
+  setToken?: (token: string) => Promise<void>
+}
+
+export function providerFleetClient<S>(
+  slug: FleetProviderSlug
+): FleetProviderClient<S> {
+  const { label, tokenPath, tokenFallback } = FLEET_PROVIDERS[slug]
+  return {
+    fetchStatus: async () => {
+      const response = await fetch(`/api/providers/${slug}-status`)
+      await throwIfNotOk(response, `Failed to check the ${label} connection`)
+      return (await response.json()) as S
+    },
+    startLogin: () =>
+      postFleetJson<FleetProviderLoginStart>(
+        `/api/providers/${slug}-login`,
+        undefined,
+        `Could not start the ${label} sign-in.`
+      ),
+    pollLogin: (loginId: string) =>
+      getFleetJson<FleetProviderLoginStatus>(
+        `/api/providers/${slug}-login/${encodeURIComponent(loginId)}`,
+        `Could not check the ${label} sign-in.`
+      ),
+    logout: async () => {
+      await postFleetJson(
+        `/api/providers/${slug}-logout`,
+        undefined,
+        `Could not sign out of ${label}.`
+      )
+    },
+    ...(tokenPath
+      ? {
+          setToken: async (token: string) => {
+            await postFleetJson(tokenPath, { token }, tokenFallback as string)
+          },
+        }
+      : {}),
+  }
+}
+
+const supabaseClient = providerFleetClient<FleetSupabaseStatus>('supabase')
+const neonClient = providerFleetClient<FleetNeonStatus>('neon')
+const digitaloceanClient =
+  providerFleetClient<FleetDigitaloceanStatus>('digitalocean')
+
+// Neon names a credential endpoint above, so its client always carries
+// setToken.
+type SetFleetToken = (token: string) => Promise<void>
+
+export const fetchFleetSupabaseStatus = supabaseClient.fetchStatus
+export const startFleetSupabaseLogin = supabaseClient.startLogin
+export const fetchFleetSupabaseLogin = supabaseClient.pollLogin
+export const fleetSupabaseLogout = supabaseClient.logout
+
+export const fetchFleetNeonStatus = neonClient.fetchStatus
+export const fleetNeonLogout = neonClient.logout
+export const setFleetNeonKey = neonClient.setToken as SetFleetToken
+
+export const fetchFleetDigitaloceanStatus = digitaloceanClient.fetchStatus
+export const startFleetDigitaloceanLogin = digitaloceanClient.startLogin
+export const fetchFleetDigitaloceanLogin = digitaloceanClient.pollLogin
+export const fleetDigitaloceanLogout = digitaloceanClient.logout
 
 export async function updateFleetTargetGroup(
   name: string,

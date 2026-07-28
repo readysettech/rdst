@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("botocore")
 
-from features.fleet.auth import get_aws_status, get_botocore_session
+from features.providers.auth import get_aws_status, get_botocore_session
 
 
 pytestmark = pytest.mark.usefixtures("run_blocking_inline")
@@ -116,7 +116,7 @@ class TestProfileSelection:
         session.set_config_variable.assert_called_once_with("profile", "from-env")
 
     async def test_discover_passes_profile_through(self):
-        from features.fleet.service import FleetService
+        from features.providers.service import ProvidersService
 
         seen: dict = {}
 
@@ -126,14 +126,14 @@ class TestProfileSelection:
 
         config = MagicMock()
         config.list_targets.return_value = []
-        service = FleetService(config=config)
+        service = ProvidersService(config=config)
         with (
             patch(
-                "features.fleet.auth.detect_aws_credentials",
+                "features.providers.auth.detect_aws_credentials",
                 return_value=(True, "ok"),
             ) as detect,
             patch(
-                "features.fleet.discovery.discover_rds_instances",
+                "features.providers.discovery.discover_rds_instances",
                 side_effect=fake_discover,
             ),
         ):
