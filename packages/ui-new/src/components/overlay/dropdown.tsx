@@ -1,14 +1,13 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { cn, tv, type VariantProps } from '@rs/tailwind-base'
+import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { Link } from '@tanstack/react-router'
-
 import { AnimatePresence, m } from 'motion/react'
-
 import {
   Children,
   type ComponentPropsWithoutRef,
+  type ComponentRef,
   cloneElement,
-  type ElementRef,
   forwardRef,
   type HTMLAttributeAnchorTarget,
   isValidElement,
@@ -19,7 +18,6 @@ import { useDisclosure } from '../../hooks/use-disclosure'
 import { getTransition } from '../../motion/transition'
 import { HStack } from '../element/stack'
 import { Icon } from '../svg/icon'
-import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 
 const dropdownContentStyles = tv({
   base: [
@@ -78,7 +76,7 @@ type DropdownContentProps = {
   WithClassName
 
 const DropdownContent = forwardRef<
-  ElementRef<typeof DropdownMenu.Content>,
+  ComponentRef<typeof DropdownMenu.Content>,
   DropdownContentProps
 >(
   (
@@ -171,7 +169,7 @@ export type BaseDropdownItemProps = {
 export type DropdownItemProps = BaseDropdownItemProps
 
 const DropdownItem = forwardRef<
-  ElementRef<typeof DropdownMenu.Content>,
+  ComponentRef<typeof DropdownMenu.Content>,
   DropdownItemProps
 >((props, ref) => {
   const {
@@ -218,7 +216,7 @@ const DropdownItem = forwardRef<
 })
 
 const DropdownItemWithChildren = forwardRef<
-  ElementRef<typeof DropdownMenu.Content>,
+  ComponentRef<typeof DropdownMenu.Content>,
   Omit<DropdownItemProps, 'label'>
 >((props, ref) => {
   const { active, className, children, ...restProps } = props
@@ -253,7 +251,7 @@ type DropdownSeparatorProps = {} & ComponentPropsWithoutRef<
   VariantProps<typeof dropdownItemStyles>
 
 const DropdownSeparator = forwardRef<
-  ElementRef<typeof DropdownMenu.Separator>,
+  ComponentRef<typeof DropdownMenu.Separator>,
   DropdownSeparatorProps
 >(({ active, ...props }, ref) => (
   <DropdownMenu.Separator
@@ -273,8 +271,8 @@ const labelStyles = tv({
     'text-subtitle-2',
     'px-4',
     'py-3',
-    'border-b-layout-1',
-    'border-b',
+    'border-b-border-layout-1',
+    'border-b-(length:--border-base)',
     'text-content-layout-3',
   ],
 })
