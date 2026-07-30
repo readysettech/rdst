@@ -10,20 +10,11 @@ from packaging.version import InvalidVersion, Version
 class InstallerState:
     data_dir: Path
     bin_dir: Path
-    cache_dir: Path
-    python: str
-
-    @property
-    def uv(self):
-        return self.data_dir / "bootstrap" / "bin" / "uv"
+    platform: str
 
     @property
     def tool_dir(self):
         return self.data_dir / "tools"
-
-    @property
-    def python_dir(self):
-        return self.data_dir / "python"
 
 
 @dataclass(frozen=True)

@@ -1,10 +1,14 @@
 #!/bin/sh
 set -eu
 
-UV_VERSION="0.11.23"
-PYTHON_VERSION="3.12"
-DEFAULT_INDEX="https://pypi.org/simple"
-UV_RELEASE_BASE_URL="https://releases.astral.sh/github/uv/releases/download/${UV_VERSION}"
+# RDST_INSTALLER_BASE_URL exists so CI can smoke-test an install against the
+# archives a build just produced, before they are published anywhere.
+ARCHIVE_BASE_URL="${RDST_INSTALLER_BASE_URL:-https://downloads.readyset.io/packages/rdst-cli}"
+# Every Mach-O in a published macOS archive is signed by this team. Checking it
+# is what a checksum cannot do: the checksum travels from the same host as the
+# archive, so a compromised host can rewrite both, but it cannot produce
+# loadable code carrying Readyset's signature.
+APPLE_TEAM_ID="MK994N7JPH"
 
 normalize_path() {
   normalized="$1"
@@ -17,21 +21,15 @@ normalize_path() {
 HOME=$(normalize_path "${HOME:-}")
 export HOME
 BIN_DIR=$(normalize_path "${XDG_BIN_HOME:-${HOME}/.local/bin}")
-TOOL_BIN_DIR="$BIN_DIR"
 DATA_HOME=$(normalize_path "${XDG_DATA_HOME:-${HOME}/.local/share}")
-CACHE_HOME=$(normalize_path "${XDG_CACHE_HOME:-${HOME}/.cache}")
 CONFIG_DIR=$(normalize_path "${HOME}/.rdst")
 DATA_DIR=$(normalize_path "${DATA_HOME}/rdst")
-CACHE_DIR=$(normalize_path "${CACHE_HOME}/rdst")
-BOOTSTRAP_DIR="${DATA_DIR}/bootstrap/bin"
-UV_BIN="${BOOTSTRAP_DIR}/uv"
 TOOL_DIR="${DATA_DIR}/tools"
 ACTIVE_TOOL_LINK="${TOOL_DIR}/current"
-INSTALL_TOOL_DIR="$TOOL_DIR"
 GENERATION_DIR=""
 CURRENT_LINK_TMP=""
 ACTIVATION_STARTED=0
-PYTHON_DIR="${DATA_DIR}/python"
+PLATFORM=""
 STATE_FILE="${CONFIG_DIR}/install-state"
 LOCK_DIR="${CONFIG_DIR}/.rdst-operation-lock"
 LOCK_TOKEN=""
@@ -61,12 +59,15 @@ usage() {
   cat <<'EOF'
 Install RDST without sudo or a preinstalled Python.
 
+Supported platforms: macOS on Apple Silicon, Linux on x86_64 and arm64.
+
 Usage:
   install.sh [--version VERSION] [--no-modify-path] [--force]
   install.sh --uninstall
 
 Options:
-  --version VERSION   Install an exact RDST version instead of the latest release.
+  --version VERSION   Install an exact RDST version instead of the one this
+                      installer publishes.
   --no-modify-path    Do not update the shell profile when the bin directory is absent from PATH.
   --force             Proceed when another rdst executable is elsewhere on PATH.
   --uninstall         Remove the installer-managed RDST runtime. User data in ~/.rdst is preserved.
@@ -118,14 +119,13 @@ validate_path() {
 validate_path "HOME" "${HOME:-}"
 validate_path "bin directory" "$BIN_DIR"
 validate_path "data directory" "$DATA_DIR"
-validate_path "cache directory" "$CACHE_DIR"
 validate_path "config directory" "$CONFIG_DIR"
 case "$BIN_DIR" in
   *:*) fail "bin directory cannot contain a colon" ;;
 esac
-case "$DATA_DIR:$CACHE_DIR" in
-  */rdst:*/rdst) ;;
-  *) fail "data and cache directories must end in /rdst" ;;
+case "$DATA_DIR" in
+  */rdst) ;;
+  *) fail "data directory must end in /rdst" ;;
 esac
 case "$CONFIG_DIR/" in
   "$DATA_DIR/"*) fail "config directory cannot be inside the data directory" ;;
@@ -136,13 +136,40 @@ case "$VERSION" in
   -*|*[!A-Za-z0-9._+!-]*|'') fail "invalid version: $VERSION" ;;
 esac
 
+# A published installer always downloads over https. The override exists so CI
+# can smoke-test against a build's own artifacts before they are published, and
+# only then may the transport be a loopback address or a local file.
+ALLOW_INSECURE_TRANSPORT=0
+case "$ARCHIVE_BASE_URL" in
+  https://*) ;;
+  http://127.0.0.1|http://127.0.0.1[:/]*|http://localhost|http://localhost[:/]*|file:///*)
+    [ -n "${RDST_INSTALLER_BASE_URL:-}" ] \
+      || fail "the RDST download location must use https"
+    ALLOW_INSECURE_TRANSPORT=1
+    warn "downloading RDST over an unverified transport: $ARCHIVE_BASE_URL"
+    ;;
+  *) fail "the RDST download location must use https" ;;
+esac
+
+# A build smoke-testing this script installs the archive it just produced, and
+# only a release signs one with Readyset's certificate. Both conditions are
+# required: the request opts out, and the archive came off the local filesystem
+# or a loopback address. A published install reaches neither.
+REQUIRE_READYSET_TEAM=1
+if [ "$ALLOW_INSECURE_TRANSPORT" -eq 1 ] && [ "${RDST_ALLOW_ADHOC_SIGNATURE:-0}" = "1" ]; then
+  REQUIRE_READYSET_TEAM=0
+  warn "accepting an RDST archive that Readyset has not signed"
+fi
+
+INSTALL_METHOD="readyset-archive"
+
 is_managed_install() {
   [ -f "$STATE_FILE" ] || return 1
-  [ "$(grep -c '^method=readyset-uv$' "$STATE_FILE" || true)" -eq 1 ]
+  [ "$(grep -c "^method=${INSTALL_METHOD}\$" "$STATE_FILE" || true)" -eq 1 ]
 }
 
 validate_state() {
-  for state_key in format method data_dir bin_dir cache_dir python uv_version; do
+  for state_key in format method data_dir bin_dir platform; do
     state_count=$(grep -c "^${state_key}=" "$STATE_FILE" || true)
     [ "$state_count" -eq 1 ] || fail "installer state has an invalid $state_key entry"
   done
@@ -160,12 +187,10 @@ write_state() {
   state_tmp="$CONFIG_DIR/.install-state.$$"
   cat > "$state_tmp" <<EOF
 format=1
-method=readyset-uv
+method=$INSTALL_METHOD
 data_dir=$DATA_DIR
 bin_dir=$BIN_DIR
-cache_dir=$CACHE_DIR
-python=$PYTHON_VERSION
-uv_version=$UV_VERSION
+platform=$PLATFORM
 path_profile=$PATH_PROFILE
 EOF
   mv "$state_tmp" "$STATE_FILE"
@@ -194,26 +219,14 @@ remove_path_block() {
   rm -f "$profile_content"
 }
 
-run_uv() {
-  (
-    for uv_name in $(env | sed -n 's/^\(UV_[A-Za-z0-9_]*\)=.*/\1/p'); do
-      unset "$uv_name"
-    done
-    UV_TOOL_DIR="$INSTALL_TOOL_DIR" \
-    UV_TOOL_BIN_DIR="$TOOL_BIN_DIR" \
-    UV_PYTHON_INSTALL_DIR="$PYTHON_DIR" \
-    UV_CACHE_DIR="${CACHE_DIR}/uv" \
-      "$UV_BIN" "$@"
-  )
-}
-
 is_managed_link() {
   path="$1"
   [ -L "$path" ] || return 1
   target=$(readlink "$path" 2>/dev/null || true)
   executable_name=$(basename "$path")
   case "$target" in
-    "$ACTIVE_TOOL_LINK/rdst/bin/$executable_name"|"$TOOL_DIR/rdst/bin/$executable_name") return 0 ;;
+    # The archive publishes both entrypoints side by side in the generation.
+    "$ACTIVE_TOOL_LINK/rdst/$executable_name") return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -283,20 +296,17 @@ uninstall() {
 
   saved_data_dir=$(normalize_path "$(state_value data_dir)")
   saved_bin_dir=$(normalize_path "$(state_value bin_dir)")
-  saved_cache_dir=$(normalize_path "$(state_value cache_dir)")
   validate_path "saved data directory" "$saved_data_dir"
   validate_path "saved bin directory" "$saved_bin_dir"
-  validate_path "saved cache directory" "$saved_cache_dir"
-  case "$saved_data_dir:$saved_cache_dir" in
-    */rdst:*/rdst) ;;
-    *) fail "saved data and cache directories must end in /rdst" ;;
+  case "$saved_data_dir" in
+    */rdst) ;;
+    *) fail "saved data directory must end in /rdst" ;;
   esac
   case "$CONFIG_DIR/" in
     "$saved_data_dir/"*) fail "refusing to remove a data directory containing configuration" ;;
   esac
   DATA_DIR="$saved_data_dir"
   BIN_DIR="$saved_bin_dir"
-  CACHE_DIR="$saved_cache_dir"
   TOOL_DIR="${DATA_DIR}/tools"
   ACTIVE_TOOL_LINK="${TOOL_DIR}/current"
 
@@ -333,7 +343,6 @@ uninstall() {
     ''|'/'|"$HOME") fail "refusing to remove unsafe data directory: $DATA_DIR" ;;
     *) rm -rf "$DATA_DIR" ;;
   esac
-  rm -rf "${CACHE_DIR}/uv"
   rm -f "$STATE_FILE"
   release_operation_lock
   trap - 0 HUP INT TERM
@@ -352,22 +361,12 @@ check_platform() {
   arch=$(uname -m 2>/dev/null || true)
 
   case "$os:$arch" in
-    Darwin:arm64|Darwin:aarch64)
-      UV_TARGET="aarch64-apple-darwin"
-      UV_SHA256="71ef9de85db820749b3b12b7585624ee279e9c5afcbc6f8236bc3d628c4305b0"
-      ;;
+    Darwin:arm64|Darwin:aarch64) PLATFORM="macos-arm64" ;;
     Darwin:x86_64|Darwin:amd64)
-      UV_TARGET="x86_64-apple-darwin"
-      UV_SHA256="7a88155033cc469bba5bd5a24212e355eb92e3e2a276320b669ec576296c1e25"
+      fail "Intel Macs are not supported. RDST requires an Apple Silicon Mac."
       ;;
-    Linux:arm64|Linux:aarch64)
-      UV_TARGET="aarch64-unknown-linux-gnu"
-      UV_SHA256="1873a77350f6621279ae1a0d2227f2bd8b67131598f14a7eb0ba2215d3da2c98"
-      ;;
-    Linux:x86_64|Linux:amd64)
-      UV_TARGET="x86_64-unknown-linux-gnu"
-      UV_SHA256="e12c4cda2fe8c305510a78380a88f2c32a27e90cdcd123cefd2873388f0ebb5f"
-      ;;
+    Linux:arm64|Linux:aarch64) PLATFORM="linux-arm64" ;;
+    Linux:x86_64|Linux:amd64) PLATFORM="linux-x86_64" ;;
     Darwin:*|Linux:*)
       fail "unsupported architecture: ${arch:-unknown}. RDST supports x86_64 and arm64."
       ;;
@@ -390,13 +389,16 @@ if [ -f "$STATE_FILE" ]; then
   validate_state
   saved_data_dir=$(normalize_path "$(state_value data_dir)")
   saved_bin_dir=$(normalize_path "$(state_value bin_dir)")
-  saved_cache_dir=$(normalize_path "$(state_value cache_dir)")
   PATH_PROFILE=$(state_value path_profile || true)
   if [ -n "$PATH_PROFILE" ]; then
     validate_path "saved shell profile" "$PATH_PROFILE"
   fi
-  if [ "$DATA_DIR" != "$saved_data_dir" ] || [ "$BIN_DIR" != "$saved_bin_dir" ] || [ "$CACHE_DIR" != "$saved_cache_dir" ]; then
+  if [ "$DATA_DIR" != "$saved_data_dir" ] || [ "$BIN_DIR" != "$saved_bin_dir" ]; then
     fail "existing RDST installation uses different directories; uninstall it before changing paths"
+  fi
+  saved_platform=$(state_value platform || true)
+  if [ -n "$saved_platform" ] && [ "$saved_platform" != "$PLATFORM" ]; then
+    fail "existing RDST installation is for $saved_platform, not $PLATFORM. Uninstall it first."
   fi
   for executable_name in rdst rdst-mcp; do
     executable_path="$BIN_DIR/$executable_name"
@@ -430,7 +432,7 @@ if [ -d "$DATA_DIR" ] && [ ! -f "$DATA_DIR/.rdst-managed" ]; then
     fail "$DATA_DIR already contains data and is not managed by the RDST installer"
   fi
 fi
-mkdir -p "$BIN_DIR" "$BOOTSTRAP_DIR" "$TOOL_DIR" "$PYTHON_DIR" "$CACHE_DIR" "$CONFIG_DIR"
+mkdir -p "$BIN_DIR" "$TOOL_DIR" "$CONFIG_DIR"
 [ ! -L "$TOOL_DIR" ] || fail "$TOOL_DIR must not be a symbolic link"
 tmp_dir=""
 state_tmp=""
@@ -461,10 +463,18 @@ download() {
   url="$1"
   destination="$2"
   if command -v curl >/dev/null 2>&1; then
-    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-      "$url" --output "$destination"
+    if [ "$ALLOW_INSECURE_TRANSPORT" -eq 1 ]; then
+      curl --fail --silent --show-error --location "$url" --output "$destination"
+    else
+      curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+        "$url" --output "$destination"
+    fi
   elif command -v wget >/dev/null 2>&1; then
-    wget --https-only --quiet --output-document="$destination" "$url"
+    if [ "$ALLOW_INSECURE_TRANSPORT" -eq 1 ]; then
+      wget --quiet --output-document="$destination" "$url"
+    else
+      wget --https-only --quiet --output-document="$destination" "$url"
+    fi
   elif command -v busybox >/dev/null 2>&1 && busybox wget --help >/dev/null 2>&1; then
     busybox wget -q -O "$destination" "$url"
   else
@@ -485,54 +495,6 @@ verify_sha256() {
   [ "$actual" = "$expected" ] || fail "RDST runtime checksum verification failed"
 }
 
-installed_uv_version=""
-if [ -x "$UV_BIN" ]; then
-  installed_uv_version=$(run_uv --version 2>/dev/null | awk '{print $2}' || true)
-fi
-if [ "$installed_uv_version" != "$UV_VERSION" ]; then
-  info "Installing the RDST runtime manager..."
-  uv_archive="$tmp_dir/uv-${UV_TARGET}.tar.gz"
-  download "$UV_RELEASE_BASE_URL/uv-${UV_TARGET}.tar.gz" "$uv_archive"
-  verify_sha256 "$uv_archive" "$UV_SHA256"
-  tar -xzf "$uv_archive" -C "$tmp_dir"
-  extracted_uv="$tmp_dir/uv-${UV_TARGET}/uv"
-  [ -x "$extracted_uv" ] || fail "RDST runtime archive did not contain uv"
-  mv "$extracted_uv" "$UV_BIN"
-  chmod 755 "$UV_BIN"
-fi
-
-if [ "$VERSION" = "latest" ]; then
-  package="rdst@latest"
-else
-  package="rdst==$VERSION"
-fi
-
-info "Installing $package with a managed Python $PYTHON_VERSION runtime..."
-if [ -L "$ACTIVE_TOOL_LINK" ]; then
-  previous_generation=$(readlink "$ACTIVE_TOOL_LINK" 2>/dev/null || true)
-  validate_generation_path "$previous_generation" \
-    || fail "$ACTIVE_TOOL_LINK points outside the managed generation directory"
-elif [ -e "$ACTIVE_TOOL_LINK" ]; then
-  fail "$ACTIVE_TOOL_LINK is not an installer-managed link"
-elif [ -d "$TOOL_DIR/rdst" ]; then
-  previous_generation="$TOOL_DIR/rdst"
-fi
-
-GENERATION_DIR=$(mktemp -d "$TOOL_DIR/.rdst-generation-XXXXXX")
-INSTALL_TOOL_DIR="$GENERATION_DIR"
-staged_bin="$tmp_dir/tool-bin"
-mkdir -p "$staged_bin"
-TOOL_BIN_DIR="$staged_bin"
-set -- tool install \
-  --python "$PYTHON_VERSION" \
-  --managed-python \
-  --no-build \
-  --no-config \
-  --default-index "$DEFAULT_INDEX" \
-  --force \
-  "$package"
-run_uv "$@"
-
 resolve_existing_path() {
   path="$1"
   path_dir=${path%/*}
@@ -541,38 +503,155 @@ resolve_existing_path() {
   printf '%s/%s' "$resolved_dir" "$path_name"
 }
 
-entrypoint_count=0
-for staged_entrypoint in "$staged_bin"/* "$staged_bin"/.[!.]* "$staged_bin"/..?*; do
-  if [ ! -e "$staged_entrypoint" ] && [ ! -L "$staged_entrypoint" ]; then
-    continue
-  fi
-  entrypoint_name=$(basename "$staged_entrypoint")
-  case "$entrypoint_name" in
-    rdst|rdst-mcp) ;;
-    *) fail "RDST package exposed an unexpected executable: $entrypoint_name" ;;
-  esac
-  [ -L "$staged_entrypoint" ] || fail "RDST executable is not a managed link: $entrypoint_name"
-  entrypoint_target=$(readlink "$staged_entrypoint" 2>/dev/null || true)
-  case "$entrypoint_target" in
-    /*) ;;
-    *) entrypoint_target="$staged_bin/$entrypoint_target" ;;
-  esac
-  resolved_entrypoint_target=$(resolve_existing_path "$entrypoint_target" || true)
-  expected_entrypoint_target=$(resolve_existing_path "$GENERATION_DIR/rdst/bin/$entrypoint_name" || true)
-  if [ -z "$resolved_entrypoint_target" ] \
-    || [ "$resolved_entrypoint_target" != "$expected_entrypoint_target" ]; then
-    fail "RDST executable points outside the managed generation: $entrypoint_name"
-  fi
-  entrypoint_count=$((entrypoint_count + 1))
-done
-[ "$entrypoint_count" -eq 2 ] || fail "RDST package did not expose the expected executables"
-"$staged_bin/rdst" --version >/dev/null 2>&1 \
-  || fail "the prepared RDST executable did not start"
+# A member name can carry the archive outside the directory it is unpacked
+# into, and unpacking is what puts it there: the signature can only be checked
+# against a tree that already exists on disk. Read the names first and refuse
+# the archive whole, rather than auditing where its contents landed. Extractors
+# differ in what they refuse on their own, so this does not rely on that.
+verify_archive_members() {
+  archive="$1"
+  member_list="$tmp_dir/members"
+  tar -tzf "$archive" > "$member_list" || fail "could not read the RDST archive"
+  [ -s "$member_list" ] || fail "the RDST archive is empty"
+  while IFS= read -r member; do
+    [ -n "$member" ] || continue
+    case "$member" in
+      /*|..|../*|*/../*|*/..)
+        fail "RDST archive contains a path that leaves the install: $member"
+        ;;
+    esac
+  done < "$member_list"
+}
 
+# A tar archive can carry symlinks pointing anywhere. Refuse any that leave the
+# unpacked tree, so activating an archive cannot publish a path elsewhere on
+# the machine under an RDST name.
+verify_extracted_links() {
+  root="$1"
+  resolved_root=$(resolve_existing_path "$root") \
+    || fail "could not resolve the prepared RDST environment"
+  link_report="$tmp_dir/unsafe-links"
+  : > "$link_report"
+  find "$root" -type l -print > "$tmp_dir/links"
+  while IFS= read -r link; do
+    [ -n "$link" ] || continue
+    target=$(readlink "$link" 2>/dev/null || true)
+    case "$target" in
+      /*)
+        printf '%s -> %s\n' "$link" "$target" >> "$link_report"
+        continue
+        ;;
+    esac
+    # A target whose parent does not exist cannot be shown to stay inside the
+    # tree, so it is reported alongside the ones that provably escape.
+    resolved=$(resolve_existing_path "${link%/*}/$target" 2>/dev/null || true)
+    case "$resolved" in
+      "$resolved_root"/*) ;;
+      *) printf '%s -> %s\n' "$link" "$target" >> "$link_report" ;;
+    esac
+  done < "$tmp_dir/links"
+  if [ -s "$link_report" ]; then
+    while IFS= read -r entry; do
+      warn "unresolvable or escaping symlink in the RDST archive: $entry"
+    done < "$link_report"
+    fail "RDST archive contains symlinks that do not stay inside the install"
+  fi
+}
+
+# The macOS archive is a signed tree, and the signature is the one check the
+# checksum cannot stand in for: both the archive and its checksum come from the
+# same host, but only Readyset can produce this signature. Every tree has to
+# verify against its own signature; whose signature it has to be is what
+# REQUIRE_READYSET_TEAM decides.
+#
+# Every Mach-O in the tree is verified, not just the entrypoint. The frozen CLI
+# loads its libraries from the tree at run time and is signed with library
+# validation disabled, so the loader re-checks none of them; verifying the
+# entrypoint alone would leave the rest resting on the checksum.
+verify_signature() {
+  root="$1"
+  [ "$os" = "Darwin" ] || return 0
+  for required_command in codesign file; do
+    command -v "$required_command" >/dev/null 2>&1 \
+      || fail "$required_command is required to verify RDST on macOS"
+  done
+
+  mach_o_list="$tmp_dir/mach-o"
+  # file reports the description last, so the greedy prefix stops at the
+  # separator it printed rather than at any colon inside a path.
+  find "$root" -type f -exec file {} + \
+    | sed -n 's/^\(.*\): [^:]*Mach-O.*$/\1/p' > "$mach_o_list"
+  grep -qxF "$root/rdst" "$mach_o_list" \
+    || fail "the RDST executable in the archive is not signed code"
+
+  while IFS= read -r mach_o; do
+    signature_info=$(codesign --verify --strict -dv "$mach_o" 2>&1) \
+      || fail "RDST signature verification failed: ${mach_o#"$root"/}"
+    [ "$REQUIRE_READYSET_TEAM" -eq 1 ] || continue
+    signature_team=$(printf '%s\n' "$signature_info" \
+      | sed -n 's/^TeamIdentifier=//p' | head -1)
+    [ "$signature_team" = "$APPLE_TEAM_ID" ] \
+      || fail "RDST is not signed by Readyset (team ${signature_team:-none}): ${mach_o#"$root"/}"
+  done < "$mach_o_list"
+}
+
+# A published installer carries the version it was published with, so latest
+# is only ever left over from an unpublished copy of this script.
+if [ "$VERSION" = "latest" ]; then
+  fail "this copy of the installer has no published version. Pass --version VERSION."
+fi
+
+archive_name="rdst-${VERSION}-${PLATFORM}.tar.gz"
+archive_url="${ARCHIVE_BASE_URL%/}/versions/${VERSION}/${archive_name}"
+archive_path="$tmp_dir/$archive_name"
+
+info "Downloading RDST $VERSION for $PLATFORM..."
+download "$archive_url" "$archive_path" \
+  || fail "no RDST $VERSION build is available for $PLATFORM at $archive_url"
+download "${archive_url}.sha256" "${archive_path}.sha256" \
+  || fail "RDST $VERSION for $PLATFORM has no published checksum"
+expected_sha=$(awk '{print $1; exit}' "${archive_path}.sha256")
+case "$expected_sha" in
+  *[!0-9a-f]*|'') fail "published checksum is malformed" ;;
+esac
+[ "${#expected_sha}" -eq 64 ] || fail "published checksum is malformed"
+verify_sha256 "$archive_path" "$expected_sha"
+
+info "Installing RDST $VERSION..."
+if [ -L "$ACTIVE_TOOL_LINK" ]; then
+  previous_generation=$(readlink "$ACTIVE_TOOL_LINK" 2>/dev/null || true)
+  validate_generation_path "$previous_generation" \
+    || fail "$ACTIVE_TOOL_LINK points outside the managed generation directory"
+elif [ -e "$ACTIVE_TOOL_LINK" ]; then
+  fail "$ACTIVE_TOOL_LINK is not an installer-managed link"
+fi
+
+verify_archive_members "$archive_path"
+GENERATION_DIR=$(mktemp -d "$TOOL_DIR/.rdst-generation-XXXXXX")
+tar -xzf "$archive_path" -C "$GENERATION_DIR"
+
+# The archive holds exactly one top-level directory. Anything else did not come
+# from the RDST build, so refuse it rather than reach into it.
+generation_entries=$(ls -A "$GENERATION_DIR")
+[ "$generation_entries" = "rdst" ] || fail "RDST archive has an unexpected layout"
+
+verify_extracted_links "$GENERATION_DIR"
 for entrypoint_name in rdst rdst-mcp; do
-  [ -x "$GENERATION_DIR/rdst/bin/$entrypoint_name" ] \
-    || fail "the prepared RDST environment is missing $entrypoint_name"
+  [ -x "$GENERATION_DIR/rdst/$entrypoint_name" ] \
+    || fail "RDST archive is missing the $entrypoint_name entrypoint"
 done
+verify_signature "$GENERATION_DIR/rdst"
+
+# Redirect rather than pipe, so the exit status is the executable's own and a
+# crash is reported as one instead of as a version mismatch.
+version_output="$tmp_dir/staged-version"
+"$GENERATION_DIR/rdst/rdst" --version > "$version_output" 2>&1 \
+  || fail "the prepared RDST executable did not start"
+# Match the version out of the output rather than reading the last line: the
+# executable shares this stream with whatever its libraries print.
+staged_version=$(sed -nE 's/.*[Vv]ersion ([0-9][^[:space:]]*).*/\1/p' "$version_output" | tail -1)
+[ "$staged_version" = "$VERSION" ] \
+  || fail "RDST archive reports ${staged_version:-no version}, expected $VERSION"
 
 CURRENT_LINK_TMP="$TOOL_DIR/.rdst-current.$$"
 rm -f "$CURRENT_LINK_TMP"
@@ -585,7 +664,7 @@ CURRENT_LINK_TMP=""
 GENERATION_DIR=""
 
 for entrypoint_name in rdst rdst-mcp; do
-  entrypoint_target="$ACTIVE_TOOL_LINK/rdst/bin/$entrypoint_name"
+  entrypoint_target="$ACTIVE_TOOL_LINK/rdst/$entrypoint_name"
   executable_path="$BIN_DIR/$entrypoint_name"
   if { [ -e "$executable_path" ] || [ -L "$executable_path" ]; } \
     && ! is_managed_link "$executable_path"; then
@@ -598,11 +677,17 @@ for entrypoint_name in rdst rdst-mcp; do
   [ "$(readlink "$executable_path" 2>/dev/null || true)" = "$entrypoint_target" ] \
     || fail "could not publish the $entrypoint_name executable"
 done
-TOOL_BIN_DIR="$BIN_DIR"
-INSTALL_TOOL_DIR="$TOOL_DIR"
 
 [ -x "$BIN_DIR/rdst" ] || fail "installation completed without creating $BIN_DIR/rdst"
 [ -x "$BIN_DIR/rdst-mcp" ] || fail "installation completed without creating $BIN_DIR/rdst-mcp"
+
+# Nothing references the previous generation once the new one is published, so
+# retire it here. Removing it earlier would strand a running rdst, and leaving
+# it grows the data directory by a full copy on every install.
+if [ -n "${previous_generation:-}" ] \
+  && validate_generation_path "$previous_generation"; then
+  rm -rf "$previous_generation"
+fi
 
 path_is_configured=0
 case ":${PATH:-}:" in

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import platform
 import re
@@ -14,15 +15,90 @@ import pytest
 
 INSTALLER = Path(__file__).parents[2] / "install.sh"
 
+ARCHIVE_VERSION = "0.1.1700"
+BASE_URL = "https://downloads.test.invalid/rdst-cli"
+# What a build smoking its own artifacts serves them over.
+LOCAL_BASE_URL = "http://127.0.0.1/rdst-cli"
+
+
+def platform_slug() -> str:
+    machine = platform.machine()
+    if platform.system() == "Darwin":
+        return "macos-arm64"
+    return "linux-arm64" if machine in ("arm64", "aarch64") else "linux-x86_64"
+
+
+def publish_archive(
+    serve: Path,
+    workspace: Path,
+    *,
+    version: str = ARCHIVE_VERSION,
+    reported_version: str | None = None,
+    root_name: str = "rdst",
+    entrypoints: tuple[str, ...] = ("rdst", "rdst-mcp"),
+    escaping_link: str | None = None,
+    escaping_member: str | None = None,
+    noisy: bool = False,
+    checksum: str | None = None,
+) -> Path:
+    """Publish a stub RDST archive the way the build scripts lay one out."""
+    # Republishing a version has to start from a clean tree, or leftovers from
+    # the previous call survive into the new archive.
+    build = workspace / f"build-{version}"
+    shutil.rmtree(build, ignore_errors=True)
+    root = build / root_name
+    (root / "_internal").mkdir(parents=True, exist_ok=True)
+    (root / "_internal" / "libpython.so").write_text("lib", encoding="utf-8")
+
+    executable = root / "rdst"
+    # A frozen build shares stdout and stderr with its libraries, so noisy=True
+    # stands in for one that prints around its own version line.
+    noise = 'echo "[telemetry] api_key is empty" >&2\n' if noisy else ""
+    executable.write_text(
+        "#!/bin/sh\n"
+        + noise
+        + f'echo "Readyset Data and SQL Toolkit (rdst) version {reported_version or version}"\n'
+        + noise,
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    if "rdst" not in entrypoints:
+        executable.unlink()
+    if "rdst-mcp" in entrypoints:
+        (root / "rdst-mcp").symlink_to("rdst")
+    if escaping_link is not None:
+        (root / "escape").symlink_to(escaping_link)
+
+    archive_name = f"rdst-{version}-{platform_slug()}.tar.gz"
+    destination = serve / "versions" / version
+    destination.mkdir(parents=True, exist_ok=True)
+    archive = destination / archive_name
+    with tarfile.open(archive, "w:gz") as handle:
+        handle.add(root, arcname=root_name)
+        if escaping_member is not None:
+            # Written through the member name, which is the one route the
+            # post-extraction symlink check cannot see.
+            payload = b"owned"
+            info = tarfile.TarInfo(escaping_member)
+            info.size = len(payload)
+            handle.addfile(info, io.BytesIO(payload))
+    digest = checksum or hashlib.sha256(archive.read_bytes()).hexdigest()
+    (destination / f"{archive_name}.sha256").write_text(
+        f"{digest}  {archive_name}\n", encoding="utf-8"
+    )
+    return archive
+
 
 @pytest.fixture
 def installer_env(tmp_path: Path):
     home = tmp_path / "home"
     fake_bin = tmp_path / "fake-bin"
     system_bin = tmp_path / "system-bin"
+    serve = tmp_path / "serve"
     home.mkdir()
     fake_bin.mkdir()
     system_bin.mkdir()
+    serve.mkdir()
 
     # Keep the installer subprocess isolated from an rdst already installed on
     # the developer or CI host while retaining the ordinary POSIX utilities it
@@ -40,121 +116,119 @@ def installer_env(tmp_path: Path):
                 continue
             destination.symlink_to(executable)
 
-    system = platform.system()
-    machine = platform.machine()
-    if system == "Darwin":
-        target = (
-            "aarch64-apple-darwin"
-            if machine in ("arm64", "aarch64")
-            else "x86_64-apple-darwin"
-        )
-    else:
-        target = (
-            "aarch64-unknown-linux-gnu"
-            if machine in ("arm64", "aarch64")
-            else "x86_64-unknown-linux-gnu"
-        )
+    publish_archive(serve, tmp_path)
 
-    archive_root = tmp_path / f"uv-{target}"
-    archive_root.mkdir()
-    uv = archive_root / "uv"
-    uv.write_text(
-        """#!/bin/sh
-set -eu
-if [ -n "${UV_EXTRA_INDEX_URL:-}" ]; then
-  echo "ambient UV_EXTRA_INDEX_URL was not cleared" >&2
-  exit 98
-fi
-if [ "${1:-}" = "--version" ]; then
-  echo "uv 0.11.23"
-  exit 0
-fi
-command_name="${1:-} ${2:-}"
-case "$command_name" in
-  "tool install")
-    if [ "${FAKE_UV_CANONICALIZE_TOOL_DIR:-0}" = "1" ]; then
-      UV_TOOL_DIR=$(cd "$UV_TOOL_DIR" && pwd -P)
-      export UV_TOOL_DIR
-    fi
-    if [ -n "${FAKE_UV_WAIT_FILE:-}" ]; then
-      touch "${FAKE_UV_WAIT_FILE}.started"
-      while [ ! -f "${FAKE_UV_WAIT_FILE}.release" ]; do sleep 0.05; done
-    fi
-    if [ "${FAKE_UV_FAIL_INSTALL:-0}" = "1" ]; then
-      echo "simulated install failure" >&2
-      exit 42
-    fi
-    package=""
-    for argument in "$@"; do package="$argument"; done
-    case "$package" in
-      rdst==*) version=${package#rdst==} ;;
-      *) version=9.9.9 ;;
-    esac
-    mkdir -p "$UV_TOOL_DIR/rdst/bin" "$UV_TOOL_BIN_DIR"
-    cat > "$UV_TOOL_DIR/rdst/bin/rdst" <<EOF
-#!/bin/sh
-echo "Readyset Data and SQL Toolkit (rdst) version $version"
-EOF
-    chmod +x "$UV_TOOL_DIR/rdst/bin/rdst"
-    ln -sf "$UV_TOOL_DIR/rdst/bin/rdst" "$UV_TOOL_DIR/rdst/bin/rdst-mcp"
-    ln -sf "$UV_TOOL_DIR/rdst/bin/rdst" "$UV_TOOL_BIN_DIR/rdst"
-    ln -sf "$UV_TOOL_DIR/rdst/bin/rdst-mcp" "$UV_TOOL_BIN_DIR/rdst-mcp"
-    if [ "${FAKE_UV_EXTRA_ENTRYPOINT:-0}" = "1" ]; then
-      ln -sf "$UV_TOOL_DIR/rdst/bin/rdst" "$UV_TOOL_BIN_DIR/python"
-    fi
-    if [ "${FAKE_UV_FAIL_AFTER_WRITE:-0}" = "1" ]; then
-      echo "simulated partial install failure" >&2
-      exit 43
-    fi
-    ;;
-  "tool uninstall")
-    rm -rf "$UV_TOOL_DIR/rdst"
-    rm -f "$UV_TOOL_BIN_DIR/rdst" "$UV_TOOL_BIN_DIR/rdst-mcp"
-    ;;
-  *)
-    echo "unexpected uv arguments: $*" >&2
-    exit 2
-    ;;
-esac
-""",
-        encoding="utf-8",
-    )
-    uv.chmod(0o755)
-    uv_archive = tmp_path / f"uv-{target}.tar.gz"
-    with tarfile.open(uv_archive, "w:gz") as archive:
-        archive.add(archive_root, arcname=archive_root.name)
-    uv_sha256 = hashlib.sha256(uv_archive.read_bytes()).hexdigest()
+    # Stamp the version the way prepare_installer.sh does, so these tests run
+    # against the published shape of the script rather than the repo copy.
     installer = tmp_path / "install.sh"
     installer.write_text(
         re.sub(
-            r'UV_SHA256="[0-9a-f]{64}"',
-            f'UV_SHA256="{uv_sha256}"',
+            r'^DEFAULT_RDST_VERSION="latest"$',
+            f'DEFAULT_RDST_VERSION="{ARCHIVE_VERSION}"',
             INSTALLER.read_text(encoding="utf-8"),
+            count=1,
+            flags=re.MULTILINE,
         ),
         encoding="utf-8",
     )
     installer.chmod(0o755)
 
+    # Resolve the request against the published tree instead of the network.
+    # The installer still passes its real transport flags, so --proto and the
+    # rest stay exercised.
     curl = fake_bin / "curl"
     curl.write_text(
         """#!/bin/sh
 set -eu
 destination=""
+url=""
 while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    destination="$2"
-    shift 2
-  else
-    shift
-  fi
+  case "$1" in
+    --output) destination="$2"; shift 2 ;;
+    --proto) shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
 done
-cp "$FAKE_UV_ARCHIVE" "$destination"
+if [ -n "${FAKE_DOWNLOAD_WAIT_FILE:-}" ]; then
+  touch "${FAKE_DOWNLOAD_WAIT_FILE}.started"
+  while [ ! -f "${FAKE_DOWNLOAD_WAIT_FILE}.release" ]; do sleep 0.05; done
+fi
+if [ "${FAKE_DOWNLOAD_FAIL:-0}" = "1" ]; then
+  echo "curl: (22) simulated download failure" >&2
+  exit 22
+fi
+path=${url#*://}
+path=${path#*/}
+source="$FAKE_SERVE_DIR/${path#rdst-cli/}"
+[ -f "$source" ] || { echo "curl: (22) not found: $url" >&2; exit 22; }
+cp "$source" "$destination"
 """,
         encoding="utf-8",
     )
     curl.chmod(0o755)
 
-    for command in ("python", "python3", "sudo"):
+    # The archive is a stub, so stand in for Apple's tooling. Real signature
+    # and team verification is covered against a genuinely signed tree.
+    # FAKE_CODESIGN_FOREIGN_FILE signs one file in the tree as somebody else,
+    # which is what a tampered library looks like to the installer.
+    codesign = fake_bin / "codesign"
+    codesign.write_text(
+        """#!/bin/sh
+set -eu
+if [ "${FAKE_CODESIGN_INVALID:-0}" = "1" ]; then
+  echo "test-stub: signature invalid" >&2
+  exit 1
+fi
+target=""
+for argument in "$@"; do
+  case "$argument" in
+    -*) ;;
+    *) target="$argument" ;;
+  esac
+done
+team="${FAKE_CODESIGN_TEAM-MK994N7JPH}"
+if [ -n "${FAKE_CODESIGN_FOREIGN_FILE:-}" ] \
+  && [ "${target##*/}" = "$FAKE_CODESIGN_FOREIGN_FILE" ]; then
+  team="0THERTEAM1"
+fi
+for argument in "$@"; do
+  if [ "$argument" = "-dv" ]; then
+    echo "Identifier=rdst" >&2
+    # An ad-hoc signature reports no team at all, which FAKE_CODESIGN_TEAM= asks for.
+    [ -z "$team" ] || echo "TeamIdentifier=$team" >&2
+    exit 0
+  fi
+done
+exit 0
+""",
+        encoding="utf-8",
+    )
+    codesign.chmod(0o755)
+
+    # The installer picks the files to verify by asking file(1) which are
+    # Mach-O. The stub archive holds shell scripts, so report its executable
+    # and its stub library as the loadable code they stand in for.
+    file_command = fake_bin / "file"
+    file_command.write_text(
+        """#!/bin/sh
+set -eu
+for path in "$@"; do
+  if [ "${FAKE_FILE_NO_MACH_O:-0}" = "1" ]; then
+    printf '%s: ASCII text\n' "$path"
+    continue
+  fi
+  case "${path##*/}" in
+    rdst|*.so) printf '%s: Mach-O 64-bit executable arm64\n' "$path" ;;
+    *) printf '%s: ASCII text\n' "$path" ;;
+  esac
+done
+""",
+        encoding="utf-8",
+    )
+    file_command.chmod(0o755)
+
+    for command in ("python", "python3", "sudo", "uv"):
         executable = fake_bin / command
         executable.write_text(
             f"#!/bin/sh\necho '{command} must not be invoked' >&2\nexit 99\n",
@@ -165,7 +239,7 @@ cp "$FAKE_UV_ARCHIVE" "$destination"
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith(("RDST_", "UV_", "XDG_"))
+        if not key.startswith(("RDST_", "UV_", "XDG_", "FAKE_"))
     }
     env.update(
         {
@@ -174,10 +248,11 @@ cp "$FAKE_UV_ARCHIVE" "$destination"
             "SHELL": "/bin/sh",
             "XDG_BIN_HOME": str(home / "bin"),
             "XDG_DATA_HOME": str(home / "data"),
-            "XDG_CACHE_HOME": str(home / "cache"),
-            "FAKE_UV_ARCHIVE": str(uv_archive),
-            "UV_EXTRA_INDEX_URL": "http://malicious.invalid/simple",
+            "RDST_INSTALLER_BASE_URL": BASE_URL,
+            "FAKE_SERVE_DIR": str(serve),
             "_RDST_TEST_INSTALLER": str(installer),
+            "_RDST_TEST_SERVE": str(serve),
+            "_RDST_TEST_WORKSPACE": str(tmp_path),
         }
     )
     return env, home
@@ -186,6 +261,8 @@ cp "$FAKE_UV_ARCHIVE" "$destination"
 def run_installer(env: dict[str, str], *args: str):
     child_env = env.copy()
     installer = child_env.pop("_RDST_TEST_INSTALLER")
+    child_env.pop("_RDST_TEST_SERVE", None)
+    child_env.pop("_RDST_TEST_WORKSPACE", None)
     return subprocess.run(
         ["sh", installer, *args],
         env=child_env,
@@ -196,16 +273,10 @@ def run_installer(env: dict[str, str], *args: str):
     )
 
 
-def test_embeds_verified_upstream_uv_checksums():
-    source = INSTALLER.read_text(encoding="utf-8")
-
-    for checksum in (
-        "71ef9de85db820749b3b12b7585624ee279e9c5afcbc6f8236bc3d628c4305b0",
-        "7a88155033cc469bba5bd5a24212e355eb92e3e2a276320b669ec576296c1e25",
-        "1873a77350f6621279ae1a0d2227f2bd8b67131598f14a7eb0ba2215d3da2c98",
-        "e12c4cda2fe8c305510a78380a88f2c32a27e90cdcd123cefd2873388f0ebb5f",
-    ):
-        assert checksum in source
+def test_pins_the_readyset_signing_team():
+    # The signing team is what makes a macOS archive verifiable beyond its
+    # checksum, which travels from the same host as the archive itself.
+    assert 'APPLE_TEAM_ID="MK994N7JPH"' in INSTALLER.read_text(encoding="utf-8")
 
 
 def test_installs_without_python_pip_or_sudo(installer_env):
@@ -220,14 +291,20 @@ def test_installs_without_python_pip_or_sudo(installer_env):
     active = home / "data" / "rdst" / "tools" / "current"
     assert active.is_symlink()
     assert active.resolve().name.startswith(".rdst-generation-")
-    assert (home / "data" / "rdst" / "bootstrap" / "bin" / "uv").is_file()
+    # No interpreter is provisioned any more: the archive is self-contained.
+    assert not (home / "data" / "rdst" / "bootstrap").exists()
+    assert not (home / "data" / "rdst" / "python").exists()
     state = (home / ".rdst" / "install-state").read_text(encoding="utf-8")
-    assert "method=readyset-uv" in state
-    assert "version 9.9.9" in result.stdout
+    assert "method=readyset-archive" in state
+    assert f"platform={platform_slug()}" in state
+    assert f"version {ARCHIVE_VERSION}" in result.stdout
 
 
 def test_installs_an_exact_version(installer_env):
     env, home = installer_env
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]), Path(env["_RDST_TEST_WORKSPACE"]), version="1.2.3"
+    )
 
     result = run_installer(env, "--version", "1.2.3", "--no-modify-path")
 
@@ -241,19 +318,20 @@ def test_installs_an_exact_version(installer_env):
     assert version.stdout.strip().endswith("1.2.3")
 
 
-def test_accepts_canonicalized_entrypoint_targets(installer_env):
+def test_rejects_an_archive_built_for_another_version(installer_env):
     env, home = installer_env
-    real_data = home / "real-data"
-    real_data.mkdir()
-    linked_data = home / "linked-data"
-    linked_data.symlink_to(real_data)
-    env["XDG_DATA_HOME"] = str(linked_data)
-    env["FAKE_UV_CANONICALIZE_TOOL_DIR"] = "1"
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        version="1.2.3",
+        reported_version="6.6.6",
+    )
 
-    result = run_installer(env, "--no-modify-path")
+    result = run_installer(env, "--version", "1.2.3", "--no-modify-path")
 
-    assert result.returncode == 0, result.stderr
-    assert (home / "bin" / "rdst").resolve().is_file()
+    assert result.returncode != 0
+    assert "reports 6.6.6, expected 1.2.3" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
 
 
 def test_rejects_a_flag_as_the_version(installer_env):
@@ -337,48 +415,254 @@ def test_refuses_a_symbolic_link_data_directory(installer_env):
     assert list(victim.iterdir()) == []
 
 
-def test_rejects_a_runtime_with_the_wrong_checksum(installer_env):
+def test_rejects_an_archive_with_the_wrong_checksum(installer_env):
     env, home = installer_env
-    installer = Path(env["_RDST_TEST_INSTALLER"])
-    installer.write_text(
-        re.sub(
-            r'UV_SHA256="[0-9a-f]{64}"',
-            'UV_SHA256="0000000000000000000000000000000000000000000000000000000000000000"',
-            installer.read_text(encoding="utf-8"),
-        ),
-        encoding="utf-8",
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        version="1.2.3",
+        checksum="0" * 64,
     )
 
-    result = run_installer(env, "--no-modify-path")
+    result = run_installer(env, "--version", "1.2.3", "--no-modify-path")
 
     assert result.returncode != 0
     assert "checksum verification failed" in result.stderr
     assert not (home / "bin" / "rdst").exists()
 
 
-def test_rejects_unexpected_package_entrypoints(installer_env):
+def test_rejects_a_malformed_published_checksum(installer_env):
     env, home = installer_env
-    env["FAKE_UV_EXTRA_ENTRYPOINT"] = "1"
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        version="1.2.3",
+        checksum="not-a-real-digest",
+    )
+
+    result = run_installer(env, "--version", "1.2.3", "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "checksum is malformed" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+
+
+def test_rejects_an_unexpected_archive_layout(installer_env):
+    env, home = installer_env
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        version="1.2.3",
+        root_name="somethingelse",
+    )
+
+    result = run_installer(env, "--version", "1.2.3", "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "unexpected layout" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+
+
+def test_rejects_an_archive_missing_the_mcp_entrypoint(installer_env):
+    env, home = installer_env
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        version="1.2.3",
+        entrypoints=("rdst",),
+    )
+
+    result = run_installer(env, "--version", "1.2.3", "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "missing the rdst-mcp entrypoint" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+
+
+@pytest.mark.parametrize("target", ["/etc/passwd", "../../../../../../etc/passwd"])
+def test_rejects_an_archive_whose_symlink_escapes(installer_env, target):
+    env, home = installer_env
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        version="1.2.3",
+        escaping_link=target,
+    )
+
+    result = run_installer(env, "--version", "1.2.3", "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "do not stay inside the install" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+
+
+@pytest.mark.parametrize(
+    "member", ["../owned", "rdst/../../owned", "/tmp/rdst-installer-owned"]
+)
+def test_rejects_an_archive_whose_member_leaves_the_install(installer_env, member, tmp_path):
+    # Unpacking is what would put the file there, and the signature can only be
+    # checked once the tree exists, so the names have to be refused first.
+    env, home = installer_env
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        version="1.2.3",
+        escaping_member=member,
+    )
+
+    result = run_installer(env, "--version", "1.2.3", "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "leaves the install" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+    # Nothing was unpacked, so the generation directory was never created.
+    assert not list((home / "data" / "rdst" / "tools").glob(".rdst-generation-*"))
+
+
+def test_reports_the_staged_version_around_unrelated_output(installer_env):
+    # The executable shares stdout and stderr with its libraries, so the check
+    # cannot assume the version is the last thing printed.
+    env, home = installer_env
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        version="1.2.3",
+        noisy=True,
+    )
+
+    result = run_installer(env, "--version", "1.2.3", "--no-modify-path")
+
+    assert result.returncode == 0, result.stderr
+    assert (home / "bin" / "rdst").exists()
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="signatures are only checked on macOS"
+)
+def test_rejects_an_archive_whose_signature_does_not_verify(installer_env):
+    env, home = installer_env
+    env["FAKE_CODESIGN_INVALID"] = "1"
 
     result = run_installer(env, "--no-modify-path")
 
     assert result.returncode != 0
-    assert "unexpected executable: python" in result.stderr
-    assert not (home / "bin" / "python").exists()
+    assert "signature verification failed" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="signatures are only checked on macOS"
+)
+def test_rejects_an_archive_signed_by_another_team(installer_env):
+    env, home = installer_env
+    env["FAKE_CODESIGN_TEAM"] = "0000000000"
+
+    result = run_installer(env, "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "not signed by Readyset" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="signatures are only checked on macOS"
+)
+def test_installs_an_adhoc_archive_when_a_build_verifies_its_own_artifacts(installer_env):
+    # A change build signs ad-hoc, and its smoke serves the archive from the
+    # host it is running on. That pairing is what lets the smoke cover this
+    # script before a release signs anything.
+    env, home = installer_env
+    env["RDST_INSTALLER_BASE_URL"] = LOCAL_BASE_URL
+    env["FAKE_CODESIGN_TEAM"] = ""
+    env["RDST_ALLOW_ADHOC_SIGNATURE"] = "1"
+
+    result = run_installer(env, "--no-modify-path")
+
+    assert result.returncode == 0, result.stderr
+    assert "Readyset has not signed" in result.stderr
+    assert (home / "bin" / "rdst").exists()
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="signatures are only checked on macOS"
+)
+def test_an_adhoc_archive_still_verifies_against_its_own_signature(installer_env):
+    # Whose signature the tree carries is the only thing the opt-out relaxes.
+    env, home = installer_env
+    env["RDST_INSTALLER_BASE_URL"] = LOCAL_BASE_URL
+    env["RDST_ALLOW_ADHOC_SIGNATURE"] = "1"
+    env["FAKE_CODESIGN_INVALID"] = "1"
+
+    result = run_installer(env, "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "signature verification failed" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="signatures are only checked on macOS"
+)
+def test_the_adhoc_opt_out_cannot_reach_a_published_install(installer_env):
+    # The opt-out is reachable only from a transport a published install never
+    # uses, so asking for it over https changes nothing.
+    env, home = installer_env
+    env["FAKE_CODESIGN_TEAM"] = ""
+    env["RDST_ALLOW_ADHOC_SIGNATURE"] = "1"
+
+    result = run_installer(env, "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "not signed by Readyset" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="signatures are only checked on macOS"
+)
+def test_rejects_an_archive_whose_library_is_signed_by_another_team(installer_env):
+    # The frozen CLI loads these from its own tree with library validation
+    # disabled, so a swapped library is never re-checked at run time. Verifying
+    # only the entrypoint would leave it resting on the checksum, which travels
+    # from the same host as the archive.
+    env, home = installer_env
+    env["FAKE_CODESIGN_FOREIGN_FILE"] = "libpython.so"
+
+    result = run_installer(env, "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "not signed by Readyset" in result.stderr
+    assert "libpython.so" in result.stderr
+    assert not (home / "bin" / "rdst").exists()
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin", reason="signatures are only checked on macOS"
+)
+def test_rejects_an_archive_whose_executable_is_not_signed_code(installer_env):
+    # An archive whose entrypoint is not Mach-O has nothing for codesign to
+    # check, so the whole signature gate would pass vacuously.
+    env, home = installer_env
+    env["FAKE_FILE_NO_MACH_O"] = "1"
+
+    result = run_installer(env, "--no-modify-path")
+
+    assert result.returncode != 0
+    assert "not signed code" in result.stderr
     assert not (home / "bin" / "rdst").exists()
 
 
 def test_failed_install_can_be_uninstalled(installer_env):
     env, home = installer_env
-    env["FAKE_UV_FAIL_INSTALL"] = "1"
+    env["FAKE_DOWNLOAD_FAIL"] = "1"
 
     failed = run_installer(env, "--no-modify-path")
 
-    assert failed.returncode == 42
+    assert failed.returncode != 0
     assert (home / ".rdst" / "install-state").is_file()
     assert (home / "data" / "rdst" / ".rdst-managed").is_file()
 
-    env.pop("FAKE_UV_FAIL_INSTALL")
+    env.pop("FAKE_DOWNLOAD_FAIL")
     uninstalled = run_installer(env, "--uninstall")
     assert uninstalled.returncode == 0, uninstalled.stderr
     assert not (home / "data" / "rdst").exists()
@@ -401,11 +685,17 @@ def test_failed_rerun_keeps_the_active_generation(installer_env):
     assert installed.returncode == 0, installed.stderr
     active = home / "data" / "rdst" / "tools" / "current"
     original_generation = active.resolve()
-    env["FAKE_UV_FAIL_AFTER_WRITE"] = "1"
+    # Republish the same version as an archive that unpacks but fails
+    # verification, so the failure lands after the new generation exists.
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        entrypoints=("rdst",),
+    )
 
     failed = run_installer(env, "--no-modify-path")
 
-    assert failed.returncode == 43
+    assert failed.returncode != 0
     assert active.resolve() == original_generation
     version = subprocess.run(
         [str(home / "bin" / "rdst"), "--version"],
@@ -413,7 +703,8 @@ def test_failed_rerun_keeps_the_active_generation(installer_env):
         capture_output=True,
         check=True,
     )
-    assert version.stdout.strip().endswith("9.9.9")
+    assert version.stdout.strip().endswith(ARCHIVE_VERSION)
+    # The abandoned generation is cleaned up, leaving only the active one.
     assert list((active.parent).glob(".rdst-generation-*")) == [original_generation]
 
 
@@ -423,12 +714,16 @@ def test_invalid_rerun_candidate_keeps_the_active_generation(installer_env):
     assert installed.returncode == 0, installed.stderr
     active = home / "data" / "rdst" / "tools" / "current"
     original_generation = active.resolve()
-    env["FAKE_UV_EXTRA_ENTRYPOINT"] = "1"
+    publish_archive(
+        Path(env["_RDST_TEST_SERVE"]),
+        Path(env["_RDST_TEST_WORKSPACE"]),
+        escaping_link="/etc/passwd",
+    )
 
     failed = run_installer(env, "--no-modify-path")
 
     assert failed.returncode != 0
-    assert "unexpected executable: python" in failed.stderr
+    assert "do not stay inside the install" in failed.stderr
     assert active.resolve() == original_generation
     assert (home / "bin" / "rdst").resolve().is_file()
 
@@ -477,7 +772,6 @@ def test_paths_with_spaces_are_supported(installer_env):
             "HOME": str(home),
             "XDG_BIN_HOME": str(home / "bin"),
             "XDG_DATA_HOME": str(home / "data"),
-            "XDG_CACHE_HOME": str(home / "cache"),
         }
     )
 
@@ -486,8 +780,9 @@ def test_paths_with_spaces_are_supported(installer_env):
 
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
-    assert "Installing the RDST runtime manager" not in second.stdout
-    assert "version 9.9.9" in second.stdout
+    assert f"version {ARCHIVE_VERSION}" in second.stdout
+    assert (home / "bin" / "rdst").is_symlink()
+    assert (home / "bin" / "rdst-mcp").resolve().is_file()
 
 
 def test_path_profile_update_is_idempotent(installer_env):
@@ -623,7 +918,7 @@ def test_existing_operation_lock_blocks_install(installer_env):
 def test_concurrent_install_is_rejected_without_disturbing_the_owner(installer_env):
     env, home = installer_env
     wait_file = home / "wait"
-    first_env = env | {"FAKE_UV_WAIT_FILE": str(wait_file)}
+    first_env = env | {"FAKE_DOWNLOAD_WAIT_FILE": str(wait_file)}
     first = subprocess.Popen(
         ["sh", env["_RDST_TEST_INSTALLER"], "--no-modify-path"],
         env=first_env,
@@ -637,7 +932,7 @@ def test_concurrent_install_is_rejected_without_disturbing_the_owner(installer_e
         time.sleep(0.01)
     else:
         first.kill()
-        pytest.fail("first installer did not reach the uv operation")
+        pytest.fail("first installer did not reach the download")
 
     second = run_installer(env, "--no-modify-path")
     Path(f"{wait_file}.release").touch()

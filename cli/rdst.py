@@ -1098,6 +1098,12 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
         return RdstResult(True, "")
 
 
+def _invoked_as_mcp_server() -> bool:
+    """Whether this process was started through the rdst-mcp entrypoint."""
+    invoked = sys.argv[0] if sys.argv else ""
+    return os.path.basename(invoked) == "rdst-mcp"
+
+
 def main():
     configure_utf8_stdio()
     if sys.argv[1:] == ["_mcp_server"]:
@@ -1105,6 +1111,17 @@ def main():
 
         mcp_main()
         return
+
+    # A frozen build is a single executable, so the installer publishes
+    # rdst-mcp as a link to it and the invoked name selects the entrypoint.
+    # Source installs declare rdst-mcp as its own console script, which routes
+    # to mcp_server:main directly and never reaches here.
+    if _invoked_as_mcp_server():
+        import mcp_server
+
+        mcp_server.main()
+        return
+
     try:
         if len(sys.argv) == 2 and sys.argv[1] in ("--help", "-h", "help"):
             print_rich_help()

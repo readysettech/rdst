@@ -66,6 +66,10 @@ const PYINSTALLER_ARGS = [
   "--collect-all=nacl",
   "--collect-all=bcrypt",
   "--collect-all=cryptography",
+  // Slack's socket mode picks a client implementation from whichever of its
+  // backends imported, so the choice is only made at run time.
+  "--collect-all=slack_bolt",
+  "--collect-all=slack_sdk",
   "--collect-submodules=uvicorn",
   "--collect-submodules=sse_starlette",
   "--collect-submodules=sqlglot",
@@ -73,6 +77,11 @@ const PYINSTALLER_ARGS = [
   // SQL) that features/shared load relative to __file__.
   "--collect-data=features",
   "--collect-data=shared",
+  // RDST resolves some of its own modules through import_module, which the
+  // analysis cannot follow, so every first-party module ships whether or not
+  // an import statement reaches it.
+  "--collect-submodules=features",
+  "--collect-submodules=shared",
   "--hidden-import=uvicorn.logging",
   "--hidden-import=uvicorn.loops.auto",
   "--hidden-import=uvicorn.protocols.http.auto",
