@@ -299,6 +299,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     register_error_handlers(app)
 
     from features.agent.api import routes as agent
+    from features.allowlist.api import routes as allowlist
     from features.analyze.api import routes as analyze
     from features.ask.api import routes as ask
     from features.audit.api import routes as audit
@@ -314,12 +315,14 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     from features.scan.api import routes as scan
     from features.schema.api import routes as schema
     from features.top.api import routes as top
+    from features.tunnel.api import routes as tunnel
     from features.trial.api import routes as trial
     from features.schema.api import semantic_layer_routes as semantic_layer
     from features.qpdemo.api import routes as qpdemo
     from shared.api.routes import browse, dev, env, report, runs, settings, status
 
     app.include_router(agent.router, prefix="/api")
+    app.include_router(allowlist.router, prefix="/api")
     app.include_router(analyze.router, prefix="/api")
     app.include_router(audit.router, prefix="/api", tags=["audit"])
     app.include_router(bootstrap.router, prefix="/api", tags=["bootstrap"])
@@ -336,6 +339,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(schema.router, prefix="/api")
     app.include_router(registry.router, prefix="/api")
     app.include_router(top.router, prefix="/api", tags=["top"])
+    app.include_router(tunnel.router, prefix="/api", tags=["tunnel"])
     app.include_router(init.router, prefix="/api", tags=["init"])
     app.include_router(semantic_layer.router, prefix="/api", tags=["semantic-layer"])
     app.include_router(report.router, prefix="/api", tags=["report"])

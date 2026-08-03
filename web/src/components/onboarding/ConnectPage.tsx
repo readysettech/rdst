@@ -84,7 +84,7 @@ export function ConnectPage({
   const navigate = useNavigate()
   const router = useRouter()
   const queryClient = useQueryClient()
-  const { addTarget, setDefaultTarget, loading } = useConfigure()
+  const { addTarget, setDefaultTarget, cancel, loading } = useConfigure()
   const { completeInit } = useOnboarding()
 
   const leave = () => {
@@ -126,6 +126,7 @@ export function ConnectPage({
   }
 
   const skip = () => {
+    cancel()
     // "I'll do it later" goes Home, which is always reachable. Returning to
     // the page that routed here would just bounce back when it still has no
     // target (e.g. a feature page needing a database).
@@ -187,9 +188,8 @@ export function ConnectPage({
             level="body-medium"
             className="text-content-layout-2 leading-relaxed"
           >
-            RDST — the Readyset Data &amp; SQL Toolkit. Point it at your
-            Postgres or MySQL to find slow queries, health issues, and caching
-            wins.
+            Use a read-only database user. RDST runs EXPLAIN, schema, index, and
+            performance-statistics queries against PostgreSQL or MySQL.
           </Text>
         </VStack>
 
@@ -220,6 +220,7 @@ export function ConnectPage({
         <div className="rounded-[1.25rem] shadow-elevation-1">
           <ConfigureForm
             onSubmit={handleSubmit}
+            onCancel={skip}
             isLoading={loading}
             submitLabel="Test & connect"
             submitSize="large"

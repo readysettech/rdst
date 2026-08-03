@@ -212,22 +212,17 @@ def _collect_postgres_schema(config: dict, target: str) -> tuple[Optional[Schema
     """Collect schema from PostgreSQL database."""
     try:
         import psycopg2
-        from shared.db_connection import resolve_connection_params
+        from shared.db_connection import (
+            postgres_connection_kwargs,
+            resolve_connection_params,
+        )
 
-        params = resolve_connection_params(target_config=config)
+        params = resolve_connection_params(target=target, target_config=config)
 
         if not all([params['host'], params['user'], params['database']]):
             return None, "Schema information: Missing connection parameters"
 
-        conn = psycopg2.connect(
-            host=params['host'],
-            port=params['port'],
-            user=params['user'],
-            password=params['password'],
-            database=params['database'],
-            connect_timeout=10,
-            sslmode=params['sslmode']
-        )
+        conn = psycopg2.connect(**postgres_connection_kwargs(params))
 
         schema_info = SchemaInfo(target=target, db_type=DbType.POSTGRESQL, source=SchemaSource.DATABASE)
         parts = []
@@ -284,22 +279,17 @@ def _collect_mysql_schema(config: dict, target: str) -> tuple[Optional[SchemaInf
     """Collect schema from MySQL database."""
     try:
         import pymysql
-        from shared.db_connection import resolve_connection_params
+        from shared.db_connection import (
+            create_mysql_connection_from_params,
+            resolve_connection_params,
+        )
 
-        params = resolve_connection_params(target_config=config)
+        params = resolve_connection_params(target=target, target_config=config)
 
         if not all([params['host'], params['user'], params['database']]):
             return None, "Schema information: Missing connection parameters"
 
-        conn = pymysql.connect(
-            host=params['host'],
-            port=params['port'],
-            user=params['user'],
-            password=params['password'],
-            database=params['database'],
-            connect_timeout=10,
-            ssl={'ssl': {}} if params['tls'] else None
-        )
+        conn = create_mysql_connection_from_params(params)
 
         schema_info = SchemaInfo(target=target, db_type=DbType.MYSQL, source=SchemaSource.DATABASE)
         parts = []

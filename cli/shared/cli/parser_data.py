@@ -71,7 +71,7 @@ Each target has a name, connection details, and an environment variable for the 
                 args=[
                     ArgDef(
                         "--connection-string",
-                        help="Database connection string (postgresql://user:pass@host:port/db or mysql://...)",
+                        help="Database connection string (postgresql://user@host:port/db or mysql://...)",
                     ),
                     ArgDef("--target", aliases=["--name"], help="Target name"),
                     ArgDef(
@@ -86,6 +86,10 @@ Each target has a name, connection details, and an environment variable for the 
                     ArgDef("--user", help="Database user (overrides connection string)"),
                     ArgDef("--database", help="Database name (overrides connection string)"),
                     ArgDef("--password-env", help="Environment variable for password"),
+                    ArgDef("--ssh-host", help="SSH jump host or ~/.ssh/config Host alias"),
+                    ArgDef("--ssh-port", type=int, help="SSH jump-host port (default: 22)"),
+                    ArgDef("--ssh-user", help="SSH user on the jump host"),
+                    ArgDef("--ssh-key", help="Path to an SSH private key"),
                     ArgDef("--read-only", action="store_true", help="Read-only connection"),
                     ArgDef(
                         "--proxy",
@@ -130,7 +134,7 @@ Each target has a name, connection details, and an environment variable for the 
                     ArgDef("name", nargs="?", help="Target name to edit"),
                     ArgDef(
                         "--connection-string",
-                        help="Database connection string (postgresql://user:pass@host:port/db or mysql://...)",
+                        help="Database connection string (postgresql://user@host:port/db or mysql://...)",
                     ),
                     ArgDef("--target", aliases=["--name"], help="Target name"),
                     ArgDef(
@@ -145,6 +149,10 @@ Each target has a name, connection details, and an environment variable for the 
                     ArgDef("--user", help="Database user (overrides connection string)"),
                     ArgDef("--database", help="Database name (overrides connection string)"),
                     ArgDef("--password-env", help="Environment variable for password"),
+                    ArgDef("--ssh-host", help="SSH jump host or ~/.ssh/config Host alias"),
+                    ArgDef("--ssh-port", type=int, help="SSH jump-host port (default: 22)"),
+                    ArgDef("--ssh-user", help="SSH user on the jump host"),
+                    ArgDef("--ssh-key", help="Path to an SSH private key"),
                     ArgDef("--read-only", action="store_true", help="Read-only connection"),
                     ArgDef(
                         "--proxy",
@@ -229,6 +237,43 @@ Each target has a name, connection details, and an environment variable for the 
             ("rdst configure list", "List all targets"),
             ("rdst configure test prod", "Test connection"),
             ("rdst configure default prod", "Set default target"),
+        ],
+    ),
+    "tunnel": CommandDef(
+        name="tunnel",
+        short_help="List, close, and test SSH tunnels",
+        description="List or close tunnels held by the local RDST web server, or test a target's SSH connection.",
+        subcommand_dest="tunnel_subcommand",
+        subcommand_defs=[
+            SubcommandDef(
+                name="list",
+                help="List tunnels held by the local RDST web server",
+                args=[],
+            ),
+            SubcommandDef(
+                name="close",
+                help="Close a target tunnel or all tunnels",
+                args=[
+                    ArgDef("target", nargs="?", help="Target whose tunnel should close"),
+                    ArgDef("--all", action="store_true", dest="close_all", help="Close all tunnels"),
+                ],
+            ),
+            SubcommandDef(
+                name="test",
+                help="Open a tunnel and test database connectivity through it",
+                args=[ArgDef("target", help="Configured target to test")],
+            ),
+        ],
+        subcommands=[
+            ("list", "List web-server tunnels"),
+            ("close", "Close a web-server tunnel"),
+            ("test", "Test SSH and database connectivity"),
+        ],
+        examples=[
+            ("rdst tunnel list", "List tunnels"),
+            ("rdst tunnel test prod", "Test a target through its tunnel"),
+            ("rdst tunnel close prod", "Close one tunnel"),
+            ("rdst tunnel close --all", "Close all tunnels"),
         ],
     ),
     "top": CommandDef(
@@ -1553,6 +1598,7 @@ Modes:
 
 COMMAND_ORDER = [
     "configure",
+    "tunnel",
     "top",
     "analyze",
     "ask",
@@ -1576,7 +1622,7 @@ COMMAND_ORDER = [
 
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ("Analysis", ["top", "analyze", "ask", "agent"]),
-    ("Configuration", ["init", "configure", "schema", "query", "guard"]),
+    ("Configuration", ["init", "configure", "tunnel", "schema", "query", "guard"]),
     ("Fleet", ["fleet", "audit"]),
     ("Integrations", ["claude", "slack", "web"]),
     ("Other", ["demo", "scan", "report", "help", "version", "update"]),

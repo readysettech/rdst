@@ -1,4 +1,5 @@
 import {
+  acceptExplainAnalyzeConsent,
   clearQueryRegistry,
   configureTestTarget,
   expect,
@@ -59,6 +60,7 @@ const liveQuery = {
 async function prepareTopPage(page: Parameters<typeof configureTestTarget>[0]) {
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
+  await acceptExplainAnalyzeConsent(page)
   await page.goto('/top')
   await expect(
     page.getByRole('heading', { name: 'Slow Queries' })
@@ -236,6 +238,7 @@ test('shows a realtime connection failure and retries the stream', async ({
         events: [
           {
             type: 'error',
+            code: 'database_connection_failed',
             message: 'Unable to connect to database telemetry',
             stage: 'connect',
           },
@@ -326,10 +329,16 @@ test('shows a realtime connection failure and retries the stream', async ({
     target: 'e2e-guard',
   })
   await expect(
+    page.getByText('Unable to connect to database telemetry', { exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Open connection settings' })
+  ).toBeVisible()
+  await expect(
     page.getByText('Error: Unable to connect to database telemetry', {
       exact: true,
     })
-  ).toBeVisible()
+  ).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Start live monitoring' }).click()
   const liveRow = page.getByTestId('top-query-row')

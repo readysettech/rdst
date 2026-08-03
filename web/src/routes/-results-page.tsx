@@ -5,6 +5,8 @@
 // it from here. See evidence/gates-final.md §Defect D-1.
 
 import { Button } from '@rs/ui-new/button'
+import { BaseInputCheckbox } from '@rs/ui-new/base-input-checkbox'
+import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
 import { CopyButton } from '@rs/ui-new/copy-button'
 import { Icon } from '@rs/ui-new/icon'
 import { m } from '@rs/ui-new/motion'
@@ -29,6 +31,16 @@ import type { ResultsSearch } from './results'
 
 interface ResultsPageProps {
   search: ResultsSearch
+}
+
+const ANALYZE_CONSENT_KEY = 'rdst.explain-analyze-consent'
+
+function hasAnalyzeConsent() {
+  try {
+    return window.localStorage.getItem(ANALYZE_CONSENT_KEY) === 'accepted'
+  } catch {
+    return false
+  }
 }
 
 export function ResultsPage({ search }: ResultsPageProps) {
@@ -57,6 +69,8 @@ export function ResultsPage({ search }: ResultsPageProps) {
   const passwordLock = useTargetPasswordLock(target)
   const [isInteractiveOpen, setIsInteractiveOpen] = useState(false)
   const [showTrialDialog, setShowTrialDialog] = useState(false)
+  const [showAnalyzeConsent, setShowAnalyzeConsent] = useState(false)
+  const [skipAnalyzeConsent, setSkipAnalyzeConsent] = useState(false)
 
   // Hand the diagnosed query directly to Comparisons, focused on its row.
   // Switch the selected target first because the query list is target-scoped.
@@ -84,10 +98,28 @@ export function ResultsPage({ search }: ResultsPageProps) {
   )
 
   const handleRetryAnalyze = useCallback(() => {
-    if (query) {
+    if (!query || passwordLock.isLocked) return
+    if (hasAnalyzeConsent()) {
+      analyze({ query, target, fast })
+      return
+    }
+    setShowAnalyzeConsent(true)
+  }, [analyze, query, target, fast, passwordLock.isLocked])
+
+  const handleConfirmAnalyze = useCallback(() => {
+    if (skipAnalyzeConsent) {
+      try {
+        window.localStorage.setItem(ANALYZE_CONSENT_KEY, 'accepted')
+      } catch {
+        // Storage can be unavailable in private browsing; consent still applies
+        // to this run.
+      }
+    }
+    setShowAnalyzeConsent(false)
+    if (query && !passwordLock.isLocked) {
       analyze({ query, target, fast })
     }
-  }, [analyze, query, target, fast])
+  }, [analyze, fast, passwordLock.isLocked, query, skipAnalyzeConsent, target])
   const [hasExistingChat, setHasExistingChat] = useState(false)
 
   // Check if query has parameters that need substitution
@@ -124,9 +156,9 @@ export function ResultsPage({ search }: ResultsPageProps) {
   useEffect(() => {
     // Only analyze if query doesn't have params (or params were already substituted)
     if (query && !queryHasParams && !passwordLock.isLocked) {
-      analyze({ query, target, fast })
+      handleRetryAnalyze()
     }
-  }, [query, target, fast, analyze, queryHasParams, passwordLock.isLocked])
+  }, [query, queryHasParams, passwordLock.isLocked, handleRetryAnalyze])
 
   const handleParamSubmit = useCallback(
     (substitutedQuery: string) => {
@@ -276,6 +308,36 @@ export function ResultsPage({ search }: ResultsPageProps) {
           setShowTrialDialog(false)
         }}
       />
+
+      <ConfirmDialog
+        isOpen={showAnalyzeConsent}
+        onClose={() => {
+          setShowAnalyzeConsent(false)
+          setSkipAnalyzeConsent(false)
+        }}
+        onConfirm={handleConfirmAnalyze}
+        title="Run EXPLAIN ANALYZE?"
+        notice={{
+          accent: 'warning',
+          icon: 'alert',
+          message:
+            'Analyze runs EXPLAIN ANALYZE, which executes your query once against the database to measure it. Cancel if this query should not be executed.',
+        }}
+        confirmLabel="Run analyze"
+        confirmVariant="primary"
+        cancelLabel="Cancel"
+      >
+        <HStack className="gap-3 items-center">
+          <BaseInputCheckbox
+            checked={skipAnalyzeConsent}
+            onCheckedChange={(checked) => setSkipAnalyzeConsent(checked === true)}
+            aria-label="Don't ask again"
+          />
+          <Text level="body-small" className="text-content-layout-2">
+            Don't ask again
+          </Text>
+        </HStack>
+      </ConfirmDialog>
 
       {/* Interactive panel */}
       {state === 'complete' && results?.query_hash && (

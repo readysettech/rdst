@@ -11,6 +11,7 @@ import { m } from '@rs/ui-new/motion'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
+import { toast } from '@rs/ui-new/use-toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createFileRoute,
@@ -46,6 +47,8 @@ import {
 } from '../lib/backgroundRuns'
 import { classifyError, TRIAL_EXHAUSTED_MESSAGE } from '../lib/errorContract'
 import { invalidateTargetQueries } from '../lib/targetQueries'
+import { isSshErrorCategory, sshErrorCopy } from '../lib/sshErrors'
+import { fetchTunnelStatuses, testTunnel } from '../lib/tunnels'
 import {
   invalidateTrialRelatedQueries,
   useTrialSource,
@@ -120,8 +123,8 @@ function keyValidationLabel(v: AnthropicKeyValidation): string {
   const isTrial = v.source === 'trial' || v.source === 'trial_exhausted'
   if (v.valid) {
     return isTrial
-      ? 'Trial token accepted — validated by the Readyset trial service.'
-      : 'Key is valid — Anthropic accepted it.'
+      ? 'Trial token verified.'
+      : 'API key verified.'
   }
   switch (v.reason) {
     case 'exhausted':
@@ -204,6 +207,8 @@ function ConfigurePage() {
   }
   // Which connection is being tested (drives the inline per-row spinner).
   const [testingTarget, setTestingTarget] = useState<string | null>(null)
+  const [testingTunnel, setTestingTunnel] = useState<string | null>(null)
+  const [testingForm, setTestingForm] = useState(false)
   const deepLinkHandledRef = useRef(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerTab, setDrawerTab] = useState<AddTab>('aws')
@@ -217,7 +222,10 @@ function ConfigurePage() {
     updateTarget,
     removeTarget,
     setDefaultTarget,
+    testConnection,
+    cancel: cancelConfigure,
     targets,
+    connectionTestResult,
     error,
     loading,
   } = useConfigure()
@@ -256,6 +264,21 @@ function ConfigurePage() {
     error: connectivityError,
   } = useFleetStatus()
   const checking = connectivityState === 'running'
+  const hasSshTargets = targets.some((target) => Boolean(target.ssh))
+  const tunnelStatusQuery = useQuery({
+    queryKey: ['tunnel-status'],
+    queryFn: fetchTunnelStatuses,
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+    enabled: hasSshTargets,
+  })
+  const tunnelStatuses = useMemo(
+    () =>
+      Object.fromEntries(
+        (tunnelStatusQuery.data ?? []).map((status) => [status.target, status])
+      ),
+    [tunnelStatusQuery.data]
+  )
   // The connectivity endpoint only knows fleet targets, so Readyset-proxy rows
   // are never checkable: name them explicitly rather than sweeping blind. Until
   // the fleet list answers, every row stays offerable so a slow or failing
@@ -271,10 +294,14 @@ function ConfigurePage() {
     () => (fleetTargets ? new Set(checkableNames) : undefined),
     [fleetTargets, checkableNames]
   )
-  const checkAll = useCallback(() => {
+  const refreshTunnelStatuses = useCallback(async () => {
+    if (hasSshTargets) await tunnelStatusQuery.refetch()
+  }, [hasSshTargets, tunnelStatusQuery.refetch])
+  const checkAll = useCallback(async () => {
     if (checkableNames.length === 0) return
-    void check(undefined, checkableNames)
-  }, [check, checkableNames])
+    await check(undefined, checkableNames)
+    await refreshTunnelStatuses()
+  }, [check, checkableNames, refreshTunnelStatuses])
 
   // Sweep connectivity once per mount, as soon as the targets are known.
   const didAutoCheck = useRef(false)
@@ -461,6 +488,7 @@ function ConfigurePage() {
       // the sidebar chip tracks it.
       startBootstrapRun(data.name)
     }
+    if (data.ssh || editingTarget?.ssh) await tunnelStatusQuery.refetch()
     setShowForm(false)
     setEditingTarget(null)
     // If we arrived here to fix a connection, resume the feature we came from.
@@ -468,8 +496,21 @@ function ConfigurePage() {
   }
 
   const handleFormCancel = () => {
+    cancelConfigure()
+    setTestingForm(false)
     setShowForm(false)
     setEditingTarget(null)
+  }
+
+  const handleFormTest = async (data: ConfigureFormData) => {
+    setTestingForm(true)
+    try {
+      const result = await testConnection(data.name.trim() || 'form-test', data)
+      await tunnelStatusQuery.refetch()
+      return result?.connected ?? false
+    } finally {
+      setTestingForm(false)
+    }
   }
 
   // Confirmation is handled by the styled ConfirmDialog inside the list.
@@ -486,7 +527,39 @@ function ConfigurePage() {
     try {
       await check(undefined, [targetName])
     } finally {
+      await refreshTunnelStatuses()
       setTestingTarget(null)
+    }
+  }
+
+  const handleTunnelTest = async (targetName: string) => {
+    setTestingTunnel(targetName)
+    try {
+      const result = await testTunnel(targetName)
+      await tunnelStatusQuery.refetch()
+      toast({
+        title: result.ok ? 'Tunnel test passed' : 'Tunnel test failed',
+        description:
+          !result.ok && isSshErrorCategory(result.category)
+            ? sshErrorCopy({
+                category: result.category,
+                message: result.message,
+                target: targetName,
+              })
+            : result.message,
+        variant: result.ok ? 'positive' : 'negative',
+      })
+    } catch (caught) {
+      toast({
+        title: 'Tunnel test failed',
+        description:
+          caught instanceof Error
+            ? caught.message
+            : 'Could not test the tunnel.',
+        variant: 'negative',
+      })
+    } finally {
+      setTestingTunnel(null)
     }
   }
 
@@ -504,6 +577,7 @@ function ConfigurePage() {
     setDrawerTab(tab)
     setDrawerOpen(true)
   }
+  const openProviderPicker = () => setDrawerOpen(true)
 
   const passwordDialogRequirements = useMemo(
     () =>
@@ -533,14 +607,21 @@ function ConfigurePage() {
       onDelete={handleDelete}
       onSetDefault={handleSetDefault}
       onAdd={handleAddClick}
-      onDiscover={() => openDrawer('aws')}
+      onDiscover={openProviderPicker}
       onMoveToGroup={setMoveTarget}
       isLoading={loading}
       connectivity={connectivity}
       checkableTargets={checkableTargets}
       testingTargetName={testingTarget}
-      connectivityBusy={checking}
       onSetPassword={(target) => setPasswordDialogTarget(target.name)}
+      onRetryConnection={async (target) => {
+        const checked = await check(undefined, [target.name])
+        await refreshTunnelStatuses()
+        return checked[target.name]?.status === 'ok'
+      }}
+      tunnelStatuses={tunnelStatuses}
+      testingTunnelName={testingTunnel}
+      onTestTunnel={(name) => void handleTunnelTest(name)}
     />
   )
 
@@ -555,6 +636,7 @@ function ConfigurePage() {
         password_env: editingTarget.password_env,
         tls: editingTarget.tls,
         read_only: editingTarget.read_only,
+        ssh: editingTarget.ssh,
       }
     : undefined
 
@@ -599,7 +681,7 @@ function ConfigurePage() {
           className="pt-8 pb-10"
           id="connections"
           title="Database connections"
-          description="The databases RDST can analyze. Add one and test it connects."
+          description="Add databases for RDST to analyze with a read-only user."
           action={
             !showForm ? (
               <HStack className="gap-2 items-center flex-wrap">
@@ -617,7 +699,7 @@ function ConfigurePage() {
                   icon="search"
                   iconPosition="left"
                   label="Discover & import"
-                  onClick={() => openDrawer('aws')}
+                  onClick={openProviderPicker}
                 />
               </HStack>
             ) : undefined
@@ -703,8 +785,11 @@ function ConfigurePage() {
                   }
                   initialData={editingInitialData}
                   onSubmit={handleFormSubmit}
+                  onTest={handleFormTest}
                   onCancel={handleFormCancel}
                   isLoading={loading}
+                  isTesting={testingForm}
+                  testResult={connectionTestResult}
                 />
               </m.div>
             </Show>
@@ -935,7 +1020,7 @@ function ConfigurePage() {
                     >
                       Deletes {dataDirectory} and stored keys. Your trial
                       registration is kept server-side — re-enter your email to
-                      recover your token.
+                      recover your token. ~/.ssh is unchanged.
                     </Text>
                   ) : null}
                 </HStack>
@@ -978,7 +1063,12 @@ function ConfigurePage() {
         onTargetsAdded={() => void listTargets()}
         onCredentialsClosed={checkAll}
         onRecheckTargets={(names) => {
-          if (names.length > 0) void check(undefined, names)
+          if (names.length > 0) {
+            void (async () => {
+              await check(undefined, names)
+              await refreshTunnelStatuses()
+            })()
+          }
         }}
       />
 

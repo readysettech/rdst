@@ -7,6 +7,9 @@ declare global {
     rdstDesktop?: {
       isDesktop: true
       platform: NodeJS.Platform
+      oauth: {
+        registerProtocol: () => Promise<boolean>
+      }
       windowControls: {
         minimize: () => void
         toggleMaximize: () => void

@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 
 import requests
 
+from shared.password_resolver import derive_password_env as password_env_for
 from shared.secret_store_service import SecretStoreService
 
 REQUEST_TIMEOUT = 10.0
@@ -139,11 +140,6 @@ def unique_name(name: str, used_names: set[str], suffix: str) -> str:
         name = f"{name}-{suffix}"
     used_names.add(name)
     return name
-
-
-def password_env_for(name: str) -> str:
-    """The environment variable a discovered target reads its password from."""
-    return re.sub(r"[^A-Z0-9]", "_", (name or "").upper()) + "_PASSWORD"
 
 
 def provider_status(

@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fleetStatusStub, makeTarget, renderWithClient } from '@/test-utils'
-import { setEnvSecret } from '../../lib/api'
 import {
   updateFleetTargetCredentials,
   useFleetStatus,
@@ -9,7 +8,6 @@ import {
 import type { FleetMember } from '../../types/fleet'
 import { CredentialsStep } from './CredentialsStep'
 
-vi.mock('../../lib/api', () => ({ setEnvSecret: vi.fn() }))
 vi.mock('../../lib/useFleet', () => ({
   updateFleetTargetCredentials: vi.fn(),
   useFleetStatus: vi.fn(),
@@ -53,13 +51,6 @@ describe('CredentialsStep', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(setEnvSecret).mockImplementation(async ({ name }) => ({
-      success: true,
-      name,
-      persisted: true,
-      session_only: false,
-      message: null,
-    }))
     vi.mocked(useFleetStatus).mockReturnValue(
       fleetStatusStub({ check }) as ReturnType<typeof useFleetStatus>
     )
@@ -78,23 +69,29 @@ describe('CredentialsStep', () => {
     ).toBe('orders_user')
     fillAndSubmit(container)
 
-    await waitFor(() => expect(setEnvSecret).toHaveBeenCalledTimes(2))
-    // Distinct imported env names are kept as-is.
-    expect(setEnvSecret).toHaveBeenNthCalledWith(1, {
-      name: 'RDST_ORDERS_PASSWORD',
-      value: 'orders-secret',
-      persist: true,
-    })
-    expect(setEnvSecret).toHaveBeenNthCalledWith(2, {
-      name: 'RDST_USERS_PASSWORD',
-      value: 'users-secret',
-      persist: true,
-    })
-    expect(updateFleetTargetCredentials).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(updateFleetTargetCredentials).toHaveBeenCalledTimes(2)
+    )
+    expect(updateFleetTargetCredentials).toHaveBeenNthCalledWith(
+      1,
+      targets[0],
+      'orders_user',
+      'orders-secret',
+      targets[0].database,
+      undefined
+    )
+    expect(updateFleetTargetCredentials).toHaveBeenNthCalledWith(
+      2,
+      targets[1],
+      'users_user',
+      'users-secret',
+      targets[1].database,
+      undefined
+    )
     expect(check).toHaveBeenCalledWith(undefined, ['orders', 'users'])
   })
 
-  it('splits a shared imported password env into per-target names', async () => {
+  it('sends passwords without exposing shared imported environment names', async () => {
     const sharedEnvTargets = targets.map((target) => ({
       ...target,
       password_env: 'FLEET_PASS',
@@ -110,24 +107,68 @@ describe('CredentialsStep', () => {
       1,
       sharedEnvTargets[0],
       'orders_user',
-      'RDST_ORDERS_1_PASSWORD'
+      'orders-secret',
+      sharedEnvTargets[0].database,
+      undefined
     )
     expect(updateFleetTargetCredentials).toHaveBeenNthCalledWith(
       2,
       sharedEnvTargets[1],
       'users_user',
-      'RDST_USERS_2_PASSWORD'
+      'users-secret',
+      sharedEnvTargets[1].database,
+      undefined
     )
-    expect(setEnvSecret).toHaveBeenNthCalledWith(1, {
-      name: 'RDST_ORDERS_1_PASSWORD',
-      value: 'orders-secret',
-      persist: true,
-    })
-    expect(setEnvSecret).toHaveBeenNthCalledWith(2, {
-      name: 'RDST_USERS_2_PASSWORD',
-      value: 'users-secret',
-      persist: true,
-    })
+  })
+
+  it('applies shared monitoring credentials to the whole batch', async () => {
+    const { container } = renderStep()
+    fireEvent.change(
+      container.querySelector('input[name="batch-credentials-user"]')!,
+      { target: { value: 'monitoring' } }
+    )
+    fireEvent.change(
+      container.querySelector('input[name="batch-credentials-password"]')!,
+      { target: { value: 'shared-secret' } }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to all' }))
+
+    for (const target of targets) {
+      expect(
+        (
+          container.querySelector(
+            `input[name="credentials-user-${target.name}"]`
+          ) as HTMLInputElement
+        ).value
+      ).toBe('monitoring')
+      expect(
+        (
+          container.querySelector(
+            `input[name="credentials-password-${target.name}"]`
+          ) as HTMLInputElement
+        ).value
+      ).toBe('shared-secret')
+    }
+  })
+
+  it('uses an imported Secrets Manager ARN without asking for a password', async () => {
+    const secretTarget = {
+      ...targets[0],
+      password_secret_arn:
+        'arn:aws:secretsmanager:us-east-1:123:secret:orders',
+      password_secret_key: 'password',
+    }
+    const { container } = renderStep({ targets: [secretTarget] })
+
+    expect(
+      screen.getByText('Credentials stored in AWS Secrets Manager')
+    ).toBeTruthy()
+    expect(
+      container.querySelector('input[name="credentials-password-orders"]')
+    ).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Save and check/ }))
+
+    await waitFor(() => expect(check).toHaveBeenCalledWith(undefined, ['orders']))
   })
 
   it('requires a password for every imported target before saving', () => {
@@ -147,6 +188,17 @@ describe('CredentialsStep', () => {
       { target: { value: 'users-secret' } }
     )
     expect(save.disabled).toBe(false)
+  })
+
+  it('explains that passwords are session-only without a secure keychain', () => {
+    renderStep({ keyringAvailable: false })
+
+    expect(
+      screen.getByText(
+        /No OS keychain found\. Re-enter the password after RDST restarts\./i
+      )
+    ).toBeTruthy()
+    expect(screen.queryByText(/config\.toml/i)).toBeNull()
   })
 
   it('keeps Save and check after a failed connection so the password can be retried', async () => {
@@ -201,6 +253,71 @@ describe('CredentialsStep', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('shows the approved write-privilege notice per connected target', () => {
+    vi.mocked(useFleetStatus).mockReturnValue({
+      check,
+      state: 'complete',
+      results: {
+        orders: {
+          type: 'connectivity',
+          target_name: 'orders',
+          status: 'ok',
+          privileges: { writable: true, evidence: 'INSERT grant found.' },
+        },
+      },
+      error: undefined,
+      reset: vi.fn(),
+    } as unknown as ReturnType<typeof useFleetStatus>)
+
+    renderStep({ targets: [targets[0]] })
+
+    expect(screen.getByText('This user has write privileges.')).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Use a read-only database user.'
+      )
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Proceed anyway' })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'How to create a read-only user' })
+    ).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'How to create a read-only user' })
+    )
+    expect(screen.getByText(/CREATE ROLE rdst_readonly LOGIN PASSWORD/)).toBeTruthy()
+    expect(screen.getByText(/GRANT CONNECT ON DATABASE "orders"/)).toBeTruthy()
+    expect(screen.getByText(/GRANT USAGE ON SCHEMA public/)).toBeTruthy()
+    expect(screen.getByText(/GRANT SELECT ON ALL TABLES/)).toBeTruthy()
+    expect(screen.getByText(/ALTER DEFAULT PRIVILEGES/)).toBeTruthy()
+  })
+
+  it('renders copy-pasteable MySQL read-only and diagnostics grants', () => {
+    vi.mocked(useFleetStatus).mockReturnValue({
+      check,
+      state: 'complete',
+      results: {
+        users: {
+          type: 'connectivity',
+          target_name: 'users',
+          status: 'ok',
+          privileges: { writable: true, evidence: 'INSERT grant found.' },
+        },
+      },
+      error: undefined,
+      reset: vi.fn(),
+    } as unknown as ReturnType<typeof useFleetStatus>)
+
+    renderStep({ targets: [targets[1]] })
+    fireEvent.click(
+      screen.getByRole('button', { name: 'How to create a read-only user' })
+    )
+
+    expect(screen.getByText(/CREATE USER 'rdst_readonly'@'%'/)).toBeTruthy()
+    expect(screen.getByText(/GRANT SELECT ON `users`\.\*/)).toBeTruthy()
+    expect(screen.getByText(/GRANT PROCESS ON \*\.\*/)).toBeTruthy()
+    expect(screen.getByText(/performance_schema\.\*/)).toBeTruthy()
+  })
+
   it('groups cluster members under their group heading', () => {
     const clustered = targets.map((target) => ({
       ...target,
@@ -210,5 +327,83 @@ describe('CredentialsStep', () => {
 
     expect(screen.getByText('rdst-fleet-aurora')).toBeTruthy()
     expect(screen.getByText(/2 instances/)).toBeTruthy()
+  })
+
+  it('assembles independent per-target SSH payloads and prefills the next target', async () => {
+    const { container } = renderStep({
+      privateTargetGroups: [
+        {
+          key: 'vpc-1',
+          label: 'Private VPC',
+          targetNames: ['orders', 'users'],
+        },
+      ],
+    })
+
+    const ordersHost = container.querySelector(
+      'input[name="private-orders-host"]'
+    ) as HTMLInputElement
+    const usersHost = container.querySelector(
+      'input[name="private-users-host"]'
+    ) as HTMLInputElement
+    fireEvent.change(ordersHost, { target: { value: 'jump.shared.test' } })
+    expect(usersHost.value).toBe('jump.shared.test')
+
+    fireEvent.change(usersHost, { target: { value: 'jump.users.test' } })
+    fillAndSubmit(container)
+
+    await waitFor(() =>
+      expect(updateFleetTargetCredentials).toHaveBeenCalledTimes(2)
+    )
+    expect(updateFleetTargetCredentials).toHaveBeenNthCalledWith(
+      1,
+      targets[0],
+      'orders_user',
+      'orders-secret',
+      targets[0].database,
+      expect.objectContaining({
+        host: 'jump.shared.test',
+        port: 22,
+      })
+    )
+    expect(updateFleetTargetCredentials).toHaveBeenNthCalledWith(
+      2,
+      targets[1],
+      'users_user',
+      'users-secret',
+      targets[1].database,
+      expect.objectContaining({
+        host: 'jump.users.test',
+        port: 22,
+      })
+    )
+  })
+
+  it('requires a database name when discovery did not provide one', () => {
+    const mysqlWithoutDatabase = [
+      {
+        ...targets[1],
+        database: '',
+        tags: ['aws-account:111122223333'],
+      },
+    ]
+    const { container } = renderStep({ targets: mysqlWithoutDatabase })
+    expect(
+      screen.getByText(
+        'Enter the database name used by this instance.'
+      )
+    ).toBeTruthy()
+    fireEvent.change(
+      container.querySelector('input[name="credentials-password-users"]')!,
+      { target: { value: 'users-secret' } }
+    )
+
+    const save = screen.getByRole('button', { name: /Save and check/ }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    fireEvent.change(
+      container.querySelector('input[name="credentials-database-users"]')!,
+      { target: { value: 'app' } }
+    )
+    expect(save.disabled).toBe(false)
   })
 })

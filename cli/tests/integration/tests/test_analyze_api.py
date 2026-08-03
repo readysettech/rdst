@@ -93,18 +93,28 @@ async def test_analyze_returns_423_when_password_env_missing(
     assert response.json()["detail"]["code"] == "TARGET_PASSWORD_REQUIRED"
 
 
-async def test_analyze_reports_explain_failure_for_unreachable_target(
+@pytest.mark.usefixtures("run_blocking_inline")
+async def test_analyze_emits_categorized_error_for_unreachable_target(
     client, tmp_rdst_home, monkeypatch
 ):
-    """Service runs end-to-end but EXPLAIN fails because the DB is
-    unreachable. The route still completes (the analyze flow is fault-
-    tolerant — partial results bubble up through the same `complete`
-    payload), but the `explain_complete` event must be marked unsuccessful
-    and `complete.explain_results.error` must mention the connection
-    failure.
-    """
+    """An unreachable database fails fast with a categorized EXPLAIN error."""
     _seed_unreachable_target(env="PROD_PASSWORD")
     monkeypatch.setenv("PROD_PASSWORD", "irrelevant")
+
+    # Keep the in-process contract test deterministic: some libpq builds
+    # produce an empty message for a refused localhost connection, and an
+    # unrelated ephemeral Readyset probe must not delay this error path.
+    def refuse_connection(_conn_params):
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr(
+        "features.analyze.functions.explain_analysis._postgres_connection",
+        refuse_connection,
+    )
+    monkeypatch.setattr(
+        "features.analyze.service.AnalyzeService._run_readyset_analysis_sync",
+        lambda *args, **kwargs: {"success": False, "error": "Not configured"},
+    )
 
     events = await _stream_events(
         client,
@@ -115,14 +125,12 @@ async def test_analyze_reports_explain_failure_for_unreachable_target(
             "skip_rewrites": True,
         },
     )
-    by_event = {e["event"]: e["data"] for e in events if "event" in e}
+    event_names = [event.get("event") for event in events]
+    errors = [event["data"] for event in events if event.get("event") == "error"]
 
-    explain = by_event.get("explain_complete")
-    assert explain is not None, f"missing explain_complete; got {events}"
-    assert explain["success"] is False
-
-    complete = by_event.get("complete")
-    assert complete is not None
-    assert complete["explain_results"]["success"] is False
-    err = complete["explain_results"].get("error", "")
-    assert "Connection refused" in err or "connection" in err.lower()
+    assert any(
+        error.get("code") == "database_connection_failed"
+        and error.get("stage") == "executing_explain"
+        for error in errors
+    ), f"missing categorized EXPLAIN error; got {events}"
+    assert "explain_complete" not in event_names

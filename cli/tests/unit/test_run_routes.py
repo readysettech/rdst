@@ -1,13 +1,35 @@
 """Tests for the shared background-run API."""
 
+import asyncio
 import json
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient, Response
 
 from shared.api.routes import runs as run_routes
 from shared.run_registry import RunRegistry
+
+
+class _Client:
+    def __init__(self, app: FastAPI):
+        self.app = app
+
+    def request(self, method: str, path: str, **kwargs) -> Response:
+        async def send() -> Response:
+            async with AsyncClient(
+                transport=ASGITransport(app=self.app),
+                base_url="http://testserver",
+            ) as client:
+                return await client.request(method, path, **kwargs)
+
+        return asyncio.run(send())
+
+    def get(self, path: str, **kwargs) -> Response:
+        return self.request("GET", path, **kwargs)
+
+    def delete(self, path: str, **kwargs) -> Response:
+        return self.request("DELETE", path, **kwargs)
 
 
 class StubRegistry:
@@ -40,7 +62,7 @@ def client(monkeypatch):
     monkeypatch.setattr(run_routes, "_registry", registry)
     app = FastAPI()
     app.include_router(run_routes.router, prefix="/api")
-    return TestClient(app), registry
+    return _Client(app), registry
 
 
 def test_status_exposes_kind_target_and_replay_cursor(client):

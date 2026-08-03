@@ -74,6 +74,10 @@ import { SupabaseConnectionPanel } from '../supabase/SupabaseConnectionPanel'
 import { ADD_TABS, type AddTab } from './addTabs'
 import { CredentialsStep } from './CredentialsStep'
 import { groupTargets } from './TargetGroupView'
+import {
+  groupPrivateTargets,
+  type PrivateTargetGroup,
+} from './privateTargets'
 
 // The regions most RDS fleets live in, offered as one-click toggles; picking
 // another region from the dropdown promotes it into the same toggle bar.
@@ -336,12 +340,16 @@ export function AddTargetsDrawer({
   const [credentialTargetNames, setCredentialTargetNames] = useState<string[]>(
     []
   )
+  const [privateTargetGroups, setPrivateTargetGroups] = useState<
+    PrivateTargetGroup[]
+  >([])
 
   // Each opening starts on the requested source tab, never on a leftover step.
   useEffect(() => {
     if (!open) return
     setStep('source')
     setAddTab(initialTab)
+    setPrivateTargetGroups([])
   }, [open, initialTab])
 
   const { data: fleetTargets } = useQuery({
@@ -405,6 +413,7 @@ export function AddTargetsDrawer({
   const [previewErrors, setPreviewErrors] = useState<string[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set())
+  const [previewRegionCount, setPreviewRegionCount] = useState(0)
   const [addingTargets, setAddingTargets] = useState(false)
 
   // Shares the AWS connection panel's cache entry (same key + profile), so
@@ -448,6 +457,12 @@ export function AddTargetsDrawer({
     () => groupTargets(previewMembers ?? [], (member) => member.group),
     [previewMembers]
   )
+  const selectablePreviewNames = (previewMembers ?? [])
+    .filter((member) => !member.already_exists)
+    .map((member) => member.name)
+  const allPreviewSelected =
+    selectablePreviewNames.length > 0 &&
+    selectablePreviewNames.every((name) => selectedNames.has(name))
 
   const selectedNewCount = previewMembers
     ? previewMembers.filter(
@@ -486,6 +501,7 @@ export function AddTargetsDrawer({
     if (completion && completion.imported > 0) {
       await publishNewTargets()
       setCredentialTargetNames(completion.target_names)
+      setPrivateTargetGroups([])
       setStep('credentials')
     }
   }
@@ -495,6 +511,7 @@ export function AddTargetsDrawer({
     setPreviewErrors([])
     try {
       const preview = await fetchFleetDiscoverPreview(input)
+      setPreviewRegionCount('regions' in input ? input.regions.length : 0)
       setPreviewMembers(preview.members)
       setPreviewErrors(preview.errors)
       setSelectedNames(
@@ -526,6 +543,15 @@ export function AddTargetsDrawer({
       setPreviewMembers(null)
       if (added.target_names.length > 0) {
         setCredentialTargetNames(added.target_names)
+        const addedNames = new Set(added.target_names)
+        setPrivateTargetGroups(
+          groupPrivateTargets(chosen).map((group) => ({
+            ...group,
+            targetNames: group.targetNames.filter((name) =>
+              addedNames.has(name)
+            ),
+          })).filter((group) => group.targetNames.length > 0)
+        )
         setStep('credentials')
       }
     } catch (caught) {
@@ -543,6 +569,7 @@ export function AddTargetsDrawer({
     setAddTab(tab)
     setPreviewMembers(null)
     setPreviewErrors([])
+    setPreviewRegionCount(0)
   }
 
   // Signing out of the active provider retires whatever it discovered: the
@@ -576,6 +603,7 @@ export function AddTargetsDrawer({
     const leftCredentials = step === 'credentials'
     setStep('source')
     setCredentialTargetNames([])
+    setPrivateTargetGroups([])
     setPreviewMembers(null)
     setPreviewErrors([])
     onClose()
@@ -607,7 +635,7 @@ export function AddTargetsDrawer({
               </DrawerTitle>
               <DrawerDescription>
                 {step === 'credentials'
-                  ? 'Secure the new database targets and verify their connections.'
+                  ? 'Enter credentials and test the imported databases.'
                   : 'Bulk-add database targets by discovering them at your cloud provider or importing a CSV.'}
               </DrawerDescription>
               {step === 'source' && (
@@ -666,6 +694,7 @@ export function AddTargetsDrawer({
                   keyringAvailable={envRequirements?.keyring_available ?? false}
                   onClose={closeDrawer}
                   onSaved={publishSavedCredentials}
+                  privateTargetGroups={privateTargetGroups}
                 />
               ) : (
                 <>
@@ -675,8 +704,7 @@ export function AddTargetsDrawer({
                         level="body-small"
                         className="text-content-layout-3"
                       >
-                        Bulk-add targets from a CSV, excluding passwords —
-                        you&apos;ll set those right after the import.
+                        Choose a CSV to add database targets.
                       </Text>
                       <div className="rounded-lg bg-surface-layout-2/60 border border-border-layout-1 px-4 py-3">
                         <Text
@@ -769,6 +797,18 @@ export function AddTargetsDrawer({
                           }}
                         />
                       )}
+                      <Show
+                        when={
+                          addTab === 'aws' ||
+                          addTab === 'digitalocean' ||
+                          addTab === 'neon'
+                        }
+                      >
+                        <Text level="caption" className="text-content-layout-3">
+                          For a private database, import it first, then add an
+                          SSH jump host in its connection details.
+                        </Text>
+                      </Show>
                       {previewMembers === null &&
                         (accountTab ? (
                           <HStack className="gap-3 items-center justify-end">
@@ -874,6 +914,29 @@ export function AddTargetsDrawer({
                                   .emptyMessage
                               : 'Choose which databases to add to your fleet.'}
                           </Text>
+                          {previewMembers.some(
+                            (member) => !member.already_exists
+                          ) && (
+                            <HStack className="gap-3 items-center">
+                              <Button
+                                variant="primary"
+                                modifier="ghost"
+                                size="small"
+                                label={
+                                  allPreviewSelected
+                                    ? 'Clear selection'
+                                    : 'Select all'
+                                }
+                                onClick={() =>
+                                  setSelectedNames(
+                                    allPreviewSelected
+                                      ? new Set()
+                                      : new Set(selectablePreviewNames)
+                                  )
+                                }
+                              />
+                            </HStack>
+                          )}
                           <VStack className="gap-4 items-stretch">
                             {previewGroups.map(({ group, targets: rows }) => (
                               <VStack
@@ -901,6 +964,45 @@ export function AddTargetsDrawer({
                                       ? '1 instance'
                                       : `${rows.length} instances`}
                                   </Text>
+                                  {rows.some(
+                                    (member) => !member.already_exists
+                                  ) && (
+                                    <HStack className="ml-auto gap-1 items-center">
+                                      <Button
+                                        variant="primary"
+                                        modifier="ghost"
+                                        size="small"
+                                        label={
+                                          rows
+                                            .filter(
+                                              (member) => !member.already_exists
+                                            )
+                                            .every((member) =>
+                                              selectedNames.has(member.name)
+                                            )
+                                            ? 'Clear selection'
+                                            : 'Select all'
+                                        }
+                                        onClick={() =>
+                                          setSelectedNames((current) => {
+                                            const updated = new Set(current)
+                                            const selectableRows = rows.filter(
+                                              (member) => !member.already_exists
+                                            )
+                                            const allSelected = selectableRows.every(
+                                              (member) => current.has(member.name)
+                                            )
+                                            for (const member of selectableRows) {
+                                              if (allSelected)
+                                                updated.delete(member.name)
+                                              else updated.add(member.name)
+                                            }
+                                            return updated
+                                          })
+                                        }
+                                      />
+                                    </HStack>
+                                  )}
                                 </HStack>
                                 {rows.map((member) => {
                                   const role = member.tags
@@ -965,6 +1067,15 @@ export function AddTargetsDrawer({
                                               label={role}
                                             />
                                           )}
+                                          {previewRegionCount > 1 &&
+                                            member.region && (
+                                              <Tag
+                                                size="small"
+                                                variant="neutral"
+                                                modifier="ghost"
+                                                label={member.region}
+                                              />
+                                            )}
                                           {member.already_exists && (
                                             <Tag
                                               size="small"

@@ -133,6 +133,9 @@ def verify_profile(profile: str, timeout: float = 3.0) -> tuple[bool, str]:
         )
         identity = sts.get_caller_identity()
         arn = identity.get("Arn")
+        from .identity import capture_aws_identity_async
+
+        capture_aws_identity_async(arn)
         return True, f"Signed in as {arn}" if arn else "AWS SSO session is active"
     except Exception as exc:
         return False, str(exc) or exc.__class__.__name__

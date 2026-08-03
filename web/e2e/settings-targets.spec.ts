@@ -19,6 +19,8 @@ type FleetMember = {
   has_password?: boolean
   group: string | null
   tags?: string[]
+  publicly_accessible?: boolean | null
+  vpc_id?: string | null
 }
 
 type FleetFixture = {
@@ -79,6 +81,8 @@ const connectivity = [
     type: 'connectivity',
     target_name: 'old-dead',
     status: 'failed',
+    code: 'database_connection_failed',
+    category: 'database_connection_failed',
     error: 'Connection timed out',
   },
 ]
@@ -172,8 +176,10 @@ test('groups the connections and shows live reachability', async ({ page }) => {
   await expect(
     page.getByRole('button', { name: 'Check all' }).first()
   ).toBeVisible()
-  // The unreachable row states the failure next to itself.
+  // The shared connection-failure surface keeps the humane first line next to
+  // the unreachable row and does not regress to a raw "Error:" dump.
   await expect(page.getByText('Connection timed out')).toBeVisible()
+  await expect(page.getByText('Error: Connection timed out')).toHaveCount(0)
 })
 
 test('does not render an Ungrouped group header when there are no real groups', async ({
@@ -364,6 +370,8 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
       tags: ['role:writer'],
       instance_class: 'db.r6g.large',
       region: 'us-east-1',
+      publicly_accessible: false,
+      vpc_id: 'vpc-orders',
       already_exists: false,
     },
     {
@@ -379,6 +387,8 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
       tags: ['role:reader'],
       instance_class: 'db.r6g.large',
       region: 'us-east-1',
+      publicly_accessible: false,
+      vpc_id: 'vpc-orders',
       already_exists: true,
     },
     {
@@ -394,6 +404,8 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
       tags: [],
       instance_class: 'db.r6g.large',
       region: 'us-east-1',
+      publicly_accessible: true,
+      vpc_id: null,
       already_exists: false,
     },
   ]
@@ -464,6 +476,21 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
       },
     })
   })
+  await page.route('**/api/tunnel/ssh-profiles', (route) =>
+    route.fulfill({ json: [] })
+  )
+  await page.route('**/api/tunnel/ssh-keys*', (route) =>
+    route.fulfill({ json: { options: [] } })
+  )
+  const credentialUpdates: Array<Record<string, unknown>> = []
+  page.on('request', (request) => {
+    if (
+      request.method() === 'PUT' &&
+      new URL(request.url()).pathname === '/api/configure/targets/orders-writer'
+    ) {
+      credentialUpdates.push(request.postDataJSON() as Record<string, unknown>)
+    }
+  })
   let previewBody: Record<string, unknown> | undefined
   await page.route('**/api/providers/discover-preview', (route) => {
     previewBody = route.request().postDataJSON()
@@ -477,10 +504,22 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
       json: { imported: 1, skipped: 0, target_names: ['orders-writer'] },
     })
   })
+  await page.route('**/api/configure/targets/orders-writer', (route) => {
+    if (route.request().method() === 'PUT') {
+      return route.fulfill({ json: { success: true, message: 'Updated' } })
+    }
+    return route.fallback()
+  })
 
   await page.goto('/configure')
   await page.getByRole('button', { name: 'Discover & import' }).click()
   await page.getByRole('button', { name: 'AWS', exact: true }).click()
+  await expect(
+    page.getByText(
+      'For a private database, import it first, then add an SSH jump host in its connection details.',
+      { exact: true }
+    )
+  ).toBeVisible()
   await page.getByRole('button', { name: 'Discover', exact: true }).click()
 
   await expect(
@@ -526,10 +565,22 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
     page
       .getByTestId('credentials-step')
       .getByText('orders-writer', { exact: true })
+      .first()
   ).toBeVisible()
   await expect(
     page.locator('input[name="credentials-user-orders-writer"]')
   ).toHaveValue('master_orders')
+  await expect(
+    page.getByText('1 private database requires an SSH jump host', {
+      exact: true,
+    })
+  ).toBeVisible()
+  await page
+    .locator('input[name="private-orders-writer-host"]')
+    .fill('bastion.orders.test')
+  await page
+    .locator('input[name="private-orders-writer-user"]')
+    .fill('ec2-user')
   await page
     .locator('input[name="credentials-password-orders-writer"]')
     .fill('orders-secret')
@@ -538,9 +589,18 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
   await expect(
     page.getByTestId('credentials-step').getByText('Connected', { exact: true })
   ).toHaveCount(1)
-  expect(secretPosts).toEqual([
-    { name: 'RDST_ORDERS_PASSWORD', value: 'orders-secret', persist: true },
-  ])
+  expect(secretPosts).toEqual([])
+  expect(credentialUpdates).toHaveLength(1)
+  expect(credentialUpdates[0]).toMatchObject({
+    target: {
+      password: 'orders-secret',
+      ssh: {
+        host: 'bastion.orders.test',
+        port: 22,
+        user: 'ec2-user',
+      },
+    },
+  })
   expect(credentialChecks).toBeGreaterThanOrEqual(1)
   await expect(page.getByRole('button', { name: 'Done' })).toBeVisible()
 })

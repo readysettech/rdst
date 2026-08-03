@@ -28,6 +28,8 @@ from features.top.models import (
     TopQueryData,
 )
 
+pytestmark = pytest.mark.usefixtures("run_blocking_inline")
+
 
 class TestTopServiceInit:
     """Tests for TopService initialization."""
@@ -79,6 +81,49 @@ class TestTopServiceGetTopQueries:
         assert len(events) >= 1
         assert events[0].type == "status"
         assert "Loading configuration" in events[0].message
+
+    def test_historical_connection_uses_resolved_tunnel_endpoint(self, service):
+        target_config = {
+            "engine": "mysql",
+            "host": "database.internal",
+            "port": 3306,
+            "database": "app",
+            "user": "app",
+            "password": "password",
+            "ssh": {"host": "jump.example.com"},
+        }
+        resolved = {
+            "engine": "mysql",
+            "host": "127.0.0.1",
+            "port": 49152,
+            "database": "app",
+            "user": "app",
+            "password": "password",
+        }
+
+        with (
+            patch(
+                "shared.db_connection.resolve_connection_params",
+                return_value=resolved,
+            ) as resolve,
+            patch("shared.data_manager.ConnectionConfig") as connection_config,
+            patch("shared.data_manager.DataManager") as data_manager,
+        ):
+            data_manager.return_value._available_commands = TOP_COMMAND_SETS
+            data_manager.return_value.execute_command.return_value = {
+                "success": True,
+                "data": [],
+            }
+            service._execute_top_query_sync(
+                "prod", target_config, "mysql", "digest"
+            )
+
+        resolve.assert_called_once_with(
+            target="prod",
+            target_config=target_config,
+        )
+        assert connection_config.call_args.kwargs["host"] == "127.0.0.1"
+        assert connection_config.call_args.kwargs["port"] == 49152
 
     @pytest.mark.asyncio
     async def test_error_no_target_configured(self, service, input_data, options):
@@ -757,7 +802,10 @@ class TestTopServiceErrorHandling:
                     events.append(event)
 
         assert events[-1].type == "error"
-        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].code == "database_connection_failed"
+        assert events[-1].message == (
+            "The database connection for 'test-target' failed."
+        )
         assert events[-1].detail == "ConnectionError"
         assert "Connection refused" not in events[-1].message
 
@@ -924,7 +972,9 @@ class TestTopServiceTimeoutScenarios:
                 events.append(event)
 
         assert events[-1].type == "error"
-        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].code == "database_connection_failed"
+        assert "database connection" in events[-1].message.lower()
+        assert "test-target" in events[-1].message
         assert events[-1].detail == "TimeoutError"
 
     @pytest.mark.asyncio
@@ -1016,7 +1066,9 @@ class TestTopServiceNetworkFailures:
                     events.append(event)
 
         assert events[-1].type == "error"
-        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].code == "database_connection_failed"
+        assert "database connection" in events[-1].message.lower()
+        assert "test-target" in events[-1].message
         assert events[-1].detail == "OSError"
         assert "unreachable" not in events[-1].message.lower()
 

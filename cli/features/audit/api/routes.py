@@ -13,7 +13,7 @@ import asyncio
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from shared.api.target_guard import TargetGuard, require_target, require_target_body
 from shared.run_registry import AUDIT_RUN_KINDS, run_registry
@@ -124,6 +124,10 @@ class AuditRequirementsResponse(BaseModel):
     detail: str = ""
     remediation: Optional[str] = None
     docker_available: bool = False
+    category: Optional[str] = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 @router.get("/requirements")
@@ -138,13 +142,99 @@ async def get_capture_requirements(
     """
 
     def _check() -> dict[str, Any]:
-        from shared.db_connection import create_direct_connection
+        from shared.db_connection import (
+            create_direct_connection,
+            resolve_connection_params,
+        )
 
+        target_config = guard.target_config
+        ssh_config = target_config.get("ssh")
+        tunnel_manager = None
         try:
-            connection = create_direct_connection(guard.target_config, connect_timeout=5)
+            if ssh_config:
+                from shared.ssh_tunnel import get_tunnel_manager
+
+                tunnel_manager = get_tunnel_manager()
+                # Preflight is an explicit connection test. Freshness belongs
+                # to the target's locked ensure operation so close/reopen cannot
+                # interleave with another resolver.
+                params = resolve_connection_params(
+                    target=guard.target_name,
+                    target_config=target_config,
+                    force_fresh_tunnel=True,
+                )
+                target_config = dict(target_config)
+                target_config.pop("ssh", None)
+                target_config.update(
+                    {
+                        "engine": params["engine"],
+                        "host": params["host"],
+                        "port": params["port"],
+                        "user": params["user"],
+                        "password": params["password"],
+                        "database": params["database"],
+                        "tls": params["tls"],
+                        "tls_verify": params.get("tls_verify", False),
+                        "tls_ca": params.get("tls_ca"),
+                    }
+                )
+                if params.get("hostaddr"):
+                    target_config["hostaddr"] = params["hostaddr"]
+            connection = create_direct_connection(target_config, connect_timeout=5)
         except Exception as exc:
+            from shared.api.ssh_errors import (
+                ssh_error_payload,
+                tls_verification_error_payload,
+            )
+            from shared.ssh_tunnel import SshTunnelError
+
+            if tunnel_manager is not None:
+                tunnel_manager.close(guard.target_name)
+            if isinstance(exc, SshTunnelError):
+                payload = ssh_error_payload(
+                    exc,
+                    guard.target_name,
+                    ssh_config,
+                )
+                return {
+                    "status": "error",
+                    "detail": payload["message"],
+                    "remediation": None,
+                    "category": payload["category"],
+                }
+            tls_payload = tls_verification_error_payload(exc, guard.target_name)
+            if tls_payload:
+                return {
+                    "status": "error",
+                    "detail": tls_payload["message"],
+                    "remediation": None,
+                    "category": tls_payload["category"],
+                }
             detail = str(exc).splitlines()[0][:300] if str(exc) else "Connection failed"
-            return {"status": "error", "detail": detail, "remediation": None}
+            if ssh_config:
+                detail = (
+                    f"SSH tunnel to jump host {ssh_config.get('host')} opened, but "
+                    f"the database is unreachable through it: {detail}. Check the "
+                    "database host, port, network rules, and DB credentials."
+                )
+                category = "database_connection_failed"
+            else:
+                from features.allowlist.service import (
+                    is_provider_network_failure,
+                    provider_network_hint,
+                )
+
+                if is_provider_network_failure(target_config, exc):
+                    detail = f"{detail}. {provider_network_hint(target_config)}"
+                    category = "provider_ip_blocked_maybe"
+                else:
+                    category = None
+            return {
+                "status": "error",
+                "detail": detail,
+                "remediation": None,
+                "category": category,
+            }
         try:
             return CaptureService.check_query_stats(connection, guard.target_engine)
         finally:
@@ -164,6 +254,7 @@ async def get_capture_requirements(
         detail=result.get("detail") or "",
         remediation=result.get("remediation"),
         docker_available=has_docker,
+        category=result.get("category"),
     )
 
 

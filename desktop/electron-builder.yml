@@ -1,5 +1,9 @@
 appId: com.readyset.rdst-desktop
 productName: RDST Desktop
+protocols:
+  - name: RDST
+    schemes:
+      - rdst
 directories:
   buildResources: resources
   output: dist

@@ -30,6 +30,7 @@ let liquidGlass: GlassModule | null = null
 let liquidGlassFailureReason: string | null = null
 let glassViewID: number | null = null
 let lastGlassFocusState: boolean | null = null
+let deepLinkPending = false
 
 const logGlassFallback = createGlassFallbackLogger(process.platform)
 
@@ -123,6 +124,9 @@ function registerWindowControlHandlers(): void {
     'window:is-maximized',
     (event) => senderWindow(event)?.isMaximized() ?? false
   )
+  ipcMain.handle('oauth:register-protocol', () =>
+    app.setAsDefaultProtocolClient('rdst')
+  )
 }
 
 async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
@@ -152,6 +156,10 @@ async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
     },
   })
   mainWindow = window
+  if (deepLinkPending) {
+    deepLinkPending = false
+    focusMainWindow()
+  }
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     const parsed = new URL(url)
@@ -225,6 +233,12 @@ function focusMainWindow(): void {
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+}
+
+function handleDeepLink(url: string): void {
+  if (!url.startsWith('rdst://')) return
+  if (!mainWindow) deepLinkPending = true
+  focusMainWindow()
 }
 
 // Stop the backend before exiting so smoke failures never orphan the
@@ -314,7 +328,15 @@ async function startApplication(): Promise<void> {
 }
 
 function configurePrimaryInstance(): void {
-  app.on('second-instance', focusMainWindow)
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    handleDeepLink(url)
+  })
+  app.on('second-instance', (_event, argv) => {
+    const deepLink = argv.find((value) => value.startsWith('rdst://'))
+    if (deepLink) handleDeepLink(deepLink)
+    else focusMainWindow()
+  })
 
   app.on('before-quit', (event) => {
     if (quitCleanupStarted) return

@@ -46,5 +46,26 @@ export function throwIfApiError(
 ): void {
   if (response.ok) return
   const detail = extractDetail(error)
-  throw new Error(detail || `${ctx}: ${response.status}`)
+  const payload =
+    error && typeof error === 'object'
+      ? ((error as { detail?: unknown }).detail ?? error)
+      : undefined
+  const fields =
+    payload && typeof payload === 'object'
+      ? (payload as Record<string, unknown>)
+      : undefined
+  const thrown = new Error(detail || `${ctx}: ${response.status}`) as Error & {
+    code?: string
+    category?: string
+    target?: string
+    detail?: string
+  }
+  if (fields) {
+    if (typeof fields.code === 'string') thrown.code = fields.code
+    if (typeof fields.category === 'string') thrown.category = fields.category
+    const target = fields.target ?? fields.target_name
+    if (typeof target === 'string') thrown.target = target
+    if (typeof fields.detail === 'string') thrown.detail = fields.detail
+  }
+  throw thrown
 }

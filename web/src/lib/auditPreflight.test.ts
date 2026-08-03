@@ -109,6 +109,49 @@ describe('audit preflight', () => {
     ).toBe(true)
   })
 
+  it('re-resolves the selected AWS profile account on every check', async () => {
+    const fetcher = vi.fn(async (target: string) => ({
+      target,
+      engine: 'postgresql',
+      query_stats: 'ok' as const,
+      detail: 'ready',
+      docker_available: true,
+    }))
+    const accounts = { old: '111', current: '222' }
+    const awsFetcher = vi.fn(async (profile?: string) => ({
+      has_credentials: true,
+      method: 'sso',
+      identity_arn: `arn:aws:sts::${accounts[profile as keyof typeof accounts]}:assumed-role/dev/user`,
+      account: accounts[profile as keyof typeof accounts],
+      active_profile: profile ?? null,
+      available_profiles: ['old', 'current'],
+      region: 'us-east-1',
+    }))
+
+    const stale = await checkAuditPreflight(['orders'], {
+      fetcher,
+      force: true,
+      awsRequired: true,
+      awsProfile: 'old',
+      awsFetcher,
+      targetAccounts: { orders: '222' },
+    })
+    const fresh = await checkAuditPreflight(['orders'], {
+      fetcher,
+      force: true,
+      awsRequired: true,
+      awsProfile: 'current',
+      awsFetcher,
+      targetAccounts: { orders: '222' },
+    })
+
+    expect(stale.aws.status?.account).toBe('111')
+    expect(stale.aws.mismatchedTargets).toEqual(['orders'])
+    expect(fresh.aws.status?.account).toBe('222')
+    expect(fresh.aws.mismatchedTargets).toBeUndefined()
+    expect(awsFetcher.mock.calls).toEqual([['old'], ['current']])
+  })
+
   it('caps concurrency at three and caches results for sixty seconds', async () => {
     let active = 0
     let maxActive = 0

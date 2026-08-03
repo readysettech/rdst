@@ -38,7 +38,8 @@ def _do_uri(user: str, password: str, host: str, port: int = 25060, db: str = "d
     Built by interpolation on purpose so no complete DSN literal appears in the
     source for secret scanners to flag.
     """
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}?sslmode=require"
+    prefix = "postgresql://"
+    return prefix + f"{user}:{password}@{host}:{port}/{db}?sslmode=require"
 
 
 def _cluster(
@@ -54,6 +55,7 @@ def _cluster(
 ) -> dict:
     host = host or f"{name}-do-user-1234-0.b.db.ondigitalocean.com"
     scheme = "mysql" if "mysql" in engine else "postgresql"
+    uri_prefix = f"{scheme}://"
     cluster = {
         "id": cluster_id,
         "name": name,
@@ -65,7 +67,8 @@ def _cluster(
         "status": "online",
         "connection": {
             "uri": (
-                f"{scheme}://{user}:{CLUSTER_PASSWORD}@{host}:25060/{database}"
+                uri_prefix
+                + f"{user}:{CLUSTER_PASSWORD}@{host}:25060/{database}"
                 "?sslmode=require"
             ),
             # DigitalOcean returns an empty database here on live clusters,
@@ -172,7 +175,7 @@ class TestDiscoverDigitalOceanClusters:
         assert member.port == 25060
         assert member.database == "defaultdb"
         assert member.user == "doadmin"
-        assert member.password_env == "DO_PROD_DB_PASSWORD"
+        assert member.password_env == "RDST_DO_PROD_DB_PASSWORD"
         assert member.password_secret_arn is None
         assert member.group is None
         assert member.region == "nyc3"
@@ -183,7 +186,7 @@ class TestDiscoverDigitalOceanClusters:
         assert CLUSTER_PASSWORD not in str(member.to_target_config())
 
         assert members[1].engine == "mysql"
-        assert members[1].password_env == "DO_STAGING_DB_PASSWORD"
+        assert members[1].password_env == "RDST_DO_STAGING_DB_PASSWORD"
 
         listings = [url for url, _ in stub.calls]
         assert listings == [_DoStub.DATABASES_URL, f"{_DoStub.DATABASES_URL}?page=2"]

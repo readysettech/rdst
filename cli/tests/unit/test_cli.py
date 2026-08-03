@@ -378,6 +378,7 @@ class TestTargetsConfig:
 
         assert cfg._data == {
             "targets": {},
+            "ssh_hosts": {},
             "default": None,
             "init": {"completed": False},
             "llm": {},

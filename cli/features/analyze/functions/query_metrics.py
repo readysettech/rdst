@@ -22,8 +22,16 @@ try:
 except ImportError:
     pymysql = None
 
+from shared.db_connection import (
+    create_mysql_connection_from_params,
+    postgres_connection_kwargs,
+    resolve_connection_params,
+)
 
-def collect_query_metrics(sql: str, target: str = None, query_hash: str = None, **kwargs) -> Dict[str, Any]:
+
+def collect_query_metrics(
+    sql: str, target: str = None, query_hash: str = None, **kwargs
+) -> Dict[str, Any]:
     """
     Collect additional query performance metrics from database telemetry sources.
 
@@ -66,9 +74,9 @@ def collect_query_metrics(sql: str, target: str = None, query_hash: str = None, 
         engine = target_config.get('engine', '').lower()
 
         if engine in ['postgresql', 'postgres']:
-            return _collect_postgres_metrics(sql, target_config, query_hash)
+            return _collect_postgres_metrics(sql, target_config, query_hash, target)
         elif engine in ['mysql', 'mariadb']:
-            return _collect_mysql_metrics(sql, target_config, query_hash)
+            return _collect_mysql_metrics(sql, target_config, query_hash, target)
         else:
             return {
                 "success": False,
@@ -86,7 +94,12 @@ def collect_query_metrics(sql: str, target: str = None, query_hash: str = None, 
         }
 
 
-def _collect_postgres_metrics(sql: str, target_config: Dict[str, Any], query_hash: str = None) -> Dict[str, Any]:
+def _collect_postgres_metrics(
+    sql: str,
+    target_config: Dict[str, Any],
+    query_hash: str = None,
+    target: str = None,
+) -> Dict[str, Any]:
     """Collect metrics from PostgreSQL pg_stat_statements and related views."""
     if psycopg2 is None:
         return {
@@ -97,16 +110,11 @@ def _collect_postgres_metrics(sql: str, target_config: Dict[str, Any], query_has
         }
 
     try:
-        conn_params = {
-            'host': target_config['host'],
-            'port': target_config.get('port', 5432),
-            'database': target_config['database'],
-            'user': target_config['user'],
-            'password': target_config.get('password', ''),
-        }
-
-        if target_config.get('tls', False):
-            conn_params['sslmode'] = 'require'
+        resolved_params = resolve_connection_params(
+            target=target,
+            target_config=target_config,
+        )
+        conn_params = postgres_connection_kwargs(resolved_params)
 
         with _postgres_connection(conn_params) as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
@@ -162,7 +170,12 @@ def _collect_postgres_metrics(sql: str, target_config: Dict[str, Any], query_has
         }
 
 
-def _collect_mysql_metrics(sql: str, target_config: Dict[str, Any], query_hash: str = None) -> Dict[str, Any]:
+def _collect_mysql_metrics(
+    sql: str,
+    target_config: Dict[str, Any],
+    query_hash: str = None,
+    target: str = None,
+) -> Dict[str, Any]:
     """Collect metrics from MySQL performance_schema and information_schema."""
     if pymysql is None:
         return {
@@ -173,20 +186,16 @@ def _collect_mysql_metrics(sql: str, target_config: Dict[str, Any], query_hash: 
         }
 
     try:
-        conn_params = {
-            'host': target_config['host'],
-            'port': target_config.get('port', 3306),
-            'database': target_config['database'],
-            'user': target_config['user'],
-            'password': target_config.get('password', ''),
+        resolved_params = resolve_connection_params(
+            target=target,
+            target_config=target_config,
+        )
+        conn_overrides = {
             'charset': 'utf8mb4',
             'cursorclass': pymysql.cursors.DictCursor
         }
 
-        if target_config.get('tls', False):
-            conn_params['ssl'] = {'ssl_disabled': False}
-
-        with _mysql_connection(conn_params) as conn:
+        with _mysql_connection(resolved_params, conn_overrides) as conn:
             with conn.cursor() as cursor:
                 available_sources = []
                 metrics = {}
@@ -247,11 +256,11 @@ def _postgres_connection(conn_params):
 
 
 @contextmanager
-def _mysql_connection(conn_params):
+def _mysql_connection(params, overrides=None):
     """Context manager for MySQL connections."""
     conn = None
     try:
-        conn = pymysql.connect(**conn_params)
+        conn = create_mysql_connection_from_params(params, **(overrides or {}))
         yield conn
     finally:
         if conn:

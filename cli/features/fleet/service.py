@@ -15,7 +15,6 @@ from .csv_importer import parse_csv
 from .events import (
     FleetConnectivityEvent,
     FleetErrorEvent,
-    FleetEvent,
     FleetImportCompleteEvent,
     FleetImportProgressEvent,
     FleetListEvent,
@@ -47,7 +46,12 @@ def fleet_member_shape(
         "target_type": target_config.get("target_type", "database"),
         "region": target_config.get("region"),
         "tls": target_config.get("tls", False),
+        "tls_verify": target_config.get("tls_verify", False),
+        "tls_ca": target_config.get("tls_ca"),
         "read_only": target_config.get("read_only", False),
+        "password_secret_arn": target_config.get("password_secret_arn"),
+        "password_secret_key": target_config.get("password_secret_key"),
+        "ssh": target_config.get("ssh"),
     }
 
 
@@ -231,6 +235,26 @@ class FleetService:
 
             password_env = target_config.get("password_env")
             if password_env and not resolve_password(target_config).available:
+                from features.allowlist.providers import provider_for_target
+
+                if provider_for_target(target_config):
+                    from features.configure.service import ConfigureService
+
+                    named_config = {**target_config, "name": name}
+                    result = await ConfigureService().perform_connection_test(
+                        named_config,
+                        force_fresh_tunnel=True,
+                    )
+                    yield FleetConnectivityEvent(
+                        type="connectivity",
+                        target_name=name,
+                        status="failed",
+                        error=result.get("message", "Connection failed"),
+                        code=result.get("code"),
+                        category=result.get("category"),
+                        password_env=result.get("password_env"),
+                    )
+                    continue
                 yield FleetConnectivityEvent(
                     type="connectivity",
                     target_name=name,
@@ -243,7 +267,12 @@ class FleetService:
 
             try:
                 started = time.monotonic()
-                version = await asyncio.to_thread(self._check_connection, target_config)
+                version, privileges = await asyncio.to_thread(
+                    self._check_connection,
+                    name,
+                    target_config,
+                    force_fresh_tunnel=True,
+                )
                 latency = (time.monotonic() - started) * 1000
                 yield FleetConnectivityEvent(
                     type="connectivity",
@@ -251,18 +280,45 @@ class FleetService:
                     status="ok",
                     latency_ms=round(latency, 1),
                     server_version=version,
+                    privileges=privileges,
                 )
             except Exception as exc:
+                if target_config.get("ssh"):
+                    get_tunnel_manager().close(name)
+                from features.allowlist.service import (
+                    connection_failure_category,
+                    provider_network_hint,
+                )
+
+                provider_category = connection_failure_category(target_config, exc)
+                provider_network_failure = provider_category is not None
+                error = str(exc)
+                if provider_network_failure:
+                    error = f"{error}. {provider_network_hint(target_config)}"
                 yield FleetConnectivityEvent(
                     type="connectivity",
                     target_name=name,
                     status="failed",
-                    error=str(exc),
+                    error=error,
+                    category=(
+                        provider_category if provider_network_failure else None
+                    ),
                 )
 
-    def _check_connection(self, target_config: dict[str, Any]) -> str:
-        """Check DB connectivity and return server version."""
-        connection = create_direct_connection(target_config, connect_timeout=3)
+    def _check_connection(
+        self,
+        target_name: str,
+        target_config: dict[str, Any],
+        *,
+        force_fresh_tunnel: bool = False,
+    ) -> tuple[str, dict]:
+        """Check DB connectivity and return server version plus privileges."""
+        named_config = {**target_config, "name": target_name}
+        connection = create_direct_connection(
+            named_config,
+            connect_timeout=3,
+            force_fresh_tunnel=force_fresh_tunnel,
+        )
         try:
             cursor = connection.cursor()
             engine = target_config.get("engine", "postgresql")
@@ -275,6 +331,9 @@ class FleetService:
             else:
                 version = str(row[0])
             cursor.close()
-            return version.split("\n")[0][:80]
+            from features.configure.privileges import detect_write_privileges
+
+            privileges = detect_write_privileges(connection, engine)
+            return version.split("\n")[0][:80], privileges
         finally:
             connection.close()

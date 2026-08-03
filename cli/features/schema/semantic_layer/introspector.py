@@ -11,6 +11,12 @@ Introspects database schema to bootstrap a semantic layer with:
 from typing import Optional
 import os
 
+from shared.db_connection import (
+    create_mysql_connection_from_params,
+    postgres_connection_kwargs,
+    resolve_connection_params,
+)
+
 from features.schema.semantic_models import (
     SemanticLayer,
     TableAnnotation,
@@ -100,19 +106,14 @@ class SchemaIntrospector:
         else:
             raise ValueError(f"Unsupported database engine: {self.engine}")
 
-    def _get_connection_params(self) -> dict:
+    def _get_connection_params(self, target_name: str) -> dict:
         """Get connection parameters from config."""
-        # Password resolved via shared resolver
-        from shared.password_resolver import resolve_password_value
-        password = resolve_password_value(self.config) or None
-
-        return {
-            "host": self.config.get("host"),
-            "port": self.config.get("port"),
-            "user": self.config.get("user"),
-            "password": password,
-            "database": self.config.get("database"),
-        }
+        params = resolve_connection_params(
+            target=target_name,
+            target_config=self.config,
+        )
+        params["password"] = params["password"] or None
+        return params
 
     def _introspect_postgres(
         self, target_name: str, enum_threshold: int, sample_enums: bool
@@ -120,26 +121,14 @@ class SchemaIntrospector:
         """Introspect PostgreSQL database."""
         import psycopg2
 
-        params = self._get_connection_params()
+        params = self._get_connection_params(target_name)
 
         if not all(
             [params["host"], params["user"], params["database"], params["password"]]
         ):
             raise ConnectionError("Missing database connection details")
 
-        # Determine SSL mode based on config
-        tls_enabled = self.config.get("tls", False)
-        sslmode = "require" if tls_enabled else "prefer"
-
-        connection = psycopg2.connect(
-            host=params["host"],
-            port=params["port"] or 5432,
-            user=params["user"],
-            password=params["password"],
-            database=params["database"],
-            sslmode=sslmode,
-            connect_timeout=10,
-        )
+        connection = psycopg2.connect(**postgres_connection_kwargs(params))
 
         layer = SemanticLayer(target=target_name)
 
@@ -546,7 +535,7 @@ class SchemaIntrospector:
         """Introspect MySQL database."""
         import pymysql
 
-        params = self._get_connection_params()
+        params = self._get_connection_params(target_name)
 
         if not all(
             [params["host"], params["user"], params["database"], params["password"]]
@@ -554,20 +543,7 @@ class SchemaIntrospector:
             raise ConnectionError("Missing database connection details")
 
         # Determine SSL mode based on config
-        tls_enabled = self.config.get("tls", False)
-
-        connect_kwargs = {
-            "host": params["host"],
-            "port": params["port"] or 3306,
-            "user": params["user"],
-            "password": params["password"],
-            "database": params["database"],
-            "connect_timeout": 10,
-        }
-        if tls_enabled:
-            connect_kwargs["ssl"] = {"ssl": True}
-
-        connection = pymysql.connect(**connect_kwargs)
+        connection = create_mysql_connection_from_params(params)
 
         layer = SemanticLayer(target=target_name)
 

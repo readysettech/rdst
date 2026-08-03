@@ -17,6 +17,13 @@ from shared.deploy.sandbox_manager import (
     _settle_transition,
 )
 
+pytestmark = pytest.mark.usefixtures("run_blocking_inline")
+
+
+async def _wait_for_thread_event(event: threading.Event) -> None:
+    while not event.is_set():
+        await asyncio.sleep(0.01)
+
 
 class FakeAdapter:
     def __init__(self) -> None:
@@ -475,7 +482,7 @@ async def test_cancelled_active_provision_rolls_back_before_next_waiter(
             self.provisioned.append(target)
             if len(self.provisioned) == 1:
                 self.provision_started.set()
-                await asyncio.to_thread(self.finish_provision.wait)
+                await _wait_for_thread_event(self.finish_provision)
             else:
                 self.second_provision_started.set()
             self.current = ProvisionedSandbox(
@@ -548,7 +555,7 @@ async def test_cancelled_replacement_removes_sandbox_once(tmp_path, target_confi
 
         async def remove(self):
             self.remove_started.set()
-            await asyncio.to_thread(self.finish_remove.wait)
+            await _wait_for_thread_event(self.finish_remove)
             await super().remove()
 
     adapter = BlockingRemovalAdapter()
@@ -597,7 +604,7 @@ async def test_repeated_cancellation_waits_for_rollback_before_next_waiter(
             self.provisioned.append(target)
             if len(self.provisioned) == 1:
                 self.provision_started.set()
-                await asyncio.to_thread(self.finish_provision.wait)
+                await _wait_for_thread_event(self.finish_provision)
             else:
                 self.second_provision_started.set()
             self.current = ProvisionedSandbox(
@@ -617,7 +624,7 @@ async def test_repeated_cancellation_waits_for_rollback_before_next_waiter(
 
         async def remove(self):
             self.remove_started.set()
-            await asyncio.to_thread(self.finish_remove.wait)
+            await _wait_for_thread_event(self.finish_remove)
             await super().remove()
 
     adapter = BlockingRollbackAdapter()

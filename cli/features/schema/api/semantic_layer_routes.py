@@ -151,6 +151,8 @@ class SchemaInitResponse(BaseModel):
     enum_columns: list[str]
     path: Optional[str] = None
     error: Optional[str] = None
+    code: Optional[str] = None
+    category: Optional[str] = None
 
 
 class SchemaExportResponse(BaseModel):
@@ -435,6 +437,8 @@ class SchemaOperationResponse(BaseModel):
     ok: bool
     message: str
     data: Optional[dict[str, Any]] = None
+    code: Optional[str] = None
+    category: Optional[str] = None
 
 
 @router.post("/semantic-layer/refresh")
@@ -449,10 +453,23 @@ async def refresh_schema(
     result = await asyncio.to_thread(
         service.refresh, guard.target_name, guard.target_config
     )
+    from shared.api.ssh_errors import connectivity_error_payload
+
+    failure = (
+        connectivity_error_payload(
+            RuntimeError(result.get("message", "")),
+            guard.target_name,
+            guard.target_config,
+        )
+        if not result.get("ok", False)
+        else None
+    )
     return SchemaOperationResponse(
         ok=result.get("ok", False),
-        message=result.get("message", ""),
+        message=failure["message"] if failure else result.get("message", ""),
         data=result.get("data"),
+        code=failure["category"] if failure else None,
+        category=failure["category"] if failure else None,
     )
 
 
@@ -468,10 +485,23 @@ async def profile_schema(
     result = await asyncio.to_thread(
         service.profile, guard.target_name, guard.target_config, request.table
     )
+    from shared.api.ssh_errors import connectivity_error_payload
+
+    failure = (
+        connectivity_error_payload(
+            RuntimeError(result.get("message", "")),
+            guard.target_name,
+            guard.target_config,
+        )
+        if not result.get("ok", False)
+        else None
+    )
     return SchemaOperationResponse(
         ok=result.get("ok", False),
-        message=result.get("message", ""),
+        message=failure["message"] if failure else result.get("message", ""),
         data=result.get("data"),
+        code=failure["category"] if failure else None,
+        category=failure["category"] if failure else None,
     )
 
 
@@ -500,8 +530,28 @@ async def init_schema(
             error_message = event.message
 
     if init_result is not None:
-        return _init_result_to_response(init_result)
+        response = _init_result_to_response(init_result)
+        if not response.success and response.error:
+            from shared.api.ssh_errors import connectivity_error_payload
 
+            failure = connectivity_error_payload(
+                RuntimeError(response.error),
+                guard.target_name,
+                guard.target_config,
+            )
+            if failure:
+                response.error = failure["message"]
+                response.code = failure["category"]
+                response.category = failure["category"]
+        return response
+
+    from shared.api.ssh_errors import connectivity_error_payload
+
+    failure = connectivity_error_payload(
+        RuntimeError(error_message or "Schema initialization failed"),
+        guard.target_name,
+        guard.target_config,
+    )
     return SchemaInitResponse(
         success=False,
         target=guard.target_name,
@@ -509,7 +559,13 @@ async def init_schema(
         columns=0,
         relationships=0,
         enum_columns=[],
-        error=error_message or "Schema initialization failed",
+        error=(
+            failure["message"]
+            if failure
+            else error_message or "Schema initialization failed"
+        ),
+        code=failure["category"] if failure else None,
+        category=failure["category"] if failure else None,
     )
 
 

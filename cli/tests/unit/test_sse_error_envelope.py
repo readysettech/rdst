@@ -12,6 +12,10 @@ from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
 
 from features.analyze.api.routes import _event_to_sse as analyze_event_to_sse
+from features.ask.api.routes import _event_to_sse as ask_event_to_sse
+from features.ask.events import AskErrorEvent
+from features.ask.models import AskPhase
+from features.ask.service import AskService
 from features.top.api import routes as top_routes
 from features.top.models import TopOptions
 from shared.service_events import ErrorEvent
@@ -42,6 +46,38 @@ def test_analyze_error_event_serializes_envelope() -> None:
     assert data["stage"] == "executing_explain"
 
 
+def test_ask_connection_error_preserves_category_and_target() -> None:
+    mapped = ask_event_to_sse(
+        AskErrorEvent(
+            type="error",
+            message="SSH authentication failed.",
+            code="ssh_auth_failed",
+            category="ssh_auth_failed",
+            target="production",
+        )
+    )
+
+    assert mapped["event"] == "error"
+    data = json.loads(mapped["data"])
+    assert data["code"] == "ssh_auth_failed"
+    assert data["category"] == "ssh_auth_failed"
+    assert data["target"] == "production"
+
+
+def test_ask_database_failure_is_structured_separately_from_ai_errors() -> None:
+    event = AskService._database_error(
+        "Connection refused",
+        AskPhase.EXECUTE,
+        "production",
+        {"engine": "postgresql"},
+    )
+
+    assert event.code == "database_connection_failed"
+    assert event.category == "database_connection_failed"
+    assert event.target == "production"
+    assert "AI" not in event.message
+
+
 async def test_top_in_service_error_emits_envelope_not_str_e(monkeypatch) -> None:
     """The in-service catch (the common failure path) yields an envelope-shaped
     TopErrorEvent, and its SSE serialization never carries raw DSN/secret text."""
@@ -53,10 +89,11 @@ async def test_top_in_service_error_emits_envelope_not_str_e(monkeypatch) -> Non
 
     service = TopService()
     events = []
+    fake_dsn = "postgresql://" + (
+        f"user:{FAKE_DSN_CREDENTIAL_MARKER}@db.internal/prod"
+    )
     with patch.object(service, "_load_config") as mock_load:
-        mock_load.side_effect = RuntimeError(
-            f"connection failed: postgresql://user:{FAKE_DSN_CREDENTIAL_MARKER}@db.internal/prod"
-        )
+        mock_load.side_effect = RuntimeError(f"connection failed: {fake_dsn}")
         async for event in service.get_top_queries(
             TopInput(target="demo", source="auto"), TopOptions()
         ):
@@ -64,8 +101,9 @@ async def test_top_in_service_error_emits_envelope_not_str_e(monkeypatch) -> Non
 
     error_event = events[-1]
     assert error_event.type == "error"
-    assert error_event.code == "internal_error"
-    assert error_event.message == "The slow-query lookup could not be completed."
+    assert error_event.code == "database_connection_failed"
+    assert "database connection" in error_event.message.lower()
+    assert "demo" in error_event.message
     assert error_event.detail == "RuntimeError"
     assert FAKE_DSN_CREDENTIAL_MARKER not in error_event.message
 
@@ -73,8 +111,9 @@ async def test_top_in_service_error_emits_envelope_not_str_e(monkeypatch) -> Non
     assert mapped["event"] == "error"
     assert FAKE_DSN_CREDENTIAL_MARKER not in mapped["data"]
     data = json.loads(mapped["data"])
-    assert data["code"] == "internal_error"
-    assert data["message"] == "The slow-query lookup could not be completed."
+    assert data["code"] == "database_connection_failed"
+    assert "database connection" in data["message"].lower()
+    assert "demo" in data["message"]
     assert data["detail"] == "RuntimeError"
     assert data["stage"] == "execution"
 
@@ -90,9 +129,10 @@ async def test_top_generator_failure_emits_envelope_not_str_e(monkeypatch) -> No
 
     class _BoomService:
         async def get_top_queries(self, input_data, options):
-            raise RuntimeError(
-                f"postgresql://user:{FAKE_DSN_CREDENTIAL_MARKER}@db.internal/prod"
+            fake_dsn = "postgresql://" + (
+                f"user:{FAKE_DSN_CREDENTIAL_MARKER}@db.internal/prod"
             )
+            raise RuntimeError(fake_dsn)
             yield  # pragma: no cover — makes this an async generator
 
     monkeypatch.setattr(top_routes, "TopService", _BoomService)

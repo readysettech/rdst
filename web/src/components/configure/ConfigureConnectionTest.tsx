@@ -12,9 +12,10 @@ import { HStack, VStack } from '@rs/ui-new/stack';
 import { Show } from '@rs/ui-new/show';
 import { Spinner } from '@rs/ui-new/spinner';
 import { m } from '@rs/ui-new/motion';
-import { Button } from '@rs/ui-new/button';
 import type { ConfigureConnectionStatus } from '../../types/configure';
+import { ConnectionFailureActions } from '../ConnectionFailureActions';
 import { condenseServerVersion } from './TargetConnectivity';
+import { WritePrivilegesNotice } from './WritePrivilegesNotice';
 
 interface ConfigureConnectionTestProps {
   result: ConfigureConnectionStatus | null;
@@ -23,6 +24,7 @@ interface ConfigureConnectionTestProps {
   targetName?: string;
   onDismiss?: () => void;
   onSetPassword?: () => void;
+  onRetry?: () => Promise<boolean>;
 }
 
 export function ConfigureConnectionTest({
@@ -31,6 +33,7 @@ export function ConfigureConnectionTest({
   targetName,
   onDismiss,
   onSetPassword,
+  onRetry,
 }: ConfigureConnectionTestProps) {
   if (isLoading) {
     return (
@@ -87,22 +90,17 @@ export function ConfigureConnectionTest({
               {result.connected ? 'Connected' : 'Connection failed'}
               {version ? ` · ${version}` : ''}
             </Text>
-            <Show when={!!result.error}>
-              <Text level="caption" className="text-content-negative-soft">
-                {passwordRequired
-                  ? `Enter the password for '${result.target}' again.`
-                  : result.error}
-              </Text>
-            </Show>
-            <Show when={passwordRequired && !!onSetPassword}>
-              <Button
-                variant="primary"
-                modifier="solid"
-                size="small"
-                icon="key"
-                iconPosition="left"
-                label="Set password"
-                onClick={onSetPassword}
+            <Show when={!result.connected && !!result.error}>
+              <ConnectionFailureActions
+                failure={{
+                  target: result.target,
+                  message: result.error,
+                  category: result.category,
+                  code: result.code,
+                }}
+                passwordRequired={passwordRequired}
+                onSetPassword={onSetPassword}
+                onRetry={onRetry}
               />
             </Show>
           </VStack>
@@ -127,6 +125,14 @@ export function ConfigureConnectionTest({
           </Show>
         </HStack>
       </div>
+      <Show when={result.connected && result.privileges?.writable === true}>
+        <div className="mt-2">
+          <WritePrivilegesNotice
+            engine={result.databaseEngine ?? 'postgresql'}
+            evidence={result.privileges?.evidence}
+          />
+        </div>
+      </Show>
     </m.div>
   );
 }

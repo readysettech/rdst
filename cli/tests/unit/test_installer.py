@@ -19,8 +19,26 @@ INSTALLER = Path(__file__).parents[2] / "install.sh"
 def installer_env(tmp_path: Path):
     home = tmp_path / "home"
     fake_bin = tmp_path / "fake-bin"
+    system_bin = tmp_path / "system-bin"
     home.mkdir()
     fake_bin.mkdir()
+    system_bin.mkdir()
+
+    # Keep the installer subprocess isolated from an rdst already installed on
+    # the developer or CI host while retaining the ordinary POSIX utilities it
+    # exercises. Tests that need an existing rdst add one explicitly.
+    for directory in (Path("/usr/bin"), Path("/bin"), Path("/usr/sbin"), Path("/sbin")):
+        if not directory.is_dir():
+            continue
+        for executable in directory.iterdir():
+            destination = system_bin / executable.name
+            if (
+                executable.name in {"rdst", "rdst-mcp"}
+                or destination.exists()
+                or destination.is_symlink()
+            ):
+                continue
+            destination.symlink_to(executable)
 
     system = platform.system()
     machine = platform.machine()
@@ -152,7 +170,7 @@ cp "$FAKE_UV_ARCHIVE" "$destination"
     env.update(
         {
             "HOME": str(home),
-            "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
+            "PATH": f"{fake_bin}:{system_bin}",
             "SHELL": "/bin/sh",
             "XDG_BIN_HOME": str(home / "bin"),
             "XDG_DATA_HOME": str(home / "data"),

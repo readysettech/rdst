@@ -6,14 +6,15 @@ best-effort MX rejection that fails open, and client/server regex parity.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
 import dns.exception
 import dns.resolver
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient, Response
 
 from shared.api.routes import settings as settings_mod
 from shared.config.targets import TargetsConfig
@@ -21,6 +22,27 @@ from shared.config.targets import TargetsConfig
 FIXTURE = (
     Path(__file__).parent / "fixtures" / "email_validation_cases.json"
 )
+
+
+class _Client:
+    def __init__(self, app: FastAPI):
+        self.app = app
+
+    def request(self, method: str, path: str, **kwargs) -> Response:
+        async def send() -> Response:
+            async with AsyncClient(
+                transport=ASGITransport(app=self.app),
+                base_url="http://testserver",
+            ) as client:
+                return await client.request(method, path, **kwargs)
+
+        return asyncio.run(send())
+
+    def get(self, path: str, **kwargs) -> Response:
+        return self.request("GET", path, **kwargs)
+
+    def post(self, path: str, **kwargs) -> Response:
+        return self.request("POST", path, **kwargs)
 
 
 class _StubEmailService:
@@ -69,7 +91,7 @@ def client(config_path, monkeypatch):
     monkeypatch.setattr(settings_mod, "_domain_has_mx", lambda domain, resolver=None: True)
     app = FastAPI()
     app.include_router(settings_mod.router, prefix="/api")
-    return TestClient(app)
+    return _Client(app)
 
 
 def _stored_email(config_path: Path) -> str | None:
@@ -130,15 +152,18 @@ def test_get_email_forbidden_off_loopback(config_path, monkeypatch):
     monkeypatch.setattr(settings_mod, "is_loopback_request", lambda request: False)
     app = FastAPI()
     app.include_router(settings_mod.router, prefix="/api")
-    resp = TestClient(app).get("/api/settings/email")
+    resp = _Client(app).get("/api/settings/email")
     assert resp.status_code == 403
 
 
 def test_post_email_forbidden_off_loopback(config_path, monkeypatch):
-    monkeypatch.setattr(settings_mod, "is_loopback_request", lambda request: False)
+    def forbidden(_request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    monkeypatch.setattr(settings_mod, "require_local_request", forbidden)
     app = FastAPI()
     app.include_router(settings_mod.router, prefix="/api")
-    resp = TestClient(app).post("/api/settings/email", json={"email": "a@b.com"})
+    resp = _Client(app).post("/api/settings/email", json={"email": "a@b.com"})
     assert resp.status_code == 403
 
 

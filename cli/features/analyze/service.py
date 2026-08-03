@@ -122,6 +122,8 @@ class AnalyzeService:
         Yields:
             AnalyzeEvent: Typed events during analysis execution
         """
+        target_name = options.target
+        target_config: Optional[Dict[str, Any]] = None
         try:
             # Initial progress
             yield ProgressEvent(
@@ -167,9 +169,15 @@ class AnalyzeService:
                 yield event
 
         except Exception as e:
+            from shared.api.ssh_errors import connectivity_error_payload
+
+            failure = connectivity_error_payload(
+                e, target_name or options.target or "target", target_config or {}
+            )
             yield ErrorEvent(
                 type="error",
-                message=str(e),
+                message=failure["message"] if failure else str(e),
+                code=failure["category"] if failure else None,
             )
 
     async def _load_config(
@@ -279,6 +287,8 @@ class AnalyzeService:
             workflow_result=workflow_result,
             readyset_result=readyset_result,
             input=input,
+            target_name=target_name,
+            target_config=target_config,
         ):
             yield event
 
@@ -449,6 +459,8 @@ class AnalyzeService:
         workflow_result: Dict[str, Any],
         readyset_result: Optional[Dict[str, Any]],
         input: AnalyzeInput,
+        target_name: str = "",
+        target_config: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[AnalyzeEvent, None]:
         """Process workflow and readyset results, yielding appropriate events.
 
@@ -474,6 +486,19 @@ class AnalyzeService:
         explain_results = context.get("explain_results", {})
         if not explain_results.get("success") and explain_results.get("error"):
             error_msg = explain_results["error"]
+            from shared.api.ssh_errors import connectivity_error_payload
+
+            failure = connectivity_error_payload(
+                RuntimeError(error_msg), target_name, target_config
+            )
+            if failure:
+                yield ErrorEvent(
+                    type="error",
+                    message=failure["message"],
+                    code=failure["category"],
+                    stage="executing_explain",
+                )
+                return
             yield ExplainCompleteEvent(
                 type="explain_complete",
                 success=False,

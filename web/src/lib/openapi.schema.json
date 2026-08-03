@@ -700,6 +700,148 @@
         "title": "AgentWriteResponse",
         "type": "object"
       },
+      "AllowlistAddRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Ip"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "AllowlistAddRequest",
+        "type": "object"
+      },
+      "AllowlistAddResponse": {
+        "properties": {
+          "added_ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added Ip"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "credential_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Method"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "verified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified"
+          }
+        },
+        "required": [
+          "ok",
+          "message",
+          "category"
+        ],
+        "title": "AllowlistAddResponse",
+        "type": "object"
+      },
+      "AllowlistContextResponse": {
+        "properties": {
+          "already_allowed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Already Allowed"
+          },
+          "current_ip": {
+            "title": "Current Ip",
+            "type": "string"
+          },
+          "entry_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Count"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "guidance": {
+            "title": "Guidance",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "signed_in": {
+            "title": "Signed In",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "provider",
+          "signed_in",
+          "current_ip",
+          "guidance"
+        ],
+        "title": "AllowlistContextResponse",
+        "type": "object"
+      },
       "AnalysisMetadata": {
         "additionalProperties": true,
         "properties": {
@@ -924,7 +1066,6 @@
         "type": "object"
       },
       "AnnotateCompleteEvent": {
-        "description": "Annotation process completed, possibly with individual table failures.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -964,7 +1105,6 @@
         "type": "object"
       },
       "AnnotateErrorEvent": {
-        "description": "Annotation process encountered an error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -984,7 +1124,6 @@
         "type": "object"
       },
       "AnnotateProgressEvent": {
-        "description": "Progress update during annotation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1048,7 +1187,6 @@
         "type": "object"
       },
       "AnnotateStartedEvent": {
-        "description": "Annotation process started.",
         "properties": {
           "completed_tables": {
             "default": 0,
@@ -1078,7 +1216,6 @@
         "type": "object"
       },
       "AnnotateTableCompleteEvent": {
-        "description": "A table has been annotated.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -1178,7 +1315,6 @@
         "type": "object"
       },
       "AskClarificationNeededEvent": {
-        "description": "Clarification needed from the user.",
         "properties": {
           "interpretations": {
             "items": {
@@ -1214,7 +1350,6 @@
         "type": "object"
       },
       "AskClarificationQuestion": {
-        "description": "A clarification question for the user.",
         "properties": {
           "id": {
             "title": "Id",
@@ -1241,8 +1376,31 @@
         "type": "object"
       },
       "AskErrorEvent": {
-        "description": "Ask encountered an error.",
         "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Category"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Code"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -1261,6 +1419,18 @@
             ],
             "default": null,
             "title": "Phase"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target"
           },
           "type": {
             "const": "error",
@@ -1373,7 +1543,6 @@
         "type": "object"
       },
       "AskInterpretation": {
-        "description": "A possible interpretation of the user's question.",
         "properties": {
           "assumptions": {
             "items": {
@@ -1494,7 +1663,6 @@
         "type": "object"
       },
       "AskResultEvent": {
-        "description": "Ask completed with results.",
         "properties": {
           "columns": {
             "items": {
@@ -1568,7 +1736,6 @@
         "type": "object"
       },
       "AskSchemaLoadedEvent": {
-        "description": "Schema has been loaded.",
         "properties": {
           "source": {
             "title": "Source",
@@ -1606,7 +1773,6 @@
         "type": "object"
       },
       "AskSqlGeneratedEvent": {
-        "description": "SQL has been generated.",
         "properties": {
           "explanation": {
             "anyOf": [
@@ -1638,7 +1804,6 @@
         "type": "object"
       },
       "AskStatusEvent": {
-        "description": "Status update during ask execution.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1891,6 +2056,17 @@
       },
       "AuditRequirementsResponse": {
         "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
           "detail": {
             "default": "",
             "title": "Detail",
@@ -2655,7 +2831,6 @@
         ]
       },
       "BootstrapNeedsKeyEvent": {
-        "description": "The run reached the annotate gate without a usable Anthropic key.\n\nThe event name doubles as the run registry's gating signal: the run's\nstatus parks on needs_key until the next event arrives.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2693,7 +2868,6 @@
         "type": "object"
       },
       "BootstrapStageEvent": {
-        "description": "Progress of one bootstrap stage.\n\nstatus is started | progress | done | failed | skipped. Child-service\nevents surface as status=\"progress\" with the child's payload in detail,\nso the stream stays one flat, typed union.",
         "properties": {
           "detail": {
             "anyOf": [
@@ -2812,7 +2986,6 @@
         "type": "object"
       },
       "CacheRunCompleteEvent": {
-        "description": "Performance comparison result (origin vs cache).",
         "properties": {
           "cache_iterations": {
             "anyOf": [
@@ -3221,7 +3394,6 @@
         "type": "object"
       },
       "ChatToolResultEvent": {
-        "description": "Result of one tool execution.\n\nFor query_database, `data` carries sql/columns/rows/row_count/\nexecution_time_ms/truncated/query_hash/query_tag; for get_schema it\ncarries tables/source.",
         "properties": {
           "content": {
             "title": "Content",
@@ -3304,6 +3476,47 @@
           "errors"
         ],
         "title": "ClearKeyringResponse",
+        "type": "object"
+      },
+      "CloseTunnelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "default": false,
+            "title": "All",
+            "type": "boolean"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "CloseTunnelRequest",
+        "type": "object"
+      },
+      "CloseTunnelResponse": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "message"
+        ],
+        "title": "CloseTunnelResponse",
         "type": "object"
       },
       "CompleteEvent": {
@@ -3792,7 +4005,6 @@
         "type": "object"
       },
       "ErrorEvent": {
-        "description": "Error event for service workflows.\n\n``code`` and ``detail`` mirror the shared HTTP error envelope\n(``shared.api.app._error_envelope``) so an SSE failure carries the same\n{code, message, detail} shape the client normalizes in ``lib/sse.ts``.\nBoth stay optional so existing producers that only set ``message`` keep\nworking; the client derives a code when one is absent.",
         "properties": {
           "code": {
             "anyOf": [
@@ -4184,6 +4396,18 @@
       },
       "FleetConnectivityEvent": {
         "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Category"
+          },
           "code": {
             "anyOf": [
               {
@@ -4231,6 +4455,19 @@
             ],
             "default": null,
             "title": "Password Env"
+          },
+          "privileges": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Privileges"
           },
           "server_version": {
             "anyOf": [
@@ -4885,6 +5122,112 @@
           "count"
         ],
         "title": "FleetTargetsResponse",
+        "type": "object"
+      },
+      "FormConnectionTestRequest": {
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/FormTestTargetData"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "FormConnectionTestRequest",
+        "type": "object"
+      },
+      "FormTestTargetData": {
+        "description": "Unsaved form values used only for a connection test.",
+        "properties": {
+          "database": {
+            "title": "Database",
+            "type": "string"
+          },
+          "engine": {
+            "default": "postgresql",
+            "title": "Engine",
+            "type": "string"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "password_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Env"
+          },
+          "port": {
+            "default": 5432,
+            "title": "Port",
+            "type": "integer"
+          },
+          "read_only": {
+            "default": false,
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "ssh": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SshData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tls": {
+            "default": false,
+            "title": "Tls",
+            "type": "boolean"
+          },
+          "tls_ca": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tls Ca"
+          },
+          "tls_verify": {
+            "default": false,
+            "title": "Tls Verify",
+            "type": "boolean"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "database",
+          "user"
+        ],
+        "title": "FormTestTargetData",
         "type": "object"
       },
       "FormattedAnalysis": {
@@ -5587,6 +5930,34 @@
         "title": "ImportQueriesResponse",
         "type": "object"
       },
+      "ImportSshKeyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "source_path": {
+            "minLength": 1,
+            "title": "Source Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_path"
+        ],
+        "title": "ImportSshKeyRequest",
+        "type": "object"
+      },
+      "ImportSshKeyResponse": {
+        "properties": {
+          "key_path": {
+            "title": "Key Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_path"
+        ],
+        "title": "ImportSshKeyResponse",
+        "type": "object"
+      },
       "IndexRecommendation": {
         "additionalProperties": true,
         "properties": {
@@ -6154,7 +6525,6 @@
         "type": "object"
       },
       "ProgressEvent": {
-        "description": "Progress update during a multi-step operation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -6197,7 +6567,6 @@
         "type": "object"
       },
       "QueryBenchmarkCompleteEvent": {
-        "description": "Benchmark finished; carries the final tally.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6245,7 +6614,6 @@
         "type": "object"
       },
       "QueryBenchmarkErrorEvent": {
-        "description": "Benchmark failed (or was rejected by a safety rail) before completion.\n\nCarries the shared error envelope ({code, message, detail}, B7/T24) so the\nclient normalizes a benchmark failure exactly like every other SSE error.\n``message`` stays humane and safe to show; ``detail`` holds only the\nexception class name for correlation \u2014 never the raw ``str(e)``, which can\nembed host / DSN / SQL material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -6302,7 +6670,6 @@
         ]
       },
       "QueryBenchmarkProgressEvent": {
-        "description": "Benchmark progress tick.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6350,7 +6717,6 @@
         "type": "object"
       },
       "QueryBenchmarkStats": {
-        "description": "Statistics for a single benchmarked query.",
         "properties": {
           "avg_ms": {
             "title": "Avg Ms",
@@ -7317,7 +7683,6 @@
         "type": "object"
       },
       "RunEndEvent": {
-        "description": "Terminal event appended by the registry after every run.",
         "properties": {
           "status": {
             "title": "Status",
@@ -7498,7 +7863,6 @@
         "type": "object"
       },
       "ScanCompleteEvent": {
-        "description": "Scan completed.",
         "properties": {
           "success": {
             "title": "Success",
@@ -7524,7 +7888,6 @@
         "type": "object"
       },
       "ScanErrorEvent": {
-        "description": "Scan error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -7584,7 +7947,6 @@
         ]
       },
       "ScanFilesFoundEvent": {
-        "description": "Files with ORM patterns discovered.",
         "properties": {
           "files": {
             "items": {
@@ -7680,7 +8042,6 @@
         "type": "string"
       },
       "ScanProgressEvent": {
-        "description": "Progress update within a scan phase.",
         "properties": {
           "current": {
             "title": "Current",
@@ -7722,7 +8083,6 @@
         "type": "object"
       },
       "ScanQueryResultEvent": {
-        "description": "Individual query result from scan.",
         "properties": {
           "query": {
             "additionalProperties": true,
@@ -7743,7 +8103,6 @@
         "type": "object"
       },
       "ScanRegistryEvent": {
-        "description": "Registry save results.",
         "properties": {
           "new_queries": {
             "title": "New Queries",
@@ -7859,7 +8218,6 @@
         "type": "object"
       },
       "ScanStatusEvent": {
-        "description": "Status update during scan.",
         "properties": {
           "message": {
             "title": "Message",
@@ -8127,6 +8485,28 @@
       },
       "SchemaInitResponse": {
         "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
           "columns": {
             "title": "Columns",
             "type": "integer"
@@ -8213,6 +8593,28 @@
       },
       "SchemaOperationResponse": {
         "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
           "data": {
             "anyOf": [
               {
@@ -8288,6 +8690,28 @@
       },
       "SchemaResponse": {
         "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
           "dialect": {
             "enum": [
               "postgresql",
@@ -8316,6 +8740,17 @@
             },
             "title": "Tables",
             "type": "object"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
           }
         },
         "required": [
@@ -8699,6 +9134,210 @@
         "title": "SettingsBody",
         "type": "object"
       },
+      "SshAuthOptionResponse": {
+        "properties": {
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "key_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Path"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "outside_ssh_dir": {
+            "default": false,
+            "title": "Outside Ssh Dir",
+            "type": "boolean"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "title": "SshAuthOptionResponse",
+        "type": "object"
+      },
+      "SshData": {
+        "additionalProperties": false,
+        "description": "SSH jump-host configuration stored as pointers only.",
+        "properties": {
+          "host": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "key_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Path"
+          },
+          "port": {
+            "default": 22,
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "type": "integer"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          }
+        },
+        "title": "SshData",
+        "type": "object"
+      },
+      "SshKeysResponse": {
+        "properties": {
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/SshAuthOptionResponse"
+            },
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "options"
+        ],
+        "title": "SshKeysResponse",
+        "type": "object"
+      },
+      "SshProfileResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "minLength": 1,
+            "title": "Host",
+            "type": "string"
+          },
+          "key_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Path"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "port": {
+            "default": 22,
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "type": "integer"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          }
+        },
+        "required": [
+          "host",
+          "name"
+        ],
+        "title": "SshProfileResponse",
+        "type": "object"
+      },
       "StatusResponse": {
         "properties": {
           "configured": {
@@ -8780,6 +9419,19 @@
             "title": "Host",
             "type": "string"
           },
+          "password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
           "password_env": {
             "anyOf": [
               {
@@ -8801,9 +9453,35 @@
             "title": "Read Only",
             "type": "boolean"
           },
+          "ssh": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SshData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tls": {
             "default": false,
             "title": "Tls",
+            "type": "boolean"
+          },
+          "tls_ca": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tls Ca"
+          },
+          "tls_verify": {
+            "default": false,
+            "title": "Tls Verify",
             "type": "boolean"
           },
           "user": {
@@ -8830,6 +9508,17 @@
             "title": "Engine",
             "type": "string"
           },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
           "has_password": {
             "title": "Has Password",
             "type": "boolean"
@@ -8837,6 +9526,17 @@
           "host": {
             "title": "Host",
             "type": "string"
+          },
+          "instance_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instance Class"
           },
           "is_default": {
             "title": "Is Default",
@@ -8857,10 +9557,49 @@
             "title": "Port",
             "type": "integer"
           },
+          "publicly_accessible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publicly Accessible"
+          },
           "read_only": {
             "default": false,
             "title": "Read Only",
             "type": "boolean"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "ssh": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SshData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
           },
           "target_name": {
             "title": "Target Name",
@@ -8869,6 +9608,22 @@
           "tls": {
             "default": false,
             "title": "Tls",
+            "type": "boolean"
+          },
+          "tls_ca": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tls Ca"
+          },
+          "tls_verify": {
+            "default": false,
+            "title": "Tls Verify",
             "type": "boolean"
           },
           "user": {
@@ -9062,6 +9817,27 @@
             ],
             "title": "Proxy"
           },
+          "publicly_accessible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publicly Accessible"
+          },
+          "ssh": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SshData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "verified": {
             "anyOf": [
               {
@@ -9118,6 +9894,58 @@
           "success"
         ],
         "title": "TargetValidationResult",
+        "type": "object"
+      },
+      "TestTunnelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "TestTunnelRequest",
+        "type": "object"
+      },
+      "TestTunnelResponse": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "stage": {
+            "enum": [
+              "tunnel",
+              "database"
+            ],
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "stage",
+          "message"
+        ],
+        "title": "TestTunnelResponse",
         "type": "object"
       },
       "TestedRewrite": {
@@ -9181,7 +10009,6 @@
         "type": "object"
       },
       "TopCompleteEvent": {
-        "description": "Operation completed.",
         "properties": {
           "newly_saved": {
             "title": "Newly Saved",
@@ -9219,7 +10046,6 @@
         "type": "object"
       },
       "TopConnectedEvent": {
-        "description": "Database connection established.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -9277,7 +10103,6 @@
         "type": "object"
       },
       "TopDbLimitWarningEvent": {
-        "description": "Database query size limit is below recommended threshold.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -9312,7 +10137,6 @@
         "type": "object"
       },
       "TopErrorEvent": {
-        "description": "Error occurred.\n\n``code`` and ``detail`` mirror the shared error envelope (B7/T24):\n``message`` stays humane, ``detail`` carries the exception class name for\ncorrelation \u2014 never the raw ``str(e)``, which can embed host/DSN material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -9397,6 +10221,28 @@
       },
       "TopHistoricalResponse": {
         "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
           "db_limit_warning": {
             "anyOf": [
               {
@@ -9476,7 +10322,6 @@
         "type": "object"
       },
       "TopQueriesEvent": {
-        "description": "Batch of top queries.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -9538,7 +10383,6 @@
         "type": "object"
       },
       "TopQueryData": {
-        "description": "Individual query data.",
         "properties": {
           "avg_time": {
             "title": "Avg Time",
@@ -9717,7 +10561,6 @@
         "type": "object"
       },
       "TopQuerySavedEvent": {
-        "description": "Query saved to registry.",
         "properties": {
           "is_new": {
             "title": "Is New",
@@ -9742,7 +10585,6 @@
         "type": "object"
       },
       "TopSourceFallbackEvent": {
-        "description": "Source fallback occurred.",
         "properties": {
           "from_source": {
             "title": "From Source",
@@ -9772,7 +10614,6 @@
         "type": "object"
       },
       "TopStatusEvent": {
-        "description": "Progress status update.",
         "properties": {
           "message": {
             "title": "Message",
@@ -10102,6 +10943,39 @@
           "active"
         ],
         "title": "TrialStatusResponse",
+        "type": "object"
+      },
+      "TunnelStatusResponse": {
+        "properties": {
+          "jump_host": {
+            "title": "Jump Host",
+            "type": "string"
+          },
+          "last_used": {
+            "title": "Last Used",
+            "type": "number"
+          },
+          "local_port": {
+            "title": "Local Port",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "jump_host",
+          "local_port",
+          "state",
+          "last_used"
+        ],
+        "title": "TunnelStatusResponse",
         "type": "object"
       },
       "UpdateSqlRequest": {
@@ -11072,6 +11946,91 @@
         "summary": "Get Agent Schema",
         "tags": [
           "agents"
+        ]
+      }
+    },
+    "/api/allowlist/add": {
+      "post": {
+        "description": "On an explicit confirmed click, read-merge-write the provider allowlist.",
+        "operationId": "add_allowlist_ip_api_allowlist_add_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllowlistAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllowlistAddResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Allowlist Ip",
+        "tags": [
+          "allowlist"
+        ]
+      }
+    },
+    "/api/allowlist/context": {
+      "get": {
+        "description": "Fetch public IP and read provider state. This route never writes.",
+        "operationId": "get_allowlist_context_api_allowlist_context_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllowlistContextResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Allowlist Context",
+        "tags": [
+          "allowlist"
         ]
       }
     },
@@ -12229,7 +13188,7 @@
     },
     "/api/configure/targets/{name}/test": {
       "post": {
-        "description": "Test connection to a target (SSE stream).",
+        "description": "Test a saved target or the current unsaved form values (SSE stream).",
         "operationId": "test_connection_api_configure_targets__name__test_post",
         "parameters": [
           {
@@ -12242,6 +13201,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FormConnectionTestRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -16913,6 +17889,234 @@
         "summary": "Get Trial Status",
         "tags": [
           "trial"
+        ]
+      }
+    },
+    "/api/tunnel/close": {
+      "post": {
+        "description": "Close one target tunnel or every tunnel in this process.",
+        "operationId": "close_tunnel_api_tunnel_close_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseTunnelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloseTunnelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Close Tunnel",
+        "tags": [
+          "tunnel",
+          "tunnel"
+        ]
+      }
+    },
+    "/api/tunnel/ssh-keys": {
+      "get": {
+        "description": "Return local SSH agent, key-file, and ssh-config authentication options.",
+        "operationId": "ssh_keys_api_tunnel_ssh_keys_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "jump_host",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Jump Host",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshKeysResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ssh Keys",
+        "tags": [
+          "tunnel",
+          "tunnel"
+        ]
+      }
+    },
+    "/api/tunnel/ssh-keys/import": {
+      "post": {
+        "description": "Copy a local private key into ~/.ssh without changing the source file.",
+        "operationId": "import_ssh_key_api_tunnel_ssh_keys_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSshKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportSshKeyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Ssh Key",
+        "tags": [
+          "tunnel",
+          "tunnel"
+        ]
+      }
+    },
+    "/api/tunnel/ssh-profiles": {
+      "get": {
+        "description": "Return reusable SSH jump-host profiles without resolving key material.",
+        "operationId": "ssh_profiles_api_tunnel_ssh_profiles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SshProfileResponse"
+                  },
+                  "title": "Response Ssh Profiles Api Tunnel Ssh Profiles Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ssh Profiles",
+        "tags": [
+          "tunnel",
+          "tunnel"
+        ]
+      }
+    },
+    "/api/tunnel/status": {
+      "get": {
+        "description": "Return the tunnels managed by this backend process.",
+        "operationId": "tunnel_status_api_tunnel_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TunnelStatusResponse"
+                  },
+                  "title": "Response Tunnel Status Api Tunnel Status Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Tunnel Status",
+        "tags": [
+          "tunnel",
+          "tunnel"
+        ]
+      }
+    },
+    "/api/tunnel/test": {
+      "post": {
+        "description": "Open a target's tunnel and probe its database through the local endpoint.",
+        "operationId": "test_tunnel_api_tunnel_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestTunnelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestTunnelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Tunnel",
+        "tags": [
+          "tunnel",
+          "tunnel"
         ]
       }
     },

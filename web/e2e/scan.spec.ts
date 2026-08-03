@@ -1,4 +1,5 @@
 import {
+  acceptExplainAnalyzeConsent,
   clearQueryRegistry,
   configureTestTarget,
   expect,
@@ -137,6 +138,7 @@ async function prepareScanPage(
 ) {
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
+  await acceptExplainAnalyzeConsent(page)
   await page.goto('/scan')
   await expect(page.getByRole('heading', { name: 'Scan' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Start Scan' })).toBeDisabled()

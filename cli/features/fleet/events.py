@@ -78,7 +78,9 @@ class FleetConnectivityEvent:
     error: str | None = None
     server_version: str | None = None
     code: str | None = None
+    category: str | None = None
     password_env: str | None = None
+    privileges: dict[str, Any] | None = None
 
 
 @dataclass

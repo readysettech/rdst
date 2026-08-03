@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 import features.ask.api.routes as ask_routes
 import features.ask.example_questions as eq
 from shared.query_registry.query_registry import QueryRegistry
 
 
+pytestmark = pytest.mark.usefixtures("run_blocking_inline")
+
+
 @pytest.fixture
-def client() -> TestClient:
+def app() -> FastAPI:
     app = FastAPI()
     app.include_router(ask_routes.router, prefix="/api")
-    return TestClient(app)
+    return app
 
 
 class _NoLayerManager:
@@ -30,13 +33,17 @@ class _NoLayerManager:
         raise AssertionError("load() must not run when exists() is False")
 
 
-def test_examples_falls_back_to_introspection(client, monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_examples_falls_back_to_introspection(app, monkeypatch, tmp_path):
     import features.schema.semantic_layer.manager as mgr
 
     monkeypatch.setattr(mgr, "SemanticLayerManager", _NoLayerManager)
     monkeypatch.setattr(eq, "rdst_data_dir", lambda: tmp_path)
 
-    resp = client.get("/api/ask/examples", params={"target": "demo"})
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/ask/examples", params={"target": "demo"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["source"] == "introspection"
@@ -46,7 +53,10 @@ def test_examples_falls_back_to_introspection(client, monkeypatch, tmp_path):
     assert "top 10 customers by revenue" not in joined
 
 
-def test_history_returns_only_ask_entries_with_questions(client, monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_history_returns_only_ask_entries_with_questions(
+    app, monkeypatch, tmp_path
+):
     registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
     registry.add_query(
         "SELECT votetypeid, count(*) FROM votes GROUP BY 1",
@@ -62,7 +72,10 @@ def test_history_returns_only_ask_entries_with_questions(client, monkeypatch, tm
 
     monkeypatch.setattr(sqr, "QueryRegistry", lambda *a, **k: registry)
 
-    resp = client.get("/api/ask/history", params={"target": "demo"})
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/ask/history", params={"target": "demo"})
     assert resp.status_code == 200
     items = resp.json()["items"]
     assert len(items) == 1
@@ -73,7 +86,8 @@ def test_history_returns_only_ask_entries_with_questions(client, monkeypatch, tm
     assert "GROUP BY 1" in item["sql"]
 
 
-def test_history_filters_by_target(client, monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_history_filters_by_target(app, monkeypatch, tmp_path):
     registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
     registry.add_query(
         "SELECT 1 FROM a", source="ask", tag="a", target="demo", question="qa"
@@ -86,13 +100,19 @@ def test_history_filters_by_target(client, monkeypatch, tmp_path):
 
     monkeypatch.setattr(sqr, "QueryRegistry", lambda *a, **k: registry)
 
-    resp = client.get("/api/ask/history", params={"target": "other"})
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/ask/history", params={"target": "other"})
     assert resp.status_code == 200
     items = resp.json()["items"]
     assert [i["question"] for i in items] == ["qb"]
 
 
-def test_history_scopes_by_ask_origin_not_stolen_target(client, monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_history_scopes_by_ask_origin_not_stolen_target(
+    app, monkeypatch, tmp_path
+):
     # A question first asked on imdb, then the SAME SQL re-added while tpcds is
     # active (which steals the mutable last_target), must stay in imdb history
     # and never leak into tpcds (rdst-e7s.26 cross-target leak).
@@ -116,8 +136,15 @@ def test_history_scopes_by_ask_origin_not_stolen_target(client, monkeypatch, tmp
 
     monkeypatch.setattr(sqr, "QueryRegistry", lambda *a, **k: registry)
 
-    imdb = client.get("/api/ask/history", params={"target": "imdb"}).json()["items"]
-    tpcds = client.get("/api/ask/history", params={"target": "tpcds"}).json()["items"]
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        imdb = (await client.get(
+            "/api/ask/history", params={"target": "imdb"}
+        )).json()["items"]
+        tpcds = (await client.get(
+            "/api/ask/history", params={"target": "tpcds"}
+        )).json()["items"]
 
     assert [i["question"] for i in imdb] == ["which actors worked with Nolan?"]
     assert tpcds == []

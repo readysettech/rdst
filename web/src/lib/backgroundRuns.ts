@@ -3,7 +3,7 @@ import type { CacheRunResult, CacheTestRunRequest } from '../types/cache'
 import type { BenchmarkRequest } from './api'
 import type { components } from './api.generated'
 import { api } from './client'
-import { normalizeSseError } from './errorContract'
+import { normalizeHttpError, normalizeSseError } from './errorContract'
 import { consumeSseResponse } from './sseReader'
 
 export type BackgroundRunKind =
@@ -45,6 +45,8 @@ export interface BackgroundRunState {
   hasWarnings: boolean
   queryHash?: string
   queryLabel?: string
+  errorCode?: string
+  errorCategory?: string
   result?: CacheRunResult
   loadResult?: LoadTestProgress
   loadRequest?: BenchmarkRequest
@@ -187,6 +189,8 @@ function attachRun(
     queryHash?: string
     queryLabel?: string
     loadRequest?: BenchmarkRequest
+    errorCode?: string
+    errorCategory?: string
   } = {}
 ): BackgroundRunState {
   const existing = runs.get(runId)
@@ -214,7 +218,12 @@ function kickoffFailed(
   kind: BackgroundRunKind,
   target: string,
   message: string,
-  metadata: { queryHash?: string; queryLabel?: string } = {}
+  metadata: {
+    queryHash?: string
+    queryLabel?: string
+    errorCode?: string
+    errorCategory?: string
+  } = {}
 ): string {
   const runId = `${kind}_${target}_start_failed_${Date.now()}`
   runs.set(runId, {
@@ -290,11 +299,22 @@ export async function startCacheTestRun(
     queryLabel: request.label ?? undefined,
   }
   try {
-    const { data, error } = await api.POST('/api/cache/test-runs', {
+    const { data, error, response } = await api.POST('/api/cache/test-runs', {
       body: request,
     })
     if (error || !data) {
-      throw new Error(normalizeSseError(error).message)
+      const envelope = normalizeHttpError(response.status, error)
+      kickoffFailed(
+        'speed_test',
+        request.target ?? '',
+        envelope.message,
+        {
+          ...metadata,
+          errorCode: envelope.code,
+          errorCategory: envelope.category,
+        }
+      )
+      return null
     }
     attachRun(
       data.run_id,
@@ -819,12 +839,16 @@ function applyFrame(runId: string, event: string, data: unknown): void {
       })
       break
     case 'error':
-    case 'annotate_error':
+    case 'annotate_error': {
+      const envelope = normalizeSseError(data)
       updateRun(runId, {
         ...base,
-        message: normalizeSseError(data).message,
+        message: envelope.message,
+        errorCode: envelope.code,
+        errorCategory: envelope.category,
       })
       break
+    }
     case 'run_end': {
       const status = String(payload.status ?? 'done') as BackgroundRunStatus
       updateRun(runId, {

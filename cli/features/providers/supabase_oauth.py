@@ -135,12 +135,12 @@ def _start_login_direct(base_url: str, client_id: str) -> dict[str, Any]:
     return {"login_id": login_id, "authorize_url": f"{AUTHORIZE_URL}?{query}"}
 
 
-def start_login(base_url: str) -> dict[str, Any]:
+def start_login(base_url: str, return_url: Optional[str] = None) -> dict[str, Any]:
     """Start a sign-in and return the URL the browser must open."""
     config = dev_client_config()
     if config is not None:
         return _start_login_direct(base_url, config[0])
-    return _OAUTH.start_login()
+    return _OAUTH.start_login(return_url)
 
 
 def _mark_login(login_id: str, status: str, detail: str) -> None:
@@ -214,7 +214,10 @@ def handle_callback(code: str, state: str) -> dict[str, Any]:
         _mark_login(login_id, "failed", str(exc))
         return {"state": "failed", "detail": str(exc)}
 
-    _store_tokens(body)
+    tokens = _store_tokens(body)
+    from .identity import capture_provider_identity_async
+
+    capture_provider_identity_async(BROKER_PROVIDER, tokens["access_token"])
     detail = "Connected to Supabase"
     _mark_login(login_id, "success", detail)
     return {"state": "success", "detail": detail}

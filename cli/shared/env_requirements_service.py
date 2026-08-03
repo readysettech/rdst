@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
 
 from shared.anthropic_env import get_anthropic_source
@@ -28,17 +29,57 @@ class EnvRequirementsService:
     def _target_env_mapping(self, cfg: Any) -> Dict[str, Dict[str, Any]]:
         """Return {password_env: {"targets": [...], "target_data": <first target's data>}}."""
         mapping: Dict[str, Dict[str, Any]] = {}
+        target_names = cfg.list_targets()
+        used_names = {
+            (cfg.get(target) or {}).get("password_env", "").strip()
+            for target in target_names
+            if (cfg.get(target) or {}).get("password_env", "").strip()
+        }
 
-        for target in cfg.list_targets():
+        for target in target_names:
             target_data = cfg.get(target) or {}
             password_env = (target_data.get("password_env") or "").strip()
             if not password_env:
-                continue
+                if target_data.get("password") or target_data.get("password_secret_arn"):
+                    continue
+                base_name = (
+                    "RDST_"
+                    + (re.sub(r"[^A-Z0-9]+", "_", target.upper()).strip("_") or "TARGET")
+                    + "_PASSWORD"
+                )
+                password_env = base_name
+                suffix = 2
+                while password_env in used_names:
+                    password_env = f"{base_name}_{suffix}"
+                    suffix += 1
+                used_names.add(password_env)
+                target_data = {**target_data, "password_env": password_env}
             if password_env not in mapping:
                 mapping[password_env] = {"targets": [], "target_data": target_data}
             mapping[password_env]["targets"].append(target)
 
         return mapping
+
+    def bind_missing_target_password(self, env_name: str) -> None:
+        """Persist a password_env pointer for targets that had no password source."""
+        cfg = self._load_config()
+        entry = self._target_env_mapping(cfg).get(env_name)
+        if entry is None:
+            return
+
+        changed = False
+        for target in entry["targets"]:
+            target_data = cfg.get(target) or {}
+            if (
+                target_data.get("password")
+                or target_data.get("password_env")
+                or target_data.get("password_secret_arn")
+            ):
+                continue
+            cfg.upsert(target, {**target_data, "password_env": env_name})
+            changed = True
+        if changed:
+            cfg.save()
 
     def _resolve_anthropic_source(self, cfg: Any) -> str:
         return get_anthropic_source(secret_store=self.secret_store, cfg=cfg)

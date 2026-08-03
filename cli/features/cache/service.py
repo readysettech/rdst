@@ -14,6 +14,7 @@ from shared.config.targets import TargetsConfig
 from shared.deploy.docker_topology import DockerTopology
 from shared.password_resolver import resolve_password_value
 from shared.service_events import ErrorEvent, ProgressEvent
+from shared.async_utils import run_blocking
 
 from .events import (
     CacheAddEvent,
@@ -137,8 +138,27 @@ class CacheService:
     # Connection helpers
     # ------------------------------------------------------------------
 
-    def _connection_kwargs(self, target_config: Dict[str, Any]) -> Dict[str, Any]:
+    def _connection_kwargs(
+        self,
+        target_config: Dict[str, Any],
+        target_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Extract connection kwargs from target config."""
+        if target_config.get("target_type") != "readyset":
+            from shared.db_connection import resolve_connection_params
+
+            params = resolve_connection_params(
+                target=target_name,
+                target_config=target_config,
+            )
+            return {
+                "host": params["host"],
+                "port": int(params["port"]),
+                "engine": params["engine"],
+                "user": params["user"],
+                "database": params["database"],
+                "password": params["password"],
+            }
         return {
             "host": target_config.get("host", "localhost"),
             "port": int(target_config.get("port", 5433)),
@@ -740,7 +760,7 @@ class CacheService:
             count = len(caches)
 
             if count > 0:
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     self._run_readyset_sql, "DROP ALL CACHES", **conn
                 )
                 if not result["success"]:
@@ -944,7 +964,7 @@ class CacheService:
             if options.mode == "kubernetes":
                 from shared.deploy.kubernetes import deploy_kubernetes
 
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     deploy_kubernetes, target, variables, password,
                     namespace=options.namespace or "readyset",
                     kubeconfig=options.kubeconfig,
@@ -952,7 +972,7 @@ class CacheService:
             elif options.host:
                 from shared.deploy.remote import deploy_remote
 
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     deploy_remote, target, variables, password,
                     mode=options.mode,
                     host=options.host or "",
@@ -962,7 +982,7 @@ class CacheService:
             elif options.mode == "systemd":
                 from shared.deploy.local_systemd import deploy_local_systemd
 
-                result = await asyncio.to_thread(
+                result = await run_blocking(
                     deploy_local_systemd, target, variables, password
                 )
             elif options.mode == "docker":
@@ -1011,8 +1031,7 @@ class CacheService:
                 message="Registering cache target...",
             )
 
-            cache_target_name = await asyncio.to_thread(
-                self._register_cache_target,
+            cache_target_name = self._register_cache_target(
                 target, target_config, variables, endpoint_host,
             )
 
@@ -1193,7 +1212,7 @@ class CacheService:
                 message="Connecting...",
             )
 
-            origin_kwargs = self._connection_kwargs(target_config)
+            origin_kwargs = self._connection_kwargs(target_config, target)
             cache_kwargs = self._connection_kwargs(cache_config)
 
             from queue import Queue, Empty
@@ -1253,9 +1272,21 @@ class CacheService:
             result = future.result()
 
             if not result.get("success"):
+                from shared.api.ssh_errors import connectivity_error_payload
+
+                failure = connectivity_error_payload(
+                    RuntimeError(result.get("error", "Comparison failed")),
+                    target,
+                    target_config,
+                )
                 yield ErrorEvent(
                     type="error",
-                    message=result.get("error", "Comparison failed"),
+                    message=(
+                        failure["message"]
+                        if failure
+                        else result.get("error", "Comparison failed")
+                    ),
+                    code=failure["category"] if failure else None,
                     stage="run",
                 )
                 return
@@ -1273,4 +1304,16 @@ class CacheService:
                 winner=result["winner"],
             )
         except Exception as e:
-            yield ErrorEvent(type="error", message=str(e), stage="run")
+            from shared.api.ssh_errors import connectivity_error_payload
+
+            failure = connectivity_error_payload(
+                e,
+                input_data.target,
+                locals().get("target_config") or {},
+            )
+            yield ErrorEvent(
+                type="error",
+                message=failure["message"] if failure else str(e),
+                code=failure["category"] if failure else None,
+                stage="run",
+            )

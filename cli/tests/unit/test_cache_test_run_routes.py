@@ -1,10 +1,37 @@
 """Tests for starting cache comparisons as detached background runs."""
 
+import asyncio
+
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient, Response
 
 from features.cache.api import routes
 from shared.api.target_guard import TargetGuard, require_target_body
+
+
+async def _target_guard() -> TargetGuard:
+    return TargetGuard("imdb", {"engine": "postgresql"}, "postgresql")
+
+
+class _Client:
+    def __init__(self, app: FastAPI):
+        self.app = app
+
+    def request(self, method: str, path: str, **kwargs) -> Response:
+        async def send() -> Response:
+            async with AsyncClient(
+                transport=ASGITransport(app=self.app),
+                base_url="http://testserver",
+            ) as client:
+                return await client.request(method, path, **kwargs)
+
+        return asyncio.run(send())
+
+    def get(self, path: str, **kwargs) -> Response:
+        return self.request("GET", path, **kwargs)
+
+    def post(self, path: str, **kwargs) -> Response:
+        return self.request("POST", path, **kwargs)
 
 
 class StubRegistry:
@@ -49,10 +76,8 @@ def test_starts_comparison_in_shared_registry(monkeypatch):
     monkeypatch.setattr(routes, "_probe_upstream", healthy_upstream)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    app.dependency_overrides[require_target_body] = lambda: TargetGuard(
-        "imdb", {"engine": "postgresql"}, "postgresql"
-    )
-    client = TestClient(app)
+    app.dependency_overrides[require_target_body] = _target_guard
+    client = _Client(app)
 
     response = client.post(
         "/api/cache/test-runs",
@@ -90,10 +115,8 @@ def test_rejects_invalid_speed_test_counts_before_start(monkeypatch):
     monkeypatch.setattr(routes, "_probe_upstream", healthy_upstream)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    app.dependency_overrides[require_target_body] = lambda: TargetGuard(
-        "imdb", {"engine": "postgresql"}, "postgresql"
-    )
-    client = TestClient(app)
+    app.dependency_overrides[require_target_body] = _target_guard
+    client = _Client(app)
 
     zero = client.post(
         "/api/cache/test-runs",
@@ -120,10 +143,8 @@ def test_unhealthy_upstream_rejects_before_starting_run(monkeypatch):
     monkeypatch.setattr(routes, "_probe_upstream", unhealthy_upstream)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    app.dependency_overrides[require_target_body] = lambda: TargetGuard(
-        "imdb", {"engine": "postgresql"}, "postgresql"
-    )
-    client = TestClient(app)
+    app.dependency_overrides[require_target_body] = _target_guard
+    client = _Client(app)
 
     response = client.post(
         "/api/cache/test-runs",
@@ -155,10 +176,8 @@ def test_unhealthy_upstream_rejects_before_requesting_prewarm(monkeypatch):
     monkeypatch.setattr(sandbox_manager_module, "sandbox_manager", manager)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    app.dependency_overrides[require_target_body] = lambda: TargetGuard(
-        "imdb", {"engine": "postgresql"}, "postgresql"
-    )
-    client = TestClient(app)
+    app.dependency_overrides[require_target_body] = _target_guard
+    client = _Client(app)
 
     response = client.post(
         "/api/cache/sandbox/prewarm",
@@ -185,10 +204,8 @@ def test_missing_docker_rejects_before_probe_or_start(monkeypatch):
     monkeypatch.setattr(routes, "_probe_upstream", tracked_probe)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    app.dependency_overrides[require_target_body] = lambda: TargetGuard(
-        "imdb", {"engine": "postgresql"}, "postgresql"
-    )
-    client = TestClient(app)
+    app.dependency_overrides[require_target_body] = _target_guard
+    client = _Client(app)
 
     response = client.post(
         "/api/cache/test-runs",
@@ -233,7 +250,7 @@ def test_sandbox_status_includes_docker_capability(monkeypatch):
     monkeypatch.setattr(routes, "_docker_runtime_status", stopped_docker)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    client = TestClient(app)
+    client = _Client(app)
 
     response = client.get("/api/cache/sandbox")
 

@@ -5,6 +5,8 @@ Tests the async generator-based configuration management service including
 target listing, connection testing, and configuration operations.
 """
 
+import os
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
@@ -92,6 +94,38 @@ class TestConfigureServiceInit:
 
         service = ConfigureService()
         assert service is not None
+
+    @pytest.mark.asyncio
+    async def test_add_target_keeps_password_session_only_without_keychain(
+        self, tmp_path, monkeypatch
+    ):
+        from features.configure.api.routes import AddTargetRequest, TargetData, add_target
+        from shared.config.targets import TargetsConfig
+        from shared.secret_store_service import SecretStoreService
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("RDST_HEADLESS_PASSWORD", raising=False)
+        monkeypatch.setattr(SecretStoreService, "is_available", lambda self: False)
+
+        response = await add_target(
+            AddTargetRequest(
+                name="headless",
+                target=TargetData(
+                    host="db.example.com",
+                    database="app",
+                    user="appuser",
+                    password="durable-secret",
+                ),
+            )
+        )
+
+        assert response.success is True
+        cfg = TargetsConfig()
+        cfg.load()
+        saved = cfg.get("headless")
+        assert "password" not in saved
+        assert saved["password_env"] == "RDST_HEADLESS_PASSWORD"
+        assert os.environ["RDST_HEADLESS_PASSWORD"] == "durable-secret"
 
 
 class TestConfigureServiceListTargets:
@@ -263,6 +297,25 @@ class TestTargetNotFoundIncludesHint:
         assert "rdst configure list" in error_events[0].message
 
     @pytest.mark.asyncio
+    async def test_get_target_uses_engine_default_port(self, service):
+        config = Mock()
+        config.get.return_value = {
+            "engine": "mysql",
+            "host": "db.example.com",
+            "database": "app",
+            "user": "readonly",
+        }
+        config.get_default.return_value = None
+
+        with patch.object(service, "_load_config", return_value=config):
+            events = [event async for event in service.get_target("mysql-db")]
+
+        detail = next(
+            event for event in events if isinstance(event, ConfigureTargetDetailEvent)
+        )
+        assert detail.port == 3306
+
+    @pytest.mark.asyncio
     async def test_test_connection_not_found_includes_hint(self, service, mock_config):
         with patch.object(service, "_load_config", return_value=mock_config):
             events = []
@@ -271,6 +324,45 @@ class TestTargetNotFoundIncludesHint:
         error_events = [e for e in events if isinstance(e, ConfigureErrorEvent)]
         assert len(error_events) == 1
         assert "rdst configure list" in error_events[0].message
+
+    @pytest.mark.asyncio
+    async def test_connection_success_includes_privilege_detection(self, service):
+        config = Mock()
+        config.get.return_value = {
+            "engine": "postgresql",
+            "host": "db.example.com",
+            "port": 5432,
+            "database": "app",
+            "user": "readonly",
+        }
+        privilege_result = {
+            "writable": True,
+            "evidence": "PostgreSQL role is a superuser.",
+        }
+
+        with (
+            patch.object(service, "_load_config", return_value=config),
+            patch.object(
+                service,
+                "perform_connection_test",
+                new=AsyncMock(
+                    return_value={
+                        "success": True,
+                        "server_version": "PostgreSQL 17",
+                        "privileges": privilege_result,
+                    }
+                ),
+            ),
+        ):
+            events = [event async for event in service.test_connection("prod")]
+
+        result = next(
+            event
+            for event in events
+            if isinstance(event, ConfigureConnectionTestEvent)
+            and event.status == "success"
+        )
+        assert result.privileges == privilege_result
 
 
 class TestConfigureCommandNoTargetError:
@@ -332,6 +424,107 @@ class TestPgVersionNotTruncated:
         assert len(result) == 123
         assert result.endswith("...")
 
+
+class TestConnectionFailureClassification:
+    @pytest.fixture
+    def service(self):
+        from features.configure.service import ConfigureService
+
+        return ConfigureService()
+
+    @pytest.mark.asyncio
+    async def test_verbatim_supabase_refusal_is_categorized(self, service):
+        config = {
+            "name": "supabase-db",
+            "engine": "postgresql",
+            "host": "db.supabase.co",
+            "port": 5432,
+            "database": "postgres",
+            "user": "postgres",
+            "password": "test-password",
+            "tags": ["provider:supabase"],
+        }
+        refusal = (
+            'connection to server at "db.supabase.co", port 5432 failed: '
+            "FATAL:  Address not allowed. Address is not in the allowed list"
+        )
+
+        with patch(
+            "features.configure.service.resolve_connection_params",
+            side_effect=RuntimeError(refusal),
+        ):
+            result = await service.perform_connection_test(config)
+
+        assert result["success"] is False
+        assert result["category"] == "provider_ip_blocked_maybe"
+        assert "password" not in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_verbatim_supabase_refusal_beats_missing_password(self, service):
+        config = {
+            "name": "supabase-db",
+            "engine": "postgresql",
+            "host": "db.supabase.co",
+            "port": 5432,
+            "database": "postgres",
+            "user": "postgres",
+            "password_env": "SUPABASE_DB_PASSWORD",
+            "tags": ["provider:supabase"],
+        }
+        refusal = (
+            "FATAL:  (EADDRNOTALLOWED) address not in tenant allow_list: "
+            "{71, 218, 135, 182}"
+        )
+
+        with patch(
+            "features.configure.service.resolve_connection_params",
+            side_effect=RuntimeError(refusal),
+        ):
+            result = await service.perform_connection_test(config)
+
+        assert result["success"] is False
+        assert result["category"] == "provider_ip_blocked_maybe"
+        assert result.get("code") != "TARGET_PASSWORD_REQUIRED"
+
+    @pytest.mark.asyncio
+    async def test_reachable_provider_without_password_requests_password(self, service):
+        config = {
+            "name": "supabase-db",
+            "engine": "postgresql",
+            "host": "db.supabase.co",
+            "port": 5432,
+            "database": "postgres",
+            "user": "postgres",
+            "password_env": "SUPABASE_DB_PASSWORD",
+            "tags": ["provider:supabase"],
+        }
+        params = {
+            **config,
+            "password": "",
+            "sslmode": "prefer",
+            "tls_verify": False,
+            "tls_ca": None,
+        }
+        psycopg2 = MagicMock()
+        psycopg2.connect.side_effect = RuntimeError(
+            'password authentication failed for user "postgres"'
+        )
+
+        with (
+            patch(
+                "features.configure.service.resolve_connection_params",
+                return_value=params,
+            ),
+            patch.dict(sys.modules, {"psycopg2": psycopg2}),
+        ):
+            result = await service.perform_connection_test(config)
+
+        assert result["success"] is False
+        assert result["code"] == "TARGET_PASSWORD_REQUIRED"
+        assert result["password_env"] == "SUPABASE_DB_PASSWORD"
+        assert psycopg2.connect.call_args.kwargs["password"] == (
+            "rdst-connectivity-probe-invalid-password"
+        )
 
 class TestTestConnectionSingleStatusMessage:
     """test_connection must emit exactly ONE status/progress message, not two."""

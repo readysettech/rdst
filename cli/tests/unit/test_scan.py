@@ -26,6 +26,8 @@ from features.scan.cli.command import ScanCommand
 from features.scan.extractors.ast_extractor import extract_queries_from_source
 from features.scan.service import ScanService
 
+pytestmark = pytest.mark.usefixtures("run_blocking_inline")
+
 
 class TestErrorMessageFlagName:
     """Error message must use --schema, not --target."""

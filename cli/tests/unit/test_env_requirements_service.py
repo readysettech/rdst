@@ -228,3 +228,31 @@ def test_target_password_from_keychain(monkeypatch):
     )
     assert prod_req["source"] == "secure_store"
     assert prod_req["satisfied"] is True
+
+
+def test_target_without_password_source_is_missing(monkeypatch):
+    monkeypatch.delenv("RDST_IMPORTED_PASSWORD", raising=False)
+    cfg = Mock()
+    cfg.list_targets.return_value = ["imported"]
+    cfg.get.return_value = {
+        "engine": "postgresql",
+        "host": "db.example.com",
+        "user": "app",
+    }
+
+    service = EnvRequirementsService(secret_store=FakeSecretStore())
+    with patch.object(service, "_load_config", return_value=cfg):
+        requirements = service.get_requirements()
+
+    password_req = next(
+        requirement
+        for requirement in requirements
+        if requirement["kind"] == "target_password"
+    )
+    assert password_req == {
+        "kind": "target_password",
+        "accepted_names": ["RDST_IMPORTED_PASSWORD"],
+        "target": "imported",
+        "satisfied": False,
+        "source": "missing",
+    }

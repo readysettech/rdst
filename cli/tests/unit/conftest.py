@@ -8,11 +8,69 @@ this suite gets a process-local in-memory keyring instead.
 
 from __future__ import annotations
 
+import asyncio
+
 import keyring
 import pytest
+from httpx import ASGITransport, AsyncClient, Response
 from keyring.backend import KeyringBackend
 
 from shared.secret_store_service import SecretStoreService
+
+
+class _BufferedStream:
+    """Context-manager shape used by the SSE test reader."""
+
+    def __init__(self, response: Response):
+        self.response = response
+
+    def __enter__(self) -> Response:
+        return self.response
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+
+class _ASGITestClient:
+    """Synchronous facade backed by one persistent ASGI event loop.
+
+    Background-run tests need tasks to survive across requests. Starlette's
+    TestClient lifespan portal deadlocks with the AnyIO version in this test
+    environment, so keep the application loop explicitly instead.
+    """
+
+    def __init__(self, app):
+        self._loop = asyncio.new_event_loop()
+        self._client = AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        )
+
+    def _submit(self, coroutine):
+        return self._loop.run_until_complete(coroutine)
+
+    def request(self, method: str, path: str, **kwargs) -> Response:
+        return self._submit(self._client.request(method, path, **kwargs))
+
+    def get(self, path: str, **kwargs) -> Response:
+        return self.request("GET", path, **kwargs)
+
+    def post(self, path: str, **kwargs) -> Response:
+        return self.request("POST", path, **kwargs)
+
+    def delete(self, path: str, **kwargs) -> Response:
+        return self.request("DELETE", path, **kwargs)
+
+    def stream(self, method: str, path: str, **kwargs) -> _BufferedStream:
+        return _BufferedStream(self.request(method, path, **kwargs))
+
+    def close(self) -> None:
+        self._submit(self._client.aclose())
+        pending = asyncio.all_tasks(self._loop)
+        for task in pending:
+            task.cancel()
+        if pending:
+            self._submit(asyncio.gather(*pending, return_exceptions=True))
+        self._loop.close()
 
 
 class _InMemoryKeyring(KeyringBackend):
@@ -119,13 +177,12 @@ def run_api_target() -> str:
 
 @pytest.fixture
 def run_api_client(run_registry, run_api_target):
-    """TestClient over the audit, fleet, and generic run routers.
+    """Persistent in-process client over the background-run routers.
 
-    Entered as a context manager so every request shares one event loop and
-    detached runs outlive the request that started them.
+    Every request shares one event loop so detached runs outlive the request
+    that started them.
     """
     from fastapi import FastAPI
-    from fastapi.testclient import TestClient
 
     from features.audit.api import routes as audit_routes
     from features.fleet.api import routes as fleet_routes
@@ -136,8 +193,14 @@ def run_api_client(run_registry, run_api_target):
     app = FastAPI()
     for module in (audit_routes, fleet_routes, providers_routes, run_routes):
         app.include_router(module.router, prefix="/api")
-    app.dependency_overrides[require_target_body] = lambda: TargetGuard(
-        run_api_target, {"engine": "postgresql"}, "postgresql"
-    )
-    with TestClient(app) as test_client:
-        yield test_client
+    async def target_guard() -> TargetGuard:
+        return TargetGuard(
+            run_api_target, {"engine": "postgresql"}, "postgresql"
+        )
+
+    app.dependency_overrides[require_target_body] = target_guard
+    client = _ASGITestClient(app)
+    try:
+        yield client
+    finally:
+        client.close()

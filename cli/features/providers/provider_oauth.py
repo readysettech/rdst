@@ -134,11 +134,14 @@ class ProviderOAuth:
                 entry["status"] = status
                 entry["detail"] = detail
 
-    def start_login(self) -> dict[str, Any]:
+    def start_login(self, return_url: Optional[str] = None) -> dict[str, Any]:
         """Ask the keyservice to own the OAuth exchange for this sign-in."""
         pickup_key = secrets.token_urlsafe(32)
         pickup_key_hash = hashlib.sha256(pickup_key.encode("ascii")).hexdigest()
-        body = self.broker_post("start", {"pickup_key_hash": pickup_key_hash})
+        payload = {"pickup_key_hash": pickup_key_hash}
+        if return_url:
+            payload["return_url"] = return_url
+        body = self.broker_post("start", payload)
 
         login_id = str(body.get("login_id") or "")
         authorize_url = str(body.get("authorize_url") or "")
@@ -162,10 +165,13 @@ class ProviderOAuth:
 
         if status == "ready":
             try:
-                self.store_tokens(self.tokens_from_broker(body))
+                tokens = self.store_tokens(self.tokens_from_broker(body))
             except self.auth_error as exc:
                 self.mark_login(login_id, "failed", str(exc))
                 return {"state": "failed", "detail": str(exc)}
+            from .identity import capture_provider_identity_async
+
+            capture_provider_identity_async(self.provider, tokens["access_token"])
             self.mark_login(login_id, "success", self.connected_detail)
             return {"state": "success", "detail": self.connected_detail}
 

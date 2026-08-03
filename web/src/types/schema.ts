@@ -97,6 +97,8 @@ export interface SchemaInitResult {
   enum_columns: string[]
   path: string | null
   error: string | null
+  code?: string | null
+  category?: string | null
 }
 
 export interface SchemaExportResult {

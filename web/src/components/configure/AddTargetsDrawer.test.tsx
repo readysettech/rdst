@@ -197,6 +197,41 @@ describe('AddTargetsDrawer', () => {
     )
   })
 
+  it('supports global and per-group selection and shows searched regions', async () => {
+    renderDrawer({ initialTab: 'aws' })
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Discover' }) as HTMLButtonElement)
+          .disabled
+      ).toBe(false)
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Discover' }))
+    await waitFor(() =>
+      expect(screen.getByLabelText('Select orders-writer')).toBeTruthy()
+    )
+
+    expect(screen.getAllByText('us-east-1')).toHaveLength(2)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear selection' })[0])
+    expect(
+      screen
+        .getByLabelText('Select orders-writer')
+        .getAttribute('aria-checked')
+    ).toBe('false')
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Select all' })[1])
+    expect(
+      screen
+        .getByLabelText('Select orders-writer')
+        .getAttribute('aria-checked')
+    ).toBe('true')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear selection' })[0])
+    expect(
+      screen
+        .getByLabelText('Select orders-writer')
+        .getAttribute('aria-checked')
+    ).toBe('false')
+  })
+
   it('discovers Supabase projects without a region picker', async () => {
     vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
       connected: true,

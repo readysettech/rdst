@@ -131,3 +131,16 @@ def make_fleet_router_client() -> FleetRouterClient:
 @pytest.fixture
 def fleet_router_client() -> FleetRouterClient:
     return make_fleet_router_client()
+
+
+@pytest.fixture(autouse=True)
+def disable_background_provider_identity(monkeypatch):
+    """Provider tests opt into identity calls explicitly; never leak HTTP."""
+    monkeypatch.setattr(
+        "features.providers.identity.capture_provider_identity_async",
+        lambda provider, token: None,
+    )
+    monkeypatch.setattr(
+        "features.providers.identity.capture_aws_identity_async",
+        lambda arn: None,
+    )

@@ -322,8 +322,10 @@ SERVICE_FAKES = [
 ]
 
 
-def fake_autocomplete_schema(target_config: dict[str, Any]) -> dict[str, Any]:
-    del target_config
+def fake_autocomplete_schema(
+    target_config: dict[str, Any], target: str | None = None
+) -> dict[str, Any]:
+    del target_config, target
     return {
         "success": True,
         "tables": fixtures.value("autocomplete_schema", default={}),

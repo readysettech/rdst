@@ -52,6 +52,7 @@ vi.mock('../configure', () => ({
 
 const addTarget = vi.fn()
 const setDefaultTarget = vi.fn()
+const cancel = vi.fn()
 const completeInit = vi.fn()
 
 function renderPage(props: { redirectTo?: string; from?: string } = {}) {
@@ -75,6 +76,7 @@ describe('ConnectPage', () => {
     vi.mocked(useConfigure).mockReturnValue({
       addTarget,
       setDefaultTarget,
+      cancel,
       loading: false,
     } as unknown as ReturnType<typeof useConfigure>)
     vi.mocked(useOnboarding).mockReturnValue({
@@ -92,6 +94,7 @@ describe('ConnectPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Skip for now/i }))
 
     expect(mockNavigate).toHaveBeenCalledWith({ to: '/' })
+    expect(cancel).toHaveBeenCalled()
   })
 
   it('completes init and returns to the intended destination on connect', async () => {

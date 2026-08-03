@@ -123,7 +123,11 @@ class InitCommand:
             targets = cfg.list_targets()
             has_default = bool(cfg.get_default())
             if not targets:
-                self._print("Setup", "No targets configured yet. Let's add one.")
+                self._print(
+                    "Setup",
+                    "Use a read-only database user. RDST runs EXPLAIN, schema, and "
+                    "performance-statistics queries.",
+                )
                 res = wizard.configure_targets("add", cfg)
                 if not res.ok:
                     break
@@ -315,7 +319,8 @@ class InitCommand:
     def _welcome(self) -> None:
         self.console.print(
             MessagePanel(
-                "Welcome to Readyset Data and SQL Toolkit (rdst).\n\nLet's get you set up in a few steps.",
+                "Use a read-only database user. RDST runs EXPLAIN, schema, and "
+                "performance-statistics queries.",
                 variant="info",
                 title="Welcome",
             )

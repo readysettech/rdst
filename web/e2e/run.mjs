@@ -6,8 +6,13 @@ import { join } from 'node:path'
 const isolatedHome = mkdtempSync(join(tmpdir(), 'rdst-web-e2e-'))
 const browserPath =
   process.env.PLAYWRIGHT_BROWSERS_PATH ?? join(homedir(), '.cache', 'ms-playwright')
-const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-const child = spawn(pnpm, ['exec', 'playwright', 'test', ...process.argv.slice(2)], {
+const playwright = join(
+  process.cwd(),
+  'node_modules',
+  '.bin',
+  process.platform === 'win32' ? 'playwright.cmd' : 'playwright',
+)
+const child = spawn(playwright, ['test', ...process.argv.slice(2)], {
   env: {
     ...process.env,
     HOME: isolatedHome,

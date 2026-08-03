@@ -95,6 +95,9 @@ export function EnvSecretsDialog({
   // (configure-settings Copy #1)
   const isAnthropicOnly =
     entries.length > 0 && entries.every((e) => e.key.startsWith("anthropic_api_key"));
+  const hasTargetPasswordEntries = entries.some((entry) =>
+    entry.key.startsWith('target_password:')
+  );
   const dialogTitle = isAnthropicOnly ? "Update Anthropic API key" : "Set required secrets";
   const anthropicProcessEnvShadow =
     isAnthropicOnly &&
@@ -115,8 +118,10 @@ export function EnvSecretsDialog({
         if (!response.success) {
           throw new Error(response.message || 'Could not save this secret.');
         }
-        if (response.session_only) {
-          resolvedResultMessage = response.message || 'Saved for this session only.';
+        if (response.message) {
+          resolvedResultMessage = response.message;
+        } else if (response.session_only) {
+          resolvedResultMessage = 'Saved for this session only.';
         }
       }
 
@@ -214,7 +219,11 @@ export function EnvSecretsDialog({
               <Alert
                 variant="warning"
                 modifier="outline"
-                label="Secure keychain is unavailable. Values will be session-only."
+                label={
+                  hasTargetPasswordEntries
+                    ? 'No OS keychain found. Re-enter the password after RDST restarts.'
+                    : 'No OS keychain found. Re-enter this value after RDST restarts.'
+                }
               />
             )}
 
@@ -283,22 +292,24 @@ export function EnvSecretsDialog({
               </div>
             )}
 
-            <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/60 px-4 py-3 border border-border-layout-1">
-              <VStack className="gap-0.5 items-start">
-                <Text level="label-small" className="text-content-layout-1">
-                  Save securely
-                </Text>
-                <Text level="caption" className="text-content-layout-3">
-                  Persist in OS keychain when available.
-                </Text>
-              </VStack>
-              <BaseInputSwitch
-                name="persist"
-                checked={persist}
-                onCheckedChange={setPersist}
-                disabled={setEnvSecretMutation.isPending}
-              />
-            </div>
+            {keyringAvailable && (
+              <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/60 px-4 py-3 border border-border-layout-1">
+                <VStack className="gap-0.5 items-start">
+                  <Text level="label-small" className="text-content-layout-1">
+                    Save securely
+                  </Text>
+                  <Text level="caption" className="text-content-layout-3">
+                    Persist in OS keychain when available.
+                  </Text>
+                </VStack>
+                <BaseInputSwitch
+                  name="persist"
+                  checked={persist}
+                  onCheckedChange={setPersist}
+                  disabled={setEnvSecretMutation.isPending}
+                />
+              </div>
+            )}
 
             {resultMessage && (
               <Alert variant="positive" modifier="outline" label={resultMessage} />

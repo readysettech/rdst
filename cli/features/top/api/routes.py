@@ -65,6 +65,8 @@ class TopHistoricalResponse(BaseModel):
     newly_saved: int = 0
     db_limit_warning: Optional[TopDbLimitWarning] = None
     error: Optional[str] = None
+    code: Optional[str] = None
+    category: Optional[str] = None
 
 
 def _serialize_query_data(query: TopQueryData) -> dict:
@@ -354,6 +356,7 @@ async def get_top_queries(
     db_engine = ""
     actual_source = source
     error_message = None
+    error_code = None
     db_limit_warning = None
 
     async with telemetry.command_run(
@@ -378,6 +381,7 @@ async def get_top_queries(
                     result = event
                 elif isinstance(event, TopErrorEvent):
                     error_message = event.message
+                    error_code = event.code
                     break
                 run.observe(event)
         except Exception as e:
@@ -385,7 +389,12 @@ async def get_top_queries(
             raise
 
     if error_message:
-        return TopHistoricalResponse(success=False, error=error_message)
+        return TopHistoricalResponse(
+            success=False,
+            error=error_message,
+            code=error_code,
+            category=error_code,
+        )
 
     if result is None:
         return TopHistoricalResponse(success=False, error="No results collected")

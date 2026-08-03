@@ -49,6 +49,9 @@ MCP_ONLY_TOOLS = {
 # e.g., rdst_configure_add -> configure add
 SUBCOMMAND_MAPPING = {
     "configure": ["add", "list", "remove", "default", "llm"],
+    # list/close manage tunnels in a separate local web-server process and are
+    # intentionally CLI-only; test is a self-contained connectivity check.
+    "tunnel": ["test"],
     "query": ["add", "list", "delete", "cache_compare"],
     "agent": ["list", "ask", "create"],
     "fleet": ["list", "status", "audit", "snapshots", "diff"],

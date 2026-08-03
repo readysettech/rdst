@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { backendExecutablePath } from './backend.js'
+import { backendEnvironment, backendExecutablePath } from './backend.js'
 
 function entries(value: string | undefined): string[] {
   return value?.split(path.delimiter) ?? []
@@ -46,5 +46,14 @@ describe('backendExecutablePath', () => {
     expect(backendExecutablePath('C:\\Windows;C:\\Docker', 'win32')).toBe(
       'C:\\Windows;C:\\Docker'
     )
+  })
+})
+
+describe('backendEnvironment', () => {
+  it('marks the sidecar as desktop-hosted', () => {
+    const environment = backendEnvironment({ PATH: '/usr/bin', CUSTOM: 'kept' })
+
+    expect(environment.RDST_DESKTOP).toBe('1')
+    expect(environment.CUSTOM).toBe('kept')
   })
 })

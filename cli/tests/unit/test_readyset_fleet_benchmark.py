@@ -587,13 +587,18 @@ class TestLifecycleInvariant:
         import functools
         import threading
 
+        from shared.async_utils import start_blocking
+
         tracker = _SandboxTracker()
         worker_started = threading.Event()
         worker_release = threading.Event()
 
         async def threaded(func, /, *args, **kwargs):
             call = functools.partial(func, *args, **kwargs)
-            return await asyncio.get_running_loop().run_in_executor(None, call)
+            future = start_blocking(call)
+            while not future.done():
+                await asyncio.sleep(0.01)
+            return future.result()
 
         def blocking_benchmark(*args, **kwargs):
             worker_started.set()

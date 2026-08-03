@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import GuardConfig
-from shared.password_resolver import resolve_password_value
+from shared.db_connection import (
+    create_mysql_connection_from_params,
+    postgres_connection_kwargs,
+    resolve_connection_params,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +73,23 @@ def check_query(
     # Cost estimation (requires database connection)
     if config.guards.cost_limit and target_config:
         results.append(
-            check_cost_limit(sql, target_config, config.guards.cost_limit)
+            check_cost_limit(
+                sql,
+                target_config,
+                config.guards.cost_limit,
+                target_name=target_name,
+            )
         )
 
     # Row estimation (requires database connection) - stronger than require_where
     if config.guards.max_estimated_rows and target_config:
         results.append(
-            check_estimated_rows(sql, config.guards.max_estimated_rows, target_config)
+            check_estimated_rows(
+                sql,
+                config.guards.max_estimated_rows,
+                target_config,
+                target_name=target_name,
+            )
         )
 
     # Check denied columns
@@ -469,6 +483,7 @@ def check_cost_limit(
     sql: str,
     target_config: dict[str, Any],
     cost_limit: int,
+    target_name: str | None = None,
 ) -> CheckResult:
     """Check query cost against limit using EXPLAIN.
 
@@ -479,9 +494,9 @@ def check_cost_limit(
         engine = target_config.get("engine", "postgresql").lower()
 
         if "postgres" in engine:
-            cost = _get_postgres_cost(sql, target_config)
+            cost = _get_postgres_cost(sql, target_config, target_name)
         elif "mysql" in engine:
-            cost = _get_mysql_cost(sql, target_config)
+            cost = _get_mysql_cost(sql, target_config, target_name)
         else:
             return CheckResult(
                 passed=True,
@@ -524,26 +539,19 @@ def check_cost_limit(
         )
 
 
-def _get_postgres_cost(sql: str, config: dict[str, Any]) -> float | None:
+def _get_postgres_cost(
+    sql: str, config: dict[str, Any], target_name: str | None = None
+) -> float | None:
     """Get query cost from PostgreSQL EXPLAIN."""
-    import os
     try:
         import psycopg2
 
-        host = config.get("host", "localhost")
-        port = config.get("port", 5432)
-        user = config.get("user") or config.get("username")
-        database = config.get("database") or config.get("dbname")
-        password = resolve_password_value(config)
-
-        conn = psycopg2.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=10,
+        params = resolve_connection_params(
+            target=target_name,
+            target_config=config,
         )
+
+        conn = psycopg2.connect(**postgres_connection_kwargs(params))
 
         try:
             with conn.cursor() as cursor:
@@ -562,26 +570,19 @@ def _get_postgres_cost(sql: str, config: dict[str, Any]) -> float | None:
     return None
 
 
-def _get_mysql_cost(sql: str, config: dict[str, Any]) -> float | None:
+def _get_mysql_cost(
+    sql: str, config: dict[str, Any], target_name: str | None = None
+) -> float | None:
     """Get query cost from MySQL EXPLAIN."""
-    import os
     try:
         import pymysql
 
-        host = config.get("host", "localhost")
-        port = config.get("port", 3306)
-        user = config.get("user") or config.get("username")
-        database = config.get("database") or config.get("dbname")
-        password = resolve_password_value(config)
-
-        conn = pymysql.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=10,
+        params = resolve_connection_params(
+            target=target_name,
+            target_config=config,
         )
+
+        conn = create_mysql_connection_from_params(params)
 
         try:
             with conn.cursor() as cursor:
@@ -797,6 +798,7 @@ def check_estimated_rows(
     sql: str,
     max_rows: int,
     target_config: dict[str, Any],
+    target_name: str | None = None,
 ) -> CheckResult:
     """Check estimated row count using database EXPLAIN.
 
@@ -816,9 +818,11 @@ def check_estimated_rows(
         engine = target_config.get("engine", "postgresql").lower()
 
         if "postgres" in engine:
-            estimated = _get_postgres_estimated_rows(sql, target_config)
+            estimated = _get_postgres_estimated_rows(
+                sql, target_config, target_name
+            )
         elif "mysql" in engine:
-            estimated = _get_mysql_estimated_rows(sql, target_config)
+            estimated = _get_mysql_estimated_rows(sql, target_config, target_name)
         else:
             return CheckResult(
                 passed=True,
@@ -861,26 +865,19 @@ def check_estimated_rows(
         )
 
 
-def _get_postgres_estimated_rows(sql: str, config: dict[str, Any]) -> float | None:
+def _get_postgres_estimated_rows(
+    sql: str, config: dict[str, Any], target_name: str | None = None
+) -> float | None:
     """Get estimated row count from PostgreSQL EXPLAIN."""
-    import os
     try:
         import psycopg2
 
-        host = config.get("host", "localhost")
-        port = config.get("port", 5432)
-        user = config.get("user") or config.get("username")
-        database = config.get("database") or config.get("dbname")
-        password = resolve_password_value(config)
-
-        conn = psycopg2.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=10,
+        params = resolve_connection_params(
+            target=target_name,
+            target_config=config,
         )
+
+        conn = psycopg2.connect(**postgres_connection_kwargs(params))
 
         try:
             with conn.cursor() as cursor:
@@ -899,27 +896,20 @@ def _get_postgres_estimated_rows(sql: str, config: dict[str, Any]) -> float | No
     return None
 
 
-def _get_mysql_estimated_rows(sql: str, config: dict[str, Any]) -> float | None:
+def _get_mysql_estimated_rows(
+    sql: str, config: dict[str, Any], target_name: str | None = None
+) -> float | None:
     """Get estimated row count from MySQL EXPLAIN."""
-    import os
     try:
         import pymysql
         import json
 
-        host = config.get("host", "localhost")
-        port = config.get("port", 3306)
-        user = config.get("user") or config.get("username")
-        database = config.get("database") or config.get("dbname")
-        password = resolve_password_value(config)
-
-        conn = pymysql.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            connect_timeout=10,
+        params = resolve_connection_params(
+            target=target_name,
+            target_config=config,
         )
+
+        conn = create_mysql_connection_from_params(params)
 
         try:
             with conn.cursor() as cursor:

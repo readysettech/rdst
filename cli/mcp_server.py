@@ -941,6 +941,25 @@ Returns JSON:
             }
         },
         {
+            "name": "rdst_tunnel_test",
+            "description": """Test SSH tunnel and database connectivity for a configured target.
+
+Use this for a target configured with an SSH jump host. The command opens a
+fresh tunnel, then verifies that the target database is reachable through it.
+The target must have an SSH configuration and its database password available.
+""",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Name of the SSH-tunneled target to test"
+                    }
+                },
+                "required": ["target"]
+            }
+        },
+        {
             "name": "rdst_report",
             "description": """Submit feedback about RDST or a specific query analysis.
 
@@ -2107,6 +2126,9 @@ Just describe your database and we'll get connected!
             args.extend(["--target", target_name])
 
         return run_rdst_command(args)
+
+    elif name == "rdst_tunnel_test":
+        return run_rdst_command(["tunnel", "test", arguments["target"]])
 
     elif name == "rdst_report":
         # Submit feedback - MUST provide --reason to avoid interactive mode

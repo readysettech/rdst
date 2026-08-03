@@ -1,7 +1,8 @@
 """Tests for starting manual schema annotation as a background run."""
 
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+import pytest
 
 from features.schema.api import semantic_layer_routes
 from shared.api.target_guard import TargetGuard, require_target_body
@@ -34,27 +35,33 @@ class StubAnnotateService:
         return generator()
 
 
-def _client(monkeypatch, registry):
+def _app(monkeypatch, registry):
     monkeypatch.setattr(semantic_layer_routes, "_registry", registry)
     monkeypatch.setattr(
         semantic_layer_routes, "AnnotateService", StubAnnotateService
     )
     app = FastAPI()
     app.include_router(semantic_layer_routes.router, prefix="/api")
-    app.dependency_overrides[require_target_body] = lambda: TargetGuard(
-        "imdb", {"engine": "postgresql"}, "postgresql"
-    )
-    return TestClient(app)
+
+    async def target_guard():
+        return TargetGuard("imdb", {"engine": "postgresql"}, "postgresql")
+
+    app.dependency_overrides[require_target_body] = target_guard
+    return app
 
 
-def test_starts_annotation_in_shared_registry(monkeypatch):
+@pytest.mark.asyncio
+async def test_starts_annotation_in_shared_registry(monkeypatch):
     registry = StubRegistry()
-    client = _client(monkeypatch, registry)
+    app = _app(monkeypatch, registry)
 
-    response = client.post(
-        "/api/semantic-layer/annotation-runs",
-        json={"target": "imdb", "sample_rows": 9},
-    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/semantic-layer/annotation-runs",
+            json={"target": "imdb", "sample_rows": 9},
+        )
 
     assert response.status_code == 200
     assert response.json() == {
@@ -66,13 +73,17 @@ def test_starts_annotation_in_shared_registry(monkeypatch):
     ]
 
 
-def test_reuses_existing_annotation_run(monkeypatch):
+@pytest.mark.asyncio
+async def test_reuses_existing_annotation_run(monkeypatch):
     registry = StubRegistry(annotation="schema_annotation_imdb_existing")
-    client = _client(monkeypatch, registry)
+    app = _app(monkeypatch, registry)
 
-    response = client.post(
-        "/api/semantic-layer/annotation-runs", json={"target": "imdb"}
-    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/semantic-layer/annotation-runs", json={"target": "imdb"}
+        )
 
     assert response.json() == {
         "run_id": "schema_annotation_imdb_existing",
@@ -81,13 +92,17 @@ def test_reuses_existing_annotation_run(monkeypatch):
     assert registry.started == []
 
 
-def test_rejects_annotation_while_bootstrap_owns_target(monkeypatch):
+@pytest.mark.asyncio
+async def test_rejects_annotation_while_bootstrap_owns_target(monkeypatch):
     registry = StubRegistry(bootstrap="bootstrap_imdb_existing")
-    client = _client(monkeypatch, registry)
+    app = _app(monkeypatch, registry)
 
-    response = client.post(
-        "/api/semantic-layer/annotation-runs", json={"target": "imdb"}
-    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/semantic-layer/annotation-runs", json={"target": "imdb"}
+        )
 
     assert response.status_code == 409
     assert "setup is already running" in response.json()["detail"].lower()

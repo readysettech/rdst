@@ -296,7 +296,11 @@ class TestKeyGate:
         await _wait_run_status(registry, run_id, "needs_key")
 
         assert registry.wake_needs_key() == 1
-        assert await asyncio.to_thread(rejected_checked.wait, 1.0)
+        async def wait_for_rejection():
+            while not rejected_checked.is_set():
+                await asyncio.sleep(0.005)
+
+        await asyncio.wait_for(wait_for_rejection(), 1.0)
         assert registry.status(run_id) == "needs_key"
         assert annotate.calls == 0
 

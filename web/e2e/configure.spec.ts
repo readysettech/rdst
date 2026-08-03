@@ -22,11 +22,67 @@ test('adds, updates, defaults, and deletes a database target', async ({
   await expect(seedRow).toBeVisible()
 
   await page.getByRole('button', { name: 'Add Target' }).click()
+  await expect(
+    page.getByRole('button', { name: /Connect via SSH jump host/ })
+  ).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Test connection' })
+  ).toBeVisible()
+  await expect(page.locator('[name="read_only"]')).toHaveCount(0)
+  await expect(page.locator('[name="password_env"]')).toHaveCount(0)
+
+  await page.getByRole('button', { name: /Connect via SSH jump host/ }).click()
+  await expect(page.locator('[name="cfg-ssh-host"]')).toBeVisible()
+
   await page.locator('[name="name"]').fill('primary-db')
   await page.locator('[name="host"]').fill('db.internal')
   await page.locator('[name="database"]').fill('application')
   await page.locator('[name="user"]').fill('rdst_e2e')
   await page.locator('[name="password"]').fill('test-password')
+
+  const connectionTestBodies: {
+    target: Record<string, unknown>
+  }[] = []
+  await page.route('**/api/configure/targets/primary-db/test', (route) => {
+    connectionTestBodies.push(
+      route.request().postDataJSON() as {
+        target: Record<string, unknown>
+      }
+    )
+    return route.fulfill({
+      headers: { 'content-type': 'text/event-stream' },
+      body: [
+        'event: connection_test',
+        `data: ${JSON.stringify({
+          target_name: 'primary-db',
+          status: 'success',
+          server_version: 'PostgreSQL 16.3',
+          privileges: {
+            writable: true,
+            evidence: 'PostgreSQL role is a superuser.',
+          },
+        })}`,
+        '',
+        'event: success',
+        'data: {"message":"Connection test complete"}',
+        '',
+      ].join('\n'),
+    })
+  })
+
+  await page.getByRole('button', { name: 'Test connection' }).click()
+  await expect(page.getByText('Connected · PostgreSQL 16.3')).toBeVisible()
+  await expect(page.getByText('This user has write privileges.')).toBeVisible()
+  await expect(page.getByText('Use a read-only database user.')).toBeVisible()
+  expect(connectionTestBodies).toHaveLength(1)
+  expect(connectionTestBodies[0].target).not.toHaveProperty('password_env')
+  expect(connectionTestBodies[0].target).toMatchObject({
+    read_only: false,
+    host: 'db.internal',
+    database: 'application',
+    user: 'rdst_e2e',
+  })
+  await page.getByRole('button', { name: 'Proceed anyway' }).click()
   await page.getByRole('button', { name: 'Add Target' }).click()
 
   let targetRow = page

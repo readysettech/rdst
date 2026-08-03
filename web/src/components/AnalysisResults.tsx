@@ -16,12 +16,14 @@ import type {
 import {
   type ApiErrorEnvelope,
   classifyError,
+  isConnectionFailure,
   isTrialExhaustedError,
   recoveryFor,
   retryHelps,
   TRIAL_EXHAUSTED_MESSAGE,
 } from "../lib/errorContract";
 import { RoutableNotice } from "./RoutableNotice";
+import { ConnectionFailureActions } from "./ConnectionFailureActions";
 import {
   type ValidIconName,
   resolveRewriteTesting,
@@ -450,6 +452,35 @@ export function AnalysisResults({
           retryLabel={onStartTrial ? "Start trial" : undefined}
         />
       )
+    }
+
+    if (target && isConnectionFailure(envelope)) {
+      return (
+        <m.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+          className="rounded-xl border border-border-negative-soft bg-surface-negative-soft/20 p-5"
+        >
+          <ConnectionFailureActions
+            failure={{
+              target: envelope.target || target,
+              message: envelope.message,
+              category: envelope.category,
+              code: envelope.code,
+            }}
+            onRetry={
+              onRetry
+                ? async () => {
+                    onRetry();
+                    return true;
+                  }
+                : undefined
+            }
+            featureRecovery
+          />
+        </m.div>
+      );
     }
 
     return (

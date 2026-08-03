@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 from shared.password_resolver import (
     PasswordResolution,
+    derive_password_env,
     resolve_password,
     resolve_password_value,
 )
@@ -18,6 +19,11 @@ class FakeSecretStore:
 
     def is_available(self) -> bool:
         return True
+
+
+def test_derive_password_env_uses_rdst_target_convention():
+    assert derive_password_env("customer prod") == "RDST_CUSTOMER_PROD_PASSWORD"
+    assert derive_password_env("--") == "RDST_TARGET_PASSWORD"
 
 # -- Priority order tests --
 

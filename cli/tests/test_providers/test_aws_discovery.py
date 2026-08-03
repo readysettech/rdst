@@ -1,6 +1,6 @@
 """Tests for AWS RDS discovery (mocked botocore)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from features.providers.discovery import _parse_instance, _ENGINE_MAP, discover_aurora_cluster
 
@@ -55,6 +55,68 @@ class TestParseInstance:
         assert member is not None
         assert member.engine == "mysql"
         assert member.port == 3306
+
+    def test_uses_rds_database_name_when_present(self):
+        member = _parse_instance(
+            self._make_instance(DBName="application"),
+            region="us-east-1",
+            engine_filter=None,
+            name_pattern=None,
+            password_env="PASS",
+            default_user=None,
+            default_group=None,
+        )
+
+        assert member.database == "application"
+
+    def test_missing_rds_database_name_stays_blank(self):
+        instance = self._make_instance(Engine="mysql")
+        instance.pop("DBName")
+
+        member = _parse_instance(
+            instance,
+            region="us-east-1",
+            engine_filter=None,
+            name_pattern=None,
+            password_env="PASS",
+            default_user=None,
+            default_group=None,
+        )
+
+        assert member.database == ""
+        assert member.database != member.name
+
+    def test_exposes_vpc_id_already_present_in_rds_data(self):
+        member = _parse_instance(
+            self._make_instance(DBSubnetGroup={"VpcId": "vpc-123"}),
+            region="us-east-1",
+            engine_filter=None,
+            name_pattern=None,
+            password_env="PASS",
+            default_user=None,
+            default_group=None,
+        )
+
+        assert member.vpc_id == "vpc-123"
+
+    def test_auto_wires_master_user_secret_already_in_discovery_response(self):
+        member = _parse_instance(
+            self._make_instance(
+                MasterUserSecret={
+                    "SecretArn": "arn:aws:secretsmanager:us-east-1:123:secret:rds"
+                }
+            ),
+            region="us-east-1",
+            engine_filter=None,
+            name_pattern=None,
+            password_env="PASS",
+            default_user=None,
+            default_group=None,
+        )
+
+        config = member.to_target_config()
+        assert config["password_secret_arn"].endswith(":secret:rds")
+        assert config["password_secret_key"] == "password"
 
     def test_engine_filter(self):
         instance = self._make_instance(Engine="mysql")
@@ -186,6 +248,27 @@ class TestAuroraClusterDiscovery:
     def test_explicit_group_overrides_cluster_id(self):
         members = self._discover(default_group="production")
         assert {m.group for m in members} == {"production"}
+
+    def test_uses_cluster_database_name_when_present(self):
+        members = self._discover(cluster=self._make_cluster(DatabaseName="billing"))
+        assert {member.database for member in members} == {"billing"}
+
+    def test_missing_cluster_database_name_stays_blank(self):
+        cluster = self._make_cluster()
+        cluster.pop("DatabaseName")
+        members = self._discover(cluster=cluster)
+        assert {member.database for member in members} == {""}
+
+    def test_cluster_secret_is_applied_to_writer_and_readers(self):
+        secret_arn = "arn:aws:secretsmanager:us-east-1:123:secret:aurora"
+        members = self._discover(
+            cluster=self._make_cluster(
+                MasterUserSecret={"SecretArn": secret_arn}
+            )
+        )
+
+        assert {member.password_secret_arn for member in members} == {secret_arn}
+        assert {member.password_secret_key for member in members} == {"password"}
 
     def test_standalone_instance_stays_ungrouped(self):
         instance = {

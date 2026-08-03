@@ -49,9 +49,9 @@ def _clear_tokens() -> None:
     _OAUTH.clear_tokens()
 
 
-def start_login() -> dict[str, Any]:
+def start_login(return_url: Optional[str] = None) -> dict[str, Any]:
     """Start a sign-in and return the URL the browser must open."""
-    return _OAUTH.start_login()
+    return _OAUTH.start_login(return_url)
 
 
 def get_login_status(login_id: str) -> dict[str, Any]:

@@ -21,6 +21,8 @@ from features.query_registry.service import (
     set_session_read_only,
 )
 
+pytestmark = pytest.mark.usefixtures("run_executor_inline")
+
 
 class TestBenchmarkReadOnlyReason:
     """Unit tests for the read-only statement classifier."""

@@ -6,6 +6,7 @@ import asyncio
 from typing import Any, AsyncGenerator, Callable, Optional
 
 from shared.anthropic_env import validate_anthropic_key
+from shared.db_connection import postgres_connection_kwargs, resolve_connection_params
 
 from .semantic_layer import create_ai_annotator, create_semantic_layer_manager
 
@@ -95,7 +96,9 @@ class AnnotateService:
             message=start_message,
         )
 
-        sample_data_fn = self._create_sample_data_function(target_config, sample_rows)
+        sample_data_fn = self._create_sample_data_function(
+            target, target_config, sample_rows
+        )
         total_tables_annotated = 0
         total_columns_annotated = 0
         total_failures = 0
@@ -298,7 +301,7 @@ class AnnotateService:
         return collapsed[:limit] + "..."
 
     def _create_sample_data_function(
-        self, target_config: dict[str, Any], sample_rows: int
+        self, target: str, target_config: dict[str, Any], sample_rows: int
     ) -> Optional[Callable[[str], list[dict]]]:
         if not target_config:
             return None
@@ -307,12 +310,12 @@ class AnnotateService:
             try:
                 import psycopg2
 
+                params = resolve_connection_params(
+                    target=target,
+                    target_config=target_config,
+                )
                 conn = psycopg2.connect(
-                    host=target_config.get("host", "localhost"),
-                    port=target_config.get("port", 5432),
-                    database=target_config.get("database"),
-                    user=target_config.get("user"),
-                    password=target_config.get("password"),
+                    **postgres_connection_kwargs(params)
                 )
                 cursor = conn.cursor()
                 cursor.execute(f"SELECT * FROM {table_name} LIMIT %s", (sample_rows,))

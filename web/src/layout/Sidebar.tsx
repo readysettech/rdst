@@ -3,7 +3,7 @@ import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { Icon } from '@rs/ui-new/icon'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { Text } from '@rs/ui-new/text'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { ActivityPulse } from '../components/audit/ActivityPulse'
@@ -12,9 +12,11 @@ import { DesktopUpdateControl } from '../components/DesktopUpdateControl'
 import { ReportDialog } from '../components/ReportDialog'
 import { TargetDropdown } from '../components/TargetDropdown'
 import { TrialBalanceBadge } from '../components/TrialBalanceBadge'
+import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
 import { useTarget } from '../hooks/useTarget'
 import { useAuditSessionActive } from '../lib/auditSession'
 import type { DesktopUpdateState } from '../lib/desktop'
+import { invalidateTrialRelatedQueries } from '../lib/trialQueries'
 import { useSystemStatus } from '../lib/useSystemStatus'
 
 // Plain-text acknowledgement of who is signed in; deliberately not a control.
@@ -231,6 +233,8 @@ export function Sidebar({
   const { target: selectedTarget, setTarget: setSelectedTarget } = useTarget()
   const auditRunning = useAuditSessionActive()
   const [reportOpen, setReportOpen] = useState(false)
+  const [trialOpen, setTrialOpen] = useState(false)
+  const queryClient = useQueryClient()
   const [advancedOpen, setAdvancedOpen] = useState(
     () => localStorage.getItem(ADVANCED_STORAGE_KEY) === 'open'
   )
@@ -465,6 +469,21 @@ export function Sidebar({
           <SidebarIdentity />
           <BackgroundRuns />
           <TrialBalanceBadge />
+          <button
+            type="button"
+            onClick={() => setTrialOpen(true)}
+            className={navItemStyles({
+              className:
+                'cursor-pointer border border-border-primary-soft bg-gradient-to-r from-surface-primary-soft to-surface-info-soft text-content-primary-soft shadow-elevation-1 hover:shadow-elevation-2',
+            })}
+          >
+            <Icon
+              name="sparkles"
+              label="Get free AI credits"
+              className="w-4 h-4 text-content-primary-soft group-hover:scale-110 group-hover:rotate-6 transition-transform"
+            />
+            <span>Get free AI credits</span>
+          </button>
           {/* Settings recedes here as a quiet utility, out of the daily nav. */}
           <NavLink item={settingsItem} active={isActive(settingsItem)} />
           <button
@@ -507,6 +526,14 @@ export function Sidebar({
         <ReportDialog
           isOpen={reportOpen}
           onClose={() => setReportOpen(false)}
+        />
+        <TrialRegistrationDialog
+          isOpen={trialOpen}
+          onClose={() => setTrialOpen(false)}
+          onSuccess={() => {
+            void invalidateTrialRelatedQueries(queryClient)
+            setTrialOpen(false)
+          }}
         />
       </aside>
     </>

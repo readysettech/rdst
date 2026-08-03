@@ -5,6 +5,10 @@ import type { UpdateStatePayload } from '../main/update-policy.js'
 contextBridge.exposeInMainWorld('rdstDesktop', {
   isDesktop: true,
   platform: process.platform,
+  oauth: {
+    registerProtocol: (): Promise<boolean> =>
+      ipcRenderer.invoke('oauth:register-protocol'),
+  },
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),
     toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),

@@ -200,8 +200,7 @@ export function FirstRunHome({ needsApiKey }: { needsApiKey: boolean }) {
             level="body-small"
             className="text-content-layout-2 mt-1 mb-4 min-h-14"
           >
-            PostgreSQL or MySQL. The wizard connects and validates in about a
-            minute. Read-only by default; nothing leaves your machine.
+            Connect PostgreSQL or MySQL with a read-only user.
           </Text>
           <Button
             variant="primary"

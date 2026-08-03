@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyError,
   friendlySqlError,
+  isConnectionFailure,
   isTrialExhaustedError,
   normalizeExplainError,
   normalizeHttpError,
@@ -200,6 +201,52 @@ describe('normalizeSseError / normalizeHttpError', () => {
   it('reads a FastAPI {detail} HTTP body', () => {
     const env = normalizeHttpError(404, { detail: 'No such target' })
     expect(env.message).toBe('No such target')
+  })
+
+  it('unwraps a categorized FastAPI detail object', () => {
+    const env = normalizeHttpError(503, {
+      detail: {
+        code: 'ssh_key_missing',
+        category: 'ssh_key_missing',
+        target_name: 'private-db',
+        message: 'SSH key not found',
+      },
+    })
+    expect(env).toMatchObject({
+      code: 'ssh_key_missing',
+      category: 'ssh_key_missing',
+      target: 'private-db',
+      message: 'SSH key not found',
+    })
+    expect(isConnectionFailure(env)).toBe(true)
+    expect(classifyError(env)).toBe('database')
+  })
+
+  it('preserves category and target on a direct HTTP envelope', () => {
+    expect(
+      normalizeHttpError(502, {
+        code: 'provider_ip_blocked',
+        category: 'provider_ip_blocked',
+        target: 'managed-db',
+        message: 'The provider blocked this IP.',
+      })
+    ).toMatchObject({
+      code: 'provider_ip_blocked',
+      category: 'provider_ip_blocked',
+      target: 'managed-db',
+    })
+  })
+
+  it('does not confuse AI authentication with SSH authentication', () => {
+    expect(
+      classifyError({
+        code: 'ssh_auth_failed',
+        message: 'SSH authentication failed',
+      })
+    ).toBe('database')
+    expect(
+      classifyError({ code: 'auth_invalid', message: 'AI authentication failed' })
+    ).toBe('provider')
   })
 
   it('falls back for opaque bodies', () => {

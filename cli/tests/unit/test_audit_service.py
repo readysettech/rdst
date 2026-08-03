@@ -6,10 +6,12 @@ import asyncio
 import json
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from features.audit.models import AuditMetrics, AuditResult
 from features.audit.service import AuditService
+
+pytestmark = pytest.mark.usefixtures("run_blocking_inline")
 
 
 def _fake_result(target: str = "mydb", error: str | None = None) -> AuditResult:
@@ -67,7 +69,6 @@ class TestAuditSingle:
         complete = next(e for e in events if e.type == "target_complete")
         assert complete.result["target_name"] == "mydb"
         assert complete.result["metrics"]["max_connections"] == 100
-
     @pytest.mark.asyncio
     async def test_save_persists_snapshot(self, tmp_rdst_home):
         service = AuditService(config=_FakeConfig({"mydb": {"engine": "postgresql"}}))
@@ -317,6 +318,28 @@ class TestAuditFleetDuration:
         complete = next(e for e in events if e.type == "target_complete")
         assert complete.result["workload"] == {"error": "capture boom"}
         assert events[-1].success is True
+
+
+def test_collect_top_queries_passes_target_name_to_connection():
+    service = AuditService()
+    connection = MagicMock()
+    target_config = {
+        "engine": "postgresql",
+        "host": "database.internal",
+        "port": 5432,
+    }
+
+    with (
+        patch("shared.db_connection.create_direct_connection") as connect,
+        patch(
+            "features.audit.service.collect_pg_stat_statements",
+            return_value=[],
+        ),
+    ):
+        connect.return_value = connection
+        service._collect_top_queries("prod", target_config, "postgresql")
+
+    connect.assert_called_once_with(target_config, target="prod")
 
 
 class TestAuditRunHistory:

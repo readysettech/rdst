@@ -209,6 +209,7 @@ class TestAnalyzeServiceEvents:
         assert "Test exception" in events[1].message
 
 
+@pytest.mark.usefixtures("run_blocking_inline")
 class TestAnalyzeServiceParallelExecution:
     """Tests for parallel execution in _run_parallel_analysis."""
 
@@ -265,17 +266,26 @@ class TestAnalyzeServiceParallelExecution:
             new_callable=AsyncMock,
             return_value=(mock_progress_gen(), workflow_result),
         ):
-            mock_path = Mock()
-            mock_path.exists.return_value = True
-
-            async for event in service._run_parallel_analysis(
-                input=input_data,
-                options=options,
-                target_name="test-target",
-                target_config={"host": "localhost"},
-                workflow_path=mock_path,
+            with patch.object(
+                service,
+                "_run_readyset_analysis_sync",
+                return_value={
+                    "success": False,
+                    "checked": False,
+                    "error": "Readyset not configured",
+                },
             ):
-                events.append(event)
+                mock_path = Mock()
+                mock_path.exists.return_value = True
+
+                async for event in service._run_parallel_analysis(
+                    input=input_data,
+                    options=options,
+                    target_name="test-target",
+                    target_config={"host": "localhost"},
+                    workflow_path=mock_path,
+                ):
+                    events.append(event)
 
         # Should have events from _process_results
         assert len(events) >= 1
@@ -1006,6 +1016,7 @@ class TestAnalyzeServiceErrorHandling:
         assert len(events) >= 1
 
 
+@pytest.mark.usefixtures("run_blocking_inline")
 class TestAnalyzeServiceTimeoutScenarios:
     """Tests for timeout handling scenarios."""
 
@@ -1088,14 +1099,23 @@ class TestAnalyzeServiceTimeoutScenarios:
                     new_callable=AsyncMock,
                     return_value=(mock_progress_gen(), workflow_result),
                 ):
-                    async for event in service._run_parallel_analysis(
-                        input=input_data,
-                        options=options,
-                        target_name="test-target",
-                        target_config={"host": "localhost"},
-                        workflow_path=mock_path,
+                    with patch.object(
+                        service,
+                        "_run_readyset_analysis_sync",
+                        return_value={
+                            "success": False,
+                            "checked": False,
+                            "error": "Readyset not configured",
+                        },
                     ):
-                        events.append(event)
+                        async for event in service._run_parallel_analysis(
+                            input=input_data,
+                            options=options,
+                            target_name="test-target",
+                            target_config={"host": "localhost"},
+                            workflow_path=mock_path,
+                        ):
+                            events.append(event)
 
         assert events[-1].type == "error"
         assert "timed out" in events[-1].message.lower()
@@ -1119,6 +1139,7 @@ class TestAnalyzeServiceTimeoutScenarios:
         assert len(events) >= 1
 
 
+@pytest.mark.usefixtures("run_blocking_inline")
 class TestAnalyzeServiceNetworkFailures:
     """Tests for network failure simulations."""
 
@@ -1189,7 +1210,10 @@ class TestAnalyzeServiceNetworkFailures:
                         events.append(event)
 
         assert events[-1].type == "error"
-        assert "unreachable" in events[-1].message.lower()
+        assert events[-1].code == "database_connection_failed"
+        assert "database connection" in events[-1].message.lower()
+        assert "test-target" in events[-1].message
+        assert "unreachable" not in events[-1].message.lower()
 
     @pytest.mark.asyncio
     async def test_dns_resolution_failure(self, service, input_data, options):

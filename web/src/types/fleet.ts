@@ -7,14 +7,21 @@
 // rdst/features/fleet/service.py.
 
 import type { components } from '../lib/api.generated'
+import type { SshConfig } from './configure'
 
 export type FleetEvent = components['schemas']['FleetEvent']
-export type FleetConnectivityEvent = Extract<
+type GeneratedFleetConnectivityEvent = Extract<
   FleetEvent,
   { type: 'connectivity' }
+>
+export type FleetConnectivityEvent = Omit<
+  GeneratedFleetConnectivityEvent,
+  'privileges'
 > & {
   code?: string | null
+  category?: string | null
   password_env?: string | null
+  privileges?: { writable: boolean; evidence: string } | null
 }
 export type FleetImportProgressEvent = Extract<
   FleetEvent,
@@ -53,6 +60,8 @@ export interface FleetMember {
   database: string
   user?: string
   password_env?: string
+  password_secret_arn?: string | null
+  password_secret_key?: string | null
   has_password?: boolean
   group?: string | null
   tags?: string[]
@@ -61,7 +70,12 @@ export interface FleetMember {
   target_type?: string
   region?: string | null
   tls?: boolean
+  tls_verify?: boolean
+  tls_ca?: string | null
   read_only?: boolean
+  publicly_accessible?: boolean | null
+  vpc_id?: string | null
+  ssh?: SshConfig | null
 }
 
 export interface FleetTargets {

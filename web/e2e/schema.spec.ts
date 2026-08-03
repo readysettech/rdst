@@ -175,32 +175,29 @@ test('surfaces a semantic-layer status failure', async ({
   page,
   browserErrors,
 }) => {
-  setBackendFixtures({
-    semantic_status: [
-      {
-        error: {
-          status: 503,
-          detail: 'database introspection unavailable',
-        },
+  setBackendFixtures()
+  await page.route('**/api/semantic-layer/status*', (route) => {
+    return route.fulfill({
+      status: 503,
+      json: {
+        code: 'database_connection_failed',
+        category: 'database_connection_failed',
+        target: 'e2e-guard',
+        message: 'Database introspection is unavailable.',
+        detail: 'The database connection failed during introspection.',
       },
-    ],
+    })
   })
   await configureTestTarget(page, { hasPassword: true })
 
   await page.goto('/schema')
-  // C-01's shared error handler (register_error_handlers) wraps every HTTP
-  // failure in the {code, message, detail} envelope, so the 503 body is no
-  // longer the bare {detail} FastAPI shape. The schema surface still renders
-  // the raw `Error: HTTP <status>: <body>` line, so the visible text now
-  // carries the full envelope.
   await expect(
-    page.getByText(
-      'Error: HTTP 503: {"code":"service_unavailable","message":"database introspection unavailable","detail":"database introspection unavailable"}',
-      {
-        exact: true,
-      }
-    )
+    page.getByText('Database introspection is unavailable.', { exact: true })
   ).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Open connection settings' })
+  ).toBeVisible()
+  await expect(page.getByText(/^Error: HTTP 503:/)).toHaveCount(0)
   consumeBrowserError(
     browserErrors,
     'Failed to load resource: the server responded with a status of 503 (Service Unavailable)'

@@ -45,6 +45,8 @@ class TargetConfigInput:
     user: str = ""
     password_env: Optional[str] = None
     tls: bool = False
+    tls_verify: bool = False
+    tls_ca: Optional[str] = None
     read_only: bool = False
 
 
@@ -74,4 +76,6 @@ class TargetDetail:
     is_default: bool
     password_env: Optional[str] = None
     tls: bool = False
+    tls_verify: bool = False
+    tls_ca: Optional[str] = None
     read_only: bool = False

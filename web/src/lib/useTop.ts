@@ -14,6 +14,11 @@ import type {
 } from '../types/top'
 import type { components } from './api.generated'
 import { useTargetSwitchLock } from './targetSwitchLock'
+import {
+  type ApiErrorEnvelope,
+  normalizeHttpError,
+  normalizeSseError,
+} from './errorContract'
 
 // SSE event types are derived from the backend-generated discriminated union.
 // Backend source of truth: rdst/features/top/events.py (TopEvent).
@@ -57,6 +62,7 @@ interface UseTopReturn {
   newlySaved: number
   savedHashes: Set<string>
   error: string | null
+  errorEnvelope?: ApiErrorEnvelope | null
 }
 
 /**
@@ -125,6 +131,8 @@ export function useTop(target?: string | null): UseTopReturn {
     initialSnapshot?.savedHashes ?? new Set()
   )
   const [error, setError] = useState<string | null>(null)
+  const [errorEnvelope, setErrorEnvelope] =
+    useState<ApiErrorEnvelope | null>(null)
 
   const abortControllerRef = useRef<AbortController | null>(null)
   useTargetSwitchLock('top', state === 'loading' || state === 'streaming')
@@ -186,6 +194,7 @@ export function useTop(target?: string | null): UseTopReturn {
     setNewlySaved(0)
     setSavedHashes(new Set())
     setError(null)
+    setErrorEnvelope(null)
   }, [queryClient, connectionInfo, target])
 
   const stopRealtime = useCallback(() => {
@@ -214,6 +223,7 @@ export function useTop(target?: string | null): UseTopReturn {
       setSourceFallback(null)
       setDbLimitWarning(null)
       setError(null)
+      setErrorEnvelope(null)
 
       try {
         const params = new URLSearchParams({
@@ -239,16 +249,30 @@ export function useTop(target?: string | null): UseTopReturn {
         })
 
         if (!response.ok) {
-          const errorText = await response.text()
-          throw new Error(
-            `HTTP error! status: ${response.status}, body: ${errorText}`
-          )
+          let body: unknown
+          try {
+            body = await response.clone().json()
+          } catch {
+            body = await response.text().catch(() => undefined)
+          }
+          const envelope = normalizeHttpError(response.status, body)
+          setError(envelope.message)
+          setErrorEnvelope(envelope)
+          setState('error')
+          return
         }
 
         const data: TopHistoricalResponse = await response.json()
 
         if (!data.success) {
-          setError(data.error || 'Unknown error')
+          const envelope = normalizeSseError({
+            code: data.code || data.category || 'database_connection_failed',
+            category: data.category,
+            message: data.error || 'Unknown error',
+            target,
+          })
+          setError(envelope.message)
+          setErrorEnvelope(envelope)
           setState('error')
           return
         }
@@ -299,6 +323,7 @@ export function useTop(target?: string | null): UseTopReturn {
       setNewlySaved(0)
       setSavedHashes(new Set())
       setError(null)
+      setErrorEnvelope(null)
 
       const params = new URLSearchParams({
         target,
@@ -325,10 +350,17 @@ export function useTop(target?: string | null): UseTopReturn {
           })
 
           if (!response.ok) {
-            const errorText = await response.text()
-            throw new Error(
-              `HTTP error! status: ${response.status}, body: ${errorText}`
-            )
+            let body: unknown
+            try {
+              body = await response.clone().json()
+            } catch {
+              body = await response.text().catch(() => undefined)
+            }
+            const envelope = normalizeHttpError(response.status, body)
+            setError(envelope.message)
+            setErrorEnvelope(envelope)
+            setState('error')
+            return
           }
 
           if (!response.body) {
@@ -441,7 +473,12 @@ export function useTop(target?: string | null): UseTopReturn {
 
                     case 'error': {
                       const errorData = data as TopErrorEvent
-                      setError(errorData.message)
+                      const envelope = normalizeSseError({
+                        ...errorData,
+                        target,
+                      })
+                      setError(envelope.message)
+                      setErrorEnvelope(envelope)
                       setState('error')
                       break
                     }
@@ -498,5 +535,6 @@ export function useTop(target?: string | null): UseTopReturn {
     newlySaved,
     savedHashes,
     error,
+    errorEnvelope,
   }
 }

@@ -63,5 +63,7 @@ export interface TopHistoricalResponse {
   queries?: TopQuery[];
   newly_saved?: number;
   error?: string;
+  code?: string;
+  category?: string;
   db_limit_warning?: TopDbLimitWarningEventData;
 }

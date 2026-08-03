@@ -16,9 +16,17 @@ import type {
 } from '../types/schema'
 import type { components } from './api.generated'
 import { useTargetSwitchLock } from './targetSwitchLock'
+import {
+  type ApiErrorEnvelope,
+  normalizeHttpError,
+  normalizeSseError,
+} from './errorContract'
 
 export type SchemaOperationResult =
-  components['schemas']['SchemaOperationResponse']
+  components['schemas']['SchemaOperationResponse'] & {
+    code?: string | null
+    category?: string | null
+  }
 
 interface UseSchemaReturn {
   // State
@@ -26,6 +34,7 @@ interface UseSchemaReturn {
   schema: SchemaDetails | null
   targets: SchemaTargetSummary[]
   error: string | null
+  errorEnvelope: ApiErrorEnvelope | null
   loading: boolean
 
   // Read operations
@@ -63,12 +72,15 @@ export function useSchema(): UseSchemaReturn {
   const [schema, setSchema] = useState<SchemaDetails | null>(null)
   const [targets, setTargets] = useState<SchemaTargetSummary[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [errorEnvelope, setErrorEnvelope] =
+    useState<ApiErrorEnvelope | null>(null)
   const [loading, setLoading] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   useTargetSwitchLock('schema', loading)
 
   const clearError = useCallback(() => {
     setError(null)
+    setErrorEnvelope(null)
   }, [])
 
   // Helper to handle fetch with abort support
@@ -85,6 +97,7 @@ export function useSchema(): UseSchemaReturn {
       abortControllerRef.current = controller
       setLoading(true)
       setError(null)
+      setErrorEnvelope(null)
 
       try {
         const response = await fetch(url, {
@@ -93,8 +106,15 @@ export function useSchema(): UseSchemaReturn {
         })
 
         if (!response.ok) {
-          const errorText = await response.text()
-          return { data: null, error: `HTTP ${response.status}: ${errorText}` }
+          let body: unknown
+          try {
+            body = await response.clone().json()
+          } catch {
+            body = await response.text().catch(() => undefined)
+          }
+          const envelope = normalizeHttpError(response.status, body)
+          setErrorEnvelope(envelope)
+          return { data: null, error: envelope.message }
         }
 
         const data = await response.json()
@@ -225,7 +245,14 @@ export function useSchema(): UseSchemaReturn {
       }
 
       if (data && !data.success) {
-        setError(data.error || 'Init failed')
+        const envelope = normalizeSseError({
+          code: data.code || data.category || 'schema_error',
+          category: data.category,
+          target,
+          message: data.error || 'Init failed',
+        })
+        setError(envelope.message)
+        setErrorEnvelope(envelope)
       }
 
       return data
@@ -431,6 +458,17 @@ export function useSchema(): UseSchemaReturn {
         return null
       }
 
+      if (data && !data.ok) {
+        const envelope = normalizeSseError({
+          code: data.code || data.category || 'schema_error',
+          category: data.category,
+          target,
+          message: data.message,
+        })
+        setError(envelope.message)
+        setErrorEnvelope(envelope)
+      }
+
       return data
     },
     [fetchWithAbort]
@@ -456,6 +494,18 @@ export function useSchema(): UseSchemaReturn {
         return null
       }
 
+
+      if (data && !data.ok) {
+        const envelope = normalizeSseError({
+          code: data.code || data.category || 'schema_error',
+          category: data.category,
+          target,
+          message: data.message,
+        })
+        setError(envelope.message)
+        setErrorEnvelope(envelope)
+      }
+
       return data
     },
     [fetchWithAbort]
@@ -467,6 +517,7 @@ export function useSchema(): UseSchemaReturn {
     schema,
     targets,
     error,
+    errorEnvelope,
     loading,
 
     // Read operations

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import asdict
 from html import escape
 from typing import Any, AsyncGenerator, Optional
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -340,6 +342,28 @@ async def _poll_provider_login(provider: str, login_id: str):
         )
 
 
+def _provider_return_url(request: Request, provider: str) -> str:
+    """Return to this web app, or to the desktop deep-link when sidecar-hosted."""
+    if os.environ.get("RDST_DESKTOP") == "1":
+        return f"rdst://oauth-complete?provider={quote(provider)}"
+
+    candidates = [request.headers.get("origin", ""), str(request.base_url)]
+    for candidate in candidates:
+        try:
+            parsed = urlsplit(candidate)
+            if (
+                parsed.scheme in ("http", "https")
+                and parsed.hostname in ("localhost", "127.0.0.1")
+            ):
+                return f"{parsed.scheme}://{parsed.netloc}/configure?connected={quote(provider)}"
+        except ValueError:
+            continue
+
+    # ASGI test clients and unusual local proxies may use a synthetic Host.
+    # The broker still independently validates this destination at /start.
+    return f"http://localhost/configure?connected={quote(provider)}"
+
+
 @router.get("/supabase-status")
 async def get_fleet_supabase_status() -> dict[str, Any]:
     """Report Supabase Management API credential state for the discovery UI."""
@@ -352,7 +376,11 @@ async def get_fleet_supabase_status() -> dict[str, Any]:
 async def start_fleet_supabase_login(request: Request):
     """Start a Supabase OAuth sign-in and hand the browser the authorize URL."""
     # The redirect URI must match the port this server is actually serving on.
-    return await _start_provider_login("supabase", str(request.base_url))
+    return await _start_provider_login(
+        "supabase",
+        str(request.base_url),
+        _provider_return_url(request, "supabase"),
+    )
 
 
 def _supabase_callback_page(title: str, detail: str) -> str:
@@ -456,9 +484,11 @@ async def get_fleet_digitalocean_status() -> dict[str, Any]:
 
 
 @router.post("/digitalocean-login")
-async def start_fleet_digitalocean_login():
+async def start_fleet_digitalocean_login(request: Request):
     """Start a DigitalOcean OAuth sign-in and hand the browser the authorize URL."""
-    return await _start_provider_login("digitalocean")
+    return await _start_provider_login(
+        "digitalocean", _provider_return_url(request, "digitalocean")
+    )
 
 
 @router.get("/digitalocean-login/{login_id}")

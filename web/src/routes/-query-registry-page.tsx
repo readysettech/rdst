@@ -20,6 +20,7 @@ import { toast } from '@rs/ui-new/use-toast'
 import { useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { ComparisonCard } from '../components/CacheComparison'
+import { ConnectionFailureActions } from '../components/ConnectionFailureActions'
 import { PathPicker } from '../components/PathPicker'
 import { QueryCacheStatus } from '../components/QueryCacheStatus'
 import { QueryCard } from '../components/QueryCard'
@@ -33,6 +34,7 @@ import {
   useBackgroundRuns,
 } from '../lib/backgroundRuns'
 import { collapseWhitespace } from '../lib/collapseWhitespace'
+import { isConnectionFailure } from '../lib/errorContract'
 import {
   formatDuration,
   formatMeta,
@@ -1406,11 +1408,38 @@ export function QueryRegistryPage({
                                   <Show
                                     when={cacheTestRun?.status === 'failed'}
                                   >
-                                    <Alert
-                                      variant="negative"
-                                      modifier="outline"
-                                      label={`Performance test failed: ${cacheTestRun?.message || 'The comparison did not complete.'}`}
-                                    />
+                                    {cacheTestRun &&
+                                    target &&
+                                    isConnectionFailure({
+                                      code: cacheTestRun.errorCode || '',
+                                      category: cacheTestRun.errorCategory,
+                                    }) ? (
+                                      <div className="rounded-lg border border-border-negative-soft bg-surface-negative-soft/20 p-4">
+                                        <ConnectionFailureActions
+                                          failure={{
+                                            target,
+                                            message: cacheTestRun.message,
+                                            category: cacheTestRun.errorCategory,
+                                            code: cacheTestRun.errorCode,
+                                          }}
+                                          onRetry={async () => {
+                                            runTest(
+                                              entry.hash,
+                                              entry.sql,
+                                              entry.most_recent_params ?? {}
+                                            )
+                                            return true
+                                          }}
+                                          featureRecovery
+                                        />
+                                      </div>
+                                    ) : (
+                                      <Alert
+                                        variant="negative"
+                                        modifier="outline"
+                                        label={`Performance test failed: ${cacheTestRun?.message || 'The comparison did not complete.'}`}
+                                      />
+                                    )}
                                   </Show>
                                   <Show when={!!runResult}>
                                     <ComparisonCard

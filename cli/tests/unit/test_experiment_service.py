@@ -91,6 +91,17 @@ async def _events(service: ReadysetExperimentService):
     ]
 
 
+async def _wait_for_thread_event(event: threading.Event, timeout: float) -> bool:
+    """Poll without consuming another default-executor worker."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if event.is_set():
+            return True
+        await asyncio.sleep(0.01)
+    return event.is_set()
+
+
 @pytest.mark.asyncio
 async def test_validation_cancellation_waits_for_database_thread(monkeypatch):
     started = threading.Event()
@@ -109,13 +120,15 @@ async def test_validation_cancellation_waits_for_database_thread(monkeypatch):
 
     monkeypatch.setattr("features.cache.experiment_service._execute_rows", rows)
     task = asyncio.create_task(_execute_rows_cancellable({}, "SELECT 1"))
-    assert await asyncio.to_thread(started.wait, 1)
+    assert await _wait_for_thread_event(started, 1)
 
     task.cancel()
-    assert await asyncio.to_thread(cancelled.wait, 1)
+    assert await _wait_for_thread_event(cancelled, 1)
     await asyncio.sleep(0)
     assert task.done() is False
     release.set()
+    assert await _wait_for_thread_event(finished, 1)
+    await asyncio.sleep(0)
 
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -467,6 +480,7 @@ async def test_cancellation_during_create_waits_then_drops_under_lease(
 ):
     manager = _Manager()
     create_started = threading.Event()
+    create_finished = threading.Event()
     allow_create = threading.Event()
 
     class BlockingCache(_Cache):
@@ -475,6 +489,7 @@ async def test_cancellation_during_create_waits_then_drops_under_lease(
                 self.statements.append(statement)
                 create_started.set()
                 allow_create.wait(timeout=2)
+                create_finished.set()
                 return {"success": True}
             return super()._run_readyset_sql(statement, **kwargs)
 
@@ -485,11 +500,13 @@ async def test_cancellation_during_create_waits_then_drops_under_lease(
         return await _events(service)
 
     task = asyncio.create_task(consume())
-    await asyncio.to_thread(create_started.wait, 1)
+    assert await _wait_for_thread_event(create_started, 1)
     task.cancel()
     await asyncio.sleep(0)
     assert task.done() is False
     allow_create.set()
+    assert await _wait_for_thread_event(create_finished, 1)
+    await asyncio.sleep(0)
     with pytest.raises(asyncio.CancelledError):
         await task
 

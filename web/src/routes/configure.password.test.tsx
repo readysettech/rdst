@@ -76,9 +76,9 @@ const { component: loadConfigurePage } = Route as unknown as {
   component: () => Promise<{ component: () => ReactElement }>
 }
 
-// Resolved at module scope: the split-module transform is the slowest step in
-// this suite, and it does not depend on any per-test mock.
-const configurePage = loadConfigurePage()
+// Resolve during module collection: the split-module transform is the slowest
+// step in this suite, and it does not belong to the per-test behavior timeout.
+const ConfigurePage = (await loadConfigurePage()).component
 
 const passwordFailure: FleetConnectivityEvent = {
   type: 'connectivity',
@@ -100,6 +100,7 @@ function mockUseConfigure(listTargets: () => Promise<void>) {
     removeTarget: vi.fn(),
     setDefaultTarget: vi.fn(),
     testConnection: vi.fn(),
+    cancel: vi.fn(),
     state: 'success',
     targets: [
       {
@@ -179,8 +180,6 @@ describe('Settings row password save', () => {
       }) as ReturnType<typeof useFleetStatus>
     )
     const client = createTestQueryClient()
-    const ConfigurePage = (await configurePage).component
-
     renderWithClient(<ConfigurePage />, client)
 
     const needed = await screen.findAllByText('Password needed')

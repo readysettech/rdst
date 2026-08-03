@@ -5,7 +5,7 @@ Handles creating direct psycopg2 or pymysql connections
 without using DataManager infrastructure.
 """
 
-import os
+import socket
 from typing import Dict, Any, Literal, Optional, Tuple
 
 
@@ -17,7 +17,12 @@ def normalize_engine_name(engine: str) -> str:
     return value
 
 
-def resolve_connection_params(target: Optional[str] = None, target_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def resolve_connection_params(
+    target: Optional[str] = None,
+    target_config: Optional[Dict[str, Any]] = None,
+    *,
+    force_fresh_tunnel: bool = False,
+) -> Dict[str, Any]:
     """
     Resolve all connection parameters from target name or configuration.
 
@@ -30,7 +35,8 @@ def resolve_connection_params(target: Optional[str] = None, target_config: Optio
     Returns:
         Dict with resolved connection parameters:
             - engine: 'postgresql' or 'mysql'
-            - host: Database host
+            - host: TLS identity/database host (real host for verified tunnels)
+            - hostaddr: Socket endpoint for verified tunnels, when applicable
             - port: Database port
             - user: Database username
             - password: Resolved password (from env var or direct)
@@ -56,9 +62,34 @@ def resolve_connection_params(target: Optional[str] = None, target_config: Optio
     engine = normalize_engine_name(target_config.get('engine', 'postgresql'))
     host = target_config.get('host', 'localhost')
     port = target_config.get('port', 5432 if 'postgres' in engine else 3306)
+    if "ssh" in target_config:
+        from shared.ssh_tunnel import get_tunnel_manager
+
+        real_host = host
+        real_port = port
+        tunnel_target = target or target_config.get('name') or host
+        ensure_kwargs = {"force_fresh": True} if force_fresh_tunnel else {}
+        host, port = get_tunnel_manager().ensure_tunnel(
+            str(tunnel_target),
+            target_config['ssh'],
+            str(real_host),
+            int(real_port),
+            **ensure_kwargs,
+        )
     user = target_config.get('user') or target_config.get('username')
     database = target_config.get('database') or target_config.get('dbname')
     tls = target_config.get('tls', False)
+    tls_verify = target_config.get('tls_verify', False)
+    tls_ca = target_config.get('tls_ca')
+    if tls_verify:
+        tls = True
+    hostaddr = target_config.get('hostaddr')
+    if "ssh" in target_config and tls_verify:
+        # Keep the database hostname as the TLS identity while directing the
+        # socket to the local tunnel endpoint. libpq consumes hostaddr
+        # directly; the PyMySQL helper below uses it to preconnect a socket.
+        hostaddr = host
+        host = real_host
     read_only = target_config.get('read_only', False)
 
     # Resolve password: config field -> env var -> keyring
@@ -68,9 +99,9 @@ def resolve_connection_params(target: Optional[str] = None, target_config: Optio
     password = resolve_password_value(target_config)
 
     # Determine SSL mode for PostgreSQL
-    sslmode = 'require' if tls else 'prefer'
+    sslmode = 'verify-full' if tls_verify else ('require' if tls else 'prefer')
 
-    return {
+    result = {
         'engine': engine,
         'host': host,
         'port': port,
@@ -79,12 +110,26 @@ def resolve_connection_params(target: Optional[str] = None, target_config: Optio
         'database': database,
         'tls': tls,
         'sslmode': sslmode,
+        'tls_verify': tls_verify,
+        'tls_ca': tls_ca,
         'read_only': read_only,
         'password_env': password_env,  # Keep for error messages
     }
+    if "ssh" in target_config:
+        result['real_host'] = real_host
+        result['real_port'] = real_port
+    if hostaddr is not None:
+        result['hostaddr'] = hostaddr
+    return result
 
 
-def create_direct_connection(target_config: Dict[str, Any], connect_timeout: int = 10):
+def create_direct_connection(
+    target_config: Dict[str, Any],
+    connect_timeout: int = 10,
+    *,
+    target: Optional[str] = None,
+    force_fresh_tunnel: bool = False,
+):
     """
     Create a direct database connection from target configuration.
 
@@ -105,13 +150,20 @@ def create_direct_connection(target_config: Dict[str, Any], connect_timeout: int
         ValueError: If engine is unsupported or config is invalid
         RuntimeError: If connection fails
     """
-    engine = normalize_engine_name(target_config.get('engine', ''))
-    host = target_config.get('host')
-    port = target_config.get('port')
-    user = target_config.get('user')
-    database = target_config.get('database')
-    password_env = target_config.get('password_env')
-    use_tls = target_config.get('tls', False)
+    params = resolve_connection_params(
+        target=target,
+        target_config=target_config,
+        force_fresh_tunnel=force_fresh_tunnel,
+    )
+    engine = params['engine']
+    host = params['host']
+    port = params['port']
+    user = params['user']
+    database = params['database']
+    password_env = params['password_env']
+    use_tls = params['tls']
+    tls_verify = params['tls_verify']
+    tls_ca = params['tls_ca']
 
     # Validate required fields
     if not all([engine, host, port, user, database]):
@@ -120,21 +172,109 @@ def create_direct_connection(target_config: Dict[str, Any], connect_timeout: int
     # Resolve password: config field -> env var -> keyring.
     # Only reject when a password_env is configured but unresolved; some targets
     # intentionally use passwordless auth and should pass an empty string through.
-    from shared.password_resolver import resolve_password_value
-
-    password = resolve_password_value(target_config)
+    password = params['password']
     if password == "" and password_env:
         raise ValueError("Password not available for target")
 
     if engine == 'postgresql':
-        return _create_postgres_connection(host, port, user, password, database, use_tls, connect_timeout=connect_timeout)
+        return _create_postgres_connection(
+            host, port, user, password, database, use_tls,
+            tls_verify=tls_verify, tls_ca=tls_ca,
+            hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
+        )
     elif engine == 'mysql':
-        return _create_mysql_connection(host, port, user, password, database, use_tls, connect_timeout=connect_timeout)
+        return _create_mysql_connection(
+            host, port, user, password, database, use_tls,
+            tls_verify=tls_verify, tls_ca=tls_ca,
+            hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
+        )
     else:
         raise ValueError(f"Unsupported database engine: {engine}")
 
 
-def _create_postgres_connection(host: str, port: int, user: str, password: str, database: str, use_tls: bool = False, connect_timeout: int = 10):
+def postgres_ssl_kwargs(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Return psycopg2 TLS kwargs without changing legacy encryption behavior."""
+    result = {'sslmode': params.get('sslmode', 'prefer')}
+    if params.get('hostaddr'):
+        result['hostaddr'] = params['hostaddr']
+    if params.get('tls_verify') and params.get('tls_ca'):
+        result['sslrootcert'] = params['tls_ca']
+    return result
+
+
+def mysql_ssl_kwargs(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Return PyMySQL TLS kwargs with optional certificate verification."""
+    if not params.get('tls'):
+        return {'ssl': None}
+    if not params.get('tls_verify'):
+        return {'ssl': {'ssl': {}}}
+
+    import ssl
+
+    ssl_context = ssl.create_default_context(cafile=params.get('tls_ca'))
+    # Match PyMySQL's compatibility behavior on Python 3.13 while retaining
+    # certificate-chain and hostname verification.
+    ssl_context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    ssl_context.check_hostname = True
+    ssl_context.verify_mode = ssl.CERT_REQUIRED
+    return {'ssl': ssl_context}
+
+
+def postgres_connection_kwargs(
+    params: Dict[str, Any],
+    *,
+    connect_timeout: int = 10,
+    **overrides: Any,
+) -> Dict[str, Any]:
+    """Build complete psycopg2 kwargs from resolved connection parameters."""
+    result = {
+        'host': params['host'],
+        'port': params['port'],
+        'user': params['user'],
+        'password': params['password'],
+        'database': params['database'],
+        'connect_timeout': connect_timeout,
+        **postgres_ssl_kwargs(params),
+    }
+    result.update(overrides)
+    return result
+
+
+def create_mysql_connection_from_params(
+    params: Dict[str, Any],
+    *,
+    connect_timeout: int = 10,
+    **overrides: Any,
+):
+    """Connect with PyMySQL, separating a tunnel socket from the TLS identity."""
+    return _create_mysql_connection(
+        params['host'],
+        params['port'],
+        params['user'],
+        params['password'],
+        params['database'],
+        params.get('tls', False),
+        tls_verify=params.get('tls_verify', False),
+        tls_ca=params.get('tls_ca'),
+        hostaddr=params.get('hostaddr'),
+        connect_timeout=connect_timeout,
+        connection_defaults=False,
+        **overrides,
+    )
+
+
+def _create_postgres_connection(
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    database: str,
+    use_tls: bool = False,
+    tls_verify: bool = False,
+    tls_ca: Optional[str] = None,
+    hostaddr: Optional[str] = None,
+    connect_timeout: int = 10,
+):
     """Create PostgreSQL connection using psycopg2."""
     try:
         import psycopg2
@@ -152,8 +292,16 @@ def _create_postgres_connection(host: str, port: int, user: str, password: str, 
             'connect_timeout': connect_timeout,
         }
 
-        if use_tls:
-            conn_params['sslmode'] = 'require'
+        conn_params.update(
+            postgres_ssl_kwargs(
+                {
+                    'sslmode': 'verify-full' if tls_verify else ('require' if use_tls else 'prefer'),
+                    'tls_verify': tls_verify,
+                    'tls_ca': tls_ca,
+                    'hostaddr': hostaddr,
+                }
+            )
+        )
 
         conn = psycopg2.connect(**conn_params)
         # Set autocommit for read-only queries
@@ -163,7 +311,20 @@ def _create_postgres_connection(host: str, port: int, user: str, password: str, 
         raise RuntimeError(f"Failed to connect to PostgreSQL: {e}")
 
 
-def _create_mysql_connection(host: str, port: int, user: str, password: str, database: str, use_tls: bool = False, connect_timeout: int = 10):
+def _create_mysql_connection(
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    database: str,
+    use_tls: bool = False,
+    tls_verify: bool = False,
+    tls_ca: Optional[str] = None,
+    hostaddr: Optional[str] = None,
+    connect_timeout: int = 10,
+    connection_defaults: bool = True,
+    **overrides: Any,
+):
     """Create MySQL connection using pymysql."""
     try:
         import pymysql
@@ -179,11 +340,23 @@ def _create_mysql_connection(host: str, port: int, user: str, password: str, dat
             'password': password,
             'database': database,
             'connect_timeout': connect_timeout,
-            'autocommit': True,
-            'cursorclass': pymysql.cursors.DictCursor,  # Return results as dicts
         }
+        if connection_defaults:
+            conn_params.update(
+                {
+                    'autocommit': True,
+                    'cursorclass': pymysql.cursors.DictCursor,
+                }
+            )
+        conn_params.update(overrides)
 
-        if use_tls:
+        if tls_verify:
+            conn_params.update(
+                mysql_ssl_kwargs(
+                    {'tls': True, 'tls_verify': True, 'tls_ca': tls_ca}
+                )
+            )
+        elif use_tls:
             import ssl
             # Require encryption but don't verify certificate (matches psycopg2 sslmode='require')
             ssl_context = ssl.create_default_context()
@@ -191,8 +364,23 @@ def _create_mysql_connection(host: str, port: int, user: str, password: str, dat
             ssl_context.verify_mode = ssl.CERT_NONE
             conn_params['ssl'] = ssl_context
 
-        conn = pymysql.connect(**conn_params)
-        return conn
+        if hostaddr:
+            raw_socket = None
+            try:
+                raw_socket = socket.create_connection(
+                    (hostaddr, int(port)), connect_timeout
+                )
+                raw_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                raw_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                conn = pymysql.connect(defer_connect=True, **conn_params)
+                conn.connect(sock=raw_socket)
+                return conn
+            except Exception:
+                if raw_socket is not None:
+                    raw_socket.close()
+                raise
+
+        return pymysql.connect(**conn_params)
     except Exception as e:
         raise RuntimeError(f"Failed to connect to MySQL: {e}")
 
@@ -299,13 +487,17 @@ def cancel_query(conn, engine: str, target_config: Optional[dict] = None) -> boo
             if not target_config:
                 return False
             thread_id = conn.thread_id()
-            from shared.password_resolver import resolve_password_value
+            params = resolve_connection_params(target_config=target_config)
             cancel_conn = _create_mysql_connection(
-                target_config['host'],
-                target_config['port'],
-                target_config['user'],
-                resolve_password_value(target_config),
-                target_config['database']
+                params['host'],
+                params['port'],
+                params['user'],
+                params['password'],
+                params['database'],
+                params['tls'],
+                tls_verify=params['tls_verify'],
+                tls_ca=params['tls_ca'],
+                hostaddr=params.get('hostaddr'),
             )
             try:
                 cursor = cancel_conn.cursor()
@@ -414,7 +606,13 @@ def cancel_postgres_by_pid(conn_params: Dict[str, Any], backend_pid: int, verbos
         return False
 
 
-def cancel_mysql_by_thread_id(target_config: Dict[str, Any], thread_id: int, verbose: bool = False) -> bool:
+def cancel_mysql_by_thread_id(
+    target_config: Dict[str, Any],
+    thread_id: int,
+    verbose: bool = False,
+    *,
+    target: Optional[str] = None,
+) -> bool:
     """
     Cancel a MySQL query by its connection thread ID.
 
@@ -429,15 +627,21 @@ def cancel_mysql_by_thread_id(target_config: Dict[str, Any], thread_id: int, ver
     Returns:
         True if KILL QUERY was executed, False otherwise
     """
-    from shared.password_resolver import resolve_password_value
     try:
+        params = resolve_connection_params(
+            target=target,
+            target_config=target_config,
+        )
         cancel_conn = _create_mysql_connection(
-            target_config['host'],
-            target_config['port'],
-            target_config['user'],
-            resolve_password_value(target_config),
-            target_config['database'],
-            target_config.get('tls', False)
+            params['host'],
+            params['port'],
+            params['user'],
+            params['password'],
+            params['database'],
+            params['tls'],
+            tls_verify=params['tls_verify'],
+            tls_ca=params['tls_ca'],
+            hostaddr=params.get('hostaddr'),
         )
         try:
             cursor = cancel_conn.cursor()

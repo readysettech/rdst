@@ -4,7 +4,9 @@ Handles database target configuration with a beautiful, step-by-step interface.
 """
 
 import asyncio
-from typing import List, Dict, Optional, Any
+import getpass
+from pathlib import Path
+from typing import List, Optional
 
 from shared.cli.types import RdstResult
 from shared.config.targets import (
@@ -12,28 +14,30 @@ from shared.config.targets import (
     normalize_db_type,
     default_port_for,
     ENGINES,
-    PROXY_TYPES,
     parse_connection_string,
+)
+from shared.db_connection import (
+    create_mysql_connection_from_params,
+    postgres_connection_kwargs,
+    resolve_connection_params,
 )
 from shared.llm import AnthropicModel, cents_to_tokens, format_tokens
 from shared.shell import environment_assignment
+from shared.password_resolver import derive_password_env
+from shared.ssh_keys import discover_ssh_auth_options
 from shared.telemetry import telemetry
 
 # Import UI system - handles Rich availability internally
 from shared.ui import (
     StyleTokens,
-    Layout as UILayout,
     TargetsTable,
     Banner,
     Confirm,
-    IntPrompt,
     KeyValueTable,
     MessagePanel,
     NextSteps,
-    NoticePanel,
     Prompt,
     SelectPrompt,
-    SelectionTable,
     get_console,
 )
 
@@ -197,7 +201,8 @@ class ConfigurationWizard:
                 return RdstResult(False, "Removal cancelled")
 
         # Use the same lifecycle-aware service as the non-interactive CLI and
-        # web API so an owned sandbox is retired before credentials disappear.
+        # web API so an owned sandbox and any SSH tunnel are retired before
+        # credentials disappear.
         from ..service import ConfigureService
 
         success = False
@@ -297,8 +302,41 @@ class ConfigurationWizard:
             kwargs.get(field) for field in ["host", "user", "database"]
         )
 
+        cli_update_fields = {
+            "connection_string",
+            "connection-string",
+            "engine",
+            "host",
+            "port",
+            "user",
+            "database",
+            "password_env",
+            "password-env",
+            "read_only",
+            "read-only",
+            "proxy",
+            "tls",
+            "no_tls",
+            "no-tls",
+            "default",
+            "ssh_host",
+            "ssh-host",
+            "ssh_port",
+            "ssh-port",
+            "ssh_user",
+            "ssh-user",
+            "ssh_key",
+            "ssh-key",
+        }
+        has_cli_updates = any(
+            key in kwargs and kwargs.get(key) not in (None, False)
+            for key in cli_update_fields
+        )
+
         if (has_required_args or has_connection_string) and not is_edit:
             # Quick CLI mode - either individual args or connection string provided
+            config_data = self._collect_config_from_args(kwargs, existing, name)
+        elif is_edit and has_cli_updates:
             config_data = self._collect_config_from_args(kwargs, existing, name)
         else:
             # Interactive wizard mode
@@ -313,6 +351,16 @@ class ConfigurationWizard:
         if not validation_result.ok:
             return validation_result
 
+        desired_ssh = (
+            None
+            if config_data.get("_remove_ssh")
+            else config_data.get("ssh", existing.get("ssh"))
+        )
+        if existing and existing.get("ssh") != desired_ssh:
+            from shared.ssh_tunnel import get_tunnel_manager
+
+            get_tunnel_manager().close(name)
+
         # Test connection (skip if --skip-verify flag is set)
         skip_verify = kwargs.get("skip_verify") or kwargs.get("skip-verify", False)
         if skip_verify:
@@ -323,6 +371,11 @@ class ConfigurationWizard:
                 "Skipped", "Connection verification skipped (--skip-verify)"
             )
         else:
+            from shared.ssh_tunnel import get_tunnel_manager
+
+            get_tunnel_manager().close(
+                str(config_data.get("name") or name or config_data.get("host"))
+            )
             test_result = self._test_connection(config_data)
             if test_result.ok:
                 self._show_success("Connection Test", test_result.message)
@@ -351,7 +404,26 @@ class ConfigurationWizard:
             merged = dict(existing)
             merged.update(config_data)
         else:
-            merged = config_data
+            merged = dict(config_data)
+        if merged.pop("_remove_ssh", False):
+            merged.pop("ssh", None)
+
+        submitted_password = merged.pop("password", None)
+        if submitted_password:
+            from shared.secret_store_service import SecretStoreService
+
+            password_env = merged.get("password_env") or derive_password_env(
+                target_name
+            )
+            merged["password_env"] = password_env
+            SecretStoreService().set_secret(
+                password_env,
+                submitted_password,
+                persist=True,
+            )
+        # Never return an inline password in result data or retain it in the
+        # in-memory form object after it has reached the secret store.
+        config_data.pop("password", None)
 
         # Apply group/tags from CLI args AFTER merge (so they override)
         group = kwargs.get("group")
@@ -414,7 +486,8 @@ class ConfigurationWizard:
         # Welcome message with compact panel
         action = "Edit" if is_edit else "Create"
         welcome_text = (
-            f"Let's {'update' if is_edit else 'configure'} your database connection!"
+            "Use a read-only database user. RDST runs EXPLAIN, schema, and "
+            "performance-statistics queries."
         )
 
         if is_edit and name:
@@ -444,18 +517,23 @@ class ConfigurationWizard:
             self._show_step("Step 3", "Connection Details", "🔌")
             config.update(self._collect_connection_details(config["engine"], existing))
 
-            # Step 4: Security & Authentication
-            self._show_step("Step 4", "Security & Authentication", "🔐")
+            # Step 4: SSH Connectivity
+            self._show_step("Step 4", "SSH Connectivity", "")
+            config.update(self._collect_ssh_settings(existing))
+
+            # Step 5: Security & Authentication
+            self._show_step("Step 5", "Security & Authentication", "🔐")
             config.update(self._collect_security_settings(config["name"], existing))
 
-            # Step 5: Advanced Options
-            self._show_step("Step 5", "Advanced Configuration", "")
+            # Step 6: Advanced Options
+            self._show_step("Step 6", "Advanced Configuration", "")
             config.update(
                 self._collect_advanced_settings(existing, config.get("engine"))
             )
+            config["read_only"] = bool(existing.get("read_only", False))
 
-            # Step 6: Finalization
-            self._show_step("Step 6", "Finalization", "")
+            # Step 7: Finalization
+            self._show_step("Step 7", "Finalization", "")
             config["make_default"] = self._confirm(
                 "Set as default target?",
                 "Use this target when no specific target is specified",
@@ -524,10 +602,18 @@ class ConfigurationWizard:
         )
 
         default_port = default_port_for(engine)
+        old_engine = normalize_db_type(existing.get("engine")) or engine
+        existing_port = existing.get("port")
+        port_default = existing_port
+        if existing_port is None or (
+            engine != old_engine
+            and int(existing_port) == default_port_for(old_engine)
+        ):
+            port_default = default_port
         port_input = self._prompt_text(
             "Port",
             f"Database port number (default: {default_port})",
-            str(existing.get("port", default_port)),
+            str(port_default),
         )
         config["port"] = int(port_input) if port_input else default_port
 
@@ -547,38 +633,150 @@ class ConfigurationWizard:
 
         return config
 
+    def _collect_ssh_settings(self, existing: dict) -> dict:
+        """Collect optional SSH jump-host settings."""
+        existing_ssh = existing.get("ssh") or {}
+        use_ssh = self._confirm(
+            "Connect through an SSH jump host?",
+            "Use this when the database is not directly reachable.",
+            bool(existing_ssh),
+        )
+        if not use_ssh:
+            return {"_remove_ssh": True} if existing_ssh else {}
+
+        profiles = TargetsConfig()
+        profiles.load()
+        profile_names = profiles.list_ssh_hosts()
+        ssh_defaults = dict(existing_ssh)
+        if profile_names:
+            manual_label = "Enter a jump host manually"
+            labels = [f"Saved jump host: {profile}" for profile in profile_names]
+            labels.append(manual_label)
+            current_profile = existing_ssh.get("profile")
+            default_idx = (
+                profile_names.index(current_profile)
+                if current_profile in profile_names
+                else len(labels) - 1
+            )
+            selected_profile = self._interactive_select(
+                "Choose a saved jump host", labels, default_idx
+            )
+            if selected_profile is None:
+                return {}
+            if selected_profile in labels and selected_profile != manual_label:
+                profile_name = profile_names[labels.index(selected_profile)]
+                ssh_defaults = dict(profiles.get_ssh_host(profile_name) or {})
+
+        host = self._prompt_text(
+            "Jump host",
+            "SSH hostname, IP address, or Host alias from ~/.ssh/config",
+            ssh_defaults.get("host"),
+            required=True,
+        )
+        port_input = self._prompt_text(
+            "SSH port",
+            "Port used by the jump host (default: 22)",
+            str(ssh_defaults.get("port", 22)),
+        )
+        user = self._prompt_text(
+            "SSH user",
+            "Operating-system user on the jump host",
+            ssh_defaults.get("user") or getpass.getuser(),
+            required=True,
+        )
+
+        options = [
+            option
+            for option in discover_ssh_auth_options(host)
+            if option["kind"] in ("agent", "file", "config")
+        ]
+        existing_key = ssh_defaults.get("key_path")
+        ssh = {
+            "host": host,
+            "port": int(port_input or 22),
+            "user": user,
+        }
+
+        if not options:
+            self._show_info(
+                "No SSH Keys Found",
+                "Run ssh-keygen -t ed25519, then add ~/.ssh/id_ed25519.pub "
+                "to the jump host's authorized_keys.",
+            )
+            key_path = self._prompt_text(
+                "Private key path",
+                "Path to the private key (the file without .pub)",
+                existing_key or str(Path.home() / ".ssh" / "id_ed25519"),
+                required=True,
+            )
+            ssh["key_path"] = key_path
+            return {"ssh": ssh}
+
+        manual_label = "Enter a key path manually"
+        labels = [option["label"] for option in options] + [manual_label]
+        default_idx = 0
+        if existing_key:
+            for index, option in enumerate(options):
+                if option.get("key_path") == existing_key:
+                    default_idx = index
+                    break
+
+        selected = self._interactive_select(
+            "Choose SSH authentication", labels, default_idx
+        )
+        if selected is None:
+            return {}
+
+        if selected == manual_label:
+            key_path = self._prompt_text(
+                "Private key path",
+                "Path to the private key (the file without .pub)",
+                existing_key or str(Path.home() / ".ssh" / "id_ed25519"),
+                required=True,
+            )
+            ssh["key_path"] = key_path
+        else:
+            selected_option = options[labels.index(selected)]
+            if selected_option.get("key_path"):
+                ssh["key_path"] = selected_option["key_path"]
+
+        return {"ssh": ssh}
+
     def _collect_security_settings(self, target_name: str, existing: dict) -> dict:
         """Collect security and authentication settings."""
         config = {}
 
-        # Password handling (simplified)
-        password_options = [
-            "Environment variable (recommended)",
-            "Skip password configuration",
-        ]
-
-        password_previews = None
-
-        password_choice = self._interactive_select_with_preview(
-            "How should we handle the password?", password_options, 0, password_previews
+        password = getpass.getpass(
+            "Database password"
+            + (" (leave blank to keep the existing password)" if existing else "")
+            + ": "
         )
-
-        if "Environment variable" in password_choice:
-            suggested_var = f"{target_name.upper().replace('-', '_')}_PASSWORD"
-            config["password_env"] = self._prompt_text(
-                "Environment variable name",
-                "Name of the environment variable containing the password",
-                existing.get("password_env") or suggested_var,
-            )
-        else:
-            config["password_env"] = ""
+        config["password_env"] = existing.get("password_env") or derive_password_env(
+            target_name
+        )
+        if password:
+            config["password"] = password
 
         # TLS Configuration
         config["tls"] = self._confirm(
-            "Enable TLS/SSL encryption?",
-            "Encrypts communication with the database",
+            "Enable TLS?",
+            "Encrypt database traffic.",
             existing.get("tls", True),
         )
+        if config["tls"]:
+            config["tls_verify"] = self._confirm(
+                "Verify the database TLS certificate?",
+                "Uses hostname verification and a trusted CA.",
+                existing.get("tls_verify", False),
+            )
+            if config["tls_verify"]:
+                config["tls_ca"] = self._prompt_text(
+                    "TLS CA path",
+                    "Optional path to a CA certificate bundle",
+                    existing.get("tls_ca"),
+                )
+        else:
+            config["tls_verify"] = False
 
         return config
 
@@ -635,12 +833,6 @@ class ConfigurationWizard:
             idx = proxy_options.index(proxy_choice)
             chosen_value = proxy_values[idx]
         config["proxy"] = chosen_value
-
-        config["read_only"] = self._confirm(
-            "Read-only connection?",
-            "Restricts connection to SELECT queries only",
-            existing.get("read_only", False),
-        )
 
         return config
 
@@ -757,11 +949,27 @@ class ConfigurationWizard:
             "Port": str(config.get("port", "")),
             "Database": config.get("database", ""),
             "User": config.get("user", ""),
-            "Password Env": config.get("password_env", "") or "Not configured",
+            "Password": "Entered" if config.get("password") else "Keep existing",
             "TLS": "Enabled" if config.get("tls") else "Disabled",
             "Proxy": config.get("proxy", "none").title(),
-            "Read Only": "Yes" if config.get("read_only") else "No",
         }
+        if config.get("tls"):
+            display_data["TLS Certificate Verification"] = (
+                "Enabled" if config.get("tls_verify") else "Disabled"
+            )
+        if config.get("tls_ca"):
+            display_data["TLS CA"] = config["tls_ca"]
+        if config.get("ssh"):
+            ssh = config["ssh"]
+            if ssh.get("profile"):
+                display_data["SSH Jump Host"] = f"Saved profile: {ssh['profile']}"
+            else:
+                display_data["SSH Jump Host"] = (
+                    f"{ssh.get('user', '')}@{ssh.get('host', '')}:{ssh.get('port', 22)}"
+                )
+                display_data["SSH Authentication"] = (
+                    ssh.get("key_path") or "SSH agent / SSH config"
+                )
 
         # Use KeyValueTable for consistent styling
         self.console.print()
@@ -782,15 +990,11 @@ class ConfigurationWizard:
 
     def _test_connection(self, config: dict) -> RdstResult:
         """Test database connection with the provided configuration."""
-        import os
-
         engine = config.get("engine", "postgresql")
         host = config.get("host")
         port = config.get("port")
         user = config.get("user")
         database = config.get("database")
-        tls = config.get("tls", False)
-
         from shared.password_resolver import resolve_password_value
         password = resolve_password_value(config)
         if not password:
@@ -801,24 +1005,18 @@ class ConfigurationWizard:
                     f"Environment variable '{password_env}' is not set.\n"
                     f"Set it with: {environment_assignment(password_env, 'your_password')}",
                 )
+            return RdstResult(False, "Enter the database password and try again.")
 
         self._show_info(
             "Testing Connection", f"Connecting to {host}:{port}/{database}..."
         )
 
         try:
+            params = resolve_connection_params(target_config=config)
             if engine == "postgresql":
                 import psycopg2
 
-                conn = psycopg2.connect(
-                    host=host,
-                    port=port,
-                    user=user,
-                    password=password,
-                    database=database,
-                    connect_timeout=10,
-                    sslmode="require" if tls else "prefer",
-                )
+                conn = psycopg2.connect(**postgres_connection_kwargs(params))
                 cursor = conn.cursor()
                 cursor.execute("SELECT version()")
                 version = cursor.fetchone()[0]
@@ -831,15 +1029,7 @@ class ConfigurationWizard:
             elif engine == "mysql":
                 import pymysql
 
-                conn = pymysql.connect(
-                    host=host,
-                    port=port,
-                    user=user,
-                    password=password,
-                    database=database,
-                    connect_timeout=10,
-                    ssl={"ssl": {}} if tls else None,
-                )
+                conn = create_mysql_connection_from_params(params)
                 cursor = conn.cursor()
                 cursor.execute("SELECT version()")
                 version = cursor.fetchone()[0]
@@ -852,15 +1042,64 @@ class ConfigurationWizard:
             else:
                 return RdstResult(False, f"Unknown engine: {engine}")
 
-        except ImportError as e:
+        except ImportError:
             driver = "psycopg2" if engine == "postgresql" else "pymysql"
             return RdstResult(
                 False,
                 f"Missing database driver: {driver}\n"
                 f"Install with: pip install {driver}",
             )
-        except Exception as e:
-            error_msg = str(e)
+        except Exception as exc:
+            from shared.ssh_tunnel import (
+                SshAuthenticationError,
+                SshConnectionError,
+                SshKeyError,
+                SshPassphraseRequired,
+                get_tunnel_manager,
+            )
+
+            if isinstance(exc, SshPassphraseRequired):
+                key_path = (config.get("ssh") or {}).get("key_path", "SSH key")
+                passphrase = getpass.getpass(f"Passphrase for {key_path}: ")
+                if not passphrase:
+                    return RdstResult(
+                        False,
+                        "SSH key passphrase is required. Add the key to ssh-agent "
+                        "or run the connection test again and enter its passphrase.",
+                    )
+                try:
+                    get_tunnel_manager().ensure_tunnel(
+                        str(config.get("name") or host),
+                        config["ssh"],
+                        str(host),
+                        int(port),
+                        passphrase=passphrase,
+                    )
+                    return self._test_connection(config)
+                except Exception as retry_exc:
+                    exc = retry_exc
+
+            if isinstance(exc, SshAuthenticationError):
+                return RdstResult(
+                    False,
+                    "SSH authentication failed. Check the SSH user and private key, "
+                    "and confirm its public key is in the jump host's authorized_keys.",
+                )
+            if isinstance(exc, SshConnectionError):
+                ssh = config.get("ssh") or {}
+                return RdstResult(
+                    False,
+                    f"Cannot reach SSH jump host {ssh.get('host')}:{ssh.get('port', 22)}. "
+                    "Check the hostname, port, VPN, and firewall rules.",
+                )
+            if isinstance(exc, SshKeyError):
+                return RdstResult(
+                    False,
+                    f"SSH key could not be used: {exc}\n"
+                    "Choose a readable private key, or add it to ssh-agent.",
+                )
+
+            error_msg = str(exc)
             # Clean up common error messages
             if (
                 "could not connect" in error_msg.lower()
@@ -930,6 +1169,29 @@ class ConfigurationWizard:
             errors.append(
                 f"For engine '{engine}', proxy must be one of: {', '.join(allowed_proxies)}"
             )
+
+        ssh = config.get("ssh")
+        if ssh:
+            if ssh.get("profile"):
+                profile = TargetsConfig()
+                profile.load()
+                if profile.get_ssh_host(ssh["profile"]) is None:
+                    errors.append(
+                        f"SSH profile '{ssh['profile']}' does not exist"
+                    )
+                ssh = None
+        if ssh:
+            if not ssh.get("host"):
+                errors.append("SSH jump host is required")
+            if not ssh.get("user"):
+                errors.append("SSH user is required")
+            try:
+                ssh_port = int(ssh.get("port", 22))
+                if ssh_port <= 0 or ssh_port > 65535:
+                    errors.append("SSH port must be between 1 and 65535")
+                ssh["port"] = ssh_port
+            except (TypeError, ValueError):
+                errors.append("SSH port must be a valid number")
 
         if errors:
             # Create compact error display
@@ -1007,8 +1269,36 @@ class ConfigurationWizard:
             ),
             "proxy": (kwargs.get("proxy") or existing.get("proxy") or "none").lower(),
             "tls": self._resolve_tls_flag(kwargs, existing, parsed_values),
+            "tls_verify": bool(existing.get("tls_verify", False)),
+            "tls_ca": existing.get("tls_ca"),
             "make_default": bool(kwargs.get("default")),
         }
+        if password_from_connstring:
+            config["password"] = password_from_connstring
+        ssh_host = kwargs.get("ssh_host") or kwargs.get("ssh-host")
+        if ssh_host:
+            existing_ssh = existing.get("ssh") or {}
+            ssh = {
+                "host": ssh_host,
+                "port": (
+                    kwargs.get("ssh_port")
+                    or kwargs.get("ssh-port")
+                    or existing_ssh.get("port")
+                    or 22
+                ),
+                "user": (
+                    kwargs.get("ssh_user")
+                    or kwargs.get("ssh-user")
+                    or existing_ssh.get("user")
+                    or getpass.getuser()
+                ),
+            }
+            ssh_key = kwargs.get("ssh_key") or kwargs.get("ssh-key")
+            if ssh_key:
+                ssh["key_path"] = ssh_key
+            elif existing_ssh.get("key_path"):
+                ssh["key_path"] = existing_ssh["key_path"]
+            config["ssh"] = ssh
 
         return config
 
@@ -1019,11 +1309,7 @@ class ConfigurationWizard:
         target_name: str,
         password_from_connstring: str = None,
     ) -> str:
-        """Resolve password environment variable name.
-
-        If password was in connection string, suggest env var and warn user to set it.
-        Priority: --password-env flag > existing config > generated suggestion
-        """
+        """Resolve the internal password pointer without prompting for its name."""
         # Check for explicit password-env flag
         explicit_env = kwargs.get("password_env") or kwargs.get("password-env")
         if explicit_env:
@@ -1033,21 +1319,8 @@ class ConfigurationWizard:
         if existing.get("password_env"):
             return existing["password_env"]
 
-        # If password was in connection string, suggest env var name
-        if password_from_connstring:
-            suggested_var = (
-                f"{target_name.upper().replace('-', '_')}_PASSWORD"
-                if target_name
-                else "DB_PASSWORD"
-            )
-            self._show_warning(
-                "Password in Connection String",
-                f"Found password in connection string.\n"
-                f"For security, rdst stores passwords in environment variables.\n\n"
-                f"Suggested: {environment_assignment(suggested_var, password_from_connstring)}\n\n"
-                f"You can override with --password-env flag.",
-            )
-            return suggested_var
+        if password_from_connstring or target_name:
+            return derive_password_env(target_name or "target")
 
         return ""
 

@@ -77,6 +77,7 @@ export interface AuditRequirements {
   detail: string
   remediation?: string | null
   docker_available: boolean
+  category?: string | null
 }
 
 export class AuditRequirementsError extends Error {

@@ -131,7 +131,7 @@ class TestDiscoverSupabaseProjects:
         assert member.port == 5432
         assert member.user == "postgres.abcdefghijklmnop"
         assert member.database == "postgres"
-        assert member.password_env == "SUPABASE_ABCDEFGHIJKLMNOP_PASSWORD"
+        assert member.password_env == "RDST_SUPABASE_ABCDEFGHIJKLMNOP_PASSWORD"
         assert member.group is None
         assert member.region == "us-east-1"
         assert member.instance_class == "supabase-micro"
@@ -190,14 +190,18 @@ class TestSupabaseOAuthBroker:
         assert supabase_oauth.get_login_status(started["login_id"])["state"] == "success"
         return started["login_id"]
 
-    def test_start_sends_only_the_pickup_key_hash(self):
+    def test_start_sends_pickup_hash_and_optional_return_url(self):
         broker = _sb_broker()
+        return_url = "http://127.0.0.1:8787/configure?connected=supabase"
         with patch("features.providers.supabase_oauth.requests.post", broker):
-            started = supabase_oauth.start_login("http://127.0.0.1:8787/")
+            started = supabase_oauth.start_login(
+                "http://127.0.0.1:8787/", return_url
+            )
 
         url, payload = broker.calls[0]
         assert url == broker.START_URL
-        assert list(payload) == ["pickup_key_hash"]
+        assert set(payload) == {"pickup_key_hash", "return_url"}
+        assert payload["return_url"] == return_url
         pickup_key = supabase_oauth.LOGIN_REGISTRY[started["login_id"]]["pickup_key"]
         assert payload["pickup_key_hash"] == hashlib.sha256(
             pickup_key.encode("ascii")
@@ -275,7 +279,10 @@ class TestSupabaseRoutes:
     def test_login_and_poll_run_through_the_broker(self, fleet_router_client):
         broker = _sb_broker()
         with patch("features.providers.supabase_oauth.requests.post", broker):
-            response = fleet_router_client.post("/api/providers/supabase-login")
+            response = fleet_router_client.post(
+                "/api/providers/supabase-login",
+                headers={"origin": "http://localhost:3001"},
+            )
             assert response.status_code == 200, response.text
             body = response.json()
             assert body == {
@@ -291,6 +298,23 @@ class TestSupabaseRoutes:
 
         assert done.json()["state"] == "success"
         assert supabase_oauth.get_access_token() == ("sba_broker", "oauth")
+        assert broker.calls[0][1]["return_url"] == (
+            "http://localhost:3001/configure?connected=supabase"
+        )
+
+    def test_login_uses_desktop_return_url(
+        self, fleet_router_client, monkeypatch
+    ):
+        monkeypatch.setenv("RDST_DESKTOP", "1")
+        broker = _sb_broker()
+
+        with patch("features.providers.supabase_oauth.requests.post", broker):
+            response = fleet_router_client.post("/api/providers/supabase-login")
+
+        assert response.status_code == 200
+        assert broker.calls[0][1]["return_url"] == (
+            "rdst://oauth-complete?provider=supabase"
+        )
 
     def test_login_broker_failure_returns_409(self, fleet_router_client):
         broker = _sb_broker()

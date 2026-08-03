@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,6 +9,7 @@ import pytest
 from features.audit.api import routes as audit_routes
 from features.audit.capture_service import CaptureService
 from shared.api.target_guard import TargetGuard
+from shared.ssh_tunnel import SshKeyError
 
 
 pytestmark = pytest.mark.usefixtures("run_blocking_inline")
@@ -152,3 +152,87 @@ class TestRequirementsRoute:
         assert body["detail"] == "Authentication failed for user"
         assert "\n" not in body["detail"]
         assert body["remediation"] is None
+
+    @pytest.mark.asyncio
+    async def test_ssh_failure_is_blocking_and_categorized(self):
+        guard = TargetGuard(
+            "private-db",
+            {
+                "engine": "postgresql",
+                "host": "db.internal",
+                "port": 5432,
+                "ssh": {
+                    "host": "jump.example.com",
+                    "key_path": "~/.ssh/missing.pem",
+                },
+            },
+            "postgresql",
+        )
+        with patch(
+            "shared.db_connection.resolve_connection_params",
+            side_effect=SshKeyError("missing"),
+        ):
+            response = await audit_routes.get_capture_requirements(guard)
+
+        body = response.model_dump()
+        assert body["query_stats"] == "error"
+        assert body["category"] == "ssh_key_missing"
+        assert "SSH key not found:" in body["detail"]
+        assert "/.ssh/missing.pem" in body["detail"]
+        assert "Choose an existing private key" in body["detail"]
+
+    @pytest.mark.asyncio
+    async def test_healthy_ssh_target_uses_local_endpoint_without_extra_noise(self):
+        guard = TargetGuard(
+            "private-db",
+            {
+                "engine": "postgresql",
+                "host": "db.internal",
+                "port": 5432,
+                "database": "app",
+                "user": "app",
+                "password": "not-a-real-secret",
+                "ssh": {"host": "jump.example.com"},
+            },
+            "postgresql",
+        )
+        connection = _pg_connection()
+        params = {
+            "engine": "postgresql",
+            "host": "127.0.0.1",
+            "port": 41001,
+            "user": "app",
+            "password": "not-a-real-secret",
+            "database": "app",
+            "tls": False,
+        }
+        manager = MagicMock()
+        with (
+            patch(
+                "shared.ssh_tunnel.get_tunnel_manager",
+                return_value=manager,
+            ),
+            patch(
+                "shared.db_connection.resolve_connection_params",
+                return_value=params,
+            ) as resolve_params,
+            patch(
+                "shared.db_connection.create_direct_connection",
+                return_value=connection,
+            ) as create_connection,
+        ):
+            response = await audit_routes.get_capture_requirements(guard)
+
+        body = response.model_dump()
+        assert body["query_stats"] == "ok"
+        assert "category" not in body
+        effective = create_connection.call_args.args[0]
+        assert effective["host"] == "127.0.0.1"
+        assert effective["port"] == 41001
+        assert "ssh" not in effective
+        resolve_params.assert_called_once_with(
+            target="private-db",
+            target_config=guard.target_config,
+            force_fresh_tunnel=True,
+        )
+        manager.close.assert_not_called()

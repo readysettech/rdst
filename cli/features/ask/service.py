@@ -39,6 +39,27 @@ _sessions: dict[str, Any] = {}
 class AskService:
     """Unified streaming service for text-to-SQL."""
 
+    @staticmethod
+    def _database_error(
+        message: str,
+        phase: AskPhase,
+        target: str,
+        target_config: dict[str, Any],
+    ) -> AskErrorEvent:
+        from shared.api.ssh_errors import connectivity_error_payload
+
+        failure = connectivity_error_payload(
+            RuntimeError(message), target, target_config
+        )
+        return AskErrorEvent(
+            type="error",
+            message=failure["message"] if failure else message,
+            phase=phase,
+            code=failure["category"] if failure else None,
+            category=failure["category"] if failure else None,
+            target=target,
+        )
+
     async def ask(
         self,
         input: AskInput,
@@ -92,10 +113,11 @@ class AskService:
             ctx = await asyncio.to_thread(load_schema, ctx, _NullPresenter(), None)
 
             if ctx.status == Status.ERROR:
-                yield AskErrorEvent(
-                    type="error",
-                    message=ctx.error_message or "Failed to load schema",
-                    phase=AskPhase.SCHEMA,
+                yield self._database_error(
+                    ctx.error_message or "Failed to load schema",
+                    AskPhase.SCHEMA,
+                    target_name,
+                    target_config,
                 )
                 return
 
@@ -282,10 +304,11 @@ class AskService:
         error_msg = (
             ctx.execution_result.error if ctx.execution_result else "Execution failed"
         )
-        yield AskErrorEvent(
-            type="error",
-            message=error_msg,
-            phase=AskPhase.EXECUTE,
+        yield self._database_error(
+            error_msg,
+            AskPhase.EXECUTE,
+            ctx.target,
+            ctx.target_config or {},
         )
 
     def _auto_save_query(self, ctx: Any) -> tuple[str, str]:

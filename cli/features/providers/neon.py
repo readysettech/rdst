@@ -122,6 +122,9 @@ def store_api_key(key: str) -> dict[str, Any]:
             f"{detail} Export {API_KEY_SECRET_NAME} in your environment to keep it "
             "across restarts."
         ).strip()
+    from .identity import capture_provider_identity_async
+
+    capture_provider_identity_async("neon", key)
     return {"connected": True, "method": "api_key", "stored": stored, "detail": detail}
 
 

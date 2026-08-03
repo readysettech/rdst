@@ -6,11 +6,12 @@ convention -- no SSE streaming through TestClient); JSON endpoints use a
 minimal FastAPI app with the target guard overridden.
 """
 
+import asyncio
 import json
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from features.bootstrap.api import routes as bootstrap_routes
 from features.bootstrap.events import BootstrapStageEvent
@@ -18,17 +19,25 @@ from shared.api.target_guard import TargetGuard, require_target_body
 from shared.run_registry import RunRegistry
 
 
-def _client(monkeypatch, service_cls=None):
+def _app(monkeypatch, service_cls=None):
     registry = RunRegistry()
     monkeypatch.setattr(bootstrap_routes, "_registry", registry)
     if service_cls is not None:
         monkeypatch.setattr(bootstrap_routes, "TargetBootstrapService", service_cls)
     app = FastAPI()
     app.include_router(bootstrap_routes.router, prefix="/api")
-    app.dependency_overrides[require_target_body] = lambda: TargetGuard(
-        "imdb", {"engine": "postgresql"}, "postgresql"
-    )
-    return TestClient(app), registry
+    async def target_guard():
+        return TargetGuard("imdb", {"engine": "postgresql"}, "postgresql")
+
+    app.dependency_overrides[require_target_body] = target_guard
+    return app, registry
+
+
+async def _request(app, method, path, json_body=None):
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await client.request(method, path, json=json_body)
 
 
 class StubService:
@@ -44,10 +53,11 @@ class StubService:
 
 
 class TestStartRoute:
-    def test_start_returns_run_id_immediately(self, monkeypatch):
-        client, registry = _client(monkeypatch, service_cls=StubService)
+    @pytest.mark.asyncio
+    async def test_start_returns_run_id_immediately(self, monkeypatch):
+        app, registry = _app(monkeypatch, service_cls=StubService)
 
-        response = client.post("/api/bootstrap", json={"target": "imdb"})
+        response = await _request(app, "POST", "/api/bootstrap", {"target": "imdb"})
 
         assert response.status_code == 200
         run_id = response.json()["run_id"]
@@ -55,7 +65,8 @@ class TestStartRoute:
         # The detached run completes; its events landed in the registry.
         assert registry.status(run_id) in ("running", "done")
 
-    def test_start_forwards_annotation_option(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_start_forwards_annotation_option(self, monkeypatch):
         captured = {}
 
         class RecordingService(StubService):
@@ -65,39 +76,50 @@ class TestStartRoute:
                 return
                 yield  # pragma: no cover
 
-        client, _registry = _client(monkeypatch, service_cls=RecordingService)
+        app, _registry = _app(monkeypatch, service_cls=RecordingService)
 
-        response = client.post(
+        response = await _request(
+            app,
+            "POST",
             "/api/bootstrap",
-            json={"target": "imdb", "annotate": False},
+            {"target": "imdb", "annotate": False},
         )
 
         assert response.status_code == 200
+        for _ in range(20):
+            if "target" in captured:
+                break
+            await asyncio.sleep(0.005)
         assert captured["target"] == "imdb"
         assert captured["options"].annotate is False
 
 
 class TestStatusRoute:
-    def test_status_of_unknown_run_is_404(self, monkeypatch):
-        client, _registry = _client(monkeypatch)
-        response = client.get("/api/bootstrap/runs/nope")
+    @pytest.mark.asyncio
+    async def test_status_of_unknown_run_is_404(self, monkeypatch):
+        app, _registry = _app(monkeypatch)
+        response = await _request(app, "GET", "/api/bootstrap/runs/nope")
         assert response.status_code == 404
         assert "nope" in response.json()["detail"]
 
-    def test_status_of_finished_run(self, monkeypatch):
-        client, registry = _client(monkeypatch, service_cls=StubService)
-        run_id = client.post("/api/bootstrap", json={"target": "imdb"}).json()["run_id"]
+    @pytest.mark.asyncio
+    async def test_status_of_finished_run(self, monkeypatch):
+        app, registry = _app(monkeypatch, service_cls=StubService)
+        run_id = (
+            await _request(app, "POST", "/api/bootstrap", {"target": "imdb"})
+        ).json()["run_id"]
 
-        response = client.get(f"/api/bootstrap/runs/{run_id}")
+        response = await _request(app, "GET", f"/api/bootstrap/runs/{run_id}")
 
         assert response.status_code == 200
         body = response.json()
         assert body["run_id"] == run_id
         assert body["status"] in ("running", "done")
 
-    def test_events_route_404_for_unknown_run(self, monkeypatch):
-        client, _registry = _client(monkeypatch)
-        response = client.get("/api/bootstrap/runs/nope/events")
+    @pytest.mark.asyncio
+    async def test_events_route_404_for_unknown_run(self, monkeypatch):
+        app, _registry = _app(monkeypatch)
+        response = await _request(app, "GET", "/api/bootstrap/runs/nope/events")
         assert response.status_code == 404
 
 

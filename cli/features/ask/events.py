@@ -91,6 +91,9 @@ class AskErrorEvent:
     type: Literal["error"]
     message: str
     phase: Optional[AskPhase | str] = None
+    code: Optional[str] = None
+    category: Optional[str] = None
+    target: Optional[str] = None
 
 
 AskEvent = Union[

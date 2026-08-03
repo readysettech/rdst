@@ -49,7 +49,7 @@ class ConfigureCommand:
 
             console = getattr(self.client, "_console", None) if self.client else None
 
-            if subcmd == "menu":
+            if subcmd in ("menu", "add", "edit"):
                 wizard = ConfigurationWizard(console=console or get_console())
                 return wizard.configure_targets(subcmd, cfg, **kwargs)
 

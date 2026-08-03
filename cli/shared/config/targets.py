@@ -183,6 +183,7 @@ class TargetsConfig:
             }
 
         self._data.setdefault("targets", {})
+        self._data.setdefault("ssh_hosts", {})
         self._data.setdefault("default", None)
         self._data.setdefault("init", {"completed": False})
         self._baseline = copy.deepcopy(self._data)
@@ -202,6 +203,43 @@ class TargetsConfig:
 
     def get(self, name: str) -> Optional[Dict[str, Any]]:
         return (self._data.get("targets", {}) or {}).get(name)
+
+    def list_ssh_hosts(self) -> List[str]:
+        """Return reusable SSH jump-host profile names."""
+        return sorted((self._data.get("ssh_hosts", {}) or {}).keys())
+
+    def get_ssh_host(self, name: str) -> Optional[Dict[str, Any]]:
+        """Return one reusable SSH jump-host profile."""
+        return (self._data.get("ssh_hosts", {}) or {}).get(name)
+
+    def remember_ssh_host(self, host: str, port: int, user: Optional[str]) -> bool:
+        """Remember a successful jump host, deduplicated by host, port, and user."""
+        profiles = self._data.setdefault("ssh_hosts", {})
+        entry = {"host": host, "port": int(port)}
+        if user:
+            entry["user"] = user
+
+        for name, existing in profiles.items():
+            if (
+                existing.get("host") == host
+                and int(existing.get("port", 22)) == int(port)
+                and (existing.get("user") or None) == user
+            ):
+                if existing == entry:
+                    return False
+                profiles[name] = entry
+                return True
+
+        base_name = host
+        if base_name in profiles:
+            base_name = f"{host}-{user}" if user else f"{host}-2"
+        name = base_name
+        suffix = 2
+        while name in profiles:
+            name = f"{base_name}-{suffix}"
+            suffix += 1
+        profiles[name] = entry
+        return True
 
     def upsert(self, name: str, entry: Dict[str, Any]) -> None:
         validate_target_name(name)
@@ -275,6 +313,24 @@ class TargetsConfig:
             self._data["llm"]["base_url"] = base_url
         if model:
             self._data["llm"]["model"] = model
+
+    def set_provider_identity(self, provider: str, identity: Dict[str, Any]) -> None:
+        """Store non-secret account pointers without promoting an email.
+
+        Provider emails are analytics context only and deliberately stay out
+        of ``[[emails]]``, whose verified flag means mailbox ownership.
+        """
+        allowed = {
+            key: identity[key]
+            for key in ("email", "name", "email_verified")
+            if identity.get(key) is not None
+        }
+        if allowed:
+            self._data.setdefault("provider_identity", {})[provider] = allowed
+
+    def get_provider_identities(self) -> Dict[str, Dict[str, Any]]:
+        identities = self._data.get("provider_identity") or {}
+        return identities if isinstance(identities, dict) else {}
 
     # ------------------------------------------------------------------
     # Email + verified-delivery storage.

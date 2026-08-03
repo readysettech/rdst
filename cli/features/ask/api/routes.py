@@ -132,11 +132,16 @@ def _event_to_sse(event: AskEvent) -> dict:
             ),
         }
     if isinstance(event, AskErrorEvent):
+        payload = {
+            "message": event.message,
+            "phase": _phase_value(event.phase),
+            "code": event.code,
+            "category": event.category,
+            "target": event.target,
+        }
         return {
             "event": "error",
-            "data": json.dumps(
-                {"message": event.message, "phase": _phase_value(event.phase)}
-            ),
+            "data": json.dumps(payload),
         }
     return {
         "event": "error",

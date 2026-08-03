@@ -13,6 +13,10 @@ from features.query_registry.events import (
 )
 from features.query_registry.models import QueryCommandInput
 
+pytestmark = pytest.mark.usefixtures(
+    "run_blocking_inline", "run_executor_inline"
+)
+
 
 @pytest.mark.asyncio
 async def test_execute_emits_status_and_complete():

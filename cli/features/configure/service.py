@@ -1,8 +1,13 @@
 """Service for database target configuration with async event streaming."""
 
-from typing import AsyncGenerator, Any, Dict
+from typing import AsyncGenerator, Any, Dict, Optional
 
-from shared.config.targets import TargetsConfig
+from shared.config.targets import TargetsConfig, default_port_for
+from shared.db_connection import (
+    create_mysql_connection_from_params,
+    postgres_connection_kwargs,
+    resolve_connection_params,
+)
 from shared.password_resolver import resolve_password, resolve_password_value
 
 from .adapters import operation_name, target_detail_to_dict, target_summary_to_dict
@@ -28,6 +33,17 @@ class ConfigureService:
         cfg = TargetsConfig()
         cfg.load()
         return cfg
+
+    @staticmethod
+    def _public_ssh_config(target_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        ssh = target_data.get("ssh")
+        if not isinstance(ssh, dict) or not (ssh.get("host") or ssh.get("profile")):
+            return None
+        return {
+            key: ssh[key]
+            for key in ("host", "port", "user", "key_path", "profile")
+            if key in ssh and ssh[key] is not None
+        }
 
     async def list_targets(
         self,
@@ -59,7 +75,13 @@ class ConfigureService:
                         has_password=resolve_password(target_data).available,
                         is_default=name == default_target,
                     )
-                    targets.append(target_summary_to_dict(summary))
+                    summary_data = target_summary_to_dict(summary)
+                    summary_data["ssh"] = self._public_ssh_config(target_data)
+                    if "publicly_accessible" in target_data:
+                        summary_data["publicly_accessible"] = bool(
+                            target_data["publicly_accessible"]
+                        )
+                    targets.append(summary_data)
 
             yield ConfigureTargetListEvent(
                 type="target_list",
@@ -92,23 +114,34 @@ class ConfigureService:
                 return
 
             default_target = cfg.get_default()
+            engine = target_data.get("engine", "postgresql")
             detail = TargetDetail(
                 target_name=name,
-                engine=target_data.get("engine", "postgresql"),
+                engine=engine,
                 host=target_data.get("host", ""),
-                port=target_data.get("port", 5432),
+                port=target_data.get("port", default_port_for(engine)),
                 database=target_data.get("database", ""),
                 user=target_data.get("user", ""),
                 password_env=target_data.get("password_env"),
                 has_password=resolve_password(target_data).available,
                 is_default=name == default_target,
                 tls=target_data.get("tls", False),
+                tls_verify=target_data.get("tls_verify", False),
+                tls_ca=target_data.get("tls_ca"),
                 read_only=target_data.get("read_only", False),
             )
 
-            yield ConfigureTargetDetailEvent(
-                type="target_detail", **target_detail_to_dict(detail)
-            )
+            detail_data = target_detail_to_dict(detail)
+            detail_data["ssh"] = self._public_ssh_config(target_data)
+            if "publicly_accessible" in target_data:
+                detail_data["publicly_accessible"] = bool(
+                    target_data["publicly_accessible"]
+                )
+            for key in ("tags", "region", "instance_class", "group"):
+                if key in target_data:
+                    detail_data[key] = target_data[key]
+
+            yield ConfigureTargetDetailEvent(type="target_detail", **detail_data)
 
         except Exception as e:
             yield ConfigureErrorEvent(
@@ -209,6 +242,17 @@ class ConfigureService:
                 return
 
             merged = {**existing, **target_data}
+            if "password" in target_data:
+                if target_data["password"] is None:
+                    merged.pop("password", None)
+                else:
+                    merged.pop("password_env", None)
+            if "ssh" in target_data and not target_data["ssh"]:
+                merged.pop("ssh", None)
+            if existing.get("ssh") != merged.get("ssh"):
+                from shared.ssh_tunnel import get_tunnel_manager
+
+                get_tunnel_manager().close(name)
             cfg.upsert(name, merged)
             cfg.save()
 
@@ -259,6 +303,9 @@ class ConfigureService:
                 await sandbox_manager.stop()
             cfg.remove(name)
             cfg.save()
+            from shared.ssh_tunnel import get_tunnel_manager
+
+            get_tunnel_manager().close(name)
 
             yield ConfigureSuccessEvent(
                 type="success",
@@ -311,10 +358,14 @@ class ConfigureService:
     async def test_connection(
         self,
         name: str,
+        target_config: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[ConfigureEvent, None]:
+        manager = None
+        test_succeeded = False
         try:
-            cfg = self._load_config()
-            target_config = cfg.get(name)
+            if target_config is None:
+                cfg = self._load_config()
+                target_config = cfg.get(name)
 
             if target_config is None:
                 yield ConfigureErrorEvent(
@@ -325,6 +376,14 @@ class ConfigureService:
                 )
                 return
 
+            # An explicit test must validate the configuration supplied for this
+            # request, never a tunnel left over from an earlier test or edit.
+            # Freshness is part of ensure_tunnel so a concurrent resolve cannot
+            # slip between a separate close and reopen.
+            from shared.ssh_tunnel import get_tunnel_manager
+
+            manager = get_tunnel_manager()
+
             yield ConfigureConnectionTestEvent(
                 type="connection_test",
                 target_name=name,
@@ -332,15 +391,22 @@ class ConfigureService:
                 message="Connecting...",
             )
 
-            result = await self.perform_connection_test(target_config)
+            test_config = dict(target_config)
+            test_config["name"] = name
+            result = await self.perform_connection_test(
+                test_config,
+                force_fresh_tunnel=True,
+            )
 
             if result["success"]:
+                test_succeeded = True
                 yield ConfigureConnectionTestEvent(
                     type="connection_test",
                     target_name=name,
                     status="success",
                     message=result.get("message", "Connection successful"),
                     server_version=result.get("server_version"),
+                    privileges=result.get("privileges"),
                 )
             else:
                 yield ConfigureConnectionTestEvent(
@@ -349,6 +415,7 @@ class ConfigureService:
                     status="failed",
                     message=result.get("message", "Connection failed"),
                     code=result.get("code"),
+                    category=result.get("category"),
                     password_env=result.get("password_env"),
                 )
 
@@ -359,22 +426,33 @@ class ConfigureService:
                 operation=operation_name("test"),
                 target_name=name,
             )
+        finally:
+            # Successful tests deliberately keep their freshly-opened tunnel so
+            # status surfaces immediately report Active. Failed/cancelled tests
+            # do not leave a misleading path behind.
+            if manager is not None and not test_succeeded:
+                manager.close(name)
 
     async def perform_connection_test(
         self,
         config: Dict[str, Any],
+        *,
+        force_fresh_tunnel: bool = False,
     ) -> Dict[str, Any]:
         engine = config.get("engine", "postgresql")
         host = config.get("host")
         port = config.get("port")
         user = config.get("user")
         database = config.get("database")
-        tls = config.get("tls", False)
-
         password = resolve_password_value(config)
-        if not password:
+        password_missing = not password
+        provider_password_probe = False
+        if password_missing:
+            from features.allowlist.providers import provider_for_target
+
+            provider_password_probe = provider_for_target(config) is not None
             password_env = config.get("password_env", "")
-            if password_env:
+            if password_env and not provider_password_probe:
                 return {
                     "success": False,
                     "code": "TARGET_PASSWORD_REQUIRED",
@@ -382,51 +460,56 @@ class ConfigureService:
                     "message": "Enter the password for this target again.",
                 }
 
+        conn = None
         try:
+            params = resolve_connection_params(
+                target_config=config,
+                force_fresh_tunnel=force_fresh_tunnel,
+            )
+            if provider_password_probe:
+                # Provider network restrictions reject the connection before
+                # authentication. A deliberately invalid password lets that
+                # refusal surface without treating a missing password as the
+                # first failure.
+                params["password"] = "rdst-connectivity-probe-invalid-password"
             if engine == "postgresql":
                 import psycopg2
 
-                conn = psycopg2.connect(
-                    host=host,
-                    port=port,
-                    user=user,
-                    password=password,
-                    database=database,
-                    connect_timeout=10,
-                    sslmode="require" if tls else "prefer",
-                )
+                conn = psycopg2.connect(**postgres_connection_kwargs(params))
+                if provider_password_probe:
+                    return self._password_required_result(config)
                 cursor = conn.cursor()
                 cursor.execute("SELECT version()")
                 version = cursor.fetchone()[0]
                 cursor.close()
-                conn.close()
+                from .privileges import detect_write_privileges
+
+                privileges = detect_write_privileges(conn, engine)
                 return {
                     "success": True,
                     "message": "Connected successfully!",
                     "server_version": (version[:120] + "...") if len(version) > 120 else version,
+                    "privileges": privileges,
                 }
 
             if engine == "mysql":
                 import pymysql
 
-                conn = pymysql.connect(
-                    host=host,
-                    port=port,
-                    user=user,
-                    password=password,
-                    database=database,
-                    connect_timeout=10,
-                    ssl={"ssl": {}} if tls else None,
-                )
+                conn = create_mysql_connection_from_params(params)
+                if provider_password_probe:
+                    return self._password_required_result(config)
                 cursor = conn.cursor()
                 cursor.execute("SELECT version()")
                 version = cursor.fetchone()[0]
                 cursor.close()
-                conn.close()
+                from .privileges import detect_write_privileges
+
+                privileges = detect_write_privileges(conn, engine)
                 return {
                     "success": True,
                     "message": "Connected successfully!",
                     "server_version": f"MySQL {version}",
+                    "privileges": privileges,
                 }
 
             return {
@@ -442,7 +525,45 @@ class ConfigureService:
             }
 
         except Exception as e:
+            from shared.api.ssh_errors import (
+                ssh_error_payload,
+                tls_verification_error_payload,
+            )
+            from shared.ssh_tunnel import SshTunnelError
+
+            if isinstance(e, SshTunnelError):
+                payload = ssh_error_payload(
+                    e,
+                    str(config.get("name") or config.get("host") or "target"),
+                    config.get("ssh"),
+                )
+                return {
+                    "success": False,
+                    "category": payload["category"],
+                    "message": payload["message"],
+                }
+
+            tls_payload = tls_verification_error_payload(
+                e,
+                str(config.get("name") or config.get("host") or "target"),
+            )
+            if tls_payload:
+                return {
+                    "success": False,
+                    "category": tls_payload["category"],
+                    "message": tls_payload["message"],
+                }
+
             error_msg = str(e)
+            from features.allowlist.service import (
+                connection_failure_category,
+                provider_network_hint,
+            )
+
+            provider_category = connection_failure_category(config, error_msg)
+            provider_network_failure = provider_category is not None
+            if provider_password_probe and self._is_authentication_failure(error_msg):
+                return self._password_required_result(config)
             if (
                 "could not connect" in error_msg.lower()
                 or "connection refused" in error_msg.lower()
@@ -450,7 +571,14 @@ class ConfigureService:
                 return {
                     "success": False,
                     "message": f"Connection refused: Cannot reach {host}:{port}. "
-                    f"Check that the database is running and accessible.",
+                    + (
+                        provider_network_hint(config)
+                        if provider_network_failure
+                        else "Check that the database is running and accessible."
+                    ),
+                    "category": (
+                        provider_category if provider_network_failure else None
+                    ),
                 }
             if (
                 "authentication failed" in error_msg.lower()
@@ -471,9 +599,52 @@ class ConfigureService:
                 return {
                     "success": False,
                     "message": f"Connection timed out to {host}:{port}. "
-                    f"Check network connectivity and firewall rules.",
+                    + (
+                        provider_network_hint(config)
+                        if provider_network_failure
+                        else "Check network connectivity and firewall rules."
+                    ),
+                    "category": (
+                        provider_category if provider_network_failure else None
+                    ),
+                }
+            if provider_network_failure:
+                return {
+                    "success": False,
+                    "category": provider_category,
+                    "message": f"Connection failed: {error_msg}. "
+                    f"{provider_network_hint(config)}",
                 }
             return {
                 "success": False,
                 "message": f"Connection failed: {error_msg}",
             }
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _password_required_result(config: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "success": False,
+            "code": "TARGET_PASSWORD_REQUIRED",
+            "password_env": config.get("password_env", ""),
+            "message": "Enter the password for this target again.",
+        }
+
+    @staticmethod
+    def _is_authentication_failure(message: str) -> bool:
+        lowered = message.lower()
+        return any(
+            marker in lowered
+            for marker in (
+                "authentication failed",
+                "password authentication failed",
+                "access denied",
+                "invalid password",
+                "unknown user",
+            )
+        )

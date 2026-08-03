@@ -414,35 +414,21 @@ class DataProfiler:
 
     def _connect(self):
         """Create a database connection using shared db_connection utility."""
-        from shared.db_connection import resolve_connection_params
+        from shared.db_connection import (
+            create_mysql_connection_from_params,
+            postgres_connection_kwargs,
+            resolve_connection_params,
+        )
 
         params = resolve_connection_params(target_config=self.config)
         engine = params["engine"]
 
         if engine in ("postgresql", "postgres"):
             import psycopg2
-            return psycopg2.connect(
-                host=params["host"],
-                port=params["port"],
-                user=params["user"],
-                password=params["password"],
-                database=params["database"],
-                sslmode=params["sslmode"],
-                connect_timeout=10,
-            )
+            return psycopg2.connect(**postgres_connection_kwargs(params))
         elif engine == "mysql":
             import pymysql
-            connect_kwargs = {
-                "host": params["host"],
-                "port": params["port"],
-                "user": params["user"],
-                "password": params["password"],
-                "database": params["database"],
-                "connect_timeout": 10,
-            }
-            if params.get("tls"):
-                connect_kwargs["ssl"] = {"ssl": True}
-            return pymysql.connect(**connect_kwargs)
+            return create_mysql_connection_from_params(params)
         else:
             raise ValueError(f"Unsupported engine: {engine}")
 

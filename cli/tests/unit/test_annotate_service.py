@@ -19,6 +19,9 @@ from features.schema.annotate_service import AnnotateService
 from features.schema.semantic_models import ColumnAnnotation, TableAnnotation
 
 
+pytestmark = pytest.mark.usefixtures("run_blocking_inline")
+
+
 VALID = {"valid": True, "reason": "ok", "model": "claude-haiku-4-5"}
 
 # Patch targets are the names bound inside the annotate_service module.

@@ -45,6 +45,15 @@ vi.mock('../components/TrialBalanceBadge', () => ({
   TrialBalanceBadge: () => null,
 }))
 
+vi.mock('../components/TrialRegistrationDialog', () => ({
+  TrialRegistrationDialog: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? (
+      <div role="dialog" aria-label="Free credits dialog">
+        Free credits dialog
+      </div>
+    ) : null,
+}))
+
 vi.mock('../hooks/useTarget', () => ({
   useTarget: () => ({ target: 'demo', setTarget: vi.fn() }),
 }))
@@ -135,6 +144,25 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
       })
     )
     expect(install).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders free credits directly above Settings and opens the trial dialog', () => {
+    render(<Sidebar />)
+
+    const credits = screen.getByRole('button', {
+      name: /Get free AI credits/,
+    })
+    const settings = screen.getByRole('link', { name: /Settings/ })
+    expect(credits.className).toContain('bg-gradient-to-r')
+    expect(credits.className).toContain('from-surface-primary-soft')
+    expect(credits.className).toContain('to-surface-info-soft')
+    expect(credits.className).toContain('shadow-elevation-1')
+    expect(
+      credits.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+
+    fireEvent.click(credits)
+    expect(screen.getByRole('dialog', { name: 'Free credits dialog' })).toBeTruthy()
   })
 
   it('shows and clears the Health Check running indicator from audit session state', () => {

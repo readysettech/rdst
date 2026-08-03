@@ -61,6 +61,7 @@ import { fetchAuditRuns, useAuditCapture } from '../lib/useAudit'
 import { useEnvRequirements } from '../lib/useEnvRequirements'
 import {
   fetchFleetSnapshots,
+  fetchFleetAwsStatus,
   fetchFleetTargets,
   useFleetAudit,
   useFleetStatus,
@@ -175,6 +176,7 @@ function AuditPage() {
   // Per-target preflight is shown before every run and cached for one minute.
   const [preflight, setPreflight] = useState<AuditPreflightResult | null>(null)
   const [requirementsBusy, setRequirementsBusy] = useState(false)
+  const [awsProfile, setAwsProfile] = useState('')
   const [runPasswordTarget, setRunPasswordTarget] = useState<string | null>(
     null
   )
@@ -219,10 +221,15 @@ function AuditPage() {
       checkAuditPreflight(selectedTargets, {
         force,
         awsRequired: awsPreflightRequired,
+        awsProfile: awsProfile || undefined,
+        awsFetcher: fetchFleetAwsStatus,
         targetAccounts,
       }),
       invalidateAiGateQueries(queryClient),
     ])
+    if (!awsProfile && result.aws.status?.active_profile) {
+      setAwsProfile(result.aws.status.active_profile)
+    }
     setPreflight(result)
     setRequirementsBusy(false)
     return result
@@ -427,7 +434,7 @@ function AuditPage() {
     <PreflightChecklist
       result={preflight}
       busy={requirementsBusy}
-      onRecheck={() => void checkRequirements(true)}
+      onRecheck={() => checkRequirements(true)}
       liveCapture={captureDuration > 0}
       aiGate={aiGate}
       members={selectedMembers}
@@ -440,6 +447,21 @@ function AuditPage() {
         (requirement) => requirement.kind === 'anthropic_api_key'
       )}
       keyringAvailable={envRequirements?.keyring_available ?? false}
+      awsProfile={awsProfile}
+      onAwsProfileChange={(profile) => {
+        setAwsProfile(profile)
+        // Keep the checklist mounted for its controlled profile picker, but
+        // discard the old account identity immediately. The next explicit
+        // check repopulates this block from the selected profile's STS result.
+        setPreflight((current) =>
+          current
+            ? {
+                ...current,
+                aws: { required: current.aws.required },
+              }
+            : current
+        )
+      }}
     />
   ) : null
 

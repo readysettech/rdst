@@ -94,11 +94,11 @@ def run_menu_with_inputs(inputs):
 
 EXPECTED_COMMANDS = [
     "configure", "top", "analyze", "ask", "scan", "agent", "guard",
-    "init", "query", "schema", "fleet", "audit", "demo",
+    "init", "query", "schema", "tunnel", "fleet", "audit", "demo",
     "version", "update", "report", "help", "claude", "slack", "web", "exit",
 ]
 
-PREVIOUSLY_MISSING = ["fleet", "audit", "demo", "claude", "slack", "web"]
+PREVIOUSLY_MISSING = ["tunnel", "fleet", "audit", "demo", "claude", "slack", "web"]
 
 
 def _get_menu_command_names():
@@ -524,7 +524,7 @@ class TestMenuItemCapitalization:
         commands = _get_menu_command_names()
         expected = {
             "configure", "top", "analyze", "ask", "scan", "agent", "guard",
-            "init", "query", "schema", "version", "update", "report", "help",
+            "init", "query", "schema", "tunnel", "version", "update", "report", "help",
             "fleet", "audit", "demo", "claude", "slack", "web",
         }
         missing = expected - set(commands)
@@ -542,11 +542,11 @@ class TestMenuCommands:
             f"'{cmd_name}' is missing from the interactive menu"
         )
 
-    def test_menu_has_21_entries_including_exit(self):
-        """Menu should show 20 real commands + exit = 21 entries."""
+    def test_menu_has_22_entries_including_exit(self):
+        """Menu should show 21 real commands + exit = 22 entries."""
         names = _get_menu_command_names_at_runtime()
-        assert len(names) == 21, (
-            f"Expected 21 menu entries (20 commands + exit), got {len(names)}: {names}"
+        assert len(names) == 22, (
+            f"Expected 22 menu entries (21 commands + exit), got {len(names)}: {names}"
         )
 
     @pytest.mark.parametrize("cmd_name", PREVIOUSLY_MISSING)
@@ -558,7 +558,7 @@ class TestMenuCommands:
 
         commands = [
             "configure", "top", "analyze", "ask", "scan", "agent", "guard",
-            "init", "query", "schema", "fleet", "audit", "demo",
+            "init", "query", "schema", "tunnel", "fleet", "audit", "demo",
             "version", "update", "report", "help", "claude", "slack", "web", "exit",
         ]
         idx = str(commands.index(cmd_name) + 1)

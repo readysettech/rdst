@@ -104,7 +104,11 @@ class ConnectionConfig:
                  db_type: str,
                  ssl_mode: str = "prefer",
                  connect_timeout: int = DEFAULT_TIMEOUT,
-                 query_type: DataManagerQueryType = DataManagerQueryType.UPSTREAM):
+                 query_type: DataManagerQueryType = DataManagerQueryType.UPSTREAM,
+                 tls: bool = False,
+                 tls_verify: bool = False,
+                 tls_ca: Optional[str] = None,
+                 hostaddr: Optional[str] = None):
         self.host = host
         self.port = port
         self.database = database
@@ -112,6 +116,10 @@ class ConnectionConfig:
         self.password = password
         self.db_type = db_type
         self.ssl_mode = ssl_mode
+        self.tls = tls
+        self.tls_verify = tls_verify
+        self.tls_ca = tls_ca
+        self.hostaddr = hostaddr
         self.connect_timeout = connect_timeout
         self.query_type = query_type
 
@@ -611,13 +619,23 @@ class DataManager:
                 else:
                     self.logger.debug("Initiating MySQL connection")
 
-                self.connections[query_type] = pymysql.connect(
-                    host=connection_config.host,
-                    port=connection_config.port,
-                    user=connection_config.username,
-                    password=connection_config.password,
-                    database=connection_config.database,
-                    connect_timeout=connection_config.connect_timeout
+                from shared.db_connection import create_mysql_connection_from_params
+
+                self.connections[query_type] = create_mysql_connection_from_params(
+                    {
+                        "host": connection_config.host,
+                        "hostaddr": connection_config.hostaddr,
+                        "port": connection_config.port,
+                        "user": connection_config.username,
+                        "password": connection_config.password,
+                        "database": connection_config.database,
+                        "tls": connection_config.tls,
+                        "tls_verify": connection_config.tls_verify,
+                        "tls_ca": connection_config.tls_ca,
+                    },
+                    connect_timeout=connection_config.connect_timeout,
+                    autocommit=False,
+                    cursorclass=pymysql.cursors.Cursor,
                 )
                 if query_type == DataManagerQueryType.READYSET:
                     self.logger.debug(
@@ -632,14 +650,23 @@ class DataManager:
                     self.logger.debug("READYSET: Initiating PostgreSQL connection")
                 else:
                     self.logger.debug("Initiating PostgreSQL connection")
+                from shared.db_connection import postgres_connection_kwargs
+
                 self.connections[query_type] = psycopg2.connect(
-                    host=connection_config.host,
-                    port=connection_config.port,
-                    user=connection_config.username,
-                    password=connection_config.password,
-                    database=connection_config.database,
-                    connect_timeout=connection_config.connect_timeout,
-                    sslmode=connection_config.ssl_mode
+                    **postgres_connection_kwargs(
+                        {
+                            "host": connection_config.host,
+                            "hostaddr": connection_config.hostaddr,
+                            "port": connection_config.port,
+                            "user": connection_config.username,
+                            "password": connection_config.password,
+                            "database": connection_config.database,
+                            "sslmode": connection_config.ssl_mode,
+                            "tls_verify": connection_config.tls_verify,
+                            "tls_ca": connection_config.tls_ca,
+                        },
+                        connect_timeout=connection_config.connect_timeout,
+                    )
                 )
                 if query_type == DataManagerQueryType.READYSET:
                     self.logger.debug(

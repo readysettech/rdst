@@ -34,7 +34,13 @@ except ImportError:
     pymysql = None
 
 # Import shared cancellation utilities
-from shared.db_connection import cancel_postgres_by_pid, cancel_mysql_by_thread_id
+from shared.db_connection import (
+    cancel_postgres_by_pid,
+    cancel_mysql_by_thread_id,
+    create_mysql_connection_from_params,
+    postgres_connection_kwargs,
+    resolve_connection_params,
+)
 
 
 def _normalize_plan_data(raw: Any) -> Dict[str, Any]:
@@ -55,14 +61,13 @@ def _normalize_plan_data(raw: Any) -> Dict[str, Any]:
     return {}
 
 
-def _resolve_explain_password(target_config: Dict[str, Any]) -> str:
+def _resolve_explain_password(
+    target_config: Dict[str, Any], resolved_password: str
+) -> str:
     """Resolve passwords for EXPLAIN paths, keeping the legacy RDST_DB_PASSWORD fallback.
 """
-    from shared.password_resolver import resolve_password_value
-
-    password = resolve_password_value(target_config)
-    if password:
-        return password
+    if resolved_password:
+        return resolved_password
 
     # An explicitly empty password means passwordless auth, not "try legacy env".
     if target_config.get('password') == '':
@@ -138,9 +143,21 @@ def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str,
                 rewrite_max_time_ms = None
 
         if engine in ['postgresql', 'postgres']:
-            return _execute_postgres_explain_analyze(sql, target_config, fast_mode=fast_mode, rewrite_max_time_ms=rewrite_max_time_ms)
+            return _execute_postgres_explain_analyze(
+                sql,
+                target_config,
+                fast_mode=fast_mode,
+                rewrite_max_time_ms=rewrite_max_time_ms,
+                target=target,
+            )
         elif engine in ['mysql', 'mariadb']:
-            return _execute_mysql_explain_analyze(sql, target_config, fast_mode=fast_mode, rewrite_max_time_ms=rewrite_max_time_ms)
+            return _execute_mysql_explain_analyze(
+                sql,
+                target_config,
+                fast_mode=fast_mode,
+                rewrite_max_time_ms=rewrite_max_time_ms,
+                target=target,
+            )
         else:
             return {
                 "success": False,
@@ -158,7 +175,13 @@ def execute_explain_analyze(sql: str, target: str = None, **kwargs) -> Dict[str,
         }
 
 
-def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], fast_mode: bool = False, rewrite_max_time_ms: float = None) -> Dict[str, Any]:
+def _execute_postgres_explain_analyze(
+    sql: str,
+    target_config: Dict[str, Any],
+    fast_mode: bool = False,
+    rewrite_max_time_ms: float = None,
+    target: str = None,
+) -> Dict[str, Any]:
     """Execute EXPLAIN ANALYZE for PostgreSQL with timeout handling.
 
     Behavior:
@@ -199,18 +222,18 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
         }
 
     try:
-        password = _resolve_explain_password(target_config)
+        resolved_params = resolve_connection_params(
+            target=target,
+            target_config=target_config,
+        )
+        password = _resolve_explain_password(
+            target_config, resolved_params['password']
+        )
 
-        conn_params = {
-            'host': target_config['host'],
-            'port': target_config.get('port', 5432),
-            'database': target_config['database'],
-            'user': target_config['user'],
-            'password': password,
-        }
-
-        if target_config.get('tls', False):
-            conn_params['sslmode'] = 'require'
+        conn_params = postgres_connection_kwargs(
+            resolved_params,
+            password=password,
+        )
 
         # FAST MODE: Skip EXPLAIN ANALYZE entirely, only run EXPLAIN
         if fast_mode:
@@ -516,7 +539,13 @@ def _execute_postgres_explain_analyze(sql: str, target_config: Dict[str, Any], f
         }
 
 
-def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast_mode: bool = False, rewrite_max_time_ms: float = None) -> Dict[str, Any]:
+def _execute_mysql_explain_analyze(
+    sql: str,
+    target_config: Dict[str, Any],
+    fast_mode: bool = False,
+    rewrite_max_time_ms: float = None,
+    target: str = None,
+) -> Dict[str, Any]:
     """Execute EXPLAIN ANALYZE for MySQL.
 
     Behavior:
@@ -551,23 +580,22 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
         }
 
     try:
-        password = _resolve_explain_password(target_config)
+        resolved_params = resolve_connection_params(
+            target=target,
+            target_config=target_config,
+        )
+        password = _resolve_explain_password(
+            target_config, resolved_params['password']
+        )
 
-        conn_params = {
-            'host': target_config['host'],
-            'port': target_config.get('port', 3306),
-            'database': target_config['database'],
-            'user': target_config['user'],
-            'password': password,
+        mysql_params = dict(resolved_params)
+        mysql_params['password'] = password
+        conn_overrides = {
             'charset': 'utf8mb4',
             'cursorclass': pymysql.cursors.DictCursor
         }
 
-        # Add SSL configuration if specified
-        if target_config.get('tls', False):
-            conn_params['ssl'] = {'ssl_disabled': False}
-
-        with _mysql_connection(conn_params) as conn:
+        with _mysql_connection(mysql_params, conn_overrides) as conn:
             with conn.cursor() as cursor:
                 # TWO-PHASE APPROACH for slow queries:
                 # Phase 1: Always run EXPLAIN (instant, no execution) to get query plan
@@ -617,7 +645,10 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
                     query_conn = None
                     try:
                         # Create new connection for this thread (cursors aren't thread-safe)
-                        query_conn = pymysql.connect(**conn_params)
+                        query_conn = create_mysql_connection_from_params(
+                            mysql_params,
+                            **conn_overrides,
+                        )
                         with query_conn.cursor() as query_cursor:
                             # Get this thread's connection ID
                             query_cursor.execute("SELECT CONNECTION_ID()")
@@ -664,7 +695,12 @@ def _execute_mysql_explain_analyze(sql: str, target_config: Dict[str, Any], fast
                     with query_lock:
                         thread_conn_id = query_result.get('connection_id')
                     if thread_conn_id:
-                        return cancel_mysql_by_thread_id(target_config, thread_conn_id, verbose=True)
+                        return cancel_mysql_by_thread_id(
+                            target_config,
+                            thread_conn_id,
+                            verbose=True,
+                            target=target,
+                        )
                     else:
                         print(f"   >> No MySQL connection ID available to kill", flush=True)
                         return False
@@ -859,11 +895,11 @@ def _postgres_connection(conn_params):
 
 
 @contextmanager
-def _mysql_connection(conn_params):
+def _mysql_connection(params, overrides=None):
     """Context manager for MySQL connections."""
     conn = None
     try:
-        conn = pymysql.connect(**conn_params)
+        conn = create_mysql_connection_from_params(params, **(overrides or {}))
         yield conn
     finally:
         if conn:

@@ -24,6 +24,7 @@ import { ConfirmDialog } from "@rs/ui-new/confirm-dialog";
 import { m } from "@rs/ui-new/motion";
 import type { ConfigureTarget } from "../../types/configure";
 import type { FleetConnectivityEvent } from "../../types/fleet";
+import type { TunnelStatus } from "../../lib/tunnels";
 import {
   isUnreachable,
   TargetConnectivity,
@@ -47,9 +48,11 @@ interface ConfigureTargetListProps {
   checkableTargets?: Set<string>;
   /** Name of the connection currently being tested (drives the inline spinner). */
   testingTargetName?: string | null;
-  /** A connectivity check is in flight; per-row tests stay disabled meanwhile. */
-  connectivityBusy?: boolean;
   onSetPassword?: (target: ConfigureTarget) => void;
+  onRetryConnection?: (target: ConfigureTarget) => Promise<boolean>;
+  tunnelStatuses?: Record<string, TunnelStatus>;
+  testingTunnelName?: string | null;
+  onTestTunnel?: (targetName: string) => void;
 }
 
 /** `engine · host:port` — the quiet identity line under the name. */
@@ -73,8 +76,11 @@ export function ConfigureTargetList({
   connectivity,
   checkableTargets,
   testingTargetName,
-  connectivityBusy,
   onSetPassword,
+  onRetryConnection,
+  tunnelStatuses,
+  testingTunnelName,
+  onTestTunnel,
 }: ConfigureTargetListProps) {
   const [deleteTargetName, setDeleteTargetName] = useState<string | null>(null);
 
@@ -115,7 +121,7 @@ export function ConfigureTargetList({
                   modifier="outline"
                   icon="search"
                   iconPosition="left"
-                  label="or discover in AWS"
+                  label="Discover from your cloud provider"
                   onClick={onDiscover}
                   disabled={isLoading}
                 />
@@ -135,6 +141,8 @@ export function ConfigureTargetList({
           const isTesting = testingTargetName === target.name;
           const status = connectivity?.[target.name];
           const checkable = !checkableTargets || checkableTargets.has(target.name);
+          const tunnel = tunnelStatuses?.[target.name];
+          const tunnelActive = tunnel?.state === "active";
 
           return (
             <m.div
@@ -171,6 +179,26 @@ export function ConfigureTargetList({
                         Default
                       </span>
                     </Show>
+                    <Show when={!!target.ssh}>
+                      <Tag
+                        size="small"
+                        variant={
+                          tunnelActive
+                            ? "positive"
+                            : tunnel
+                              ? "negative"
+                              : "neutral"
+                        }
+                        modifier="ghost"
+                        label={
+                          tunnelActive
+                            ? "Tunnel active"
+                            : tunnel
+                              ? "Tunnel down"
+                              : "Tunnel closed"
+                        }
+                      />
+                    </Show>
                   </HStack>
 
                   {/* The password chip opens the meta line in every row, so its
@@ -182,11 +210,9 @@ export function ConfigureTargetList({
                       {target.has_password ? (
                         <Tag
                           size="small"
-                          variant="positive"
-                          modifier="ghost"
-                          icon="tick"
-                          iconPosition="left"
-                          label="Password set"
+                          variant="neutral"
+                          modifier="outline"
+                          label="Password stored"
                         />
                       ) : (
                         <Tag
@@ -226,7 +252,7 @@ export function ConfigureTargetList({
                     }
                     onClick={() => onTest?.(target.name)}
                     loading={isTesting}
-                    disabled={isLoading || connectivityBusy || !checkable}
+                    disabled={isLoading || !checkable}
                   />
 
                   {/* Overflow — tertiary actions [VIS-114, USE-018] */}
@@ -262,6 +288,18 @@ export function ConfigureTargetList({
                           onClick={() => onMoveToGroup?.(target)}
                         />
                       </Show>
+                      <Show when={!!target.ssh && !!onTestTunnel}>
+                        <Dropdown.Item
+                          leftIcon="connect"
+                          label={
+                            testingTunnelName === target.name
+                              ? "Testing tunnel…"
+                              : "Test tunnel"
+                          }
+                          disabled={testingTunnelName === target.name}
+                          onClick={() => onTestTunnel?.(target.name)}
+                        />
+                      </Show>
                       <Dropdown.Separator />
                       <Dropdown.Item
                         leftIcon="trash"
@@ -282,6 +320,7 @@ export function ConfigureTargetList({
                     target={target}
                     result={status}
                     onSetPassword={() => onSetPassword?.(target)}
+                    onRetry={onRetryConnection}
                   />
                 </div>
               </Show>

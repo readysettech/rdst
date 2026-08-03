@@ -98,8 +98,15 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
   })
 
   const oauth = Boolean(client.startLogin && client.pollLogin)
-  const { loginId, loginStatus, loginError, starting, beginLogin, clearError } =
-    useProviderOAuthLogin({
+  const {
+    loginId,
+    loginStatus,
+    loginError,
+    blockedAuthUrl,
+    starting,
+    beginLogin,
+    clearError,
+  } = useProviderOAuthLogin({
       label,
       start: client.startLogin ?? noBrowserSignIn,
       poll: client.pollLogin ?? noBrowserSignIn,
@@ -313,10 +320,22 @@ export function ProviderConnectionPanel<S extends ProviderStatus>({
               onClick={() => void beginLogin()}
             />
             {loginId && (
-              <Text level="caption" className="text-content-layout-3">
-                {loginStatus?.detail ||
-                  'Authorize RDST in the browser tab we opened.'}
-              </Text>
+              <VStack className="gap-1 items-start">
+                <Text level="caption" className="text-content-layout-3">
+                  {loginStatus?.detail ||
+                    'Authorize RDST in the browser tab we opened.'}
+                </Text>
+                {blockedAuthUrl && (
+                  <a
+                    href={blockedAuthUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm text-content-primary-soft hover:underline"
+                  >
+                    Popup blocked. Open sign-in.
+                  </a>
+                )}
+              </VStack>
             )}
           </VStack>
         ) : (

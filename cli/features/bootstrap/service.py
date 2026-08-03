@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, AsyncGenerator, Callable
 
 from shared.anthropic_env import validate_anthropic_key
+from shared.async_utils import run_blocking
 from shared.service_events import ErrorEvent
 
 from .events import (
@@ -34,9 +35,10 @@ _TRACK_DONE = object()
 @dataclass
 class BootstrapOptions:
     annotate: bool = True
-    # How often the annotate gate re-validates while waiting. It has no
-    # deadline: the user may add a key at any point while RDST remains open.
+    # How often the annotate gate re-validates while its schema track is live.
     key_poll_seconds: float = 5.0
+    # A wedged schema/deploy collaborator must settle the background run visibly.
+    track_timeout_seconds: float = 900.0
 
 
 def _stage(
@@ -86,7 +88,8 @@ class TargetBootstrapService:
             STAGE_CONNECTION_TEST, "started", f"Testing connection to {target}..."
         )
         try:
-            result = await asyncio.to_thread(self._connection_test_sync, target_config)
+            test_config = {**target_config, "name": target}
+            result = await run_blocking(self._connection_test_sync, test_config)
         except Exception as exc:
             result = {"success": False, "message": str(exc)}
         if not result.get("success"):
@@ -103,13 +106,32 @@ class TargetBootstrapService:
             STAGE_CONNECTION_TEST,
             "done",
             result.get("message", ""),
-            {"server_version": result.get("server_version")},
+            {
+                "server_version": result.get("server_version"),
+                "privileges": result.get("privileges"),
+            },
         )
 
-        # Independent tracks share one queue; a sentinel per track marks its end.
+        # The schema track is pumped through a queue so failures and timeouts become
+        # visible events instead of stranding the background run.
         queue: asyncio.Queue = asyncio.Queue()
-        tracks = [self._schema_track(target, target_config, options, key_wakeup)]
-        tasks = [asyncio.create_task(self._pump(track, queue)) for track in tracks]
+        tracks = [
+            (
+                "schema",
+                self._schema_track(target, target_config, options, key_wakeup),
+            )
+        ]
+        tasks = [
+            asyncio.create_task(
+                self._pump(
+                    track_name,
+                    track,
+                    queue,
+                    options.track_timeout_seconds,
+                )
+            )
+            for track_name, track in tracks
+        ]
         try:
             remaining = len(tasks)
             while remaining:
@@ -123,20 +145,55 @@ class TargetBootstrapService:
                 task.cancel()
 
     @staticmethod
-    async def _pump(gen: AsyncGenerator, queue: asyncio.Queue) -> None:
+    async def _pump(
+        track_name: str,
+        gen: AsyncGenerator,
+        queue: asyncio.Queue,
+        timeout_seconds: float,
+    ) -> None:
         """Drain one track into the queue; a track failure becomes an error
         event rather than killing its sibling."""
         try:
-            async for event in gen:
-                await queue.put(event)
-        except Exception as exc:
+            await asyncio.wait_for(
+                TargetBootstrapService._drain_track(gen, queue),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            message = (
+                f"{track_name.capitalize()} bootstrap track timed out after "
+                f"{timeout_seconds:g} seconds"
+            )
+            await queue.put(_stage(track_name, "failed", message))
             await queue.put(
                 ErrorEvent(
-                    type="error", message=str(exc), code="BOOTSTRAP_TRACK_FAILED"
+                    type="error",
+                    message=message,
+                    code="BOOTSTRAP_TRACK_TIMEOUT",
+                    stage=track_name,
+                )
+            )
+        except Exception as exc:
+            message = str(exc) or f"{track_name.capitalize()} bootstrap track failed"
+            await queue.put(_stage(track_name, "failed", message))
+            await queue.put(
+                ErrorEvent(
+                    type="error",
+                    message=message,
+                    code="BOOTSTRAP_TRACK_FAILED",
+                    stage=track_name,
                 )
             )
         finally:
+            try:
+                await gen.aclose()
+            except (Exception, asyncio.CancelledError):
+                pass
             await queue.put(_TRACK_DONE)
+
+    @staticmethod
+    async def _drain_track(gen: AsyncGenerator, queue: asyncio.Queue) -> None:
+        async for event in gen:
+            await queue.put(event)
 
     async def _schema_track(
         self,
@@ -148,14 +205,14 @@ class TargetBootstrapService:
         schema = self._schema_service()
 
         yield _stage(STAGE_STRUCTURE, "started", "Fetching database structure...")
-        status = await asyncio.to_thread(schema.get_status, target)
+        status = await run_blocking(schema.get_status, target)
         if status.exists:
             # Never force-init an existing layer: refresh merges structural
             # changes while preserving annotations.
-            refreshed = await asyncio.to_thread(schema.refresh, target, target_config)
+            refreshed = await run_blocking(schema.refresh, target, target_config)
             ok, message = bool(refreshed.get("ok")), refreshed.get("message", "")
         else:
-            initialized = await asyncio.to_thread(schema.init, target, target_config)
+            initialized = await run_blocking(schema.init, target, target_config)
             ok = initialized.success
             message = initialized.error or f"{initialized.tables} tables found"
         if not ok:
@@ -164,7 +221,7 @@ class TargetBootstrapService:
         yield _stage(STAGE_STRUCTURE, "done", message)
 
         yield _stage(STAGE_PROFILE, "started", "Profiling columns...")
-        profiled = await asyncio.to_thread(schema.profile, target, target_config)
+        profiled = await run_blocking(schema.profile, target, target_config)
         if profiled.get("ok"):
             yield _stage(STAGE_PROFILE, "done", profiled.get("message", ""))
         else:
@@ -174,7 +231,7 @@ class TargetBootstrapService:
         if not options.annotate:
             yield _stage(STAGE_ANNOTATE, "skipped", "Annotation disabled")
             return
-        validity = await asyncio.to_thread(self._key_validator)
+        validity = await run_blocking(self._key_validator)
         if not validity.get("valid"):
             yield BootstrapNeedsKeyEvent(
                 type="needs_key",
@@ -220,19 +277,25 @@ class TargetBootstrapService:
                 else:
                     key_wakeup.clear()
             interval = min(interval * 2, options.key_poll_seconds * 6)
-            validity = await asyncio.to_thread(self._key_validator)
+            validity = await run_blocking(self._key_validator)
             if validity.get("valid"):
                 return validity
 
     def _connection_test_sync(self, target_config: dict[str, Any]) -> dict:
         """Run the configure test on a worker thread.
 
-        ConfigureService.perform_connection_test is declared async but its
-        body is blocking DB I/O, so it gets a private loop off the main one.
+        ConfigureService.perform_connection_test is declared async but has no
+        await points: its body is blocking DB I/O. Advance that coroutine once
+        on the worker instead of nesting an event loop in the worker thread.
         """
-        return asyncio.run(
-            self._configure_service().perform_connection_test(target_config)
-        )
+        test = self._configure_service().perform_connection_test(target_config)
+        try:
+            test.send(None)
+        except StopIteration as complete:
+            return complete.value
+        finally:
+            test.close()
+        raise RuntimeError("Connection test unexpectedly yielded")
 
     def _configure_service(self) -> Any:
         if self._configure is None:

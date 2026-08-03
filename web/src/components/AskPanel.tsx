@@ -20,6 +20,7 @@ import { fetchAskExamples, fetchAskHistory, type AskHistoryItem } from "../lib/a
 import { formatTimestamp } from "../lib/formatters";
 import {
   classifyError,
+  isConnectionFailure,
   isTrialExhaustedError,
   TRIAL_EXHAUSTED_MESSAGE,
 } from "../lib/errorContract";
@@ -28,6 +29,7 @@ import { RoutableNotice } from "./RoutableNotice";
 import { TrialRegistrationDialog } from "./TrialRegistrationDialog";
 import { createCsvFilename, downloadCsv, toCsv } from "../lib/csv";
 import { SQLDisplay } from "./SQLDisplay";
+import { ConnectionFailureActions } from "./ConnectionFailureActions";
 
 interface AskPanelProps {
   target?: string | null;
@@ -500,6 +502,7 @@ export function AskPanel({ target, disabled = false }: AskPanelProps) {
         >
           <ErrorState
             error={error}
+            target={target}
             onRetry={handleRetry}
             onNewQuestion={handleNewQuestion}
             onStartTrial={() => setShowTrialDialog(true)}
@@ -845,11 +848,19 @@ function ResultsTable({
 // Error State Component
 function ErrorState({
   error,
+  target,
   onRetry,
   onNewQuestion,
   onStartTrial,
 }: {
-  error: { message: string; phase?: string | null };
+  error: {
+    message: string;
+    phase?: string | null;
+    code?: string;
+    category?: string;
+    target?: string;
+  };
+  target?: string | null;
   onRetry: () => void;
   onNewQuestion: () => void;
   onStartTrial: () => void;
@@ -859,7 +870,13 @@ function ErrorState({
   // notice instead of an unwinnable retry. The ask SSE error carries no code
   // yet, so classify from the message — the same shared classifier the rest
   // of the app uses.
-  const errorClass = classifyError({ code: '', message: error.message });
+  const envelope = {
+    code: error.code || error.category || '',
+    category: error.category,
+    target: error.target || target || undefined,
+    message: error.message,
+  };
+  const errorClass = classifyError(envelope);
   const isAuthenticationError =
     errorClass === 'provider' || errorClass === 'rdst-service';
   const trialExhausted = isTrialExhaustedError(error.message);
@@ -873,6 +890,33 @@ function ErrorState({
     execute: 'Running the query',
   };
   const phaseLabel = error.phase ? phaseLabels[error.phase] : undefined;
+  if (envelope.target && isConnectionFailure(envelope)) {
+    return (
+      <VStack className="gap-3 items-stretch rounded-xl border border-border-negative-soft bg-surface-negative-soft/20 p-5">
+        <ConnectionFailureActions
+          failure={{
+            target: envelope.target,
+            message: envelope.message,
+            category: envelope.category,
+            code: envelope.code,
+          }}
+          onRetry={async () => {
+            onRetry();
+            return true;
+          }}
+          featureRecovery
+        />
+        {phaseLabel && (
+          <Tag
+            variant="negative"
+            modifier="ghost"
+            size="small"
+            label={`Failed while: ${phaseLabel}`}
+          />
+        )}
+      </VStack>
+    );
+  }
   if (isAuthenticationError) {
     return (
       <VStack className="gap-3 items-start">

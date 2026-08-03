@@ -79,6 +79,8 @@ class TopService:
         Yields:
             TopEvent: Typed events during execution
         """
+        target_name = input.target
+        target_config: Optional[Dict[str, Any]] = None
         try:
             # 1. Status: Loading configuration
             yield TopStatusEvent(type="status", message="Loading configuration...")
@@ -125,7 +127,7 @@ class TopService:
             yield TopStatusEvent(type="status", message="Connecting to database...")
 
             data, actual_source, fallback_event = await self._execute_top_query(
-                target_config, db_engine, source
+                target_name, target_config, db_engine, source
             )
 
             # 3. Connected event
@@ -139,7 +141,7 @@ class TopService:
             # 3b. Check database query size limit (MySQL digest tables
             # truncate; PG pg_stat_statements does not — see mode="historical")
             warning_event = await self._check_db_limit_for_historical(
-                target_config, db_engine
+                target_name, target_config, db_engine
             )
             if warning_event:
                 yield warning_event
@@ -207,13 +209,22 @@ class TopService:
 
         except Exception as e:
             logger.debug("Error in get_top_queries", exc_info=True)
+            from shared.api.ssh_errors import connectivity_error_payload
+
+            failure = connectivity_error_payload(
+                e, target_name or input.target or "target", target_config or {}
+            )
             # Shared error envelope (B7/T24): humane message; the exception
             # class name in detail; raw str(e) (may embed host/DSN) stays in
             # the debug log only.
             yield TopErrorEvent(
                 type="error",
-                message="The slow-query lookup could not be completed.",
-                code="internal_error",
+                message=(
+                    failure["message"]
+                    if failure
+                    else "The slow-query lookup could not be completed."
+                ),
+                code=failure["category"] if failure else "internal_error",
                 detail=type(e).__name__,
                 stage="execution",
             )
@@ -245,6 +256,8 @@ class TopService:
             TopEvent: Continuous events during monitoring
         """
         connection = None
+        target_name = input.target
+        target_config: Optional[Dict[str, Any]] = None
         try:
             # Load config
             yield TopStatusEvent(type="status", message="Loading configuration...")
@@ -275,7 +288,7 @@ class TopService:
             yield TopStatusEvent(type="status", message="Connecting to database...")
 
             connection = await asyncio.to_thread(
-                self._create_direct_connection, target_config
+                self._create_direct_connection, target_name, target_config
             )
 
             # Connected event
@@ -399,11 +412,20 @@ class TopService:
 
         except Exception as e:
             logger.debug("Error in stream_realtime", exc_info=True)
+            from shared.api.ssh_errors import connectivity_error_payload
+
+            failure = connectivity_error_payload(
+                e, target_name or input.target or "target", target_config or {}
+            )
             # Shared error envelope (B7/T24) — see get_top_queries above.
             yield TopErrorEvent(
                 type="error",
-                message="Slow-query monitoring stopped unexpectedly.",
-                code="internal_error",
+                message=(
+                    failure["message"]
+                    if failure
+                    else "Slow-query monitoring stopped unexpectedly."
+                ),
+                code=failure["category"] if failure else "internal_error",
                 detail=type(e).__name__,
                 stage="execution",
             )
@@ -435,23 +457,28 @@ class TopService:
         )
 
     async def _check_db_limit_for_historical(
-        self, target_config: Dict[str, Any], db_engine: str
+        self,
+        target_name: str,
+        target_config: Dict[str, Any],
+        db_engine: str,
     ) -> Optional[TopDbLimitWarningEvent]:
         """Check db query size limit for historical mode (creates a temporary connection)."""
         from shared.query_capture_limits import DB_QUERY_SIZE_WARN_THRESHOLD
         from shared.db_connection import close_connection, query_db_query_size_limit
 
-        def _check(cfg, engine):
+        def _check(name, cfg, engine):
             from shared.db_connection import create_direct_connection
 
-            conn = create_direct_connection(cfg)
+            conn = create_direct_connection(cfg, target=name)
             try:
                 return query_db_query_size_limit(conn, engine, mode="historical")
             finally:
                 close_connection(conn)
 
         try:
-            result = await asyncio.to_thread(_check, target_config, db_engine)
+            result = await asyncio.to_thread(
+                _check, target_name, target_config, db_engine
+            )
         except Exception:
             return None
 
@@ -538,7 +565,11 @@ class TopService:
         )
 
     async def _execute_top_query(
-        self, target_config: Dict[str, Any], db_engine: str, source: str
+        self,
+        target_name: str,
+        target_config: Dict[str, Any],
+        db_engine: str,
+        source: str,
     ) -> tuple[Dict[str, Any], str, Optional[TopSourceFallbackEvent]]:
         """Execute the top query using DataManager.
 
@@ -546,33 +577,50 @@ class TopService:
             Tuple of (data dict, actual_source, optional fallback event)
         """
         result = await asyncio.to_thread(
-            self._execute_top_query_sync, target_config, db_engine, source
+            self._execute_top_query_sync,
+            target_name,
+            target_config,
+            db_engine,
+            source,
         )
         return result
 
     def _execute_top_query_sync(
-        self, target_config: Dict[str, Any], db_engine: str, source: str
+        self,
+        target_name: str,
+        target_config: Dict[str, Any],
+        db_engine: str,
+        source: str,
     ) -> tuple[Dict[str, Any], str, Optional[TopSourceFallbackEvent]]:
         """Synchronous execution of top query (runs in thread)."""
         from features.top.command_sets import TOP_COMMAND_SETS
         from shared.data_manager import ConnectionConfig, DataManager
         from shared.data_manager_service import DMSDbType, DataManagerQueryType
 
-        from shared.password_resolver import resolve_password_value
+        from shared.db_connection import resolve_connection_params
 
-        password = resolve_password_value(target_config)
+        params = resolve_connection_params(
+            target=target_name,
+            target_config=target_config,
+        )
+        password = params["password"]
 
         if not password:
             raise ValueError("No password found for this target. Set its password, then try again.")
 
         # Create connection config
         connection_config = ConnectionConfig(
-            host=target_config["host"],
-            port=target_config["port"],
-            database=target_config["database"],
-            username=target_config["user"],
+            host=params["host"],
+            port=params["port"],
+            database=params["database"],
+            username=params["user"],
             password=password,
             db_type=DMSDbType.MySql if db_engine == "mysql" else DMSDbType.PostgreSQL,
+            ssl_mode=params.get("sslmode", "prefer"),
+            tls=params.get("tls", False),
+            tls_verify=params.get("tls_verify", False),
+            tls_ca=params.get("tls_ca"),
+            hostaddr=params.get("hostaddr"),
             query_type=DataManagerQueryType.UPSTREAM,
         )
 
@@ -859,11 +907,13 @@ class TopService:
 
         return results
 
-    def _create_direct_connection(self, target_config: Dict[str, Any]):
+    def _create_direct_connection(
+        self, target_name: str, target_config: Dict[str, Any]
+    ):
         """Create a direct database connection."""
         from shared.db_connection import create_direct_connection
 
-        return create_direct_connection(target_config)
+        return create_direct_connection(target_config, target=target_name)
 
     def _filter_and_build_realtime_queries(
         self,

@@ -8,17 +8,20 @@ rather than emailed empty.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient, Response
 
 from features.audit.api import routes as audit_routes
 from features.audit.report import delivery as delivery_mod
 from shared.api import guards
 from shared.config.targets import TargetsConfig
+
+pytestmark = pytest.mark.usefixtures("run_blocking_inline")
 
 
 class _StubEmailService:
@@ -106,13 +109,30 @@ def _app() -> FastAPI:
     return app
 
 
+class _Client:
+    """Small synchronous facade over HTTPX's in-process ASGI transport."""
+
+    def __init__(self, app: FastAPI):
+        self.app = app
+
+    def post(self, path: str, **kwargs) -> Response:
+        async def request() -> Response:
+            transport = ASGITransport(app=self.app)
+            async with AsyncClient(
+                transport=transport, base_url="http://testserver"
+            ) as client:
+                return await client.post(path, **kwargs)
+
+        return asyncio.run(request())
+
+
 @pytest.fixture
-def client(config_path, monkeypatch) -> TestClient:
+def client(config_path, monkeypatch) -> _Client:
     # Treat every test request as loopback + same-host; the 403 guard paths
     # are exercised separately with the real guards.
     monkeypatch.setattr(guards, "is_loopback_request", lambda request: True)
     monkeypatch.setattr(guards, "same_host_from_headers", lambda request: True)
-    return TestClient(_app())
+    return _Client(_app())
 
 
 def test_verified_email_sends_immediately(client, tmp_rdst_home, config_path):
@@ -257,7 +277,7 @@ def test_forbidden_for_non_local_callers(
     )
     run_id = _seed_snapshot(tmp_rdst_home)
 
-    response = TestClient(_app()).post(f"/api/audit/runs/{run_id}/email", json={})
+    response = _Client(_app()).post(f"/api/audit/runs/{run_id}/email", json={})
 
     assert response.status_code == 403
     assert _StubEmailService.calls == []

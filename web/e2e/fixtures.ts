@@ -117,6 +117,17 @@ export async function configureTestTarget(
   expect(initialized.ok()).toBe(true)
 }
 
+/**
+ * Record the product's persistent EXPLAIN ANALYZE consent for workflows whose
+ * subject is downstream of the consent gate. The dedicated analyze consent
+ * spec intentionally does not call this helper.
+ */
+export async function acceptExplainAnalyzeConsent(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('rdst.explain-analyze-consent', 'accepted')
+  })
+}
+
 export async function clearTargets(request: APIRequestContext) {
   const response = await request.get('/api/configure/targets')
   expect(response.ok()).toBe(true)

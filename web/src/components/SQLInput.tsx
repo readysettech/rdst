@@ -3,9 +3,16 @@ import { Spinner } from "@rs/ui-new/spinner";
 import { Icon } from "@rs/ui-new/icon";
 import { Text } from "@rs/ui-new/text";
 import { HStack } from "@rs/ui-new/stack";
+import { Tag } from "@rs/ui-new/tag";
 import { m, AnimatePresence } from "@rs/ui-new/motion";
 import { SQLEditor, type SchemaInfo, formatQuery } from "./SQLEditor";
 import { fetchSchema } from "../lib/api";
+import {
+  type ApiErrorEnvelope,
+  normalizeSseError,
+  normalizeUnknownError,
+} from "../lib/errorContract";
+import { ConnectionFailureActions } from "./ConnectionFailureActions";
 
 interface SQLInputProps {
   value: string;
@@ -23,11 +30,17 @@ function SchemaStatus({
   isConnected,
   tableCount,
   dialect,
+  target,
+  failure,
+  onRetry,
 }: {
   isLoading: boolean;
   isConnected: boolean;
   tableCount: number;
   dialect?: string;
+  target?: string | null;
+  failure?: ApiErrorEnvelope;
+  onRetry?: () => Promise<boolean>;
 }) {
   if (isLoading) {
     return (
@@ -78,6 +91,36 @@ function SchemaStatus({
     );
   }
 
+  if (target && failure) {
+    return (
+      <m.div
+        initial={{ opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -5 }}
+        className="space-y-2"
+      >
+        <Tag
+          size="small"
+          variant="negative"
+          modifier="ghost"
+          icon="alert"
+          iconPosition="left"
+          label="Connection failed"
+        />
+        <ConnectionFailureActions
+          failure={{
+            target: failure.target || target,
+            message: failure.message,
+            category: failure.category,
+            code: failure.code,
+          }}
+          onRetry={onRetry}
+          featureRecovery
+        />
+      </m.div>
+    );
+  }
+
   return (
     <m.div
       initial={{ opacity: 0, y: 5 }}
@@ -107,6 +150,8 @@ export function SQLInput({
     data: schemaData,
     isLoading: isLoadingSchema,
     isFetching: isFetchingSchema,
+    error: schemaError,
+    refetch: refetchSchema,
   } = useQuery({
     queryKey: ["schema", target],
     queryFn: () => fetchSchema(target || undefined),
@@ -114,12 +159,30 @@ export function SQLInput({
     enabled: !!target,
   });
 
+  const schemaPayload = schemaData as
+    | (typeof schemaData & {
+        category?: string | null;
+        code?: string | null;
+        target?: string | null;
+      })
+    | undefined;
+  const schemaFailure = schemaError
+    ? normalizeUnknownError(schemaError, "The database connection failed.")
+    : schemaData?.error
+      ? normalizeSseError({
+          code: schemaPayload?.code || schemaPayload?.category || "database_connection_failed",
+          category: schemaPayload?.category,
+          target: schemaPayload?.target || target,
+          message: schemaData.error,
+        })
+      : undefined;
+
   const schema: SchemaInfo | undefined =
     schemaData?.tables && Object.keys(schemaData.tables).length > 0
       ? { tables: schemaData.tables, dialect: schemaData.dialect }
       : undefined;
 
-  const isSchemaLoading = target && (isLoadingSchema || isFetchingSchema);
+  const isSchemaLoading = !!target && (isLoadingSchema || isFetchingSchema);
   const tableCount = schema?.tables ? Object.keys(schema.tables).length : 0;
 
   const handleFormat = showPrettify
@@ -151,7 +214,9 @@ export function SQLInput({
             key={
               isSchemaLoading
                 ? "loading"
-                : schema
+                : schemaFailure
+                  ? "failed"
+                  : schema
                   ? "connected"
                   : "disconnected"
             }
@@ -159,6 +224,12 @@ export function SQLInput({
             isConnected={!!schema}
             tableCount={tableCount}
             dialect={schema?.dialect}
+            target={target}
+            failure={schemaFailure}
+            onRetry={async () => {
+              const result = await refetchSchema();
+              return !result.error && !result.data?.error;
+            }}
           />
         </AnimatePresence>
       </div>

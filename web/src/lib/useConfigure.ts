@@ -2,10 +2,9 @@
  * Hook for Configure target management with SSE streaming for connection tests
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
-import { setEnvSecret } from './api';
 import { throwIfNotOk } from './httpError';
 import type {
   ConfigureTarget,
@@ -46,7 +45,11 @@ interface UseConfigureReturn {
   updateTarget: (name: string, data: ConfigureFormData) => Promise<void>;
   removeTarget: (name: string) => Promise<void>;
   setDefaultTarget: (name: string) => Promise<void>;
-  testConnection: (name: string) => void;
+  testConnection: (
+    name: string,
+    data?: ConfigureFormData,
+  ) => Promise<ConfigureConnectionStatus | null>;
+  cancel: () => void;
 
   // State
   state: ConfigureState;
@@ -70,6 +73,27 @@ export function useConfigure(): UseConfigureReturn {
   // must not cancel an in-flight connection test, and adding a target must
   // survive the list refresh it triggers itself.
   const controllers = useRef<ActionControllers>({});
+
+  const cancel = useCallback(() => {
+    for (const action of ['testConnection', 'addTarget']) {
+      controllers.current[action]?.abort();
+      controllers.current[action] = null;
+    }
+    setState('idle');
+    setLoading(false);
+    setConnectionTestResult(null);
+    setError(null);
+  }, []);
+
+  useEffect(
+    () => () => {
+      for (const controller of Object.values(controllers.current)) {
+        controller?.abort();
+      }
+      controllers.current = {};
+    },
+    [],
+  );
 
   // Invalidate the status query so TargetDropdown updates
   const invalidateStatus = useCallback(() => {
@@ -139,7 +163,19 @@ export function useConfigure(): UseConfigureReturn {
         user: detail.user,
         password_env: detail.password_env ?? undefined,
         tls: detail.tls ?? false,
+        tls_verify: detail.tls_verify ?? false,
+        tls_ca: detail.tls_ca ?? undefined,
         read_only: detail.read_only ?? false,
+        ssh: detail.ssh?.profile
+          ? { profile: detail.ssh.profile }
+          : detail.ssh?.host
+            ? {
+                host: detail.ssh.host,
+                port: detail.ssh.port,
+                user: detail.ssh.user,
+                key_path: detail.ssh.key_path,
+              }
+            : undefined,
         has_password: detail.has_password,
         is_default: detail.is_default,
       };
@@ -175,9 +211,12 @@ export function useConfigure(): UseConfigureReturn {
             port: data.port,
             database: data.database,
             user: data.user,
-            password_env: data.password_env,
+            password: data.password,
             tls: data.tls ?? false,
+            tls_verify: data.tls_verify ?? false,
+            tls_ca: data.tls_ca,
             read_only: data.read_only ?? false,
+            ssh: data.ssh,
           },
         },
         signal: controller.signal,
@@ -188,26 +227,13 @@ export function useConfigure(): UseConfigureReturn {
         throw new Error(result.data.message || 'Failed to add target');
       }
 
-      if (data.password && data.password_env) {
-        const secretResult = await setEnvSecret({
-          name: data.password_env,
-          value: data.password,
-          persist: true,
-        });
-        if (!secretResult.success) {
-          throw new Error(
-            secretResult.message || 'Target was added, but its password could not be saved',
-          );
-        }
-      }
-
       setState('success');
       // Refresh target list and invalidate status for header dropdown
       await listTargets();
       invalidateStatus();
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
-        return;
+        throw err;
       }
       const errorMessage = err instanceof Error ? err.message : 'Failed to add target';
       setError(errorMessage);
@@ -237,9 +263,12 @@ export function useConfigure(): UseConfigureReturn {
             port: data.port,
             database: data.database,
             user: data.user,
-            password_env: data.password_env,
+            password: data.password,
             tls: data.tls,
+            tls_verify: data.tls_verify,
+            tls_ca: data.tls_ca,
             read_only: data.read_only,
+            ssh: data.ssh,
           },
         },
         signal: controller.signal,
@@ -248,19 +277,6 @@ export function useConfigure(): UseConfigureReturn {
       if (!result.data) throw new Error('Missing response body');
       if (!result.data.success) {
         throw new Error(result.data.message || 'Failed to update target');
-      }
-
-      if (data.password && data.password_env) {
-        const secretResult = await setEnvSecret({
-          name: data.password_env,
-          value: data.password,
-          persist: true,
-        });
-        if (!secretResult.success) {
-          throw new Error(
-            secretResult.message || 'Target was updated, but its password could not be saved',
-          );
-        }
       }
 
       setState('success');
@@ -353,8 +369,9 @@ export function useConfigure(): UseConfigureReturn {
   }, [listTargets]);
 
   // Test connection (SSE streaming)
-  const testConnection = useCallback((name: string) => {
+  const testConnection = useCallback(async (name: string, data?: ConfigureFormData) => {
     const controller = beginRequest(controllers.current, 'testConnection');
+    const databaseEngine = data?.engine;
 
     setState('loading');
     setLoading(true);
@@ -362,11 +379,33 @@ export function useConfigure(): UseConfigureReturn {
     setError(null);
 
     const streamSSE = async () => {
+      let finalResult: ConfigureConnectionStatus | null = null;
       try {
-        const response = await fetch(`/api/configure/targets/${name}/test`, {
+        const response = await fetch(
+          `/api/configure/targets/${encodeURIComponent(name)}/test`,
+          {
           method: 'POST',
+          headers: data ? { 'content-type': 'application/json' } : undefined,
+          body: data
+            ? JSON.stringify({
+                target: {
+                  engine: data.engine,
+                  host: data.host,
+                  port: data.port,
+                  database: data.database,
+                  user: data.user,
+                  password: data.password,
+                  tls: data.tls ?? false,
+                  tls_verify: data.tls_verify ?? false,
+                  tls_ca: data.tls_ca,
+                  read_only: data.read_only ?? false,
+                  ssh: data.ssh,
+                },
+              })
+            : undefined,
           signal: controller.signal,
-        });
+          },
+        );
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -419,14 +458,22 @@ export function useConfigure(): UseConfigureReturn {
 
                   case 'connection_test': {
                     const isSuccess = data.status === 'success';
-                    setConnectionTestResult({
+                    finalResult = {
                       target: data.target_name,
                       connected: isSuccess,
                       error: isSuccess ? undefined : data.message,
                       engine: data.server_version,
                       code: data.code,
+                      category: data.category,
                       passwordEnv: data.password_env,
-                    });
+                      privileges: data.privileges,
+                      databaseEngine:
+                        databaseEngine ??
+                        (String(data.server_version || '').startsWith('MySQL')
+                          ? 'mysql'
+                          : 'postgresql'),
+                    };
+                    setConnectionTestResult(finalResult);
                     break;
                   }
 
@@ -457,18 +504,20 @@ export function useConfigure(): UseConfigureReturn {
         }
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') {
-          return;
+          return null;
         }
         const errorMessage = err instanceof Error ? err.message : 'Connection test failed';
         setError(errorMessage);
         setState('error');
         setLoading(false);
       } finally {
+        setLoading(false);
         endRequest(controllers.current, 'testConnection', controller);
       }
+      return finalResult;
     };
 
-    streamSSE();
+    return await streamSSE();
   }, []);
 
   return {
@@ -480,6 +529,7 @@ export function useConfigure(): UseConfigureReturn {
     removeTarget,
     setDefaultTarget,
     testConnection,
+    cancel,
 
     // State
     state,

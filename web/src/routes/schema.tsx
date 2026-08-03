@@ -18,6 +18,7 @@ import { toast } from '@rs/ui-new/use-toast'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { RoutableNotice } from '../components/RoutableNotice'
+import { ConnectionFailureActions } from '../components/ConnectionFailureActions'
 import {
   SchemaAddMetricDialog,
   SchemaAddRelationshipDialog,
@@ -44,6 +45,7 @@ import { useTrialSource } from '../lib/trialQueries'
 import { useAnthropicValidity } from '../lib/useAnthropicValidity'
 import { useSchema } from '../lib/useSchema'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
+import { isConnectionFailure } from '../lib/errorContract'
 import type {
   AddColumnData,
   AddEnumData,
@@ -100,6 +102,7 @@ function SchemaPage() {
     status,
     schema,
     error,
+    errorEnvelope,
     loading,
     checkStatus,
     loadSchema,
@@ -116,6 +119,10 @@ function SchemaPage() {
     profileSchema,
     clearError,
   } = useSchema()
+  const connectionFailure =
+    target && errorEnvelope && isConnectionFailure(errorEnvelope)
+      ? errorEnvelope
+      : null
 
   // AI Annotate needs a *working* Anthropic key. Presence isn't enough — a
   // saved key can be stale/rejected — so probe validity when a key is present.
@@ -629,6 +636,16 @@ function SchemaPage() {
                   variant="informative"
                   modifier="ghost"
                 />
+                {connectionFailure && (
+                  <Tag
+                    label="Connection failed"
+                    size="small"
+                    variant="negative"
+                    modifier="ghost"
+                    icon="alert"
+                    iconPosition="left"
+                  />
+                )}
               </HStack>
               <Text
                 level="body-small"
@@ -719,12 +736,32 @@ function SchemaPage() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-6"
         >
-          <Alert
-            variant="negative"
-            modifier="outline"
-            label={`Error: ${error}`}
-            onClick={clearError}
-          />
+          {connectionFailure && target ? (
+            <div className="rounded-xl border border-border-negative-soft bg-surface-negative-soft/20 p-4">
+              <ConnectionFailureActions
+                failure={{
+                  target: connectionFailure.target || target,
+                  message: connectionFailure.message,
+                  category: connectionFailure.category,
+                  code: connectionFailure.code,
+                }}
+                onRetry={async () => {
+                  if (currentStatus?.exists) {
+                    return (await refreshSchema(target))?.ok === true
+                  }
+                  return (await initSchema(target))?.success === true
+                }}
+                featureRecovery
+              />
+            </div>
+          ) : (
+            <Alert
+              variant="negative"
+              modifier="outline"
+              label={`Error: ${error}`}
+              onClick={clearError}
+            />
+          )}
         </m.div>
       </Show>
 

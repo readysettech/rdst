@@ -202,9 +202,9 @@ async def test_status_stream_checks_only_requested_targets(
 
     checked: list[str] = []
 
-    def fake_check(self, target_config):
-        checked.append(target_config["host"] + ":" + target_config["database"])
-        return "PostgreSQL 16"
+    def fake_check(self, target_name, target_config, *, force_fresh_tunnel=False):
+        checked.append(target_name)
+        return "PostgreSQL 16", {}
 
     with patch("features.fleet.service.FleetService._check_connection", fake_check):
         events = await collect_sse_events(
@@ -215,7 +215,7 @@ async def test_status_stream_checks_only_requested_targets(
 
     connectivity = [e["data"] for e in events if e["event"] == "connectivity"]
     assert {event["target_name"] for event in connectivity} == {"db2"}
-    assert len(checked) == 1
+    assert checked == ["db2"]
 
 
 def _seed_snapshot(home, snapshot_id: str, results: list[dict]) -> None:

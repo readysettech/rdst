@@ -18,6 +18,9 @@ class SchemaResponse(BaseModel):
     tables: dict[str, list[str]]
     dialect: Literal["postgresql", "mysql"]
     error: Optional[str] = None
+    code: Optional[str] = None
+    category: Optional[str] = None
+    target: Optional[str] = None
 
 
 @router.get("/schema")
@@ -26,12 +29,24 @@ async def get_schema(
 ) -> SchemaResponse:
     """Fetch database schema for SQL autocomplete."""
     try:
-        result = collect_all_tables_schema(target_config=guard.target_config)
+        result = collect_all_tables_schema(
+            target_config=guard.target_config,
+            target=guard.target_name,
+        )
         if not result.get("success"):
+            from shared.api.ssh_errors import connectivity_error_payload
+
+            raw_error = result.get("error", "Failed to collect schema")
+            failure = connectivity_error_payload(
+                RuntimeError(raw_error), guard.target_name, guard.target_config
+            )
             return SchemaResponse(
                 tables={},
                 dialect="postgresql",
-                error=result.get("error", "Failed to collect schema"),
+                error=failure["message"] if failure else raw_error,
+                code=failure["category"] if failure else None,
+                category=failure["category"] if failure else None,
+                target=guard.target_name,
             )
 
         engine = guard.target_config.get("engine", "postgresql")
@@ -45,10 +60,18 @@ async def get_schema(
     except HTTPException:
         raise
     except Exception as exc:
+        from shared.api.ssh_errors import connectivity_error_payload
+
+        failure = connectivity_error_payload(
+            exc, guard.target_name, guard.target_config
+        )
         return SchemaResponse(
             tables={},
             dialect="postgresql",
-            error=str(exc),
+            error=failure["message"] if failure else str(exc),
+            code=failure["category"] if failure else None,
+            category=failure["category"] if failure else None,
+            target=guard.target_name,
         )
 
 

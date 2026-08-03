@@ -1,4 +1,5 @@
 import {
+  acceptExplainAnalyzeConsent,
   clearQueryRegistry,
   configureTestTarget,
   expect,
@@ -104,13 +105,70 @@ function serviceEvents(
 }
 
 async function prepareAnalysisPage(
-  page: Parameters<typeof configureTestTarget>[0]
+  page: Parameters<typeof configureTestTarget>[0],
+  { consent = true }: { consent?: boolean } = {}
 ) {
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
+  if (consent) await acceptExplainAnalyzeConsent(page)
   await page.goto('/analyze')
   await expect(page.getByText('e2e-guard', { exact: true })).toBeVisible()
 }
+
+test('gates the first EXPLAIN ANALYZE run behind explicit consent', async ({
+  page,
+}) => {
+  setBackendFixtures({
+    analyze: [{ events: serviceEvents(successEvents) }],
+  })
+  await prepareAnalysisPage(page, { consent: false })
+
+  let analysisCalls = 0
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/analyze'
+    ) {
+      analysisCalls += 1
+    }
+  })
+
+  await fillCodeMirror(page.locator('.cm-editor'), query)
+  await page.getByRole('button', { name: 'Analyze Query' }).click()
+
+  const consentDialog = page.getByRole('dialog')
+  await expect(
+    consentDialog.getByRole('heading', { name: 'Run EXPLAIN ANALYZE?' })
+  ).toHaveCount(1)
+  await expect(
+    consentDialog.getByText(
+      'Analyze runs EXPLAIN ANALYZE, which executes your query once against the database to measure it. Cancel if this query should not be executed.',
+      { exact: true }
+    )
+  ).toBeVisible()
+  expect(analysisCalls).toBe(0)
+
+  await consentDialog.getByRole('checkbox', { name: "Don't ask again" }).check()
+  const analysisRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/analyze'
+  )
+  await consentDialog.getByRole('button', { name: 'Run analyze' }).click()
+  await analysisRequest
+
+  await expect(
+    page.getByText('Performance Summary', { exact: true })
+  ).toBeVisible()
+  expect(analysisCalls).toBe(1)
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.localStorage.getItem('rdst.explain-analyze-consent')
+      )
+    )
+    .toBe('accepted')
+})
 
 test('submits SQL and renders streamed analysis results', async ({ page }) => {
   await prepareAnalysisPage(page)

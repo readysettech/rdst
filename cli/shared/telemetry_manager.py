@@ -523,6 +523,22 @@ class TelemetryManager:
 
             cfg = create_targets_config(path=str(self._rdst_dir / "config.toml"))
             cfg.load()
+            for provider, provider_identity in cfg.get_provider_identities().items():
+                if not isinstance(provider_identity, dict):
+                    continue
+                if provider_identity.get("email"):
+                    properties.setdefault(
+                        f"provider_email_{provider}", provider_identity["email"]
+                    )
+                if provider_identity.get("name"):
+                    properties.setdefault(
+                        f"provider_name_{provider}", provider_identity["name"]
+                    )
+                if isinstance(provider_identity.get("email_verified"), bool):
+                    properties.setdefault(
+                        f"provider_email_verified_{provider}",
+                        provider_identity["email_verified"],
+                    )
             # Identity precedence: the primary [[emails]] entry (set at the gate,
             # promoted on trial verification) is the human's identity. The
             # [trial].email is only a fallback for pre-gate installs that

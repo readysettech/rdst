@@ -190,6 +190,9 @@ finally:
         process.send_signal(signal.SIGINT)
         process.communicate(timeout=5)
 
+        deadline = time.monotonic() + 5
+        while not cleaned.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert cleaned.read_text() == "cleaned"
         assert process.returncode != 0
 

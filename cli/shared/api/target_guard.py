@@ -47,10 +47,40 @@ def resolve_target_config(target: Optional[str] = None) -> Tuple[str, Dict[str, 
 
 
 def ensure_target_password(target: Optional[str] = None) -> TargetGuard:
-    """Resolve target config and enforce password availability."""
+    """Resolve target config and enforce password and SSH availability."""
     target_name, target_config = resolve_target_config(target)
 
     if resolve_password(target_config).available:
+        if target_config.get("ssh"):
+            try:
+                from shared.db_connection import resolve_connection_params
+
+                resolve_connection_params(
+                    target=target_name,
+                    target_config=target_config,
+                )
+            except Exception as exc:
+                from shared.api.ssh_errors import ssh_error_payload
+                from shared.ssh_tunnel import SshTunnelError
+
+                if isinstance(exc, SshTunnelError):
+                    payload = ssh_error_payload(
+                        exc,
+                        target_name,
+                        target_config.get("ssh"),
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "code": payload["category"],
+                            "category": payload["category"],
+                            "target": target_name,
+                            "target_name": target_name,
+                            "status": "failed",
+                            "message": payload["message"],
+                        },
+                    ) from exc
+                raise
         target_engine = target_config.get("engine", "unknown") or "unknown"
         return TargetGuard(target_name, target_config, target_engine)
 

@@ -133,7 +133,7 @@ class TestDiscoverNeonProjects:
         assert member.port == 5432
         assert member.database == "appdb"
         assert member.user == "app_owner"
-        assert member.password_env == "NEON_WISPY_FROST_12345678_PASSWORD"
+        assert member.password_env == "RDST_NEON_WISPY_FROST_12345678_PASSWORD"
         assert member.group is None
         assert member.region == "aws-us-east-2"
         assert member.instance_class == "neon-0.25-2cu"

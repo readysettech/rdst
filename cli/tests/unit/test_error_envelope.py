@@ -6,11 +6,36 @@ unexpected server error must never echo ``str(exc)`` as the user-facing message.
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient, Response
 from pydantic import BaseModel
-from starlette.testclient import TestClient
 
 from shared.api.app import create_app, register_error_handlers
+
+
+class _Client:
+    def __init__(self, app: FastAPI):
+        self.app = app
+
+    def request(self, method: str, path: str, **kwargs) -> Response:
+        async def send() -> Response:
+            async with AsyncClient(
+                transport=ASGITransport(
+                    app=self.app, raise_app_exceptions=False
+                ),
+                base_url="http://testserver",
+            ) as client:
+                return await client.request(method, path, **kwargs)
+
+        return asyncio.run(send())
+
+    def get(self, path: str, **kwargs) -> Response:
+        return self.request("GET", path, **kwargs)
+
+    def post(self, path: str, **kwargs) -> Response:
+        return self.request("POST", path, **kwargs)
 
 
 def _app_with_handlers() -> FastAPI:
@@ -39,7 +64,7 @@ def _app_with_handlers() -> FastAPI:
 
 
 def test_unhandled_exception_returns_envelope_without_leaking_str_e() -> None:
-    client = TestClient(_app_with_handlers(), raise_server_exceptions=False)
+    client = _Client(_app_with_handlers())
     response = client.get("/boom")
 
     assert response.status_code == 500
@@ -55,7 +80,7 @@ def test_unhandled_exception_returns_envelope_without_leaking_str_e() -> None:
 
 
 def test_http_exception_maps_to_envelope() -> None:
-    client = TestClient(_app_with_handlers(), raise_server_exceptions=False)
+    client = _Client(_app_with_handlers())
     response = client.get("/gone")
 
     assert response.status_code == 404
@@ -67,7 +92,7 @@ def test_http_exception_maps_to_envelope() -> None:
 
 
 def test_validation_error_maps_to_envelope() -> None:
-    client = TestClient(_app_with_handlers(), raise_server_exceptions=False)
+    client = _Client(_app_with_handlers())
     response = client.post("/need-body", json={})
 
     assert response.status_code == 422
@@ -79,7 +104,7 @@ def test_validation_error_maps_to_envelope() -> None:
 
 
 def test_create_app_wires_the_envelope_for_unknown_api_routes() -> None:
-    client = TestClient(create_app(), raise_server_exceptions=False)
+    client = _Client(create_app())
     response = client.get("/api/definitely-not-a-real-route")
 
     assert response.status_code == 404

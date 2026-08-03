@@ -116,6 +116,10 @@ export interface DiscoveredFleetMember {
   instance_class: string | null
   region: string | null
   already_exists: boolean
+  publicly_accessible?: boolean | null
+  vpc_id?: string | null
+  password_secret_arn?: string | null
+  password_secret_key?: string | null
 }
 
 // Regions and profile belong to AWS alone; the account providers discover
@@ -557,7 +561,9 @@ export async function updateFleetTargetGroup(
 export async function updateFleetTargetCredentials(
   member: FleetMember,
   user: string,
-  passwordEnv: string
+  password: string,
+  database: string,
+  ssh?: FleetMember['ssh']
 ): Promise<void> {
   const response = await fetch(
     `/api/configure/targets/${encodeURIComponent(member.name)}`,
@@ -569,11 +575,14 @@ export async function updateFleetTargetCredentials(
           engine: member.engine,
           host: member.host,
           port: member.port,
-          database: member.database,
+          database,
           user,
-          password_env: passwordEnv,
+          ...(password ? { password } : {}),
           tls: member.tls ?? false,
+          tls_verify: member.tls_verify ?? false,
+          tls_ca: member.tls_ca ?? undefined,
           read_only: member.read_only ?? false,
+          ...(ssh ? { ssh } : {}),
         },
       }),
     }
@@ -630,7 +639,10 @@ async function consumeFleetStream<E = FleetEvent>(
 // ---------------------------------------------------------------------------
 
 interface UseFleetStatusReturn {
-  check: (group?: string, targets?: string[]) => Promise<void>
+  check: (
+    group?: string,
+    targets?: string[]
+  ) => Promise<Record<string, FleetConnectivityEvent>>
   state: FleetStreamState
   results: Record<string, FleetConnectivityEvent>
   error: string | undefined
@@ -667,6 +679,7 @@ export function useFleetStatus(): UseFleetStatusReturn {
       )
     })
     setError(undefined)
+    const completed: Record<string, FleetConnectivityEvent> = {}
 
     try {
       const params = new URLSearchParams()
@@ -678,16 +691,23 @@ export function useFleetStatus(): UseFleetStatusReturn {
       })
       await consumeFleetStream(response, (event) => {
         if (event.type === 'connectivity') {
-          setResults((prev) => ({ ...prev, [event.target_name]: event }))
+          const connectivityEvent = event as FleetConnectivityEvent
+          completed[connectivityEvent.target_name] = connectivityEvent
+          setResults((prev) => ({
+            ...prev,
+            [connectivityEvent.target_name]: connectivityEvent,
+          }))
         } else if (event.type === 'error') {
           setError(event.message)
         }
       })
       setState((prev) => (prev === 'running' ? 'complete' : prev))
+      return completed
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return
+      if (err instanceof Error && err.name === 'AbortError') return completed
       setError(err instanceof Error ? err.message : 'An error occurred')
       setState('error')
+      return completed
     } finally {
       abortControllerRef.current = null
     }

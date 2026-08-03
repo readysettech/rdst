@@ -248,7 +248,7 @@ def tmp_rdst_home(monkeypatch, tmp_path: Path) -> Path:
 
 @pytest.fixture
 def run_blocking_inline(monkeypatch):
-    """Run ``asyncio.to_thread`` work on the caller's event loop.
+    """Run mocked executor work on the caller's event loop.
 
     Mocked blocking boundaries have nothing real to block on, and a worker
     thread makes the interleaving non-deterministic. Modules that mock those
@@ -260,3 +260,19 @@ def run_blocking_inline(monkeypatch):
         return func(*args, **kwargs)
 
     monkeypatch.setattr(asyncio, "to_thread", _inline)
+
+
+@pytest.fixture
+def run_executor_inline(monkeypatch):
+    """Run mocked ``run_in_executor`` work on the caller's event loop."""
+    import asyncio
+
+    def _executor_inline(loop, _executor, func, *args):
+        future = loop.create_future()
+        try:
+            future.set_result(func(*args))
+        except BaseException as exc:
+            future.set_exception(exc)
+        return future
+
+    monkeypatch.setattr(asyncio.BaseEventLoop, "run_in_executor", _executor_inline)

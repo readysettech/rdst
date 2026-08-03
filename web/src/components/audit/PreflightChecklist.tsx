@@ -17,6 +17,7 @@ import { invalidateTrialRelatedQueries } from '../../lib/trialQueries'
 import type { AiGate } from '../../lib/useAiGate'
 import type { FleetMember } from '../../types/fleet'
 import { AwsConnectionPanel } from '../aws/AwsConnectionPanel'
+import { ConnectionFailureActions } from '../ConnectionFailureActions'
 import { EnvSecretsDialog } from '../EnvSecretsDialog'
 import { TrialRegistrationDialog } from '../TrialRegistrationDialog'
 
@@ -64,16 +65,20 @@ export function PreflightChecklist({
   passwordRequirements,
   anthropicRequirement,
   keyringAvailable,
+  awsProfile,
+  onAwsProfileChange,
 }: {
   result: AuditPreflightResult
   busy: boolean
-  onRecheck: () => void
+  onRecheck: () => Promise<AuditPreflightResult | null>
   liveCapture: boolean
   aiGate: AiPreflightGate
   members: FleetMember[]
   passwordRequirements: EnvRequirement[]
   anthropicRequirement?: EnvRequirement
   keyringAvailable: boolean
+  awsProfile: string
+  onAwsProfileChange: (profile: string) => void
 }) {
   const queryClient = useQueryClient()
   const [showTrialDialog, setShowTrialDialog] = useState(false)
@@ -87,8 +92,6 @@ export function PreflightChecklist({
   // the env probe reported, or synthesize an equivalent one from the member's
   // configured password_env so a target that already has a password set can
   // still be updated.
-  const hasPassword = (targetName: string) =>
-    members.find((member) => member.name === targetName)?.has_password ?? false
   const passwordRequirementFor = (
     targetName: string,
     passwordEnv?: string | null
@@ -111,8 +114,6 @@ export function PreflightChecklist({
       source: 'missing',
     }
   }
-  const passwordButtonLabel = (targetName: string) =>
-    hasPassword(targetName) ? 'Update password' : 'Set password'
   const dockerAvailable =
     rows.length > 0 && rows.every((row) => row.docker_available)
   const aiReady = aiGate.status === 'ready' || aiGate.status === 'unverified'
@@ -144,7 +145,7 @@ export function PreflightChecklist({
             size="small"
             label="Re-check"
             loading={busy}
-            onClick={onRecheck}
+            onClick={() => void onRecheck()}
           />
         </HStack>
         {rows.map((row) => (
@@ -164,7 +165,7 @@ export function PreflightChecklist({
                 <Check
                   ok={!liveCapture || row.query_stats === 'ok'}
                   label="Query statistics"
-                  detail={row.detail}
+                  detail={row.query_stats === 'error' ? undefined : row.detail}
                 />
               </div>
               {(row.query_stats === 'missing' || row.query_stats === 'error') &&
@@ -182,32 +183,39 @@ export function PreflightChecklist({
                     </pre>
                   </div>
                 )}
-              {row.query_stats === 'error' &&
-                passwordRequirementFor(row.target) && (
-                  <div className="mt-1 pl-5">
-                    <Text
-                      level="caption"
-                      className="text-content-layout-3 block mb-1.5"
-                    >
-                      A connection failure is often a wrong or expired password.
-                    </Text>
-                    <Button
-                      variant="primary"
-                      modifier="solid"
-                      size="small"
-                      icon="key"
-                      iconPosition="left"
-                      label={passwordButtonLabel(row.target)}
-                      onClick={() => setPasswordTarget(row.target)}
-                    />
-                  </div>
-                )}
+              {row.query_stats === 'error' && (
+                <div className="mt-1 pl-5">
+                  <ConnectionFailureActions
+                    failure={{
+                      target: row.target,
+                      message: row.detail,
+                      category: row.category,
+                    }}
+                    passwordRequired={
+                      !row.category && !!passwordRequirementFor(row.target)
+                    }
+                    onSetPassword={
+                      passwordRequirementFor(row.target)
+                        ? () => setPasswordTarget(row.target)
+                        : undefined
+                    }
+                    onRetry={async () => {
+                      const checked = await onRecheck()
+                      return (
+                        !!checked &&
+                        !checked.errors[row.target] &&
+                        checked.requirements[row.target]?.query_stats !==
+                          'error'
+                      )
+                    }}
+                  />
+                </div>
+              )}
             </VStack>
           </div>
         ))}
         {Object.entries(result.errors).map(([target, error]) => {
           const targetName = error.target ?? target
-          const passwordRequired = error.code === 'TARGET_PASSWORD_REQUIRED'
           const requirement = passwordRequirementFor(
             targetName,
             error.passwordEnv
@@ -220,36 +228,26 @@ export function PreflightChecklist({
               <Text level="label-small" className="text-content-layout-1">
                 Database · {target}
               </Text>
-              <Check
-                ok={false}
-                label="Database reachable"
-                detail={
-                  passwordRequired
-                    ? `Enter the password for '${targetName}' again.`
-                    : error.message
-                }
-              />
-              {requirement && (
-                <div className="mt-2 pl-5">
-                  {!passwordRequired && (
-                    <Text
-                      level="caption"
-                      className="text-content-layout-3 block mb-1.5"
-                    >
-                      A connection failure is often a wrong or expired password.
-                    </Text>
-                  )}
-                  <Button
-                    variant="primary"
-                    modifier="solid"
-                    size="small"
-                    icon="key"
-                    iconPosition="left"
-                    label={passwordButtonLabel(targetName)}
-                    onClick={() => setPasswordTarget(targetName)}
-                  />
-                </div>
-              )}
+              <Check ok={false} label="Database reachable" />
+              <div className="mt-2 pl-5">
+                <ConnectionFailureActions
+                  failure={{
+                    target: targetName,
+                    message: error.message,
+                    code: error.code,
+                  }}
+                  passwordRequired={!!requirement}
+                    onSetPassword={
+                      requirement
+                        ? () => setPasswordTarget(targetName)
+                        : undefined
+                    }
+                  onRetry={async () => {
+                    const checked = await onRecheck()
+                    return !!checked && !checked.errors[targetName]
+                  }}
+                />
+              </div>
             </div>
           )
         })}
@@ -353,7 +351,10 @@ export function PreflightChecklist({
                 result.aws.error ||
                 (result.aws.mismatchedTargets?.length ?? 0) > 0) && (
                 <div>
-                  <AwsConnectionPanel />
+                  <AwsConnectionPanel
+                    profile={awsProfile}
+                    onProfileChange={onAwsProfileChange}
+                  />
                 </div>
               )}
               {(result.aws.mismatchedTargets?.length ?? 0) > 0 && (

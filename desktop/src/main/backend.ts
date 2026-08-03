@@ -76,6 +76,16 @@ export interface StartBackendOptions {
   port?: number
 }
 
+export function backendEnvironment(
+  base: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  return {
+    ...base,
+    PATH: backendExecutablePath(base.PATH),
+    RDST_DESKTOP: '1',
+  }
+}
+
 function backendBinaryName(platform: NodeJS.Platform): string {
   return platform === 'win32' ? `${BACKEND_NAME}.exe` : BACKEND_NAME
 }
@@ -261,10 +271,7 @@ export async function startBackend(
     ['web', '--ui', 'none', '--host', host, '--port', String(port)],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        PATH: backendExecutablePath(),
-      },
+      env: backendEnvironment(),
     }
   )
 

@@ -157,6 +157,24 @@ rdst configure default --target prod-db
 
 ```
 
+For a private target, add an SSH jump host in the configure wizard. For
+non-interactive setup, use `--ssh-host`, `--ssh-port`, `--ssh-user`, and
+optionally `--ssh-key`.
+
+### rdst tunnel
+List or close tunnels held by `rdst web`, or test a target's SSH connection.
+
+```bash
+rdst tunnel list
+rdst tunnel test prod-db
+rdst tunnel close prod-db
+rdst tunnel close --all
+```
+
+Without `rdst web`, CLI tunnels last only for the command using them. The tunnel
+commands check port 8787 by default; set `RDST_WEB_PORT` when the server uses a
+different port.
+
 ### rdst analyze
 Analyze a SQL query for performance optimization.
 

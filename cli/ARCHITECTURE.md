@@ -74,6 +74,7 @@ Avoid:
 Current feature-owned domains:
 
 - `agent`
+- `allowlist`
 - `analyze`
 - `ask`
 - `audit`
@@ -95,12 +96,14 @@ Current feature-owned domains:
 - `top`
 - `trial`
 - `update`
+- `tunnel`
 
 Each slice should be readable from its `models.py` and `service.py` first. That is the feature contract.
 
 ### Feature map
 
 - `agent`: agent runtime and MCP-facing agent behavior
+- `allowlist`: provider IP-allowlist context and explicit one-click write-back (Supabase, Neon, DigitalOcean)
 - `analyze`: query analysis, explain flows, rewrite evaluation, analysis rendering
 - `ask`: natural-language-to-SQL, Ask engine, validation, Ask prompts, Ask debug tooling
 - `audit`: audit workflows, capture, storage, scoring, audit prompts
@@ -122,6 +125,7 @@ Each slice should be readable from its `models.py` and `service.py` first. That 
 - `top`: live/top query monitoring, realtime display, top command sets
 - `trial`: trial registration and trial status flows
 - `update`: installer-owned version resolution and immutable generation activation
+- `tunnel`: SSH tunnel status, test, and close surfaces over the shared tunnel manager
 
 ### Shared infrastructure
 

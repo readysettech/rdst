@@ -18,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { TargetLockNotice } from '../components'
+import { ConnectionFailureActions } from '../components/ConnectionFailureActions'
 import {
   hasParameters,
   ParameterDialog,
@@ -30,6 +31,7 @@ import { useCacheAction } from '../lib/useCacheAction'
 import { useQueryRegistry } from '../lib/useQueryRegistry'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 import { useTop } from '../lib/useTop'
+import { isConnectionFailure } from '../lib/errorContract'
 import type {
   TopDbLimitWarningEventData,
   TopMode,
@@ -207,6 +209,7 @@ export function TopPage() {
     newlySaved,
     savedHashes,
     error,
+    errorEnvelope,
   } = useTop(target)
 
   // Persist the run's filters on the same signal the results are cached
@@ -471,9 +474,25 @@ export function TopPage() {
 
       <Show when={error !== null}>
         <div className="bg-surface-negative-soft rounded-xl border border-border-negative-soft p-4">
-          <Text level="body-small" className="text-content-negative-soft">
-            Error: {error}
-          </Text>
+          {target && errorEnvelope && isConnectionFailure(errorEnvelope) ? (
+            <ConnectionFailureActions
+              failure={{
+                target: errorEnvelope.target || target,
+                message: errorEnvelope.message,
+                category: errorEnvelope.category,
+                code: errorEnvelope.code,
+              }}
+              onRetry={async () => {
+                handleStart()
+                return true
+              }}
+              featureRecovery
+            />
+          ) : (
+            <Text level="body-small" className="text-content-negative-soft">
+              Error: {error}
+            </Text>
+          )}
         </div>
       </Show>
 

@@ -16,6 +16,10 @@ from features.cache.events import (
 from features.cache.models import CacheInput, CacheOptions
 from shared.service_events import ErrorEvent, ProgressEvent
 
+pytestmark = pytest.mark.usefixtures(
+    "run_blocking_inline", "run_executor_inline"
+)
+
 
 # ============================================================================
 # Cycle 1: Types

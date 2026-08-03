@@ -38,8 +38,13 @@ class FleetMember:
     target_type: str = "database"
     primary_target: str | None = None
     tls: bool = False
+    tls_verify: bool = False
+    tls_ca: str | None = None
     read_only: bool = False
     password_secret_arn: str | None = None
+    password_secret_key: str | None = None
+    publicly_accessible: bool | None = None
+    vpc_id: str | None = None
 
     def to_target_config(self) -> dict[str, Any]:
         target_config: dict[str, Any] = {
@@ -50,8 +55,11 @@ class FleetMember:
             "user": self.user,
             "password_env": self.password_env,
             "tls": self.tls,
+            "tls_verify": self.tls_verify,
             "read_only": self.read_only,
         }
+        if self.tls_ca:
+            target_config["tls_ca"] = self.tls_ca
         if self.target_type != "database":
             target_config["target_type"] = self.target_type
         if self.group:
@@ -66,6 +74,11 @@ class FleetMember:
             target_config["primary_target"] = self.primary_target
         if self.password_secret_arn:
             target_config["password_secret_arn"] = self.password_secret_arn
+            target_config["password_secret_key"] = self.password_secret_key or "password"
+        if self.publicly_accessible is not None:
+            target_config["publicly_accessible"] = self.publicly_accessible
+        if self.vpc_id:
+            target_config["vpc_id"] = self.vpc_id
         return target_config
 
 

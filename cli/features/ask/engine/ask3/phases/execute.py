@@ -60,9 +60,13 @@ def execute_query(
             db_type = ctx.db_type or ctx.target_config.get('engine', 'postgresql').lower()
 
             if db_type == DbType.POSTGRESQL or 'postgres' in db_type:
-                result = _execute_postgres(ctx.sql, ctx.target_config, ctx.timeout_seconds)
+                result = _execute_postgres(
+                    ctx.sql, ctx.target_config, ctx.timeout_seconds, ctx.target
+                )
             elif db_type == DbType.MYSQL or 'mysql' in db_type:
-                result = _execute_mysql(ctx.sql, ctx.target_config, ctx.timeout_seconds)
+                result = _execute_mysql(
+                    ctx.sql, ctx.target_config, ctx.timeout_seconds, ctx.target
+                )
             else:
                 ctx.mark_error(f"Unsupported database type: {db_type}")
                 presenter.error(f"Unsupported database type: {db_type}")
@@ -110,13 +114,22 @@ def execute_query(
     return ctx
 
 
-def _execute_postgres(sql: str, config: Dict[str, Any], timeout_seconds: int) -> Dict[str, Any]:
+def _execute_postgres(
+    sql: str,
+    config: Dict[str, Any],
+    timeout_seconds: int,
+    target: str = None,
+) -> Dict[str, Any]:
     """Execute query against PostgreSQL."""
     try:
         import psycopg2
-        from shared.db_connection import resolve_connection_params
+        from shared.db_connection import (
+            create_mysql_connection_from_params,
+            postgres_connection_kwargs,
+            resolve_connection_params,
+        )
 
-        params = resolve_connection_params(target_config=config)
+        params = resolve_connection_params(target=target, target_config=config)
 
         if not all([params['host'], params['user'], params['database']]):
             return {
@@ -127,15 +140,7 @@ def _execute_postgres(sql: str, config: Dict[str, Any], timeout_seconds: int) ->
             }
 
         # Connect
-        conn = psycopg2.connect(
-            host=params['host'],
-            port=params['port'],
-            user=params['user'],
-            password=params['password'],
-            database=params['database'],
-            connect_timeout=10,
-            sslmode=params['sslmode']
-        )
+        conn = psycopg2.connect(**postgres_connection_kwargs(params))
 
         try:
             with conn.cursor() as cursor:
@@ -177,13 +182,21 @@ def _execute_postgres(sql: str, config: Dict[str, Any], timeout_seconds: int) ->
         }
 
 
-def _execute_mysql(sql: str, config: Dict[str, Any], timeout_seconds: int) -> Dict[str, Any]:
+def _execute_mysql(
+    sql: str,
+    config: Dict[str, Any],
+    timeout_seconds: int,
+    target: str = None,
+) -> Dict[str, Any]:
     """Execute query against MySQL."""
     try:
         import pymysql
-        from shared.db_connection import resolve_connection_params
+        from shared.db_connection import (
+            create_mysql_connection_from_params,
+            resolve_connection_params,
+        )
 
-        params = resolve_connection_params(target_config=config)
+        params = resolve_connection_params(target=target, target_config=config)
 
         if not all([params['host'], params['user'], params['database']]):
             return {
@@ -194,15 +207,7 @@ def _execute_mysql(sql: str, config: Dict[str, Any], timeout_seconds: int) -> Di
             }
 
         # Connect
-        conn = pymysql.connect(
-            host=params['host'],
-            port=params['port'],
-            user=params['user'],
-            password=params['password'],
-            database=params['database'],
-            connect_timeout=10,
-            ssl={'ssl': {}} if params['tls'] else None
-        )
+        conn = create_mysql_connection_from_params(params)
 
         try:
             with conn.cursor() as cursor:

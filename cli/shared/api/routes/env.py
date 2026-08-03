@@ -88,6 +88,7 @@ async def set_env_secret(request: Request, body: EnvSetRequest) -> EnvSetRespons
             message="This secret cannot be set here.",
         )
 
+    service.bind_missing_target_password(body.name)
     result = service.secret_store.set_secret(
         name=body.name,
         value=body.value.get_secret_value(),

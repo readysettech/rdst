@@ -27,6 +27,11 @@ from shared.config import (
     normalize_db_type,
     parse_connection_string,
 )
+from shared.db_connection import (
+    create_mysql_connection_from_params,
+    postgres_connection_kwargs,
+    resolve_connection_params,
+)
 from shared.ui import KeyValueTable, MessagePanel, SimpleTree, get_console
 
 # Local cloud agent modules (will be used by future implementations)
@@ -100,6 +105,15 @@ class RdstCLI:
         except Exception as e:
             return RdstResult(False, f"configure failed: {e}")
 
+    def tunnel(self, subcommand: str, **kwargs) -> RdstResult:
+        """Inspect and manage in-process SSH tunnels."""
+        from features.tunnel.cli.command import TunnelCommand
+
+        return TunnelCommand(console=self.client._console).execute(
+            subcommand,
+            **kwargs,
+        )
+
     def _test_connection(self, cfg: TargetsConfig, kwargs: dict) -> RdstResult:
         """Test database connection for a target. Returns JSON-formatted result."""
         import json
@@ -129,7 +143,6 @@ class RdstCLI:
         engine = target_config.get("engine", "").lower()
         host = target_config.get("host", "localhost")
         port = target_config.get("port")
-        user = target_config.get("user", "postgres")
         database = target_config.get("database", "postgres")
         from shared.password_resolver import resolve_password_value
         password = resolve_password_value(target_config)
@@ -144,16 +157,19 @@ class RdstCLI:
 
         # Test connection based on engine
         try:
+            params = resolve_connection_params(
+                target=target_name,
+                target_config=target_config,
+            )
             if engine == "postgresql":
                 import psycopg2
 
                 conn = psycopg2.connect(
-                    host=host,
-                    port=port or 5432,
-                    user=user,
-                    password=password,
-                    database=database,
-                    connect_timeout=10,
+                    **postgres_connection_kwargs(
+                        params,
+                        user=params["user"] or "postgres",
+                        database=params["database"] or "postgres",
+                    )
                 )
                 cursor = conn.cursor()
                 cursor.execute("SELECT version()")
@@ -175,13 +191,10 @@ class RdstCLI:
             elif engine == "mysql":
                 import pymysql
 
-                conn = pymysql.connect(
-                    host=host,
-                    port=port or 3306,
-                    user=user,
-                    password=password,
-                    database=database,
-                    connect_timeout=10,
+                conn = create_mysql_connection_from_params(
+                    params,
+                    user=params["user"] or "postgres",
+                    database=params["database"] or "postgres",
                 )
                 cursor = conn.cursor()
                 cursor.execute("SELECT version()")

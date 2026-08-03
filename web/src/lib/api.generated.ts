@@ -165,6 +165,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/allowlist/add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Allowlist Ip
+         * @description On an explicit confirmed click, read-merge-write the provider allowlist.
+         */
+        post: operations["add_allowlist_ip_api_allowlist_add_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/allowlist/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Allowlist Context
+         * @description Fetch public IP and read provider state. This route never writes.
+         */
+        get: operations["get_allowlist_context_api_allowlist_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analyze": {
         parameters: {
             query?: never;
@@ -624,7 +664,7 @@ export interface paths {
         put?: never;
         /**
          * Test Connection
-         * @description Test connection to a target (SSE stream).
+         * @description Test a saved target or the current unsaved form values (SSE stream).
          */
         post: operations["test_connection_api_configure_targets__name__test_post"];
         delete?: never;
@@ -2781,6 +2821,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tunnel/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close Tunnel
+         * @description Close one target tunnel or every tunnel in this process.
+         */
+        post: operations["close_tunnel_api_tunnel_close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tunnel/ssh-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ssh Keys
+         * @description Return local SSH agent, key-file, and ssh-config authentication options.
+         */
+        get: operations["ssh_keys_api_tunnel_ssh_keys_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tunnel/ssh-keys/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Ssh Key
+         * @description Copy a local private key into ~/.ssh without changing the source file.
+         */
+        post: operations["import_ssh_key_api_tunnel_ssh_keys_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tunnel/ssh-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ssh Profiles
+         * @description Return reusable SSH jump-host profiles without resolving key material.
+         */
+        get: operations["ssh_profiles_api_tunnel_ssh_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tunnel/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tunnel Status
+         * @description Return the tunnels managed by this backend process.
+         */
+        get: operations["tunnel_status_api_tunnel_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tunnel/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Tunnel
+         * @description Open a target's tunnel and probe its database through the local endpoint.
+         */
+        post: operations["test_tunnel_api_tunnel_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -3075,6 +3235,45 @@ export interface components {
             /** Success */
             success: boolean;
         };
+        /** AllowlistAddRequest */
+        AllowlistAddRequest: {
+            /** Expected Ip */
+            expected_ip?: string | null;
+            /** Target */
+            target: string;
+        };
+        /** AllowlistAddResponse */
+        AllowlistAddResponse: {
+            /** Added Ip */
+            added_ip?: string | null;
+            /** Category */
+            category: string;
+            /** Credential Method */
+            credential_method?: string | null;
+            /** Message */
+            message: string;
+            /** Ok */
+            ok: boolean;
+            /** Verified */
+            verified?: boolean | null;
+        };
+        /** AllowlistContextResponse */
+        AllowlistContextResponse: {
+            /** Already Allowed */
+            already_allowed?: boolean | null;
+            /** Current Ip */
+            current_ip: string;
+            /** Entry Count */
+            entry_count?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Guidance */
+            guidance: string;
+            /** Provider */
+            provider: string;
+            /** Signed In */
+            signed_in: boolean;
+        };
         /** AnalysisMetadata */
         AnalysisMetadata: {
             /** Analysis Id */
@@ -3166,10 +3365,7 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /**
-         * AnnotateCompleteEvent
-         * @description Annotation process completed, possibly with individual table failures.
-         */
+        /** AnnotateCompleteEvent */
         AnnotateCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -3187,10 +3383,7 @@ export interface components {
              */
             type: "annotate_complete";
         };
-        /**
-         * AnnotateErrorEvent
-         * @description Annotation process encountered an error.
-         */
+        /** AnnotateErrorEvent */
         AnnotateErrorEvent: {
             /** Message */
             message: string;
@@ -3200,10 +3393,7 @@ export interface components {
              */
             type: "annotate_error";
         };
-        /**
-         * AnnotateProgressEvent
-         * @description Progress update during annotation.
-         */
+        /** AnnotateProgressEvent */
         AnnotateProgressEvent: {
             /** Message */
             message: string;
@@ -3231,10 +3421,7 @@ export interface components {
             /** Target */
             target: string;
         };
-        /**
-         * AnnotateStartedEvent
-         * @description Annotation process started.
-         */
+        /** AnnotateStartedEvent */
         AnnotateStartedEvent: {
             /**
              * Completed Tables
@@ -3251,10 +3438,7 @@ export interface components {
              */
             type: "annotate_started";
         };
-        /**
-         * AnnotateTableCompleteEvent
-         * @description A table has been annotated.
-         */
+        /** AnnotateTableCompleteEvent */
         AnnotateTableCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -3294,10 +3478,7 @@ export interface components {
             /** Valid */
             valid: boolean;
         };
-        /**
-         * AskClarificationNeededEvent
-         * @description Clarification needed from the user.
-         */
+        /** AskClarificationNeededEvent */
         AskClarificationNeededEvent: {
             /** Interpretations */
             interpretations: components["schemas"]["AskInterpretation"][];
@@ -3311,10 +3492,7 @@ export interface components {
              */
             type: "clarification_needed";
         };
-        /**
-         * AskClarificationQuestion
-         * @description A clarification question for the user.
-         */
+        /** AskClarificationQuestion */
         AskClarificationQuestion: {
             /** Id */
             id: string;
@@ -3323,11 +3501,18 @@ export interface components {
             /** Question */
             question: string;
         };
-        /**
-         * AskErrorEvent
-         * @description Ask encountered an error.
-         */
+        /** AskErrorEvent */
         AskErrorEvent: {
+            /**
+             * Category
+             * @default null
+             */
+            category?: string | null;
+            /**
+             * Code
+             * @default null
+             */
+            code?: string | null;
             /** Message */
             message: string;
             /**
@@ -3335,6 +3520,11 @@ export interface components {
              * @default null
              */
             phase?: components["schemas"]["AskPhase"] | string | null;
+            /**
+             * Target
+             * @default null
+             */
+            target?: string | null;
             /**
              * Type
              * @constant
@@ -3369,10 +3559,7 @@ export interface components {
             /** Items */
             items: components["schemas"]["AskHistoryItem"][];
         };
-        /**
-         * AskInterpretation
-         * @description A possible interpretation of the user's question.
-         */
+        /** AskInterpretation */
         AskInterpretation: {
             /** Assumptions */
             assumptions: string[];
@@ -3421,10 +3608,7 @@ export interface components {
              */
             timeout?: number;
         };
-        /**
-         * AskResultEvent
-         * @description Ask completed with results.
-         */
+        /** AskResultEvent */
         AskResultEvent: {
             /** Columns */
             columns: string[];
@@ -3463,10 +3647,7 @@ export interface components {
              */
             type: "result";
         };
-        /**
-         * AskSchemaLoadedEvent
-         * @description Schema has been loaded.
-         */
+        /** AskSchemaLoadedEvent */
         AskSchemaLoadedEvent: {
             /** Source */
             source: string;
@@ -3485,10 +3666,7 @@ export interface components {
              */
             type: "schema_loaded";
         };
-        /**
-         * AskSqlGeneratedEvent
-         * @description SQL has been generated.
-         */
+        /** AskSqlGeneratedEvent */
         AskSqlGeneratedEvent: {
             /**
              * Explanation
@@ -3503,10 +3681,7 @@ export interface components {
              */
             type: "sql_generated";
         };
-        /**
-         * AskStatusEvent
-         * @description Status update during ask execution.
-         */
+        /** AskStatusEvent */
         AskStatusEvent: {
             /** Message */
             message: string;
@@ -3629,6 +3804,8 @@ export interface components {
         };
         /** AuditRequirementsResponse */
         AuditRequirementsResponse: {
+            /** Category */
+            category?: string | null;
             /**
              * Detail
              * @default
@@ -3923,13 +4100,7 @@ export interface components {
             target?: string | null;
         };
         BootstrapEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"];
-        /**
-         * BootstrapNeedsKeyEvent
-         * @description The run reached the annotate gate without a usable Anthropic key.
-         *
-         *     The event name doubles as the run registry's gating signal: the run's
-         *     status parks on needs_key until the next event arrives.
-         */
+        /** BootstrapNeedsKeyEvent */
         BootstrapNeedsKeyEvent: {
             /** Message */
             message: string;
@@ -3946,14 +4117,7 @@ export interface components {
             /** Status */
             status: string;
         };
-        /**
-         * BootstrapStageEvent
-         * @description Progress of one bootstrap stage.
-         *
-         *     status is started | progress | done | failed | skipped. Child-service
-         *     events surface as status="progress" with the child's payload in detail,
-         *     so the stream stays one flat, typed union.
-         */
+        /** BootstrapStageEvent */
         BootstrapStageEvent: {
             /**
              * Detail
@@ -4006,10 +4170,7 @@ export interface components {
             /** Parent */
             parent: string | null;
         };
-        /**
-         * CacheRunCompleteEvent
-         * @description Performance comparison result (origin vs cache).
-         */
+        /** CacheRunCompleteEvent */
         CacheRunCompleteEvent: {
             /**
              * Cache Iterations
@@ -4182,14 +4343,7 @@ export interface components {
              */
             type: "tool_call";
         };
-        /**
-         * ChatToolResultEvent
-         * @description Result of one tool execution.
-         *
-         *     For query_database, `data` carries sql/columns/rows/row_count/
-         *     execution_time_ms/truncated/query_hash/query_tag; for get_schema it
-         *     carries tables/source.
-         */
+        /** ChatToolResultEvent */
         ChatToolResultEvent: {
             /** Content */
             content: string;
@@ -4220,6 +4374,23 @@ export interface components {
             missing: string[];
             /** Success */
             success: boolean;
+        };
+        /** CloseTunnelRequest */
+        CloseTunnelRequest: {
+            /**
+             * All
+             * @default false
+             */
+            all?: boolean;
+            /** Target */
+            target?: string | null;
+        };
+        /** CloseTunnelResponse */
+        CloseTunnelResponse: {
+            /** Message */
+            message: string;
+            /** Ok */
+            ok: boolean;
         };
         /** CompleteEvent */
         CompleteEvent: {
@@ -4407,16 +4578,7 @@ export interface components {
             /** Success */
             success: boolean;
         };
-        /**
-         * ErrorEvent
-         * @description Error event for service workflows.
-         *
-         *     ``code`` and ``detail`` mirror the shared HTTP error envelope
-         *     (``shared.api.app._error_envelope``) so an SSE failure carries the same
-         *     {code, message, detail} shape the client normalizes in ``lib/sse.ts``.
-         *     Both stay optional so existing producers that only set ``message`` keep
-         *     working; the client derives a code when one is absent.
-         */
+        /** ErrorEvent */
         ErrorEvent: {
             /**
              * Code
@@ -4592,6 +4754,11 @@ export interface components {
         /** FleetConnectivityEvent */
         FleetConnectivityEvent: {
             /**
+             * Category
+             * @default null
+             */
+            category?: string | null;
+            /**
              * Code
              * @default null
              */
@@ -4611,6 +4778,13 @@ export interface components {
              * @default null
              */
             password_env?: string | null;
+            /**
+             * Privileges
+             * @default null
+             */
+            privileges?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Server Version
              * @default null
@@ -4861,6 +5035,54 @@ export interface components {
             members: {
                 [key: string]: unknown;
             }[];
+        };
+        /** FormConnectionTestRequest */
+        FormConnectionTestRequest: {
+            target: components["schemas"]["FormTestTargetData"];
+        };
+        /**
+         * FormTestTargetData
+         * @description Unsaved form values used only for a connection test.
+         */
+        FormTestTargetData: {
+            /** Database */
+            database: string;
+            /**
+             * Engine
+             * @default postgresql
+             */
+            engine?: string;
+            /** Host */
+            host: string;
+            /** Password */
+            password?: string | null;
+            /** Password Env */
+            password_env?: string | null;
+            /**
+             * Port
+             * @default 5432
+             */
+            port?: number;
+            /**
+             * Read Only
+             * @default false
+             */
+            read_only?: boolean;
+            ssh?: components["schemas"]["SshData"] | null;
+            /**
+             * Tls
+             * @default false
+             */
+            tls?: boolean;
+            /** Tls Ca */
+            tls_ca?: string | null;
+            /**
+             * Tls Verify
+             * @default false
+             */
+            tls_verify?: boolean;
+            /** User */
+            user: string;
         };
         /** FormattedAnalysis */
         FormattedAnalysis: {
@@ -5154,6 +5376,16 @@ export interface components {
              */
             updated?: number;
         };
+        /** ImportSshKeyRequest */
+        ImportSshKeyRequest: {
+            /** Source Path */
+            source_path: string;
+        };
+        /** ImportSshKeyResponse */
+        ImportSshKeyResponse: {
+            /** Key Path */
+            key_path: string;
+        };
         /** IndexRecommendation */
         IndexRecommendation: {
             /**
@@ -5372,10 +5604,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /**
-         * ProgressEvent
-         * @description Progress update during a multi-step operation.
-         */
+        /** ProgressEvent */
         ProgressEvent: {
             /** Message */
             message: string;
@@ -5394,10 +5623,7 @@ export interface components {
             /** Token */
             token: string;
         };
-        /**
-         * QueryBenchmarkCompleteEvent
-         * @description Benchmark finished; carries the final tally.
-         */
+        /** QueryBenchmarkCompleteEvent */
         QueryBenchmarkCompleteEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -5417,16 +5643,7 @@ export interface components {
              */
             type: "complete";
         };
-        /**
-         * QueryBenchmarkErrorEvent
-         * @description Benchmark failed (or was rejected by a safety rail) before completion.
-         *
-         *     Carries the shared error envelope ({code, message, detail}, B7/T24) so the
-         *     client normalizes a benchmark failure exactly like every other SSE error.
-         *     ``message`` stays humane and safe to show; ``detail`` holds only the
-         *     exception class name for correlation — never the raw ``str(e)``, which can
-         *     embed host / DSN / SQL material.
-         */
+        /** QueryBenchmarkErrorEvent */
         QueryBenchmarkErrorEvent: {
             /**
              * Code
@@ -5447,10 +5664,7 @@ export interface components {
             type: "error";
         };
         QueryBenchmarkEvent: components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"];
-        /**
-         * QueryBenchmarkProgressEvent
-         * @description Benchmark progress tick.
-         */
+        /** QueryBenchmarkProgressEvent */
         QueryBenchmarkProgressEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -5470,10 +5684,7 @@ export interface components {
              */
             type: "progress";
         };
-        /**
-         * QueryBenchmarkStats
-         * @description Statistics for a single benchmarked query.
-         */
+        /** QueryBenchmarkStats */
         QueryBenchmarkStats: {
             /** Avg Ms */
             avg_ms: number;
@@ -5884,10 +6095,7 @@ export interface components {
             /** Verified */
             verified: boolean;
         };
-        /**
-         * RunEndEvent
-         * @description Terminal event appended by the registry after every run.
-         */
+        /** RunEndEvent */
         RunEndEvent: {
             /** Status */
             status: string;
@@ -5940,10 +6148,7 @@ export interface components {
             /** Queued Requests */
             queued_requests: number;
         };
-        /**
-         * ScanCompleteEvent
-         * @description Scan completed.
-         */
+        /** ScanCompleteEvent */
         ScanCompleteEvent: {
             /** Success */
             success: boolean;
@@ -5957,10 +6162,7 @@ export interface components {
              */
             type: "complete";
         };
-        /**
-         * ScanErrorEvent
-         * @description Scan error.
-         */
+        /** ScanErrorEvent */
         ScanErrorEvent: {
             /** Message */
             message: string;
@@ -5976,10 +6178,7 @@ export interface components {
             type: "error";
         };
         ScanEvent: components["schemas"]["ScanStatusEvent"] | components["schemas"]["ScanFilesFoundEvent"] | components["schemas"]["ScanProgressEvent"] | components["schemas"]["ScanQueryResultEvent"] | components["schemas"]["ScanRegistryEvent"] | components["schemas"]["ScanCompleteEvent"] | components["schemas"]["ScanErrorEvent"];
-        /**
-         * ScanFilesFoundEvent
-         * @description Files with ORM patterns discovered.
-         */
+        /** ScanFilesFoundEvent */
         ScanFilesFoundEvent: {
             /** Files */
             files: {
@@ -6022,10 +6221,7 @@ export interface components {
          * @enum {string}
          */
         ScanPhase: "config" | "discovery" | "extraction" | "conversion" | "registry" | "analysis";
-        /**
-         * ScanProgressEvent
-         * @description Progress update within a scan phase.
-         */
+        /** ScanProgressEvent */
         ScanProgressEvent: {
             /** Current */
             current: number;
@@ -6041,10 +6237,7 @@ export interface components {
              */
             type: "progress";
         };
-        /**
-         * ScanQueryResultEvent
-         * @description Individual query result from scan.
-         */
+        /** ScanQueryResultEvent */
         ScanQueryResultEvent: {
             /** Query */
             query: {
@@ -6056,10 +6249,7 @@ export interface components {
              */
             type: "query_result";
         };
-        /**
-         * ScanRegistryEvent
-         * @description Registry save results.
-         */
+        /** ScanRegistryEvent */
         ScanRegistryEvent: {
             /** New Queries */
             new_queries: number;
@@ -6129,10 +6319,7 @@ export interface components {
              */
             warn_threshold?: number;
         };
-        /**
-         * ScanStatusEvent
-         * @description Status update during scan.
-         */
+        /** ScanStatusEvent */
         ScanStatusEvent: {
             /** Message */
             message: string;
@@ -6225,6 +6412,10 @@ export interface components {
         };
         /** SchemaInitResponse */
         SchemaInitResponse: {
+            /** Category */
+            category?: string | null;
+            /** Code */
+            code?: string | null;
             /** Columns */
             columns: number;
             /** Enum Columns */
@@ -6253,6 +6444,10 @@ export interface components {
         };
         /** SchemaOperationResponse */
         SchemaOperationResponse: {
+            /** Category */
+            category?: string | null;
+            /** Code */
+            code?: string | null;
             /** Data */
             data?: {
                 [key: string]: unknown;
@@ -6276,6 +6471,10 @@ export interface components {
         };
         /** SchemaResponse */
         SchemaResponse: {
+            /** Category */
+            category?: string | null;
+            /** Code */
+            code?: string | null;
             /**
              * Dialect
              * @enum {string}
@@ -6287,6 +6486,8 @@ export interface components {
             tables: {
                 [key: string]: string[];
             };
+            /** Target */
+            target?: string | null;
         };
         /** SchemaStatusResponse */
         SchemaStatusResponse: {
@@ -6409,6 +6610,68 @@ export interface components {
             /** Cache Budget */
             cache_budget: number;
         };
+        /** SshAuthOptionResponse */
+        SshAuthOptionResponse: {
+            /** Host */
+            host?: string | null;
+            /** Hostname */
+            hostname?: string | null;
+            /** Key Path */
+            key_path?: string | null;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /**
+             * Outside Ssh Dir
+             * @default false
+             */
+            outside_ssh_dir?: boolean;
+            /** Port */
+            port?: number | null;
+            /** User */
+            user?: string | null;
+        };
+        /**
+         * SshData
+         * @description SSH jump-host configuration stored as pointers only.
+         */
+        SshData: {
+            /** Host */
+            host?: string | null;
+            /** Key Path */
+            key_path?: string | null;
+            /**
+             * Port
+             * @default 22
+             */
+            port?: number;
+            /** Profile */
+            profile?: string | null;
+            /** User */
+            user?: string | null;
+        };
+        /** SshKeysResponse */
+        SshKeysResponse: {
+            /** Options */
+            options: components["schemas"]["SshAuthOptionResponse"][];
+        };
+        /** SshProfileResponse */
+        SshProfileResponse: {
+            /** Host */
+            host: string;
+            /** Key Path */
+            key_path?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Port
+             * @default 22
+             */
+            port?: number;
+            /** User */
+            user?: string | null;
+        };
         /** StatusResponse */
         StatusResponse: {
             /** Configured */
@@ -6438,6 +6701,8 @@ export interface components {
             engine?: string;
             /** Host */
             host: string;
+            /** Password */
+            password?: string | null;
             /** Password Env */
             password_env?: string | null;
             /**
@@ -6450,11 +6715,19 @@ export interface components {
              * @default false
              */
             read_only?: boolean;
+            ssh?: components["schemas"]["SshData"] | null;
             /**
              * Tls
              * @default false
              */
             tls?: boolean;
+            /** Tls Ca */
+            tls_ca?: string | null;
+            /**
+             * Tls Verify
+             * @default false
+             */
+            tls_verify?: boolean;
             /** User */
             user: string;
         };
@@ -6467,21 +6740,32 @@ export interface components {
             database: string;
             /** Engine */
             engine: string;
+            /** Group */
+            group?: string | null;
             /** Has Password */
             has_password: boolean;
             /** Host */
             host: string;
+            /** Instance Class */
+            instance_class?: string | null;
             /** Is Default */
             is_default: boolean;
             /** Password Env */
             password_env?: string | null;
             /** Port */
             port: number;
+            /** Publicly Accessible */
+            publicly_accessible?: boolean | null;
             /**
              * Read Only
              * @default false
              */
             read_only?: boolean;
+            /** Region */
+            region?: string | null;
+            ssh?: components["schemas"]["SshData"] | null;
+            /** Tags */
+            tags?: string[];
             /** Target Name */
             target_name: string;
             /**
@@ -6489,6 +6773,13 @@ export interface components {
              * @default false
              */
             tls?: boolean;
+            /** Tls Ca */
+            tls_ca?: string | null;
+            /**
+             * Tls Verify
+             * @default false
+             */
+            tls_verify?: boolean;
             /** User */
             user: string;
         };
@@ -6552,6 +6843,9 @@ export interface components {
             port?: number | string | null;
             /** Proxy */
             proxy?: string | null;
+            /** Publicly Accessible */
+            publicly_accessible?: boolean | null;
+            ssh?: components["schemas"]["SshData"] | null;
             /** Verified */
             verified?: boolean | null;
         };
@@ -6565,6 +6859,25 @@ export interface components {
             success: boolean;
             /** Version */
             version?: string | null;
+        };
+        /** TestTunnelRequest */
+        TestTunnelRequest: {
+            /** Target */
+            target: string;
+        };
+        /** TestTunnelResponse */
+        TestTunnelResponse: {
+            /** Category */
+            category?: string | null;
+            /** Message */
+            message: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "tunnel" | "database";
         };
         /** TestedRewrite */
         TestedRewrite: {
@@ -6591,10 +6904,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /**
-         * TopCompleteEvent
-         * @description Operation completed.
-         */
+        /** TopCompleteEvent */
         TopCompleteEvent: {
             /** Newly Saved */
             newly_saved: number;
@@ -6610,10 +6920,7 @@ export interface components {
              */
             type: "complete";
         };
-        /**
-         * TopConnectedEvent
-         * @description Database connection established.
-         */
+        /** TopConnectedEvent */
         TopConnectedEvent: {
             /** Db Engine */
             db_engine: string;
@@ -6638,10 +6945,7 @@ export interface components {
             /** Setting Name */
             setting_name: string;
         };
-        /**
-         * TopDbLimitWarningEvent
-         * @description Database query size limit is below recommended threshold.
-         */
+        /** TopDbLimitWarningEvent */
         TopDbLimitWarningEvent: {
             /** Db Engine */
             db_engine: string;
@@ -6657,14 +6961,7 @@ export interface components {
              */
             type: "db_limit_warning";
         };
-        /**
-         * TopErrorEvent
-         * @description Error occurred.
-         *
-         *     ``code`` and ``detail`` mirror the shared error envelope (B7/T24):
-         *     ``message`` stays humane, ``detail`` carries the exception class name for
-         *     correlation — never the raw ``str(e)``, which can embed host/DSN material.
-         */
+        /** TopErrorEvent */
         TopErrorEvent: {
             /**
              * Code
@@ -6692,6 +6989,10 @@ export interface components {
         TopEvent: components["schemas"]["TopStatusEvent"] | components["schemas"]["TopConnectedEvent"] | components["schemas"]["TopSourceFallbackEvent"] | components["schemas"]["TopDbLimitWarningEvent"] | components["schemas"]["TopQueriesEvent"] | components["schemas"]["TopQuerySavedEvent"] | components["schemas"]["TopCompleteEvent"] | components["schemas"]["TopErrorEvent"];
         /** TopHistoricalResponse */
         TopHistoricalResponse: {
+            /** Category */
+            category?: string | null;
+            /** Code */
+            code?: string | null;
             db_limit_warning?: components["schemas"]["TopDbLimitWarning"] | null;
             /** Engine */
             engine?: string | null;
@@ -6714,10 +7015,7 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /**
-         * TopQueriesEvent
-         * @description Batch of top queries.
-         */
+        /** TopQueriesEvent */
         TopQueriesEvent: {
             /** Db Engine */
             db_engine: string;
@@ -6743,10 +7041,7 @@ export interface components {
              */
             type: "queries";
         };
-        /**
-         * TopQueryData
-         * @description Individual query data.
-         */
+        /** TopQueryData */
         TopQueryData: {
             /** Avg Time */
             avg_time: string;
@@ -6808,10 +7103,7 @@ export interface components {
             /** Total Time */
             total_time: string;
         };
-        /**
-         * TopQuerySavedEvent
-         * @description Query saved to registry.
-         */
+        /** TopQuerySavedEvent */
         TopQuerySavedEvent: {
             /** Is New */
             is_new: boolean;
@@ -6823,10 +7115,7 @@ export interface components {
              */
             type: "query_saved";
         };
-        /**
-         * TopSourceFallbackEvent
-         * @description Source fallback occurred.
-         */
+        /** TopSourceFallbackEvent */
         TopSourceFallbackEvent: {
             /** From Source */
             from_source: string;
@@ -6840,10 +7129,7 @@ export interface components {
              */
             type: "source_fallback";
         };
-        /**
-         * TopStatusEvent
-         * @description Progress status update.
-         */
+        /** TopStatusEvent */
         TopStatusEvent: {
             /** Message */
             message: string;
@@ -6934,6 +7220,19 @@ export interface components {
             remaining_tokens_display?: string | null;
             /** Status */
             status?: string | null;
+        };
+        /** TunnelStatusResponse */
+        TunnelStatusResponse: {
+            /** Jump Host */
+            jump_host: string;
+            /** Last Used */
+            last_used: number;
+            /** Local Port */
+            local_port: number;
+            /** State */
+            state: string;
+            /** Target */
+            target: string;
         };
         /** UpdateSqlRequest */
         UpdateSqlRequest: {
@@ -7479,6 +7778,70 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_allowlist_ip_api_allowlist_add_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AllowlistAddRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllowlistAddResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_allowlist_context_api_allowlist_context_get: {
+        parameters: {
+            query: {
+                target: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllowlistContextResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8267,7 +8630,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["FormConnectionTestRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -11650,6 +12017,176 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrialStatusResponse"];
+                };
+            };
+        };
+    };
+    close_tunnel_api_tunnel_close_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CloseTunnelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CloseTunnelResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ssh_keys_api_tunnel_ssh_keys_get: {
+        parameters: {
+            query?: {
+                jump_host?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SshKeysResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_ssh_key_api_tunnel_ssh_keys_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportSshKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportSshKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ssh_profiles_api_tunnel_ssh_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SshProfileResponse"][];
+                };
+            };
+        };
+    };
+    tunnel_status_api_tunnel_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TunnelStatusResponse"][];
+                };
+            };
+        };
+    };
+    test_tunnel_api_tunnel_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestTunnelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestTunnelResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

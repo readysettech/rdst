@@ -13,13 +13,22 @@ import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { type ReactNode, useState } from 'react'
-import type { ConfigureFormData } from '../../types/configure'
+import type {
+  ConfigureConnectionStatus,
+  ConfigureFormData,
+} from '../../types/configure'
+import { ConfigureConnectionTest } from './ConfigureConnectionTest'
+import { FieldLabel } from './FieldLabel'
+import { assembleSshConfig, SshFields, sshFieldsValue } from './SshFields'
 
 interface ConfigureFormProps {
   initialData?: Partial<ConfigureFormData>
   onSubmit?: (data: ConfigureFormData) => void
+  onTest?: (data: ConfigureFormData) => void | boolean | Promise<boolean>
   onCancel?: () => void
   isLoading?: boolean
+  isTesting?: boolean
+  testResult?: ConfigureConnectionStatus | null
   /** Override the add-mode submit label (e.g. "Test & connect" on first run). */
   submitLabel?: string
   /** Size of the primary submit button; first run uses a large hero CTA
@@ -31,28 +40,6 @@ const engineOptions = [
   { value: 'postgresql', label: 'PostgreSQL' },
   { value: 'mysql', label: 'MySQL' },
 ]
-
-/**
- * A form label programmatically associated with its input via `htmlFor` — the
- * flagship-setup a11y fix (configure had 8 labels, 0 associated). `Text` does
- * not type `htmlFor`, so the association lives on a native `<label>` wrapping a
- * `Text` span. [USE-088]
- */
-function FieldLabel({
-  htmlFor,
-  children,
-}: {
-  htmlFor: string
-  children: ReactNode
-}) {
-  return (
-    <label htmlFor={htmlFor} className="block mb-1.5">
-      <Text as="span" level="label-small" className="text-content-layout-2">
-        {children}
-      </Text>
-    </label>
-  )
-}
 
 /**
  * Progressive-disclosure section (built on the shared `use-disclosure` hook).
@@ -124,7 +111,12 @@ interface ParsedConnectionUrl {
   user: string
   password: string
   tls: boolean
+  tlsVerify: boolean
+  tlsCa: string
 }
+
+export const defaultPortFor = (engine: string) =>
+  engine === 'mysql' ? 3306 : 5432
 
 function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
   try {
@@ -148,7 +140,7 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
 
     // Determine engine from original protocol
     const engine = normalizedUrl.startsWith('mysql://') ? 'mysql' : 'postgresql'
-    const defaultPort = engine === 'mysql' ? 3306 : 5432
+    const defaultPort = defaultPortFor(engine)
 
     // Extract database from pathname (remove leading slash)
     const database = parsed.pathname.replace(/^\//, '')
@@ -156,12 +148,16 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
 
     // Infer TLS/SSL from connection string query params
     let tls = false
+    let tlsVerify = false
+    let tlsCa = ''
     if (engine === 'postgresql') {
       const sslMode = (params.get('sslmode') || '').toLowerCase()
       tls =
         sslMode === 'require' ||
         sslMode === 'verify-ca' ||
         sslMode === 'verify-full'
+      tlsVerify = sslMode === 'verify-ca' || sslMode === 'verify-full'
+      tlsCa = params.get('sslrootcert') || ''
     } else {
       const ssl = (params.get('ssl') || '').toLowerCase()
       const sslMode = (params.get('ssl-mode') || '').toUpperCase()
@@ -171,6 +167,8 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
         sslMode === 'REQUIRED' ||
         sslMode === 'VERIFY_CA' ||
         sslMode === 'VERIFY_IDENTITY'
+      tlsVerify = sslMode === 'VERIFY_CA' || sslMode === 'VERIFY_IDENTITY'
+      tlsCa = params.get('ssl-ca') || ''
     }
 
     return {
@@ -181,6 +179,8 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
       user: parsed.username ? decodeURIComponent(parsed.username) : '',
       password: parsed.password ? decodeURIComponent(parsed.password) : '',
       tls,
+      tlsVerify,
+      tlsCa,
     }
   } catch {
     return null
@@ -190,8 +190,11 @@ function parseConnectionUrl(url: string): ParsedConnectionUrl | null {
 export function ConfigureForm({
   initialData,
   onSubmit,
+  onTest,
   onCancel,
   isLoading,
+  isTesting,
+  testResult,
   submitLabel,
   submitSize = 'base',
 }: ConfigureFormProps) {
@@ -201,24 +204,24 @@ export function ConfigureForm({
   const [name, setName] = useState(initialData?.name || '')
   const [engine, setEngine] = useState(initialData?.engine || 'postgresql')
   const defaultPort =
-    initialData?.port ??
-    ((initialData?.engine || 'postgresql') === 'mysql' ? 3306 : 5432)
+    initialData?.port ?? defaultPortFor(initialData?.engine || 'postgresql')
   const [host, setHost] = useState(initialData?.host || 'localhost')
   const [port, setPort] = useState(defaultPort)
+  const [portTouched, setPortTouched] = useState(
+    initialData?.port !== undefined &&
+      initialData.port !== defaultPortFor(initialData.engine || 'postgresql')
+  )
   const [database, setDatabase] = useState(initialData?.database || '')
   const [user, setUser] = useState(initialData?.user || '')
-  const [passwordEnv, setPasswordEnv] = useState(
-    initialData?.password_env || ''
-  )
   const [password, setPassword] = useState('')
-  const [passwordEnvCustomized, setPasswordEnvCustomized] = useState(
-    Boolean(initialData?.password_env)
-  )
   const [tls, setTls] = useState(initialData?.tls ?? false)
-  const [readOnly, setReadOnly] = useState(initialData?.read_only ?? false)
+  const [tlsVerify, setTlsVerify] = useState(initialData?.tls_verify ?? false)
+  const [tlsCa, setTlsCa] = useState(initialData?.tls_ca ?? '')
+  const readOnly = initialData?.read_only ?? false
+  const [ssh, setSsh] = useState(() => sshFieldsValue(initialData?.ssh))
 
   // "Connection details" holds the fields the connection needs, so it opens by
-  // default; "Advanced" (TLS / read-only) stays collapsed until asked for. A
+  // default; "Advanced" TLS settings stay collapsed until asked for. A
   // paste reveals both so the auto-filled values — including the inferred TLS —
   // are visible for review. [VIS-114, USE-067]
   const [detailsOpenState, setDetailsOpenState] = useState(true)
@@ -227,6 +230,11 @@ export function ConfigureForm({
     onOpenChange: setDetailsOpenState,
   })
   const [advancedOpen, setAdvancedOpen] = useDisclosure({})
+  const [sshOpenState, setSshOpenState] = useState(Boolean(initialData?.ssh))
+  const [sshOpen, setSshOpen] = useDisclosure({
+    open: sshOpenState,
+    onOpenChange: setSshOpenState,
+  })
 
   const handleParseUrl = () => {
     setUrlError(null)
@@ -248,17 +256,17 @@ export function ConfigureForm({
     setEngine(parsed.engine)
     setHost(parsed.host)
     setPort(parsed.port)
+    setPortTouched(parsed.port !== defaultPortFor(parsed.engine))
     setDatabase(parsed.database)
     setUser(parsed.user)
     setPassword(parsed.password)
     setTls(parsed.tls)
+    setTlsVerify(parsed.tlsVerify)
+    setTlsCa(parsed.tlsCa)
 
     // Auto-generate name from database if not already set
     if (!name && parsed.database) {
       setName(parsed.database)
-      if (!passwordEnvCustomized) {
-        setPasswordEnv(defaultPasswordEnv(parsed.database))
-      }
     }
 
     // Reveal the pre-filled fields (and the inferred TLS in Advanced) for review.
@@ -269,41 +277,47 @@ export function ConfigureForm({
     setConnectionUrl('')
   }
 
-  const isAddModePasswordValid =
-    !isAddMode || (passwordEnv.trim().length > 0 && password.length > 0)
+  const isAddModePasswordValid = !isAddMode || password.length > 0
   const isValid =
     name && host && port && database && user && isAddModePasswordValid
+
+  const currentData = (): ConfigureFormData => ({
+    name,
+    engine,
+    host,
+    port,
+    database,
+    user,
+    password: password || undefined,
+    password_env: initialData?.password_env,
+    tls,
+    tls_verify: tlsVerify,
+    tls_ca: tlsCa.trim() || undefined,
+    read_only: readOnly,
+    ssh: assembleSshConfig(ssh),
+  })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!isValid || !onSubmit) return
 
-    onSubmit({
-      name,
-      engine,
-      host,
-      port,
-      database,
-      user,
-      password: password || undefined,
-      password_env: passwordEnv || undefined,
-      tls,
-      read_only: readOnly,
-    })
+    onSubmit(currentData())
   }
 
   const handleCancel = () => {
+    const resetEngine = initialData?.engine || 'postgresql'
     setName('')
-    setEngine('postgresql')
+    setEngine(resetEngine)
     setHost('localhost')
-    setPort(5432)
+    setPort(initialData?.port ?? defaultPortFor(resetEngine))
+    setPortTouched(false)
     setDatabase('')
     setUser('')
-    setPasswordEnv('')
     setPassword('')
-    setPasswordEnvCustomized(false)
     setTls(false)
-    setReadOnly(false)
+    setTlsVerify(false)
+    setTlsCa('')
+    setSsh(sshFieldsValue())
     onCancel?.()
   }
 
@@ -356,7 +370,11 @@ export function ConfigureForm({
                           setConnectionUrl(e.target.value)
                           setUrlError(null)
                         }}
-                        placeholder="postgresql://user@host:5432/database"
+                        placeholder={
+                          engine === 'mysql'
+                            ? 'mysql://user@host:3306/database'
+                            : 'postgresql://user@host:5432/database'
+                        }
                         disabled={isLoading}
                       />
                     </div>
@@ -395,9 +413,6 @@ export function ConfigureForm({
                 onChange={(e) => {
                   const nextName = e.target.value
                   setName(nextName)
-                  if (isAddMode && !passwordEnvCustomized) {
-                    setPasswordEnv(defaultPasswordEnv(nextName))
-                  }
                 }}
                 placeholder="my-database"
                 disabled={isLoading || !!initialData?.name}
@@ -430,7 +445,10 @@ export function ConfigureForm({
                       name="engine"
                       options={engineOptions}
                       value={engine}
-                      onValueChange={setEngine}
+                      onValueChange={(nextEngine) => {
+                        setEngine(nextEngine);
+                        if (!portTouched) setPort(defaultPortFor(nextEngine));
+                      }}
                       disabled={isLoading}
                     />
                   </div>
@@ -442,7 +460,11 @@ export function ConfigureForm({
                       name="host"
                       value={host}
                       onChange={(e) => setHost(e.target.value)}
-                      placeholder="localhost"
+                      placeholder={
+                        engine === 'mysql'
+                          ? 'mysql.example.com'
+                          : 'postgres.example.com'
+                      }
                       disabled={isLoading}
                       required
                     />
@@ -455,8 +477,13 @@ export function ConfigureForm({
                       name="port"
                       type="number"
                       value={String(port)}
-                      onChange={(e) => setPort(Number(e.target.value) || 5432)}
-                      placeholder="5432"
+                      onChange={(e) => {
+                        setPortTouched(true);
+                        setPort(
+                          Number(e.target.value) || defaultPortFor(engine),
+                        );
+                      }}
+                      placeholder={String(defaultPortFor(engine))}
                       disabled={isLoading}
                       required
                     />
@@ -482,7 +509,7 @@ export function ConfigureForm({
                       name="user"
                       value={user}
                       onChange={(e) => setUser(e.target.value)}
-                      placeholder="postgres"
+                      placeholder={engine === 'mysql' ? 'root' : 'postgres'}
                       disabled={isLoading}
                       required
                     />
@@ -516,11 +543,26 @@ export function ConfigureForm({
               </div>
             </Disclosure>
 
-            {/* Advanced — TLS + read-only, collapsed until asked for. [VIS-114] */}
+            <Disclosure
+              id="cfg-ssh"
+              title="Connect via SSH jump host"
+              subtitle="For databases that are not directly reachable"
+              open={sshOpen}
+              onToggle={setSshOpen}
+            >
+              <SshFields
+                value={ssh}
+                onChange={setSsh}
+                disabled={isLoading}
+                idPrefix="cfg-ssh"
+              />
+            </Disclosure>
+
+            {/* Advanced — TLS verification, collapsed until asked for. [VIS-114] */}
             <Disclosure
               id="cfg-advanced"
               title="Advanced"
-              subtitle="TLS, read-only"
+              subtitle="TLS and certificate verification"
               open={advancedOpen}
               onToggle={setAdvancedOpen}
             >
@@ -533,7 +575,7 @@ export function ConfigureForm({
                         level="label-small"
                         className="text-content-layout-1"
                       >
-                        TLS / SSL
+                        TLS encryption
                       </Text>
                       <Text
                         as="span"
@@ -547,45 +589,69 @@ export function ConfigureForm({
                   <BaseInputSwitch
                     id="cfg-tls"
                     name="tls"
-                    aria-label="TLS / SSL — require encrypted connection"
+                    aria-label="TLS encryption"
                     checked={tls}
-                    onCheckedChange={setTls}
+                    onCheckedChange={(next) => {
+                      setTls(next);
+                      if (!next) setTlsVerify(false);
+                    }}
                     disabled={isLoading}
                   />
                 </div>
 
-                <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
-                  <label htmlFor="cfg-read-only" className="cursor-pointer">
-                    <VStack className="gap-0.5 items-start">
-                      <Text
-                        as="span"
-                        level="label-small"
-                        className="text-content-layout-1"
-                      >
-                        Read Only
-                      </Text>
-                      <Text
-                        as="span"
-                        level="caption"
-                        className="text-content-layout-3"
-                      >
-                        Restrict to SELECT queries only
-                      </Text>
-                    </VStack>
-                  </label>
-                  <BaseInputSwitch
-                    id="cfg-read-only"
-                    name="read_only"
-                    aria-label="Read Only — restrict to SELECT queries only"
-                    checked={readOnly}
-                    onCheckedChange={setReadOnly}
-                    disabled={isLoading}
-                  />
-                </div>
+                <Show when={tls}>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
+                      <label htmlFor="cfg-tls-verify" className="cursor-pointer">
+                        <VStack className="gap-0.5 items-start">
+                          <Text as="span" level="label-small" className="text-content-layout-1">
+                            Verify TLS certificate
+                          </Text>
+                          <Text as="span" level="caption" className="text-content-layout-3">
+                            Verify the certificate chain and database hostname
+                          </Text>
+                        </VStack>
+                      </label>
+                      <BaseInputSwitch
+                        id="cfg-tls-verify"
+                        name="tls_verify"
+                        aria-label="Verify TLS certificate"
+                        checked={tlsVerify}
+                        onCheckedChange={setTlsVerify}
+                        disabled={isLoading}
+                      />
+                    </div>
+                    <Show when={tlsVerify}>
+                      <div>
+                        <FieldLabel htmlFor="cfg-tls-ca">TLS CA path</FieldLabel>
+                        <BaseInputText
+                          id="cfg-tls-ca"
+                          name="tls_ca"
+                          value={tlsCa}
+                          onChange={(event) => setTlsCa(event.target.value)}
+                          placeholder="/path/to/ca-certificate.pem (optional)"
+                          disabled={isLoading}
+                        />
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
               </div>
             </Disclosure>
           </div>
         </Card.Content>
+        <Show when={isTesting || !!testResult}>
+          <div className="px-5 pb-2">
+            <ConfigureConnectionTest
+              result={testResult ?? null}
+              isLoading={isTesting}
+              targetName={name.trim() || 'form-test'}
+              onRetry={async () =>
+                Boolean(await onTest?.(currentData()))
+              }
+            />
+          </div>
+        </Show>
         <Card.Footer>
           <HStack className="gap-3 justify-end w-full">
             <Button
@@ -593,7 +659,17 @@ export function ConfigureForm({
               modifier="ghost"
               label="Cancel"
               onClick={handleCancel}
-              disabled={isLoading}
+              type="button"
+            />
+            <Button
+              variant="primary"
+              modifier="outline"
+              label="Test connection"
+              icon="connect"
+              iconPosition="left"
+              onClick={() => void onTest?.(currentData())}
+              loading={isTesting}
+              disabled={!isValid || isLoading || isTesting || !onTest}
               type="button"
             />
             <Button
@@ -607,7 +683,7 @@ export function ConfigureForm({
               }
               type="submit"
               loading={isLoading}
-              disabled={!isValid}
+              disabled={!isValid || isTesting}
             />
           </HStack>
         </Card.Footer>

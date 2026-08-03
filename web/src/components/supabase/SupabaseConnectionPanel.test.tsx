@@ -124,4 +124,34 @@ describe('SupabaseConnectionPanel', () => {
       await screen.findByText('Waiting for you to approve the request')
     ).toBeTruthy()
   })
+
+  it('offers the authorization link when the popup is blocked', async () => {
+    vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
+      connected: false,
+      method: null,
+      detail: null,
+    })
+    vi.mocked(startFleetSupabaseLogin).mockResolvedValue({
+      login_id: 'login-1',
+      authorize_url: 'https://supabase.example/authorize',
+    })
+    vi.mocked(fetchFleetSupabaseLogin).mockResolvedValue({
+      state: 'running',
+      detail: 'Waiting for approval',
+    })
+    vi.stubGlobal('open', vi.fn().mockReturnValue(null))
+
+    renderWithClient(<SupabaseConnectionPanel />)
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Sign in with Supabase' })
+    )
+
+    const fallback = await screen.findByRole('link', {
+      name: 'Popup blocked. Open sign-in.',
+    })
+    expect(fallback.getAttribute('href')).toBe(
+      'https://supabase.example/authorize'
+    )
+    expect(window.open).toHaveBeenCalledWith('about:blank', '_blank')
+  })
 })

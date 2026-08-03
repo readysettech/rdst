@@ -1,4 +1,5 @@
 import {
+  acceptExplainAnalyzeConsent,
   clearQueryRegistry,
   configureTestTarget,
   expect,
@@ -26,6 +27,7 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   })
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
+  await acceptExplainAnalyzeConsent(page)
 
   const initialSql = 'SELECT id FROM users'
   const updatedSql = 'SELECT id, email FROM users ORDER BY id'

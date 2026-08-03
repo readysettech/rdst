@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { useTargetSwitchLock } from './targetSwitchLock';
 import type { components } from './api.generated';
+import { normalizeHttpError, normalizeSseError } from './errorContract';
 
 // Ask API types
 export interface AskRequest {
@@ -36,7 +37,11 @@ export type AskResultEvent = Omit<
   Extract<AskEvent, { type: 'result' }>,
   'rows'
 > & { rows: unknown[][] };
-export type AskErrorEvent = Extract<AskEvent, { type: 'error' }>;
+export type AskErrorEvent = Extract<AskEvent, { type: 'error' }> & {
+  code?: string;
+  category?: string;
+  target?: string;
+};
 
 export type AskState =
   | 'idle'
@@ -117,8 +122,23 @@ export function useAsk(): UseAskReturn {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+        let body: unknown;
+        try {
+          body = await response.clone().json();
+        } catch {
+          body = await response.text().catch(() => undefined);
+        }
+        const envelope = normalizeHttpError(response.status, body);
+        setError({
+          type: 'error',
+          message: envelope.message,
+          phase: null,
+          code: envelope.code,
+          category: envelope.category,
+          target: envelope.target ?? request.target,
+        });
+        setState('error');
+        return;
       }
 
       if (!response.body) {
@@ -186,7 +206,17 @@ export function useAsk(): UseAskReturn {
                   break;
 
                 case 'error':
-                  setError(data as AskErrorEvent);
+                  {
+                    const envelope = normalizeSseError(data);
+                    setError({
+                      type: 'error',
+                      message: envelope.message,
+                      phase: data.phase ?? null,
+                      code: envelope.code,
+                      category: envelope.category,
+                      target: envelope.target ?? request.target,
+                    });
+                  }
                   setState('error');
                   break;
 

@@ -95,7 +95,7 @@ describe('EnvSecretsDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('shows session-only warning when keyring is unavailable', () => {
+  it('explains session-only target password storage when keyring is unavailable', () => {
     renderWithClient(
       <EnvSecretsDialog
         isOpen
@@ -103,9 +103,9 @@ describe('EnvSecretsDialog', () => {
         keyringAvailable={false}
         requirements={[
           {
-            kind: 'anthropic_api_key',
-            accepted_names: ['RDST_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'],
-            target: null,
+            kind: 'target_password',
+            accepted_names: ['PROD_DB_PASSWORD'],
+            target: 'prod',
             satisfied: false,
             source: 'missing',
           },
@@ -114,9 +114,13 @@ describe('EnvSecretsDialog', () => {
     );
 
     expect(
-      screen.getByText(/Secure keychain is unavailable\. Values will be session-only\./i)
+      screen.getByText(
+        /No OS keychain found\. Re-enter the password after RDST restarts\./i
+      )
     ).toBeTruthy();
-    expect(screen.getByLabelText('Anthropic API Key')).toBeTruthy();
+    expect(screen.getByLabelText('Password (prod)')).toBeTruthy();
+    expect(screen.queryByText(/config\.toml/i)).toBeNull();
+    expect(screen.queryByText(/Save between restarts/i)).toBeNull();
   });
 
   it('preserves typed values and validation state when parent rerenders while open', async () => {

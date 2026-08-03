@@ -25,7 +25,10 @@ interface TargetsStepProps {
   onUpdateTarget: (name: string, data: ConfigureFormData) => Promise<void>;
   onRemoveTarget: (name: string) => Promise<void>;
   onSetDefault: (name: string) => Promise<void>;
-  onTestConnection: (name: string) => void;
+  onTestConnection: (
+    name: string,
+    data?: ConfigureFormData
+  ) => Promise<ConfigureConnectionStatus | null>;
   connectionTestResult: ConfigureConnectionStatus | null;
   state: ConfigureState;
   onNext: () => void;
@@ -190,6 +193,12 @@ export function TargetsStep({
                       : undefined
                   }
                   onSubmit={handleFormSubmit}
+                  onTest={async (data) =>
+                    (await onTestConnection(
+                      data.name.trim() || 'form-test',
+                      data
+                    ))?.connected ?? false
+                  }
                   onCancel={handleFormCancel}
                   isLoading={isLoading}
                 />
@@ -244,7 +253,14 @@ export function TargetsStep({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
           >
-            <ConfigureConnectionTest result={connectionTestResult} isLoading={state === "loading"} />
+            <ConfigureConnectionTest
+              result={connectionTestResult}
+              isLoading={state === "loading"}
+              onRetry={async () =>
+                (await onTestConnection(connectionTestResult.target))
+                  ?.connected ?? false
+              }
+            />
           </m.div>
         )}
       </AnimatePresence>

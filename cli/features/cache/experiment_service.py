@@ -7,10 +7,11 @@ import hashlib
 import json
 import re
 from queue import Empty, Queue
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Callable
 
 import sqlglot
 
+from shared.async_utils import start_blocking
 from shared.config.targets import TargetsConfig
 from shared.deploy.sandbox_manager import (
     ReadysetSandboxManager,
@@ -140,7 +141,7 @@ class ReadysetExperimentService:
                 progress=lambda stage, message: progress(stage, message, 10),
             ) as acquired:
                 try:
-                    origin = await asyncio.to_thread(
+                    origin = await _blocking_call(
                         _origin_connection_config, target
                     )
                     readyset = acquired.connection.as_target_config()
@@ -339,6 +340,16 @@ def _connection_kwargs(lease: SandboxLease) -> dict[str, Any]:
     }
 
 
+async def _blocking_call(
+    callback: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
+    """Await a daemon worker while keeping cancellation responsive."""
+    future = start_blocking(callback, *args, **kwargs)
+    while not future.done():
+        await asyncio.sleep(0.01)
+    return future.result()
+
+
 def _readyset_query(query: str, engine: str) -> str:
     from shared.query_registry.sql_normalizer import denormalize_for_readyset
 
@@ -382,20 +393,15 @@ async def _execute_rows_cancellable(
     config: dict[str, Any], query: str
 ) -> list[Any]:
     controller = ComparisonController()
-    future = asyncio.get_running_loop().run_in_executor(
-        None, lambda: _execute_rows(config, query, controller)
-    )
+    future = start_blocking(_execute_rows, config, query, controller)
     try:
-        return await asyncio.shield(future)
+        while not future.done():
+            await asyncio.sleep(0.01)
+        return future.result()
     except asyncio.CancelledError as cancellation:
         controller.cancel()
         while not future.done():
-            try:
-                await asyncio.shield(future)
-            except asyncio.CancelledError:
-                continue
-            except Exception:
-                break
+            await asyncio.sleep(0.01)
         raise cancellation
 
 
@@ -426,21 +432,20 @@ async def _run_readyset_sql_settled(
     lease: SandboxLease,
 ) -> tuple[dict[str, Any], bool]:
     """Let bounded Readyset DDL settle before releasing its sandbox lease."""
-    task = asyncio.create_task(
-        asyncio.to_thread(
-            cache_service._run_readyset_sql,
-            statement,
-            **_connection_kwargs(lease),
-        )
+    future = start_blocking(
+        cache_service._run_readyset_sql,
+        statement,
+        **_connection_kwargs(lease),
     )
     cancelled = False
-    while True:
+    while not future.done():
         try:
-            return await asyncio.shield(task), cancelled
+            await asyncio.sleep(0.01)
         except asyncio.CancelledError:
             # _run_readyset_sql has 30-second driver timeouts. Waiting here
             # avoids abandoned DDL racing the next lease or target transition.
             cancelled = True
+    return future.result(), cancelled
 
 
 def _top_level_order_key_indexes(query: str) -> tuple[int, ...] | None:
@@ -529,20 +534,18 @@ async def _run_comparison_cancellable(
         progress_queue.put((stage, current, total))
 
     last_percent = 65
-    future = asyncio.get_running_loop().run_in_executor(
-        None,
-        lambda: run_comparison(
-            query=query,
-            original_db_config=origin,
-            readyset_db_config=readyset,
-            iterations=iterations,
-            warmup_iterations=warmup,
-            interval_ms=interval_ms,
-            concurrency=concurrency,
-            duration_seconds=duration_seconds,
-            on_progress=on_progress,
-            controller=controller,
-        ),
+    future = start_blocking(
+        run_comparison,
+        query=query,
+        original_db_config=origin,
+        readyset_db_config=readyset,
+        iterations=iterations,
+        warmup_iterations=warmup,
+        interval_ms=interval_ms,
+        concurrency=concurrency,
+        duration_seconds=duration_seconds,
+        on_progress=on_progress,
+        controller=controller,
     )
     try:
         while True:

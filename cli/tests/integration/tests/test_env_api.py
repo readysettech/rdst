@@ -15,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 
 from shared.api.routes import env as env_routes
 from shared.config.targets import TargetsConfig
+from shared.secret_store_service import SecretStoreService
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +68,45 @@ async def test_get_env_requirements_lists_seeded_target_password(
     assert by_kind["anthropic_api_key"]["source"] == "missing"
 
 
+async def test_set_password_for_target_without_password_source(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    cfg = TargetsConfig()
+    cfg.load()
+    cfg.upsert(
+        "imported",
+        {
+            "engine": "postgresql",
+            "host": "db.example.com",
+            "port": 5432,
+            "database": "appdb",
+            "user": "appuser",
+        },
+    )
+    cfg.save()
+    monkeypatch.delenv("RDST_IMPORTED_PASSWORD", raising=False)
+
+    requirements = await client.get("/api/env/requirements")
+    password_req = next(
+        item
+        for item in requirements.json()["requirements"]
+        if item["kind"] == "target_password"
+    )
+    response = await client.post(
+        "/api/env/set",
+        json={
+            "name": password_req["accepted_names"][0],
+            "value": "session-password",
+            "persist": False,
+        },
+    )
+
+    cfg.load()
+    assert response.json()["success"] is True
+    assert cfg.get("imported")["password_env"] == "RDST_IMPORTED_PASSWORD"
+    assert os.environ["RDST_IMPORTED_PASSWORD"] == "session-password"
+
+
 async def test_set_env_secret_persists_to_keyring(
     client, tmp_rdst_home, inmemory_keyring, monkeypatch
 ):
@@ -74,7 +114,7 @@ async def test_set_env_secret_persists_to_keyring(
     actually writes to the keyring backend (in-memory here) and updates
     `os.environ` as a side effect."""
     _seed_target_with_password_env("PROD_DB_PASSWORD")
-    monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
+    monkeypatch.delenv("RDST_PROD_PASSWORD", raising=False)
 
     response = await client.post(
         "/api/env/set",
@@ -115,6 +155,43 @@ async def test_set_env_secret_session_only_when_persist_false(
     assert (
         inmemory_keyring.get_password("rdst-web", "PROD_DB_PASSWORD") is None
     )
+
+
+async def test_set_target_password_stays_session_only_when_keyring_unavailable(
+    client, tmp_rdst_home, inmemory_keyring, monkeypatch
+):
+    cfg = TargetsConfig()
+    cfg.load()
+    cfg.upsert(
+        "prod",
+        {
+            "engine": "postgresql",
+            "host": "db.example.com",
+            "port": 5432,
+            "database": "appdb",
+            "user": "appuser",
+        },
+    )
+    cfg.save()
+    monkeypatch.delenv("PROD_DB_PASSWORD", raising=False)
+    monkeypatch.setattr(SecretStoreService, "is_available", lambda self: False)
+
+    response = await client.post(
+        "/api/env/set",
+        json={"name": "RDST_PROD_PASSWORD", "value": "durable", "persist": True},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["persisted"] is False
+    assert body["session_only"] is True
+    assert "session only" in body["message"].lower()
+    assert os.environ["RDST_PROD_PASSWORD"] == "durable"
+
+    cfg.load()
+    saved = cfg.get("prod")
+    assert "password" not in saved
+    assert saved["password_env"] == "RDST_PROD_PASSWORD"
 
 
 async def test_set_anthropic_secret_notifies_parked_work(

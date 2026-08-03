@@ -30,7 +30,15 @@ class ConfigureTargetDetailEvent:
     is_default: bool
     password_env: Optional[str] = None
     tls: bool = False
+    tls_verify: bool = False
+    tls_ca: Optional[str] = None
     read_only: bool = False
+    ssh: Optional[Dict[str, Any]] = None
+    publicly_accessible: Optional[bool] = None
+    tags: Optional[List[str]] = None
+    region: Optional[str] = None
+    instance_class: Optional[str] = None
+    group: Optional[str] = None
 
 
 @dataclass
@@ -41,7 +49,9 @@ class ConfigureConnectionTestEvent:
     message: Optional[str] = None
     server_version: Optional[str] = None
     code: Optional[str] = None
+    category: Optional[str] = None
     password_env: Optional[str] = None
+    privileges: Optional[Dict[str, Any]] = None
 
 
 @dataclass

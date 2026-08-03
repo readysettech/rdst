@@ -13,6 +13,7 @@ from shared.api.target_guard import (
     resolve_target_config,
 )
 from shared.password_resolver import PasswordResolution
+from shared.ssh_tunnel import SshConnectionError
 
 
 def _mock_config(
@@ -114,3 +115,29 @@ def test_ensure_target_password_allows_keychain_password(monkeypatch):
         guard = ensure_target_password("prod")
 
     assert guard.target_name == "prod"
+
+
+def test_ensure_target_password_categorizes_ssh_failure():
+    target = {
+        "engine": "postgresql",
+        "password": "not-a-real-secret",
+        "host": "db.internal",
+        "port": 5432,
+        "ssh": {"host": "jump.example.com", "port": 2222},
+    }
+    cfg = _mock_config(targets={"prod": target})
+    with (
+        patch("shared.api.target_guard.TargetsConfig", return_value=cfg),
+        patch(
+            "shared.db_connection.resolve_connection_params",
+            side_effect=SshConnectionError("offline"),
+        ),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        ensure_target_password("prod")
+
+    exc = exc_info.value
+    assert exc.status_code == 503
+    assert exc.detail["category"] == "ssh_jump_unreachable"
+    assert exc.detail["target_name"] == "prod"
+    assert "jump.example.com:2222 is unreachable" in exc.detail["message"]

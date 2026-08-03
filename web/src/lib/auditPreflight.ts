@@ -65,7 +65,8 @@ export async function checkAuditPreflight(
     now?: () => number
     fetcher?: (target: string) => Promise<AuditRequirements>
     awsRequired?: boolean
-    awsFetcher?: () => Promise<FleetAwsStatus>
+    awsProfile?: string
+    awsFetcher?: (profile?: string) => Promise<FleetAwsStatus>
     // Target name -> AWS account id it was imported from (aws-account tag).
     targetAccounts?: Record<string, string>
   } = {}
@@ -122,7 +123,9 @@ export async function checkAuditPreflight(
   }
   if (aws.required) {
     try {
-      aws.status = await (options.awsFetcher ?? fetchFleetAwsStatus)()
+      aws.status = await (options.awsFetcher ?? fetchFleetAwsStatus)(
+        options.awsProfile
+      )
     } catch (error) {
       aws.error = error instanceof Error ? error.message : String(error)
     }

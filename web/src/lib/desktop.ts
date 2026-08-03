@@ -34,6 +34,9 @@ declare global {
     rdstDesktop?: {
       isDesktop: true
       platform: string
+      oauth?: {
+        registerProtocol: () => Promise<boolean>
+      }
       windowControls?: DesktopWindowControls
       updates?: DesktopUpdates
     }
@@ -68,4 +71,8 @@ export function getWindowControls(): DesktopWindowControls | undefined {
 
 export function getDesktopUpdates(): DesktopUpdates | undefined {
   return window.rdstDesktop?.updates
+}
+
+export function registerDesktopOAuthProtocol(): Promise<boolean> | undefined {
+  return window.rdstDesktop?.oauth?.registerProtocol()
 }

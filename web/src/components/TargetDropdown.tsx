@@ -164,9 +164,9 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
             </div>
             {target.has_password ? (
               <Icon
-                name="tick-double"
-                label="Password configured"
-                className={target.name === currentTarget ? 'text-content-positive-soft' : 'text-content-layout-3'}
+                name="key"
+                label="Password stored"
+                className="text-content-layout-3"
               />
             ) : (
               <Icon

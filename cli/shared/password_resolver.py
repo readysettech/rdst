@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, NamedTuple, Union
 
 from .aws_secrets import resolve_secret
 from .secret_store_service import SecretStoreService
+
+
+def derive_password_env(name: str) -> str:
+    """Return the conventional environment variable for a target password."""
+    normalized = re.sub(r"[^A-Z0-9]+", "_", (name or "").upper()).strip("_")
+    return f"RDST_{normalized or 'TARGET'}_PASSWORD"
 
 
 class PasswordResolution(NamedTuple):
@@ -40,6 +47,14 @@ def resolve_password(
         store = secret_store or SecretStoreService()
         if store.get_secret(password_env):
             return PasswordResolution(available=True, source="secure_store")
+
+    secret_arn = (
+        target_config.get("password_secret_arn")
+        if isinstance(target_config, dict)
+        else getattr(target_config, "password_secret_arn", None)
+    )
+    if secret_arn:
+        return PasswordResolution(available=True, source="aws_secrets_manager")
 
     return PasswordResolution(available=False, source="missing")
 

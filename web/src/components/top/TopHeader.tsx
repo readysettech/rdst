@@ -57,7 +57,7 @@ function getStatusLabel(state: TopState): string {
     case 'complete':
       return 'Complete';
     case 'error':
-      return 'Error';
+      return 'Connection failed';
     default:
       return state;
   }

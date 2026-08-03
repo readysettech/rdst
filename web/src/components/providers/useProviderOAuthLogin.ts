@@ -3,6 +3,7 @@ import type {
   FleetProviderLoginStart,
   FleetProviderLoginStatus,
 } from '../../lib/useFleet'
+import { registerDesktopOAuthProtocol } from '../../lib/desktop'
 
 /** What the panel shows when a sign-in attempt fails, from any source. */
 export interface ProviderLoginFailure {
@@ -24,6 +25,7 @@ export interface UseProviderOAuthLoginReturn {
   loginId: string | null
   loginStatus: FleetProviderLoginStatus | null
   loginError: ProviderLoginFailure | null
+  blockedAuthUrl: string | null
   starting: boolean
   beginLogin: () => Promise<void>
   clearError: () => void
@@ -52,6 +54,7 @@ export function useProviderOAuthLogin({
     null
   )
   const [starting, setStarting] = useState(false)
+  const [blockedAuthUrl, setBlockedAuthUrl] = useState<string | null>(null)
 
   // The poll runs on a timer owned by one login attempt: keying it on anything
   // but the login id would restart the timer whenever a caller re-renders.
@@ -61,15 +64,27 @@ export function useProviderOAuthLogin({
   })
 
   const beginLogin = useCallback(async () => {
+    // Reserve the tab while this click still has browser user-gesture context.
+    // Opening only after the async start request is exactly what popup blockers
+    // reject in Safari/Chrome's stricter modes.
+    const popup = window.open('about:blank', '_blank')
     setStarting(true)
     setLoginError(null)
     setLoginStatus(null)
+    setBlockedAuthUrl(null)
     try {
+      await registerDesktopOAuthProtocol()
       const started = await latest.current.start()
-      window.open(started.authorize_url, '_blank')
+      if (popup) {
+        popup.opener = null
+        popup.location.href = started.authorize_url
+      } else {
+        setBlockedAuthUrl(started.authorize_url)
+      }
       setLoginId(started.login_id)
       setLoginStatus({ state: 'running' })
     } catch (caught) {
+      popup?.close()
       setLoginError(asProviderFailure(caught))
     } finally {
       setStarting(false)
@@ -110,5 +125,13 @@ export function useProviderOAuthLogin({
 
   const clearError = useCallback(() => setLoginError(null), [])
 
-  return { loginId, loginStatus, loginError, starting, beginLogin, clearError }
+  return {
+    loginId,
+    loginStatus,
+    loginError,
+    blockedAuthUrl,
+    starting,
+    beginLogin,
+    clearError,
+  }
 }

@@ -7,12 +7,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ComparisonCard } from '../components/CacheComparison'
+import { ConnectionFailureActions } from '../components/ConnectionFailureActions'
 import { QueryCacheStatus } from '../components/QueryCacheStatus'
 import { QueryCard } from '../components/QueryCard'
 import { ParameterDialog } from '../components/top'
 import { useTarget } from '../hooks/useTarget'
 import { startCacheTestRun, useBackgroundRuns } from '../lib/backgroundRuns'
-import { normalizeHttpError } from '../lib/errorContract'
+import { isConnectionFailure, normalizeHttpError } from '../lib/errorContract'
 import { isNotCacheable } from '../lib/queryImpact'
 import { fillCapturedParams, hasParameters } from '../lib/sqlParameters'
 import { useQueryRegistry } from '../lib/useQueryRegistry'
@@ -429,12 +430,39 @@ export function CachePage({ deepLinkHash }: { deepLinkHash?: string }) {
                             </Text>
                           )}
                           {run?.status === 'failed' && (
-                            <Text
-                              level="body-small"
-                              className="text-content-negative-soft"
-                            >
-                              {run.message}
-                            </Text>
+                            target &&
+                            isConnectionFailure({
+                              code: run.errorCode || '',
+                              category: run.errorCategory,
+                            }) ? (
+                              <div className="rounded-lg border border-border-negative-soft bg-surface-negative-soft/20 p-4">
+                                <ConnectionFailureActions
+                                  failure={{
+                                    target,
+                                    message: run.message,
+                                    category: run.errorCategory,
+                                    code: run.errorCode,
+                                  }}
+                                  onRetry={async () => {
+                                    await startTest(
+                                      entry.hash,
+                                      entry.sql,
+                                      entry.tag?.trim() ||
+                                        `Query ${entry.hash.slice(0, 8)}`
+                                    )
+                                    return true
+                                  }}
+                                  featureRecovery
+                                />
+                              </div>
+                            ) : (
+                              <Text
+                                level="body-small"
+                                className="text-content-negative-soft"
+                              >
+                                {run.message}
+                              </Text>
+                            )
                           )}
                           {run?.result && (
                             <ComparisonCard result={run.result} />

@@ -26,6 +26,8 @@ from features.ask.models import (
     AskOptions,
 )
 
+pytestmark = pytest.mark.usefixtures("run_blocking_inline")
+
 
 class TestAskServiceInit:
     """Tests for AskService initialization."""

@@ -614,7 +614,7 @@ class AuditService:
 
         _progress("Collecting database metrics...")
         try:
-            metrics = collect_metrics(target_config)
+            metrics = collect_metrics(target_config, target=target_name)
         except Exception as exc:
             return AuditResult(
                 target_name=target_name,
@@ -640,6 +640,7 @@ class AuditService:
         sizing = compute_sizing_verdict(metrics, instance_class=instance_class)
         cache_opportunity = compute_cache_opportunity(metrics)
         top_queries = self._collect_top_queries(
+            target_name,
             target_config,
             engine,
             limit=20,
@@ -751,6 +752,7 @@ class AuditService:
 
     def _collect_top_queries(
         self,
+        target_name: str,
         target_config: dict[str, Any],
         engine: str,
         limit: int = 20,
@@ -763,7 +765,10 @@ class AuditService:
         try:
             from shared.db_connection import create_direct_connection
 
-            connection = create_direct_connection(target_config)
+            connection = create_direct_connection(
+                target_config,
+                target=target_name,
+            )
             try:
                 if engine == "postgresql":
                     raw = collect_pg_stat_statements(connection)

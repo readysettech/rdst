@@ -9,7 +9,6 @@
  * and offers the password action instead of the driver text.
  */
 
-import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
@@ -17,6 +16,7 @@ import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { useState } from 'react'
 import type { FleetConnectivityEvent } from '../../types/fleet'
+import { ConnectionFailureActions } from '../ConnectionFailureActions'
 
 /** The row fields the connectivity surfaces read. */
 export interface ConnectivityTarget {
@@ -87,15 +87,15 @@ export function UnreachableNotice({
   target,
   result,
   onSetPassword,
+  onRetry,
 }: {
   target: ConnectivityTarget
   result: FleetConnectivityEvent | undefined
   onSetPassword?: (target: ConnectivityTarget) => void
+  onRetry?: (target: ConnectivityTarget) => Promise<boolean>
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const error = result?.error ?? ''
-  const firstLine =
-    error.split('\n')[0] || 'The last connectivity check failed.'
   const passwordIssue =
     target.has_password === false ||
     result?.code === 'TARGET_PASSWORD_REQUIRED' ||
@@ -103,49 +103,48 @@ export function UnreachableNotice({
 
   return (
     <div className="rounded-lg border border-border-warning-soft bg-surface-warning-soft/15 px-3 py-2">
-      <HStack className="gap-2 items-center flex-wrap">
-        <Icon
-          name="alert"
-          label=""
-          aria-hidden="true"
-          className="w-4 h-4 text-content-warning-soft shrink-0"
-        />
-        <Text level="caption" className="text-content-layout-2 flex-1 min-w-48">
-          {passwordIssue
-            ? `Enter the password for '${target.name}' again.`
-            : firstLine}
-        </Text>
-        {passwordIssue && onSetPassword && (
-          <Button
-            variant="primary"
-            modifier="outline"
-            size="small"
-            label="Set password"
-            icon="key"
-            iconPosition="left"
-            onClick={() => onSetPassword(target)}
+        <HStack className="gap-2 items-center flex-wrap">
+          <Icon
+            name="alert"
+            label=""
+            aria-hidden="true"
+            className="w-4 h-4 text-content-warning-soft shrink-0"
           />
-        )}
-        {error && !passwordIssue && (
-          <button
-            type="button"
-            onClick={() => setDetailsOpen((open) => !open)}
-            className="cursor-pointer"
-          >
-            <Text
-              level="caption"
-              className="text-content-layout-3 hover:underline"
+          <div className="flex-1 min-w-48">
+            <ConnectionFailureActions
+              failure={{
+                target: target.name,
+                message: error,
+                category: result?.category,
+                code: result?.code,
+              }}
+              passwordRequired={passwordIssue}
+              onSetPassword={
+                onSetPassword ? () => onSetPassword(target) : undefined
+              }
+              onRetry={onRetry ? () => onRetry(target) : undefined}
+            />
+          </div>
+          {error && !passwordIssue && (
+            <button
+              type="button"
+              onClick={() => setDetailsOpen((open) => !open)}
+              className="cursor-pointer"
             >
-              {detailsOpen ? 'Hide details' : 'Details'}
-            </Text>
-          </button>
+              <Text
+                level="caption"
+                className="text-content-layout-3 hover:underline"
+              >
+                {detailsOpen ? 'Hide details' : 'Details'}
+              </Text>
+            </button>
+          )}
+        </HStack>
+        {detailsOpen && error && !passwordIssue && (
+          <pre className="mt-2 text-xs text-content-layout-3 whitespace-pre-wrap break-all">
+            {error}
+          </pre>
         )}
-      </HStack>
-      {detailsOpen && error && !passwordIssue && (
-        <pre className="mt-2 text-xs text-content-layout-3 whitespace-pre-wrap break-all">
-          {error}
-        </pre>
-      )}
     </div>
   )
 }

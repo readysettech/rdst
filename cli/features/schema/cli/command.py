@@ -5,7 +5,11 @@ from __future__ import annotations
 import subprocess
 from typing import Optional
 
-from shared.db_connection import resolve_connection_params
+from shared.db_connection import (
+    create_mysql_connection_from_params,
+    postgres_connection_kwargs,
+    resolve_connection_params,
+)
 from shared.editor import resolve_editor_command
 from shared.ui import MessagePanel, Prompt, Rule, SimpleTree, StyleTokens, get_console
 
@@ -638,7 +642,7 @@ class SchemaCommand:
         if target_config:
             try:
                 sample_data_fn = self._create_sample_data_function(
-                    target_config, sample_rows
+                    target, target_config, sample_rows
                 )
             except Exception:
                 pass
@@ -651,9 +655,14 @@ class SchemaCommand:
         )
         return wizard.run(target, table_name)
 
-    def _create_sample_data_function(self, target_config: dict, sample_rows: int):
+    def _create_sample_data_function(
+        self, target: str, target_config: dict, sample_rows: int
+    ):
         def sample_data(table_name: str) -> list[dict]:
-            params = resolve_connection_params(target_config=target_config)
+            params = resolve_connection_params(
+                target=target,
+                target_config=target_config,
+            )
             engine = params["engine"]
 
             if engine in ("postgresql", "postgres"):
@@ -661,13 +670,7 @@ class SchemaCommand:
                 import psycopg2.extras
 
                 conn = psycopg2.connect(
-                    host=params["host"],
-                    port=params["port"],
-                    user=params["user"],
-                    password=params["password"],
-                    database=params["database"],
-                    sslmode=params["sslmode"],
-                    connect_timeout=5,
+                    **postgres_connection_kwargs(params, connect_timeout=5)
                 )
                 try:
                     with conn.cursor(
@@ -688,14 +691,10 @@ class SchemaCommand:
                 import pymysql
                 import pymysql.cursors
 
-                conn = pymysql.connect(
-                    host=params["host"],
-                    port=params["port"],
-                    user=params["user"],
-                    password=params["password"],
-                    database=params["database"],
-                    cursorclass=pymysql.cursors.DictCursor,
+                conn = create_mysql_connection_from_params(
+                    params,
                     connect_timeout=5,
+                    cursorclass=pymysql.cursors.DictCursor,
                 )
                 try:
                     with conn.cursor() as cursor:

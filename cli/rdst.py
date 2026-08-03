@@ -257,7 +257,7 @@ Commands:
 
 Examples:
   rdst configure add --target prod --host db.example.com --user admin
-  rdst configure add --target prod --connection-string "postgresql://user:pass@host:5432/db"
+  rdst configure add --target prod --connection-string "postgresql://user@host:5432/db"
   rdst configure list
   rdst analyze "SELECT * FROM users WHERE active = true"
   rdst analyze "SELECT COUNT(*) FROM orders WHERE status = 'pending'"
@@ -306,6 +306,19 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
         if configure_subcommand is not None:
             kwargs["subcommand"] = configure_subcommand
         return cli.configure(config_path=args.config, **kwargs)
+    elif command == "tunnel":
+        tunnel_subcommand = getattr(args, "tunnel_subcommand", None)
+        if not tunnel_subcommand:
+            return RdstResult(
+                False,
+                "Tunnel command requires a subcommand: list, close, test\n"
+                "Try: rdst tunnel --help",
+            )
+        return cli.tunnel(
+            subcommand=tunnel_subcommand,
+            target=getattr(args, "target", None),
+            close_all=getattr(args, "close_all", False),
+        )
     elif command == "top":
         return cli.top(**kwargs)
     elif command == "analyze":
@@ -913,7 +926,7 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
         # Order matches what --help shows; 'exit' is appended as a menu-only entry.
         _menu_command_names = [
             "configure", "top", "analyze", "ask", "scan", "agent", "guard",
-            "init", "query", "schema", "fleet", "audit", "demo",
+            "init", "query", "schema", "tunnel", "fleet", "audit", "demo",
             "version", "update", "report", "help", "claude", "slack", "web",
         ]
         commands = [
@@ -1062,6 +1075,8 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
             report_cmd = ReportCommand()
             success = report_cmd.run()
             return RdstResult(success, "")
+        elif cmd == "tunnel":
+            return RdstResult(True, "Run: rdst tunnel --help")
         elif cmd == "fleet":
             return RdstResult(True, "Run: rdst fleet --help")
         elif cmd == "audit":

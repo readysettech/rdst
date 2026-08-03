@@ -162,9 +162,9 @@ def discover_aurora_cluster(
 
     writer_host = cluster.get("Endpoint", "")
     port = cluster.get("Port", 5432 if rdst_engine == "postgresql" else 3306)
-    # CLI override > RDS-reported DBName > cluster ID (last is usually wrong;
-    # cluster IDs aren't valid DB names — pass --default-database to fix).
-    database = default_database or cluster.get("DatabaseName") or cluster_id
+    # Instance identifiers are not database names. When RDS has no database
+    # name, leave it blank so the credentials step can ask for the real one.
+    database = default_database or cluster.get("DatabaseName") or ""
     user = default_user or cluster.get(
         "MasterUsername", "postgres" if rdst_engine == "postgresql" else "admin"
     )
@@ -172,6 +172,7 @@ def discover_aurora_cluster(
         return []
 
     group = default_group or cluster_id
+    cluster_secret_arn = (cluster.get("MasterUserSecret") or {}).get("SecretArn")
     members = [
         FleetMember(
             name=f"{cluster_id}-writer",
@@ -185,6 +186,9 @@ def discover_aurora_cluster(
             tags=["aurora", "writer", "role:writer"],
             instance_class=None,
             region=region,
+            publicly_accessible=cluster.get("PubliclyAccessible"),
+            password_secret_arn=cluster_secret_arn,
+            password_secret_key="password",
         )
     ]
 
@@ -216,6 +220,12 @@ def discover_aurora_cluster(
                                 tags=["aurora", "reader", "role:reader"],
                                 instance_class=instance.get("DBInstanceClass"),
                                 region=region,
+                                publicly_accessible=instance.get("PubliclyAccessible"),
+                                password_secret_arn=(
+                                    instance.get("MasterUserSecret") or {}
+                                ).get("SecretArn")
+                                or cluster_secret_arn,
+                                password_secret_key="password",
                             )
                         )
         except Exception as exc:
@@ -260,7 +270,7 @@ def _parse_instance(
     if not host:
         return None
 
-    database = default_database or instance.get("DBName") or db_id
+    database = default_database or instance.get("DBName") or ""
     user = default_user or instance.get(
         "MasterUsername", "postgres" if rdst_engine == "postgresql" else "admin"
     )
@@ -283,4 +293,10 @@ def _parse_instance(
         tags=tags,
         instance_class=instance_class,
         region=region,
+        publicly_accessible=instance.get("PubliclyAccessible"),
+        vpc_id=(instance.get("DBSubnetGroup") or {}).get("VpcId"),
+        password_secret_arn=(instance.get("MasterUserSecret") or {}).get(
+            "SecretArn"
+        ),
+        password_secret_key="password",
     )

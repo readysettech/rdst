@@ -164,6 +164,9 @@ def get_aws_status(sts_timeout: float = 3.0, profile: Optional[str] = None) -> d
                 ),
             )
             identity = sts.get_caller_identity()
+            from .identity import capture_aws_identity_async
+
+            capture_aws_identity_async(identity.get("Arn"))
             status["has_credentials"] = True
             status["identity_arn"] = identity.get("Arn")
             status["account"] = identity.get("Account")

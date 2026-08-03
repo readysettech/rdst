@@ -10,6 +10,8 @@ export interface ApiErrorEnvelope {
   code: string
   message: string
   detail?: string
+  category?: string
+  target?: string
 }
 
 export type { ErrorClass }
@@ -84,6 +86,11 @@ export function classifyError(envelope: ApiErrorEnvelope): ErrorClass {
   const code = (envelope.code ?? '').toLowerCase()
   const msg = (envelope.message ?? '').toLowerCase()
   const hay = `${code} ${msg}`
+
+  // Stable connectivity categories beat message heuristics. In particular,
+  // `ssh_auth_failed` contains "auth", but it is database connectivity — not
+  // an Anthropic/API-key failure.
+  if (isConnectionFailure(envelope)) return 'database'
 
   if (
     CONTAINS(hay, [
@@ -300,7 +307,17 @@ export function normalizeSseError(data: unknown): ApiErrorEnvelope {
         : d.detail != null
           ? JSON.stringify(d.detail)
           : undefined
-    return { code, message, detail }
+    const category =
+      typeof d.category === 'string' && d.category.trim()
+        ? d.category
+        : undefined
+    const target =
+      typeof d.target === 'string' && d.target.trim()
+        ? d.target
+        : typeof d.target_name === 'string' && d.target_name.trim()
+          ? d.target_name
+          : undefined
+    return { code, message, detail, category, target }
   }
   return {
     code: 'error',
@@ -321,16 +338,39 @@ export function normalizeHttpError(
 ): ApiErrorEnvelope {
   if (body && typeof body === 'object') {
     const b = body as Record<string, unknown>
+    // A direct envelope can legitimately carry object-valued diagnostic detail;
+    // preserve its top-level message/code instead of mistaking that detail for
+    // FastAPI's wrapper.
     if (typeof b.message === 'string' && b.message.trim()) {
       return {
         code: typeof b.code === 'string' && b.code ? b.code : `http_${status}`,
         message: b.message.trim(),
+        category:
+          typeof b.category === 'string' && b.category.trim()
+            ? b.category
+            : undefined,
+        target:
+          typeof b.target === 'string' && b.target.trim()
+            ? b.target
+            : typeof b.target_name === 'string' && b.target_name.trim()
+              ? b.target_name
+              : undefined,
         detail:
           typeof b.detail === 'string'
             ? b.detail
             : b.detail != null
               ? JSON.stringify(b.detail)
               : undefined,
+      }
+    }
+    // FastAPI wraps HTTPException payloads in `{detail: ...}`. TargetGuard's
+    // connectivity failures intentionally use an object-valued detail so the
+    // category survives; unwrap it after ruling out a direct envelope.
+    if (b.detail && typeof b.detail === 'object') {
+      const nested = normalizeSseError(b.detail)
+      return {
+        ...nested,
+        code: nested.code === 'error' ? `http_${status}` : nested.code,
       }
     }
     if (typeof b.detail === 'string' && b.detail.trim()) {
@@ -341,4 +381,43 @@ export function normalizeHttpError(
     code: `http_${status}`,
     message: `The server returned an error (${status}).`,
   }
+}
+
+const CONNECTION_CODES = new Set([
+  'database_connection_failed',
+])
+
+/** True only for stable connection/tunnel/provider-network categories. */
+export function isConnectionFailure(
+  envelope: Pick<ApiErrorEnvelope, 'code' | 'category'>
+): boolean {
+  const value = (envelope.category || envelope.code || '').toLowerCase()
+  return (
+    value.startsWith('ssh_') ||
+    value.startsWith('provider_ip_blocked') ||
+    CONNECTION_CODES.has(value)
+  )
+}
+
+/** Preserve structured fields attached to thrown API errors. */
+export function normalizeUnknownError(
+  error: unknown,
+  fallback = 'The operation could not be completed.'
+): ApiErrorEnvelope {
+  if (error && typeof error === 'object') {
+    const value = error as Record<string, unknown>
+    return normalizeSseError({
+      code: value.code,
+      category: value.category,
+      target: value.target,
+      message:
+        typeof value.message === 'string' && value.message.trim()
+          ? value.message
+          : fallback,
+      detail: value.detail,
+    })
+  }
+  return normalizeSseError(
+    typeof error === 'string' && error.trim() ? error : fallback
+  )
 }

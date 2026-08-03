@@ -1,6 +1,6 @@
 import type { components as apiComponents } from './api.generated'
 import { api as typedClient } from './client'
-import { throwIfNotOk } from './httpError'
+import { throwIfApiError, throwIfNotOk } from './httpError'
 
 export type AnalyzeRequest = apiComponents['schemas']['AnalyzeRequest']
 
@@ -127,10 +127,10 @@ export async function validateAnthropicKey(): Promise<AnthropicKeyValidation> {
 export type SchemaResponse = apiComponents['schemas']['SchemaResponse']
 
 export async function fetchSchema(target?: string): Promise<SchemaResponse> {
-  const { data, response } = await typedClient.GET('/api/schema', {
+  const { data, error, response } = await typedClient.GET('/api/schema', {
     params: { query: { target: target ?? null } },
   })
-  await throwIfNotOk(response, 'Failed to fetch schema')
+  throwIfApiError(response, error, 'Failed to fetch schema')
   if (!data) throw new Error('Missing response body')
   return data
 }

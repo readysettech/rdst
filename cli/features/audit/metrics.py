@@ -10,16 +10,20 @@ from .models import AuditMetrics
 logger = logging.getLogger(__name__)
 
 
-def collect_metrics(target_config: Dict[str, Any]) -> AuditMetrics:
+def collect_metrics(
+    target_config: Dict[str, Any], target: Optional[str] = None
+) -> AuditMetrics:
     """Collect audit metrics from a database target. Raises on connection failure."""
     engine = target_config.get("engine", "postgresql")
     if engine == "postgresql":
-        return _collect_postgresql_metrics(target_config)
+        return _collect_postgresql_metrics(target_config, target)
     else:
-        return _collect_mysql_metrics(target_config)
+        return _collect_mysql_metrics(target_config, target)
 
 
-def _collect_postgresql_metrics(target_config: Dict[str, Any]) -> AuditMetrics:
+def _collect_postgresql_metrics(
+    target_config: Dict[str, Any], target: Optional[str] = None
+) -> AuditMetrics:
     """Collect metrics from PostgreSQL using pg_stat_* views."""
     import datetime
 
@@ -28,7 +32,7 @@ def _collect_postgresql_metrics(target_config: Dict[str, Any]) -> AuditMetrics:
     )
 
     try:
-        conn = create_direct_connection(target_config)
+        conn = create_direct_connection(target_config, target=target)
     except Exception as e:
         raise RuntimeError(f"Failed to connect: {e}") from e
 
@@ -198,7 +202,9 @@ def _collect_postgresql_metrics(target_config: Dict[str, Any]) -> AuditMetrics:
     return metrics
 
 
-def _collect_mysql_metrics(target_config: Dict[str, Any]) -> AuditMetrics:
+def _collect_mysql_metrics(
+    target_config: Dict[str, Any], target: Optional[str] = None
+) -> AuditMetrics:
     """Collect metrics from MySQL using SHOW STATUS and performance_schema."""
     import datetime
 
@@ -207,7 +213,7 @@ def _collect_mysql_metrics(target_config: Dict[str, Any]) -> AuditMetrics:
     )
 
     try:
-        conn = create_direct_connection(target_config)
+        conn = create_direct_connection(target_config, target=target)
     except Exception as e:
         raise RuntimeError(f"Failed to connect: {e}") from e
 

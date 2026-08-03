@@ -431,6 +431,7 @@ class FleetCommand:
         imported = 0
         skipped = 0
         discovered_names = []
+        private_names = []
 
         try:
             for member in discover_rds_instances(
@@ -456,6 +457,17 @@ class FleetCommand:
                     role_tag = " [bold cyan][writer][/bold cyan]"
                 elif "reader" in member.tags:
                     role_tag = " [dim][reader][/dim]"
+                if member.publicly_accessible is False:
+                    private_names.append(member.name)
+                elif member.publicly_accessible is None:
+                    from shared.db_connection import probe_target_connection
+
+                    probe = probe_target_connection(
+                        member.to_target_config(),
+                        connect_timeout=3,
+                    )
+                    if not probe["success"]:
+                        private_names.append(member.name)
 
                 if dry_run:
                     console.print(
@@ -481,6 +493,13 @@ class FleetCommand:
 
         prefix = "[dry-run] " if dry_run else ""
         console.print(f"\n{prefix}[bold]{imported} discovered, {skipped} already existed[/bold]")
+        if private_names:
+            names = ", ".join(private_names)
+            console.print(
+                f"\n[yellow]Private targets:[/yellow] {names}\n"
+                "Run `rdst configure edit <name>` to add an SSH jump host, or "
+                "use --ssh-host, --ssh-port, --ssh-user, and --ssh-key."
+            )
 
         # Interactive credential setup for newly discovered instances
         if imported > 0 and not dry_run:
