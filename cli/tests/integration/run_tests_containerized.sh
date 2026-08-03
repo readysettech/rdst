@@ -120,7 +120,14 @@ echo "Using Python: $($PYTHON_BIN --version) at $PYTHON_BIN"
 
 echo "Installing Python dependencies..."
 cd "$RDST_ROOT"
-$PYTHON_BIN -m pip install --quiet --user -r requirements.txt 2>&1 | grep -v "WARNING:" || true
+if ! INSTALL_OUTPUT=$(
+  "$PYTHON_BIN" -m pip install --quiet --user -r requirements.txt 2>&1
+); then
+  echo "$INSTALL_OUTPUT" | grep -v "WARNING:" >&2 || true
+  echo "ERROR: Failed to install Python dependencies" >&2
+  exit 1
+fi
+echo "$INSTALL_OUTPUT" | grep -v "WARNING:" || true
 
 USER_SITE=$($PYTHON_BIN -c "import site; print(site.getusersitepackages())" 2>/dev/null || echo "")
 if [[ -n "$USER_SITE" ]]; then

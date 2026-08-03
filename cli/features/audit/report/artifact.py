@@ -31,7 +31,7 @@ def save_report_locally(run_id: str, html: str) -> str | None:
         directory = reports_dir()
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{run_id}.html"
-        path.write_text(html)
+        path.write_text(html, encoding="utf-8")
         return str(path)
     except Exception as exc:
         logger.warning("Could not save report for %s: %s", run_id, exc)
@@ -66,7 +66,7 @@ def _read_saved_artifact(run_id: str) -> str | None:
     path = reports_dir() / f"{run_id}.html"
     try:
         if path.is_file():
-            return path.read_text()
+            return path.read_text(encoding="utf-8")
     except OSError as exc:
         logger.warning("Could not read saved report %s: %s", path, exc)
     return None

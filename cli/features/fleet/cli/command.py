@@ -15,6 +15,7 @@ from shared.cli.types import RdstResult
 from shared.config.targets import TargetsConfig
 from shared.db_connection import close_connection, create_direct_connection
 from shared.secret_store_service import SecretStoreService
+from shared.shell import environment_assignment
 from shared.ui import ElapsedMessage, Status, get_console
 
 from features.audit.capture_service import CaptureService, _parse_duration
@@ -89,12 +90,15 @@ class FleetCommand:
             ))
 
             # Password options panel
+            password_assignment = environment_assignment(
+                "PROD_DB_PASS", "my-actual-password"
+            )
             console.print(StyledPanel(
                 "[bold]Option 1: Environment variable[/bold]\n"
                 "Put the env var NAME in the CSV (not the actual password).\n"
-                "Then export the password in your shell before running RDST.\n\n"
+                "Then set the password in your shell before running RDST.\n\n"
                 "  CSV column:  password_env = PROD_DB_PASS\n"
-                "  Your shell:  export PROD_DB_PASS=\"my-actual-password\"\n\n"
+                f"  Your shell:  {password_assignment}\n\n"
                 "[bold]Option 2: AWS Secrets Manager[/bold]\n"
                 "Put the full Secrets Manager ARN in the CSV.\n"
                 "RDST will fetch the password automatically at runtime.\n\n"
@@ -189,7 +193,8 @@ class FleetCommand:
                     console.print(f"    [green]Password saved to OS keyring (persists across sessions)[/green]")
                 else:
                     console.print(f"    [green]Password set for this session via {env_name}[/green]")
-                    console.print(f"    [dim]For future sessions: export {env_name}=\"your-password\"[/dim]")
+                    assignment = environment_assignment(env_name, "your-password")
+                    console.print(f"    [dim]For future sessions: {assignment}[/dim]")
         elif pw_method == "2":
             arn = Prompt.ask("    Secrets Manager ARN", default="", show_default=False)
             if arn:
@@ -627,10 +632,11 @@ class FleetCommand:
         # Print env var summary for targets not using keyring
         if env_vars_needed:
             console.print(f"\n[bold]Environment Variables Required[/bold]")
-            console.print("[dim]Add these to your shell profile to persist across sessions:[/dim]\n")
+            console.print("[dim]Set these before starting RDST in a future session:[/dim]\n")
             for env_name, targets in env_vars_needed.items():
                 target_list = ", ".join(targets)
-                console.print(f'  export {env_name}="your-password"  [dim]# {target_list}[/dim]')
+                assignment = environment_assignment(env_name, "your-password")
+                console.print(f"  {assignment}  [dim]# {target_list}[/dim]")
             console.print()
 
         # Next steps breadcrumbs
@@ -1401,7 +1407,8 @@ class FleetCommand:
                     target_name = r.get("target_name", "?")
                     target_cfg = cfg.get(target_name) or {}
                     pw_env = target_cfg.get("password_env", "FLEET_DB_PASS")
-                    console.print(f"  [red]{target_name}[/red]: password not set — export {pw_env}=\"your-password\"")
+                    assignment = environment_assignment(pw_env, "your-password")
+                    console.print(f"  [red]{target_name}[/red]: password not set — {assignment}")
                 elif "Authentication failed" in error_msg:
                     console.print(f"  [red]{r.get('target_name', '?')}[/red]: wrong password or username")
                 elif "Unable to locate credentials" in error_msg:
@@ -1411,7 +1418,8 @@ class FleetCommand:
                         console.print(f"  [red]{target_name}[/red]: AWS credentials not found — run: aws sso login")
                     else:
                         pw_env = target_cfg.get("password_env", "FLEET_DB_PASS")
-                        console.print(f"  [red]{target_name}[/red]: password not set — export {pw_env}=\"your-password\"")
+                        assignment = environment_assignment(pw_env, "your-password")
+                        console.print(f"  [red]{target_name}[/red]: password not set — {assignment}")
                 else:
                     console.print(f"  [red]{r.get('target_name', '?')}[/red]: {error_msg[:80]}")
         else:

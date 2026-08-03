@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 from .config import AgentConfig, SafetyConfig, RestrictionsConfig, agents_dir
-from shared.config.targets import create_targets_config
+from shared.config.targets import create_targets_config, is_windows_reserved_name
 
 from features.guard import GuardManager, GuardNotFoundError
 
@@ -66,7 +66,7 @@ def validate_agent_name(name: str) -> None:
     if len(name) > 64:
         raise InvalidAgentNameError("Agent name cannot exceed 64 characters")
 
-    if not AGENT_NAME_PATTERN.match(name):
+    if not AGENT_NAME_PATTERN.match(name) or is_windows_reserved_name(name):
         raise InvalidAgentNameError(
             f"Invalid agent name '{name}'. "
             "Name must start with a letter or underscore and contain only "

@@ -102,7 +102,7 @@ def get_example_questions(
 
     if cache.exists():
         try:
-            cached = json.loads(cache.read_text())
+            cached = json.loads(cache.read_text(encoding="utf-8"))
             if cached.get("fingerprint") == fp and cached.get("examples"):
                 return {"examples": cached["examples"], "source": "semantic"}
         except Exception:
@@ -113,7 +113,8 @@ def get_example_questions(
         if examples:
             try:
                 cache.write_text(
-                    json.dumps({"fingerprint": fp, "examples": examples})
+                    json.dumps({"fingerprint": fp, "examples": examples}),
+                    encoding="utf-8",
                 )
             except Exception:
                 logger.debug("Failed to write ask-examples cache", exc_info=True)

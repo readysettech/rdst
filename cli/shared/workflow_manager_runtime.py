@@ -126,7 +126,7 @@ class WorkflowManager:
 
     @classmethod
     def from_file(cls, path: str, resources: Optional[ResourceRegistry] = None) -> "WorkflowManager":
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             wf = json.load(f)
         mgr = cls(resources)
         mgr._workflow = wf

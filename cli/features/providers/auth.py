@@ -51,7 +51,7 @@ def detect_aws_credentials(profile: Optional[str] = None) -> Tuple[bool, str]:
     config_path = Path.home() / ".aws" / "config"
     if config_path.exists():
         try:
-            content = config_path.read_text()
+            content = config_path.read_text(encoding="utf-8")
             if "sso_start_url" in content or "sso_session" in content:
                 return False, (
                     "AWS SSO configured but may need login. Run:\n"

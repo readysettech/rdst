@@ -66,6 +66,11 @@ class TestValidateAgentName:
         with pytest.raises(InvalidAgentNameError, match="must start with a letter or underscore"):
             validate_agent_name("my agent")
 
+    @pytest.mark.parametrize("name", ["CON", "aux", "LPT1"])
+    def test_windows_reserved_name_raises(self, name):
+        with pytest.raises(InvalidAgentNameError):
+            validate_agent_name(name)
+
     def test_name_with_special_chars_raises(self):
         """Test name with special characters raises error."""
         invalid_names = ["agent@test", "agent.test", "agent/test", "agent:test"]

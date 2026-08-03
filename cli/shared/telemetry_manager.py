@@ -287,7 +287,7 @@ class TelemetryManager:
         # Try to read existing
         if device_id_file.exists():
             try:
-                self._device_id = device_id_file.read_text().strip()
+                self._device_id = device_id_file.read_text(encoding="utf-8").strip()
                 if self._device_id:
                     return self._device_id
             except Exception:
@@ -301,7 +301,7 @@ class TelemetryManager:
         persisted = False
         try:
             self._rdst_dir.mkdir(parents=True, exist_ok=True)
-            device_id_file.write_text(self._device_id)
+            device_id_file.write_text(self._device_id, encoding="utf-8")
             persisted = True
         except Exception:
             pass
@@ -355,7 +355,7 @@ class TelemetryManager:
         config_file = self._rdst_dir / "config.toml"
         if config_file.exists():
             try:
-                content = config_file.read_text()
+                content = config_file.read_text(encoding="utf-8")
                 if "telemetry_enabled = false" in content.lower():
                     self._enabled = False
                     return False
@@ -383,7 +383,7 @@ class TelemetryManager:
                 return "trial"
             config_file = self._rdst_dir / "config.toml"
             if config_file.exists():
-                content = config_file.read_text()
+                content = config_file.read_text(encoding="utf-8")
                 if "[trial]" in content:
                     if 'status = "active"' in content:
                         return "trial"
@@ -424,7 +424,7 @@ class TelemetryManager:
 
         if stats_file.exists():
             try:
-                self._stats = json.loads(stats_file.read_text())
+                self._stats = json.loads(stats_file.read_text(encoding="utf-8"))
                 return self._stats
             except Exception:
                 pass
@@ -453,7 +453,7 @@ class TelemetryManager:
         try:
             stats_file = self._rdst_dir / "stats.json"
             self._rdst_dir.mkdir(parents=True, exist_ok=True)
-            stats_file.write_text(json.dumps(self._stats, indent=2))
+            stats_file.write_text(json.dumps(self._stats, indent=2), encoding="utf-8")
         except Exception:
             pass
 

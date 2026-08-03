@@ -93,7 +93,7 @@ def parse_alembic_migrations(diff_files: List[str], repo_root: str) -> List[Inde
             continue
 
         try:
-            content = full_path.read_text()
+            content = full_path.read_text(encoding="utf-8", errors="ignore")
             tree = ast.parse(content)
         except Exception:
             continue

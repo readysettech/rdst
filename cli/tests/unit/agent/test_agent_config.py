@@ -236,6 +236,23 @@ class TestAgentConfig:
             assert loaded.description == config.description
             assert loaded.safety.max_rows == config.safety.max_rows
 
+    def test_unicode_roundtrip_on_legacy_windows_locale(self, tmp_path, monkeypatch):
+        import builtins
+
+        real_open = builtins.open
+
+        def windows_open(file, mode="r", *args, **kwargs):
+            if "b" not in mode and "encoding" not in kwargs:
+                kwargs["encoding"] = "cp1252"
+            return real_open(file, mode, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", windows_open)
+        path = tmp_path / "unicode-agent.yaml"
+        AgentConfig(name="unicode", target="prod", description="東京 ▶").save(path)
+
+        assert AgentConfig.load(path).description == "東京 ▶"
+        assert "東京" in path.read_text(encoding="utf-8")
+
     def test_save_creates_directory(self):
         """Test saving creates parent directories."""
         with tempfile.TemporaryDirectory() as tmpdir:

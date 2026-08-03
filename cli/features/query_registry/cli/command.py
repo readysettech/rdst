@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import signal
+import shutil
 import statistics
 import sys
 import subprocess  # nosemgrep: gitlab.bandit.B404
@@ -20,7 +21,6 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Queue, Empty
-from shutil import which
 from threading import Lock
 from typing import Optional, Any
 
@@ -49,6 +49,7 @@ from shared.ui import (
     Status,
 )
 
+from shared.editor import resolve_editor_command
 from shared.query_registry import QueryRegistry
 
 
@@ -1176,40 +1177,9 @@ class QueryCommand:
             },
         )
 
-    def _validate_editor(self, editor_name: str) -> Optional[str]:
-        """
-        Validate and resolve editor command to absolute path.
-
-        Args:
-            editor_name: Name or path of editor from environment or default
-
-        Returns:
-            Absolute path to validated editor executable, or None if invalid
-        """
-        if not editor_name:
-            return None
-
-        # Extract just the command name (first part before any spaces)
-        # This prevents command injection via editor name
-        command = editor_name.split()[0]
-
-        # Resolve to absolute path using which()
-        # This validates the command exists and is executable
-        resolved_path = which(command)
-
-        if not resolved_path:
-            return None
-
-        # Additional validation: ensure it's an absolute path
-        path_obj = Path(resolved_path)
-        if not path_obj.is_absolute():
-            return None
-
-        # Ensure the file exists and is executable
-        if not (path_obj.exists() and os.access(str(path_obj), os.X_OK)):
-            return None
-
-        return resolved_path
+    def _validate_editor(self, editor_name: str) -> Optional[list[str]]:
+        """Resolve an editor command and preserve configured arguments."""
+        return resolve_editor_command(editor_name)
 
     def _open_editor_for_query(
         self,
@@ -1228,25 +1198,14 @@ class QueryCommand:
         Returns:
             SQL query string, or None if cancelled/empty
         """
-        # Determine editor to use from environment
-        editor_name = os.environ.get("EDITOR") or os.environ.get("VISUAL")
+        editor_command = resolve_editor_command()
 
-        # Validate editor from environment
-        editor = self._validate_editor(editor_name) if editor_name else None
-
-        if not editor:
-            # Try common editors in order of preference
-            for candidate in ["vim", "nano", "vi", "emacs"]:
-                editor = self._validate_editor(candidate)
-                if editor:
-                    break
-
-        if not editor:
+        if editor_command is None:
             self.console.print(
                 MessagePanel(
                     "No editor found.",
                     variant="error",
-                    hint="Set $EDITOR environment variable or install vim/nano.",
+                    hint="Set EDITOR or VISUAL to an installed editor.",
                 )
             )
             return None
@@ -1255,25 +1214,18 @@ class QueryCommand:
         template = self._create_editor_template(name, existing_sql, target_name)
 
         # Create temporary file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".sql", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".sql", delete=False, encoding="utf-8"
+        ) as f:
             f.write(template)
             f.flush()
             temp_path = f.name
 
         try:
-            # Open editor
-            # SECURITY: editor is validated via _validate_editor() to ensure:
-            # 1. It's resolved to an absolute path via shutil.which()
-            # 2. It's an actual executable file
-            # 3. Command injection is prevented by using list form (not shell=True)
-            # 4. Only the first word of editor name is used (splits on spaces)
-            # Justification for nosemgrep: Editor path is validated through _validate_editor()
-            # which uses shutil.which() to resolve to absolute path and verifies it's an
-            # executable. List form prevents shell injection.
-            subprocess.call([editor, temp_path])  # nosemgrep
+            subprocess.call([*editor_command, temp_path])  # nosemgrep
 
             # Read edited content
-            with open(temp_path, "r") as f:
+            with open(temp_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Parse SQL from content
@@ -1433,7 +1385,7 @@ class QueryCommand:
         Returns:
             True if command exists, False otherwise
         """
-        return which(command) is not None
+        return shutil.which(command) is not None
 
     # =========================================================================
     # Run command implementation

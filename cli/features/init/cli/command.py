@@ -15,6 +15,7 @@ from features.init.service import InitService
 from shared.cli.types import RdstResult
 from shared.config.targets import TargetsConfig
 from shared.llm import resolve_api_key
+from shared.shell import environment_assignment
 from shared.ui import (
     Confirm,
     MessagePanel,
@@ -208,7 +209,7 @@ class InitCommand:
                             "No LLM API key configured.\n\n"
                             "Options:\n"
                             "  1. Run 'rdst configure llm' to sign up for a free trial (up to 925K tokens)\n"
-                            '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."',
+                            f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}",
                             variant="warning",
                             title="LLM Setup Required",
                             hint="Get an API key at: https://console.anthropic.com/",

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from typing import Optional
 
 from shared.db_connection import resolve_connection_params
+from shared.editor import resolve_editor_command
 from shared.ui import MessagePanel, Prompt, Rule, SimpleTree, StyleTokens, get_console
 
 from ..semantic_models import SemanticLayer
@@ -247,9 +247,15 @@ class SchemaCommand:
         layer = self.manager.load(target)
         path = self.manager.get_path(target)
 
-        editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "vim"))
+        editor_command = resolve_editor_command()
+        if editor_command is None:
+            return {
+                "ok": False,
+                "message": "No editor found. Set EDITOR or VISUAL.",
+                "data": None,
+            }
         try:
-            subprocess.run([editor, str(path)], check=True)
+            subprocess.run([*editor_command, str(path)], check=True)
             try:
                 self.manager.clear_cache()
                 self.manager.load(target)
@@ -273,11 +279,11 @@ class SchemaCommand:
                 "message": f"Editor exited with error: {exc}",
                 "data": {"path": str(path)},
             }
-        except FileNotFoundError:
+        except OSError as exc:
             return {
                 "ok": False,
-                "message": f"Editor not found: {editor}. Set $EDITOR environment variable.",
-                "data": {"editor": editor},
+                "message": f"Could not run editor: {exc}",
+                "data": {"editor": editor_command[0]},
             }
 
     def export(self, target: str, output_format: str = "yaml") -> dict:

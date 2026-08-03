@@ -23,7 +23,7 @@ class LLMInspector:
 
     def load_session(self) -> Dict[str, Any]:
         if self._session_data is None:
-            with open(self.session_file) as f:
+            with open(self.session_file, encoding="utf-8") as f:
                 self._session_data = json.load(f)
         return self._session_data
 
@@ -158,15 +158,15 @@ class LLMInspector:
             call_id = call.get("call_id", "unknown")[:8]
 
             prompt_file = output_dir / f"{i:03d}_{function_name}_{call_id}_prompt.txt"
-            with open(prompt_file, "w") as f:
+            with open(prompt_file, "w", encoding="utf-8", newline="\n") as f:
                 f.write(call.get("prompt", ""))
 
             response_file = output_dir / f"{i:03d}_{function_name}_{call_id}_response.txt"
-            with open(response_file, "w") as f:
+            with open(response_file, "w", encoding="utf-8", newline="\n") as f:
                 f.write(call.get("response", ""))
 
             meta_file = output_dir / f"{i:03d}_{function_name}_{call_id}_meta.json"
-            with open(meta_file, "w") as f:
+            with open(meta_file, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(
                     {
                         "call_id": call.get("call_id"),

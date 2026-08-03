@@ -32,6 +32,7 @@ from features.guard import (
     format_derived_rules,
 )
 from shared.cli.types import RdstResult
+from shared.editor import resolve_editor_command
 
 
 class GuardCommand:
@@ -281,20 +282,22 @@ Run 'rdst guard create --help' for full options."""
 
     def _edit_derived_config(self, config: GuardConfig) -> RdstResult:
         """Open derived config in editor for manual adjustment."""
-        editor = os.environ.get("EDITOR", "vi")
+        editor_command = resolve_editor_command()
+        if editor_command is None:
+            return RdstResult(False, "No editor found. Set EDITOR or VISUAL.")
 
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
         ) as f:
             yaml.dump(config.to_dict(), f, default_flow_style=False, sort_keys=False)
             temp_path = f.name
 
         try:
-            result = subprocess.run([editor, temp_path])
+            result = subprocess.run([*editor_command, temp_path])
             if result.returncode != 0:
                 return RdstResult(False, "Editor exited with error")
 
-            with open(temp_path) as f:
+            with open(temp_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
 
             edited_config = GuardConfig.from_dict(data)
@@ -306,6 +309,8 @@ Run 'rdst guard create --help' for full options."""
             )
         except GuardExistsError:
             return RdstResult(False, f"Guard '{config.name}' already exists.")
+        except OSError as exc:
+            return RdstResult(False, f"Could not run editor: {exc}")
         finally:
             os.unlink(temp_path)
 
@@ -441,23 +446,25 @@ Run 'rdst guard create --help' for full options."""
         except GuardNotFoundError:
             return RdstResult(False, f"Guard '{name}' not found")
 
-        editor = os.environ.get("EDITOR", "vi")
+        editor_command = resolve_editor_command()
+        if editor_command is None:
+            return RdstResult(False, "No editor found. Set EDITOR or VISUAL.")
 
         # Write to temp file
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
         ) as f:
             yaml.dump(config.to_dict(), f, default_flow_style=False, sort_keys=False)
             temp_path = f.name
 
         try:
             # Open editor
-            result = subprocess.run([editor, temp_path])
+            result = subprocess.run([*editor_command, temp_path])
             if result.returncode != 0:
                 return RdstResult(False, "Editor exited with error")
 
             # Read back and validate
-            with open(temp_path) as f:
+            with open(temp_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
 
             # Ensure name wasn't changed
@@ -472,7 +479,8 @@ Run 'rdst guard create --help' for full options."""
             self.manager.update(updated_config)
 
             return RdstResult(True, f"Updated guard '{name}'")
-
+        except OSError as exc:
+            return RdstResult(False, f"Could not run editor: {exc}")
         finally:
             os.unlink(temp_path)
 

@@ -235,7 +235,7 @@ class CacheManager:
         file_name = f"{self.workflow_id}_async_cache.txt"
         file_path = f"/home/{self.config_manager.user}/{file_name}"
 
-        with open(file_path, 'w') as file:
+        with open(file_path, 'w', encoding='utf-8', newline='\n') as file:
             file.write('success' if success else 'failed')
         
         s3_file_path = f"{self.config_manager.cluster_id}/{self.config_manager.instance_id}/cache_query/{self.workflow_id}_async_cache.txt"
@@ -310,7 +310,7 @@ class CacheManager:
                              f"contains {len(blacklisted_cache_names)} blacklisted caches.", highlight=True)
             os.makedirs(os.path.dirname(denylist_file_path), exist_ok=True)
 
-            with open(denylist_file_path, 'w') as file:
+            with open(denylist_file_path, 'w', encoding='utf-8', newline='\n') as file:
                 if blacklisted_cache_names:
                     for cache_name in blacklisted_cache_names:
                         # Default values

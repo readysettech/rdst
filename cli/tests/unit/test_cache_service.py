@@ -866,6 +866,49 @@ class TestDeployNonDocker:
         assert final.endpoint is not None
         mock_register.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_deploy_remote_docker_registers_published_host(self):
+        """A remote daemon's published ports are not on client loopback."""
+        from features.cache.service import CacheService
+
+        service = CacheService()
+        target_config = {
+            "engine": "postgresql", "host": "db.host", "port": 5432,
+            "user": "admin", "database": "myapp", "password_env": "DB_PASS",
+        }
+        variables = {
+            "db_engine": "postgresql", "readyset_port": 5433,
+            "db_user": "admin", "db_name": "myapp", "container_name": "rs-mydb",
+        }
+        docker_result = {"success": True, "container_name": "rs-mydb"}
+        topology_env = {
+            "RDST_DOCKER_REMOTE": "1",
+            "RDST_DOCKER_PUBLISHED_HOST": "daemon.example.com",
+        }
+
+        with (
+            patch.dict("os.environ", topology_env, clear=False),
+            patch("features.cache.service.TargetsConfig") as mock_config,
+            patch("features.cache.service.resolve_password_value", return_value="secret"),
+            patch("shared.deploy.script_generator.build_variables", return_value=variables),
+            patch("shared.deploy.local_docker.deploy_local_docker", return_value=docker_result),
+            patch.object(service, "_register_cache_target", return_value="mydb-cache") as register,
+        ):
+            mock_config.return_value.load.return_value = None
+            mock_config.return_value.get.return_value = target_config
+            events = [
+                event
+                async for event in service.deploy(
+                    CacheInput(target="mydb"), CacheOptions(mode="docker")
+                )
+            ]
+
+        final = events[-1]
+        assert final.endpoint == "postgresql://admin@daemon.example.com:5433/myapp"
+        register.assert_called_once_with(
+            "mydb", target_config, variables, "daemon.example.com"
+        )
+
 
 # ============================================================================
 # CacheOptions — new fields

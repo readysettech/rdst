@@ -16,6 +16,7 @@ from shared.config.targets import (
     parse_connection_string,
 )
 from shared.llm import AnthropicModel, cents_to_tokens, format_tokens
+from shared.shell import environment_assignment
 from shared.telemetry import telemetry
 
 # Import UI system - handles Rich availability internally
@@ -798,7 +799,7 @@ class ConfigurationWizard:
                 return RdstResult(
                     False,
                     f"Environment variable '{password_env}' is not set.\n"
-                    f'Set it with: export {password_env}="your_password"',
+                    f"Set it with: {environment_assignment(password_env, 'your_password')}",
                 )
 
         self._show_info(
@@ -1043,7 +1044,7 @@ class ConfigurationWizard:
                 "Password in Connection String",
                 f"Found password in connection string.\n"
                 f"For security, rdst stores passwords in environment variables.\n\n"
-                f'Suggested: export {suggested_var}="{password_from_connstring}"\n\n'
+                f"Suggested: {environment_assignment(suggested_var, password_from_connstring)}\n\n"
                 f"You can override with --password-env flag.",
             )
             return suggested_var
@@ -1183,7 +1184,7 @@ class ConfigurationWizard:
                     MessagePanel(
                         "Unable to reach RDST trial service.\n\n"
                         "You can set your own key instead:\n"
-                        '  export ANTHROPIC_API_KEY="sk-ant-..."',
+                        f"  {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}",
                         variant="error",
                         title="Connection Error",
                     )
@@ -1205,7 +1206,7 @@ class ConfigurationWizard:
                         or "The RDST free trial program is currently full.\n\n"
                         "Options:\n"
                         "  1. Email hello@readyset.io to request access\n"
-                        '  2. Use your own key: export ANTHROPIC_API_KEY="sk-ant-..."\n'
+                        f"  2. Use your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
                         "     Get one at: https://console.anthropic.com/",
                         variant="warning",
                         title="Trial Program Full",
@@ -1360,7 +1361,7 @@ class ConfigurationWizard:
                 MessagePanel(
                     "Too many failed attempts.\n\n"
                     "You can set your own key instead:\n"
-                    '  export ANTHROPIC_API_KEY="sk-ant-..."',
+                    f"  {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}",
                     variant="error",
                 )
             )
@@ -1430,7 +1431,7 @@ class ConfigurationWizard:
             self.console.print(
                 MessagePanel(
                     f"{label} saved securely to your OS keychain. Future RDST "
-                    f"sessions will pick it up automatically — no `export` needed.",
+                    "sessions will pick it up automatically without shell setup.",
                     variant="success",
                     title="Saved Securely",
                 )
@@ -1440,8 +1441,8 @@ class ConfigurationWizard:
         self.console.print(
             MessagePanel(
                 f"{label} applied for this session only. Your OS keychain "
-                f"isn't available — to make this persist across shells, "
-                f"add `export {name}=\"...\"` to ~/.bashrc or ~/.zshrc.",
+                f"isn't available. Set it before starting RDST next time: "
+                f"`{environment_assignment(name, '...')}`.",
                 variant="warning",
                 title="Session Only",
             )
@@ -1470,7 +1471,7 @@ class ConfigurationWizard:
             self.console.print(
                 MessagePanel(
                     "Skipped. Set the env var when ready:\n"
-                    '  export ANTHROPIC_API_KEY="sk-ant-..."',
+                    f"  {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}",
                     variant="info",
                     title="No Key Provided",
                 )

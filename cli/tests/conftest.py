@@ -3,17 +3,31 @@ Common pytest fixtures and configuration for RDST tests.
 """
 
 import os
-
-# Disable telemetry for ALL tests before anything else imports
-# `shared.telemetry_manager`. The `tmp_rdst_home` fixture gives each test
-# a fresh empty `~/.rdst/`, so without this gate every test that touches
-# `device_id` would generate a new UUID and fire a PostHog `installation`
-# event. The CLI shell suite
-# already does this via `tests/integration/lib/setup.sh`.
-os.environ.setdefault("RDST_TESTING", "true")
-
 import sys
 import tempfile
+
+# Protect the developer profile before pytest imports test modules. Some
+# production modules derive paths from Path.home() at import time; the autouse
+# fixture below provides a fresh per-test home for call-time path resolution.
+_TEST_SESSION_HOME = tempfile.mkdtemp(prefix="rdst-tests-")
+_TEST_HOME_DRIVE, _TEST_HOME_PATH = os.path.splitdrive(_TEST_SESSION_HOME)
+os.environ["HOME"] = _TEST_SESSION_HOME
+os.environ["USERPROFILE"] = _TEST_SESSION_HOME
+os.environ["HOMEDRIVE"] = _TEST_HOME_DRIVE
+os.environ["HOMEPATH"] = _TEST_HOME_PATH
+
+# Keep developer-specific remote-Docker routing out of unit tests. Individual
+# topology tests set these variables explicitly when needed.
+for variable in (
+    "RDST_DOCKER_REMOTE",
+    "RDST_DOCKER_PUBLISHED_HOST",
+    "RDST_DOCKER_UPSTREAM_HOST",
+):
+    os.environ.pop(variable, None)
+
+# Disable telemetry for all tests before shared.telemetry_manager is imported.
+os.environ.setdefault("RDST_TESTING", "true")
+
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -205,21 +219,29 @@ def mock_config_manager():
     return config
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def tmp_rdst_home(monkeypatch, tmp_path: Path) -> Path:
     """Relocate ``~/.rdst/`` to a fresh tmp dir for the duration of one test.
 
-    Setting ``HOME`` is sufficient because every callsite resolves the
-    data directory at *call* time (via ``shared.constants.rdst_data_dir()``
-    or ``Path.home()``), not at module import. Per-feature paths
-    (agents, guards, slack, scan corpus/snippets, semantic-layer) are
-    likewise functions, so they pick up the new HOME on first use.
+    RDST resolves its data directory at call time. Set both POSIX and Windows
+    home variables so ``Path.home()`` cannot reach the developer profile.
     """
-    rdst_home = tmp_path / "home"
+    rdst_home = tmp_path / "rdst-home"
     rdst_data_dir = rdst_home / ".rdst"
     rdst_data_dir.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("HOME", str(rdst_home))
+    home = str(rdst_home)
+    home_drive, home_path = os.path.splitdrive(home)
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("USERPROFILE", home)
+    monkeypatch.setenv("HOMEDRIVE", home_drive)
+    monkeypatch.setenv("HOMEPATH", home_path)
+    for variable in (
+        "RDST_DOCKER_REMOTE",
+        "RDST_DOCKER_PUBLISHED_HOST",
+        "RDST_DOCKER_UPSTREAM_HOST",
+    ):
+        monkeypatch.delenv(variable, raising=False)
 
     return rdst_data_dir
 

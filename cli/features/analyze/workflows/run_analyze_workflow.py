@@ -271,7 +271,7 @@ Examples:
         query = args.query
     else:  # query_file
         try:
-            with open(args.query_file, 'r') as f:
+            with open(args.query_file, 'r', encoding='utf-8') as f:
                 query = f.read().strip()
         except Exception as e:
             print(f"Error reading query file: {e}")

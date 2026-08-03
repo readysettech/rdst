@@ -202,7 +202,7 @@ run_test_suite() {
 # Run MCP sync check (no database required)
 run_mcp_sync_check() {
   log_section "Running MCP Sync Check"
-  python3 "${SCRIPT_DIR}/tests/test_mcp_sync.py"
+  "$PYTHON_BIN" "${SCRIPT_DIR}/tests/test_mcp_sync.py"
   if [[ $? -ne 0 ]]; then
     echo "✗ MCP sync check failed - CLI and MCP server are out of sync"
     exit 1
@@ -214,7 +214,7 @@ run_mcp_sync_check() {
 # Run architecture sync check (no database required)
 run_architecture_sync_check() {
   log_section "Running Architecture Sync Check"
-  python3 "${SCRIPT_DIR}/tests/test_architecture_sync.py"
+  "$PYTHON_BIN" "${SCRIPT_DIR}/tests/test_architecture_sync.py"
   if [[ $? -ne 0 ]]; then
     echo "✗ Architecture sync check failed - ARCHITECTURE.md is out of sync with features/"
     exit 1

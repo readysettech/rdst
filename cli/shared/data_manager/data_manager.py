@@ -804,7 +804,9 @@ class DataManager:
         return query
 
     def _execute_system_command(self, command: str) -> List[List[str]]:
-        """Execute a system command and return results as a list of rows."""
+        """Execute a supported system collector command."""
+        if os.name == "nt":
+            raise RuntimeError("System metric collectors are not supported on Windows")
         try:
             result = subprocess.run(
                 command,

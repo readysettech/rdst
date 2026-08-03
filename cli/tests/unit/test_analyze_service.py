@@ -5,6 +5,8 @@ Tests the async generator-based query analysis service including event yielding,
 parallel execution, error handling, and fast mode.
 """
 
+import os
+
 import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
@@ -46,7 +48,12 @@ class TestAnalyzeServiceInit:
     async def test_load_config_reads_real_targets_config(self, tmp_path, monkeypatch):
         from shared.config.targets import TargetsConfig
 
-        monkeypatch.setenv("HOME", str(tmp_path))
+        home = str(tmp_path)
+        drive, path = os.path.splitdrive(home)
+        monkeypatch.setenv("HOME", home)
+        monkeypatch.setenv("USERPROFILE", home)
+        monkeypatch.setenv("HOMEDRIVE", drive)
+        monkeypatch.setenv("HOMEPATH", path)
         config = TargetsConfig()
         config.load()
         config.upsert(

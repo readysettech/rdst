@@ -98,8 +98,8 @@ class TestClaudeCommandHandlerShutil:
         assert result.ok is True
         assert "RDST registered with Claude Code" in result.message
 
-    def test_claude_found_uses_python3_when_no_uv(self):
-        """When 'uv' is absent, falls back to python3 for mcp_server.py."""
+    def test_claude_found_uses_current_python_when_no_uv(self):
+        """When uv is absent, register the current Python interpreter."""
         def _which_no_uv(name):
             return {
                 "claude": "/usr/local/bin/claude",
@@ -130,8 +130,10 @@ class TestClaudeCommandHandlerShutil:
                             result = rdst_module.execute_command(cli, args)
 
         assert result.ok is True
-        # python3 should be at index 0 of the mcp_command portion
-        assert "python3" in called_with["cmd"]
+        import sys
+
+        separator = called_with["cmd"].index("--")
+        assert called_with["cmd"][separator + 1] == sys.executable
 
     def test_claude_found_uses_uv_when_available(self):
         """When 'uv' is present, uses uv run for mcp_server.py."""
@@ -165,7 +167,37 @@ class TestClaudeCommandHandlerShutil:
                             result = rdst_module.execute_command(cli, args)
 
         assert result.ok is True
-        assert "uv" in called_with["cmd"]
+        separator = called_with["cmd"].index("--")
+        assert called_with["cmd"][separator + 1] == "/usr/local/bin/uv"
+
+    def test_frozen_cli_registers_its_embedded_mcp_mode(self):
+        called_with = {}
+
+        def _capture_run(cmd, **kwargs):
+            called_with["cmd"] = cmd
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        import argparse
+        import rdst as rdst_module
+        from shared.cli import RdstCLI
+
+        args = argparse.Namespace(command="claude", action="add", config=None)
+        with patch("shutil.which", side_effect=lambda name: f"/bin/{name}"):
+            with patch("subprocess.run", side_effect=_capture_run):
+                with patch("os.makedirs"):
+                    with patch("builtins.open", mock.mock_open()):
+                        with patch.object(sys, "frozen", True, create=True):
+                            result = rdst_module.execute_command(RdstCLI(), args)
+
+        assert result.ok is True
+        separator = called_with["cmd"].index("--")
+        assert called_with["cmd"][separator + 1:] == [
+            sys.executable,
+            "_mcp_server",
+        ]
 
     def test_claude_rdst_mcp_in_path(self):
         """When 'rdst-mcp' is installed, it is used directly."""
@@ -198,7 +230,8 @@ class TestClaudeCommandHandlerShutil:
                         result = rdst_module.execute_command(cli, args)
 
         assert result.ok is True
-        assert "rdst-mcp" in called_with["cmd"]
+        separator = called_with["cmd"].index("--")
+        assert called_with["cmd"][separator + 1] == "/usr/local/bin/rdst-mcp"
 
     def test_claude_remove_action(self):
         """The 'remove' action calls subprocess.run with 'mcp remove'."""
@@ -214,7 +247,7 @@ class TestClaudeCommandHandlerShutil:
         import argparse
         args = argparse.Namespace(command="claude", action="remove", config=None)
 
-        with patch("shutil.which", return_value="/usr/local/bin/claude"):
+        with patch("shutil.which", return_value=r"C:\Users\faruk\bin\claude.cmd"):
             with patch("subprocess.run", side_effect=_capture_run):
                 with patch("os.path.exists", return_value=False):
                     import rdst as rdst_module
@@ -223,8 +256,12 @@ class TestClaudeCommandHandlerShutil:
                     result = rdst_module.execute_command(cli, args)
 
         assert result.ok is True
-        assert "mcp" in called_with["cmd"]
-        assert "remove" in called_with["cmd"]
+        assert called_with["cmd"] == [
+            r"C:\Users\faruk\bin\claude.cmd",
+            "mcp",
+            "remove",
+            "rdst",
+        ]
 
     def test_subprocess_run_failure_returns_error(self):
         """When subprocess.run returns non-zero, the result is a failure."""

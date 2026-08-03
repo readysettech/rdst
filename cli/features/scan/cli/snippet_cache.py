@@ -45,14 +45,14 @@ class SnippetCache:
         """Load cache from disk."""
         if self.cache_file.exists():
             try:
-                self.cache = json.loads(self.cache_file.read_text())
+                self.cache = json.loads(self.cache_file.read_text(encoding="utf-8"))
             except Exception:
                 self.cache = {}
 
     def _save(self):
         """Save cache to disk."""
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_file.write_text(json.dumps(self.cache, indent=2))
+        self.cache_file.write_text(json.dumps(self.cache, indent=2), encoding="utf-8")
 
     def get(self, snippet_hash: str) -> Optional[Dict[str, Any]]:
         """

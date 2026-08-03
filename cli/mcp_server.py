@@ -36,11 +36,32 @@ import sys
 import os
 import signal
 import subprocess
+
+from shared.child_process import rdst_child_argv
+from shared.shell import environment_assignment
+from shared.stdio import configure_utf8_stdio
 from typing import Any, Dict, List, Optional
 
 # MCP Protocol constants
 JSONRPC_VERSION = "2.0"
 MCP_VERSION = "2024-11-05"
+
+_PASSWORD_ASSIGNMENT = environment_assignment("PASSWORD_ENV_NAME", "actual-password")
+_PROD_PASSWORD_ASSIGNMENT = environment_assignment("PROD_DB_PASSWORD", "secret123")
+_ANTHROPIC_ASSIGNMENT = environment_assignment("ANTHROPIC_API_KEY", "sk-ant-...")
+_OPENAI_ASSIGNMENT = environment_assignment("OPENAI_API_KEY", "sk-...")
+
+
+def _installation_guidance(*, windows: bool | None = None):
+    is_windows = os.name == "nt" if windows is None else windows
+    if is_windows:
+        return """- Desktop: RDST is bundled with the RDST desktop application.
+- Source development: run `uv sync --group dev` from the `rdst` directory.
+- Desktop sidecar updates arrive with desktop application updates."""
+    return """- Install: `curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh`
+- Check for updates: `rdst update --check`
+- Upgrade: `rdst update`"""
+
 
 # Single source of truth for the slow query workflow
 SLOW_QUERY_WORKFLOW = """1. `rdst_query_list` → Check saved queries FIRST
@@ -69,9 +90,7 @@ It connects to PostgreSQL or MySQL databases and provides AI-powered analysis
 of query performance, index recommendations, and caching suggestions.
 
 ### Installation & Upgrade
-- Install: `curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh`
-- Check for updates: `rdst update --check`
-- Upgrade: `rdst update`
+{_installation_guidance()}
 - Check version: `rdst version`
 
 {SLOW_QUERY_WORKFLOW_DETAILED}
@@ -121,16 +140,16 @@ host = "db.example.com"
 port = 5432
 user = "admin"
 database = "mydb"
-password_env = "MY_DB_PASSWORD"  # <-- User must export this env var
+password_env = "MY_DB_PASSWORD"  # <-- User must set this env var
 ```
 
-Before running commands, the user must:
-```bash
-export MY_DB_PASSWORD="actual-password-here"
+Before running commands, the user must set it in the current shell:
+```
+{environment_assignment("MY_DB_PASSWORD", "actual-password-here")}
 ```
 
 If a command fails with authentication error, check:
-1. Is the password_env variable exported?
+1. Is the password_env variable set?
 2. Is the password correct?
 3. Can the host/port be reached?
 
@@ -146,7 +165,7 @@ RDST requires an LLM provider for query analysis. Two options:
 - Check balance anytime: `rdst configure llm`
 
 **Option 2: Your Own Anthropic API Key**
-- Export: `export ANTHROPIC_API_KEY="sk-ant-..."`
+- Set in the current shell: `{_ANTHROPIC_ASSIGNMENT}`
 - No credit limits, direct API access
 
 If a user has no ANTHROPIC_API_KEY and hasn't set up a trial, tell them to run
@@ -163,7 +182,7 @@ If a user has no ANTHROPIC_API_KEY and hasn't set up a trial, tell them to run
 ### CLI-Only Features (Tell user to run in terminal)
 - `rdst ask "question" --target mydb` - Natural language to SQL
 - `rdst schema annotate --target mydb` - Add descriptions
-- `rdst schema edit --target mydb` - Edit in $EDITOR
+- `rdst schema edit --target mydb` - Edit with the configured editor
 """
 
 
@@ -206,21 +225,8 @@ def make_error(id: Any, code: int, message: str, data: Any = None) -> Dict[str, 
 
 
 def _get_rdst_command() -> List[str]:
-    """Get the command to run RDST.
-
-    Prefers local rdst.py (development mode) over installed rdst command.
-    This ensures MCP uses the same version as the local development environment.
-    """
-    # Check for rdst.py in the same directory as this script
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    local_rdst = os.path.join(script_dir, "rdst.py")
-
-    if os.path.exists(local_rdst):
-        # Use local development version
-        return [sys.executable, local_rdst]
-
-    # Fall back to installed rdst command
-    return ["rdst"]
+    """Return the matching installed or frozen RDST command."""
+    return rdst_child_argv([])
 
 
 def run_rdst_command(
@@ -240,7 +246,9 @@ def run_rdst_command(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                env=os.environ.copy(),
+                encoding="utf-8",
+                errors="replace",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                 **process_options,
             )
             try:
@@ -249,12 +257,17 @@ def run_rdst_command(
                 interrupt = (
                     signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT
                 )
-                process.send_signal(interrupt)
                 try:
-                    stdout, stderr = process.communicate(timeout=60)
-                except subprocess.TimeoutExpired:
+                    process.send_signal(interrupt)
+                except OSError:
                     process.kill()
                     stdout, stderr = process.communicate()
+                else:
+                    try:
+                        stdout, stderr = process.communicate(timeout=60)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        stdout, stderr = process.communicate()
                 return {
                     "success": False,
                     "stdout": stdout,
@@ -276,8 +289,10 @@ def run_rdst_command(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout_seconds,
-            env=os.environ.copy(),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         return {
             "success": result.returncode == 0,
@@ -313,15 +328,15 @@ def get_tools() -> List[Dict[str, Any]]:
     tools = [
         {
             "name": "rdst_configure_add",
-            "description": """Add a new database target configuration to RDST.
+            "description": f"""Add a new database target configuration to RDST.
 
 This creates a connection profile that RDST will use to connect to your database.
 The password is NOT stored - instead you specify an environment variable name
 that will contain the password at runtime.
 
-IMPORTANT: After adding a target, the user must export the password environment
+IMPORTANT: After adding a target, the user must set the password environment
 variable before running other RDST commands:
-  export PASSWORD_ENV_NAME="actual-password"
+  {_PASSWORD_ASSIGNMENT}
 
 Example:
   rdst_configure_add(
@@ -334,7 +349,7 @@ Example:
     password_env="PROD_DB_PASSWORD"
   )
 
-Then user runs: export PROD_DB_PASSWORD="secret123"
+Then user runs: {_PROD_PASSWORD_ASSIGNMENT}
 """,
             "inputSchema": {
                 "type": "object",
@@ -423,7 +438,7 @@ Use --confirm to skip the interactive confirmation prompt.
         },
         {
             "name": "rdst_configure_llm",
-            "description": """Configure the LLM (AI) provider for RDST analysis.
+            "description": f"""Configure the LLM (AI) provider for RDST analysis.
 
 RDST uses AI to analyze query execution plans and provide recommendations.
 By default, it uses Claude (Anthropic). This command configures the AI provider.
@@ -455,8 +470,8 @@ EXAMPLES:
   rdst configure llm  (interactive - includes trial signup option)
 
 REQUIRED ENV VARS:
-- For Claude: export ANTHROPIC_API_KEY="sk-ant-..."
-- For OpenAI: export OPENAI_API_KEY="sk-..."
+- For Claude: {_ANTHROPIC_ASSIGNMENT}
+- For OpenAI: {_OPENAI_ASSIGNMENT}
 - For LM Studio: No API key needed, just base_url
 - For Trial: No env var needed - credits are managed by RDST
 """,
@@ -1031,7 +1046,7 @@ SUBCOMMANDS (available via MCP):
 CLI-ONLY FEATURES (tell user to run these in their terminal):
 - `rdst schema annotate --target <target>` - Interactive wizard to add descriptions
 - `rdst schema annotate --target <target> --use-llm` - AI-generated descriptions
-- `rdst schema edit --target <target>` - Opens in $EDITOR
+- `rdst schema edit --target <target>` - Opens in the configured editor
 - `rdst ask "question" --target <target>` - Natural language to SQL (interactive)
 
 The `rdst ask` command converts natural language questions into SQL queries.
@@ -1936,7 +1951,7 @@ Required environment variable: {api_key_info.get(provider, 'Check provider docs'
     elif name == "rdst_read_config":
         config_path = os.path.expanduser("~/.rdst/config.toml")
         try:
-            with open(config_path, "r") as f:
+            with open(config_path, "r", encoding="utf-8") as f:
                 content = f.read()
             return {
                 "success": True,
@@ -1982,13 +1997,11 @@ This is the RDST configuration file. Key sections:
         config_path = os.path.expanduser("~/.rdst/config.toml")
         try:
             import toml
-            with open(config_path, "r") as f:
+            with open(config_path, "r", encoding="utf-8") as f:
                 config = toml.load(f)
 
             targets = config.get("targets", {})
             default_target = config.get("default")
-            llm_config = config.get("llm", {})
-
             # Build status report
             report = []
             report.append("## RDST - Database Query Analysis Tool\n")
@@ -2060,7 +2073,7 @@ Just describe your database and we'll get connected!
         except ImportError:
             # toml not available, fall back to raw read
             try:
-                with open(config_path, "r") as f:
+                with open(config_path, "r", encoding="utf-8") as f:
                     content = f.read()
                 return {
                     "success": True,
@@ -2527,7 +2540,7 @@ def handle_resource(uri: str) -> Dict[str, Any]:
     if uri == "rdst://config":
         config_path = os.path.expanduser("~/.rdst/config.toml")
         try:
-            with open(config_path, "r") as f:
+            with open(config_path, "r", encoding="utf-8") as f:
                 content = f.read()
             return {
                 "contents": [
@@ -2646,9 +2659,7 @@ def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def main():
     """Main entry point for the MCP server."""
-    # Set up unbuffered I/O for stdio transport
-    sys.stdin = open(sys.stdin.fileno(), 'r', buffering=1)
-    sys.stdout = open(sys.stdout.fileno(), 'w', buffering=1)
+    configure_utf8_stdio(force=True, line_buffering=True)
 
     while True:
         try:

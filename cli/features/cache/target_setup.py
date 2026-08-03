@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404 - subprocess required for Docker/database operations
 import json
+import os
 import time
 from typing import Dict, Any
 
 from .readyset_container import check_docker_available, format_docker_error
 from shared.config.targets import create_targets_config
+from shared.deploy.docker_topology import DockerTopology
 
 
 def get_target_config(target_name: str = None, **kwargs) -> Dict[str, Any]:
@@ -430,6 +432,7 @@ def wait_for_database_ready(
 
         print(f"Waiting for {database_type} to be ready...")
 
+        published_host = DockerTopology.from_environment().published_host
         start_time = time.time()
         while (time.time() - start_time) < timeout:
             # Check if container is still running
@@ -452,7 +455,7 @@ def wait_for_database_ready(
                 import socket
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(1)
-                result = sock.connect_ex(('127.0.0.1', port))
+                result = sock.connect_ex((published_host, port))
                 sock.close()
 
                 if result == 0:
@@ -521,11 +524,11 @@ def recreate_schema_from_target(
 
         print(f"Recreating schema from {target_host}:{target_port}/{target_db}...")
 
-        # Translate localhost to host.docker.internal for Docker container access
-        # pg_dump runs inside the test container, so localhost would refer to the container itself
-        docker_target_host = target_host
-        if target_host in ('localhost', '127.0.0.1'):
-            docker_target_host = 'host.docker.internal'
+        # pg_dump runs inside the test container, so resolve the target from the
+        # Docker daemon's network rather than the RDST client's network.
+        docker_target_host = DockerTopology.from_environment().container_host_for(
+            target_host
+        )
 
         if engine == "postgresql":
             # Try Docker-based pg_dump first (more reliable)
@@ -774,8 +777,6 @@ def create_test_db_target_config(
     Returns:
         Target configuration dict
     """
-    import os
-
     port = int(port)
 
     # Parse target config from JSON if needed

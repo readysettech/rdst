@@ -61,6 +61,30 @@ def test_saved_artifact_wins_over_regeneration(tmp_rdst_home):
     assert (reports_dir() / "audit_prod_1.html").is_file()
 
 
+def test_saved_artifact_uses_utf8_on_legacy_windows_locale(
+    tmp_rdst_home, monkeypatch
+):
+    real_open = Path.open
+
+    def windows_open(path, mode="r", buffering=-1, encoding=None, *args, **kwargs):
+        return real_open(
+            path,
+            mode,
+            buffering,
+            encoding="cp1252" if encoding in (None, "locale") else encoding,
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(Path, "open", windows_open)
+    html = "<html><span>▶ 東京</span></html>"
+
+    saved_path = save_report_locally("audit_prod_unicode", html)
+
+    assert saved_path is not None
+    assert Path(saved_path).read_text(encoding="utf-8") == html
+
+
 def test_quick_audit_regenerates_with_health_score(tmp_rdst_home):
     _write_snapshot(tmp_rdst_home, "audit_prod_1", _audit_snapshot())
 

@@ -1,12 +1,14 @@
 """Shared target configuration helpers."""
 
-import os
-import tempfile
+import copy
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import toml
+
+from shared.persistence import update_toml
 
 PROXY_TYPES = [
     "none",
@@ -18,6 +20,44 @@ PROXY_TYPES = [
 ]
 
 ENGINES = ["postgresql", "mysql"]
+
+_TARGET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def is_windows_reserved_name(name: str) -> bool:
+    return name.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES
+
+
+def validate_target_name(name: str) -> None:
+    """Reject target names that cannot be used as portable path components."""
+    if not _TARGET_NAME_RE.fullmatch(name) or name.endswith((".", " ")):
+        raise ValueError(
+            "Invalid target name. Use 1-64 ASCII letters, numbers, dots, "
+            "underscores, or hyphens, starting with a letter or number."
+        )
+    if is_windows_reserved_name(name):
+        raise ValueError(f"Invalid target name '{name}': reserved by Windows")
+
+
+def _validate_target_mapping(data: dict[str, Any]) -> None:
+    folded_names: dict[str, str] = {}
+    for name in (data.get("targets") or {}):
+        validate_target_name(name)
+        folded = name.casefold()
+        collision = folded_names.get(folded)
+        if collision is not None and collision != name:
+            raise ValueError(
+                f"Target name '{name}' conflicts with existing target '{collision}'"
+            )
+        folded_names[folded] = name
 
 
 def normalize_db_type(db: Optional[str]) -> Optional[str]:
@@ -124,18 +164,16 @@ class TargetsConfig:
             "default": None,
             "init": {"completed": False},
         }
+        self._baseline = copy.deepcopy(self._data)
 
     def load(self) -> None:
         if self.path.exists():
             try:
                 self._data = toml.load(self.path)
-            except Exception:
-                self._data = {
-                    "targets": {},
-                    "default": None,
-                    "init": {"completed": False},
-                    "llm": {},
-                }
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to load RDST config at {self.path}: {exc}"
+                ) from exc
         else:
             self._data = {
                 "targets": {},
@@ -147,24 +185,17 @@ class TargetsConfig:
         self._data.setdefault("targets", {})
         self._data.setdefault("default", None)
         self._data.setdefault("init", {"completed": False})
+        self._baseline = copy.deepcopy(self._data)
 
     def save(self) -> None:
-        """Persist the whole config atomically so a crash mid-write can't leave
-        a truncated file. All sections in ``self._data`` are preserved."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(
-            dir=str(self.path.parent), prefix=".config.", suffix=".tmp"
+        """Merge this instance's changes and atomically persist the config."""
+        self._data = update_toml(
+            self.path,
+            self._baseline,
+            self._data,
+            validate=_validate_target_mapping,
         )
-        try:
-            with os.fdopen(fd, "w") as f:
-                toml.dump(self._data, f)
-            os.replace(tmp, self.path)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        self._baseline = copy.deepcopy(self._data)
 
     def list_targets(self) -> List[str]:
         return sorted(self._data.get("targets", {}).keys())
@@ -173,8 +204,17 @@ class TargetsConfig:
         return (self._data.get("targets", {}) or {}).get(name)
 
     def upsert(self, name: str, entry: Dict[str, Any]) -> None:
-        self._data.setdefault("targets", {})
-        self._data["targets"][name] = entry
+        validate_target_name(name)
+        targets = self._data.setdefault("targets", {})
+        collision = next(
+            (existing for existing in targets if existing != name and existing.casefold() == name.casefold()),
+            None,
+        )
+        if collision is not None:
+            raise ValueError(
+                f"Target name '{name}' conflicts with existing target '{collision}'"
+            )
+        targets[name] = entry
 
     def remove(self, name: str) -> bool:
         targets = self._data.get("targets", {})

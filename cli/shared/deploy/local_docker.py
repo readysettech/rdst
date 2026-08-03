@@ -8,6 +8,8 @@ import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404
 from typing import Any, Dict, Optional
 from urllib.parse import quote as urlquote
 
+from shared.deploy.docker_topology import DockerTopology, DockerTopologyError
+
 MANAGED_SANDBOX_NAME = "rdst-readyset-sandbox"
 MANAGED_SANDBOX_LABEL = "io.readyset.rdst.sandbox"
 
@@ -163,11 +165,10 @@ def _create_container(
     cpus = variables.get("cpus", "2")
     docker_memory = variables.get("docker_memory", "4g")
 
-    # For local deployment, use host.docker.internal to reach the host DB
-    if db_host in ("localhost", "127.0.0.1", "::1"):
-        docker_db_host = "host.docker.internal"
-    else:
-        docker_db_host = db_host
+    try:
+        docker_db_host = DockerTopology.from_environment().container_host_for(db_host)
+    except DockerTopologyError as exc:
+        return {"success": False, "error": str(exc)}
 
     # Build DATABASE_URL (URL-encode user/password to handle special chars)
     safe_user = urlquote(db_user, safe="")
@@ -467,11 +468,10 @@ def _create_container_command(
     """Create a Readyset container with an explicit lifecycle policy."""
     engine = variables["db_engine"]
     db_host = variables["db_host"]
-    docker_db_host = (
-        "host.docker.internal"
-        if db_host in ("localhost", "127.0.0.1", "::1")
-        else db_host
-    )
+    try:
+        docker_db_host = DockerTopology.from_environment().container_host_for(db_host)
+    except DockerTopologyError as exc:
+        return {"success": False, "error": str(exc)}
     safe_user = urlquote(variables["db_user"], safe="")
     safe_password = urlquote(password, safe="")
     db_type = "mysql" if engine == "mysql" else "postgresql"
@@ -672,7 +672,15 @@ def probe_local_docker(target_name: str) -> "ProbeResult":
     # failure does not flip us to UNREACHABLE — Readyset can be mid-startup, behind
     # a slow `docker run`, or use a custom port the user picked.
     sql_ports = _docker_list_tcp_ports(name)
-    reachable_port = next((p for p in sql_ports if _tcp_reachable("127.0.0.1", p, timeout=1.0)), None)
+    published_host = DockerTopology.from_environment().published_host
+    reachable_port = next(
+        (
+            port
+            for port in sql_ports
+            if _tcp_reachable(published_host, port, timeout=1.0)
+        ),
+        None,
+    )
     if reachable_port:
         return ProbeResult(state=ProbeState.DEPLOYED_RUNNING, mode="docker", container_id=name,
                            detail=f"Container running, port {reachable_port} reachable")

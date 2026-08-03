@@ -10,6 +10,7 @@ from shared.anthropic_env import get_anthropic_source, has_anthropic_api_key
 from shared.config.targets import TargetsConfig
 from shared.llm import AnthropicModel, create_llm_manager
 from shared.password_resolver import resolve_password, resolve_password_value
+from shared.shell import environment_assignment
 
 from .events import (
     InitCompleteEvent,
@@ -136,7 +137,7 @@ class InitService:
                     "Trial credits exhausted.\n\n"
                     "To continue using RDST:\n"
                     "  1. Get your own key: https://console.anthropic.com/\n"
-                    '  2. Set it: export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
+                    f"  2. Set it: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n\n"
                     "Want more trial credits? Email hello@readyset.io"
                 ),
             }

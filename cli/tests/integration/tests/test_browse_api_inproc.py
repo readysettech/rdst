@@ -5,6 +5,21 @@ Covers directory listing and the ext filter used by the file picker UI.
 
 from __future__ import annotations
 
+from shared.api.routes import browse
+
+
+def test_windows_drive_entries_include_available_drives(monkeypatch):
+    monkeypatch.setattr(
+        browse.os.path,
+        "exists",
+        lambda path: path in {"C:\\", "E:\\"},
+    )
+
+    assert [entry.path for entry in browse._windows_drive_entries()] == [
+        "C:\\",
+        "E:\\",
+    ]
+
 
 async def test_browse_lists_directories_only_by_default(client, tmp_path):
     root = tmp_path / "browse"

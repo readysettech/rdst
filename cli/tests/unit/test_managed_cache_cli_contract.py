@@ -328,6 +328,31 @@ def test_mcp_timeout_interrupts_speed_test_and_waits_for_cleanup() -> None:
     assert "cleanup complete" in result["stderr"]
 
 
+def test_mcp_timeout_kills_child_when_interrupt_delivery_fails() -> None:
+    process = MagicMock()
+    process.communicate.side_effect = [
+        subprocess.TimeoutExpired(cmd="rdst", timeout=10),
+        ("partial output", "killed"),
+    ]
+    process.send_signal.side_effect = OSError("no console")
+
+    with (
+        patch("mcp_server._get_rdst_command", return_value=["rdst"]),
+        patch("mcp_server.subprocess.Popen", return_value=process),
+    ):
+        result = run_rdst_command(
+            ["query", "cache-compare", "SELECT 1"],
+            timeout_seconds=10,
+            graceful_timeout=True,
+        )
+
+    process.kill.assert_called_once_with()
+    assert process.communicate.call_args_list[-1].kwargs == {}
+    assert result["success"] is False
+    assert result["stdout"] == "partial output"
+    assert "killed" in result["stderr"]
+
+
 def test_cache_compare_auto_provisions_through_sandbox_manager() -> None:
     """An origin target is sufficient; no generated `*-cache` target is required."""
     config = MagicMock()

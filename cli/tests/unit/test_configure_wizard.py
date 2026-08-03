@@ -18,7 +18,7 @@ class TestConfigureWizardNoCacheDeploy:
 
     def test_wizard_module_does_not_import_deploy_command(self):
         import features.configure.cli.wizard as wiz
-        src = Path(wiz.__file__).read_text()
+        src = Path(wiz.__file__).read_text(encoding="utf-8")
         assert "from features.cache.cli.deploy import DeployCommand" not in src
         assert "DeployCommand()" not in src
         assert '"cache_deployed":' not in src

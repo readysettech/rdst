@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import yaml
 
+from shared.persistence import write_text
+
 
 def _utcnow() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
@@ -595,9 +597,13 @@ class SemanticLayer:
     def save(self, path: Path) -> None:
         """Save semantic layer to YAML file."""
         self.updated_at = _utcnow()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w') as f:
-            yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
+        content = yaml.dump(
+            self.to_dict(),
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+        write_text(path, content)
 
     @classmethod
     def load(cls, path: Path) -> 'SemanticLayer':
@@ -605,7 +611,7 @@ class SemanticLayer:
         if not path.exists():
             raise FileNotFoundError(f"Semantic layer file not found: {path}")
 
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
 
         return cls.from_dict(data)

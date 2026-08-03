@@ -273,6 +273,11 @@ class TestGuardNameValidation:
         with pytest.raises(InvalidGuardNameError):
             validate_guard_name(".hidden")
 
+    @pytest.mark.parametrize("name", ["CON", "aux", "LPT1"])
+    def test_windows_reserved_name_rejected(self, name):
+        with pytest.raises(InvalidGuardNameError):
+            validate_guard_name(name)
+
     def test_empty_name_rejected(self):
         """Empty names must be rejected."""
         with pytest.raises(InvalidGuardNameError):

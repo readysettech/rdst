@@ -3,10 +3,9 @@ Slack configuration and credential management.
 """
 
 import json
-import os
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
 
 try:
     import tomli
@@ -21,6 +20,8 @@ except ImportError:
 from pathlib import Path
 
 from shared.constants import rdst_data_dir
+from shared.persistence import update_json, write_text
+from shared.secret_store_service import SecretStoreService
 
 
 def slack_config_dir() -> Path:
@@ -36,6 +37,19 @@ def credentials_file() -> Path:
 def slack_agents_dir() -> Path:
     """Return the Slack agents directory (``~/.rdst/slack/agents``)."""
     return slack_config_dir() / "agents"
+
+
+def _secret_store() -> SecretStoreService:
+    return SecretStoreService(service_name="rdst-slack")
+
+
+def _token_key(workspace_id: str, kind: str, version: str | None = None) -> str:
+    suffix = f":{version}" if version else ""
+    return f"{workspace_id}{suffix}:{kind}-token"
+
+
+def _credential_version() -> str:
+    return uuid.uuid4().hex
 
 
 @dataclass
@@ -79,7 +93,9 @@ class SlackCredentials:
     bot_token: str  # xoxb-...
     app_token: str  # xapp-...
     workspace_name: str = ""
-    installed_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    installed_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
     @classmethod
     def from_dict(cls, workspace_id: str, data: dict) -> "SlackCredentials":
@@ -88,13 +104,13 @@ class SlackCredentials:
             bot_token=data["bot_token"],
             app_token=data["app_token"],
             workspace_name=data.get("workspace_name", ""),
-            installed_at=data.get("installed_at", datetime.utcnow().isoformat()),
+            installed_at=data.get(
+                "installed_at", datetime.now(timezone.utc).isoformat()
+            ),
         )
 
     def to_dict(self) -> dict:
         return {
-            "bot_token": self.bot_token,
-            "app_token": self.app_token,
             "workspace_name": self.workspace_name,
             "installed_at": self.installed_at,
         }
@@ -106,7 +122,7 @@ def ensure_slack_dirs() -> None:
     slack_agents_dir().mkdir(parents=True, exist_ok=True)
 
 
-def load_credentials(workspace_id: Optional[str] = None) -> dict[str, SlackCredentials]:
+def load_credentials(workspace_id: str | None = None) -> dict[str, SlackCredentials]:
     """
     Load Slack credentials from ~/.rdst/slack/credentials.json.
 
@@ -120,15 +136,69 @@ def load_credentials(workspace_id: Optional[str] = None) -> dict[str, SlackCrede
     if not creds_file.exists():
         return {}
 
-    with open(creds_file, "r") as f:
+    with open(creds_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    store = _secret_store()
     credentials = {}
+    migrated_workspaces: set[str] = set()
     for wid, cred_data in data.items():
         if workspace_id and wid != workspace_id:
             continue
-        credentials[wid] = SlackCredentials.from_dict(wid, cred_data)
+        version = cred_data.get("secret_version")
+        bot_token = cred_data.get("bot_token") or store.get_secret(
+            _token_key(wid, "bot", version)
+        )
+        app_token = cred_data.get("app_token") or store.get_secret(
+            _token_key(wid, "app", version)
+        )
+        if not bot_token or not app_token:
+            continue
+        if "bot_token" in cred_data and store.is_available():
+            new_version = _credential_version()
+            bot_result = store.set_secret(
+                _token_key(wid, "bot", new_version),
+                bot_token,
+                persist=True,
+                apply_to_environment=False,
+            )
+            app_result = store.set_secret(
+                _token_key(wid, "app", new_version),
+                app_token,
+                persist=True,
+                apply_to_environment=False,
+            )
+            if bot_result.get("persisted") and app_result.get("persisted"):
+                data[wid] = {
+                    "workspace_name": cred_data.get("workspace_name", ""),
+                    "installed_at": cred_data.get(
+                        "installed_at", datetime.now(timezone.utc).isoformat()
+                    ),
+                    "secret_version": new_version,
+                }
+                migrated_workspaces.add(wid)
+        credentials[wid] = SlackCredentials(
+            workspace_id=wid,
+            bot_token=bot_token,
+            app_token=app_token,
+            workspace_name=cred_data.get("workspace_name", ""),
+            installed_at=cred_data.get(
+                "installed_at", datetime.now(timezone.utc).isoformat()
+            ),
+        )
 
+    if migrated_workspaces:
+
+        def remove_plaintext_tokens(latest):
+            for wid in migrated_workspaces:
+                entry = latest.get(wid)
+                if isinstance(entry, dict):
+                    entry.pop("bot_token", None)
+                    entry.pop("app_token", None)
+                    entry["secret_version"] = data[wid]["secret_version"]
+            return latest
+
+        update_json(creds_file, remove_plaintext_tokens)
     return credentials
 
 
@@ -143,24 +213,32 @@ def save_credentials(credentials: SlackCredentials) -> None:
 
     creds_file = credentials_file()
 
-    # Load existing credentials
-    existing = {}
-    if creds_file.exists():
-        with open(creds_file, "r") as f:
-            existing = json.load(f)
+    store = _secret_store()
+    if not store.is_available():
+        raise RuntimeError("Slack credentials require an available secure keyring")
 
-    # Update with new credentials
-    existing[credentials.workspace_id] = credentials.to_dict()
+    version = _credential_version()
+    for kind, token in (("bot", credentials.bot_token), ("app", credentials.app_token)):
+        result = store.set_secret(
+            _token_key(credentials.workspace_id, kind, version),
+            token,
+            persist=True,
+            apply_to_environment=False,
+        )
+        if not result.get("persisted"):
+            raise RuntimeError("Failed to save Slack credentials in the secure keyring")
 
-    # Save back
-    with open(creds_file, "w") as f:
-        json.dump(existing, f, indent=2)
+    def update(existing):
+        existing[credentials.workspace_id] = {
+            **credentials.to_dict(),
+            "secret_version": version,
+        }
+        return existing
 
-    # Set restrictive permissions (owner read/write only)
-    os.chmod(creds_file, 0o600)
+    update_json(creds_file, update)
 
 
-def load_agent_config(agent_name: str) -> Optional[AgentConfig]:
+def load_agent_config(agent_name: str) -> AgentConfig | None:
     """
     Load agent configuration from ~/.rdst/slack/agents/<name>.toml.
 
@@ -192,7 +270,6 @@ def save_agent_config(config: AgentConfig) -> None:
     agent_file = slack_agents_dir() / f"{config.name}.toml"
 
     if tomli_w is None:
-        # Fallback: write TOML manually
         lines = [
             f'name = "{config.name}"',
             f'target = "{config.target}"',
@@ -201,11 +278,10 @@ def save_agent_config(config: AgentConfig) -> None:
             f"max_rows = {config.max_rows}",
             f"timeout_seconds = {config.timeout_seconds}",
         ]
-        with open(agent_file, "w") as f:
-            f.write("\n".join(lines) + "\n")
+        content = "\n".join(lines) + "\n"
     else:
-        with open(agent_file, "wb") as f:
-            tomli_w.dump(config.to_dict(), f)
+        content = tomli_w.dumps(config.to_dict())
+    write_text(agent_file, content)
 
 
 def list_agents() -> list[AgentConfig]:

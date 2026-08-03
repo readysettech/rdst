@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Iterator
 
+from shared.config.targets import is_windows_reserved_name
+
 from . import config as _config
 from .config import GuardConfig
 
@@ -49,7 +51,7 @@ def validate_guard_name(name: str) -> None:
     if len(name) > 64:
         raise InvalidGuardNameError("Guard name cannot exceed 64 characters")
 
-    if not GUARD_NAME_PATTERN.match(name):
+    if not GUARD_NAME_PATTERN.match(name) or is_windows_reserved_name(name):
         raise InvalidGuardNameError(
             f"Invalid guard name '{name}'. "
             "Names must start with a letter or underscore and contain only "

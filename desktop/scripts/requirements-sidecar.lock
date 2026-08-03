@@ -536,6 +536,10 @@ fastapi-ai-sdk==0.1.0 \
     --hash=sha256:19353d99c8f86a3ae27cbf8855017a169c31fd906c71c155ba005d9f1e892370 \
     --hash=sha256:a8b399c71ae89b527f305ac00cec5840e50dad7e36765070e7b099e7dbba99a0
     # via rdst (../../../rdst/pyproject.toml)
+filelock==3.32.2 \
+    --hash=sha256:87dd94cf281e586d135fa51132b8e3d9a598b316e90377a288663c9321036c82 \
+    --hash=sha256:c33351e1f49cae33414acbc6d56784e6ecee82514ec90795da1161fc4836b5b8
+    # via rdst (../../../rdst/pyproject.toml)
 h11==0.16.0 \
     --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \
     --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
@@ -893,6 +897,7 @@ packaging==26.2 \
     --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e \
     --hash=sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661
     # via
+    #   rdst (../../../rdst/pyproject.toml)
     #   hatchling
     #   pyinstaller
     #   pyinstaller-hooks-contrib

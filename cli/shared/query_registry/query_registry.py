@@ -7,6 +7,7 @@ normalized hashing and TOML-based persistence.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import re
 import logging
@@ -20,6 +21,7 @@ import sqlglot
 import sqlparse
 from sqlglot.errors import ParseError
 
+from shared.persistence import update_toml
 from shared.query_capture_limits import MAX_QUERY_LENGTH
 
 logger = logging.getLogger(__name__)
@@ -697,6 +699,7 @@ class QueryRegistry:
         # In-memory cache of queries
         self._queries: Dict[str, QueryEntry] = {}
         self._loaded = False
+        self._baseline_data: Dict[str, Any] = {"queries": {}}
 
     def _ensure_directory(self) -> None:
         """Ensure the registry directory exists."""
@@ -707,50 +710,59 @@ class QueryRegistry:
         if not self.registry_path.exists():
             self._queries = {}
             self._loaded = True
+            self._baseline_data = {"queries": {}}
             return
 
         try:
             with open(self.registry_path, "r", encoding="utf-8") as f:
                 data = toml.load(f)
-
-            # Load queries from TOML structure
             queries_data = data.get("queries", {})
-            self._queries = {}
+            self._queries = {
+                query_hash: QueryEntry.from_dict(query_data)
+                for query_hash, query_data in queries_data.items()
+            }
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load query registry at {self.registry_path}: {exc}"
+            ) from exc
 
-            for query_hash, query_data in queries_data.items():
-                try:
-                    self._queries[query_hash] = QueryEntry.from_dict(query_data)
-                except Exception as e:
-                    # Skip malformed entries but continue loading others
-                    print(f"Warning: Skipping malformed query entry {query_hash}: {e}")
-                    continue
+        self._loaded = True
+        self._baseline_data = self._toml_data()
 
-            self._loaded = True
+    def _toml_data(self) -> Dict[str, Any]:
+        return {
+            "queries": {
+                query_hash: entry.to_dict()
+                for query_hash, entry in self._queries.items()
+            }
+        }
 
-        except Exception as e:
-            # If loading fails, start with empty registry
-            print(f"Warning: Could not load query registry: {e}")
-            self._queries = {}
-            self._loaded = True
+    @staticmethod
+    def _validate_toml_data(data: Dict[str, Any]) -> None:
+        for query_data in data.get("queries", {}).values():
+            QueryEntry.from_dict(query_data)
 
     def save(self) -> None:
-        """Save queries from memory to TOML file."""
+        """Merge this instance's changes and atomically persist the registry."""
         if not self._loaded:
             self.load()
 
-        self._ensure_directory()
-
-        # Convert to TOML structure
-        toml_data = {"queries": {}}
-
-        for query_hash, entry in self._queries.items():
-            toml_data["queries"][query_hash] = entry.to_dict()
-
+        current = self._toml_data()
         try:
-            with open(self.registry_path, "w", encoding="utf-8") as f:
-                toml.dump(toml_data, f)
-        except Exception as e:
-            raise RuntimeError(f"Failed to save query registry: {e}")
+            merged = update_toml(
+                self.registry_path,
+                self._baseline_data,
+                current,
+                validate=self._validate_toml_data,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to save query registry: {exc}") from exc
+
+        self._queries = {
+            query_hash: QueryEntry.from_dict(copy.deepcopy(query_data))
+            for query_hash, query_data in merged.get("queries", {}).items()
+        }
+        self._baseline_data = self._toml_data()
 
     def add_query(
         self,

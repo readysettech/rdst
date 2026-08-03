@@ -532,7 +532,7 @@ class ScanService:
                 detected_orms = self._detect_orms(filepath, content)
                 if detected_orms:
                     results.append({
-                        "file": str(filepath.relative_to(directory_path)),
+                        "file": filepath.relative_to(directory_path).as_posix(),
                         "orms": list(set(detected_orms)),
                         "lines": len(content.splitlines()),
                     })
@@ -565,26 +565,33 @@ class ScanService:
             if result.returncode != 0:
                 return None
 
-            changed_files_from_root = set(
-                f.strip() for f in result.stdout.strip().split("\n") if f.strip()
-            )
+            changed_files_from_root = {
+                f.strip().replace("\\", "/")
+                for f in result.stdout.strip().split("\n")
+                if f.strip()
+            }
 
             if not changed_files_from_root:
                 return []
 
-            scan_dir_rel_to_root = os.path.relpath(directory, git_root)
+            scan_dir_rel_to_root = os.path.relpath(directory, git_root).replace(
+                "\\", "/"
+            )
             if scan_dir_rel_to_root == ".":
                 changed_files = changed_files_from_root
             else:
-                prefix = scan_dir_rel_to_root + os.sep
-                changed_files = set()
-                for f in changed_files_from_root:
-                    if f.startswith(prefix):
-                        changed_files.add(f[len(prefix):])
-                    elif f.startswith(scan_dir_rel_to_root + "/"):
-                        changed_files.add(f[len(scan_dir_rel_to_root) + 1:])
+                prefix = f"{scan_dir_rel_to_root}/"
+                changed_files = {
+                    path[len(prefix):]
+                    for path in changed_files_from_root
+                    if path.startswith(prefix)
+                }
 
-            return [f for f in orm_files if f["file"] in changed_files]
+            return [
+                file
+                for file in orm_files
+                if file["file"].replace("\\", "/") in changed_files
+            ]
 
         except (FileNotFoundError, Exception):
             return None
@@ -622,7 +629,7 @@ class ScanService:
         try:
             import yaml
 
-            data = yaml.safe_load(schema_file.read_text())
+            data = yaml.safe_load(schema_file.read_text(encoding="utf-8"))
             tables = data.get("tables", {})
             lines = ["Database Schema:"]
             for table_name, table_info in tables.items():
@@ -640,7 +647,7 @@ class ScanService:
         schema_file = rdst_semantic_layer_dir() / f"{target}.yaml"
         if schema_file.exists():
             try:
-                content = schema_file.read_text()
+                content = schema_file.read_text(encoding="utf-8")
                 if "mysql" in content.lower():
                     return "MySQL"
             except Exception:

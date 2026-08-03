@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import io
 import json
 from datetime import datetime, timedelta, timezone
@@ -21,7 +23,12 @@ def _iso(delta: timedelta) -> str:
 
 @pytest.fixture
 def home(monkeypatch, tmp_path):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    home_path = str(tmp_path)
+    drive, path = os.path.splitdrive(home_path)
+    monkeypatch.setenv("HOME", home_path)
+    monkeypatch.setenv("USERPROFILE", home_path)
+    monkeypatch.setenv("HOMEDRIVE", drive)
+    monkeypatch.setenv("HOMEPATH", path)
     return tmp_path
 
 

@@ -16,6 +16,7 @@ logging.getLogger("sqlglot").setLevel(logging.ERROR)
 from shared.anthropic_env import has_anthropic_api_key
 from shared.cli.types import RdstResult
 from shared.json_parse import parse_llm_json
+from shared.persistence import update_json
 from shared.query_registry import QueryRegistry
 from shared.ui import ElapsedMessage, Status, get_console
 
@@ -1340,26 +1341,22 @@ class AuditCommand:
         if not run_id:
             return
         try:
-            import json as _json
-
             storage = AuditStorage()
             path = storage.base_dir / target / f"{run_id}.json"
             if not path.exists():
                 return
 
-            with open(path) as f:
-                data = _json.load(f)
+            def merge(data):
+                for key in (
+                    "target_name", "engine", "host", "region", "instance_class",
+                    "instance_class_source", "group", "tags", "metrics", "sizing",
+                    "cache_opportunity", "top_queries",
+                ):
+                    if key in audit_result and key not in data:
+                        data[key] = audit_result[key]
+                return data
 
-            # Merge audit-level fields that the capture doesn't have
-            for key in ("target_name", "engine", "host", "region", "instance_class",
-                        "instance_class_source",
-                        "group", "tags", "metrics", "sizing", "cache_opportunity",
-                        "top_queries"):
-                if key in audit_result and key not in data:
-                    data[key] = audit_result[key]
-
-            with open(path, "w") as f:
-                _json.dump(data, f, indent=2, default=str)
+            update_json(path, merge)
         except Exception:
             pass  # Non-critical — don't break the audit flow
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import configparser
 from unittest.mock import patch
 
@@ -20,7 +22,12 @@ START_URL = "https://example.awsapps.com/start"
 
 @pytest.fixture(autouse=True)
 def isolated_home(monkeypatch, tmp_path):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    home = str(tmp_path)
+    drive, path = os.path.splitdrive(home)
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("USERPROFILE", home)
+    monkeypatch.setenv("HOMEDRIVE", drive)
+    monkeypatch.setenv("HOMEPATH", path)
     monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / ".aws" / "config"))
 
 

@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404
+import sys
 import tempfile
 from typing import Any, Dict, Optional
 
@@ -200,7 +201,12 @@ def _scp_script(
     local_path = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".sh", prefix="rdst-deploy-", delete=False
+            mode="w",
+            suffix=".sh",
+            prefix="rdst-deploy-",
+            delete=False,
+            encoding="utf-8",
+            newline="\n",
         ) as f:
             f.write(script)
             local_path = f.name

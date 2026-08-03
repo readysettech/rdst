@@ -121,9 +121,9 @@ class TestFormatHeader:
         }
         result = _format_header(formatted_output)
 
-        # Should have box borders
-        assert any("╭" in line for line in result)
-        assert any("╰" in line for line in result)
+        # Rich uses Unicode or ASCII borders depending on terminal support.
+        assert any(border in line for line in result for border in ("╭", "┌", "+"))
+        assert any("test-target" in line for line in result)
         assert any("RDST Query Analysis" in line for line in result)
         assert any("test-target" in line for line in result)
         assert any("POSTGRESQL" in line for line in result)
@@ -406,6 +406,74 @@ class TestTargetsConfig:
         assert "test-target" in cfg2.list_targets()
         assert cfg2.get("test-target")["host"] == "localhost"
 
+    def test_save_uses_utf8_on_legacy_windows_locale(
+        self, temp_config_file, monkeypatch
+    ):
+        """Non-ASCII target data must round-trip when the OS locale is cp1252."""
+        import os
+        import shared.persistence as persistence_module
+
+        real_fdopen = os.fdopen
+
+        def windows_fdopen(fd, mode, *args, encoding=None, **kwargs):
+            return real_fdopen(
+                fd, mode, *args, encoding=encoding or "cp1252", **kwargs
+            )
+
+        monkeypatch.setattr(persistence_module.os, "fdopen", windows_fdopen)
+
+        cfg = TargetsConfig(path=str(temp_config_file))
+        cfg.load()
+        cfg.upsert("prod", {"host": "localhost", "user": "東京"})
+        cfg.save()
+
+        assert "東京" in temp_config_file.read_text(encoding="utf-8")
+        loaded = TargetsConfig(path=str(temp_config_file))
+        loaded.load()
+        assert loaded.get("prod")["user"] == "東京"
+
+    def test_load_does_not_hide_invalid_config(self, temp_config_file):
+        original = b'[[targets]\nname = "broken"\n'
+        temp_config_file.write_bytes(original)
+
+        cfg = TargetsConfig(path=str(temp_config_file))
+        with pytest.raises(RuntimeError, match="Failed to load RDST config"):
+            cfg.load()
+
+        assert temp_config_file.read_bytes() == original
+
+    def test_concurrent_instances_merge_independent_updates(self, temp_config_file):
+        first = TargetsConfig(path=str(temp_config_file))
+        second = TargetsConfig(path=str(temp_config_file))
+        first.load()
+        second.load()
+
+        first.upsert("first", {"host": "one"})
+        first.save()
+        second.upsert("second", {"host": "two"})
+        second.save()
+
+        loaded = TargetsConfig(path=str(temp_config_file))
+        loaded.load()
+        assert loaded.list_targets() == ["first", "second"]
+
+    def test_concurrent_instances_reject_casefold_collision(self, temp_config_file):
+        first = TargetsConfig(path=str(temp_config_file))
+        second = TargetsConfig(path=str(temp_config_file))
+        first.load()
+        second.load()
+
+        first.upsert("Prod", {"host": "one"})
+        second.upsert("prod", {"host": "two"})
+        first.save()
+
+        with pytest.raises(ValueError, match="conflicts with existing target"):
+            second.save()
+
+        loaded = TargetsConfig(path=str(temp_config_file))
+        loaded.load()
+        assert loaded.list_targets() == ["Prod"]
+
     def test_list_targets(self, temp_config_file):
         """Test listing targets."""
         cfg = TargetsConfig(path=str(temp_config_file))
@@ -424,6 +492,40 @@ class TestTargetsConfig:
         cfg.upsert("new-target", {"host": "newhost"})
 
         assert cfg.get("new-target") == {"host": "newhost"}
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "../prod",
+            "prod/east",
+            r"prod\east",
+            "C:prod",
+            "prod.",
+            "prod ",
+            ".",
+            "..",
+            "CON",
+            "nul.txt",
+            "COM1",
+        ],
+    )
+    def test_upsert_rejects_nonportable_target_names(self, temp_config_file, name):
+        cfg = TargetsConfig(path=str(temp_config_file))
+        cfg.load()
+
+        with pytest.raises(ValueError, match="target name"):
+            cfg.upsert(name, {"host": "localhost"})
+
+    def test_upsert_rejects_casefolded_collision(self, temp_config_file):
+        cfg = TargetsConfig(path=str(temp_config_file))
+        cfg.load()
+        cfg.upsert("Prod", {"host": "one"})
+
+        with pytest.raises(ValueError, match="conflicts with existing target"):
+            cfg.upsert("prod", {"host": "two"})
+
+        cfg.upsert("Prod", {"host": "updated"})
+        assert cfg.get("Prod") == {"host": "updated"}
 
     def test_remove_target(self, temp_config_file):
         """Test removing a target."""

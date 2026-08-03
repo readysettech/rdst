@@ -24,7 +24,7 @@ import sys
 import json
 from pathlib import Path
 
-from shared.child_process import rdst_child_argv
+from shared.child_process import rdst_child_argv, rdst_child_env
 from typing import List, Dict, Any, Optional
 
 from shared.ui import (
@@ -43,6 +43,7 @@ from contextlib import contextmanager
 from shared.cli.types import RdstResult
 from shared.constants import rdst_semantic_layer_dir
 from shared.query_registry import QueryRegistry, hash_sql
+from shared.shell import environment_assignment
 
 
 @contextmanager
@@ -367,7 +368,7 @@ class ScanCommand:
                     "No LLM API key configured. Cannot run analysis.\n\n"
                     "Options:\n"
                     "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
-                    "  2. Set your own key: export ANTHROPIC_API_KEY=\"sk-ant-...\"\n"
+                    f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
                     "     Get one at: https://console.anthropic.com/"
                 )
                 if output_json:
@@ -423,7 +424,7 @@ class ScanCommand:
         schema_file = rdst_semantic_layer_dir() / f"{target}.yaml"
         if schema_file.exists():
             try:
-                content = schema_file.read_text()
+                content = schema_file.read_text(encoding="utf-8")
                 if "mysql" in content.lower():
                     return "MySQL"
             except Exception:
@@ -457,6 +458,9 @@ class ScanCommand:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=rdst_child_env(),
                 stdin=subprocess.DEVNULL,  # Isolate subprocess from terminal
                 timeout=60,  # fall back to --fast if EXPLAIN ANALYZE is slow
             )
@@ -637,6 +641,9 @@ class ScanCommand:
                     fast_cmd,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=rdst_child_env(),
                     stdin=subprocess.DEVNULL,
                     timeout=60,  # --fast skips EXPLAIN ANALYZE, should be quick
                 )
@@ -774,7 +781,7 @@ class ScanCommand:
                 import yaml
                 schema_path = os.path.expanduser(f"~/.rdst/semantic-layer/{target}.yaml")
                 if os.path.exists(schema_path):
-                    with open(schema_path) as f:
+                    with open(schema_path, encoding="utf-8") as f:
                         schema = yaml.safe_load(f)
                     for table_name, table_info in (schema.get("tables") or {}).items():
                         for col_name, col_info in (table_info.get("columns") or {}).items():

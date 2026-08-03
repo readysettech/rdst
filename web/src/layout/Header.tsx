@@ -51,7 +51,7 @@ const routeConfig: Record<string, RouteConfig> = {
 
 interface HeaderProps {
   isElectronMac?: boolean
-  isElectronLinux?: boolean
+  isElectronFrameless?: boolean
   /** Opens the off-canvas mobile nav drawer (<768px only). */
   onMenuClick?: () => void
   /** Drawer open state — drives the hamburger's aria-expanded [USE-090]. */
@@ -60,7 +60,7 @@ interface HeaderProps {
 
 export function Header({
   isElectronMac = false,
-  isElectronLinux = false,
+  isElectronFrameless = false,
   onMenuClick,
   mobileNavOpen = false,
 }: HeaderProps) {
@@ -160,7 +160,7 @@ export function Header({
           </HStack>
         </HStack>
 
-        {isElectronLinux && <WindowControls />}
+        {isElectronFrameless && <WindowControls />}
       </HStack>
     </header>
   )

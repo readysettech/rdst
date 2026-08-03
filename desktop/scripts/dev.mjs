@@ -7,7 +7,14 @@ const __dirname = dirname(__filename);
 const appDir = resolve(__dirname, "..");
 const webAppsDir = resolve(appDir, "../..");
 const rdstDir = resolve(webAppsDir, "../rdst");
-const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const pnpmCommand = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "pnpm";
+const pnpmPrefixArgs = process.platform === "win32" ? ["/d", "/s", "/c", "pnpm"] : [];
+const backendCommand =
+  process.platform === "win32" ? resolve(rdstDir, ".venv/Scripts/rdst.exe") : "uv";
+const backendArgs =
+  process.platform === "win32"
+    ? ["web", "--ui", "none", "--reload"]
+    : ["run", "--directory", rdstDir, "rdst", "web", "--ui", "none", "--reload"];
 const READY_TIMEOUT_MS = 30_000;
 const SHUTDOWN_TIMEOUT_MS = 3_000;
 
@@ -125,23 +132,25 @@ async function shutdown(code) {
 
 async function main() {
   console.log("[rdst-desktop] Building Electron main and preload processes...");
-  await run(pnpm, ["exec", "tsup"], { cwd: appDir });
+  await run(pnpmCommand, [...pnpmPrefixArgs, "exec", "tsup"], { cwd: appDir });
 
-  const backend = start(
-    "backend",
-    "uv",
-    ["run", "--directory", rdstDir, "rdst", "web", "--ui", "none", "--reload"],
-    { cwd: appDir },
-  );
+  if (process.platform === "win32") {
+    await run("uv", ["run", "--directory", rdstDir, "rdst", "version"], { cwd: appDir });
+  }
+
+  const backend = start("backend", backendCommand, backendArgs, { cwd: rdstDir });
   const renderer = start(
     "renderer",
-    pnpm,
-    ["--filter", "rdst-web", "dev:vite"],
+    pnpmCommand,
+    [...pnpmPrefixArgs, "--filter", "rdst-web", "dev:vite"],
     { cwd: webAppsDir },
   );
-  start("electron build watcher", pnpm, ["exec", "tsup", "--watch"], {
-    cwd: appDir,
-  });
+  start(
+    "electron build watcher",
+    pnpmCommand,
+    [...pnpmPrefixArgs, "exec", "tsup", "--watch"],
+    { cwd: appDir },
+  );
 
   const rendererUrl = "http://localhost:3001";
   await Promise.all([
@@ -149,7 +158,7 @@ async function main() {
     waitForUrl("Vite renderer", rendererUrl, renderer),
   ]);
 
-  start("electron", pnpm, ["exec", "electron", "."], {
+  start("electron", pnpmCommand, [...pnpmPrefixArgs, "exec", "electron", "."], {
     cwd: appDir,
     env: { ELECTRON_RENDERER_URL: rendererUrl },
   });

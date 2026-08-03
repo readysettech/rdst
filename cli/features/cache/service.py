@@ -11,6 +11,7 @@ import subprocess
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from shared.config.targets import TargetsConfig
+from shared.deploy.docker_topology import DockerTopology
 from shared.password_resolver import resolve_password_value
 from shared.service_events import ErrorEvent, ProgressEvent
 
@@ -992,7 +993,11 @@ class CacheService:
             is_local = options.mode in ("docker", "systemd") and not options.host
 
             if is_local:
-                endpoint_host = "127.0.0.1"
+                endpoint_host = (
+                    DockerTopology.from_environment().published_host
+                    if options.mode == "docker"
+                    else "127.0.0.1"
+                )
             else:
                 # Non-local: register with empty host — user will provide it
                 endpoint_host = ""

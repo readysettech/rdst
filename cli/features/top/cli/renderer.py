@@ -5,6 +5,7 @@ It consumes TopEvent objects from TopService and renders them appropriately.
 """
 
 import datetime
+import os
 import sys
 import time
 from typing import List, Optional
@@ -411,17 +412,16 @@ class TopRenderer:
         for idx in range(len(self._current_queries), 10):
             table.add_row(str(idx), "-", "-", "-", "-", "-", style=StyleTokens.MUTED)
 
-        # Footer with keyboard shortcuts
-        footer = KeyboardShortcuts(
-            title="Quick Actions",
-            shortcuts=[
+        shortcuts = [("Ctrl+C", "quit", StyleTokens.ERROR)]
+        if os.name != "nt":
+            shortcuts = [
                 ("0-9", "save", StyleTokens.SUCCESS),
                 ("a", "save all", StyleTokens.SUCCESS),
                 ("z+0-9", "analyze", StyleTokens.WARNING),
                 ("q", "quit", StyleTokens.ERROR),
-                ("Ctrl+C", "quit", StyleTokens.ERROR),
-            ],
-        )
+                *shortcuts,
+            ]
+        footer = KeyboardShortcuts(title="Quick Actions", shortcuts=shortcuts)
 
         return Group(header, table, footer)
 

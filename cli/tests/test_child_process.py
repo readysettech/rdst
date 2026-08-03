@@ -13,20 +13,42 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
-from shared.child_process import rdst_child_argv
+from shared.child_process import rdst_child_argv, rdst_child_env
 
 RDST_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_rdst_child_argv_uses_module_invocation():
     assert rdst_child_argv(["analyze", "-q", "SELECT 1"]) == [
-        sys.executable, "-m", "rdst", "analyze", "-q", "SELECT 1",
+        sys.executable,
+        "-m",
+        "rdst",
+        "analyze",
+        "-q",
+        "SELECT 1",
     ]
 
 
 def test_rdst_child_argv_empty():
     assert rdst_child_argv([]) == [sys.executable, "-m", "rdst"]
+
+
+def test_rdst_child_argv_uses_direct_arguments_when_frozen():
+    with patch.object(sys, "frozen", True, create=True):
+        assert rdst_child_argv(["analyze", "--hash", "abc"]) == [
+            sys.executable,
+            "analyze",
+            "--hash",
+            "abc",
+        ]
+
+
+def test_rdst_child_env_forces_utf8_without_losing_parent_values():
+    env = rdst_child_env({"EXISTING": "value", "PYTHONIOENCODING": "cp1252"})
+
+    assert env == {"EXISTING": "value", "PYTHONIOENCODING": "utf-8"}
 
 
 def test_rdst_runs_from_unrelated_directory(tmp_path):
@@ -36,6 +58,7 @@ def test_rdst_runs_from_unrelated_directory(tmp_path):
     env = {**os.environ, "PYTHONPATH": str(RDST_ROOT), "RDST_TESTING": "true"}
     proc = subprocess.run(
         rdst_child_argv(["version"]),
+        check=False,
         cwd=tmp_path,
         env=env,
         capture_output=True,

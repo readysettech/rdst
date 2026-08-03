@@ -59,6 +59,33 @@ Update them with `uv tool upgrade rdst` or `pipx upgrade rdst`.
 
 > **After installing**, run `rdst init` to configure your first database connection.
 
+### Native Windows development
+
+Use PowerShell with Python 3.12+ and uv:
+
+```powershell
+cd rdst
+uv sync --group dev
+uv run rdst version
+$env:PROD_DB_PASSWORD = "your-password"
+```
+
+RDST stores user data under `%USERPROFILE%\.rdst`. Interactive editor commands
+use `EDITOR` or `VISUAL` and fall back to Notepad.
+
+When the Docker CLI talks to a daemon on another machine, configure the daemon
+network explicitly:
+
+```powershell
+$env:RDST_DOCKER_REMOTE = "1"
+$env:RDST_DOCKER_PUBLISHED_HOST = "192.168.122.1"
+$env:RDST_DOCKER_UPSTREAM_HOST = "192.168.122.222"
+```
+
+`RDST_DOCKER_PUBLISHED_HOST` is where Windows reaches published container ports.
+`RDST_DOCKER_UPSTREAM_HOST` is where containers reach a database running on the
+Windows client. The database must listen on that routable address.
+
 ## Quick Start
 
 1. **Initialize RDST:**
@@ -132,8 +159,9 @@ uvx rdst analyze "SELECT * FROM orders WHERE status = 'pending'"
 
 ## Requirements
 
-- macOS or a glibc-based Linux distribution on x86_64 or arm64
-- `curl` or `wget`
+- Packaged CLI: macOS or a glibc-based Linux distribution on x86_64 or arm64
+- Native Windows development: Python 3.12+, uv, and PowerShell
+- `curl` or `wget` for the macOS/Linux installer
 - PostgreSQL or MySQL database access
 
 ## About Readyset

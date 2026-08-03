@@ -332,7 +332,7 @@ def _denylisted_fingerprints(path: Path | None) -> set[int]:
     if not path or not path.exists():
         return set()
     out: set[int] = set()
-    for raw in path.read_text().splitlines():
+    for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue

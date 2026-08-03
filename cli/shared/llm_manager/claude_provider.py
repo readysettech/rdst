@@ -11,6 +11,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 from .base import LLMError, Provider, ProviderRequest, ProviderResponse
+from shared.shell import environment_assignment
 
 
 class AnthropicModel(str, Enum):
@@ -156,7 +157,7 @@ class ClaudeProvider(Provider):
                     "Unable to reach RDST trial service.\n\n"
                     "Options:\n"
                     "  1. Try again in a few minutes\n"
-                    '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."\n'
+                    f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
                     "     Get one at: https://console.anthropic.com/",
                     code="PROXY_UNREACHABLE",
                     cause=e,
@@ -187,7 +188,7 @@ class ClaudeProvider(Provider):
                     f"{detail}\n\n"
                     "To continue using RDST:\n"
                     "  1. Get your own key: https://console.anthropic.com/\n"
-                    '  2. Set it: export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
+                    f"  2. Set it: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n\n"
                     "Want more trial credits? Email hello@readyset.io",
                     code="TRIAL_EXHAUSTED",
                     status=403,

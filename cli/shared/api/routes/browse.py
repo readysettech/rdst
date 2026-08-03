@@ -7,7 +7,7 @@ since browser-native folder pickers return sandboxed paths.
 from __future__ import annotations
 
 import os
-from pathlib import Path
+import string
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -38,6 +38,14 @@ class BrowseResponse(BaseModel):
     parent: Optional[str]
     directories: list[DirectoryEntry]
     files: list[DirectoryEntry] = []
+
+
+def _windows_drive_entries() -> list[DirectoryEntry]:
+    return [
+        DirectoryEntry(name=f"{letter}:", path=f"{letter}:\\")
+        for letter in string.ascii_uppercase
+        if os.path.exists(f"{letter}:\\")
+    ]
 
 
 @router.get("/browse")
@@ -90,6 +98,14 @@ async def browse_directory(
                 files.append(DirectoryEntry(name=entry, path=full_path))
         except PermissionError:
             continue
+
+    if os.name == "nt" and parent is None:
+        known_paths = {entry.path.casefold() for entry in directories}
+        directories.extend(
+            drive
+            for drive in _windows_drive_entries()
+            if drive.path.casefold() not in known_paths
+        )
 
     directories.sort(key=lambda d: d.name.lower())
     files.sort(key=lambda f: f.name.lower())

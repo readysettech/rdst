@@ -65,7 +65,7 @@ class SnapshotBrowser:
             print(F.error(f"Snapshot not found: {snapshot_name}"))
             return
 
-        with open(snapshot_path) as f:
+        with open(snapshot_path, encoding="utf-8") as f:
             data = json.load(f)
 
         print(F.header(f"SNAPSHOT: {snapshot_name}"))
@@ -114,9 +114,9 @@ class SnapshotBrowser:
             print(F.error(f"Snapshot not found: {snapshot2}"))
             return
 
-        with open(path1) as f:
+        with open(path1, encoding="utf-8") as f:
             data1 = json.load(f)
-        with open(path2) as f:
+        with open(path2, encoding="utf-8") as f:
             data2 = json.load(f)
 
         print(F.header(f"SNAPSHOT DIFF: {snapshot1} → {snapshot2}"))

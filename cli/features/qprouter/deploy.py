@@ -18,10 +18,13 @@ future `cache deploy` that puts squeepy in front of ReadySet.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from shared.deploy.docker_topology import DockerTopology
 
 READYSET_IMAGE = "public.ecr.aws/readyset/readyset:latest-stable"
 SQP_IMAGE = "public.ecr.aws/i9r8k6s4/sqp:20260709-1722"
@@ -112,14 +115,29 @@ class Ports:
 
 
 def _port_free(port: int) -> bool:
-    """Whether Docker could publish `port` on this host.
+    """Whether Docker could publish `port` on the daemon host.
 
-    Probes a wildcard bind on BOTH stacks with no SO_REUSEADDR: on
-    macOS/BSD, a reuse-enabled loopback bind succeeds even while another
-    process (a local Postgres, another engine's port forwarder) holds the
-    port on 0.0.0.0 or ::, which made the demo pick busy ports on Macs and
-    fail at container start."""
+    Remote conflicts are detected when the container starts and retried with a
+    new port. Local daemons can be probed directly with wildcard binds.
+    """
+    if DockerTopology.from_environment().remote:
+        return True
+
+    for family, address in (
+        (socket.AF_INET, ("127.0.0.1", port)),
+        (socket.AF_INET6, ("::1", port)),
+    ):
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
+                probe.settimeout(0.05)
+                if probe.connect_ex(address) == 0:
+                    return False
+        except OSError:
+            pass
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s4:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            s4.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         try:
             s4.bind(("", port))
         except OSError:
@@ -127,6 +145,8 @@ def _port_free(port: int) -> bool:
     try:
         with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s6:
             s6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                s6.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
             try:
                 s6.bind(("::", port))
             except OSError:
@@ -170,11 +190,32 @@ def is_port_conflict(error_text: str) -> bool:
     return any(marker in text for marker in _PORT_CONFLICT_MARKERS)
 
 
+def _docker_published_ports() -> set[int]:
+    """Return host ports currently published by containers on the daemon."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Ports}}"],
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if result.returncode != 0:
+        return set()
+    return {int(port) for port in re.findall(r":(\d+)->", result.stdout)}
+
+
 def allocate_ports(exclude: set[int] | None = None) -> Ports:
     """Find a free, non-colliding port for each component (increment on
     conflict). `exclude` blacklists ports a previous attempt already failed
     on."""
     taken: set[int] = set(exclude or ())
+    if DockerTopology.from_environment().remote:
+        taken.update(_docker_published_ports())
     return Ports(
         pg=_next_free(BASE_PORTS["pg"], taken),
         readyset=_next_free(BASE_PORTS["readyset"], taken),
@@ -185,7 +226,9 @@ def allocate_ports(exclude: set[int] | None = None) -> Ports:
 
 
 def _run(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(
+        cmd, capture_output=True, check=False, text=True, timeout=timeout
+    )
 
 
 def image_present(image: str, runner=_run) -> bool:
@@ -223,15 +266,20 @@ class PullProgress:
             self.done_layers += 1
 
 
-def pull_image_streaming(image: str, progress: PullProgress,
-                         on_start=None) -> subprocess.CompletedProcess:
+def pull_image_streaming(
+    image: str, progress: PullProgress, on_start=None
+) -> subprocess.CompletedProcess:
     """Pull `image`, feeding every status line to `progress` as it arrives so
     the caller can narrate layer-level progress live. `on_start` receives the
     Popen handle, letting the caller kill a stuck pull. stderr is merged into
     stdout; the returned stderr carries the output tail for error
     classification."""
-    proc = subprocess.Popen(["docker", "pull", image], stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(
+        ["docker", "pull", image],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
     if on_start is not None:
         on_start(proc)
     out: list[str] = []
@@ -240,90 +288,155 @@ def pull_image_streaming(image: str, progress: PullProgress,
         progress.feed(line)
     rc = proc.wait()
     text = "".join(out)
-    return subprocess.CompletedProcess(proc.args, rc, stdout=text,
-                                       stderr=text[-500:])
+    return subprocess.CompletedProcess(proc.args, rc, stdout=text, stderr=text[-500:])
 
 
 def deploy_postgres_baked(name: str, port: int) -> subprocess.CompletedProcess:
     """Run the pre-baked Orders image: credentials and data ship in the image,
     runtime flags ship in its CMD — only the name and port vary."""
-    return _run([
-        "docker", "run", "--pull=never", "-d", "--name", name, "--restart=unless-stopped",
-        "--shm-size=1g",
-        *_limit_flags("pg"),
-        "-p", f"{port}:5432",
-        BAKED_PG_IMAGE,
-    ])
+    return _run(
+        [
+            "docker",
+            "run",
+            "--pull=never",
+            "-d",
+            "--name",
+            name,
+            "--restart=unless-stopped",
+            "--shm-size=1g",
+            *_limit_flags("pg"),
+            "-p",
+            f"{port}:5432",
+            BAKED_PG_IMAGE,
+        ]
+    )
 
 
-def deploy_readyset(name: str, port: int, metrics_port: int, pg_port: int,
-                    creds: dict) -> subprocess.CompletedProcess:
-    db = (f"postgresql://{creds['user']}:{creds['password']}"
-          f"@host.docker.internal:{pg_port}/{creds['database']}")
-    return _run([
-        "docker", "run", "--pull=never", "-d", "--name", name, "--restart=unless-stopped",
-        "--add-host=host.docker.internal:host-gateway",
-        *_limit_flags("readyset"),
-        "-e", f"UPSTREAM_DB_URL={db}",
-        "-e", f"LISTEN_ADDRESS=0.0.0.0:{port}",
-        "-e", "QUERY_LOG_MODE=enabled",
-        "-e", "PROMETHEUS_METRICS=true",
-        "-e", f"METRICS_ADDRESS=0.0.0.0:{metrics_port}",
-        "-e", "DISABLE_TELEMETRY=true",
-        "-e", "ALLOW_UNAUTHENTICATED_CONNECTIONS=true",
-        # Shallow caches default to a 10s TTL, so every cache re-runs upstream
-        # every few seconds; with ~20 caches created together those refreshes
-        # land in lockstep and the ReadySet throughput line sawtooths. A 3-minute
-        # TTL makes refreshes rare and the line steady for the length of a demo.
-        "-e", f"DEFAULT_TTL_MS={os.environ.get('QPDEMO_SHALLOW_TTL_MS', '180000')}",
-        "-p", f"{port}:{port}",
-        "-p", f"{metrics_port}:{metrics_port}",
-        READYSET_IMAGE,
-    ])
+def deploy_readyset(
+    name: str, port: int, metrics_port: int, pg_port: int, creds: dict
+) -> subprocess.CompletedProcess:
+    db = (
+        f"postgresql://{creds['user']}:{creds['password']}"
+        f"@qpdemo-pg:5432/{creds['database']}"
+    )
+    return _run(
+        [
+            "docker",
+            "run",
+            "--pull=never",
+            "-d",
+            "--name",
+            name,
+            "--restart=unless-stopped",
+            "--link",
+            "qpdemo-pg:qpdemo-pg",
+            *_limit_flags("readyset"),
+            "-e",
+            f"UPSTREAM_DB_URL={db}",
+            "-e",
+            f"LISTEN_ADDRESS=0.0.0.0:{port}",
+            "-e",
+            "QUERY_LOG_MODE=enabled",
+            "-e",
+            "PROMETHEUS_METRICS=true",
+            "-e",
+            f"METRICS_ADDRESS=0.0.0.0:{metrics_port}",
+            "-e",
+            "DISABLE_TELEMETRY=true",
+            "-e",
+            "ALLOW_UNAUTHENTICATED_CONNECTIONS=true",
+            # Shallow caches default to a 10s TTL, so every cache re-runs upstream
+            # every few seconds; with ~20 caches created together those refreshes
+            # land in lockstep and the ReadySet throughput line sawtooths. A 3-minute
+            # TTL makes refreshes rare and the line steady for the length of a demo.
+            "-e",
+            f"DEFAULT_TTL_MS={os.environ.get('QPDEMO_SHALLOW_TTL_MS', '180000')}",
+            "-p",
+            f"{port}:{port}",
+            "-p",
+            f"{metrics_port}:{metrics_port}",
+            READYSET_IMAGE,
+        ]
+    )
 
 
-def deploy_sqp(name: str, ports: Ports, config_path: Path, denylist_path: Path
-               ) -> subprocess.CompletedProcess:
-    return _run([
-        "docker", "run", "--pull=never", "-d", "--name", name, "--restart=unless-stopped",
-        "--add-host=host.docker.internal:host-gateway",
-        *_limit_flags("sqp"),
-        "-v", f"{config_path}:/etc/sqp/sqp.toml:ro",
-        "-v", f"{denylist_path}:/etc/sqp/denylist:ro",
-        "-p", f"{ports.sqp}:{ports.sqp}",
-        "-p", f"{ports.metrics}:{ports.metrics}",
-        "-p", f"{ports.admin}:{ports.admin}",
-        SQP_IMAGE,
-    ])
+def deploy_sqp(
+    name: str, ports: Ports, config_path: Path, denylist_path: Path
+) -> subprocess.CompletedProcess:
+    created = _run(
+        [
+            "docker",
+            "create",
+            "--pull=never",
+            "--name",
+            name,
+            "--restart=unless-stopped",
+            "--link",
+            "qpdemo-pg:qpdemo-pg",
+            "--link",
+            "qpdemo-readyset:qpdemo-readyset",
+            *_limit_flags("sqp"),
+            "-p",
+            f"{ports.sqp}:{ports.sqp}",
+            "-p",
+            f"{ports.metrics}:{ports.metrics}",
+            "-p",
+            f"{ports.admin}:{ports.admin}",
+            SQP_IMAGE,
+        ]
+    )
+    if created.returncode != 0:
+        return created
+    for source, destination in (
+        (config_path, f"{name}:/etc/sqp/sqp.toml"),
+        (denylist_path, f"{name}:/etc/sqp/denylist"),
+    ):
+        copied = _run(["docker", "cp", str(source), destination])
+        if copied.returncode != 0:
+            return copied
+    return _run(["docker", "start", name])
 
 
-def deploy_qp_cron(name: str, config_dir: Path, fast_crontab: bool = True
-                   ) -> subprocess.CompletedProcess:
+def deploy_qp_cron(
+    name: str, config_dir: Path, fast_crontab: bool = True
+) -> subprocess.CompletedProcess:
     """Create the standalone QueryPilot cron container in the stopped state."""
     cmd = [
-        "docker", "create", "--pull=never", "--name", name, "--restart=unless-stopped",
-        "--add-host=host.docker.internal:host-gateway",
+        "docker",
+        "create",
+        "--pull=never",
+        "--name",
+        name,
+        "--restart=unless-stopped",
+        "--link",
+        "qpdemo-sqp:qpdemo-sqp",
+        "--link",
+        "qpdemo-readyset:qpdemo-readyset",
         *_limit_flags("qp-cron"),
-        "-v", f"{config_dir}:/etc/sqp:ro",
         QP_CRON_IMAGE,
     ]
     if fast_crontab:
         cmd.append("/etc/sqp/crontab")
-    return _run(cmd)
+    created = _run(cmd)
+    if created.returncode != 0:
+        return created
+    return _run(["docker", "cp", f"{config_dir}{os.sep}.", f"{name}:/etc/sqp"])
 
 
-def write_sqp_config(out_dir: Path, ports: Ports, pg_port: int, rs_port: int,
-                     api_key: str, creds: dict) -> tuple[Path, Path]:
-    """Render sqp.toml with resolved ports + host.docker.internal backends.
+def write_sqp_config(
+    out_dir: Path, ports: Ports, pg_port: int, rs_port: int, api_key: str, creds: dict
+) -> tuple[Path, Path]:
+    """Render sqp.toml with container-DNS backends.
 
     Returns (config_path, denylist_path). The embedded QueryPilot plugin is
     explicitly disabled; the demo uses the standalone qp-cron container instead.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     denylist = out_dir / "denylist"
-    denylist.write_text("")
+    denylist.write_text("", encoding="utf-8", newline="\n")
     cfg = out_dir / "sqp.toml"
-    cfg.write_text(f"""[general]
+    cfg.write_text(
+        f"""[general]
 pool_mode = "transaction"
 worker_threads = 0
 
@@ -336,19 +449,19 @@ tls_mode = "disable"
 role = "primary"
 min_connections = 2
 max_connections = 50
-username = "{creds['user']}"
-password = "{creds['password']}"
-database = "{creds['database']}"
-backends = [{{ host = "host.docker.internal", port = {pg_port}, weight = 1 }}]
+username = "{creds["user"]}"
+password = "{creds["password"]}"
+database = "{creds["database"]}"
+backends = [{{ host = "qpdemo-pg", port = 5432, weight = 1 }}]
 
 [pools.readyset]
 role = "primary"
 min_connections = 1
 max_connections = 25
-username = "{creds['user']}"
-password = "{creds['password']}"
-database = "{creds['database']}"
-backends = [{{ host = "host.docker.internal", port = {rs_port}, weight = 1 }}]
+username = "{creds["user"]}"
+password = "{creds["password"]}"
+database = "{creds["database"]}"
+backends = [{{ host = "qpdemo-readyset", port = {rs_port}, weight = 1 }}]
 
 [routing]
 default_pool = "primary"
@@ -365,13 +478,21 @@ format = "pretty"
 
 [plugins.query_pilot]
 enabled = false
-""")
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
     return cfg, denylist
 
 
-def write_qp_config(out_dir: Path, admin_port: int, readyset_pg_port: int, creds: dict,
-                    query_discovery_mode: str = "count_star",
-                    number_of_queries: int = 10) -> tuple[Path, Path, Path]:
+def write_qp_config(
+    out_dir: Path,
+    admin_port: int,
+    readyset_pg_port: int,
+    creds: dict,
+    query_discovery_mode: str = "count_star",
+    number_of_queries: int = 10,
+) -> tuple[Path, Path, Path]:
     """Render the standalone QueryPilot config directory mounted at /etc/sqp."""
     if query_discovery_mode not in {"count_star", "sum_time"}:
         raise ValueError(f"unsupported query_discovery_mode: {query_discovery_mode}")
@@ -380,21 +501,23 @@ def write_qp_config(out_dir: Path, admin_port: int, readyset_pg_port: int, creds
     out_dir.mkdir(parents=True, exist_ok=True)
     out_dir.chmod(0o755)
     denylist = out_dir / "denylist"
-    denylist.write_text("", newline="\n")
+    denylist.write_text("", encoding="utf-8", newline="\n")
     denylist.chmod(0o644)
     crontab = out_dir / "crontab"
     crontab.write_text(
         "*/15 * * * * * * /usr/bin/sqp-query-pilot --config /etc/sqp/qp.cnf\n",
+        encoding="utf-8",
         newline="\n",
     )
     crontab.chmod(0o644)
     cfg = out_dir / "qp.cnf"
-    cfg.write_text(f"""backend_type = "sqp"
+    cfg.write_text(
+        f"""backend_type = "sqp"
 database_type = "postgresql"
-sqp_api_url = "http://host.docker.internal:{admin_port}"
+sqp_api_url = "http://qpdemo-sqp:{admin_port}"
 sqp_readyset_pool = "readyset"
 sqp_readyset_servers = [
-    {{ host = "host.docker.internal", port = {readyset_pg_port} }},
+    {{ host = "qpdemo-readyset", port = {readyset_pg_port} }},
 ]
 
 warmup_time_s = 0
@@ -410,10 +533,13 @@ log_verbosity = "debug"
 denylist_path = "/etc/sqp/denylist"
 
 [[user]]
-readyset_user = "{creds['user']}"
-readyset_password = "{creds['password']}"
-readyset_database = "{creds['database']}"
-""", newline="\n")
+readyset_user = "{creds["user"]}"
+readyset_password = "{creds["password"]}"
+readyset_database = "{creds["database"]}"
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
     cfg.chmod(0o644)
     return cfg, denylist, crontab
 

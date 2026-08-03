@@ -19,6 +19,7 @@ import os
 import time
 
 from shared.keyservice import keyservice_base_url, keyservice_url
+from shared.shell import environment_assignment
 
 
 # Backwards-compatible module-level constants — evaluated at import time,
@@ -159,7 +160,7 @@ def resolve_api_key() -> KeyResolution:
             "Trial credits exhausted.\n\n"
             "To continue using RDST:\n"
             "  1. Get your own key: https://console.anthropic.com/\n"
-            '  2. Set it: export ANTHROPIC_API_KEY="sk-ant-..."\n\n'
+            f"  2. Set it: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n\n"
             "Want more trial credits? Email hello@readyset.io",
             code="TRIAL_EXHAUSTED",
         )
@@ -192,7 +193,7 @@ def resolve_api_key() -> KeyResolution:
         "No LLM API key configured.\n\n"
         "Options:\n"
         "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
-        '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."\n'
+        f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
         "     Get one at: https://console.anthropic.com/",
         code="NO_API_KEY",
     )

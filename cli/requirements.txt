@@ -11,3 +11,4 @@ sqlglot
 anthropic
 botocore
 packaging>=26.0
+filelock>=3.32.2

@@ -85,7 +85,7 @@ class AskHistory:
         )
 
         # Append to file
-        with open(self.history_file, 'a') as f:
+        with open(self.history_file, 'a', encoding='utf-8', newline='\n') as f:
             f.write(json.dumps(entry.to_dict()) + '\n')
 
     def get_recent(self, limit: int = 20) -> List[HistoryEntry]:
@@ -102,7 +102,7 @@ class AskHistory:
             return []
 
         entries = []
-        with open(self.history_file, 'r') as f:
+        with open(self.history_file, 'r', encoding='utf-8') as f:
             for line in f:
                 if line.strip():
                     try:

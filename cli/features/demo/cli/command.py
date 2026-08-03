@@ -18,6 +18,7 @@ import time
 from shared.child_process import rdst_child_argv
 from shared.cli.types import RdstResult
 from shared.config.targets import TargetsConfig
+from shared.deploy.docker_topology import DockerTopology
 from shared.ui import StyleTokens, get_console, MessagePanel, NextSteps
 
 
@@ -130,7 +131,7 @@ class DemoCommand:
             return RdstResult(False, "Demo container is not running. Run 'rdst demo setup' first.")
 
         os.environ["RDST_DEMO_PASSWORD"] = DEMO_PASSWORD
-        db_url = f"postgresql://{DEMO_USER}:{DEMO_PASSWORD}@127.0.0.1:{DEMO_PORT}/{DEMO_DATABASE}"
+        db_url = self._database_url()
         total_steps = 6
 
         self._tour_header("Loading Demo Data",
@@ -553,7 +554,7 @@ class DemoCommand:
         config.upsert(DEMO_TARGET, {
             "name": DEMO_TARGET,
             "engine": "postgresql",
-            "host": "127.0.0.1",
+            "host": self._connection_host(),
             "port": DEMO_PORT,
             "user": DEMO_USER,
             "database": DEMO_DATABASE,
@@ -581,9 +582,25 @@ class DemoCommand:
         subprocess.run(rdst_child_argv(args))
 
     def _print_connection_info(self):
-        self.console.print(f"  [{StyleTokens.MUTED}]Host: 127.0.0.1:{DEMO_PORT}[/{StyleTokens.MUTED}]")
+        self.console.print(
+            f"  [{StyleTokens.MUTED}]Host: {self._connection_host()}:{DEMO_PORT}"
+            f"[/{StyleTokens.MUTED}]"
+        )
         self.console.print(f"  [{StyleTokens.MUTED}]User: {DEMO_USER}  Database: {DEMO_DATABASE}[/{StyleTokens.MUTED}]")
         self.console.print(f"  [{StyleTokens.MUTED}]Password: {DEMO_PASSWORD}[/{StyleTokens.MUTED}]")
+
+    def _connection_host(self) -> str:
+        """Return the host where Docker-published demo ports are reachable."""
+        return DockerTopology.from_environment().published_host
+
+    def _database_url(self) -> str:
+        """Build the demo database URL for the active Docker topology."""
+        host = self._connection_host()
+        url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        return (
+            f"postgresql://{DEMO_USER}:{DEMO_PASSWORD}@{url_host}:"
+            f"{DEMO_PORT}/{DEMO_DATABASE}"
+        )
 
     def _tour_header(self, title: str, subtitle: str):
         self.console.print()

@@ -17,7 +17,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
@@ -28,6 +28,7 @@ from features.qprouter.readyset_client import ReadysetClient
 from features.qprouter.sqp_client import to_decimal, to_hex
 from features.qpdemo.load_driver import DualPathLoadDriver, WindowStat
 from features.qpdemo.workload import WORKLOAD, load_sqls, workload_dicts
+from shared.deploy.docker_topology import DockerTopology
 from shared.telemetry import telemetry
 
 PROJECT = "qpdemo"
@@ -322,7 +323,7 @@ class DemoService:
         history.json, and the now-unused ~/.rdst/demo directory."""
         if STATE_PATH.exists():
             try:
-                legacy = json.loads(STATE_PATH.read_text())
+                legacy = json.loads(STATE_PATH.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 legacy = None
             if legacy:
@@ -347,9 +348,10 @@ class DemoService:
 
     def _make_qprouter(self) -> QPRouter:
         p = self._ports
-        rs = ReadysetClient("127.0.0.1", p.readyset,
+        host = DockerTopology.from_environment().published_host
+        rs = ReadysetClient(host, p.readyset,
                             metrics_port=p.readyset_metrics, **CREDS)
-        return QPRouter("127.0.0.1", p.sqp, p.admin, api_key=API_KEY,
+        return QPRouter(host, p.sqp, p.admin, api_key=API_KEY,
                         readyset=rs, metrics_port=p.metrics, name="demo-qpr")
 
     # ---- docker helpers ------------------------------------------------------
@@ -591,6 +593,7 @@ class DemoService:
             lines.append(f"digest={to_hex(fp)} # manual cache")
         (QP_CONFIG_DIR / "denylist").write_text(
             "\n".join(sorted(set(lines))) + ("\n" if lines else ""),
+            encoding="utf-8",
             newline="\n",
         )
 
@@ -632,6 +635,26 @@ class DemoService:
             return "unavailable"
         return "ok"
 
+    @staticmethod
+    def _remote_disk_free_gb(images: list[str], missing: list[str]) -> float | None:
+        for image in images:
+            if image in missing:
+                continue
+            try:
+                result = qdeploy._run(
+                    [
+                        "docker", "run", "--rm", "--pull=never",
+                        "--entrypoint", "df", image, "-Pk", "/",
+                    ],
+                    timeout=30,
+                )
+                fields = result.stdout.strip().splitlines()[-1].split()
+                if result.returncode == 0 and len(fields) >= 4:
+                    return int(fields[3]) * 1024 / 1e9
+            except (IndexError, OSError, ValueError, subprocess.SubprocessError):
+                continue
+        return None
+
     def preflight(self) -> dict:
         """Live start-card checklist: Docker reachable, demo images cached, and
         enough free disk. Cheap enough to re-run on every card mount / retry."""
@@ -648,17 +671,27 @@ class DemoService:
         download_mb = (
             int(round(IMAGE_DOWNLOAD_MB * len(missing) / len(images))) if missing else 0
         )
-        try:
-            free_gb = shutil.disk_usage(str(Path.home())).free / 1e9
-        except OSError:
-            free_gb = 0.0
+        topology = DockerTopology.from_environment()
+        if topology.remote:
+            remote_free_gb = self._remote_disk_free_gb(images, missing)
+            disk_space_checked = remote_free_gb is not None
+            free_gb = remote_free_gb or 0.0
+            disk_space_ok = not disk_space_checked or free_gb >= DISK_REQUIRED_GB
+        else:
+            try:
+                free_gb = shutil.disk_usage(str(Path.home())).free / 1e9
+            except OSError:
+                free_gb = 0.0
+            disk_space_checked = True
+            disk_space_ok = free_gb >= DISK_REQUIRED_GB
         return {
             "docker_installed": docker_installed,
             "docker_running": docker_running,
             "images_present": not missing,
             "missing_images": missing,
             "download_mb": download_mb,
-            "disk_space_ok": free_gb >= DISK_REQUIRED_GB,
+            "disk_space_ok": disk_space_ok,
+            "disk_space_checked": disk_space_checked,
             "disk_free_gb": round(free_gb, 1),
             "disk_required_gb": DISK_REQUIRED_GB,
             "amd64_emulation": self._amd64_emulation_status(docker_running),
@@ -979,7 +1012,9 @@ class DemoService:
         def _warm_one(job: tuple[int, str]) -> int:
             port, sql = job
             conn = psycopg2.connect(
-                host="127.0.0.1", port=port, dbname=CREDS["database"],
+                host=DockerTopology.from_environment().published_host,
+                port=port,
+                dbname=CREDS["database"],
                 user=CREDS["user"], password=CREDS["password"], connect_timeout=5,
             )
             conn.autocommit = True
@@ -1120,9 +1155,10 @@ class DemoService:
             return
         self._workers = workers or self._workers
         self._latest = None
-        direct = dict(host="127.0.0.1", port=self._ports.pg, dbname=CREDS["database"],
+        host = DockerTopology.from_environment().published_host
+        direct = dict(host=host, port=self._ports.pg, dbname=CREDS["database"],
                       user=CREDS["user"], password=CREDS["password"])
-        sqp = dict(host="127.0.0.1", port=self._ports.sqp, dbname=CREDS["database"],
+        sqp = dict(host=host, port=self._ports.sqp, dbname=CREDS["database"],
                    user=CREDS["user"], password=CREDS["password"])
         self._driver = DualPathLoadDriver(direct, sqp, load_sqls())
         self._reset_comparison_window()

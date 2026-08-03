@@ -112,7 +112,13 @@ class TestBuildVariables:
         # Default MySQL readyset port
         assert variables["readyset_port"] == "3307"
 
-    def test_postgres_defaults(self, postgres_target_config):
+    def test_postgres_defaults(self, postgres_target_config, monkeypatch):
+        # This is a pure variable-construction test. Keep live Docker-published
+        # ports from making the expected default depend on test ordering.
+        monkeypatch.setattr(
+            "shared.deploy.script_generator._find_available_port",
+            lambda engine, _host: {"postgresql": 5433, "mysql": 3307}[engine],
+        )
         variables = build_variables(
             target_name="pgdb",
             target_config=postgres_target_config,

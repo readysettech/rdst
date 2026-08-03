@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 import yaml
 
+from shared.persistence import write_text
+
 from shared.constants import rdst_data_dir
 
 
@@ -243,7 +245,7 @@ class GuardConfig:
     @classmethod
     def load(cls, path: Path) -> "GuardConfig":
         """Load guard config from a YAML file."""
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return cls.from_dict(data)
 
@@ -252,16 +254,13 @@ class GuardConfig:
         if path is None:
             path = guards_dir() / f"{self.name}.yaml"
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(path, "w") as f:
-            yaml.dump(
-                self.to_dict(),
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-                allow_unicode=True,
-            )
+        content = yaml.dump(
+            self.to_dict(),
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+        write_text(path, content)
 
         return path
 

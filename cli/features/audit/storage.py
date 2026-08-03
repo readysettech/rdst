@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from shared.persistence import write_json
+
 from .models import WorkloadRun
 
 logger = logging.getLogger(__name__)
@@ -38,21 +40,20 @@ class AuditStorage:
         data = asdict(run)
         if extra:
             data.update(extra)
-        with open(path, "w") as file_obj:
-            json.dump(data, file_obj, indent=2, default=str)
+        write_json(path, data)
         return str(path)
 
     def load_run(self, target: str, run_id: str) -> dict[str, Any] | None:
         path = self.base_dir / target / f"{run_id}.json"
         if path.exists():
-            with open(path) as file_obj:
+            with open(path, encoding="utf-8") as file_obj:
                 return json.load(file_obj)
 
         target_dir = self.base_dir / target
         if target_dir.exists():
             for candidate in sorted(target_dir.glob("*.json"), reverse=True):
                 if candidate.stem.startswith(run_id):
-                    with open(candidate) as file_obj:
+                    with open(candidate, encoding="utf-8") as file_obj:
                         return json.load(file_obj)
         return None
 
@@ -77,7 +78,7 @@ class AuditStorage:
         results: list[dict[str, Any]] = []
         for path in sorted(target_dir.glob("*.json"), reverse=True):
             try:
-                with open(path) as file_obj:
+                with open(path, encoding="utf-8") as file_obj:
                     data = json.load(file_obj)
                 results.append(
                     {
@@ -122,7 +123,7 @@ def list_audit_runs(
     if store.base_dir.exists():
         for path in sorted(store.base_dir.glob("audit_*.json"), reverse=True):
             try:
-                with open(path) as file_obj:
+                with open(path, encoding="utf-8") as file_obj:
                     data = json.load(file_obj)
                 snap_target = data.get("target_name", "")
                 if target and snap_target != target:
@@ -172,7 +173,7 @@ def find_audit_run(run_id: str, target: str | None = None) -> dict[str, Any] | N
             if not path.exists():
                 continue
             try:
-                with open(path) as file_obj:
+                with open(path, encoding="utf-8") as file_obj:
                     return json.load(file_obj)
             except (OSError, json.JSONDecodeError) as e:
                 logger.warning("Skipping unreadable audit snapshot %s: %s", path, e)

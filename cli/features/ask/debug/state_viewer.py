@@ -24,7 +24,7 @@ class StateViewer:
 
     def load_session(self) -> Dict[str, Any]:
         if self._session_data is None:
-            with open(self.session_file) as f:
+            with open(self.session_file, encoding="utf-8") as f:
                 self._session_data = json.load(f)
         return self._session_data
 

@@ -23,7 +23,7 @@ import {
   useAuditPresentation,
   useAuditSession,
 } from '../lib/auditSession'
-import { isDesktopLinux, isDesktopMac } from '../lib/desktop'
+import { isDesktopFrameless, isDesktopMac } from '../lib/desktop'
 import { useDesktopUpdates } from '../lib/useDesktopUpdates'
 
 export const Route = createRootRoute({
@@ -42,7 +42,7 @@ export const Route = createRootRoute({
  */
 function AppShell({ children }: { children: ReactNode }) {
   const isElectronMac = isDesktopMac()
-  const isElectronLinux = isDesktopLinux()
+  const isElectronFrameless = isDesktopFrameless()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const { state: desktopUpdateState, install: installDesktopUpdate } =
     useDesktopUpdates()
@@ -66,7 +66,7 @@ function AppShell({ children }: { children: ReactNode }) {
       </a>
       <Header
         isElectronMac={isElectronMac}
-        isElectronLinux={isElectronLinux}
+        isElectronFrameless={isElectronFrameless}
         onMenuClick={() => setMobileNavOpen(true)}
         mobileNavOpen={mobileNavOpen}
       />

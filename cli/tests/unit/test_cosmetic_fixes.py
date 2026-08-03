@@ -197,21 +197,17 @@ finally:
     def test_sigbreak_runs_subprocess_finally_cleanup(self, tmp_path):
         import subprocess
         import sys
-        import time
-
         rdst_dir = Path(__file__).resolve().parents[2]
-        started = tmp_path / "started"
         cleaned = tmp_path / "cleaned"
         code = f"""
 import runpy
-import time
+import signal
 from pathlib import Path
 runpy.run_path({str(rdst_dir / 'rdst.py')!r}, run_name='rdst_signal_test')
-Path({str(started)!r}).write_text('started')
 try:
-    time.sleep(30)
+    signal.raise_signal(signal.SIGBREAK)
 finally:
-    Path({str(cleaned)!r}).write_text('cleaned')
+    Path({str(cleaned)!r}).write_text('cleaned', encoding='utf-8')
 """
         process = subprocess.Popen(
             [sys.executable, "-c", code],
@@ -219,18 +215,13 @@ finally:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env={**os.environ, "RDST_TESTING": "true"},
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
-        deadline = time.monotonic() + 5
-        while not started.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert started.exists()
-
-        process.send_signal(signal.CTRL_BREAK_EVENT)
         process.communicate(timeout=5)
 
-        assert cleaned.read_text() == "cleaned"
+        assert cleaned.read_text(encoding="utf-8") == "cleaned"
         assert process.returncode != 0
 
 

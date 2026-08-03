@@ -692,7 +692,7 @@ def main():
 </body>
 </html>"""
 
-    OUTPUT_FILE.write_text(full_html)
+    OUTPUT_FILE.write_text(full_html, encoding="utf-8")
     print(f"Exported to: {OUTPUT_FILE}")
 
 

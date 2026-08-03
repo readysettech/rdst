@@ -24,7 +24,13 @@ PYTHON_BIN="$(command -v "$PYTHON_BIN")"
 
 # Install Python packages needed for workload scripts
 echo "Installing Python packages for workload scripts..."
-"$PYTHON_BIN" -m pip install --user --quiet mysql-connector-python psycopg2-binary || {
+PIP_SCOPE_ARGS=(--user)
+if "$PYTHON_BIN" -c \
+  'import sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)'; then
+  PIP_SCOPE_ARGS=()
+fi
+"$PYTHON_BIN" -m pip install "${PIP_SCOPE_ARGS[@]}" --quiet \
+  mysql-connector-python psycopg2-binary || {
   echo "Warning: Failed to install Python packages. Workload-dependent tests may fail."
 }
 
@@ -177,7 +183,7 @@ READYSET_PORT="${READYSET_PORT:-5433}"
 # Comparisons prepare the managed sandbox; pull its image up front so the
 # first test never races a cold multi-hundred-MB download. Best-effort:
 # if the pull fails, `docker run` still pulls on demand.
-READYSET_TEST_IMAGE="$(python3 -c 'from shared.deploy import READYSET_IMAGE; print(READYSET_IMAGE)' 2>/dev/null || true)"
+READYSET_TEST_IMAGE="$("$PYTHON_BIN" -c 'from shared.deploy import READYSET_IMAGE; print(READYSET_IMAGE)' 2>/dev/null || true)"
 if [[ -n "$READYSET_TEST_IMAGE" ]]; then
   echo "Pre-pulling Readyset image for cache tests: $READYSET_TEST_IMAGE"
   docker pull "$READYSET_TEST_IMAGE" >/dev/null 2>&1 || true

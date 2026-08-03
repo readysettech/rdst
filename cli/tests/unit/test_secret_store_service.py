@@ -1,8 +1,11 @@
 """Unit tests for secure secret storage service."""
 
 import os
+import threading
+import time
 from unittest.mock import Mock, patch
 
+from shared import secret_store_service
 from shared.secret_store_service import SecretStoreService
 
 
@@ -10,6 +13,20 @@ def _build_backend(class_name: str, module_name: str):
     backend_type = type(class_name, (), {})
     backend_type.__module__ = module_name
     return backend_type()
+
+
+def test_keyring_timeout_does_not_wait_for_hung_backend(monkeypatch):
+    release = threading.Event()
+    service = SecretStoreService()
+    monkeypatch.setattr(secret_store_service, "_KEYRING_TIMEOUT", 0.01)
+
+    started = time.monotonic()
+    result = service._keyring_call(lambda: release.wait(timeout=1))
+    elapsed = time.monotonic() - started
+    release.set()
+
+    assert result is secret_store_service._TIMEOUT
+    assert elapsed < 0.5
 
 
 def test_set_secret_persists_when_keyring_available(monkeypatch):

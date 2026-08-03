@@ -5,6 +5,8 @@ Pure logic — no live stack required.
 
 from features.qprouter.sqp_client import to_decimal, to_hex
 from features.qprouter import deploy as qdeploy
+from types import SimpleNamespace
+
 from features.qprouter.qprouter import (
     MANUAL_OWNER,
     QPRouter,
@@ -176,9 +178,29 @@ def test_qp_config_defaults_to_budget_ten(tmp_path):
     assert "number_of_queries = 10" in cfg.read_text()
 
 
-def test_port_free_detects_a_live_bind():
+def test_remote_port_probe_defers_to_daemon_start(monkeypatch):
+    monkeypatch.setattr(
+        qdeploy.DockerTopology,
+        "from_environment",
+        lambda: SimpleNamespace(remote=True),
+    )
+    monkeypatch.setattr(
+        qdeploy.socket,
+        "socket",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()),
+    )
+
+    assert qdeploy._port_free(5432) is True
+
+
+def test_port_free_detects_a_live_bind(monkeypatch):
     import socket
 
+    monkeypatch.setattr(
+        qdeploy.DockerTopology,
+        "from_environment",
+        lambda: SimpleNamespace(remote=False),
+    )
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("127.0.0.1", 0))
@@ -189,9 +211,35 @@ def test_port_free_detects_a_live_bind():
         assert qdeploy._port_free(busy) is False
 
 
+def test_remote_allocate_ports_skips_daemon_published_ports(monkeypatch):
+    monkeypatch.setattr(
+        qdeploy.DockerTopology,
+        "from_environment",
+        lambda: SimpleNamespace(remote=True),
+    )
+    monkeypatch.setattr(
+        qdeploy.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="0.0.0.0:5432->5432/tcp, [::]:5433->5433/tcp\n",
+        ),
+    )
+
+    ports = qdeploy.allocate_ports()
+
+    assert ports.pg not in {5432, 5433}
+    assert ports.readyset not in {5432, 5433}
+
+
 def test_allocate_ports_skips_an_occupied_base_port(monkeypatch):
     import socket
 
+    monkeypatch.setattr(
+        qdeploy.DockerTopology,
+        "from_environment",
+        lambda: SimpleNamespace(remote=False),
+    )
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("127.0.0.1", 0))

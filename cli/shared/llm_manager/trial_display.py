@@ -8,6 +8,8 @@ Token tiers: personal ≈ 275K tokens ($1.50), business ≈ 925K tokens ($5.00).
 
 from __future__ import annotations
 
+from shared.shell import environment_assignment
+
 
 # Sonnet blended rate at 4:1 input/output ratio (typical for RDST):
 # (4 * $3 + 1 * $15) / 5 = $5.40 per MTok
@@ -49,7 +51,7 @@ def show_trial_balance(result: dict, console) -> None:
         console.print(
             MessagePanel(
                 "Trial tokens exhausted.\n\n"
-                'To continue: export ANTHROPIC_API_KEY="sk-ant-..."\n'
+                f"To continue: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
                 "Get a key at: https://console.anthropic.com/\n\n"
                 "Want more trial tokens? Email hello@readyset.io",
                 variant="warning",

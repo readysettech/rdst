@@ -336,7 +336,7 @@ class CommandSetData:
             if self._data.empty and self.schema:
                 self.logger.debug(f"Writing schema directly: {self.schema}", highlight=False)
                 import csv
-                with open(file_path, 'w', newline='') as csvfile:
+                with open(file_path, 'w', encoding='utf-8', newline='') as csvfile:
                     writer = csv.writer(csvfile)
                     writer.writerow(self.schema)
 
@@ -346,7 +346,7 @@ class CommandSetData:
                     file_size = os.path.getsize(file_path)
                     self.logger.debug(f"File written successfully. Size: {file_size} bytes", highlight=False)
                     # Read it back to verify
-                    with open(file_path, 'r') as f:
+                    with open(file_path, 'r', encoding='utf-8', newline='') as f:
                         content = f.read()
                         self.logger.debug(f"File content: '{content}'", highlight=False)
                 else:

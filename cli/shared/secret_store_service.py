@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+import queue
+import threading
 from typing import Any, Dict, List, Optional
 
 _KEYRING_TIMEOUT = 2
@@ -30,11 +31,18 @@ class SecretStoreService:
             return None
 
     def _keyring_call(self, fn, *args):
+        results: queue.Queue[Any] = queue.Queue(maxsize=1)
+
+        def call() -> None:
+            try:
+                results.put(fn(*args))
+            except Exception:
+                results.put(_TIMEOUT)
+
+        threading.Thread(target=call, daemon=True).start()
         try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(fn, *args)
-                return future.result(timeout=_KEYRING_TIMEOUT)
-        except (FuturesTimeoutError, Exception):
+            return results.get(timeout=_KEYRING_TIMEOUT)
+        except queue.Empty:
             return _TIMEOUT
 
     def _backend_looks_viable(self) -> bool:
@@ -69,8 +77,15 @@ class SecretStoreService:
         SecretStoreService._probe_cache[self.service_name] = available
         return available
 
-    def set_secret(self, name: str, value: str, persist: bool = True) -> Dict[str, Any]:
-        os.environ[name] = value
+    def set_secret(
+        self,
+        name: str,
+        value: str,
+        persist: bool = True,
+        apply_to_environment: bool = True,
+    ) -> Dict[str, Any]:
+        if apply_to_environment:
+            os.environ[name] = value
 
         if not persist:
             return {

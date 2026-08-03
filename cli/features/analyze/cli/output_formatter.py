@@ -9,8 +9,10 @@ Uses the RDST UI theme system for consistent styling across all output.
 
 from typing import Dict, Any, List, Optional
 import json
+import os
 import textwrap
 
+from shared.shell import environment_assignment
 from shared.ui import (
     get_console,
     StyleTokens,
@@ -44,7 +46,11 @@ def _ensure_dict(value: Any) -> Dict[str, Any]:
 
 
 def _generate_db_test_command(
-    sql: str, target_config: Dict[str, Any], db_engine: str
+    sql: str,
+    target_config: Dict[str, Any],
+    db_engine: str,
+    *,
+    windows: bool | None = None,
 ) -> Optional[str]:
     """
     Generate a one-liner database command for testing a query.
@@ -74,19 +80,30 @@ def _generate_db_test_command(
 
     # Clean up SQL: remove trailing semicolon and normalize whitespace
     sql_clean = sql.strip().rstrip(";")
-    # Escape single quotes in SQL for shell
-    sql_escaped = sql_clean.replace("'", "'\"'\"'")
-
-    # Reference the environment variable by name (e.g., $IMDB_POSTGRES_PASSWORD)
-    pwd_ref = f"${password_env}"
-
+    is_windows = os.name == "nt" if windows is None else windows
     engine_lower = (db_engine or "").lower()
 
+    if is_windows:
+        sql_escaped = sql_clean.replace("'", "''")
+        pwd_ref = f"$env:{password_env}"
+        if engine_lower in ("mysql", "mariadb"):
+            return (
+                f"$env:MYSQL_PWD = {pwd_ref}; mysql -h {host} -P {port} "
+                f"-u {user} {database} -e '{sql_escaped}'"
+            )
+        if engine_lower in ("postgresql", "postgres", "pg"):
+            return (
+                f"$env:PGPASSWORD = {pwd_ref}; psql -h {host} -p {port} "
+                f"-U {user} -d {database} -c '\\timing' -c '{sql_escaped}'"
+            )
+        return None
+
+    sql_escaped = sql_clean.replace("'", "'\"'\"'")
+    pwd_ref = f"${password_env}"
     if engine_lower in ("mysql", "mariadb"):
         return f"MYSQL_PWD=\"{pwd_ref}\" mysql -h {host} -P {port} -u {user} {database} -e '{sql_escaped}'"
 
-    elif engine_lower in ("postgresql", "postgres", "pg"):
-        # Use \timing to show query execution time
+    if engine_lower in ("postgresql", "postgres", "pg"):
         return f"PGPASSWORD=\"{pwd_ref}\" psql -h {host} -p {port} -U {user} -d {database} -c '\\timing' -c '{sql_escaped}'"
 
     return None
@@ -418,7 +435,7 @@ def _format_from_raw_workflow(workflow_result: Dict[str, Any]) -> str:
         if is_trial_exhausted:
             hint_text = (
                 "Get your own key at https://console.anthropic.com/\n"
-                "Then: export ANTHROPIC_API_KEY=\"sk-ant-...\""
+                f"Then: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}"
             )
         else:
             hint_text = "Check your API key and provider settings with 'rdst configure llm'"

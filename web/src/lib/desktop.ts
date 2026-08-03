@@ -52,13 +52,13 @@ export function isDesktopMac(): boolean {
 }
 
 /**
- * True when running inside the rdst-desktop Electron shell on Linux, where the
- * window is frameless and the renderer draws its own window controls.
+ * True when the desktop shell uses a frameless window and the renderer draws
+ * its own window controls.
  */
-export function isDesktopLinux(): boolean {
+export function isDesktopFrameless(): boolean {
   return (
     window.rdstDesktop?.isDesktop === true &&
-    window.rdstDesktop.platform === 'linux'
+    window.rdstDesktop.platform !== 'darwin'
   )
 }
 

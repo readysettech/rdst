@@ -215,6 +215,23 @@ class TestGuardConfig:
             assert loaded.masking.patterns == {"*.email": "email"}
             assert loaded.guards.require_where is True
 
+    def test_unicode_roundtrip_on_legacy_windows_locale(self, tmp_path, monkeypatch):
+        import builtins
+
+        real_open = builtins.open
+
+        def windows_open(file, mode="r", *args, **kwargs):
+            if "b" not in mode and "encoding" not in kwargs:
+                kwargs["encoding"] = "cp1252"
+            return real_open(file, mode, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", windows_open)
+        path = tmp_path / "unicode-guard.yaml"
+        GuardConfig(name="unicode", description="東京 ▶").save(path)
+
+        assert GuardConfig.load(path).description == "東京 ▶"
+        assert "東京" in path.read_text(encoding="utf-8")
+
     def test_yaml_format(self):
         """YAML output should be human-readable."""
         config = GuardConfig(

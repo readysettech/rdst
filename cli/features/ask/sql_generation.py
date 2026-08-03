@@ -211,7 +211,7 @@ def generate_sql_from_nl(
             try:
                 import tempfile
                 debug_path = os.path.join(tempfile.gettempdir(), 'rdst_ask_llm_response.json')
-                with open(debug_path, 'w') as f:
+                with open(debug_path, 'w', encoding='utf-8', newline='\n') as f:
                     f.write(response_text)
                 logger.debug(f"Full response saved to {debug_path}")
             except:

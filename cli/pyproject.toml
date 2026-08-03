@@ -51,6 +51,7 @@ dependencies = [
     "fastapi-ai-sdk>=0.1.0",
     "keyring>=25.0.0",
     "packaging>=26.0",
+    "filelock>=3.32.2",
 ]
 
 [project.optional-dependencies]

@@ -49,7 +49,7 @@ class QueryCorpus:
             return False
 
         try:
-            content = self.corpus_file.read_text()
+            content = self.corpus_file.read_text(encoding="utf-8")
             if YAML_AVAILABLE:
                 data = yaml.safe_load(content)
             else:
@@ -91,7 +91,7 @@ class QueryCorpus:
         else:
             content = json.dumps(data, indent=2)
 
-        self.corpus_file.write_text(content)
+        self.corpus_file.write_text(content, encoding="utf-8")
 
     def add_query(self, query_data: Dict) -> str:
         """

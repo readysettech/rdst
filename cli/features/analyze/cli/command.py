@@ -43,6 +43,7 @@ from shared.ui import (
 )
 
 from shared.llm_manager import LLMManager
+from shared.shell import environment_assignment
 from shared.query_registry import (
     ConversationRegistry,
     QueryRegistry,
@@ -1058,7 +1059,7 @@ class AnalyzeCommand:
                 "No LLM API key configured.\n\n"
                 "Options:\n"
                 "  1. Run 'rdst init' to sign up for a free trial (up to 925K tokens)\n"
-                '  2. Set your own key: export ANTHROPIC_API_KEY="sk-ant-..."\n'
+                f"  2. Set your own key: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n"
                 "     Get one at: https://console.anthropic.com/"
             )
 

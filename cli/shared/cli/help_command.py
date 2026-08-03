@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Optional
 import os
 
+from shared.shell import adapt_shell_guidance
 from shared.ui import (
     get_console,
     MarkdownContent,
@@ -41,7 +42,12 @@ The installer supports x86_64 and arm64 without sudo, pip, or a preinstalled
 Python. Linux requires a glibc-based distribution.
 
 ### Windows
-Coming soon.
+Native development uses PowerShell, Python 3.12+, and uv:
+```powershell
+cd rdst
+uv sync --group dev
+uv run rdst version
+```
 
 ### Verify and Update
 ```bash
@@ -1231,6 +1237,8 @@ If digest source fails:
 - Conversation history: ~/.rdst/conversations/
 """
 
+RDST_DOCS = adapt_shell_guidance(RDST_DOCS)
+
 
 @dataclass
 class HelpResult:
@@ -1317,7 +1325,10 @@ Include command examples when relevant. If the question isn't covered in the doc
 
             # Response format: {"text": "...", "usage": {...}, "provider": "...", "model": "..."}
             if response.get("text"):
-                return HelpResult(success=True, answer=response["text"].strip())
+                return HelpResult(
+                    success=True,
+                    answer=adapt_shell_guidance(response["text"].strip()),
+                )
             else:
                 return HelpResult(
                     success=False,
@@ -1494,4 +1505,4 @@ Try:
 
 (LLM unavailable: {error})"""
 
-        return HelpResult(success=True, answer=answer)
+        return HelpResult(success=True, answer=adapt_shell_guidance(answer))

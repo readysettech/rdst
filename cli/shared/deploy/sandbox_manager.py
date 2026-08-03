@@ -33,6 +33,8 @@ from typing import (
 )
 
 from shared.config.targets import TargetsConfig
+from shared.deploy.docker_topology import DockerTopology
+from shared.persistence import delete_file, update_json, write_text
 from shared.password_resolver import resolve_password_value
 
 logger = logging.getLogger(__name__)
@@ -263,7 +265,7 @@ class LocalDockerSandboxAdapter:
             raise RuntimeError(result.get("error") or "Readyset sandbox deployment failed")
         connection = SandboxConnection(
             engine=str(variables.get("db_engine", "postgresql")),
-            host="127.0.0.1",
+            host=DockerTopology.from_environment().published_host,
             port=int(variables["readyset_port"]),
             database=str(variables.get("db_name", "")),
             user=str(variables.get("db_user", "")),
@@ -318,9 +320,10 @@ class LocalDockerSandboxAdapter:
                         cursor.close()
 
                 await asyncio.to_thread(_probe)
-                metadata = _read_metadata(self.metadata_path) or {}
-                metadata["ready"] = True
-                _write_metadata(self.metadata_path, metadata)
+                _update_metadata(
+                    self.metadata_path,
+                    lambda metadata: {**metadata, "ready": True},
+                )
                 return
             except Exception as exc:
                 last_error = str(exc) or type(exc).__name__
@@ -997,13 +1000,15 @@ class ReadysetSandboxManager:
                 else "absent"
             )
             if self._sandbox is not None:
-                metadata = _read_metadata(self._metadata_path) or {}
-                connection_metadata = metadata.get("connection")
-                if isinstance(connection_metadata, dict):
-                    connection_metadata.pop("password", None)
-                metadata["last_released_at"] = now.isoformat()
-                metadata["generation"] = self._state.generation
-                _write_metadata(self._metadata_path, metadata)
+                def mark_released(metadata):
+                    connection_metadata = metadata.get("connection")
+                    if isinstance(connection_metadata, dict):
+                        connection_metadata.pop("password", None)
+                    metadata["last_released_at"] = now.isoformat()
+                    metadata["generation"] = self._state.generation
+                    return metadata
+
+                _update_metadata(self._metadata_path, mark_released)
             self._condition.notify_all()
 
     async def _expiry_loop(self) -> None:
@@ -1121,7 +1126,7 @@ def _read_metadata(path: Path | None) -> dict[str, Any] | None:
     if path is None or not path.exists():
         return None
     try:
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8"))
         return value if isinstance(value, dict) else None
     except (OSError, ValueError):
         return None
@@ -1130,19 +1135,18 @@ def _read_metadata(path: Path | None) -> dict[str, Any] | None:
 def _write_metadata(path: Path | None, value: dict[str, Any]) -> None:
     if path is None:
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(".tmp")
-    temp.write_text(json.dumps(value, sort_keys=True))
-    temp.replace(path)
+    write_text(path, json.dumps(value, sort_keys=True))
+
+
+def _update_metadata(path: Path | None, update) -> None:
+    if path is None:
+        return
+    update_json(path, update, create=False)
 
 
 def _delete_metadata(path: Path | None) -> None:
-    if path is None:
-        return
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
+    if path is not None:
+        delete_file(path)
 
 
 sandbox_manager = ReadysetSandboxManager()

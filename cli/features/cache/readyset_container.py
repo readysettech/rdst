@@ -156,6 +156,7 @@ def check_docker_available() -> Dict[str, Any]:
         }
 
 from shared.deploy import READYSET_IMAGE
+from shared.deploy.docker_topology import DockerTopology, DockerTopologyError
 
 
 def start_readyset_container(
@@ -186,6 +187,8 @@ def start_readyset_container(
             test_db_config = json.loads(test_db_config)
 
         readyset_port = int(readyset_port)
+        topology = DockerTopology.from_environment()
+        published_host = topology.published_host
 
         # Check if Readyset container already exists
         check_cmd = [
@@ -218,7 +221,7 @@ def start_readyset_container(
                 return {
                     "success": True,
                     "container_name": readyset_container_name,
-                    "readyset_url": f"{readyset_url_protocol}://localhost:{readyset_port}",
+                    "readyset_url": f"{readyset_url_protocol}://{published_host}:{readyset_port}",
                     "port": readyset_port,
                     "already_running": True
                 }
@@ -248,7 +251,7 @@ def start_readyset_container(
                         return {
                             "success": True,
                             "container_name": readyset_container_name,
-                            "readyset_url": f"{readyset_url_protocol}://localhost:{readyset_port}",
+                            "readyset_url": f"{readyset_url_protocol}://{published_host}:{readyset_port}",
                             "port": readyset_port,
                             "started": True
                         }
@@ -262,15 +265,15 @@ def start_readyset_container(
         database = test_db_config.get('database', 'testdb')
         user = test_db_config.get('user', 'postgres')
         password = test_db_config.get('password', '')
+        docker_host = topology.container_host_for(host)
 
         # Map engine to DATABASE_TYPE
         if engine == 'postgresql':
             db_type = 'postgresql'
-            # Use host.docker.internal to connect to test DB from inside container
-            target_db_url = f"postgresql://{user}:{password}@host.docker.internal:{port}/{database}"
+            target_db_url = f"postgresql://{user}:{password}@{docker_host}:{port}/{database}"
         elif engine == 'mysql':
             db_type = 'mysql'
-            target_db_url = f"mysql://{user}:{password}@host.docker.internal:{port}/{database}"
+            target_db_url = f"mysql://{user}:{password}@{docker_host}:{port}/{database}"
         else:
             return {
                 "success": False,
@@ -279,7 +282,7 @@ def start_readyset_container(
 
         print(f"Creating Readyset container: {readyset_container_name}...")
         print(f"  Database Type: {db_type}")
-        print(f"  Target DB: {db_type}://host.docker.internal:{port}/{database}")
+        print(f"  Target DB: {db_type}://{docker_host}:{port}/{database}")
         print(f"  Readyset port: {readyset_port}")
 
         # Create and start Readyset container
@@ -318,20 +321,20 @@ def start_readyset_container(
         time.sleep(2)
 
         # Test connectivity from inside the container to the database (optional diagnostic)
-        print(f"Testing connectivity from Readyset container to {db_type}://host.docker.internal:{port}...")
+        print(f"Testing connectivity from Readyset container to {db_type}://{docker_host}:{port}...")
 
         if db_type == 'mysql':
             # Test MySQL connection from inside container
             test_cmd = [
                 'docker', 'exec', readyset_container_name,
-                'mysql', '-h', 'host.docker.internal', '-P', str(port),
+                'mysql', '-h', docker_host, '-P', str(port),
                 '-u', user, f'-p{password}', '-e', 'SELECT 1;'
             ]
         else:
             # Test PostgreSQL connection from inside container
             test_cmd = [
                 'docker', 'exec', readyset_container_name,
-                'bash', '-c', f'PGPASSWORD={password} psql -h host.docker.internal -p {port} -U {user} -d {database} -c "SELECT 1;"'
+                'bash', '-c', f'PGPASSWORD={password} psql -h {docker_host} -p {port} -U {user} -d {database} -c "SELECT 1;"'
             ]
 
         conn_test = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
@@ -372,7 +375,7 @@ def start_readyset_container(
         return {
             "success": True,
             "container_name": readyset_container_name,
-            "readyset_url": f"{readyset_url_protocol}://localhost:{readyset_port}",
+            "readyset_url": f"{readyset_url_protocol}://{published_host}:{readyset_port}",
             "port": readyset_port,
             "created": True,
             "target_db_url": target_db_url.replace(f':{password}@', ':***@')  # Hide password in logs
@@ -594,11 +597,9 @@ def start_readyset_container_direct(
             console.print(f"[dim]Removing existing container to ensure latest image...[/dim]")
             subprocess.run(['docker', 'rm', '-f', readyset_container_name], capture_output=True, timeout=10)
 
-        # Build target database URL for Readyset (direct to upstream)
-        # For Docker, we need to handle localhost specially
-        docker_host = host
-        if host in ('localhost', '127.0.0.1'):
-            docker_host = 'host.docker.internal'
+        topology = DockerTopology.from_environment()
+        published_host = topology.published_host
+        docker_host = topology.container_host_for(host)
 
         if engine == 'mysql':
             target_db_url = f"mysql://{user}:{password}@{docker_host}:{port}/{database}"
@@ -679,13 +680,19 @@ def start_readyset_container_direct(
         return {
             "success": True,
             "container_name": readyset_container_name,
-            "readyset_url": f"{readyset_url_protocol}://localhost:{readyset_port}",
+            "readyset_url": f"{readyset_url_protocol}://{published_host}:{readyset_port}",
             "port": readyset_port,
             "created": True,
             "shallow_mode": True,
             "target_db_url": target_db_url.replace(f':{password}@', ':***@')
         }
 
+    except DockerTopologyError as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+            "error_type": "docker_topology",
+        }
     except subprocess.TimeoutExpired:
         return {
             "success": False,

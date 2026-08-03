@@ -26,6 +26,7 @@ if hasattr(signal, "SIGBREAK"):
 
 
 # UI system
+from shared.stdio import configure_utf8_stdio
 from shared.ui import StyleTokens, get_console, DataTable, SectionHeader
 
 
@@ -405,14 +406,19 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             selected_hash = result.data.get("selected_hash")
             selected_target = result.data.get("selected_target")
 
-            from shared.child_process import rdst_child_argv
+            import subprocess
+
+            from shared.child_process import rdst_child_argv, rdst_child_env
 
             analyze_args = ["analyze", "--hash", selected_hash]
             if selected_target:
                 analyze_args.extend(["--target", selected_target])
 
-            # Replace this process with analyze - gives clean terminal state
-            os.execv(sys.executable, rdst_child_argv(analyze_args))
+            child = subprocess.run(
+                rdst_child_argv(analyze_args), env=rdst_child_env()
+            )
+            if child.returncode != 0:
+                return RdstResult(False, "Analyze command failed")
 
         return result
 
@@ -538,10 +544,12 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
             # Register the MCP server
             # Determine the best way to run the MCP server:
             # 1. If rdst-mcp is in PATH (pip installed), use it
-            # 2. Otherwise, use python3 with full path to mcp_server.py
+            # 2. Otherwise, use the current interpreter with mcp_server.py
             rdst_mcp_path = shutil.which("rdst-mcp")
-            if rdst_mcp_path:
-                mcp_command = ["rdst-mcp"]
+            if getattr(sys, "frozen", False):
+                mcp_command = [sys.executable, "_mcp_server"]
+            elif rdst_mcp_path:
+                mcp_command = [rdst_mcp_path]
             else:
                 # Find mcp_server.py relative to this script
                 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -550,10 +558,11 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
                     return RdstResult(
                         False, f"MCP server not found at {mcp_server_path}"
                     )
-                # Use uv run to ensure dependencies are available, fallback to python3
-                if shutil.which("uv"):
+                # Use uv run to ensure dependencies are available.
+                uv_path = shutil.which("uv")
+                if uv_path:
                     mcp_command = [
-                        "uv",
+                        uv_path,
                         "run",
                         "--directory",
                         script_dir,
@@ -561,7 +570,7 @@ def execute_command(cli: RdstCLI, args: argparse.Namespace) -> RdstResult:
                         mcp_server_path,
                     ]
                 else:
-                    mcp_command = ["python3", mcp_server_path]
+                    mcp_command = [sys.executable, mcp_server_path]
 
             # Install the /rdst slash command globally
             slash_cmd_content = """# RDST Mode Activated
@@ -605,7 +614,7 @@ Present a status summary:
 
 [List their configured targets - show which are ready vs need passwords]
 
-[If any need passwords, show: "To use [target], export: `export VAR_NAME='password'`"]
+[If any need passwords, name each password environment variable and ask the user to set it in the shell that starts Claude Code.]
 
 **What would you like to do?**
 - Analyze a SQL query
@@ -622,7 +631,7 @@ Keep it conversational. The user shouldn't need to know the underlying commands 
             os.makedirs(claude_commands_dir, exist_ok=True)
             slash_cmd_path = os.path.join(claude_commands_dir, "rdst.md")
             try:
-                with open(slash_cmd_path, "w") as f:
+                with open(slash_cmd_path, "w", encoding="utf-8") as f:
                     f.write(slash_cmd_content)
             except Exception:
                 # Non-fatal - continue with MCP registration
@@ -630,9 +639,11 @@ Keep it conversational. The user shouldn't need to know the underlying commands 
 
             try:
                 result = subprocess.run(
-                    ["claude", "mcp", "add", "rdst", "--"] + mcp_command,
+                    [claude_path, "mcp", "add", "rdst", "--"] + mcp_command,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                 )
                 if result.returncode == 0:
                     return RdstResult(
@@ -666,7 +677,11 @@ Claude will now have access to all RDST tools for query analysis and optimizatio
 
             try:
                 result = subprocess.run(
-                    ["claude", "mcp", "remove", "rdst"], capture_output=True, text=True
+                    [claude_path, "mcp", "remove", "rdst"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
                 )
                 if result.returncode == 0:
                     return RdstResult(True, "RDST removed from Claude Code.")
@@ -1069,6 +1084,12 @@ def _interactive_menu(cli: RdstCLI) -> RdstResult:
 
 
 def main():
+    configure_utf8_stdio()
+    if sys.argv[1:] == ["_mcp_server"]:
+        from mcp_server import main as mcp_main
+
+        mcp_main()
+        return
     try:
         if len(sys.argv) == 2 and sys.argv[1] in ("--help", "-h", "help"):
             print_rich_help()

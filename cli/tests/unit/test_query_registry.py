@@ -374,6 +374,21 @@ class TestQueryRegistry:
         assert entry is not None
         assert entry.tag == "test"
 
+    def test_concurrent_instances_merge_independent_queries(self, temp_dir):
+        registry_path = temp_dir / "test_queries.toml"
+        first = QueryRegistry(registry_path=str(registry_path))
+        second = QueryRegistry(registry_path=str(registry_path))
+        first.load()
+        second.load()
+
+        first_hash, _ = first.add_query("SELECT * FROM first_table")
+        second_hash, _ = second.add_query("SELECT * FROM second_table")
+
+        loaded = QueryRegistry(registry_path=str(registry_path))
+        loaded.load()
+        assert loaded.get_query(first_hash) is not None
+        assert loaded.get_query(second_hash) is not None
+
     def test_add_duplicate_query(self, temp_dir):
         """Test adding the same query twice updates existing entry."""
         registry_path = temp_dir / "test_queries.toml"

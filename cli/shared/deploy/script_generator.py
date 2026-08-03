@@ -190,7 +190,7 @@ def generate_script(mode: str, variables: Dict[str, str]) -> str:
     if not template_file.exists():
         raise FileNotFoundError(f"Template not found: {template_file}")
 
-    script = template_file.read_text()
+    script = template_file.read_text(encoding="utf-8")
     for key, value in variables.items():
         script = script.replace(f"{{{key}}}", str(value))
     return script
@@ -216,7 +216,7 @@ def _generate_k8s_manifests(variables: Dict[str, str], include_secret: bool = Tr
         template_file = TEMPLATE_DIR / name
         if not template_file.exists():
             raise FileNotFoundError(f"Template not found: {template_file}")
-        content = template_file.read_text()
+        content = template_file.read_text(encoding="utf-8")
         for key, value in variables.items():
             content = content.replace(f"{{{key}}}", str(value))
         parts.append(content)

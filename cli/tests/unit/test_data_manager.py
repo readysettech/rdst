@@ -37,6 +37,14 @@ class TestDataManagerHelpers:
         """Test module has DataManager class."""
         assert hasattr(data_manager_module, 'DataManager')
 
+    def test_system_collectors_fail_clearly_on_windows(self):
+        manager = object.__new__(DataManager)
+        manager.logger = MagicMock()
+
+        with patch.object(data_manager_module.os, "name", "nt"):
+            with pytest.raises(RuntimeError, match="not supported on Windows"):
+                manager._execute_system_command("uptime")
+
 
 # Note: The DataManager class has complex initialization that requires
 # database connections and other dependencies. Full unit testing would

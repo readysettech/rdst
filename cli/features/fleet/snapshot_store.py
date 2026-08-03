@@ -8,6 +8,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from shared.persistence import write_json
+
 from .models import FleetAuditSnapshot, FleetDiff, FleetDiffEntry
 
 
@@ -38,27 +40,25 @@ class SnapshotStore:
     def save(self, snapshot: FleetAuditSnapshot) -> str:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         path = self.base_dir / f"{snapshot.snapshot_id}.json"
-        with open(path, "w") as file_obj:
-            json.dump(asdict(snapshot), file_obj, indent=2, default=str)
+        write_json(path, asdict(snapshot))
         return str(path)
 
     def save_raw(self, snapshot_id: str, data: Any) -> str:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         path = self.base_dir / f"{snapshot_id}.json"
-        with open(path, "w") as file_obj:
-            json.dump(data, file_obj, indent=2, default=str)
+        write_json(path, data)
         return str(path)
 
     def load(self, snapshot_id: str) -> dict[str, Any] | None:
         path = self.base_dir / f"{snapshot_id}.json"
         if path.exists():
-            with open(path) as file_obj:
+            with open(path, encoding="utf-8") as file_obj:
                 return json.load(file_obj)
 
         if self.base_dir.exists():
             for candidate in sorted(self.base_dir.glob("*.json")):
                 if candidate.stem.startswith(snapshot_id):
-                    with open(candidate) as file_obj:
+                    with open(candidate, encoding="utf-8") as file_obj:
                         return json.load(file_obj)
         return None
 
@@ -74,7 +74,7 @@ class SnapshotStore:
         snapshots: list[dict[str, Any]] = []
         for path in sorted(self.base_dir.glob("*.json"), reverse=True):
             try:
-                with open(path) as file_obj:
+                with open(path, encoding="utf-8") as file_obj:
                     data = json.load(file_obj)
                 is_fleet = isinstance(data.get("results"), list)
                 entries = _snapshot_entries(data)
