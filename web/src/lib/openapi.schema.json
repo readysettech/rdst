@@ -6883,15 +6883,8 @@
         "description": "Request body for submitting feedback.",
         "properties": {
           "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
+            "title": "Email",
+            "type": "string"
           },
           "include_plan": {
             "default": false,
@@ -6930,7 +6923,8 @@
           }
         },
         "required": [
-          "reason"
+          "reason",
+          "email"
         ],
         "title": "ReportRequest",
         "type": "object"
@@ -15283,7 +15277,7 @@
     },
     "/api/report": {
       "post": {
-        "description": "Submit user feedback.\n\nFeedback is sent to PostHog for analytics and workflow notifications.\nIf a query_hash is provided, the query context is loaded from the registry.",
+        "description": "Submit user feedback.\n\nFeedback is sent to PostHog for analytics and to Slack through a PostHog workflow.\nIf a query_hash is provided, the query context is loaded from the registry.",
         "operationId": "submit_report_api_report_post",
         "requestBody": {
           "content": {

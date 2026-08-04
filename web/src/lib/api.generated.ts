@@ -2094,7 +2094,7 @@ export interface paths {
          * Submit Report
          * @description Submit user feedback.
          *
-         *     Feedback is sent to PostHog for analytics and workflow notifications.
+         *     Feedback is sent to PostHog for analytics and to Slack through a PostHog workflow.
          *     If a query_hash is provided, the query context is loaded from the registry.
          */
         post: operations["submit_report_api_report_post"];
@@ -5707,7 +5707,7 @@ export interface components {
          */
         ReportRequest: {
             /** Email */
-            email?: string | null;
+            email: string;
             /**
              * Include Plan
              * @default false

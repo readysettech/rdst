@@ -578,6 +578,18 @@ class TestEmailPersistence:
         assert properties["suggestion_text"] == "Keep it up"
         assert properties["email"] == "feedback@example.com"
 
+    def test_feedback_without_email_is_not_sent(self, temp_rdst_dir):
+        from shared.telemetry_manager import TelemetryManager
+
+        tm = TelemetryManager()
+        tm._rdst_dir = temp_rdst_dir
+
+        with patch.object(tm, "track_with_stats") as mock_track:
+            with pytest.raises(ValueError, match="Email is required"):
+                tm.submit_feedback(reason="Anonymous feedback", email=None)
+
+        mock_track.assert_not_called()
+
 
 class TestTrialServiceDisplayName:
     """TrialService is used by the web API path (not the wizard).

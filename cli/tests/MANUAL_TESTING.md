@@ -229,7 +229,7 @@ rdst report
 1. [ ] Prompts for feedback type (positive/negative)
 2. [ ] Prompts for feedback text (multiline)
 3. [ ] Empty line or Ctrl-D ends input
-4. [ ] Optionally prompts for email
+4. [ ] Requires a valid email before submission
 5. [ ] Optionally prompts for query hash
 6. [ ] Shows confirmation before sending
 7. [ ] Displays success/failure message

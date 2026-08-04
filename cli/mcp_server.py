@@ -949,17 +949,18 @@ Use this when the user wants to:
 - Provide feedback (positive or negative) about analysis results
 - Suggest improvements or features
 
-The feedback is sent to the RDST team for review. Users can optionally
-include their email for follow-up.
+The feedback is sent to the RDST team for review. An email is required so the
+team can attribute the feedback and follow up.
 
 WORKFLOW:
 1. Ask the user what feedback they want to provide
 2. Ask if it's positive or negative feedback
-3. Optionally ask for their email if they want follow-up
+3. Ask for their email
 4. Call rdst_report with the details
 
 Example: User says "The index recommendation was wrong"
-→ Call rdst_report(reason="Index recommendation was incorrect - suggested index already exists", negative=True)
+Call rdst_report(reason="Index recommendation was incorrect - suggested index already exists",
+                 email="user@example.com", negative=True)
 """,
             "inputSchema": {
                 "type": "object",
@@ -974,7 +975,7 @@ Example: User says "The index recommendation was wrong"
                     },
                     "email": {
                         "type": "string",
-                        "description": "User's email for follow-up (optional)"
+                        "description": "User's email for follow-up (required)"
                     },
                     "positive": {
                         "type": "boolean",
@@ -993,7 +994,7 @@ Example: User says "The index recommendation was wrong"
                         "description": "Include the execution plan in the feedback (if hash provided)"
                     }
                 },
-                "required": ["reason"]
+                "required": ["reason", "email"]
             }
         },
         {
@@ -2109,12 +2110,15 @@ Just describe your database and we'll get connected!
 
     elif name == "rdst_report":
         # Submit feedback - MUST provide --reason to avoid interactive mode
-        args = ["report"]
-        args.extend(["--reason", arguments["reason"]])
+        args = [
+            "report",
+            "--reason",
+            arguments["reason"],
+            "--email",
+            arguments["email"],
+        ]
         if arguments.get("hash"):
             args.extend(["--hash", arguments["hash"]])
-        if arguments.get("email"):
-            args.extend(["--email", arguments["email"]])
         if arguments.get("positive"):
             args.append("--positive")
         elif arguments.get("negative"):

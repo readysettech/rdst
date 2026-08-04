@@ -279,10 +279,10 @@ Send feedback to the RDST team.
 
 ```bash
 # Report an issue
-rdst report --reason "Analysis gave wrong recommendation" --hash abc123 --negative
+rdst report --reason "Analysis gave wrong recommendation" --hash abc123 --negative --email you@example.com
 
 # Report positive feedback
-rdst report --reason "Great index suggestion!" --hash abc123 --positive
+rdst report --reason "Great index suggestion!" --hash abc123 --positive --email you@example.com
 ```
 
 ### rdst ask

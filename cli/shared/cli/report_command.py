@@ -2,11 +2,13 @@
 RDST Report Command
 
 Allows users to submit feedback about RDST analysis results.
-Feedback is sent to PostHog for analytics and workflow notifications.
+Feedback is sent to PostHog for analytics and to Slack through a PostHog workflow.
 """
 
 import sys
-from typing import Optional, Tuple, List
+from typing import List, Optional, Tuple
+
+from shared.email import EMAIL_RE
 
 # Import UI system - handles Rich availability internally
 from shared.ui import (
@@ -49,7 +51,7 @@ class ReportCommand:
         Args:
             query_hash: Hash of the query to report on (optional)
             reason: Feedback reason (if not provided, will prompt)
-            email: Email for follow-up (optional)
+            email: Email for follow-up and feedback attribution
             positive: Mark as positive feedback
             negative: Mark as negative feedback
             include_query: Include raw SQL in feedback
@@ -179,16 +181,29 @@ class ReportCommand:
             if plan_json and not include_plan:
                 include_plan = True
 
-        # Validate email if provided via CLI flag (non-interactive path)
-        if email and not fully_interactive:
-            if not ("@" in email and "." in email):
+        # Feedback must always have an attributable email. Interactive callers
+        # are prompted here; automation must provide --email explicitly.
+        if not email:
+            if sys.stdin.isatty():
+                email = self._prompt_email()
+            else:
                 self.console.print(
                     MessagePanel(
-                        f"Invalid email address: '{email}'. Please provide a valid email.",
+                        "Email is required when not running interactively. Use --email you@example.com",
                         variant="error",
                     )
                 )
                 return False
+
+        email = email.strip().lower()
+        if not EMAIL_RE.match(email):
+            self.console.print(
+                MessagePanel(
+                    f"Invalid email address: '{email}'. Please provide a valid email.",
+                    variant="error",
+                )
+            )
+            return False
 
         # Submit feedback
         try:
@@ -292,7 +307,7 @@ class ReportCommand:
             if not reason:
                 return None
 
-            # Step 4: Ask for email
+            # Step 4: Ask for the email attached to the feedback event
             email = self._prompt_email()
 
             return (query_hash, reason, sentiment, email, include_query, include_plan)
@@ -429,25 +444,25 @@ class ReportCommand:
         except Exception:
             return None, None, None
 
-    def _prompt_email(self) -> Optional[str]:
-        """Prompt for optional email."""
+    def _prompt_email(self) -> str:
+        """Prompt until a valid required email is provided."""
         try:
-            email = Prompt.ask(
-                "\nEmail for follow-up (optional, press Enter to skip)",
-                default="",
-                show_default=False,
-            )
+            while True:
+                email = Prompt.ask(
+                    "\nEmail for follow-up",
+                    default="",
+                    show_default=False,
+                ).strip().lower()
 
-            # Basic validation
-            if email and "@" in email and "." in email:
-                return email
-            elif email:
+                if EMAIL_RE.match(email):
+                    return email
+
                 self.console.print(
-                    MessagePanel("Invalid email format, skipping", variant="warning")
+                    MessagePanel(
+                        "A valid email is required to submit feedback",
+                        variant="warning",
+                    )
                 )
-                return None
-
-            return None
 
         except (EOFError, KeyboardInterrupt):
             raise  # Re-raise so top-level handler catches it

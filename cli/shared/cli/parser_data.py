@@ -904,7 +904,11 @@ analysis results. Optionally include query details for context.""",
                 short="-r",
                 help="Feedback reason (interactive if not provided)",
             ),
-            ArgDef("--email", short="-e", help="Email for follow-up (optional)"),
+            ArgDef(
+                "--email",
+                short="-e",
+                help="Email for follow-up (required for non-interactive use)",
+            ),
             ArgDef("--positive", action="store_true", help="Mark as positive feedback"),
             ArgDef("--negative", action="store_true", help="Mark as negative feedback"),
             ArgDef(
@@ -920,12 +924,15 @@ analysis results. Optionally include query details for context.""",
         ],
         examples=[
             (
-                'rdst report --negative -r "Index suggestion was incorrect"',
+                'rdst report --negative -r "Index suggestion was incorrect" -e you@example.com',
                 "Report an issue",
             ),
-            ('rdst report --positive -r "Great recommendation!"', "Positive feedback"),
             (
-                'rdst report --hash abc123 --include-query -r "Unexpected result"',
+                'rdst report --positive -r "Great recommendation!" -e you@example.com',
+                "Positive feedback",
+            ),
+            (
+                'rdst report --hash abc123 --include-query -r "Unexpected result" -e you@example.com',
                 "Include query context",
             ),
         ],

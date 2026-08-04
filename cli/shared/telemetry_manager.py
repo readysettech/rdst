@@ -1242,12 +1242,12 @@ class TelemetryManager:
     def submit_feedback(
         self,
         reason: str,
+        email: str,
         query_hash: Optional[str] = None,
         query_sql: Optional[str] = None,
         plan_json: Optional[str] = None,
         suggestion_text: Optional[str] = None,
         sentiment: str = "neutral",  # positive, negative, neutral
-        email: Optional[str] = None,
         include_query: bool = False,
         include_plan: bool = False,
         flags_used: Optional[list] = None,
@@ -1262,11 +1262,20 @@ class TelemetryManager:
             plan_json: Execution plan (only included if include_plan=True)
             suggestion_text: What RDST suggested
             sentiment: positive/negative/neutral
-            email: Optional email for follow-up
+            email: Required email for follow-up and feedback attribution
             include_query: Whether to include raw SQL
             include_plan: Whether to include execution plan
             flags_used: CLI flags that were used
         """
+        email = (email or "").strip().lower()
+        if not email:
+            raise ValueError("Email is required to submit feedback")
+
+        from shared.api.email import EMAIL_RE
+
+        if not EMAIL_RE.match(email):
+            raise ValueError("Invalid email address")
+
         properties = {
             "reason": reason,
             "sentiment": sentiment,

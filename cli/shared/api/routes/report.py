@@ -2,12 +2,15 @@
 RDST Report API Route
 
 Allows web users to submit feedback about RDST analysis results.
-Feedback is sent to PostHog for analytics and workflow notifications.
+Feedback is sent to PostHog for analytics and to Slack through a PostHog workflow.
 """
+
+from typing import Literal, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Literal, Optional
+
+from shared.api.email import normalized_email
 
 router = APIRouter()
 
@@ -20,7 +23,7 @@ class ReportRequest(BaseModel):
     reason: str  # Required - feedback text
     sentiment: ReportSentiment = "neutral"
     query_hash: Optional[str] = None  # Optional - reference a specific query
-    email: Optional[str] = None  # Optional - for follow-up
+    email: str  # Required - identifies the user in PostHog and Slack notifications
     include_query: bool = False  # Whether to include raw SQL
     include_plan: bool = False  # Whether to include execution plan
 
@@ -37,9 +40,13 @@ async def submit_report(request: ReportRequest) -> ReportResponse:
     """
     Submit user feedback.
 
-    Feedback is sent to PostHog for analytics and workflow notifications.
+    Feedback is sent to PostHog for analytics and to Slack through a PostHog workflow.
     If a query_hash is provided, the query context is loaded from the registry.
     """
+    # Keep every accepted feedback event attributable before it reaches
+    # PostHog (and the Slack workflow fed by that event).
+    email = normalized_email(request.email)
+
     try:
         from shared.telemetry import telemetry
 
@@ -61,7 +68,7 @@ async def submit_report(request: ReportRequest) -> ReportResponse:
             plan_json=plan_json,
             suggestion_text=suggestion_text,
             sentiment=request.sentiment,
-            email=request.email,
+            email=email,
             include_query=request.include_query,
             include_plan=request.include_plan,
             flags_used=["web"],  # Indicate this came from web UI

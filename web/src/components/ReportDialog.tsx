@@ -19,6 +19,7 @@ import {
   type ReportSentiment,
   submitReport,
 } from '../lib/api'
+import { isValidEmail, normalizeEmail } from './emailValidation'
 
 interface ReportDialogProps {
   isOpen: boolean
@@ -75,6 +76,7 @@ export function ReportDialog({
   const [includePlan, setIncludePlan] = useState(true)
   const [reason, setReason] = useState('')
   const [email, setEmail] = useState('')
+  const [emailOverride, setEmailOverride] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
   // Reset form when dialog opens
@@ -86,8 +88,35 @@ export function ReportDialog({
       setIncludePlan(true)
       setReason('')
       setEmail('')
+      setEmailOverride(false)
     }
   }, [isOpen, initialQueryHash])
+
+  const { data: identity } = useQuery<{
+    email: string | null
+    verified: boolean
+  } | null>({
+    queryKey: ['settings', 'email'],
+    queryFn: async () => {
+      const response = await fetch('/api/settings/email')
+      if (!response.ok) return null
+      return (await response.json()) as {
+        email: string | null
+        verified: boolean
+      }
+    },
+    enabled: isOpen,
+    staleTime: 60_000,
+  })
+
+  const verifiedEmail =
+    identity?.verified && identity.email ? identity.email : null
+
+  useEffect(() => {
+    if (isOpen && verifiedEmail && !emailOverride) {
+      setEmail(verifiedEmail)
+    }
+  }, [isOpen, verifiedEmail, emailOverride])
 
   // Fetch recent queries for dropdown
   const { data: queries = [] } = useQuery<
@@ -141,11 +170,22 @@ export function ReportDialog({
       return
     }
 
+    const normalizedEmail = normalizeEmail(
+      verifiedEmail && !emailOverride ? verifiedEmail : email
+    )
+    if (!isValidEmail(normalizedEmail)) {
+      toast({
+        title: 'Please enter a valid email address',
+        variant: 'warning',
+      })
+      return
+    }
+
     submitMutation.mutate({
       reason: reason.trim(),
       sentiment,
       query_hash: selectedQueryHash || undefined,
-      email: email.trim() || undefined,
+      email: normalizedEmail,
       include_query: selectedQueryHash ? includeQuery : undefined,
       include_plan: selectedQueryHash ? includePlan : undefined,
     })
@@ -468,19 +508,33 @@ export function ReportDialog({
               transition={{ duration: 0.3, delay: 0.2 }}
             >
               <Text level="label-small" className="text-content-layout-2 mb-2">
-                Email{' '}
-                <span className="text-content-layout-3 font-normal">
-                  (optional)
-                </span>
+                Email
               </Text>
-              <BaseInputText
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                type="email"
-              />
+              {verifiedEmail && !emailOverride ? (
+                <div className="rounded-xl border border-border-layout-1 bg-surface-layout-2 px-4 py-3">
+                  <Text level="body-small" className="text-content-layout-2">
+                    Sending as {verifiedEmail}
+                  </Text>
+                  <button
+                    type="button"
+                    className="mt-1 cursor-pointer text-sm text-content-primary-soft hover:underline"
+                    onClick={() => setEmailOverride(true)}
+                  >
+                    Use a different email
+                  </button>
+                </div>
+              ) : (
+                <BaseInputText
+                  name="feedback-email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  type="email"
+                  required
+                />
+              )}
               <Text level="caption" className="text-content-layout-3 mt-1.5">
-                We&apos;ll only reach out if we have follow-up questions
+                Required so we can follow up about your feedback
               </Text>
             </m.div>
           </div>
@@ -507,7 +561,13 @@ export function ReportDialog({
               iconPosition="right"
               onClick={handleSubmit}
               loading={submitMutation.isPending}
-              disabled={submitMutation.isPending || !reason.trim()}
+              disabled={
+                submitMutation.isPending ||
+                !reason.trim() ||
+                !(
+                  verifiedEmail && !emailOverride ? verifiedEmail : email
+                ).trim()
+              }
             />
           </m.div>
         </ModalContent>
