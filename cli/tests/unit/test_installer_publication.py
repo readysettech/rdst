@@ -10,6 +10,10 @@ import yaml
 
 RDST_DIR = Path(__file__).parents[2]
 DETECT_PIPELINE = RDST_DIR / ".buildkite" / "detect_pipeline_areas.sh"
+WINDOWS_DESKTOP_BUILD = RDST_DIR / ".buildkite" / "build_rdst_desktop_windows.ps1"
+WINDOWS_DESKTOP_SIGNING_CONFIG = (
+    RDST_DIR / ".buildkite" / "electron-builder-windows-signed.yml"
+)
 PREPARE = RDST_DIR / ".buildkite" / "prepare_installer.sh"
 PUBLISH = RDST_DIR / ".buildkite" / "publish_installer.sh"
 
@@ -121,6 +125,83 @@ def prepare(env: dict[str, str], build: int):
     result = run_script(PREPARE, prepared_env)
     assert result.returncode == 0, result.stderr
     return prepared_env
+
+
+def test_desktop_pipeline_builds_smokes_and_publishes_windows(tmp_path: Path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/bin/sh\nprintf '%s\\n' web-apps/apps/rdst-desktop/electron-builder.yml\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    env = os.environ | {
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "BUILDKITE_BRANCH": "main",
+        "BUILDKITE_BUILD_NUMBER": "123",
+    }
+
+    result = run_script(DETECT_PIPELINE, env)
+
+    assert result.returncode == 0, result.stderr
+    pipeline = yaml.safe_load(result.stdout)
+    steps = {step.get("key"): step for step in pipeline["steps"] if "key" in step}
+    windows_git_env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.longpaths",
+        "GIT_CONFIG_VALUE_0": "true",
+    }
+    build = steps["build-rdst-desktop-windows"]
+    assert build["agents"]["queue"] == "windows-c6a-2xlarge"
+    assert build["env"] == windows_git_env
+    assert "artifact_paths" not in build
+    assert "build_rdst_desktop_windows.ps1" in build["command"]
+
+    smoke_group = steps["smoke-rdst-desktop"]
+    smoke_steps = {step["key"]: step for step in smoke_group["steps"]}
+    smoke = smoke_steps["smoke-rdst-desktop-windows"]
+    assert smoke["depends_on"] == "build-rdst-desktop-windows"
+    assert smoke["agents"]["queue"] == "windows-c6a-2xlarge"
+    assert smoke["env"] == windows_git_env
+
+    publish = steps["publish-rdst-desktop"]
+    assert "smoke-rdst-desktop-windows" in publish["depends_on"]
+    assert "windows '*.exe'" in publish["command"]
+    assert "smoke-rdst-desktop-windows" in steps["release-approval"]["depends_on"]
+
+
+def test_windows_build_uploads_normalized_artifact_paths():
+    script = WINDOWS_DESKTOP_BUILD.read_text(encoding="utf-8")
+
+    assert "'artifact', 'upload', '--experiment', 'normalised-upload-paths'" in script
+    assert "rdst/.buildkite-artifacts/rdst-desktop-windows/*" in script
+    assert "rdst/.buildkite-artifacts/rdst-desktop-windows/update/*" in script
+
+
+def test_windows_main_build_inherits_azure_signing_credentials():
+    script = WINDOWS_DESKTOP_BUILD.read_text(encoding="utf-8")
+
+    for name in ("AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"):
+        assert name in script
+    assert "Main build requires Azure Trusted Signing credentials" in script
+    assert "Main build requires WIN_CSC_LINK" not in script
+    assert "Install-ChocolateyPackage 'dotnet-8.0-sdk'" in script
+    assert "electron-builder-windows-signed.yml" in script
+
+    signing_config = yaml.safe_load(
+        WINDOWS_DESKTOP_SIGNING_CONFIG.read_text(encoding="utf-8")
+    )
+    assert signing_config["extends"] == "./electron-builder.yml"
+    assert signing_config["win"]["azureSignOptions"] == {
+        "publisherName": (
+            'CN="READYSET TECHNOLOGY, INC.", O="READYSET TECHNOLOGY, INC.", '
+            "L=Beverly Hills, S=California, C=US"
+        ),
+        "endpoint": "https://eus.codesigning.azure.net/",
+        "codeSigningAccountName": "readysetsigning",
+        "certificateProfileName": "rdstapp-public",
+    }
 
 
 def test_linux_release_smokes_mount_buildkite_agent(tmp_path: Path):

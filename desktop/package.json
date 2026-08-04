@@ -20,6 +20,7 @@
     "package": "electron-builder && pnpm verify:packaged-glass",
     "package:linux": "pnpm prepackage && if [ -n \"${RDST_BUILD_VERSION:-}\" ]; then electron-builder --linux --x64 --publish never -c.extraMetadata.version=\"$RDST_BUILD_VERSION\" -c.extraMetadata.rdstUpdates=\"${RDST_DESKTOP_UPDATES:-disabled}\"; else electron-builder --linux --x64 --publish never; fi",
     "package:mac": "pnpm prepackage && if [ -n \"${RDST_BUILD_VERSION:-}\" ]; then electron-builder --mac --publish never -c.extraMetadata.version=\"$RDST_BUILD_VERSION\" -c.extraMetadata.rdstUpdates=\"${RDST_DESKTOP_UPDATES:-disabled}\"; else electron-builder --mac --publish never; fi && pnpm verify:packaged-glass",
+    "package:win": "node ./scripts/package-win.mjs",
     "prepackage": "pnpm build:web && pnpm build:sidecar && pnpm build",
     "start": "electron .",
     "test": "vitest run",

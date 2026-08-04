@@ -1,11 +1,44 @@
+import type { spawn } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { backendEnvironment, backendExecutablePath } from './backend.js'
+import {
+  backendEnvironment,
+  backendExecutablePath,
+  terminateWindowsProcessTree,
+} from './backend.js'
 
 function entries(value: string | undefined): string[] {
-  return value?.split(path.delimiter) ?? []
+  return value?.split(path.posix.delimiter) ?? []
 }
+
+describe('terminateWindowsProcessTree', () => {
+  it('forcefully terminates the backend and all descendants', async () => {
+    const taskkill = new EventEmitter()
+    const spawnProcess = vi.fn(() => taskkill) as unknown as typeof spawn
+
+    const termination = terminateWindowsProcessTree(1234, spawnProcess)
+    taskkill.emit('exit', 0)
+    await termination
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      'taskkill.exe',
+      ['/PID', '1234', '/T', '/F'],
+      { stdio: 'ignore', windowsHide: true }
+    )
+  })
+
+  it('reports taskkill failures', async () => {
+    const taskkill = new EventEmitter()
+    const spawnProcess = vi.fn(() => taskkill) as unknown as typeof spawn
+
+    const termination = terminateWindowsProcessTree(1234, spawnProcess)
+    taskkill.emit('exit', 1)
+
+    await expect(termination).rejects.toThrow('taskkill exited with code 1')
+  })
+})
 
 describe('backendExecutablePath', () => {
   it('makes Docker Desktop discoverable from a minimal macOS GUI PATH', () => {

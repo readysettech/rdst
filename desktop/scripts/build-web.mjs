@@ -12,6 +12,7 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: webAppsRoot,
     stdio: "inherit",
+    shell: process.platform === "win32",
     ...options
   });
   if (result.status !== 0) {
@@ -19,7 +20,8 @@ function run(command, args, options = {}) {
   }
 }
 
-run("pnpm", ["--filter", "rdst-web", "build"]);
+const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+run(pnpmCommand, ["--filter", "rdst-web", "build"]);
 
 if (!existsSync(path.join(sourceDist, "index.html"))) {
   throw new Error(`RDST web build did not produce ${sourceDist}/index.html`);

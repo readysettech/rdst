@@ -27,7 +27,9 @@ const sidecarPlatformDir = path.resolve(appDir, "sidecar", `${packageOs}-${proce
 const sidecarAppDir = path.resolve(sidecarPlatformDir, "rdst");
 const executableName = process.platform === "win32" ? "rdst.exe" : "rdst";
 const stagedExecutable = path.resolve(sidecarAppDir, executableName);
-const buildRoot = path.resolve(rdstDir, "build/electron/pyinstaller");
+const buildRoot = path.resolve(
+  process.env.RDST_SIDECAR_BUILD_ROOT ?? path.resolve(rdstDir, "build/electron/pyinstaller")
+);
 const distRoot = path.resolve(buildRoot, "dist");
 const workRoot = path.resolve(buildRoot, "work");
 const specRoot = path.resolve(buildRoot, "spec");

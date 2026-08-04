@@ -17,6 +17,7 @@ export interface UpdateStatePayload {
 export const UPDATE_FEED_URLS: Partial<Record<NodeJS.Platform, string>> = {
   darwin: 'https://downloads.readyset.io/packages/rdst-desktop/macos/update',
   linux: 'https://downloads.readyset.io/packages/rdst-desktop/linux/update',
+  win32: 'https://downloads.readyset.io/packages/rdst-desktop/windows/update',
 }
 
 export interface UpdateEnvironment {
@@ -34,7 +35,7 @@ export interface UpdateEnvironment {
 /**
  * Picks how updates are delivered for this install.
  *
- * - macOS and AppImage installs update in place through electron-updater.
+ * - macOS, Windows, and AppImage installs update in place through electron-updater.
  * - deb/rpm installs get a notification with download links.
  */
 export function resolveUpdateMode(env: UpdateEnvironment): UpdateMode {
@@ -43,6 +44,7 @@ export function resolveUpdateMode(env: UpdateEnvironment): UpdateMode {
     case 'linux':
       return env.appImagePath ? 'auto' : 'notify'
     case 'darwin':
+    case 'win32':
       return 'auto'
     default:
       return 'disabled'
@@ -107,14 +109,18 @@ export function manualDownloadLinks(options: {
     return [{ label: '.dmg', url: `${feedUrl}/${dmg}` }]
   }
 
-  return [
-    {
-      label: '.deb',
-      url: `${feedUrl}/rdst-desktop-${options.version}-amd64.deb`,
-    },
-    {
-      label: '.rpm',
-      url: `${feedUrl}/rdst-desktop-${options.version}-x86_64.rpm`,
-    },
-  ]
+  if (options.platform === 'linux') {
+    return [
+      {
+        label: '.deb',
+        url: `${feedUrl}/rdst-desktop-${options.version}-amd64.deb`,
+      },
+      {
+        label: '.rpm',
+        url: `${feedUrl}/rdst-desktop-${options.version}-x86_64.rpm`,
+      },
+    ]
+  }
+
+  return []
 }

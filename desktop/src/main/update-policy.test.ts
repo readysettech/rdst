@@ -63,7 +63,7 @@ describe('resolveUpdateMode', () => {
     ).toBe('auto')
   })
 
-  it('disables updates on unsupported platforms', () => {
+  it('updates Windows installs in place', () => {
     expect(
       resolveUpdateMode({
         isPackaged: true,
@@ -71,7 +71,7 @@ describe('resolveUpdateMode', () => {
         platform: 'win32',
         appImagePath: undefined,
       })
-    ).toBe('disabled')
+    ).toBe('auto')
   })
 })
 
@@ -180,7 +180,7 @@ describe('manualDownloadLinks', () => {
     ])
   })
 
-  it('returns no links on unsupported platforms', () => {
+  it('returns no manual links for Windows in-place updates', () => {
     expect(
       manualDownloadLinks({
         platform: 'win32',

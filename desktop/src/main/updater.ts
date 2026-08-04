@@ -52,7 +52,7 @@ function scheduleChecks(check: () => void): void {
   setInterval(check, CHECK_INTERVAL_MS).unref()
 }
 
-/** In-place updates through electron-updater; macOS and AppImage installs. */
+/** In-place updates through electron-updater; macOS, Windows, and AppImage installs. */
 function setupInPlaceUpdates(): void {
   let downloadingVersion: string | null = null
   autoUpdater.autoDownload = true

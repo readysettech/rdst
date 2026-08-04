@@ -35,11 +35,11 @@ export function backendExecutablePath(
   if (platform === 'win32') return currentPath
 
   const entries = (currentPath ?? '')
-    .split(path.delimiter)
+    .split(path.posix.delimiter)
     .filter((entry) => entry.length > 0)
 
   for (const entry of POSIX_SYSTEM_PATHS) addUniquePathEntry(entries, entry)
-  addUniquePathEntry(entries, path.join(homeDir, '.docker', 'bin'))
+  addUniquePathEntry(entries, path.posix.join(homeDir, '.docker', 'bin'))
 
   if (platform === 'darwin') {
     addUniquePathEntry(entries, '/opt/homebrew/bin')
@@ -50,7 +50,7 @@ export function backendExecutablePath(
     )
     addUniquePathEntry(
       entries,
-      path.join(
+      path.posix.join(
         homeDir,
         'Applications',
         'Docker.app',
@@ -61,7 +61,7 @@ export function backendExecutablePath(
     )
   }
 
-  return entries.join(path.delimiter)
+  return entries.join(path.posix.delimiter)
 }
 
 export interface BackendHandle {
@@ -271,6 +271,7 @@ export async function startBackend(
     ['web', '--ui', 'none', '--host', host, '--port', String(port)],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
       env: backendEnvironment(),
     }
   )
@@ -339,8 +340,41 @@ async function waitForExit(
   })
 }
 
+export async function terminateWindowsProcessTree(
+  pid: number,
+  spawnProcess: typeof spawn = spawn
+): Promise<void> {
+  const taskkill = spawnProcess(
+    'taskkill.exe',
+    ['/PID', String(pid), '/T', '/F'],
+    { stdio: 'ignore', windowsHide: true }
+  )
+  await new Promise<void>((resolve, reject) => {
+    taskkill.once('error', reject)
+    taskkill.once('exit', (code) => {
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(new Error(`taskkill exited with code ${code}`))
+      }
+    })
+  })
+}
+
 async function terminateProcess(child: ChildProcess): Promise<void> {
   if (processHasExited(child)) return
+
+  if (process.platform === 'win32' && child.pid !== undefined) {
+    try {
+      await terminateWindowsProcessTree(child.pid)
+      if (await waitForExit(child, FORCE_KILL_TIMEOUT_MS)) return
+    } catch (error) {
+      console.warn(
+        '[rdst-desktop] failed to terminate RDST backend process tree:',
+        error
+      )
+    }
+  }
 
   try {
     child.kill('SIGTERM')

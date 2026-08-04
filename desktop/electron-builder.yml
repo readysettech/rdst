@@ -39,8 +39,14 @@ mac:
     - provider: generic
       url: https://downloads.readyset.io/packages/rdst-desktop/macos/update
 win:
+  artifactName: "rdst-desktop-${version}-${arch}.${ext}"
   target:
-    - nsis
+    - target: nsis
+      arch:
+        - x64
+  publish:
+    - provider: generic
+      url: https://downloads.readyset.io/packages/rdst-desktop/windows/update
 linux:
   artifactName: "rdst-desktop-${version}-${arch}.${ext}"
   category: Development

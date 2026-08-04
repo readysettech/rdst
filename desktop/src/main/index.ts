@@ -16,8 +16,8 @@ import { setupAutoUpdates } from './updater.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RENDERER_DIR = path.resolve(__dirname, '../renderer')
 
-// CI smoke mode: boot the full shell (sidecar backend, static server,
-// renderer), print SMOKE_OK, and exit. See rdst/.buildkite smoke scripts.
+// CI smoke mode boots the full shell (sidecar backend, static server,
+// renderer), records SMOKE_OK when requested, and exits.
 const SMOKE_MODE = process.env.RDST_DESKTOP_SMOKE === '1'
 const SMOKE_TIMEOUT_MS = 120_000
 
@@ -106,8 +106,9 @@ async function resolveRendererUrl(): Promise<string> {
 }
 
 function registerWindowControlHandlers(): void {
-  const senderWindow = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) =>
-    BrowserWindow.fromWebContents(event.sender)
+  const senderWindow = (
+    event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent
+  ) => BrowserWindow.fromWebContents(event.sender)
 
   ipcMain.on('window:minimize', (event) => senderWindow(event)?.minimize())
   ipcMain.on('window:toggle-maximize', (event) => {
@@ -176,7 +177,9 @@ async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
 
   if (SMOKE_MODE) {
     window.webContents.on('render-process-gone', (_event, details) => {
-      console.error(`[rdst-desktop] smoke: renderer process gone: ${details.reason}`)
+      console.error(
+        `[rdst-desktop] smoke: renderer process gone: ${details.reason}`
+      )
       exitSmoke(1)
     })
   }
@@ -253,7 +256,10 @@ function exitSmoke(code: number): void {
 
 async function runSmokeCheck(window: BrowserWindow): Promise<void> {
   const title = await window.webContents.executeJavaScript('document.title')
-  console.log(`SMOKE_OK title=${String(title)}`)
+  const result = `SMOKE_OK title=${String(title)}`
+  const markerPath = process.env.RDST_DESKTOP_SMOKE_MARKER
+  if (markerPath) fs.writeFileSync(markerPath, `${result}\n`, 'utf8')
+  console.log(result)
   window.destroy()
   exitSmoke(0)
 }
@@ -262,7 +268,9 @@ async function startApplication(): Promise<void> {
   if (SMOKE_MODE) {
     // Self-imposed deadline so a hung boot cannot wedge a CI step.
     setTimeout(() => {
-      console.error('[rdst-desktop] smoke: timed out waiting for shell readiness')
+      console.error(
+        '[rdst-desktop] smoke: timed out waiting for shell readiness'
+      )
       exitSmoke(2)
     }, SMOKE_TIMEOUT_MS)
   }
