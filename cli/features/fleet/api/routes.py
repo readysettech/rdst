@@ -17,6 +17,7 @@ from typing import Any, AsyncGenerator, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
+from pydantic import SecretStr
 
 from sse_starlette.sse import EventSourceResponse
 
@@ -43,7 +44,8 @@ class FleetImportRequest(BaseModel):
     # picker). Exactly one must be provided; csv_content wins when both are.
     csv_file: Optional[str] = None
     csv_content: Optional[str] = None
-    password_env: str = "FLEET_PASS"
+    password_env: Optional[str] = None
+    password: Optional[SecretStr] = None
     group: Optional[str] = None
     tags: Optional[list[str]] = None
     dry_run: bool = False
@@ -377,6 +379,9 @@ async def import_fleet(request: FleetImportRequest):
             async for event in service.import_fleet(
                 csv_file,
                 password_env=request.password_env,
+                password=(
+                    request.password.get_secret_value() if request.password else None
+                ),
                 default_group=request.group,
                 default_tags=request.tags,
                 dry_run=request.dry_run,

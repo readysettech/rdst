@@ -18,7 +18,7 @@ from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 from sse_starlette.sse import EventSourceResponse
 
@@ -69,7 +69,8 @@ class FleetDiscoverRequest(BaseModel):
     regions: list[str]
     engine_filter: Optional[str] = None
     name_pattern: Optional[str] = None
-    password_env: str = "FLEET_PASS"
+    password_env: Optional[str] = None
+    password: Optional[SecretStr] = None
     user: Optional[str] = None
     default_database: Optional[str] = None
     group: Optional[str] = None
@@ -563,6 +564,9 @@ async def discover_fleet(request: FleetDiscoverRequest):
             engine_filter=engine_filter,
             name_pattern=request.name_pattern,
             password_env=request.password_env,
+            password=(
+                request.password.get_secret_value() if request.password else None
+            ),
             default_user=request.user,
             default_group=request.group,
             default_database=request.default_database,

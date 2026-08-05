@@ -85,12 +85,16 @@ def ensure_target_password(target: Optional[str] = None) -> TargetGuard:
         return TargetGuard(target_name, target_config, target_engine)
 
     password_env = target_config.get("password_env")
-    message = f"Set the password for '{target_name}' to run this."
+    message = (
+        f"No password is available for target '{target_name}' — open its "
+        "connection settings and enter the database password."
+    )
 
     raise HTTPException(
         status_code=423,
         detail={
             "code": TARGET_PASSWORD_REQUIRED_CODE,
+            "category": "target_password_required",
             "target": target_name,
             "password_env": password_env,
             "message": message,

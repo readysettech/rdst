@@ -17,7 +17,6 @@ from .digitalocean_oauth import (
 from features.fleet.models import FleetMember
 from .provider_common import (
     bearer_get,
-    password_env_for,
     provider_status,
     slugify,
     status_cache,
@@ -246,7 +245,6 @@ def discover_digitalocean_clusters(errors: list[str]) -> list[FleetMember]:
                 port=fields["port"],
                 database=fields["database"],
                 user=fields["user"],
-                password_env=password_env_for(f"do-{cluster_name or cluster_id}"),
                 # DigitalOcean clusters carry their replicas internally, so
                 # like Supabase and Neon projects they stay ungrouped.
                 group=None,

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
@@ -14,6 +13,7 @@ from shared.anthropic_env import has_anthropic_api_key
 from shared.cli.types import RdstResult
 from shared.config.targets import TargetsConfig
 from shared.db_connection import close_connection, create_direct_connection
+from shared.password_resolver import derive_password_env, store_target_password
 from shared.secret_store_service import SecretStoreService
 from shared.shell import environment_assignment
 from shared.ui import ElapsedMessage, Status, get_console
@@ -172,14 +172,12 @@ class FleetCommand:
         cfg = TargetsConfig()
         cfg.load()
 
-        env_name = f"{name.upper().replace('-', '_')}_PASS"
         target_config = {
             "engine": engine,
             "host": host,
             "port": port,
             "user": user,
             "database": database,
-            "password_env": env_name,
         }
         if group:
             target_config["group"] = group
@@ -187,14 +185,19 @@ class FleetCommand:
         if pw_method == "1":
             password = Prompt.ask("    Password", password=True, default="", show_default=False)
             if password:
-                stored_in_keyring = self._try_store_in_keyring(env_name, password)
-                os.environ[env_name] = password
+                store = SecretStoreService()
+                env_name = store_target_password(
+                    name,
+                    password,
+                    secret_store=store,
+                )
+                target_config["password_env"] = env_name
+                stored_in_keyring = store.get_secret(env_name) == password
                 if stored_in_keyring:
                     console.print(f"    [green]Password saved to OS keyring (persists across sessions)[/green]")
                 else:
-                    console.print(f"    [green]Password set for this session via {env_name}[/green]")
-                    assignment = environment_assignment(env_name, "your-password")
-                    console.print(f"    [dim]For future sessions: {assignment}[/dim]")
+                    console.print("    [green]Password set for this session[/green]")
+                    console.print("    [dim]Re-enter it after RDST restarts.[/dim]")
         elif pw_method == "2":
             arn = Prompt.ask("    Secrets Manager ARN", default="", show_default=False)
             if arn:
@@ -237,7 +240,7 @@ class FleetCommand:
         if not csv_file:
             return RdstResult(False, "CSV file required: rdst fleet import --from fleet.csv")
 
-        password_env = getattr(args, "password_env", "FLEET_PASS")
+        password_env = getattr(args, "password_env", None)
         group = getattr(args, "group", None)
         tags = getattr(args, "tags", None) or []
         dry_run = getattr(args, "dry_run", False)
@@ -402,7 +405,7 @@ class FleetCommand:
         if engine_filter == "all":
             engine_filter = None
         name_pattern = getattr(args, "name_pattern", None)
-        password_env = getattr(args, "password_env", "FLEET_PASS")
+        password_env = getattr(args, "password_env", None)
         default_user = getattr(args, "user", None)
         default_group = getattr(args, "group", None)
         default_database = getattr(args, "default_database", None)
@@ -524,8 +527,7 @@ class FleetCommand:
             console.print("\n[dim]Skipped credential setup.[/dim]")
             return
 
-        # Track env vars that need exporting (not stored in keyring)
-        env_vars_needed: dict[str, list[str]] = {}  # env_name -> [target_names]
+        session_only_targets: list[str] = []
 
         if choice == "1":
             # Shared credentials
@@ -542,24 +544,30 @@ class FleetCommand:
             except (EOFError, KeyboardInterrupt):
                 console.print("\n[dim]Skipped credential setup.[/dim]")
                 return
-            env_name = "FLEET_DB_PASS"
-            stored_in_keyring = False
-            if password:
-                stored_in_keyring = self._try_store_in_keyring(env_name, password)
-                os.environ[env_name] = password
+            store = SecretStoreService()
+            all_stored_in_keyring = True
             for name in discovered_names:
                 tc = cfg.get(name)
                 if tc:
-                    tc["password_env"] = env_name
+                    if password:
+                        env_name = store_target_password(
+                            name,
+                            password,
+                            secret_store=store,
+                        )
+                        tc["password_env"] = env_name
+                        if store.get_secret(env_name) != password:
+                            all_stored_in_keyring = False
+                            session_only_targets.append(name)
                     if shared_user:
                         tc["user"] = shared_user
                     cfg.upsert(name, tc)
             cfg.save()
             console.print(f"\n[green]All {len(discovered_names)} targets configured[/green]")
-            if stored_in_keyring:
+            if password and all_stored_in_keyring:
                 console.print(f"[green]Password saved to OS keyring (persists across sessions)[/green]")
-            else:
-                env_vars_needed[env_name] = list(discovered_names)
+            elif password:
+                console.print("[dim]Password is available for this session; re-enter it after RDST restarts.[/dim]")
 
         elif choice == "2":
             # Per-instance setup
@@ -608,20 +616,24 @@ class FleetCommand:
                     break
 
                 if method == "1":
-                    default_env = f"{name.upper().replace('-', '_')}_PASS"
                     password = Prompt.ask("    Password", password=True, default="", show_default=False)
-                    env_name = default_env
-                    stored_in_keyring = False
                     if password:
-                        stored_in_keyring = self._try_store_in_keyring(env_name, password)
-                        os.environ[env_name] = password
-                    tc["password_env"] = env_name
+                        store = SecretStoreService()
+                        env_name = store_target_password(
+                            name,
+                            password,
+                            secret_store=store,
+                        )
+                        tc["password_env"] = env_name
+                        stored_in_keyring = store.get_secret(env_name) == password
+                    else:
+                        stored_in_keyring = False
                     cfg.upsert(name, tc)
                     changed += 1
                     if stored_in_keyring:
                         console.print(f"    [green]Password saved to OS keyring[/green]")
-                    else:
-                        env_vars_needed.setdefault(env_name, []).append(name)
+                    elif password:
+                        session_only_targets.append(name)
                         console.print(f"    [green]Password set for this session[/green]")
 
                 elif method == "2":
@@ -648,15 +660,12 @@ class FleetCommand:
         else:
             console.print("[dim]Skipped credential setup. Configure later with: rdst configure edit <target>[/dim]")
 
-        # Print env var summary for targets not using keyring
-        if env_vars_needed:
-            console.print(f"\n[bold]Environment Variables Required[/bold]")
-            console.print("[dim]Set these before starting RDST in a future session:[/dim]\n")
-            for env_name, targets in env_vars_needed.items():
-                target_list = ", ".join(targets)
-                assignment = environment_assignment(env_name, "your-password")
-                console.print(f"  {assignment}  [dim]# {target_list}[/dim]")
-            console.print()
+        if session_only_targets:
+            console.print(
+                "\n[dim]No OS keychain was available. Re-enter the password for "
+                "these targets after RDST restarts: "
+                f"{', '.join(dict.fromkeys(session_only_targets))}.[/dim]"
+            )
 
         # Next steps breadcrumbs
         groups = set()
@@ -674,20 +683,6 @@ class FleetCommand:
                 console.print(f"  [dim]{step}. Audit {group}:[/dim]{'  ' if len(group) < 16 else ' '}[cyan]rdst fleet audit --group {group} --duration 2m[/cyan]")
         else:
             console.print(f"  [dim]2. Run audit:[/dim]           [cyan]rdst audit --target {discovered_names[0]} --duration 2m[/cyan]")
-
-    @staticmethod
-    def _try_store_in_keyring(key_name: str, password: str) -> bool:
-        """Try to store password in OS keyring. Returns True if successful."""
-        try:
-            store = SecretStoreService()
-            if not store.is_available():
-                return False
-            store.set_secret(key_name, password)
-            # Verify it stuck
-            stored = store.get_secret(key_name)
-            return stored == password
-        except Exception:
-            return False
 
     # =========================================================================
     # Fleet Summary Mode (default UX)

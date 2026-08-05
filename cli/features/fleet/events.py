@@ -10,7 +10,7 @@ from typing import Any, Literal, Union
 class FleetInput:
     subcommand: str
     csv_file: str | None = None
-    password_env: str = "FLEET_PASS"
+    password_env: str | None = None
     group: str | None = None
     tag: str | None = None
     regions: str | None = None

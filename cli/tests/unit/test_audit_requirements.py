@@ -149,7 +149,10 @@ class TestRequirementsRoute:
             response = await audit_routes.get_capture_requirements(guard)
         body = response.model_dump()
         assert body["query_stats"] == "error"
-        assert body["detail"] == "Authentication failed for user"
+        assert body["category"] == "target_password_required"
+        assert body["detail"].startswith(
+            "No password is available for target 'mydb'"
+        )
         assert "\n" not in body["detail"]
         assert body["remediation"] is None
 

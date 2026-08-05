@@ -8,7 +8,7 @@ from typing import Any
 
 from shared.config.targets import TargetsConfig
 from shared.db_connection import create_direct_connection
-from shared.password_resolver import resolve_password
+from shared.password_resolver import resolve_password, store_target_password
 from shared.secret_store_service import SecretStoreService
 
 from .csv_importer import parse_csv
@@ -58,8 +58,13 @@ def fleet_member_shape(
 class FleetService:
     """Service layer for fleet operations."""
 
-    def __init__(self, config: TargetsConfig | None = None):
+    def __init__(
+        self,
+        config: TargetsConfig | None = None,
+        secret_store: SecretStoreService | None = None,
+    ):
         self._config = config
+        self._secret_store = secret_store
 
     def _get_config(self) -> TargetsConfig:
         if self._config is None:
@@ -70,7 +75,8 @@ class FleetService:
     async def import_fleet(
         self,
         csv_file: str,
-        password_env: str = "FLEET_PASS",
+        password_env: str | None = None,
+        password: str | None = None,
         default_group: str | None = None,
         default_tags: list[str] | None = None,
         dry_run: bool = False,
@@ -83,6 +89,7 @@ class FleetService:
         members, errors = parse_csv(
             csv_file,
             password_env=password_env,
+            password=password,
             default_group=default_group,
             default_tags=default_tags,
         )
@@ -136,7 +143,16 @@ class FleetService:
                 imported_names.append(member.name)
                 continue
 
-            config.upsert(member.name, member.to_target_config())
+            target_config = member.to_target_config()
+            stored_env = store_target_password(
+                member.name,
+                member.password,
+                member.password_env,
+                secret_store=self._secret_store,
+            )
+            if stored_env:
+                target_config["password_env"] = stored_env
+            config.upsert(member.name, target_config)
             imported += 1
             imported_names.append(member.name)
             yield FleetImportProgressEvent(
@@ -259,8 +275,12 @@ class FleetService:
                     type="connectivity",
                     target_name=name,
                     status="failed",
-                    error=f"Enter the password for '{name}' again.",
+                    error=(
+                        f"No password is available for target '{name}' — open its "
+                        "connection settings and enter the database password."
+                    ),
                     code="TARGET_PASSWORD_REQUIRED",
+                    category="target_password_required",
                     password_env=password_env,
                 )
                 continue
@@ -285,6 +305,20 @@ class FleetService:
             except Exception as exc:
                 if target_config.get("ssh"):
                     get_tunnel_manager().close(name)
+                from shared.api.ssh_errors import connectivity_error_payload
+
+                failure = connectivity_error_payload(exc, name, target_config)
+                if failure:
+                    yield FleetConnectivityEvent(
+                        type="connectivity",
+                        target_name=name,
+                        status="failed",
+                        error=failure["message"],
+                        code=failure.get("code", failure["category"]),
+                        category=failure["category"],
+                        password_env=target_config.get("password_env"),
+                    )
+                    continue
                 from features.allowlist.service import (
                     connection_failure_category,
                     provider_network_hint,

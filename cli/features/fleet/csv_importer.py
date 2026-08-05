@@ -44,7 +44,8 @@ def _parse_tags(raw: str) -> List[str]:
 
 def parse_csv(
     csv_path: str,
-    password_env: str = "FLEET_PASS",
+    password_env: Optional[str] = None,
+    password: Optional[str] = None,
     default_group: Optional[str] = None,
     default_tags: Optional[List[str]] = None,
 ) -> Tuple[List[FleetMember], List[Dict[str, Any]]]:
@@ -137,6 +138,8 @@ def parse_csv(
             # Per-row password_env overrides the global default
             row_password_env = (row.get("password_env") or "").strip()
             effective_password_env = row_password_env or password_env
+            row_password = row.get("password") or None
+            effective_password = row_password or password
 
             # Optional fields
             instance_class = (row.get("instance_class") or "").strip() or None
@@ -167,6 +170,7 @@ def parse_csv(
                     tls=tls,
                     read_only=read_only,
                     password_secret_arn=secret_arn,
+                    password=effective_password,
                 )
             )
 

@@ -12,7 +12,6 @@ from features.fleet.models import FleetMember
 from .provider_common import (
     bearer_get,
     json_items,
-    password_env_for,
     provider_status,
     slugify,
     status_cache,
@@ -243,7 +242,6 @@ def discover_supabase_projects(errors: list[str]) -> list[FleetMember]:
                 port=POOLER_PORT,
                 database=db_name or "postgres",
                 user=user or f"postgres.{ref}",
-                password_env=password_env_for(f"supabase-{ref}"),
                 # Supabase projects have no cluster concept; like standalone
                 # RDS instances they stay ungrouped. The org rides in a tag.
                 group=None,

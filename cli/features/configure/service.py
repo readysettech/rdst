@@ -453,12 +453,7 @@ class ConfigureService:
             provider_password_probe = provider_for_target(config) is not None
             password_env = config.get("password_env", "")
             if password_env and not provider_password_probe:
-                return {
-                    "success": False,
-                    "code": "TARGET_PASSWORD_REQUIRED",
-                    "password_env": password_env,
-                    "message": "Enter the password for this target again.",
-                }
+                return self._password_required_result(config)
 
         conn = None
         try:
@@ -556,6 +551,24 @@ class ConfigureService:
                 }
 
             error_msg = str(e)
+            from shared.api.ssh_errors import connectivity_error_payload
+
+            credential_failure = connectivity_error_payload(
+                e,
+                str(config.get("name") or config.get("host") or "target"),
+                config,
+            )
+            if (
+                credential_failure
+                and credential_failure["category"] == "target_password_required"
+            ):
+                return {
+                    "success": False,
+                    "code": credential_failure["code"],
+                    "category": credential_failure["category"],
+                    "password_env": config.get("password_env", ""),
+                    "message": credential_failure["message"],
+                }
             from features.allowlist.service import (
                 connection_failure_category,
                 provider_network_hint,
@@ -629,11 +642,16 @@ class ConfigureService:
 
     @staticmethod
     def _password_required_result(config: Dict[str, Any]) -> Dict[str, Any]:
+        target_name = str(config.get("name") or config.get("host") or "target")
         return {
             "success": False,
             "code": "TARGET_PASSWORD_REQUIRED",
+            "category": "target_password_required",
             "password_env": config.get("password_env", ""),
-            "message": "Enter the password for this target again.",
+            "message": (
+                f"No password is available for target '{target_name}' — open its "
+                "connection settings and enter the database password."
+            ),
         }
 
     @staticmethod

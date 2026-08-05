@@ -98,7 +98,10 @@ def test_ensure_target_password_raises_423_with_structured_detail(monkeypatch):
     assert exc.detail["code"] == TARGET_PASSWORD_REQUIRED_CODE
     assert exc.detail["target"] == "prod"
     assert exc.detail["password_env"] == "PROD_DB_PASSWORD"
-    assert exc.detail["message"] == "Set the password for 'prod' to run this."
+    assert exc.detail["category"] == "target_password_required"
+    assert exc.detail["message"].startswith(
+        "No password is available for target 'prod'"
+    )
     assert "PROD_DB_PASSWORD" not in exc.detail["message"]
 
 

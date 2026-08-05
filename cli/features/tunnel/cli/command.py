@@ -219,10 +219,18 @@ class TunnelCommand:
             return RdstResult(True, "")
 
         self.manager.close(target)
-        message = (
+        from shared.api.ssh_errors import connectivity_error_payload
+
+        failure = connectivity_error_payload(
+            state.get("error") or "connection failed",
+            target,
+            target_config,
+        )
+        message = (failure or {}).get(
+            "message",
             f"SSH tunnel opened for '{target}', but the database is unreachable "
             f"through it: {state.get('error') or 'connection failed'}. "
-            "Check the database host, port, security group, and DB credentials."
+            "Check the database host, port, security group, and DB credentials.",
         )
         return RdstResult(False, message, data=state)
 

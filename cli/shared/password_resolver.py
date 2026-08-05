@@ -16,6 +16,31 @@ def derive_password_env(name: str) -> str:
     return f"RDST_{normalized or 'TARGET'}_PASSWORD"
 
 
+def store_target_password(
+    target_name: str,
+    password: str | None,
+    password_env: str | None = None,
+    *,
+    secret_store: SecretStoreService | None = None,
+) -> str | None:
+    """Store a submitted target password and return its config pointer.
+
+    Explicit pointers remain power-user overrides. A password submitted without
+    one gets the normal per-target pointer; an absent password and pointer leave
+    the target passwordless.
+    """
+    if password is None:
+        return password_env or None
+
+    resolved_env = password_env or derive_password_env(target_name)
+    (secret_store or SecretStoreService()).set_secret(
+        resolved_env,
+        password,
+        persist=True,
+    )
+    return resolved_env
+
+
 class PasswordResolution(NamedTuple):
     available: bool
     source: str

@@ -16,6 +16,15 @@ _TLS_VERIFICATION_FAILURE = re.compile(
     re.IGNORECASE,
 )
 
+TARGET_PASSWORD_REQUIRED_CATEGORY = "target_password_required"
+TARGET_PASSWORD_REQUIRED_CODE = "TARGET_PASSWORD_REQUIRED"
+_PASSWORD_REQUIRED_FAILURE = re.compile(
+    r"password not available for target|password authentication failed|"
+    r"authentication failed for user|access denied for user|access denied|"
+    r"invalid password|using password:\s*no",
+    re.IGNORECASE,
+)
+
 
 def _exception_text(error: object) -> str:
     """Collect driver wrapper and underlying TLS exception messages."""
@@ -142,6 +151,22 @@ def connectivity_error_payload(
     if tls_payload:
         return tls_payload
 
+    from shared.password_resolver import resolve_password
+
+    if (
+        not resolve_password(target_config).available
+        and _PASSWORD_REQUIRED_FAILURE.search(_exception_text(error))
+    ):
+        return {
+            "code": TARGET_PASSWORD_REQUIRED_CODE,
+            "category": TARGET_PASSWORD_REQUIRED_CATEGORY,
+            "message": (
+                f"No password is available for target '{target_name}' — open its "
+                "connection settings and enter the database password."
+            ),
+            "target_name": target_name,
+        }
+
     from features.allowlist.service import (
         _NETWORK_FAILURE,
         connection_failure_category,
@@ -177,6 +202,8 @@ def connectivity_error_payload(
 
 
 __all__ = [
+    "TARGET_PASSWORD_REQUIRED_CATEGORY",
+    "TARGET_PASSWORD_REQUIRED_CODE",
     "connectivity_error_payload",
     "ssh_error_category",
     "ssh_error_payload",

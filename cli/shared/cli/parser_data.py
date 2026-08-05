@@ -1436,7 +1436,7 @@ Modes:
                 help="Interactive fleet configuration",
                 args=[
                     ArgDef("--from", dest="csv_file", help="Import from CSV file"),
-                    ArgDef("--password-env", default="FLEET_PASS", help="Default password env var"),
+                    ArgDef("--password-env", help="Default password env var"),
                     ArgDef("--discover", action="store_true", help="Discover from AWS"),
                     ArgDef("--group", help="Default group for new targets"),
                 ],
@@ -1448,8 +1448,8 @@ Modes:
                     ArgDef("--from", dest="csv_file", help="Path to CSV file"),
                     ArgDef(
                         "--password-env",
-                        default="FLEET_PASS",
-                        help="Env var holding fleet password (default: FLEET_PASS)",
+                        default=None,
+                        help="Env var holding fleet password",
                     ),
                     ArgDef("--group", help="Assign all imported targets to this group"),
                     ArgDef("--tag", action="append", dest="tags", help="Add tag (repeatable)"),
@@ -1470,7 +1470,7 @@ Modes:
                     ArgDef("--name-pattern", help="Glob pattern for instance names"),
                     ArgDef(
                         "--password-env",
-                        default="FLEET_PASS",
+                        default=None,
                         help="Env var for fleet password",
                     ),
                     ArgDef("--user", help="DB username (default: postgres/admin)"),

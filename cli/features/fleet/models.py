@@ -30,7 +30,7 @@ class FleetMember:
     port: int
     database: str
     user: str
-    password_env: str
+    password_env: str | None = None
     group: str | None = None
     tags: list[str] = field(default_factory=list)
     instance_class: str | None = None
@@ -45,6 +45,7 @@ class FleetMember:
     password_secret_key: str | None = None
     publicly_accessible: bool | None = None
     vpc_id: str | None = None
+    password: str | None = field(default=None, repr=False, compare=False)
 
     def to_target_config(self) -> dict[str, Any]:
         target_config: dict[str, Any] = {
@@ -53,11 +54,12 @@ class FleetMember:
             "port": self.port,
             "database": self.database,
             "user": self.user,
-            "password_env": self.password_env,
             "tls": self.tls,
             "tls_verify": self.tls_verify,
             "read_only": self.read_only,
         }
+        if self.password_env:
+            target_config["password_env"] = self.password_env
         if self.tls_ca:
             target_config["tls_ca"] = self.tls_ca
         if self.target_type != "database":

@@ -12,6 +12,8 @@ import dataclasses
 from importlib import import_module
 
 from shared.config.targets import TargetsConfig
+from shared.password_resolver import store_target_password
+from shared.secret_store_service import SecretStoreService
 
 from features.fleet.events import (
     FleetDiscoverEvent,
@@ -44,8 +46,13 @@ def _existing_hosts(config: TargetsConfig) -> set[str]:
 class ProvidersService:
     """Service layer for provider sign-in and database discovery."""
 
-    def __init__(self, config: TargetsConfig | None = None):
+    def __init__(
+        self,
+        config: TargetsConfig | None = None,
+        secret_store: SecretStoreService | None = None,
+    ):
         self._config = config
+        self._secret_store = secret_store
 
     def _get_config(self) -> TargetsConfig:
         if self._config is None:
@@ -94,8 +101,10 @@ class ProvidersService:
 
         shaped = []
         for member in members:
+            public_member = dataclasses.asdict(member)
+            public_member.pop("password", None)
             shaped.append({
-                **dataclasses.asdict(member),
+                **public_member,
                 "already_exists": bool(
                     config.get(member.name) or member.host.lower() in existing_hosts
                 ),
@@ -124,7 +133,16 @@ class ProvidersService:
             if config.get(member.name) or member.host.lower() in existing_hosts:
                 skipped += 1
                 continue
-            config.upsert(member.name, member.to_target_config())
+            target_config = member.to_target_config()
+            stored_env = store_target_password(
+                member.name,
+                member.password,
+                member.password_env,
+                secret_store=self._secret_store,
+            )
+            if stored_env:
+                target_config["password_env"] = stored_env
+            config.upsert(member.name, target_config)
             imported_names.append(member.name)
         if imported_names:
             config.save()
@@ -140,7 +158,8 @@ class ProvidersService:
         *,
         engine_filter: str | None = None,
         name_pattern: str | None = None,
-        password_env: str = "FLEET_PASS",
+        password_env: str | None = None,
+        password: str | None = None,
         default_user: str | None = None,
         default_group: str | None = None,
         default_database: str | None = None,
@@ -237,7 +256,16 @@ class ProvidersService:
                 continue
 
             if not dry_run:
-                config.upsert(member.name, member.to_target_config())
+                target_config = member.to_target_config()
+                stored_env = store_target_password(
+                    member.name,
+                    password,
+                    member.password_env,
+                    secret_store=self._secret_store,
+                )
+                if stored_env:
+                    target_config["password_env"] = stored_env
+                config.upsert(member.name, target_config)
             imported += 1
             imported_names.append(member.name)
             prefix = "[dry-run] Would import" if dry_run else "Discovered"

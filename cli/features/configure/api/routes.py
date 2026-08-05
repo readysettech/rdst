@@ -21,7 +21,7 @@ from features.configure.events import (
 from features.configure.models import ConfigureInput, ConfigureOptions
 from features.configure.service import ConfigureService
 from shared.config.targets import TargetsConfig
-from shared.password_resolver import derive_password_env
+from shared.password_resolver import derive_password_env, store_target_password
 from shared.secret_store_service import SecretStoreService
 
 router = APIRouter()
@@ -201,12 +201,13 @@ def _password_env_for_request(
 def _store_submitted_password(
     target: TargetData, password_env: Optional[str]
 ) -> None:
-    if target.password is None or not password_env:
+    if target.password is None:
         return
-    SecretStoreService().set_secret(
-        password_env,
+    store_target_password(
+        "target",
         target.password.get_secret_value(),
-        persist=True,
+        password_env,
+        secret_store=SecretStoreService(),
     )
 
 

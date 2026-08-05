@@ -1162,7 +1162,10 @@ class TestTopServiceNetworkFailures:
                     events.append(event)
 
         assert events[-1].type == "error"
-        assert events[-1].message == "The slow-query lookup could not be completed."
+        assert events[-1].code == "target_password_required"
+        assert events[-1].message.startswith(
+            "No password is available for target 'test-target'"
+        )
         assert events[-1].detail == "Exception"
         assert "authentication" not in events[-1].message.lower()
 

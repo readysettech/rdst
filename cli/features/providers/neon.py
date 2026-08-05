@@ -14,7 +14,6 @@ from .provider_common import (
     bearer_get,
     forget_secret,
     json_items,
-    password_env_for,
     provider_status,
     read_secret,
     secret_store,
@@ -309,7 +308,6 @@ def discover_neon_projects(errors: list[str]) -> list[FleetMember]:
                 port=DEFAULT_PORT,
                 database=db_name,
                 user=user,
-                password_env=password_env_for(f"neon-{project_id}"),
                 # Neon projects have no cluster concept; like Supabase
                 # projects they stay ungrouped.
                 group=None,

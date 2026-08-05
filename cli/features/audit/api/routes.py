@@ -182,33 +182,21 @@ async def get_capture_requirements(
                     target_config["hostaddr"] = params["hostaddr"]
             connection = create_direct_connection(target_config, connect_timeout=5)
         except Exception as exc:
-            from shared.api.ssh_errors import (
-                ssh_error_payload,
-                tls_verification_error_payload,
-            )
-            from shared.ssh_tunnel import SshTunnelError
+            from shared.api.ssh_errors import connectivity_error_payload
 
             if tunnel_manager is not None:
                 tunnel_manager.close(guard.target_name)
-            if isinstance(exc, SshTunnelError):
-                payload = ssh_error_payload(
-                    exc,
-                    guard.target_name,
-                    ssh_config,
-                )
+            payload = connectivity_error_payload(
+                exc,
+                guard.target_name,
+                target_config,
+            )
+            if payload:
                 return {
                     "status": "error",
                     "detail": payload["message"],
                     "remediation": None,
                     "category": payload["category"],
-                }
-            tls_payload = tls_verification_error_payload(exc, guard.target_name)
-            if tls_payload:
-                return {
-                    "status": "error",
-                    "detail": tls_payload["message"],
-                    "remediation": None,
-                    "category": tls_payload["category"],
                 }
             detail = str(exc).splitlines()[0][:300] if str(exc) else "Connection failed"
             if ssh_config:
