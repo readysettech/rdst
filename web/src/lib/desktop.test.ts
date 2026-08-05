@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { isDesktopFrameless } from './desktop'
+import { isDesktopFrameless, isDesktopRuntime } from './desktop'
 
 function setDesktopPlatform(platform: string) {
   window.rdstDesktop = { isDesktop: true, platform }
@@ -24,5 +24,15 @@ describe('isDesktopFrameless', () => {
 
   it('is false outside the desktop shell', () => {
     expect(isDesktopFrameless()).toBe(false)
+  })
+})
+
+describe('isDesktopRuntime', () => {
+  it('uses the preload bridge as the runtime signal', () => {
+    expect(isDesktopRuntime()).toBe(false)
+
+    setDesktopPlatform('win32')
+
+    expect(isDesktopRuntime()).toBe(true)
   })
 })

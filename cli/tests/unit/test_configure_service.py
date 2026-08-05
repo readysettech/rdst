@@ -128,6 +128,49 @@ class TestConfigureServiceInit:
         assert os.environ["RDST_HEADLESS_PASSWORD"] == "durable-secret"
 
 
+@pytest.mark.parametrize(
+    ("module_name", "expected"),
+    [
+        (
+            "psycopg2",
+            "Missing database driver: psycopg2. Install with: pip install psycopg2",
+        ),
+        (
+            "paramiko",
+            "SSH support is unavailable in this build because the paramiko module is missing.",
+        ),
+        ("dependency_from_plugin", "Missing required module: dependency_from_plugin."),
+    ],
+)
+@pytest.mark.asyncio
+async def test_connection_test_names_the_module_that_failed_to_import(
+    monkeypatch, module_name, expected
+):
+    from features.configure.service import ConfigureService
+
+    missing = ModuleNotFoundError(
+        f"No module named '{module_name}'",
+        name=module_name,
+    )
+    monkeypatch.setattr(
+        "features.configure.service.resolve_connection_params",
+        Mock(side_effect=missing),
+    )
+
+    result = await ConfigureService().perform_connection_test(
+        {
+            "engine": "postgresql",
+            "host": "db.example.com",
+            "port": 5432,
+            "database": "app",
+            "user": "app",
+            "password": "secret",
+        }
+    )
+
+    assert result == {"success": False, "message": expected}
+
+
 class TestConfigureServiceListTargets:
     """Tests for list_targets() method."""
 

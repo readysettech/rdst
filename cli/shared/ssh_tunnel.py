@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import getpass
+import logging
 import os
 import select
 import socket
@@ -19,6 +20,8 @@ MAX_TUNNELS = 10
 KEEPALIVE_SECONDS = 30
 ACCEPT_READY_TIMEOUT_SECONDS = 2.0
 CHANNEL_OPEN_RETRY_SECONDS = 0.25
+
+logger = logging.getLogger(__name__)
 
 
 class SshTunnelError(RuntimeError):
@@ -504,7 +507,16 @@ class TunnelManager:
                 client, address = tunnel.listener.accept()
             except socket.timeout:
                 continue
-            except OSError:
+            except (OSError, ValueError) as exc:
+                if not (
+                    tunnel.stop_event.is_set()
+                    or TunnelManager._endpoint_is_closed(tunnel.listener)
+                ):
+                    logger.warning(
+                        "SSH tunnel listener for %s stopped unexpectedly: %s",
+                        tunnel.target,
+                        exc,
+                    )
                 break
 
             with tunnel.clients_lock:
@@ -586,13 +598,33 @@ class TunnelManager:
                 if not data:
                     break
                 destination.sendall(data)
-        except (OSError, EOFError):
-            pass
+        except (OSError, ValueError, EOFError) as exc:
+            if not (
+                stop_event.is_set()
+                or TunnelManager._endpoint_is_closed(source)
+                or TunnelManager._endpoint_is_closed(destination)
+            ):
+                logger.warning("SSH tunnel relay stopped unexpectedly: %s", exc)
         finally:
             try:
                 destination.shutdown(socket.SHUT_WR)
-            except (AttributeError, OSError):
+            except (AttributeError, OSError, ValueError):
                 pass
+
+    @staticmethod
+    def _endpoint_is_closed(endpoint: Any) -> bool:
+        if getattr(endpoint, "closed", False) is True:
+            return True
+        if getattr(endpoint, "_closed", False) is True:
+            return True
+        fileno = getattr(endpoint, "fileno", None)
+        if not callable(fileno):
+            return False
+        try:
+            descriptor = fileno()
+        except (OSError, ValueError):
+            return True
+        return isinstance(descriptor, int) and descriptor < 0
 
     @staticmethod
     def _close_tunnel(tunnel: _Tunnel) -> None:

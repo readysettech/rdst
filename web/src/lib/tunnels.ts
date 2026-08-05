@@ -24,6 +24,18 @@ export interface SshProfile {
   key_path?: string | null
 }
 
+export interface SshBrowserEntry {
+  name: string
+  path: string
+  is_dir: boolean
+}
+
+export interface SshBrowserDirectory {
+  path: string
+  parent?: string | null
+  entries: SshBrowserEntry[]
+}
+
 export async function fetchTunnelStatuses(): Promise<TunnelStatus[]> {
   const { data, response } = await api.GET('/api/tunnel/status')
   await throwIfNotOk(response, 'Failed to fetch SSH tunnel status')
@@ -52,6 +64,15 @@ export async function fetchSshProfiles(): Promise<SshProfile[]> {
   const response = await fetch('/api/tunnel/ssh-profiles')
   await throwIfNotOk(response, 'Failed to load saved jump hosts')
   return (await response.json()) as SshProfile[]
+}
+
+export async function fetchSshDirectory(
+  path?: string
+): Promise<SshBrowserDirectory> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : ''
+  const response = await fetch(`/api/tunnel/browse${query}`)
+  await throwIfNotOk(response, 'Failed to browse local files')
+  return (await response.json()) as SshBrowserDirectory
 }
 
 export async function importSshKey(sourcePath: string): Promise<string> {

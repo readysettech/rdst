@@ -128,6 +128,20 @@ function registerWindowControlHandlers(): void {
   ipcMain.handle('oauth:register-protocol', () =>
     app.setAsDefaultProtocolClient('rdst')
   )
+  ipcMain.handle('ssh:select-key', async (event) => {
+    const sshDirectory = path.join(os.homedir(), '.ssh')
+    const options: Electron.OpenDialogOptions = {
+      title: 'Select SSH private key',
+      defaultPath: fs.existsSync(sshDirectory) ? sshDirectory : os.homedir(),
+      // SSH keys live in ~/.ssh, which macOS and Linux dialogs hide by default.
+      properties: ['openFile', 'showHiddenFiles'],
+    }
+    const win = senderWindow(event)
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
 }
 
 async function createWindow(rendererUrl: string): Promise<BrowserWindow> {

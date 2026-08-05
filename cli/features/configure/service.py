@@ -517,11 +517,12 @@ class ConfigureService:
                 "message": f"Unknown engine: {engine}",
             }
 
-        except ImportError:
-            driver = "psycopg2" if engine == "postgresql" else "pymysql"
+        except ImportError as exc:
+            from .import_errors import missing_module_message
+
             return {
                 "success": False,
-                "message": f"Missing database driver: {driver}. Install with: pip install {driver}",
+                "message": missing_module_message(exc, engine),
             }
 
         except Exception as e:

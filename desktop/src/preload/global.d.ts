@@ -10,6 +10,9 @@ declare global {
       oauth: {
         registerProtocol: () => Promise<boolean>
       }
+      files: {
+        selectSshKey: () => Promise<string | null>
+      }
       windowControls: {
         minimize: () => void
         toggleMaximize: () => void

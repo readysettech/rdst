@@ -135,6 +135,60 @@ async def test_ssh_keys_exposes_shared_discovery(monkeypatch):
     assert response.json()["options"][2]["kind"] == "agent"
 
 
+async def test_file_browser_lists_directories_files_and_parent(tmp_rdst_home):
+    home = tmp_rdst_home.parent
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir()
+    (ssh_dir / "nested").mkdir()
+    (ssh_dir / "id_ed25519").write_text("private key", encoding="utf-8")
+
+    response = await _request("GET", "/api/tunnel/browse?path=.ssh")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["path"] == str(ssh_dir)
+    assert body["parent"] == str(home)
+    assert body["entries"] == [
+        {"name": "nested", "path": str(ssh_dir / "nested"), "is_dir": True},
+        {
+            "name": "id_ed25519",
+            "path": str(ssh_dir / "id_ed25519"),
+            "is_dir": False,
+        },
+    ]
+
+
+async def test_file_browser_rejects_relative_parent_traversal(tmp_rdst_home):
+    outside = tmp_rdst_home.parent.parent / "outside"
+    outside.mkdir(exist_ok=True)
+
+    response = await _request("GET", "/api/tunnel/browse?path=../outside")
+
+    assert response.status_code == 400
+    assert "home directory" in response.json()["detail"]
+
+
+async def test_file_browser_accepts_an_explicit_absolute_path_outside_home(
+    tmp_rdst_home,
+):
+    outside = tmp_rdst_home.parent.parent / "explicit-outside"
+    outside.mkdir(exist_ok=True)
+
+    response = await _request(
+        "GET", f"/api/tunnel/browse?path={outside.as_posix()}"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["path"] == str(outside)
+
+
+async def test_file_browser_reports_a_nonexistent_path(tmp_rdst_home):
+    response = await _request("GET", "/api/tunnel/browse?path=missing")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Directory does not exist"
+
+
 def test_ssh_key_discovery_scans_downloads_shallowly(tmp_rdst_home, monkeypatch):
     from shared.ssh_keys import discover_ssh_auth_options
 

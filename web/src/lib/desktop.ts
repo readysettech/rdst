@@ -37,6 +37,9 @@ declare global {
       oauth?: {
         registerProtocol: () => Promise<boolean>
       }
+      files?: {
+        selectSshKey: () => Promise<string | null>
+      }
       windowControls?: DesktopWindowControls
       updates?: DesktopUpdates
     }
@@ -52,6 +55,10 @@ export function isDesktopMac(): boolean {
     window.rdstDesktop?.isDesktop === true &&
     window.rdstDesktop.platform === 'darwin'
   )
+}
+
+export function isDesktopRuntime(): boolean {
+  return window.rdstDesktop?.isDesktop === true
 }
 
 /**
@@ -75,4 +82,8 @@ export function getDesktopUpdates(): DesktopUpdates | undefined {
 
 export function registerDesktopOAuthProtocol(): Promise<boolean> | undefined {
   return window.rdstDesktop?.oauth?.registerProtocol()
+}
+
+export function selectDesktopSshKey(): Promise<string | null> | undefined {
+  return window.rdstDesktop?.files?.selectSshKey()
 }

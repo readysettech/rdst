@@ -1,7 +1,17 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchSshKeys, fetchSshProfiles } from '../../lib/tunnels'
+import {
+  fetchSshDirectory,
+  fetchSshKeys,
+  fetchSshProfiles,
+} from '../../lib/tunnels'
 import {
   assembleSshConfig,
   SshFields,
@@ -10,6 +20,7 @@ import {
 } from './SshFields'
 
 vi.mock('../../lib/tunnels', () => ({
+  fetchSshDirectory: vi.fn(),
   fetchSshKeys: vi.fn(),
   fetchSshProfiles: vi.fn(),
   importSshKey: vi.fn(),
@@ -35,12 +46,21 @@ function Harness({
 
 describe('SshFields', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     Element.prototype.scrollIntoView = vi.fn()
+    vi.mocked(fetchSshDirectory).mockResolvedValue({
+      path: '/home/test',
+      parent: null,
+      entries: [],
+    })
     vi.mocked(fetchSshKeys).mockResolvedValue([])
     vi.mocked(fetchSshProfiles).mockResolvedValue([])
   })
 
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    delete window.rdstDesktop
+  })
 
   it('assembles trimmed fields with SSH port 22 by default', () => {
     const onSubmit = vi.fn()
@@ -53,9 +73,7 @@ describe('SshFields', () => {
       target: { value: ' ec2-user ' },
     })
     fireEvent.click(screen.getByRole('combobox', { name: 'Key path' }))
-    fireEvent.click(
-      screen.getByRole('option', { name: 'Enter path manually' })
-    )
+    fireEvent.click(screen.getByRole('option', { name: 'Enter path manually' }))
     fireEvent.change(screen.getByLabelText('Key path'), {
       target: { value: ' ~/.ssh/prod.pem ' },
     })
@@ -79,6 +97,115 @@ describe('SshFields', () => {
         key_path: '',
       })
     ).toBeUndefined()
+  })
+
+  it('selects a discovered key without leaving detected-key mode', async () => {
+    const onSubmit = vi.fn()
+    vi.mocked(fetchSshKeys).mockResolvedValue([
+      {
+        kind: 'file',
+        label: '~/.ssh: id_ed25519',
+        key_path: '/home/test/.ssh/id_ed25519',
+      },
+    ])
+    render(<Harness onSubmit={onSubmit} />)
+
+    await waitFor(() => expect(fetchSshKeys).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('combobox', { name: 'Key path' }))
+    fireEvent.click(
+      await screen.findByRole('option', { name: '~/.ssh: id_ed25519' })
+    )
+    fireEvent.change(screen.getByLabelText('Jump host'), {
+      target: { value: 'bastion.example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Assemble' }))
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      host: 'bastion.example.com',
+      port: 22,
+      key_path: '/home/test/.ssh/id_ed25519',
+    })
+  })
+
+  it('browses backend files in the web runtime and selects a key', async () => {
+    const onSubmit = vi.fn()
+    vi.mocked(fetchSshDirectory)
+      .mockResolvedValueOnce({
+        path: '/home/test',
+        parent: null,
+        entries: [
+          {
+            name: '.ssh',
+            path: '/home/test/.ssh',
+            is_dir: true,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        path: '/home/test/.ssh',
+        parent: '/home/test',
+        entries: [
+          {
+            name: 'id_ed25519',
+            path: '/home/test/.ssh/id_ed25519',
+            is_dir: false,
+          },
+        ],
+      })
+    render(<Harness onSubmit={onSubmit} />)
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Key path' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Browse local files' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Open folder: .ssh' })
+    )
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Select file: id_ed25519',
+      })
+    )
+    fireEvent.change(screen.getByLabelText('Jump host'), {
+      target: { value: 'bastion.example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Assemble' }))
+
+    expect(fetchSshDirectory).toHaveBeenCalledWith(undefined)
+    expect(fetchSshDirectory).toHaveBeenCalledWith('/home/test/.ssh')
+    expect(onSubmit).toHaveBeenCalledWith({
+      host: 'bastion.example.com',
+      port: 22,
+      key_path: '/home/test/.ssh/id_ed25519',
+    })
+  })
+
+  it('uses the native picker in the desktop runtime', async () => {
+    const onSubmit = vi.fn()
+    const selectSshKey = vi
+      .fn()
+      .mockResolvedValue('C:\\Users\\me\\.ssh\\id_ed25519')
+    window.rdstDesktop = {
+      isDesktop: true,
+      platform: 'win32',
+      files: { selectSshKey },
+    }
+    render(<Harness onSubmit={onSubmit} />)
+
+    expect(
+      screen.queryByRole('option', { name: 'Browse local files' })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Browse...' }))
+    await waitFor(() => expect(selectSshKey).toHaveBeenCalledOnce())
+    fireEvent.change(screen.getByLabelText('Jump host'), {
+      target: { value: 'bastion.example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Assemble' }))
+
+    expect(fetchSshDirectory).not.toHaveBeenCalled()
+    expect(onSubmit).toHaveBeenCalledWith({
+      host: 'bastion.example.com',
+      port: 22,
+      key_path: 'C:\\Users\\me\\.ssh\\id_ed25519',
+    })
   })
 
   it('assembles reusable profiles without duplicating inline settings', () => {
@@ -144,9 +271,7 @@ describe('SshFields', () => {
     const keySelect = await screen.findByRole('combobox', { name: 'Key path' })
     await waitFor(() => expect(keySelect.textContent).toContain('/keys/prod'))
     fireEvent.click(keySelect)
-    fireEvent.click(
-      screen.getByRole('option', { name: 'Enter path manually' })
-    )
+    fireEvent.click(screen.getByRole('option', { name: 'Enter path manually' }))
     fireEvent.change(screen.getByLabelText('Key path'), {
       target: { value: '/keys/new' },
     })

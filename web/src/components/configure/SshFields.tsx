@@ -4,11 +4,14 @@ import { Button } from '@rs/ui-new/button'
 import { VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useMemo, useState } from 'react'
+import { isDesktopRuntime, selectDesktopSshKey } from '../../lib/desktop'
 import {
+  fetchSshDirectory,
   fetchSshKeys,
   fetchSshProfiles,
   importSshKey,
   type SshAuthOption,
+  type SshBrowserDirectory,
   type SshProfile,
 } from '../../lib/tunnels'
 import type { SshConfig } from '../../types/configure'
@@ -67,9 +70,16 @@ export function SshFields({
   const [hostMode, setHostMode] = useState(
     value.host ? `current:${value.host}` : 'manual'
   )
-  const [keyMode, setKeyMode] = useState<'select' | 'manual'>('select')
+  const [keyMode, setKeyMode] = useState<'select' | 'manual' | 'browse'>(
+    'select'
+  )
+  const [browserDirectory, setBrowserDirectory] =
+    useState<SshBrowserDirectory | null>(null)
+  const [browserLoading, setBrowserLoading] = useState(false)
+  const [browserError, setBrowserError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  const desktop = isDesktopRuntime()
   const selectedProfile = value.profile
     ? rememberedHosts.find((item) => item.name === value.profile)
     : undefined
@@ -148,14 +158,18 @@ export function SshFields({
           },
         ]
       : []),
-    ...rememberedHosts.filter((host) => !isCurrentHost(host)).map((host) => ({
-      value: `remembered:${host.name}`,
-      label: `${host.host}${host.user ? ` (${host.user})` : ''}`,
-    })),
-    ...configHosts.filter((host) => !isCurrentHost(host)).map((host) => ({
-      value: `config:${host.host}`,
-      label: `${host.label}${host.user ? ` (${host.user})` : ''} — from SSH config`,
-    })),
+    ...rememberedHosts
+      .filter((host) => !isCurrentHost(host))
+      .map((host) => ({
+        value: `remembered:${host.name}`,
+        label: `${host.host}${host.user ? ` (${host.user})` : ''}`,
+      })),
+    ...configHosts
+      .filter((host) => !isCurrentHost(host))
+      .map((host) => ({
+        value: `config:${host.host}`,
+        label: `${host.label}${host.user ? ` (${host.user})` : ''} — from SSH config`,
+      })),
   ]
   // The select's value must always exist in its options, even on renders where
   // hostMode and value.host briefly disagree; otherwise the control goes blank.
@@ -188,9 +202,12 @@ export function SshFields({
         value: option.key_path,
         label: option.label,
       })),
+      ...(!desktop
+        ? [{ value: '__browse__', label: 'Browse local files' }]
+        : []),
       { value: '__manual__', label: 'Enter path manually' },
     ],
-    [keyOptions, selectedKey, displayValue.key_path]
+    [keyOptions, selectedKey, displayValue.key_path, desktop]
   )
 
   const chooseHost = (selection: string) => {
@@ -228,6 +245,32 @@ export function SshFields({
         user: configHost.user ?? '',
       })
     }
+  }
+
+  const loadBrowserDirectory = (path?: string) => {
+    setBrowserLoading(true)
+    setBrowserError(null)
+    void fetchSshDirectory(path)
+      .then(setBrowserDirectory)
+      .catch((caught) =>
+        setBrowserError(
+          caught instanceof Error ? caught.message : String(caught)
+        )
+      )
+      .finally(() => setBrowserLoading(false))
+  }
+
+  const browseForKey = () => {
+    setImportError(null)
+    void selectDesktopSshKey()
+      ?.then((keyPath) => {
+        if (keyPath) update({ profile: '', key_path: keyPath })
+      })
+      .catch((caught) =>
+        setImportError(
+          caught instanceof Error ? caught.message : String(caught)
+        )
+      )
   }
 
   return (
@@ -299,24 +342,44 @@ export function SshFields({
 
       <div>
         <FieldLabel htmlFor={`${idPrefix}-key-path`}>Key path</FieldLabel>
-        {keyMode === 'select' ? (
-          <BaseInputSelect
-            id={`${idPrefix}-key-path`}
-            name={`${idPrefix}-key-path`}
-            value={displayValue.key_path}
-            placeholder="Choose a private key"
-            onValueChange={(selection) => {
-              if (selection === '__manual__') {
-                setKeyMode('manual')
-                return
-              }
-              setImportError(null)
-              update({ profile: '', key_path: selection })
-            }}
-            options={selectKeyOptions}
-            disabled={disabled}
-          />
-        ) : (
+        {keyMode === 'select' && (
+          <VStack className="gap-2 items-stretch">
+            <BaseInputSelect
+              id={`${idPrefix}-key-path`}
+              name={`${idPrefix}-key-path`}
+              value={displayValue.key_path}
+              placeholder="Choose a private key"
+              onValueChange={(selection) => {
+                if (selection === '__browse__') {
+                  setKeyMode('browse')
+                  loadBrowserDirectory()
+                  return
+                }
+                if (selection === '__manual__') {
+                  setKeyMode('manual')
+                  return
+                }
+                setImportError(null)
+                update({ profile: '', key_path: selection })
+              }}
+              options={selectKeyOptions}
+              disabled={disabled}
+            />
+            {desktop && (
+              <div>
+                <Button
+                  variant="primary"
+                  modifier="outline"
+                  size="small"
+                  label="Browse..."
+                  onClick={browseForKey}
+                  disabled={disabled}
+                />
+              </div>
+            )}
+          </VStack>
+        )}
+        {keyMode === 'manual' && (
           <VStack className="gap-2 items-stretch">
             <BaseInputText
               id={`${idPrefix}-key-path`}
@@ -336,6 +399,73 @@ export function SshFields({
               onClick={() => setKeyMode('select')}
               disabled={disabled}
             />
+          </VStack>
+        )}
+        {keyMode === 'browse' && (
+          <VStack className="gap-2 items-stretch">
+            {browserDirectory && (
+              <Text level="caption" className="text-content-layout-3 break-all">
+                {browserDirectory.path}
+              </Text>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {browserDirectory?.parent && (
+                <Button
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  label="Up one folder"
+                  onClick={() =>
+                    loadBrowserDirectory(browserDirectory.parent ?? undefined)
+                  }
+                  disabled={disabled || browserLoading}
+                />
+              )}
+              <Button
+                variant="primary"
+                modifier="ghost"
+                size="small"
+                label="Back to detected keys"
+                onClick={() => setKeyMode('select')}
+                disabled={disabled || browserLoading}
+              />
+            </div>
+            <VStack className="gap-1 items-stretch max-h-52 overflow-y-auto rounded-lg border border-border-layout-1 p-2">
+              {browserDirectory?.entries.map((entry) => (
+                <Button
+                  key={entry.path}
+                  variant="primary"
+                  modifier="ghost"
+                  size="small"
+                  fullWidth
+                  label={`${entry.is_dir ? 'Open folder' : 'Select file'}: ${entry.name}`}
+                  onClick={() => {
+                    if (entry.is_dir) {
+                      loadBrowserDirectory(entry.path)
+                    } else {
+                      update({ profile: '', key_path: entry.path })
+                      setKeyMode('select')
+                    }
+                  }}
+                  disabled={disabled || browserLoading}
+                />
+              ))}
+              {!browserLoading && browserDirectory?.entries.length === 0 && (
+                <Text level="caption" className="text-content-layout-3">
+                  This folder is empty.
+                </Text>
+              )}
+            </VStack>
+            {browserLoading && (
+              <Text level="caption" className="text-content-layout-3">
+                Loading files...
+              </Text>
+            )}
+            {browserError && (
+              <Text level="caption" className="text-content-negative-soft">
+                {browserError}
+              </Text>
+            )}
           </VStack>
         )}
       </div>

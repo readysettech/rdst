@@ -3,7 +3,10 @@ import type {
   FleetProviderLoginStart,
   FleetProviderLoginStatus,
 } from '../../lib/useFleet'
-import { registerDesktopOAuthProtocol } from '../../lib/desktop'
+import {
+  isDesktopRuntime,
+  registerDesktopOAuthProtocol,
+} from '../../lib/desktop'
 
 /** What the panel shows when a sign-in attempt fails, from any source. */
 export interface ProviderLoginFailure {
@@ -64,10 +67,14 @@ export function useProviderOAuthLogin({
   })
 
   const beginLogin = useCallback(async () => {
+    const desktop = isDesktopRuntime()
     // Reserve the tab while this click still has browser user-gesture context.
     // Opening only after the async start request is exactly what popup blockers
     // reject in Safari/Chrome's stricter modes.
-    const popup = window.open('about:blank', '_blank')
+    // Electron is different: its main process routes a requested URL to the
+    // system browser, so it must receive the real provider URL rather than an
+    // about:blank placeholder.
+    const popup = desktop ? null : window.open('about:blank', '_blank')
     setStarting(true)
     setLoginError(null)
     setLoginStatus(null)
@@ -75,7 +82,9 @@ export function useProviderOAuthLogin({
     try {
       await registerDesktopOAuthProtocol()
       const started = await latest.current.start()
-      if (popup) {
+      if (desktop) {
+        window.open(started.authorize_url, '_blank')
+      } else if (popup) {
         popup.opener = null
         popup.location.href = started.authorize_url
       } else {

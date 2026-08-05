@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
     registerProtocol: (): Promise<boolean> =>
       ipcRenderer.invoke('oauth:register-protocol'),
   },
+  files: {
+    selectSshKey: (): Promise<string | null> =>
+      ipcRenderer.invoke('ssh:select-key'),
+  },
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),
     toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
@@ -31,8 +35,7 @@ contextBridge.exposeInMainWorld('rdstDesktop', {
       const listener = (_event: unknown, state: UpdateStatePayload) =>
         callback(state)
       ipcRenderer.on('updates:state-changed', listener)
-      return () =>
-        ipcRenderer.removeListener('updates:state-changed', listener)
+      return () => ipcRenderer.removeListener('updates:state-changed', listener)
     },
   },
 })

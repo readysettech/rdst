@@ -18,6 +18,7 @@ vi.mock('../../lib/useFleet', () => ({
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  delete window.rdstDesktop
 })
 
 describe('SupabaseConnectionPanel compact', () => {
@@ -153,5 +154,40 @@ describe('SupabaseConnectionPanel', () => {
       'https://supabase.example/authorize'
     )
     expect(window.open).toHaveBeenCalledWith('about:blank', '_blank')
+  })
+
+  it('hands Electron the provider URL without opening about:blank', async () => {
+    vi.mocked(fetchFleetSupabaseStatus).mockResolvedValue({
+      connected: false,
+      method: null,
+      detail: null,
+    })
+    vi.mocked(startFleetSupabaseLogin).mockResolvedValue({
+      login_id: 'login-1',
+      authorize_url: 'https://supabase.example/authorize',
+    })
+    vi.mocked(fetchFleetSupabaseLogin).mockResolvedValue({
+      state: 'running',
+      detail: 'Waiting for approval',
+    })
+    window.rdstDesktop = { isDesktop: true, platform: 'win32' }
+    const open = vi.fn().mockReturnValue(null)
+    vi.stubGlobal('open', open)
+
+    renderWithClient(<SupabaseConnectionPanel />)
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Sign in with Supabase' })
+    )
+
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith(
+        'https://supabase.example/authorize',
+        '_blank'
+      )
+    )
+    expect(open).not.toHaveBeenCalledWith('about:blank', '_blank')
+    expect(
+      screen.queryByRole('link', { name: 'Popup blocked. Open sign-in.' })
+    ).toBeNull()
   })
 })

@@ -365,6 +365,60 @@ def test_forwarder_retries_a_transient_channel_open_failure():
     client.close.assert_called_once()
 
 
+@pytest.mark.parametrize("error", [OSError("closed"), ValueError("closed")])
+def test_relay_shutdown_socket_errors_are_silent(monkeypatch, error):
+    stop_event = threading.Event()
+    source = SimpleNamespace(closed=False, fileno=lambda: 1)
+    destination = MagicMock()
+
+    def close_during_select(*_args, **_kwargs):
+        stop_event.set()
+        raise error
+
+    warning = MagicMock()
+    monkeypatch.setattr("shared.ssh_tunnel.select.select", close_during_select)
+    monkeypatch.setattr("shared.ssh_tunnel.logger.warning", warning)
+
+    TunnelManager._pump(source, destination, stop_event)
+
+    warning.assert_not_called()
+
+
+def test_relay_errors_from_an_already_closed_socket_are_silent(monkeypatch):
+    source = SimpleNamespace(closed=True, fileno=lambda: -1)
+    destination = MagicMock()
+    warning = MagicMock()
+    monkeypatch.setattr(
+        "shared.ssh_tunnel.select.select",
+        MagicMock(
+            side_effect=ValueError(
+                "file descriptor cannot be a negative integer"
+            )
+        ),
+    )
+    monkeypatch.setattr("shared.ssh_tunnel.logger.warning", warning)
+
+    TunnelManager._pump(source, destination, threading.Event())
+
+    warning.assert_not_called()
+
+
+def test_relay_logs_genuine_midstream_socket_errors(monkeypatch):
+    source = SimpleNamespace(closed=False, fileno=lambda: 1)
+    destination = MagicMock()
+    warning = MagicMock()
+    monkeypatch.setattr(
+        "shared.ssh_tunnel.select.select",
+        MagicMock(side_effect=OSError("network failed")),
+    )
+    monkeypatch.setattr("shared.ssh_tunnel.logger.warning", warning)
+
+    TunnelManager._pump(source, destination, threading.Event())
+
+    warning.assert_called_once()
+    assert "network failed" in str(warning.call_args)
+
+
 def test_last_used_updates_and_close():
     manager = _RegistryManager()
     try:

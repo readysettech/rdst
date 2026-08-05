@@ -71,6 +71,52 @@ class TestConfigureWizardNoCacheDeploy:
         assert result.ok is True
         assert removed == ["app"]
 
+
+@pytest.mark.parametrize(
+    ("module_name", "expected"),
+    [
+        (
+            "pymysql",
+            "Missing database driver: pymysql\nInstall with: pip install pymysql",
+        ),
+        (
+            "paramiko",
+            "SSH support is unavailable in this build because the paramiko module is missing.",
+        ),
+        ("dependency_from_plugin", "Missing required module: dependency_from_plugin."),
+    ],
+)
+def test_connection_test_names_the_module_that_failed_to_import(
+    monkeypatch, module_name, expected
+):
+    from features.configure.cli.wizard import ConfigurationWizard
+
+    missing = ModuleNotFoundError(
+        f"No module named '{module_name}'",
+        name=module_name,
+    )
+    monkeypatch.setattr(
+        "features.configure.cli.wizard.resolve_connection_params",
+        Mock(side_effect=missing),
+    )
+    wizard = ConfigurationWizard(console=Mock())
+    wizard._show_info = Mock()
+
+    result = wizard._test_connection(
+        {
+            "engine": "mysql",
+            "host": "db.example.com",
+            "port": 3306,
+            "database": "app",
+            "user": "app",
+            "password": "secret",
+        }
+    )
+
+    assert result.ok is False
+    assert result.message == expected
+
+
 class TestConfigureWizardSsh:
 
     def test_ssh_step_builds_nested_config_from_discovered_key(self):

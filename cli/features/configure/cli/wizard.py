@@ -1042,12 +1042,12 @@ class ConfigurationWizard:
             else:
                 return RdstResult(False, f"Unknown engine: {engine}")
 
-        except ImportError:
-            driver = "psycopg2" if engine == "postgresql" else "pymysql"
+        except ImportError as exc:
+            from ..import_errors import missing_module_message
+
             return RdstResult(
                 False,
-                f"Missing database driver: {driver}\n"
-                f"Install with: pip install {driver}",
+                missing_module_message(exc, engine, multiline=True),
             )
         except Exception as exc:
             from shared.ssh_tunnel import (

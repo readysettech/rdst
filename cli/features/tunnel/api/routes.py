@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 router = APIRouter(prefix="/tunnel", tags=["tunnel"])
@@ -72,6 +73,18 @@ class SshKeysResponse(BaseModel):
     options: list[SshAuthOptionResponse]
 
 
+class FileBrowserEntry(BaseModel):
+    name: str
+    path: str
+    is_dir: bool
+
+
+class FileBrowserResponse(BaseModel):
+    path: str
+    parent: Optional[str] = None
+    entries: list[FileBrowserEntry]
+
+
 class ImportSshKeyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -110,6 +123,69 @@ async def ssh_keys(jump_host: str = "") -> SshKeysResponse:
     options = await asyncio.to_thread(discover_ssh_auth_options, jump_host)
     return SshKeysResponse(
         options=[SshAuthOptionResponse(**option) for option in options]
+    )
+
+
+def _resolve_browse_directory(requested_path: Optional[str]) -> Path:
+    home = Path.home().resolve()
+    if requested_path:
+        supplied = Path(requested_path).expanduser()
+        explicitly_absolute = supplied.is_absolute()
+        candidate = supplied if explicitly_absolute else home / supplied
+    else:
+        explicitly_absolute = False
+        candidate = home
+
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise HTTPException(status_code=404, detail="Directory does not exist") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not explicitly_absolute and not resolved.is_relative_to(home):
+        raise HTTPException(
+            status_code=400,
+            detail="Relative paths must stay within the user's home directory",
+        )
+    if not resolved.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+    return resolved
+
+
+@router.get("/browse", response_model=FileBrowserResponse)
+async def browse_files(path: Optional[str] = None) -> FileBrowserResponse:
+    """List local paths for the browser SSH key picker."""
+    home = Path.home().resolve()
+    directory = _resolve_browse_directory(path)
+    try:
+        children = sorted(
+            directory.iterdir(),
+            key=lambda item: (not item.is_dir(), item.name.casefold()),
+        )
+        entries = [
+            FileBrowserEntry(
+                name=child.name,
+                path=str(child.resolve()),
+                is_dir=child.is_dir(),
+            )
+            for child in children
+        ]
+    except OSError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unable to list directory: {exc}",
+        ) from exc
+
+    parent = (
+        None
+        if directory == home or directory.parent == directory
+        else str(directory.parent)
+    )
+    return FileBrowserResponse(
+        path=str(directory),
+        parent=parent,
+        entries=entries,
     )
 
 
