@@ -24,6 +24,8 @@
 
 set -euo pipefail
 
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RDST_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${RDST_DIR}/.." && pwd)"
