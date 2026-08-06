@@ -1,28 +1,30 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import { RouterProvider, createRouter } from '@tanstack/react-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import LazyMotion from '@rs/ui-new/lazy-motion';
-import domMax from '@rs/ui-new/dom-max';
-import { Toaster } from '@rs/ui-new/toaster';
+import domMax from '@rs/ui-new/dom-max'
+import LazyMotion from '@rs/ui-new/lazy-motion'
+import { Toaster } from '@rs/ui-new/toaster'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createRouter, RouterProvider } from '@tanstack/react-router'
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { initAnalytics } from './lib/analytics'
+import { routeTree } from './routeTree.gen'
 
-import { routeTree } from './routeTree.gen';
+import './style.css'
 
-import './style.css';
+initAnalytics()
 
-const router = createRouter({ routeTree });
+const router = createRouter({ routeTree })
 
 declare module '@tanstack/react-router' {
   interface Register {
-    router: typeof router;
+    router: typeof router
   }
 }
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient()
 
-const rootElement = document.getElementById('root')!;
+const rootElement = document.getElementById('root')!
 if (!rootElement.innerHTML) {
-  const root = createRoot(rootElement);
+  const root = createRoot(rootElement)
   root.render(
     <StrictMode>
       <LazyMotion features={domMax} strict>
@@ -31,6 +33,6 @@ if (!rootElement.innerHTML) {
           <Toaster />
         </QueryClientProvider>
       </LazyMotion>
-    </StrictMode>,
-  );
+    </StrictMode>
+  )
 }

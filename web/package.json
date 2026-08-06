@@ -34,6 +34,7 @@
     "ai": "^5.0.0",
     "codemirror": "^6.0.2",
     "openapi-fetch": "^0.17.0",
+    "posthog-js": "^1.292.0",
     "react": "catalog:react19",
     "react-dom": "catalog:react19",
     "sql-formatter": "catalog:common"
