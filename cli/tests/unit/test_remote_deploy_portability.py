@@ -6,7 +6,7 @@ import tempfile
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
-from shared.deploy.remote import _scp_script
+from shared.deploy.remote import _scp_script, _upload_private_script
 
 
 def test_scp_script_writes_utf8_with_lf_line_endings():
@@ -42,3 +42,32 @@ def test_scp_script_writes_utf8_with_lf_line_endings():
     assert opened_with["encoding"] == "utf-8"
     assert opened_with["newline"] == "\n"
     assert transferred["contents"] == "#!/usr/bin/env bash\necho '東京'\n".encode()
+
+
+def test_private_upload_creates_an_owner_only_remote_file():
+    """The uploaded script holds the database password.
+
+    It goes over the SSH channel as bytes so no host rewrites its newlines,
+    and the remote shell restricts the mode before the file exists.
+    """
+    calls = {}
+
+    def capture_ssh(command, **kwargs):
+        calls["command"] = command
+        calls["input"] = kwargs.get("input")
+        assert kwargs.get("text") is not True
+        return CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+    with patch("shared.deploy.remote.subprocess.run", side_effect=capture_ssh):
+        result = _upload_private_script(
+            "#!/usr/bin/env bash\necho '東京'\n",
+            "deploy@example.com",
+            "/tmp/rdst-deploy-prod-0123456789abcdef.sh",
+            [],
+        )
+
+    assert result["success"] is True
+    assert calls["input"] == "#!/usr/bin/env bash\necho '東京'\n".encode()
+    remote_command = calls["command"][-1]
+    assert remote_command.startswith("umask 077 &&")
+    assert "/tmp/rdst-deploy-prod-0123456789abcdef.sh" in remote_command

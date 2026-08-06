@@ -10,6 +10,8 @@ schema init/refresh. Detection uses SQL aggregation (not random
 sampling) for deterministic, reliable results.
 """
 
+from shared.db_connection import quote_identifier
+
 
 def detect_delimiter_columns_sql_postgres(
     text_columns: list[str], table_name: str, row_estimate: int,
@@ -41,14 +43,15 @@ def detect_delimiter_columns_sql_postgres(
 
     agg_parts = []
     for col in text_columns:
+        q = quote_identifier(col)
         agg_parts.append(
-            f'SUM(CASE WHEN "{col}" LIKE \'%,%\' THEN 1 ELSE 0 END)::float '
-            f'/ NULLIF(COUNT("{col}"), 0) AS "{col}"'
+            f'SUM(CASE WHEN {q} LIKE \'%,%\' THEN 1 ELSE 0 END)::float '
+            f'/ NULLIF(COUNT({q}), 0) AS {q}'
         )
 
     return (
         f'SELECT {", ".join(agg_parts)} '
-        f'FROM "{table_name}"{sample_clause}'
+        f'FROM {quote_identifier(table_name)}{sample_clause}'
     )
 
 
@@ -69,20 +72,23 @@ def detect_delimiter_columns_sql_mysql(
 
     agg_parts = []
     for col in text_columns:
+        q = quote_identifier(col, "mysql")
         agg_parts.append(
-            f"SUM(CASE WHEN `{col}` LIKE '%,%' THEN 1 ELSE 0 END) "
-            f"/ NULLIF(COUNT(`{col}`), 0) AS `{col}`"
+            f"SUM(CASE WHEN {q} LIKE '%,%' THEN 1 ELSE 0 END) "
+            f"/ NULLIF(COUNT({q}), 0) AS {q}"
         )
 
+    table = quote_identifier(table_name, "mysql")
     if inner_limit:
+        inner_cols = ", ".join(quote_identifier(c, "mysql") for c in text_columns)
         return (
             f'SELECT {", ".join(agg_parts)} '
-            f'FROM (SELECT {", ".join(f"`{c}`" for c in text_columns)} '
-            f'FROM `{table_name}`{inner_limit}) sampled'
+            f'FROM (SELECT {inner_cols} '
+            f'FROM {table}{inner_limit}) sampled'
         )
     return (
         f'SELECT {", ".join(agg_parts)} '
-        f'FROM `{table_name}`'
+        f'FROM {table}'
     )
 
 

@@ -54,8 +54,13 @@ def check_query(
     """
     results = []
 
-    # Always check read-only
-    results.append(check_read_only(sql))
+    # Always check read-only. A query that fails here is already blocked, and
+    # the EXPLAIN-backed guards below would send it to the database anyway, so
+    # stop before anything reaches a connection.
+    read_only = check_read_only(sql)
+    results.append(read_only)
+    if not read_only.passed:
+        return results
 
     # Structural guards
     if config.guards.require_where:

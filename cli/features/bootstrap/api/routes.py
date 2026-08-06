@@ -12,10 +12,11 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from shared.api.guards import require_local_request
 from shared.api.target_guard import TargetGuard, require_target_body
 from shared.run_registry import RunRegistry, run_registry
 
@@ -43,10 +44,13 @@ class BootstrapRunStatusResponse(BaseModel):
 
 @router.post("", response_model=BootstrapStartResponse)
 async def start_bootstrap(
+    http_request: Request,
     request: BootstrapStartRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> BootstrapStartResponse:
     """Start the add-database bootstrap for a target; returns immediately."""
+    require_local_request(http_request)
+
     options = BootstrapOptions(annotate=request.annotate)
     service = TargetBootstrapService()
     key_wakeup = asyncio.Event()

@@ -26,6 +26,37 @@ from shared.query_capture_limits import MAX_QUERY_LENGTH
 
 logger = logging.getLogger(__name__)
 
+# Statements that must never enter the registry. Everything downstream treats a
+# registry entry as text it may hand back to a database (analyze, cache,
+# benchmark), so procedural blocks and anything that changes schema or
+# privileges is refused at the boundary. INSERT/UPDATE/DELETE stay storable
+# because `rdst top` and `rdst scan` legitimately capture write traffic for
+# reporting; the sinks that re-execute registry text enforce read-only
+# themselves.
+UNSTORABLE_LEAD_KEYWORDS = frozenset(
+    {
+        "DO",
+        "CALL",
+        "CREATE",
+        "DROP",
+        "ALTER",
+        "TRUNCATE",
+        "RENAME",
+        "GRANT",
+        "REVOKE",
+        "COMMENT",
+    }
+)
+
+
+def _statement_count(sql: str) -> int:
+    """Count statements that carry content, ignoring comments and empty tails."""
+    return sum(
+        1
+        for statement in sqlparse.parse(sql or "")
+        if statement.token_first(skip_cm=True) is not None
+    )
+
 
 def canonicalize_sql(sql: str) -> str:
     """
@@ -99,7 +130,12 @@ def verify_query_completeness(
             return False, f"Query appears truncated (ends with '{suffix.strip()}')"
 
     try:
-        sqlglot.parse_one(canonical_sql, dialect=dialect)
+        # parse(), not parse_one(): parse_one() keeps only the first statement,
+        # so a stacked "SELECT 1; DROP TABLE t" would be stored whole and then
+        # replayed whole at every sink that re-executes registry text.
+        statements = [s for s in sqlglot.parse(canonical_sql, dialect=dialect) if s]
+        if len(statements) > 1:
+            return False, "Multiple statements in one query are not allowed"
         return True, None
     except ParseError as e:
         error_str = str(e).lower()
@@ -209,7 +245,7 @@ def hash_sql_deep(query: str) -> str:
     """
     normalized = normalize_sql_deep(query)
     # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5
-    return hashlib.md5(normalized.encode('utf-8')).hexdigest()[:12]
+    return hashlib.md5(normalized.encode('utf-8'), usedforsecurity=False).hexdigest()[:12]
 
 
 def hash_sql(query: str) -> str:
@@ -228,9 +264,7 @@ def hash_sql(query: str) -> str:
     normalized = normalize_sql(query)
     # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
     # MD5 is used for query fingerprinting/deduplication, not cryptographic purposes
-    return hashlib.md5(
-        normalized.encode("utf-8")
-    ).hexdigest()[
+    return hashlib.md5(normalized.encode("utf-8"), usedforsecurity=False).hexdigest()[
         :12
     ]  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
 
@@ -560,8 +594,9 @@ def reconstruct_query_with_params(
 
     for i, value in enumerate(param_values):
         if isinstance(value, str):
-            # String parameters need quotes
-            replacement = f"'{value}'"
+            # String parameters need quotes; double any embedded quote so the
+            # value cannot terminate its own literal
+            replacement = "'" + value.replace("'", "''") + "'"
         else:
             # Numeric parameters don't need quotes
             replacement = str(value)
@@ -810,13 +845,21 @@ class QueryRegistry:
 
         canonical_sql = canonicalize_sql(sql)
 
-        # Procedural statements (PL/pgSQL DO blocks, CALL) are not analyzable
+        # Procedural and schema/privilege statements are not analyzable
         # queries; reject them with a clear reason instead of a parse error.
         first_keyword = re.match(r"\s*(\w+)", canonical_sql or "")
-        if first_keyword and first_keyword.group(1).upper() in ("DO", "CALL"):
+        if first_keyword and first_keyword.group(1).upper() in UNSTORABLE_LEAD_KEYWORDS:
             raise ValueError(
                 f"{first_keyword.group(1).upper()} statements can't be saved to "
                 "the registry; only plain SQL queries can be analyzed."
+            )
+
+        # Checked here rather than relying on verify_query_completeness because
+        # scan-sourced entries skip that check entirely.
+        if _statement_count(canonical_sql) > 1:
+            raise ValueError(
+                "Multiple statements in one entry can't be saved to the "
+                "registry; save one statement at a time."
             )
 
         # Enforce size limit for registry storage

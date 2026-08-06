@@ -10,8 +10,10 @@ import os
 import string
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+
+from shared.api.guards import require_local_request
 
 router = APIRouter()
 
@@ -50,7 +52,7 @@ def _windows_drive_entries() -> list[DirectoryEntry]:
 
 @router.get("/browse")
 async def browse_directory(
-    path: Optional[str] = None, ext: Optional[str] = None
+    request: Request, path: Optional[str] = None, ext: Optional[str] = None
 ) -> BrowseResponse:
     """List subdirectories (and optionally files) of a path for the picker UI.
 
@@ -61,6 +63,8 @@ async def browse_directory(
     Returns:
         Current path, parent path, sorted subdirectories, and matching files.
     """
+    require_local_request(request)
+
     if path:
         resolved = os.path.abspath(os.path.expanduser(path))
     else:

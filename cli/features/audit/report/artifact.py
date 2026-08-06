@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from shared.constants import rdst_data_dir
+from shared.persistence import is_safe_file_stem
 
 from ..storage import find_audit_run
 from .report import render_v3_fleet_html, render_v3_single_html
@@ -27,6 +28,9 @@ def reports_dir() -> Path:
 def save_report_locally(run_id: str, html: str) -> str | None:
     """Persist the report artifact for `run_id`. Best-effort: returns the
     path it wrote, or None when the write failed."""
+    if not is_safe_file_stem(run_id):
+        logger.warning("Refusing to save a report under run id %r", run_id)
+        return None
     try:
         directory = reports_dir()
         directory.mkdir(parents=True, exist_ok=True)
@@ -63,6 +67,8 @@ def _capture_as_audit(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _read_saved_artifact(run_id: str) -> str | None:
+    if not is_safe_file_stem(run_id):
+        return None
     path = reports_dir() / f"{run_id}.html"
     try:
         if path.is_file():

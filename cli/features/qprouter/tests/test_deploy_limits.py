@@ -167,3 +167,46 @@ def test_demo_configs_use_container_dns(tmp_path):
     assert f'host = "qpdemo-readyset", port = {ports.readyset}' in qp_text
     assert "host.docker.internal" not in sqp_text
     assert "host.docker.internal" not in qp_text
+
+
+def test_containers_publish_on_loopback_for_a_local_daemon(monkeypatch):
+    # The demo stack ships fixed credentials and an unauthenticated ReadySet, so
+    # a local daemon must not expose any of it to the network.
+    for var in ("DOCKER_HOST", "DOCKER_CONTEXT", "RDST_DOCKER_REMOTE"):
+        monkeypatch.delenv(var, raising=False)
+    calls = _capture(monkeypatch)
+    ports = deploy.Ports(
+        pg=5432, readyset=5433, readyset_metrics=6034, sqp=6432, metrics=9090
+    )
+
+    deploy.deploy_postgres_baked("qpdemo-pg", ports.pg)
+    deploy.deploy_readyset(
+        "qpdemo-readyset",
+        ports.readyset,
+        ports.readyset_metrics,
+        ports.pg,
+        {"user": "u", "password": "p", "database": "d"},
+    )
+    deploy.deploy_sqp(
+        "qpdemo-sqp",
+        ports,
+        __import__("pathlib").Path("/tmp/c"),
+        __import__("pathlib").Path("/tmp/d"),
+    )
+
+    published = [p for cmd in calls for p in _flags(cmd, "-p")]
+    assert published
+    for mapping in published:
+        assert mapping.startswith("127.0.0.1:"), mapping
+
+
+def test_a_remote_daemon_keeps_publishing_on_its_own_interfaces(monkeypatch):
+    # A remote daemon is only reachable by address, so loopback would strand it.
+    monkeypatch.setenv("RDST_DOCKER_REMOTE", "true")
+    monkeypatch.setenv("RDST_DOCKER_PUBLISHED_HOST", "10.0.0.5")
+    calls = _capture(monkeypatch)
+
+    deploy.deploy_postgres_baked("qpdemo-pg", 5432)
+
+    (cmd,) = calls
+    assert _flags(cmd, "-p") == ["5432:5432"]

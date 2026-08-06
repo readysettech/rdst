@@ -4,6 +4,8 @@ import json
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404 - subprocess required for Docker/database operations
 from typing import Dict, Any, List, Set
 
+from shared.db_connection import quote_identifier
+
 
 def check_tables_have_data(
     container_name: str = None,
@@ -85,7 +87,7 @@ def check_tables_have_data(
             table_counts = {}
 
             for table in tables:
-                count_query = f"SELECT COUNT(*) FROM {table};"
+                count_query = f"SELECT COUNT(*) FROM {quote_identifier(table)};"
                 cmd = [
                     'docker', 'exec', container_name,
                     'psql',
@@ -342,7 +344,7 @@ def get_test_database_schema(
                     '-p' + target_config.get('password', 'testpassword'),
                     database,
                     '-N',
-                    '-e', f'SHOW CREATE TABLE {table};'
+                    '-e', f'SHOW CREATE TABLE {quote_identifier(table, "mysql")};'
                 ]
 
                 result = subprocess.run(

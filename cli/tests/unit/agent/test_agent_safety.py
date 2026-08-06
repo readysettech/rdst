@@ -102,6 +102,12 @@ class TestValidateReadOnly:
         assert ok is False
         assert "ALTER" in msg.upper()
 
+    def test_unparseable_sql_is_rejected(self):
+        """SQL that cannot be parsed cannot be shown to be read-only."""
+        ok, msg = validate_read_only("SELECT FROM WHERE ((( ;; )")
+        assert ok is False
+        assert msg
+
 
 class TestInjectLimit:
     """Tests for LIMIT injection."""

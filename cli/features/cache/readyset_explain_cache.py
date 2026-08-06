@@ -62,6 +62,18 @@ def explain_create_cache_readyset(
                 "error": "No query provided for Readyset analysis",
             }
 
+        # The query is interpolated into the EXPLAIN statement below and often
+        # originates in the registry, so only a single read-only statement is
+        # allowed through.
+        from features.query_registry.service import benchmark_read_only_reason
+
+        not_read_only = benchmark_read_only_reason(query)
+        if not_read_only:
+            return {
+                "success": False,
+                "error": f"This query cannot be cached. {not_read_only}",
+            }
+
         # Parse test_db_config if it's a JSON string
         if isinstance(test_db_config, str):
             test_db_config = json.loads(test_db_config)

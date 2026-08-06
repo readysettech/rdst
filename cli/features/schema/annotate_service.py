@@ -6,7 +6,11 @@ import asyncio
 from typing import Any, AsyncGenerator, Callable, Optional
 
 from shared.anthropic_env import validate_anthropic_key
-from shared.db_connection import postgres_connection_kwargs, resolve_connection_params
+from shared.db_connection import (
+    postgres_connection_kwargs,
+    quote_identifier,
+    resolve_connection_params,
+)
 
 from .semantic_layer import create_ai_annotator, create_semantic_layer_manager
 
@@ -318,7 +322,10 @@ class AnnotateService:
                     **postgres_connection_kwargs(params)
                 )
                 cursor = conn.cursor()
-                cursor.execute(f"SELECT * FROM {table_name} LIMIT %s", (sample_rows,))
+                cursor.execute(
+                    f"SELECT * FROM {quote_identifier(table_name)} LIMIT %s",
+                    (sample_rows,),
+                )
                 columns = [desc[0] for desc in cursor.description]
                 rows = cursor.fetchall()
                 conn.close()

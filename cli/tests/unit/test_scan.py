@@ -896,3 +896,25 @@ class TestSpinnerShowsFilePath:
         assert messages
         discovery_msg = messages[0]
         assert str(tmp_path) in discovery_msg
+
+
+class TestDiffFileContainment:
+    """`--diff` file lists come from git, which can name paths above the scan
+    root. Those must not be read."""
+
+    def test_paths_outside_the_scan_root_are_skipped(self, tmp_path):
+        from features.scan.cli.scan_context import ContextGatherer
+
+        root = tmp_path / "repo"
+        root.mkdir()
+        (root / "app.py").write_text(
+            "session.query(User).filter(User.id == 1).all()\n"
+        )
+        (tmp_path / "outside.py").write_text("session.query(Secret).all()\n")
+
+        context = ContextGatherer(str(root)).gather_context(
+            ["app.py", "../outside.py"]
+        )
+
+        assert list(context["query_files"]) == ["app.py"]
+        assert context["stats"]["skipped_outside_root"] == ["../outside.py"]

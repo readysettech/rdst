@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, Optional, Tuple
 
 from shared.config.targets import TargetsConfig
+from shared.query_safety import validate_query_safety
 from shared.workflow_manager import get_workflow_components
 
 from .events import (
@@ -125,6 +126,21 @@ class AnalyzeService:
         target_name = options.target
         target_config: Optional[Dict[str, Any]] = None
         try:
+            # Refuse unsafe SQL before anything else happens. The workflow runs
+            # the same check and raises, which is the backstop for every other
+            # caller, but reaching it costs a stack trace for what is a normal
+            # refusal -- and analyze executes what it is given, since EXPLAIN
+            # ANALYZE runs the statement rather than just planning it.
+            if input.sql:
+                safety = validate_query_safety(input.sql)
+                if not safety.get("safe"):
+                    issues = "; ".join(safety.get("issues") or []) or "failed safety validation"
+                    yield ErrorEvent(
+                        type="error",
+                        message=f"Refusing to analyze this query: {issues}",
+                    )
+                    return
+
             # Initial progress
             yield ProgressEvent(
                 type="progress",

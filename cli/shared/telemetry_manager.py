@@ -51,6 +51,20 @@ def _get_sentry():
     return _sentry_sdk if _sentry_sdk else None
 
 
+def _sentry_before_send(event, hint):
+    """Strip the payloads that carry credentials: request bodies, and the local
+    variables of every captured frame (connection URLs, resolved passwords)."""
+    try:
+        event.pop("request", None)
+        for group in ("exception", "threads"):
+            for entry in (event.get(group) or {}).get("values") or []:
+                for frame in (entry.get("stacktrace") or {}).get("frames") or []:
+                    frame.pop("vars", None)
+    except Exception:
+        return None
+    return event
+
+
 def _get_requests():
     global _requests
     if _requests is None:
@@ -151,14 +165,17 @@ class TelemetryManager:
     - Privacy controls (opt-out via env var or config)
     """
 
-    # Configuration
-    # PostHog write-only ingest key — safe to embed (cannot read data, only write events)
-    # Override via RDST_POSTHOG_KEY env var if needed
+    # Configuration, overridable via the environment.
+    # RDST_POSTHOG_KEY: PostHog project key. Write-only ingest key by design
+    # (cannot read data), so it ships in source like any client-side analytics
+    # key. Setting it empty disables telemetry entirely.
     # RDST_SENTRY_DSN: Sentry DSN for crash reporting
+    # RDST_INTERNAL_PROBE_URL: host that answers only from inside the company
+    # network; unresolvable elsewhere. Empty skips the internal-install probe.
     POSTHOG_API_KEY = os.environ.get("RDST_POSTHOG_KEY", "phc_WPINnbS1CUiADz01QFeDZCr4Wn7jXfNPxe1EK0V2ZzP")
     POSTHOG_HOST = "https://us.i.posthog.com"
     SENTRY_DSN = os.environ.get("RDST_SENTRY_DSN", "")
-    INTERNAL_INSTALL_PROBE_URL = "http://readyset-canary/"
+    INTERNAL_INSTALL_PROBE_URL = os.environ.get("RDST_INTERNAL_PROBE_URL", "http://readyset-canary/")
     INTERNAL_INSTALL_REQUEST_TIMEOUT = (1, 1)
     INTERNAL_INSTALL_TOTAL_TIMEOUT_SECONDS = 2
     BACKGROUND_FLUSH_TIMEOUT_SECONDS = 5
@@ -210,6 +227,8 @@ class TelemetryManager:
                         traces_sample_rate=0.1,
                         environment=os.environ.get("RDST_ENV", "production"),
                         release=self._get_version(),
+                        include_local_variables=False,
+                        before_send=_sentry_before_send,
                     )
                     # Set user context with device_id
                     sentry.set_user({"id": self.device_id})
@@ -785,7 +804,10 @@ class TelemetryManager:
     # =========================================================================
 
     def _detect_internal_user(self) -> bool:
-        """Probe the tailnet canary with a hard overall deadline."""
+        """Probe the internal canary with a hard overall deadline."""
+        if not self.INTERNAL_INSTALL_PROBE_URL:
+            return False
+
         deadline = time.monotonic() + self.INTERNAL_INSTALL_TOTAL_TIMEOUT_SECONDS
         done = threading.Event()
         result = False

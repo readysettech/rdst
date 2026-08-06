@@ -12,6 +12,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+PROBE_URL = "http://internal-probe.example/"
+
+
 @pytest.fixture(autouse=True)
 def _no_trial_token_leak():
     """The registration flows under test export RDST_TRIAL_TOKEN; restore the
@@ -85,6 +88,10 @@ class TestInstallationTracking:
         tm._initialized = True
         tm._device_id = "test-device-id"
         tm._get_auth_type = MagicMock(return_value="none")
+        # The ingest key and probe host come from the environment, which only a
+        # release build sets; stand in for one so the send paths stay exercised.
+        tm.POSTHOG_API_KEY = "phc_test_key"
+        tm.INTERNAL_INSTALL_PROBE_URL = PROBE_URL
         return tm
 
     @staticmethod
@@ -147,11 +154,33 @@ class TestInstallationTracking:
 
         assert session.trust_env is False
         session.head.assert_called_once_with(
-            "http://readyset-canary/",
+            PROBE_URL,
             allow_redirects=False,
             timeout=(1, 1),
         )
         session.close.assert_called_once()
+
+    def test_unset_probe_url_skips_the_network_entirely(self, temp_rdst_dir):
+        tm = self._make_tm(temp_rdst_dir)
+        tm.INTERNAL_INSTALL_PROBE_URL = ""
+        requests, session = self._mock_requests()
+
+        with patch("shared.telemetry_manager._get_requests", return_value=requests):
+            assert tm._detect_internal_user() is False
+
+        session.head.assert_not_called()
+
+    def test_unset_ingest_key_sends_nothing(self, temp_rdst_dir):
+        tm = self._make_tm(temp_rdst_dir)
+        tm.POSTHOG_API_KEY = ""
+        posthog = MagicMock()
+
+        with patch("shared.telemetry_manager._get_posthog", return_value=posthog):
+            tm.track("installation", {"source": "cli"})
+            tm.flush()
+
+        posthog.capture.assert_not_called()
+        posthog.identify.assert_not_called()
 
     @pytest.mark.parametrize("status_code", [302, 503])
     def test_tailnet_probe_rejects_unexpected_response(

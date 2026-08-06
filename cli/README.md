@@ -1,19 +1,40 @@
-# RDST - Readyset Data and SQL Toolkit
+<div align="center">
 
-A command-line tool for database diagnostics, query analysis, performance tuning, and caching optimization with Readyset.
+<img src="docs/assets/rdst-banner.svg" alt="RDST - the Readyset Data and SQL Toolkit" width="100%"/>
 
-## What is RDST?
+<p>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"/></a>
+  <img src="https://img.shields.io/badge/platform-macOS_%7C_Linux_%7C_Windows-lightgrey" alt="Platforms"/>
+  <img src="https://img.shields.io/badge/databases-PostgreSQL_%7C_MySQL-336791" alt="PostgreSQL and MySQL"/>
+  <a href="https://readyset.io/docs/readyset-ai/rdst/cli"><img src="https://img.shields.io/badge/docs-readyset.io-4cc38a" alt="Documentation"/></a>
+  <a href="https://readyset.io/downloads"><img src="https://img.shields.io/badge/desktop-download-6e56cf" alt="Download RDST Desktop"/></a>
+</p>
 
-RDST helps you:
-- Analyze SQL queries for caching opportunities
-- Identify slow queries in real-time
-- Get optimization suggestions
-- Evaluate query compatibility with Readyset cache
-- Manage database connection profiles
+**Find slow queries, analyze them, and fix them — from your terminal.**
+
+</div>
+
+RDST is a command-line toolkit for database diagnostics, query analysis,
+performance tuning, and caching with [Readyset](https://readyset.io). Point it
+at PostgreSQL or MySQL and it finds your slow queries, explains *why* they are
+slow, and shows what an index, a rewrite, or a Readyset cache would do about it.
+
+## Highlights
+
+- **`rdst top`** — live view of the slowest queries hitting your database
+- **`rdst analyze`** — EXPLAIN-driven analysis with AI index and rewrite recommendations, plus a real Readyset cache benchmark (`--readyset-cache`)
+- **`rdst ask`** — ask questions about your data in natural language; guarded, read-only SQL generation
+- **`rdst audit` / `rdst fleet`** — deep health audits of one database or a whole fleet
+- **`rdst scan`** — find ORM queries (SQLAlchemy, Django, Prisma, Drizzle) in your codebase and flag performance issues, deterministic and CI-friendly
+- **`rdst demo`** — try everything against a local demo database in one command
+- **MCP built in** — `rdst claude add` registers RDST as an MCP server so Claude Code can use your targets
 
 ## Installation
 
-Install RDST on macOS or Linux without sudo, pip, or a preinstalled Python:
+Prefer an app? **[RDST Desktop](https://readyset.io/downloads)** packages the
+same toolkit with a graphical client for macOS, Windows, and Linux.
+
+Install the RDST CLI on macOS or Linux without sudo, pip, or a preinstalled Python:
 
 ```bash
 curl -fsSL https://downloads.readyset.io/packages/rdst-cli/install.sh | sh
@@ -86,76 +107,77 @@ $env:RDST_DOCKER_UPSTREAM_HOST = "192.168.122.222"
 `RDST_DOCKER_UPSTREAM_HOST` is where containers reach a database running on the
 Windows client. The database must listen on that routable address.
 
-## Quick Start
+## Quick start
 
-1. **Initialize RDST:**
+1. **Initialize RDST** — the wizard walks you through your first target:
    ```bash
    rdst init
-   # Or with uvx (no installation needed):
-   uvx rdst init
    ```
 
-2. **Configure database connection:**
+2. **Or configure a database target directly:**
    ```bash
-   rdst configure add-target mydb \
-     --host localhost \
+   rdst configure add --target mydb \
+     --host db.example.com \
      --port 5432 \
      --database myapp \
-     --user postgres
+     --user postgres \
+     --password-env MYDB_PASSWORD
+   ```
+   Passwords are never stored in config files — RDST reads them from the
+   environment variable you name, or the OS keychain.
+
+3. **Watch what's slow:**
+   ```bash
+   rdst top --target mydb
    ```
 
-3. **Analyze queries:**
+4. **Analyze a query:**
    ```bash
-   # Analyze a specific query
-   rdst analyze "SELECT * FROM users WHERE active = true"
+   rdst analyze -q "SELECT * FROM users WHERE active = true" --target mydb
 
-   # With uvx:
-   uvx rdst analyze "SELECT * FROM users WHERE active = true"
-
-   # Analyze with Readyset cache evaluation
-   rdst analyze --readyset-cache "SELECT * FROM products ORDER BY created_at"
+   # Verify with a temporary Readyset performance test
+   rdst analyze -q "SELECT * FROM products ORDER BY created_at" --readyset-cache
    ```
 
-4. **Monitor slow queries:**
+5. **Audit health** — one target or the whole fleet:
    ```bash
-   rdst top
-   # Or: uvx rdst top
-   ```
-
-5. **Audit your fleet:**
-   ```bash
-   # Snapshot all ReadySet clusters and audit their health
+   rdst audit --target mydb
    rdst fleet audit --target prod
-
-   # Import clusters from your infrastructure
-   rdst fleet import --target prod
    ```
+   See the [fleet audit docs](https://readyset.io/docs/readyset-ai/rdst/fleet-and-audit/fleet-audit).
 
-   Fleet audit checks cache utilization, query support, and configuration
-   across your ReadySet deployments. See the
-   [fleet audit docs](https://readyset.io/docs/readyset-ai/rdst/fleet-and-audit/fleet-audit)
-   for more.
+No database handy? `rdst demo setup` starts a local demo database to explore with.
 
 ## Commands
 
-All commands can be run with `rdst` (if installed) or `uvx rdst` (no installation):
+| Command | Description |
+| --- | --- |
+| `rdst top` | Monitor slow queries in real time |
+| `rdst analyze` | Analyze SQL query performance and caching opportunities |
+| `rdst ask` | Ask questions about your database in natural language |
+| `rdst agent` | Manage and run data agents with safety policies |
+| `rdst init` | First-time setup wizard |
+| `rdst configure` | Manage database targets and connection profiles |
+| `rdst tunnel` | List, close, and test SSH tunnels |
+| `rdst schema` | Manage the semantic layer that improves SQL generation |
+| `rdst query` | Manage the saved-query registry |
+| `rdst guard` | Manage reusable safety policies |
+| `rdst audit` | Run a deep health audit of a database target |
+| `rdst fleet` | Manage and audit database fleets |
+| `rdst scan` | Scan a codebase for ORM queries (experimental) |
+| `rdst demo` | Try RDST with a demo database |
+| `rdst claude` | Register RDST with Claude Code (MCP) |
+| `rdst slack` | Deploy a Slack bot for database queries |
+| `rdst web` | Start the RDST web server and client |
+| `rdst report` | Submit feedback or bug reports |
+| `rdst help` | Show help, or answer a question (`rdst help "..."`) |
+| `rdst update` | Check for and install RDST updates |
+| `rdst version` | Show version information |
 
-- `rdst analyze` - Analyze SQL queries and evaluate caching opportunities
-- `rdst top` - Live view of slow queries
-- `rdst ask` - Natural language to SQL queries
-- `rdst scan` - Scan codebases for ORM queries and analyze performance
-- `rdst fleet audit` - Audit ReadySet cluster health and cache utilization
-- `rdst fleet import` - Import ReadySet clusters from your infrastructure
-- `rdst schema` - Manage the semantic layer for better query generation
-- `rdst query` - Manage query registry
-- `rdst configure` - Manage database targets and connection profiles
-- `rdst init` - First-time setup wizard
-- `rdst version` - Show version information
+Run `rdst <command> --help` for options and examples.
 
-**Example with uvx:**
-```bash
-uvx rdst analyze "SELECT * FROM orders WHERE status = 'pending'"
-```
+AI-assisted commands (`ask`, `analyze` insights, `schema annotate`) use your
+`ANTHROPIC_API_KEY`, or a free trial you can start with `rdst configure llm`.
 
 ## Requirements
 
@@ -166,14 +188,17 @@ uvx rdst analyze "SELECT * FROM orders WHERE status = 'pending'"
 
 ## About Readyset
 
-Readyset is a SQL caching engine that sits between your application and database, automatically caching query results to improve performance. Learn more at [readyset.io](https://readyset.io).
+Readyset is a SQL caching engine that sits between your application and your
+database, keeping query results up to date as the underlying data changes.
+Learn more at [readyset.io](https://readyset.io).
 
-## Documentation
+## Documentation and support
 
-- [Readyset Documentation](https://docs.readyset.io)
-- [GitHub Repository](https://github.com/readysettech/readyset)
-- [Report Issues](https://github.com/readysettech/readyset/issues)
+- [RDST Documentation](https://readyset.io/docs/readyset-ai/rdst/cli)
+- [Download RDST Desktop](https://readyset.io/downloads)
+- [Report Issues](https://github.com/readysettech/rdst/issues)
+- [Security policy](SECURITY.md)
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License — see [LICENSE](LICENSE) for details.

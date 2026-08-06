@@ -13,12 +13,15 @@ from features.cache.readyset_workflow_functions import (
 )
 from features.schema.schema_collector import collect_target_schema
 from features.schema.schema_from_yaml import collect_schema_from_yaml
-from shared.query_safety import validate_query_safety
-from .workflow_integration import format_analysis_output, store_analysis_results
+from .workflow_integration import (
+    enforce_query_safety,
+    format_analysis_output,
+    store_analysis_results,
+)
 from shared.query_parameterization import normalize_for_registry, parameterize_for_llm
 
 ANALYZE_WORKFLOW_FUNCTIONS = {
-    "validate_query_safety": validate_query_safety,
+    "validate_query_safety": enforce_query_safety,
     "parameterize_for_llm": parameterize_for_llm,
     "normalize_for_registry": normalize_for_registry,
     "execute_explain_analyze": execute_explain_analyze,

@@ -13,6 +13,15 @@ from typing import Any
 
 import requests
 
+# Cache names come back from SHOW CACHES / are built from a fingerprint and are
+# interpolated into DDL, so they are restricted to bare identifiers.
+_CACHE_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _require_cache_name(name: str) -> None:
+    if not _CACHE_NAME_RE.match(name or ""):
+        raise ValueError(f"Invalid ReadySet cache name: {name!r}")
+
 
 class ReadysetClient:
     def __init__(self, host: str, port: int, user: str = "sqp_user",
@@ -38,6 +47,16 @@ class ReadysetClient:
         return conn
 
     def create_cache(self, sql: str, name: str | None = None) -> None:
+        # ``sql`` is digest text SQP observed on the wire and ``name`` is derived
+        # from a fingerprint; both are interpolated into DDL, so neither may
+        # carry a second statement or a non-identifier character.
+        from features.query_registry.service import benchmark_read_only_reason
+
+        not_read_only = benchmark_read_only_reason(sql)
+        if not_read_only:
+            raise ValueError(f"Refusing to cache this query: {not_read_only}")
+        if name is not None:
+            _require_cache_name(name)
         stmt = f"CREATE CACHE {name} FROM {sql}" if name else f"CREATE CACHE FROM {sql}"
         conn = self._connect()
         try:
@@ -47,6 +66,7 @@ class ReadysetClient:
             conn.close()
 
     def drop_cache(self, name: str) -> None:
+        _require_cache_name(name)
         conn = self._connect()
         try:
             with conn.cursor() as cur:

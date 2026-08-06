@@ -17,6 +17,35 @@ def normalize_engine_name(engine: str) -> str:
     return value
 
 
+def quote_identifier(name: str, engine: str = "postgresql") -> str:
+    """
+    Quote a SQL identifier (table, column, or schema name) for the given engine.
+
+    Identifiers cannot be bound as query parameters, so any name that reaches a
+    query string has to be quoted for the dialect. MySQL uses backticks, every
+    other supported engine uses the SQL-standard double quote; in both cases an
+    embedded quote character is escaped by doubling it.
+
+    Args:
+        name: Identifier to quote
+        engine: Engine name or alias (see normalize_engine_name)
+
+    Returns:
+        The identifier wrapped in the dialect's quote character
+
+    Raises:
+        ValueError: If name is empty or contains a NUL byte
+    """
+    if not name:
+        raise ValueError("SQL identifier must be a non-empty string")
+    if "\x00" in name:
+        raise ValueError("SQL identifier must not contain a NUL byte")
+
+    if normalize_engine_name(engine) == "mysql":
+        return "`" + name.replace("`", "``") + "`"
+    return '"' + name.replace('"', '""') + '"'
+
+
 def resolve_connection_params(
     target: Optional[str] = None,
     target_config: Optional[Dict[str, Any]] = None,
@@ -177,19 +206,40 @@ def create_direct_connection(
         raise ValueError("Password not available for target")
 
     if engine == 'postgresql':
-        return _create_postgres_connection(
+        conn = _create_postgres_connection(
             host, port, user, password, database, use_tls,
             tls_verify=tls_verify, tls_ca=tls_ca,
             hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
         )
     elif engine == 'mysql':
-        return _create_mysql_connection(
+        conn = _create_mysql_connection(
             host, port, user, password, database, use_tls,
             tls_verify=tls_verify, tls_ca=tls_ca,
             hostaddr=params.get('hostaddr'), connect_timeout=connect_timeout,
         )
     else:
         raise ValueError(f"Unsupported database engine: {engine}")
+
+    if params.get('read_only'):
+        apply_read_only_session(conn, engine)
+    return conn
+
+
+def apply_read_only_session(connection, engine: str) -> None:
+    """Put the session into read-only mode for a target marked read_only.
+
+    This is the only control here the database itself enforces; everything
+    else inspects SQL as text and can be argued with. A target the user has
+    declared read-only should refuse writes even if something upstream builds
+    a statement nobody intended.
+    """
+    if engine == 'postgresql':
+        # Native psycopg2 API; must run before any transaction is open, which
+        # is the case on a connection that has just been handed back.
+        connection.set_session(readonly=True)
+    elif engine == 'mysql':
+        with connection.cursor() as cursor:
+            cursor.execute("SET SESSION TRANSACTION READ ONLY")
 
 
 def postgres_ssl_kwargs(params: Dict[str, Any]) -> Dict[str, Any]:

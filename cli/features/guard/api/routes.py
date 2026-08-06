@@ -10,8 +10,10 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+
+from shared.api.guards import require_local_request
 
 from features.guard import (
     GuardConfig,
@@ -199,16 +201,20 @@ def _config_to_summary(config: GuardConfig) -> GuardSummary:
 
 
 @router.get("")
-async def list_guards() -> GuardListResponse:
+async def list_guards(http_request: Request) -> GuardListResponse:
     """List all guards with summary info."""
+    require_local_request(http_request)
+
     manager = GuardManager()
     summaries = [_config_to_summary(cfg) for cfg in manager.list_configs()]
     return GuardListResponse(guards=summaries, count=len(summaries))
 
 
 @router.get("/{name}")
-async def get_guard(name: str) -> GuardDetail:
+async def get_guard(http_request: Request, name: str) -> GuardDetail:
     """Get full guard configuration."""
+    require_local_request(http_request)
+
     try:
         config = GuardManager().get(name)
     except GuardNotFoundError:
@@ -217,12 +223,16 @@ async def get_guard(name: str) -> GuardDetail:
 
 
 @router.post("")
-async def create_guard(detail: GuardDetail) -> GuardWriteResponse:
+async def create_guard(
+    http_request: Request, detail: GuardDetail
+) -> GuardWriteResponse:
     """Create a guard from an explicit configuration.
 
     Intent-derived configs from POST /guards/derive are saved through here
     after the user reviews them.
     """
+    require_local_request(http_request)
+
     config = _detail_to_config(detail)
     try:
         path = GuardManager().create(config)
@@ -236,8 +246,12 @@ async def create_guard(detail: GuardDetail) -> GuardWriteResponse:
 
 
 @router.put("/{name}")
-async def update_guard(name: str, detail: GuardDetail) -> GuardWriteResponse:
+async def update_guard(
+    http_request: Request, name: str, detail: GuardDetail
+) -> GuardWriteResponse:
     """Replace a guard's configuration. The name is immutable."""
+    require_local_request(http_request)
+
     if detail.name != name:
         raise HTTPException(
             status_code=400,
@@ -251,8 +265,10 @@ async def update_guard(name: str, detail: GuardDetail) -> GuardWriteResponse:
 
 
 @router.delete("/{name}")
-async def delete_guard(name: str) -> GuardWriteResponse:
+async def delete_guard(http_request: Request, name: str) -> GuardWriteResponse:
     """Delete a guard."""
+    require_local_request(http_request)
+
     try:
         GuardManager().delete(name)
     except GuardNotFoundError:
@@ -261,12 +277,16 @@ async def delete_guard(name: str) -> GuardWriteResponse:
 
 
 @router.post("/derive")
-async def derive_guard(request: GuardDeriveRequest) -> GuardDetail:
+async def derive_guard(
+    http_request: Request, request: GuardDeriveRequest
+) -> GuardDetail:
     """Derive guard rules from a natural-language intent (preview only).
 
     Returns the proposed configuration without saving it; the client reviews
     or edits the rules and saves via POST /guards.
     """
+    require_local_request(http_request)
+
     try:
         config = await asyncio.to_thread(
             derive_rules_from_intent,
@@ -282,12 +302,16 @@ async def derive_guard(request: GuardDeriveRequest) -> GuardDetail:
 
 
 @router.post("/{name}/check")
-async def check_guard(name: str, request: GuardCheckRequest) -> GuardCheckResponse:
+async def check_guard(
+    http_request: Request, name: str, request: GuardCheckRequest
+) -> GuardCheckResponse:
     """Validate SQL against a guard.
 
     With a target, EXPLAIN-backed checks (cost_limit, max_estimated_rows)
     run against the database; without one they are skipped, matching the CLI.
     """
+    require_local_request(http_request)
+
     try:
         config = GuardManager().get(name)
     except GuardNotFoundError:

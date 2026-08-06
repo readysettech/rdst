@@ -1,6 +1,6 @@
 """Interactive API routes for RDST web client."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi_ai_sdk import create_ai_stream_response
 from fastapi_ai_sdk.models import (
     ErrorEvent,
@@ -17,6 +17,7 @@ from features.interactive.events import (
     InteractiveErrorEvent,
 )
 from features.interactive.service import InteractiveService
+from shared.api.guards import require_local_request
 from shared.api.models import (
     ConversationHistoryResponse,
     ConversationStatusResponse,
@@ -29,14 +30,22 @@ router = APIRouter()
 
 
 @router.get("/interactive/{query_hash}/status")
-async def get_conversation_status(query_hash: str) -> ConversationStatusResponse:
+async def get_conversation_status(
+    http_request: Request, query_hash: str
+) -> ConversationStatusResponse:
+    require_local_request(http_request)
+
     service = InteractiveService()
     status = service.get_conversation_status(query_hash)
     return ConversationStatusResponse(**status)
 
 
 @router.get("/interactive/{query_hash}/history")
-async def get_conversation_history(query_hash: str) -> ConversationHistoryResponse:
+async def get_conversation_history(
+    http_request: Request, query_hash: str
+) -> ConversationHistoryResponse:
+    require_local_request(http_request)
+
     service = InteractiveService()
     history = service.get_conversation_history(query_hash)
     messages = [MessageResponse(**msg) for msg in history]
@@ -44,7 +53,11 @@ async def get_conversation_history(query_hash: str) -> ConversationHistoryRespon
 
 
 @router.post("/interactive/{query_hash}/message")
-async def send_message(query_hash: str, request: InteractiveMessageRequest):
+async def send_message(
+    http_request: Request, query_hash: str, request: InteractiveMessageRequest
+):
+    require_local_request(http_request)
+
     async def event_generator():
         text_id = f"txt_{query_hash}"
         yield StartEvent(message_id=f"msg_{query_hash}").to_sse()
@@ -76,7 +89,11 @@ async def send_message(query_hash: str, request: InteractiveMessageRequest):
 
 
 @router.delete("/interactive/{query_hash}")
-async def delete_conversation(query_hash: str) -> DeleteResponse:
+async def delete_conversation(
+    http_request: Request, query_hash: str
+) -> DeleteResponse:
+    require_local_request(http_request)
+
     service = InteractiveService()
     success = service.delete_conversation(query_hash)
     return DeleteResponse(success=success)

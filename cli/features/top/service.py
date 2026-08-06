@@ -975,7 +975,7 @@ class TopService:
         except ImportError:
             import hashlib
 
-            return hashlib.md5(query_text.encode()).hexdigest()[:12]
+            return hashlib.md5(query_text.encode(), usedforsecurity=False).hexdigest()[:12]
 
     async def _load_existing_registry_hashes(self) -> Set[str]:
         """Load existing query hashes from registry."""

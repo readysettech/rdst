@@ -1763,7 +1763,7 @@ class ScanCommand:
             import subprocess
             try:
                 result = subprocess.run(
-                    ["git", "diff", "--name-only", diff],
+                    ["git", "diff", "--name-only", diff, "--"],
                     capture_output=True,
                     text=True,
                     cwd=directory,

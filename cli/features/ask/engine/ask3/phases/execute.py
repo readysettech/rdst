@@ -49,6 +49,22 @@ def execute_query(
         presenter.error("No target configuration")
         return ctx
 
+    # The validate phase covers the linear flow only: agent escalation and direct
+    # agent mode hand their own SQL straight to execution. Validate here so every
+    # path is gated at the point of no return.
+    from features.ask.sql_validation import validate_sql_for_ask
+
+    validation = validate_sql_for_ask(
+        sql=ctx.sql, max_limit=1000, default_limit=ctx.max_rows
+    )
+    if not validation.get('is_valid'):
+        message = "SQL validation failed: " + "; ".join(validation.get('issues', []))
+        ctx.mark_error(message)
+        presenter.error(message)
+        return ctx
+
+    ctx.sql = validation.get('validated_sql', ctx.sql)
+
     start_time = time.time()
 
     try:

@@ -237,6 +237,18 @@ class TestReconstructQueryWithParams:
 
         assert "'Test'" in result
 
+    def test_embedded_quote_cannot_terminate_the_literal(self):
+        """A quote inside a value is doubled, so the value stays one literal."""
+        parameterized = "SELECT * FROM users WHERE name = ?"
+        params = {"param_0": "O'Brien'; DROP TABLE users --"}
+
+        result = reconstruct_query_with_params(parameterized, params)
+
+        assert result == (
+            "SELECT * FROM users WHERE name = "
+            "'O''Brien''; DROP TABLE users --'"
+        )
+
 
 class TestQueryEntry:
     """Tests for the QueryEntry dataclass."""
@@ -329,6 +341,40 @@ class TestProceduralStatementRejection:
 
         with pytest.raises(ValueError, match="CALL statements can't be saved"):
             registry.add_query(sql="CALL refresh_stats()", source="top", target="pgtest")
+
+    def test_stacked_statements_rejected(self, temp_dir):
+        """Stacked SQL must not be stored whole and replayed at re-execution sinks."""
+        registry = QueryRegistry(registry_path=str(Path(temp_dir) / "queries.toml"))
+
+        with pytest.raises(ValueError, match="Multiple statements"):
+            registry.add_query(sql="SELECT 1; DROP TABLE users", source="top")
+
+    def test_stacked_statements_rejected_when_extraction_skipped(self, temp_dir):
+        """Scan-sourced entries skip completeness checking but not this one."""
+        registry = QueryRegistry(registry_path=str(Path(temp_dir) / "queries.toml"))
+
+        with pytest.raises(ValueError, match="Multiple statements"):
+            registry.add_query(
+                sql="SELECT 1; DROP TABLE users",
+                source="scan",
+                skip_param_extraction=True,
+            )
+
+    def test_schema_changing_statement_rejected(self, temp_dir):
+        registry = QueryRegistry(registry_path=str(Path(temp_dir) / "queries.toml"))
+
+        with pytest.raises(ValueError, match="DROP statements can't be saved"):
+            registry.add_query(sql="DROP TABLE users", source="top")
+
+    def test_captured_dml_is_still_storable(self, temp_dir):
+        """`rdst top` legitimately captures write traffic for reporting."""
+        registry = QueryRegistry(registry_path=str(Path(temp_dir) / "queries.toml"))
+
+        query_hash, is_new = registry.add_query(
+            sql="UPDATE orders SET status = 'shipped' WHERE id = 7", source="top"
+        )
+        assert is_new is True
+        assert query_hash
 
 
 class TestQueryRegistry:

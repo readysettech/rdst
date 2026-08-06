@@ -251,6 +251,11 @@ class CacheCommands:
                     # SHOW PROXIED QUERIES: (query_id, query_text, supported, count)
                     proxied_text = str(row[1])
                     proxied_id = str(row[0])
+                    # The id is server output that gets interpolated into DDL
+                    # below; anything but a bare identifier falls through to
+                    # the SQL-based path.
+                    if not _re.match(r'^[a-zA-Z0-9_]+$', proxied_id):
+                        continue
                     if _norm(proxied_text) == query_norm:
                         # Match found — create cache directly using query ID
                         # (bypass CacheService which would fail static check on ID)

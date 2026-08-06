@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from shared.db_connection import quote_identifier
+
 from .pattern_detector import (
     detect_delimiter_columns_sql_postgres,
     detect_delimiter_columns_sql_mysql,
@@ -149,13 +151,15 @@ class DataProfiler:
 
         parts = []
         for col in col_names:
+            q = quote_identifier(col)
             parts.append(
-                f'COUNT("{col}") AS "{col}__cnt", '
-                f'COUNT(DISTINCT "{col}") AS "{col}__dist", '
-                f'SUM(CASE WHEN "{col}" IS NULL THEN 1 ELSE 0 END) AS "{col}__nulls"'
+                f'COUNT({q}) AS {quote_identifier(col + "__cnt")}, '
+                f'COUNT(DISTINCT {q}) AS {quote_identifier(col + "__dist")}, '
+                f'SUM(CASE WHEN {q} IS NULL THEN 1 ELSE 0 END) AS {quote_identifier(col + "__nulls")}'
             )
 
-        sql = f'SELECT COUNT(*) AS __total, {", ".join(parts)} FROM "{table_name}"{sample_clause}'
+        table = quote_identifier(table_name)
+        sql = f'SELECT COUNT(*) AS __total, {", ".join(parts)} FROM {table}{sample_clause}'
         cur.execute(sql)
         row = cur.fetchone()
         if not row:
@@ -192,13 +196,15 @@ class DataProfiler:
             pct = min(100.0, max(1.0, (20_000 / row_estimate) * 100))
             sample_clause = f" TABLESAMPLE SYSTEM({pct})"
 
+        table = quote_identifier(table_name)
         for col in interesting:
+            q = quote_identifier(col)
             try:
                 cur.execute(
-                    f'SELECT "{col}"::text, COUNT(*) AS cnt '
-                    f'FROM "{table_name}"{sample_clause} '
-                    f'WHERE "{col}" IS NOT NULL '
-                    f'GROUP BY "{col}" ORDER BY cnt DESC LIMIT 10'
+                    f'SELECT {q}::text, COUNT(*) AS cnt '
+                    f'FROM {table}{sample_clause} '
+                    f'WHERE {q} IS NOT NULL '
+                    f'GROUP BY {q} ORDER BY cnt DESC LIMIT 10'
                 )
                 rows = cur.fetchall()
                 cp = profile.columns.setdefault(
@@ -220,7 +226,7 @@ class DataProfiler:
         try:
             cur2 = cur.connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur2.execute(
-                f'SELECT * FROM "{table_name}"{sample_clause} LIMIT {sample_rows}'
+                f'SELECT * FROM {quote_identifier(table_name)}{sample_clause} LIMIT {int(sample_rows)}'
             )
             profile.sample_rows = [
                 {k: _safe_str(v) for k, v in dict(row).items()}
@@ -299,20 +305,22 @@ class DataProfiler:
 
         parts = []
         for col in col_names:
+            q = quote_identifier(col, "mysql")
             parts.append(
-                f'COUNT(`{col}`) AS `{col}__cnt`, '
-                f'COUNT(DISTINCT `{col}`) AS `{col}__dist`, '
-                f'SUM(CASE WHEN `{col}` IS NULL THEN 1 ELSE 0 END) AS `{col}__nulls`'
+                f'COUNT({q}) AS {quote_identifier(col + "__cnt", "mysql")}, '
+                f'COUNT(DISTINCT {q}) AS {quote_identifier(col + "__dist", "mysql")}, '
+                f'SUM(CASE WHEN {q} IS NULL THEN 1 ELSE 0 END) AS {quote_identifier(col + "__nulls", "mysql")}'
             )
 
+        table = quote_identifier(table_name, "mysql")
         if limit_clause:
-            inner_cols = ", ".join(f'`{c}`' for c in col_names)
+            inner_cols = ", ".join(quote_identifier(c, "mysql") for c in col_names)
             sql = (
                 f'SELECT COUNT(*) AS __total, {", ".join(parts)} '
-                f'FROM (SELECT {inner_cols} FROM `{table_name}`{limit_clause}) sampled'
+                f'FROM (SELECT {inner_cols} FROM {table}{limit_clause}) sampled'
             )
         else:
-            sql = f'SELECT COUNT(*) AS __total, {", ".join(parts)} FROM `{table_name}`'
+            sql = f'SELECT COUNT(*) AS __total, {", ".join(parts)} FROM {table}'
 
         cur.execute(sql)
         row = cur.fetchone()
@@ -344,20 +352,22 @@ class DataProfiler:
         if not interesting:
             return
 
+        table = quote_identifier(table_name, "mysql")
         for col in interesting:
+            q = quote_identifier(col, "mysql")
             try:
                 if row_estimate > 50_000:
                     cur.execute(
-                        f'SELECT CAST(`{col}` AS CHAR) AS val, COUNT(*) AS cnt '
-                        f'FROM (SELECT `{col}` FROM `{table_name}` LIMIT 20000) sampled '
-                        f'WHERE `{col}` IS NOT NULL '
+                        f'SELECT CAST({q} AS CHAR) AS val, COUNT(*) AS cnt '
+                        f'FROM (SELECT {q} FROM {table} LIMIT 20000) sampled '
+                        f'WHERE {q} IS NOT NULL '
                         f'GROUP BY val ORDER BY cnt DESC LIMIT 10'
                     )
                 else:
                     cur.execute(
-                        f'SELECT CAST(`{col}` AS CHAR) AS val, COUNT(*) AS cnt '
-                        f'FROM `{table_name}` '
-                        f'WHERE `{col}` IS NOT NULL '
+                        f'SELECT CAST({q} AS CHAR) AS val, COUNT(*) AS cnt '
+                        f'FROM {table} '
+                        f'WHERE {q} IS NOT NULL '
                         f'GROUP BY val ORDER BY cnt DESC LIMIT 10'
                     )
                 rows = cur.fetchall()
@@ -374,7 +384,9 @@ class DataProfiler:
 
         try:
             dict_cur = cur.connection.cursor(pymysql.cursors.DictCursor)
-            dict_cur.execute(f'SELECT * FROM `{table_name}` LIMIT {sample_rows}')
+            dict_cur.execute(
+                f'SELECT * FROM {quote_identifier(table_name, "mysql")} LIMIT {int(sample_rows)}'
+            )
             profile.sample_rows = [
                 {k: _safe_str(v) for k, v in row.items()}
                 for row in dict_cur.fetchall()

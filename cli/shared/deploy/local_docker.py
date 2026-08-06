@@ -14,6 +14,14 @@ MANAGED_SANDBOX_NAME = "rdst-readyset-sandbox"
 MANAGED_SANDBOX_LABEL = "io.readyset.rdst.sandbox"
 
 
+def publish_bind() -> str:
+    """Host-side interface for `docker run -p`. A local daemon publishes on
+    loopback: the Readyset proxy and its unauthenticated metrics endpoint are for
+    this machine only. A remote daemon is reached by address, so its ports stay on
+    the daemon's interfaces."""
+    return "" if DockerTopology.from_environment().remote else "127.0.0.1:"
+
+
 def docker_runtime_status() -> Dict[str, bool]:
     """Return whether the local Docker CLI and daemon are available."""
     if shutil.which("docker") is None:
@@ -225,8 +233,8 @@ def _create_container(
         "-e", f"READYSET_MEMORY_LIMIT={memory_bytes}",
         "-e", "DEFAULT_TTL_MS=600000",
         "-e", f"METRICS_ADDRESS=0.0.0.0:{variables.get('metrics_port', '6034')}",
-        "-p", f"{readyset_port}:{readyset_port}",
-        "-p", f"{variables.get('metrics_port', '6034')}:{variables.get('metrics_port', '6034')}",
+        "-p", f"{publish_bind()}{readyset_port}:{readyset_port}",
+        "-p", f"{publish_bind()}{variables.get('metrics_port', '6034')}:{variables.get('metrics_port', '6034')}",
         "--add-host=host.docker.internal:host-gateway",
         image,
     ]
@@ -520,9 +528,9 @@ def _create_container_command(
             "-e",
             f"METRICS_ADDRESS=0.0.0.0:{metrics_port}",
             "-p",
-            f"{readyset_port}:{readyset_port}",
+            f"{publish_bind()}{readyset_port}:{readyset_port}",
             "-p",
-            f"{metrics_port}:{metrics_port}",
+            f"{publish_bind()}{metrics_port}:{metrics_port}",
             "--add-host=host.docker.internal:host-gateway",
             variables["readyset_image"],
         ]

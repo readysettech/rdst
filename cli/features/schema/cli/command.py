@@ -8,6 +8,7 @@ from typing import Optional
 from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
+    quote_identifier,
     resolve_connection_params,
 )
 from shared.editor import resolve_editor_command
@@ -678,9 +679,9 @@ class SchemaCommand:
                     ) as cursor:
                         cursor.execute(
                             f"""
-                            SELECT * FROM "{table_name}"
+                            SELECT * FROM {quote_identifier(table_name)}
                             TABLESAMPLE SYSTEM(1)
-                            LIMIT {sample_rows}
+                            LIMIT {int(sample_rows)}
                         """
                         )
                         return [dict(row) for row in cursor.fetchall()]
@@ -699,7 +700,8 @@ class SchemaCommand:
                 try:
                     with conn.cursor() as cursor:
                         cursor.execute(
-                            f"SELECT * FROM `{table_name}` LIMIT {sample_rows}"
+                            f"SELECT * FROM {quote_identifier(table_name, 'mysql')} "
+                            f"LIMIT {int(sample_rows)}"
                         )
                         return cursor.fetchall()
                 finally:

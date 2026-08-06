@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import tempfile
 import time
 from collections.abc import Callable
@@ -13,6 +14,29 @@ from typing import Any
 
 import toml
 from filelock import FileLock
+
+_SAFE_FILE_STEM_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def is_safe_file_stem(value: str) -> bool:
+    """Whether ``value`` may be interpolated into a filename.
+
+    Snapshot, run, and report names arrive from CLI arguments and HTTP request
+    bodies, so a store must never let one carry a path separator or a parent
+    reference out of its directory.
+    """
+    if not value or value in {".", ".."}:
+        return False
+    return _SAFE_FILE_STEM_RE.fullmatch(value) is not None
+
+
+def require_safe_file_stem(value: str, kind: str = "name") -> str:
+    """Return ``value`` when it is a safe filename stem, else raise."""
+    if not is_safe_file_stem(value):
+        raise ValueError(
+            f"Invalid {kind} {value!r}: use letters, digits, '.', '_', or '-'"
+        )
+    return value
 
 
 def merge_mapping_changes(

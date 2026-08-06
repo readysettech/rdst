@@ -166,3 +166,86 @@ def test_non_loopback_host_header_with_loopback_origin_is_forbidden():
     )
 
     assert response.status_code == 403
+
+
+# Routes that spend money, touch the database, or rewrite the semantic-layer
+# YAML. Each must reject a request another page made, so this list is the
+# contract: a new state-changing route on these routers belongs here.
+GUARDED_WRITE_ROUTES = [
+    ("POST", "/api/analyze"),
+    ("POST", "/api/analyze/quick"),
+    ("POST", "/api/semantic-layer/refresh"),
+    ("POST", "/api/semantic-layer/profile"),
+    ("POST", "/api/semantic-layer/init"),
+    ("POST", "/api/semantic-layer/init/stream"),
+    ("DELETE", "/api/semantic-layer"),
+    ("POST", "/api/semantic-layer/table"),
+    ("POST", "/api/semantic-layer/column"),
+    ("POST", "/api/semantic-layer/enum"),
+    ("POST", "/api/semantic-layer/terminology"),
+    ("POST", "/api/semantic-layer/relationship"),
+    ("POST", "/api/semantic-layer/metric"),
+    ("POST", "/api/semantic-layer/annotate"),
+    ("POST", "/api/semantic-layer/annotation-runs"),
+]
+
+# One body carrying every required field on these routers' request models.
+# Pydantic ignores the extras, so a single payload clears validation
+# everywhere and the guard is what the assertion sees.
+WRITE_BODY = {
+    "target": "imdb",
+    "query": "SELECT 1",
+    "table_name": "movies",
+    "column_name": "title",
+    "description": "d",
+    "enum_values": {},
+    "term": "t",
+    "definition": "d",
+    "sql_pattern": "p",
+    "source_table": "movies",
+    "target_table": "actors",
+    "join_pattern": "j",
+    "name": "m",
+    "sql": "SELECT 1",
+}
+
+
+def _write_route_app() -> FastAPI:
+    from features.analyze.api import routes as analyze_routes
+    from features.schema.api import semantic_layer_routes
+    from shared.api.target_guard import (
+        TargetGuard,
+        require_target,
+        require_target_body,
+    )
+
+    app = FastAPI()
+    app.include_router(analyze_routes.router, prefix="/api")
+    app.include_router(semantic_layer_routes.router, prefix="/api")
+
+    async def target_guard() -> TargetGuard:
+        return TargetGuard("imdb", {"engine": "postgresql"}, "postgresql")
+
+    app.dependency_overrides[require_target] = target_guard
+    app.dependency_overrides[require_target_body] = target_guard
+    return app
+
+
+@pytest.mark.parametrize(("method", "path"), GUARDED_WRITE_ROUTES)
+def test_cross_site_page_cannot_drive_write_routes(method, path):
+    async def send() -> Response:
+        transport = ASGITransport(app=_write_route_app(), client=LOOPBACK_CLIENT)
+        async with AsyncClient(
+            transport=transport, base_url="http://127.0.0.1:8787"
+        ) as http:
+            return await http.request(
+                method,
+                path,
+                json=WRITE_BODY,
+                params={"target": "imdb"},
+                headers={"origin": "https://evil.example"},
+            )
+
+    response = asyncio.run(send())
+
+    assert response.status_code == 403, response.text

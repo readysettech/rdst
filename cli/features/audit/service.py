@@ -824,7 +824,7 @@ class AuditService:
                     from shared.query_registry import hash_sql
                     query_hash = hash_sql(text)[:12]
                 except Exception:
-                    query_hash = hashlib.md5(normalized.encode()).hexdigest()[:12]
+                    query_hash = hashlib.md5(normalized.encode(), usedforsecurity=False).hexdigest()[:12]
                 pct = round((total_ms / total_time) * 100, 1) if total_time > 0 else 0
                 queries.append(
                     {

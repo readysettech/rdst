@@ -31,11 +31,11 @@ classifiers = [
 ]
 dependencies = [
     "boto3",
-    "requests==2.31.0",
+    "requests>=2.33.0",
     "psycopg2-binary",
     "pymysql",
     "paramiko",
-    "cryptography",
+    "cryptography>=50.0.0",
     "py7zr",
     "pandas",
     "rich",
@@ -67,9 +67,9 @@ agent = [
 [project.urls]
 Homepage = "https://readyset.io"
 Documentation = "https://docs.readyset.io"
-Repository = "https://github.com/readysettech/readyset"
-Issues = "https://github.com/readysettech/readyset/issues"
-Changelog = "https://github.com/readysettech/readyset/releases"
+Repository = "https://github.com/readysettech/rdst"
+Issues = "https://github.com/readysettech/rdst/issues"
+Changelog = "https://github.com/readysettech/rdst/releases"
 
 [build-system]
 requires = ["hatchling"]

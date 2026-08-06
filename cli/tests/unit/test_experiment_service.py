@@ -475,6 +475,32 @@ async def test_unsupported_query_does_not_create_a_cache(experiment_stubs):
 
 
 @pytest.mark.asyncio
+async def test_non_read_only_query_never_reaches_the_sandbox(experiment_stubs):
+    """Request SQL is interpolated into cache DDL and executed on the origin."""
+    manager = _Manager()
+    cache = _Cache()
+    service = ReadysetExperimentService(manager, cache)
+
+    events = [
+        event
+        async for event in service.compare(
+            owner_id="speed_test_123",
+            target="origin",
+            query="SELECT 1; DROP TABLE users",
+            iterations=3,
+            warmup=1,
+        )
+    ]
+
+    assert any(
+        isinstance(event, ErrorEvent) and event.code == "speed_test_read_only"
+        for event in events
+    )
+    assert cache.statements == []
+    assert manager.acquired == []
+
+
+@pytest.mark.asyncio
 async def test_cancellation_during_create_waits_then_drops_under_lease(
     experiment_stubs
 ):

@@ -1,10 +1,11 @@
 import json
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from shared.api.guards import require_local_request
 from shared.api.models import AnalyzeRequest
 from shared.api.target_guard import TargetGuard, require_target_body
 from shared.telemetry import telemetry
@@ -185,7 +186,13 @@ async def _quick_analyze_generator(
 
 
 @router.post("/analyze")
-async def analyze(request: AnalyzeRequest, guard: TargetGuard = Depends(require_target_body)):
+async def analyze(
+    http_request: Request,
+    request: AnalyzeRequest,
+    guard: TargetGuard = Depends(require_target_body),
+):
+    require_local_request(http_request)
+
     input_data = AnalyzeInput(sql=request.query, normalized_sql=request.query, source="web")
     options = AnalyzeOptions(
         target=guard.target_name,
@@ -200,7 +207,13 @@ async def analyze(request: AnalyzeRequest, guard: TargetGuard = Depends(require_
 
 
 @router.post("/analyze/quick")
-async def analyze_quick(request: AnalyzeRequest, guard: TargetGuard = Depends(require_target_body)):
+async def analyze_quick(
+    http_request: Request,
+    request: AnalyzeRequest,
+    guard: TargetGuard = Depends(require_target_body),
+):
+    require_local_request(http_request)
+
     input_data = AnalyzeInput(sql=request.query, normalized_sql=request.query, source="web")
     options = AnalyzeOptions(
         target=guard.target_name,

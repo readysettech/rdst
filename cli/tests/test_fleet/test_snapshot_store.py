@@ -5,6 +5,8 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
+import pytest
+
 from features.audit.models import (
     AuditMetrics,
     AuditResult,
@@ -122,3 +124,43 @@ class TestSnapshotStore:
 
         loaded = self.store.load("raw-test")
         assert loaded["custom_key"] == "custom_value"
+
+
+# Snapshot names reach the store from `--save-name` and from the fleet audit
+# request body, so a name that walks out of the snapshot directory must never
+# reach the filesystem.
+TRAVERSING_IDS = [
+    "../escaped",
+    "..",
+    "sub/dir",
+    "back\\slash",
+    "nul\x00byte",
+    "",
+]
+
+
+class TestSnapshotIdValidation:
+    def setup_method(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.store = SnapshotStore(base_dir=self.tmpdir)
+
+    @pytest.mark.parametrize("snapshot_id", TRAVERSING_IDS)
+    def test_save_raw_rejects_unsafe_id(self, snapshot_id):
+        with pytest.raises(ValueError):
+            self.store.save_raw(snapshot_id, {"a": 1})
+        assert list(self.tmpdir.parent.glob("escaped*")) == []
+
+    @pytest.mark.parametrize("snapshot_id", TRAVERSING_IDS)
+    def test_save_rejects_unsafe_id(self, snapshot_id):
+        with pytest.raises(ValueError):
+            self.store.save(_make_snapshot(snapshot_id))
+
+    @pytest.mark.parametrize("snapshot_id", TRAVERSING_IDS)
+    def test_reads_of_unsafe_ids_find_nothing(self, snapshot_id):
+        assert self.store.load(snapshot_id) is None
+        assert self.store.delete(snapshot_id) is False
+
+    def test_ordinary_ids_still_work(self):
+        for snapshot_id in ("fleet_20260811_120000", "audit_prod-1.v2"):
+            self.store.save_raw(snapshot_id, {"snapshot_id": snapshot_id})
+            assert self.store.load(snapshot_id) is not None

@@ -102,12 +102,14 @@ class TestConfigureServiceInit:
         from features.configure.api.routes import AddTargetRequest, TargetData, add_target
         from shared.config.targets import TargetsConfig
         from shared.secret_store_service import SecretStoreService
+        from tests.unit.conftest import make_loopback_request
 
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.delenv("RDST_HEADLESS_PASSWORD", raising=False)
         monkeypatch.setattr(SecretStoreService, "is_available", lambda self: False)
 
         response = await add_target(
+            make_loopback_request(),
             AddTargetRequest(
                 name="headless",
                 target=TargetData(

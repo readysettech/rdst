@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import shlex
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404
 import sys
@@ -81,12 +82,16 @@ def deploy_remote(
     if password:
         script = _inject_password(script, password)
 
-    # 4. SCP script to remote
-    remote_script_path = f"/tmp/rdst-deploy-{target_name}.sh"
+    # 4. Upload the script to an unpredictable, owner-only path. It carries the
+    #    database password, so another account on the host must not be able to
+    #    guess the name or read the file.
+    remote_script_path = f"/tmp/rdst-deploy-{target_name}-{secrets.token_hex(8)}.sh"
 
-    scp_result = _scp_script(script, remote_dest, remote_script_path, ssh_opts)
-    if not scp_result["success"]:
-        return scp_result
+    upload_result = _upload_private_script(
+        script, remote_dest, remote_script_path, ssh_opts
+    )
+    if not upload_result["success"]:
+        return upload_result
 
     # 5. Execute remotely with streaming output
     exec_result = _execute_remote(remote_dest, remote_script_path, ssh_opts)
@@ -234,6 +239,46 @@ def _scp_script(
                 os.unlink(local_path)
             except OSError:
                 pass
+
+
+def _upload_private_script(
+    script: str,
+    remote_dest: str,
+    remote_path: str,
+    ssh_opts: list,
+) -> Dict[str, Any]:
+    """Stream a secret-bearing script to the remote host over the SSH channel.
+
+    The remote shell sets `umask 077` before the redirect creates the file, so
+    the script is owner-only from the moment it exists — a mode SCP cannot
+    guarantee, and one that matters because the content holds a password.
+    """
+    quoted = shlex.quote(remote_path)
+    command = f"umask 077 && rm -f {quoted} && cat > {quoted}"
+    try:
+        result = subprocess.run(
+            ["ssh", *ssh_opts, remote_dest, command],
+            # Bytes, not text: a text-mode pipe rewrites newlines on Windows
+            # and the remote bash would choke on the CRLF script.
+            input=script.encode("utf-8"),
+            capture_output=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Uploading the deployment script timed out."}
+    except FileNotFoundError:
+        return {
+            "success": False,
+            "error": "ssh command not found. Install OpenSSH client.",
+        }
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", "replace").strip()
+        return {
+            "success": False,
+            "error": f"Failed to copy script to {remote_dest}:\n{stderr}",
+        }
+    return {"success": True}
 
 
 def _execute_remote(

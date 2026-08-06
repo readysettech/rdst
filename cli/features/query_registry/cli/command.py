@@ -13,6 +13,7 @@ import signal
 import shutil
 import statistics
 import sys
+from shared.query_safety import validate_query_safety
 import subprocess  # nosemgrep: gitlab.bandit.B404
 import tempfile
 import threading
@@ -1494,7 +1495,7 @@ class QueryCommand:
             temp_names = []
             for i, sql in enumerate(loaded_queries):
                 import hashlib
-                qhash = hashlib.md5(sql.encode()).hexdigest()[:8]
+                qhash = hashlib.md5(sql.encode(), usedforsecurity=False).hexdigest()[:8]
                 temp_name = f"_file_{qhash}"
                 if not registry.get_query_by_tag(temp_name):
                     registry.add_query(sql=sql, tag=temp_name, target=target, source="file")
@@ -1537,6 +1538,21 @@ class QueryCommand:
 
         if not resolved_queries:
             return RdstResult(ok=False, message="No queries to run. Provide query names/hashes or use --file.", data={})
+
+        # The registry is not a trusted store: entries arrive from --file, from
+        # `scan`, and from pg_stat_statements, so their text is only as
+        # trustworthy as whoever could write to those. Run mode executes them
+        # repeatedly and concurrently, so check before the first execution.
+        for entry, executable_sql in resolved_queries:
+            safety = validate_query_safety(executable_sql)
+            if not safety.get("safe"):
+                issues = "; ".join(safety.get("issues") or []) or "failed safety validation"
+                name = getattr(entry, "tag", None) or getattr(entry, "query_hash", "query")
+                return RdstResult(
+                    ok=False,
+                    message=f"Refusing to run '{name}': {issues}",
+                    data={},
+                )
 
         # Add warm-up slots: one per unique query (first execution of each is excluded)
         num_queries = len(resolved_queries)

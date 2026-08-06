@@ -15,6 +15,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from shared.api.guards import require_local_request
 from shared.api.target_guard import TargetGuard, require_target, require_target_body
 from shared.run_registry import AUDIT_RUN_KINDS, run_registry
 
@@ -60,10 +61,13 @@ class AuditRunListResponse(BaseModel):
 
 @router.post("", response_model=AuditRunStartResponse)
 async def run_audit(
+    http_request: Request,
     request: AuditRunRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> AuditRunStartResponse:
     """Start a metrics-only audit as a detached background run."""
+    require_local_request(http_request)
+
     existing = _registry.find_active(AUDIT_RUN_KINDS)
     if existing is not None:
         return AuditRunStartResponse(run_id=existing, reused=True)
@@ -90,6 +94,7 @@ class AuditCaptureRequest(BaseModel):
 
 @router.post("/capture", response_model=AuditRunStartResponse)
 async def run_capture(
+    http_request: Request,
     request: AuditCaptureRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> AuditRunStartResponse:
@@ -98,6 +103,8 @@ async def run_capture(
     The capture holds a database connection for the whole window; cancelling
     the run through `DELETE /api/runs/{run_id}` releases it.
     """
+    require_local_request(http_request)
+
     existing = _registry.find_active(AUDIT_RUN_KINDS)
     if existing is not None:
         return AuditRunStartResponse(run_id=existing, reused=True)
@@ -132,6 +139,7 @@ class AuditRequirementsResponse(BaseModel):
 
 @router.get("/requirements")
 async def get_capture_requirements(
+    http_request: Request,
     guard: TargetGuard = Depends(require_target),
 ) -> AuditRequirementsResponse:
     """Check capture prerequisites for a target.
@@ -140,6 +148,7 @@ async def get_capture_requirements(
     is available, with setup instructions when it is not. Connection
     failures surface as query_stats "error".
     """
+    require_local_request(http_request)
 
     def _check() -> dict[str, Any]:
         from shared.db_connection import (
@@ -248,10 +257,13 @@ async def get_capture_requirements(
 
 @router.get("/runs")
 async def get_audit_runs(
+    http_request: Request,
     target: Optional[str] = Query(default=None),
     limit: int = Query(default=20, ge=1, le=200),
 ) -> AuditRunListResponse:
     """List past audit runs (quick audits and duration captures)."""
+    require_local_request(http_request)
+
     runs = list_audit_runs(target=target, limit=limit)
     summaries = [
         AuditRunSummary(
@@ -271,10 +283,13 @@ async def get_audit_runs(
 
 @router.get("/runs/{run_id}")
 async def get_audit_run(
+    http_request: Request,
     run_id: str,
     target: Optional[str] = Query(default=None),
 ) -> dict[str, Any]:
     """Fetch a saved audit run's full payload by ID (exact or prefix)."""
+    require_local_request(http_request)
+
     data = find_audit_run(run_id, target=target)
     if data is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")

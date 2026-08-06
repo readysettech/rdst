@@ -434,6 +434,20 @@ class TestCacheAdd:
         assert run_sql.call_args.args[0].startswith("EXPLAIN CREATE SHALLOW CACHE FROM ")
 
     @pytest.mark.asyncio
+    async def test_add_rejects_non_read_only_query(self):
+        """Registry text is interpolated into DDL, so only reads get that far."""
+        from features.cache.service import CacheService
+
+        service = CacheService()
+        with patch.object(service, "_run_readyset_sql") as run_sql:
+            events = [e async for e in service.add_cache(
+                CacheInput(target="mydb", query="SELECT 1; DROP TABLE users"),
+                CacheOptions(dry_run=True),
+            )]
+        assert events[-1].type == "error"
+        run_sql.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_add_no_cache_target(self):
         from features.cache.service import CacheService
 
@@ -486,6 +500,31 @@ class TestCacheDelete:
                 CacheInput(target="mydb", cache_id="'; DROP TABLE users; --"),
             )]
         assert events[-1].type == "error"
+
+    @pytest.mark.asyncio
+    async def test_delete_rejects_unsafe_resolved_id(self):
+        """The registry-resolved id is re-validated before it reaches DROP CACHE."""
+        from features.cache.service import CacheService
+
+        service = CacheService()
+        cache_config = {
+            "target_type": "readyset", "engine": "postgresql",
+            "host": "127.0.0.1", "port": 5433, "user": "admin",
+            "database": "myapp",
+        }
+        with (
+            patch.object(service, "_resolve_cache_target", return_value=("mydb-cache", cache_config)),
+            patch.object(
+                service, "_resolve_cache_id_for_drop",
+                return_value="q_abc; DROP TABLE users; --",
+            ),
+            patch.object(service, "_run_readyset_sql") as run_sql,
+        ):
+            events = [e async for e in service.delete_cache(
+                CacheInput(target="mydb", cache_id="abc123"),
+            )]
+        assert events[-1].type == "error"
+        run_sql.assert_not_called()
 
 
 class TestCacheDropAll:

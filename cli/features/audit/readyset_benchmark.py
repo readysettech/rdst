@@ -227,6 +227,7 @@ def benchmark_queries(
     """
     from features.cache.service import CacheService
     from features.cache.models import CacheInput, CacheOptions
+    from features.query_registry.service import benchmark_read_only_reason
 
     console = console or _NullConsole()
     service = (
@@ -283,6 +284,28 @@ def benchmark_queries(
         upstream_ms = q.get("avg_time_ms", 0.0)
 
         if not sql.strip():
+            continue
+
+        # Captured text is database-controlled and is about to be interpolated
+        # into EXPLAIN / CREATE CACHE and executed in the timing loop, so only a
+        # single read-only statement gets that far.
+        not_read_only = benchmark_read_only_reason(sql)
+        if not_read_only:
+            results.append({
+                "query_hash": q_hash,
+                "query_text": sql[:200],
+                "baseline_ms": upstream_ms,
+                "upstream_ms": upstream_ms,
+                "upstream_source": "capture_window",
+                "static_cacheable": False,
+                "static_reason": not_read_only,
+                "deep_supported": False,
+                "deep_reason": not_read_only,
+                "cacheable": False,
+                "not_cacheable_reason": not_read_only,
+                "readyset_ms": 0,
+                "speedup": 0,
+            })
             continue
 
         static_cacheable, static_reason = _static_cacheability_advisory(sql)

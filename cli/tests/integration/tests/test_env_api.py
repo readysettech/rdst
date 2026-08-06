@@ -231,16 +231,17 @@ async def test_set_env_secret_rejects_non_allowlisted_name(
     assert "export" not in message
 
 
-async def test_set_env_secret_rejects_mismatched_origin(
+async def test_set_env_secret_rejects_cross_site_origin(
     app, tmp_rdst_home, inmemory_keyring
 ):
-    """Loopback request whose `Origin` header points at a different
-    loopback alias must be 403'd by the same-host check."""
+    """Loopback request carrying another site's `Origin` must be 403'd by the
+    same-host check. Loopback aliases all name this server and are
+    interchangeable; a real site is not."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8787") as c:
         response = await c.post(
             "/api/env/set",
-            headers={"origin": "http://localhost:8787"},
+            headers={"origin": "https://evil.example"},
             json={"name": "PROD_DB_PASSWORD", "value": "x", "persist": True},
         )
     assert response.status_code == 403

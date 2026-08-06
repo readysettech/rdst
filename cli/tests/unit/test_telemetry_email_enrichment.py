@@ -89,6 +89,8 @@ def test_track_identifies_device_with_email(tmp_path, monkeypatch):
     tm._device_id = "dev-telemetry-123"
     tm._enabled = True
     tm._initialized = True
+    # Only a release build carries an ingest key; without one track() sends nothing.
+    tm.POSTHOG_API_KEY = "phc_test_key"
 
     tm.track("email_captured", {"display_name": "RDST Email Captured", "source": "gate"})
 

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Set
 from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
+    quote_identifier,
     resolve_connection_params,
 )
 
@@ -532,7 +533,7 @@ def _collect_mysql_schema(
 
                     # Get table structure - use backtick quoting for MySQL identifier safety
                     # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
-                    cursor.execute(f"DESCRIBE `{table_name}`")
+                    cursor.execute(f"DESCRIBE {quote_identifier(table_name, 'mysql')}")
                     columns = cursor.fetchall()
 
                     if not columns:
@@ -540,7 +541,7 @@ def _collect_mysql_schema(
 
                     # Get indexes - use backtick quoting for MySQL identifier safety
                     # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
-                    cursor.execute(f"SHOW INDEX FROM `{table_name}`")
+                    cursor.execute(f"SHOW INDEX FROM {quote_identifier(table_name, 'mysql')}")
                     indexes = cursor.fetchall()
 
                     # Get row count estimate (for LLM to understand scale)

@@ -49,7 +49,7 @@ def session_token_path(session_name: str) -> Path:
     sha1(session_name); matching that here checks the exact file the
     credential path will load.
     """
-    key = hashlib.sha1(session_name.encode("utf-8")).hexdigest()
+    key = hashlib.sha1(session_name.encode("utf-8"), usedforsecurity=False).hexdigest()
     return sso_cache_dir() / f"{key}.json"
 
 

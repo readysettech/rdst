@@ -36,7 +36,7 @@ def normalize_for_registry(sql: str, **kwargs) -> Dict[str, Any]:
     """
     try:
         normalized = _normalize_sql_for_registry(sql)
-        query_hash = hashlib.md5(normalized.encode('utf-8')).hexdigest()[:12]
+        query_hash = hashlib.md5(normalized.encode('utf-8'), usedforsecurity=False).hexdigest()[:12]
 
         # Detect what types of parameters were normalized
         param_types = _detect_parameter_types(sql, normalized)
@@ -53,7 +53,7 @@ def normalize_for_registry(sql: str, **kwargs) -> Dict[str, Any]:
         return {
             "normalized_sql": sql,
             "original_sql": sql,
-            "hash": hashlib.md5(sql.encode('utf-8')).hexdigest()[:12],
+            "hash": hashlib.md5(sql.encode('utf-8'), usedforsecurity=False).hexdigest()[:12],
             "parameters_detected": [],
             "error": f"Normalization failed: {str(e)}"
         }

@@ -4,6 +4,8 @@ import datetime
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.db_connection import quote_identifier
+
 from .models import DatabaseSnapshot, IntermediateSnapshot, TableStats
 
 logger = logging.getLogger(__name__)
@@ -577,7 +579,7 @@ def collect_schema_for_tables(
             else:
                 # MySQL - Columns via DESCRIBE
                 try:
-                    cur.execute(f"DESCRIBE `{table}`")
+                    cur.execute(f"DESCRIBE {quote_identifier(table, 'mysql')}")
                     for row in cur.fetchall():
                         v = list(row.values()) if isinstance(row, dict) else row
                         col_name = str(v[0])
@@ -594,7 +596,7 @@ def collect_schema_for_tables(
 
                 # MySQL - Indexes
                 try:
-                    cur.execute(f"SHOW INDEX FROM `{table}`")
+                    cur.execute(f"SHOW INDEX FROM {quote_identifier(table, 'mysql')}")
                     idx_map: Dict[str, List[str]] = {}
                     for row in cur.fetchall():
                         v = list(row.values()) if isinstance(row, dict) else row

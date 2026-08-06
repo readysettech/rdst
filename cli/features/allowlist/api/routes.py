@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
+from shared.api.guards import require_local_request
 from shared.config.targets import TargetsConfig
 
 from ..service import AllowlistError, add_current_ip, allowlist_context
@@ -78,8 +79,12 @@ def _context_error_response(exc: AllowlistError) -> JSONResponse:
 
 
 @router.get("/context", response_model=AllowlistContextResponse)
-async def get_allowlist_context(target: str = Query(...)) -> AllowlistContextResponse:
+async def get_allowlist_context(
+    http_request: Request, target: str = Query(...)
+) -> AllowlistContextResponse:
     """Fetch public IP and read provider state. This route never writes."""
+    require_local_request(http_request)
+
     try:
         result = await asyncio.to_thread(allowlist_context, _config(), target)
     except AllowlistError as exc:
@@ -89,9 +94,12 @@ async def get_allowlist_context(target: str = Query(...)) -> AllowlistContextRes
 
 @router.post("/add", response_model=AllowlistAddResponse)
 async def add_allowlist_ip(
+    http_request: Request,
     request: AllowlistAddRequest,
 ) -> AllowlistAddResponse:
     """On an explicit confirmed click, read-merge-write the provider allowlist."""
+    require_local_request(http_request)
+
     try:
         result = await asyncio.to_thread(
             add_current_ip,

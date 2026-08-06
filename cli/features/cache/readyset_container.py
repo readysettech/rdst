@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404 - subprocess required for Docker/database operations
 import time
 import json
@@ -157,6 +159,24 @@ def check_docker_available() -> Dict[str, Any]:
 
 from shared.deploy import READYSET_IMAGE
 from shared.deploy.docker_topology import DockerTopology, DockerTopologyError
+from shared.deploy.local_docker import publish_bind
+
+
+def _upstream_env_file(target_db_url: str) -> str:
+    """Write UPSTREAM_DB_URL to a private file for `docker run --env-file`.
+
+    The URL carries the database password. Passing it as `-e` puts it in the
+    `docker run` command line, where any local process can read it out of `ps`.
+    An env-file keeps it off the command line; the value is still visible in
+    `docker inspect`, which is unavoidable since the container needs it.
+    """
+    fd, path = tempfile.mkstemp(prefix="rdst-upstream-", suffix=".env")
+    os.close(fd)
+    os.chmod(path, 0o600)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(f"UPSTREAM_DB_URL={target_db_url}\n")
+    return path
+
 
 
 def start_readyset_container(
@@ -289,25 +309,29 @@ def start_readyset_container(
         # Use --pull always to ensure we get the latest image
         # Official readysettech/readyset image uses UPSTREAM_DB_URL and LISTEN_ADDRESS
         listen_address = f"0.0.0.0:{readyset_port}"
+        upstream_env_file = _upstream_env_file(target_db_url)
         docker_cmd = [
             'docker', 'run',
             '-d',
             '--pull', 'always',
             '--name', readyset_container_name,
-            '-e', f'UPSTREAM_DB_URL={target_db_url}',
+            '--env-file', upstream_env_file,
             '-e', f'LISTEN_ADDRESS={listen_address}',
-            '-p', f'{readyset_port}:{readyset_port}',
+            '-p', f'{publish_bind()}{readyset_port}:{readyset_port}',
             '--add-host=host.docker.internal:host-gateway',  # Allow container to reach host
             READYSET_IMAGE,
         ]
 
         print(f"Starting docker run (pulling latest image if needed)...")
-        result = subprocess.run(
-            docker_cmd,
-            capture_output=True,
-            text=True,
-            timeout=300  # Increased from 60s to 300s (5 min) for large image pulls
-        )
+        try:
+            result = subprocess.run(
+                docker_cmd,
+                capture_output=True,
+                text=True,
+                timeout=300  # Increased from 60s to 300s (5 min) for large image pulls
+            )
+        finally:
+            os.unlink(upstream_env_file)
 
         if result.returncode != 0:
             error_msg = result.stderr.strip()
@@ -323,21 +347,34 @@ def start_readyset_container(
         # Test connectivity from inside the container to the database (optional diagnostic)
         print(f"Testing connectivity from Readyset container to {db_type}://{docker_host}:{port}...")
 
+        # The password arrives on stdin rather than in argv: a command line is
+        # readable by any local process through `ps`, and the non-secret
+        # connection details go through the environment so they are never
+        # spliced into a shell string.
+        exec_env = [
+            '-e', f'RDST_PROBE_HOST={docker_host}',
+            '-e', f'RDST_PROBE_PORT={port}',
+            '-e', f'RDST_PROBE_USER={user}',
+            '-e', f'RDST_PROBE_DB={database}',
+        ]
         if db_type == 'mysql':
-            # Test MySQL connection from inside container
-            test_cmd = [
-                'docker', 'exec', readyset_container_name,
-                'mysql', '-h', docker_host, '-P', str(port),
-                '-u', user, f'-p{password}', '-e', 'SELECT 1;'
-            ]
+            probe = (
+                'read -r MYSQL_PWD; export MYSQL_PWD; '
+                'exec mysql -h "$RDST_PROBE_HOST" -P "$RDST_PROBE_PORT" '
+                '-u "$RDST_PROBE_USER" -e "SELECT 1;"'
+            )
         else:
-            # Test PostgreSQL connection from inside container
-            test_cmd = [
-                'docker', 'exec', readyset_container_name,
-                'bash', '-c', f'PGPASSWORD={password} psql -h {docker_host} -p {port} -U {user} -d {database} -c "SELECT 1;"'
-            ]
+            probe = (
+                'read -r PGPASSWORD; export PGPASSWORD; '
+                'exec psql -h "$RDST_PROBE_HOST" -p "$RDST_PROBE_PORT" '
+                '-U "$RDST_PROBE_USER" -d "$RDST_PROBE_DB" -c "SELECT 1;"'
+            )
+        test_cmd = ['docker', 'exec', '-i', *exec_env, readyset_container_name, 'sh', '-c', probe]
 
-        conn_test = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
+        conn_test = subprocess.run(
+            test_cmd, capture_output=True, text=True, timeout=10,
+            input=f"{password}\n",
+        )
         if conn_test.returncode == 0:
             print(f"✓ Readyset container can reach test database")
         else:
@@ -612,29 +649,33 @@ def start_readyset_container_direct(
         # Use --pull always to ensure we get the latest image (required for shallow cache support)
         # Official readysettech/readyset image uses UPSTREAM_DB_URL and LISTEN_ADDRESS
         listen_address = f"0.0.0.0:{readyset_port}"
+        upstream_env_file = _upstream_env_file(target_db_url)
         docker_cmd = [
             'docker', 'run',
             '-d',
             '--pull', 'always',
             '--name', readyset_container_name,
-            '-e', f'UPSTREAM_DB_URL={target_db_url}',
+            '--env-file', upstream_env_file,
             '-e', f'LISTEN_ADDRESS={listen_address}',
             '-e', 'DEPLOYMENT_MODE=standalone',
             '-e', 'QUERY_CACHING=explicit',
             '-e', 'CACHE_MODE=shallow',
             '-e', 'DEFAULT_TTL_MS=600000',
-            '-p', f'{readyset_port}:{readyset_port}',
+            '-p', f'{publish_bind()}{readyset_port}:{readyset_port}',
             '--add-host=host.docker.internal:host-gateway',
             READYSET_IMAGE,
         ]
 
         console.print("[dim]Starting docker run...[/dim]")
-        result = subprocess.run(
-            docker_cmd,
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
+        try:
+            result = subprocess.run(
+                docker_cmd,
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+        finally:
+            os.unlink(upstream_env_file)
 
         if result.returncode != 0:
             error_result = format_docker_error(result.stderr, "Failed to start Readyset container")

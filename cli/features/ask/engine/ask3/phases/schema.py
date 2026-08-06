@@ -281,6 +281,7 @@ def _collect_mysql_schema(config: dict, target: str) -> tuple[Optional[SchemaInf
         import pymysql
         from shared.db_connection import (
             create_mysql_connection_from_params,
+            quote_identifier,
             resolve_connection_params,
         )
 
@@ -301,7 +302,7 @@ def _collect_mysql_schema(config: dict, target: str) -> tuple[Optional[SchemaInf
 
             for table_name in tables:
                 # Get columns
-                cur.execute(f"DESCRIBE `{table_name}`")
+                cur.execute(f"DESCRIBE {quote_identifier(table_name, 'mysql')}")
 
                 table_info = TableInfo(name=table_name)
                 col_strs = []

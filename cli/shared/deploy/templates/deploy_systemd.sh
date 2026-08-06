@@ -13,6 +13,10 @@ READYSET_PORT="{readyset_port}"
 READYSET_IMAGE="{readyset_image}"
 CONFIG_DIR="/etc/readyset"
 CONFIG_FILE="${CONFIG_DIR}/${SERVICE_NAME}.toml"
+# The connection URL carries the database password, so it lives in a
+# root-only EnvironmentFile rather than the unit's Environment= lines, which
+# any local account can read back through `systemctl show`.
+ENV_FILE="${CONFIG_DIR}/${SERVICE_NAME}.env"
 BINARY_PATH="/usr/local/bin/readyset"
 
 # ---------------------------------------------------------------------------
@@ -44,7 +48,7 @@ case "${1:-}" in
     sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     sudo systemctl disable "$SERVICE_NAME" 2>/dev/null || true
     sudo rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
-    sudo rm -f "$CONFIG_FILE"
+    sudo rm -f "$CONFIG_FILE" "$ENV_FILE"
     sudo systemctl daemon-reload
     echo "Uninstalled."
     exit 0
@@ -129,11 +133,19 @@ fi
 # ---------------------------------------------------------------------------
 echo "Writing config to ${CONFIG_FILE}..."
 sudo mkdir -p "$CONFIG_DIR"
+# Create both files empty and root-only first: they hold the connection URL,
+# so they must never exist world-readable, not even briefly.
+sudo install -m 600 /dev/null "$CONFIG_FILE"
 sudo tee "$CONFIG_FILE" > /dev/null <<EOF
 # Readyset configuration for target: {target_name}
 database_type = "${DB_TYPE}"
 upstream_db_url = "${DB_URL}"
 listen_port = ${READYSET_PORT}
+EOF
+
+sudo install -m 600 /dev/null "$ENV_FILE"
+sudo tee "$ENV_FILE" > /dev/null <<EOF
+UPSTREAM_DB_URL=${DB_URL}
 EOF
 
 # ---------------------------------------------------------------------------
@@ -151,7 +163,7 @@ Type=simple
 ExecStart=${BINARY_PATH}
 Restart=on-failure
 RestartSec=5
-Environment=UPSTREAM_DB_URL=${DB_URL}
+EnvironmentFile=${ENV_FILE}
 Environment=DATABASE_TYPE=${DB_TYPE}
 Environment=LISTEN_ADDRESS=0.0.0.0:${READYSET_PORT}
 Environment=DEPLOYMENT_MODE=standalone

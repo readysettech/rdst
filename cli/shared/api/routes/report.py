@@ -7,10 +7,11 @@ Feedback is sent to PostHog for analytics and to Slack through a PostHog workflo
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from shared.api.email import normalized_email
+from shared.api.guards import require_local_request
 
 router = APIRouter()
 
@@ -36,13 +37,17 @@ class ReportResponse(BaseModel):
 
 
 @router.post("/report")
-async def submit_report(request: ReportRequest) -> ReportResponse:
+async def submit_report(
+    http_request: Request, request: ReportRequest
+) -> ReportResponse:
     """
     Submit user feedback.
 
     Feedback is sent to PostHog for analytics and to Slack through a PostHog workflow.
     If a query_hash is provided, the query context is loaded from the registry.
     """
+    require_local_request(http_request)
+
     # Keep every accepted feedback event attributable before it reaches
     # PostHog (and the Slack workflow fed by that event).
     email = normalized_email(request.email)

@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Callable
 
 import sqlglot
 
+from features.query_registry.service import benchmark_read_only_reason
 from shared.async_utils import start_blocking
 from shared.config.targets import TargetsConfig
 from shared.deploy.sandbox_manager import (
@@ -130,6 +131,22 @@ class ReadysetExperimentService:
                     type="progress", stage=stage, percent=percent, message=message
                 )
             )
+
+        # The request supplies this SQL and it is both interpolated into cache
+        # DDL and executed against the origin, so a speed test only ever runs a
+        # single read-only statement.
+        not_read_only = benchmark_read_only_reason(query)
+        if not_read_only:
+            await queue.put(
+                ErrorEvent(
+                    type="error",
+                    message=not_read_only,
+                    code="speed_test_read_only",
+                    stage="checking_query",
+                )
+            )
+            await queue.put(_DONE)
+            return
 
         try:
             await progress("queued", "Queued for the Readyset sandbox", 0)

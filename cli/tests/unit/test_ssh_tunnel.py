@@ -782,6 +782,12 @@ def test_successful_tunnel_remembers_host_without_key(
         def load_system_host_keys(self):
             pass
 
+        def load_host_keys(self, filename):
+            # Recorded so the test can assert the client is given a file to
+            # write to: without one, a newly seen host key is accepted and then
+            # forgotten, so a later change to it cannot be detected.
+            self.host_keys_file = filename
+
         def set_missing_host_key_policy(self, policy):
             pass
 

@@ -114,6 +114,13 @@ class Ports:
         return d
 
 
+def _publish_bind() -> str:
+    """Host-side interface for `docker run -p`. Every container in the plane ships
+    fixed credentials, so a local daemon publishes on loopback; a remote daemon is
+    only reachable by address, so its ports stay on the daemon's interfaces."""
+    return "" if DockerTopology.from_environment().remote else "127.0.0.1:"
+
+
 def _port_free(port: int) -> bool:
     """Whether Docker could publish `port` on the daemon host.
 
@@ -306,7 +313,7 @@ def deploy_postgres_baked(name: str, port: int) -> subprocess.CompletedProcess:
             "--shm-size=1g",
             *_limit_flags("pg"),
             "-p",
-            f"{port}:5432",
+            f"{_publish_bind()}{port}:5432",
             BAKED_PG_IMAGE,
         ]
     )
@@ -352,9 +359,9 @@ def deploy_readyset(
             "-e",
             f"DEFAULT_TTL_MS={os.environ.get('QPDEMO_SHALLOW_TTL_MS', '180000')}",
             "-p",
-            f"{port}:{port}",
+            f"{_publish_bind()}{port}:{port}",
             "-p",
-            f"{metrics_port}:{metrics_port}",
+            f"{_publish_bind()}{metrics_port}:{metrics_port}",
             READYSET_IMAGE,
         ]
     )
@@ -377,11 +384,11 @@ def deploy_sqp(
             "qpdemo-readyset:qpdemo-readyset",
             *_limit_flags("sqp"),
             "-p",
-            f"{ports.sqp}:{ports.sqp}",
+            f"{_publish_bind()}{ports.sqp}:{ports.sqp}",
             "-p",
-            f"{ports.metrics}:{ports.metrics}",
+            f"{_publish_bind()}{ports.metrics}:{ports.metrics}",
             "-p",
-            f"{ports.admin}:{ports.admin}",
+            f"{_publish_bind()}{ports.admin}:{ports.admin}",
             SQP_IMAGE,
         ]
     )

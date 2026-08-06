@@ -187,7 +187,7 @@ class ActivityQueryCollector:
                 normalized = normalize_query(query_text)
                 # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
                 # MD5 is used for query identification/grouping, not cryptographic purposes
-                row['query_hash'] = hashlib.md5(normalized.encode()).hexdigest()  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
+                row['query_hash'] = hashlib.md5(normalized.encode(), usedforsecurity=False).hexdigest()  # nosemgrep: python.lang.security.insecure-hash-algorithms-md5.insecure-hash-algorithm-md5, gitlab.bandit.B303-1
 
             return results
 

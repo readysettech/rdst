@@ -27,6 +27,7 @@ from features.audit.report.delivery import (
     RunEmailResponse,
     deliver_run_report,
 )
+from shared.api.guards import require_local_request
 from shared.run_registry import AUDIT_RUN_KINDS, run_registry
 from shared.service_events import ErrorEvent
 
@@ -67,10 +68,13 @@ def _event_to_sse(event: Any) -> dict:
 
 @router.get("/targets")
 async def list_fleet_targets(
+    http_request: Request,
     group: Optional[str] = Query(default=None),
     tag: Optional[str] = Query(default=None),
 ) -> FleetTargetsResponse:
     """List fleet members (all configured database targets)."""
+    require_local_request(http_request)
+
     service = FleetService()
     members: list[dict[str, Any]] = []
     groups: list[str] = []
@@ -83,9 +87,11 @@ async def list_fleet_targets(
 
 @router.patch("/targets/{name}")
 async def patch_fleet_target_group(
-    name: str, request: FleetTargetGroupRequest
+    http_request: Request, name: str, request: FleetTargetGroupRequest
 ) -> dict[str, Any]:
     """Set or clear a configured fleet target's group."""
+    require_local_request(http_request)
+
     from shared.config.targets import TargetsConfig
 
     config = TargetsConfig()
@@ -104,11 +110,14 @@ async def patch_fleet_target_group(
 
 @router.get("/status")
 async def check_fleet_status(
+    http_request: Request,
     group: Optional[str] = Query(default=None),
     tag: Optional[str] = Query(default=None),
     targets: Optional[list[str]] = Query(default=None),
 ):
     """Check connectivity for fleet targets (SSE stream)."""
+    require_local_request(http_request)
+
     service = FleetService()
 
     async def _generator() -> AsyncGenerator[dict, None]:
@@ -146,7 +155,9 @@ FLEET_CHILD_ERROR_EVENTS = frozenset({"target_error"})
 
 
 @router.post("/audit", response_model=AuditRunStartResponse)
-async def run_fleet_audit(request: FleetAuditRequest) -> AuditRunStartResponse:
+async def run_fleet_audit(
+    http_request: Request, request: FleetAuditRequest
+) -> AuditRunStartResponse:
     """Start a fleet-wide audit as one detached background run.
 
     Targets come from an explicit `targets` list, or from the fleet filtered
@@ -154,6 +165,8 @@ async def run_fleet_audit(request: FleetAuditRequest) -> AuditRunStartResponse:
     is a single run, so its events read back through
     `/api/runs/{run_id}/events` and one cancel stops every target.
     """
+    require_local_request(http_request)
+
     import datetime
 
     from features.audit.service import AuditService
@@ -262,6 +275,7 @@ class FleetDiffResponse(BaseModel):
 
 @router.get("/snapshots")
 async def list_fleet_snapshots(
+    http_request: Request,
     kind: str = Query(
         "fleet",
         description="Filter by snapshot kind: fleet, single, or all",
@@ -272,6 +286,8 @@ async def list_fleet_snapshots(
     Single-target audit saves share the snapshot directory; they belong to
     the audit run history, so this defaults to fleet-audit snapshots only.
     """
+    require_local_request(http_request)
+
     snapshots = SnapshotStore().list_snapshots()
     if kind != "all":
         snapshots = [snap for snap in snapshots if snap.get("kind") == kind]
@@ -291,8 +307,12 @@ async def list_fleet_snapshots(
 
 
 @router.get("/snapshots/{snapshot_id}")
-async def get_fleet_snapshot(snapshot_id: str) -> dict[str, Any]:
+async def get_fleet_snapshot(
+    http_request: Request, snapshot_id: str
+) -> dict[str, Any]:
     """Fetch a snapshot's full payload by ID (exact or prefix)."""
+    require_local_request(http_request)
+
     data = SnapshotStore().load(snapshot_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"Snapshot '{snapshot_id}' not found")
@@ -311,8 +331,12 @@ async def email_fleet_snapshot(
 
 
 @router.delete("/snapshots/{snapshot_id}")
-async def delete_fleet_snapshot(snapshot_id: str) -> dict[str, bool]:
+async def delete_fleet_snapshot(
+    http_request: Request, snapshot_id: str
+) -> dict[str, bool]:
     """Delete a snapshot by exact ID."""
+    require_local_request(http_request)
+
     if not SnapshotStore().delete(snapshot_id):
         raise HTTPException(status_code=404, detail=f"Snapshot '{snapshot_id}' not found")
     return {"success": True}
@@ -320,10 +344,13 @@ async def delete_fleet_snapshot(snapshot_id: str) -> dict[str, bool]:
 
 @router.get("/diff")
 async def diff_fleet_snapshots(
+    http_request: Request,
     baseline: str = Query(...),
     current: str = Query(...),
 ) -> FleetDiffResponse:
     """Compare two snapshots' per-target metrics and sizing verdicts."""
+    require_local_request(http_request)
+
     diff = SnapshotStore().diff(baseline, current)
     if diff is None:
         raise HTTPException(
@@ -351,8 +378,10 @@ async def diff_fleet_snapshots(
 
 
 @router.post("/import")
-async def import_fleet(request: FleetImportRequest):
+async def import_fleet(http_request: Request, request: FleetImportRequest):
     """Import fleet targets from a CSV file or uploaded content (SSE stream)."""
+    require_local_request(http_request)
+
     import tempfile
 
     service = FleetService()

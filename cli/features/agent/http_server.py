@@ -127,12 +127,14 @@ class AgentHTTPServer:
         schema = await loop.run_in_executor(None, self.runtime.get_schema_summary)
         return web.json_response(schema)
 
-    def run(self, host: str = "0.0.0.0", port: int = 8080) -> None:
+    def run(self, host: str = "127.0.0.1", port: int = 8080) -> None:
         """
         Run the HTTP server.
 
         Args:
-            host: Host to bind to (default "0.0.0.0").
+            host: Host to bind to (default "127.0.0.1"). The CLI advertises
+                  this server as localhost and it carries no authentication,
+                  so it stays on the loopback interface unless asked otherwise.
             port: Port to listen on (default 8080).
         """
         web.run_app(self.app, host=host, port=port, print=self._print_startup)

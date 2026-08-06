@@ -688,7 +688,7 @@ def _render_sizing_caching_table(results: List[Dict[str, Any]]) -> str:
             f"<tr>"
             f'<td><b>{esc(r.get("target_name",""))}</b></td>'
             f'<td>{_role_label(role)}</td>'
-            f'<td>{_engine_version(r)}</td>'
+            f'<td>{esc(_engine_version(r))}</td>'
             f'<td><span class="stag stag-{sev_sizing}">{esc(verdict)}</span></td>'
             f'<td><span class="stag stag-{("ok" if rightsize == "Yes" else "warn")}">{esc(rightsize)}</span></td>'
             f'<td><span class="stag stag-{cache_sev}">{esc(cache_label)}</span></td>'
@@ -709,6 +709,8 @@ def _render_findings_list(findings: List[Dict[str, Any]]) -> str:
     items = []
     for f in findings:
         sev = (f.get("severity") or "info").lower()
+        if sev not in ("ok", "warn", "crit", "info"):
+            sev = "info"
         items.append(
             f'<div class="finding">'
             f'<span class="dot dot-{sev} finding-dot"></span>'
@@ -737,7 +739,7 @@ def _render_section_1_overview(
             f'<div class="topo-role">{_role_label(role)}</div>'
             f'<div class="topo-name">{esc(r.get("target_name",""))}</div>'
             f'<div style="font-size:12px;color:var(--text-2);margin-top:4px;">'
-            f'{_engine_version(r)} · {esc(r.get("instance_class") or "—")} · {esc(r.get("region") or "—")}'
+            f'{esc(_engine_version(r))} · {esc(r.get("instance_class") or "—")} · {esc(r.get("region") or "—")}'
             f'</div></div></div>'
         )
 
@@ -750,11 +752,13 @@ def _render_section_1_overview(
     # Executive summary — use fleet LLM text if present, else synthesize.
     # Only synthesize for fleet (N>=2); single-target reports use per-target
     # health_analysis executive_summary if available, or skip the block.
-    summary_text = (fleet_insights or {}).get("executive_summary") or ""
+    # Model-written summaries are escaped; the synthesized narrative is our own
+    # markup and stays as generated.
+    summary_text = esc((fleet_insights or {}).get("executive_summary") or "")
     if not summary_text:
         if is_single:
             ha = results[0].get("health_analysis") or {}
-            summary_text = ha.get("executive_summary") or ""
+            summary_text = esc(ha.get("executive_summary") or "")
         else:
             summary_text = _synthesize_fleet_summary(results)
     if summary_text:
@@ -1112,7 +1116,10 @@ def _render_section_next_steps(
 
     items = []
     for i, step in enumerate(steps[:8], start=1):
-        rank = step.get("rank") or i
+        try:
+            rank = int(step.get("rank") or i)
+        except (TypeError, ValueError):
+            rank = i
         title = step.get("title") or ""
         body = step.get("body") or ""
         commands = step.get("commands") or []

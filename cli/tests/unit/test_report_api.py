@@ -11,7 +11,7 @@ from shared.api.routes import report as report_mod
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(report_mod.router, prefix="/api")
-    return TestClient(app)
+    return TestClient(app, client=("127.0.0.1", 54321))
 
 
 def test_report_requires_email():

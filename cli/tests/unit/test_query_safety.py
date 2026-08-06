@@ -379,3 +379,133 @@ class TestEdgeCases:
 
         assert "safe" in result
         assert "issues" in result
+
+
+class TestAnalyzeReachesTheDatabase:
+    """Regression tests for queries analyze must refuse.
+
+    `rdst analyze` reaches the database through EXPLAIN ANALYZE, which runs the
+    statement rather than just planning it. Writes happen to roll back because
+    psycopg2 leaves the transaction uncommitted, but that is incidental and does
+    not cover anything that acts outside the transaction or returns before it.
+    """
+
+    def test_refuses_trailing_copy_to_program(self):
+        """A second statement after a benign SELECT ran a shell command.
+
+        Verified against a live PostgreSQL container: before this check, the
+        payload below created a file on the database server. COPY ... TO PROGRAM
+        executes immediately and a rollback does not undo it.
+        """
+        sql = "SELECT 1; COPY (SELECT 1) TO PROGRAM 'touch /tmp/pwned'"
+        result = validate_query_safety(sql)
+
+        assert result["safe"] is False
+        assert any("Multiple statements" in i for i in result["issues"])
+
+    def test_refuses_leading_copy_to_program(self):
+        """The same payload as a single statement is refused on its keyword."""
+        result = validate_query_safety("COPY (SELECT 1) TO PROGRAM 'touch /tmp/pwned'")
+
+        assert result["safe"] is False
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT pg_read_file('/etc/passwd')",
+            "SELECT pg_ls_dir('/')",
+            "SELECT lo_import('/etc/passwd')",
+            "SELECT * FROM dblink('host=evil', 'SELECT 1') AS t(a int)",
+            "SELECT pg_sleep(10000)",
+            "SELECT LOAD_FILE('/etc/passwd')",
+        ],
+    )
+    def test_refuses_side_effect_functions(self, sql):
+        """These stay inside a plain SELECT and return before any rollback."""
+        result = validate_query_safety(sql)
+
+        assert result["safe"] is False
+
+
+class TestKeywordMatchingIsNotLiteralMatching:
+    """A keyword is an operation only outside quotes and locking clauses.
+
+    Measured against 424k SELECT statements from the logictest corpus: these
+    were the only shapes that produced a false rejection.
+    """
+
+    def test_row_locking_select_is_read_only(self):
+        """FOR UPDATE takes locks but modifies nothing."""
+        result = validate_query_safety("SELECT ids.nextid FROM ids FOR UPDATE")
+
+        assert result["safe"] is True
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT id FROM t FOR SHARE",
+            "SELECT id FROM t FOR NO KEY UPDATE",
+            "SELECT id FROM t LOCK IN SHARE MODE",
+        ],
+    )
+    def test_other_locking_clauses_are_read_only_too(self, sql):
+        result = validate_query_safety(sql)
+
+        assert result["safe"] is True
+
+    def test_keyword_inside_a_string_literal_is_text(self):
+        """'DROP' in a value is data, not a statement."""
+        result = validate_query_safety("SELECT * FROM notes WHERE body = 'please DROP by'")
+
+        assert result["safe"] is True
+
+    def test_semicolon_inside_a_string_literal_is_not_a_statement(self):
+        result = validate_query_safety("SELECT * FROM notes WHERE body = 'a;b'")
+
+        assert result["safe"] is True
+
+
+class TestRejectionSurvivesRewording:
+    """A denylist is only worth as much as its resistance to reshaping.
+
+    Each payload below is the same statement wearing different clothes: case
+    changes, comments, whitespace, wrapping. 224 such mutations were generated
+    and none were accepted; these are the representative shapes.
+    """
+
+    DESTRUCTIVE = "SELECT 1; DROP TABLE users"
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT 1; DROP TABLE users",
+            "select 1; drop table users",
+            "SELECT 1; DrOp TaBlE users",
+            "SELECT 1;\nDROP TABLE users",
+            "SELECT 1;\tDROP TABLE users",
+            "/*c*/ SELECT 1; DROP TABLE users",
+            "SELECT 1; DROP TABLE users -- trailing",
+            "  SELECT 1; DROP TABLE users  ",
+            "SELECT /*x*/ 1; DROP TABLE users",
+        ],
+    )
+    def test_reshaped_payload_is_still_refused(self, sql):
+        assert validate_query_safety(sql)["safe"] is False
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT 1 WHERE x = ''; DROP TABLE users; --'",
+            "SELECT 'a''b'; DROP TABLE users",
+            "SELECT 'unclosed ; DROP TABLE users",
+            'SELECT "ident"; DROP TABLE users',
+            "SELECT `mysqlident`; DROP TABLE users",
+            "SELECT 1 /* ' */ ; DROP TABLE users",
+            "SELECT $$x$$; DROP TABLE users",
+            "SELECT $tag$x$tag$; DROP TABLE users",
+        ],
+    )
+    def test_quote_confusion_cannot_hide_a_second_statement(self, sql):
+        """Literals are blanked before scanning, so a crafted quote must not be
+        able to blank real SQL along with it."""
+        assert validate_query_safety(sql)["safe"] is False

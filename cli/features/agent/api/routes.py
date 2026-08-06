@@ -13,7 +13,7 @@ import logging
 from dataclasses import asdict
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -25,6 +25,7 @@ from features.agent.manager import (
     InvalidAgentNameError,
     TargetNotFoundError,
 )
+from shared.api.guards import require_local_request
 from shared.api.target_guard import ensure_target_password
 
 logger = logging.getLogger(__name__)
@@ -131,8 +132,10 @@ def _get_agent(name: str):
 
 
 @router.get("")
-async def list_agents() -> AgentListResponse:
+async def list_agents(http_request: Request) -> AgentListResponse:
     """List all agents."""
+    require_local_request(http_request)
+
     manager = AgentManager()
     summaries = []
     for name in manager.list():
@@ -155,14 +158,20 @@ async def list_agents() -> AgentListResponse:
 
 
 @router.get("/{name}")
-async def get_agent(name: str) -> AgentDetail:
+async def get_agent(http_request: Request, name: str) -> AgentDetail:
     """Get full agent configuration."""
+    require_local_request(http_request)
+
     return _config_to_detail(_get_agent(name))
 
 
 @router.post("")
-async def create_agent(request: AgentCreateRequest) -> AgentWriteResponse:
+async def create_agent(
+    http_request: Request, request: AgentCreateRequest
+) -> AgentWriteResponse:
     """Create a new agent. Validates that the target and guard exist."""
+    require_local_request(http_request)
+
     try:
         AgentManager().create(
             name=request.name,
@@ -189,20 +198,26 @@ async def create_agent(request: AgentCreateRequest) -> AgentWriteResponse:
 
 
 @router.delete("/{name}")
-async def delete_agent(name: str) -> AgentWriteResponse:
+async def delete_agent(http_request: Request, name: str) -> AgentWriteResponse:
     """Delete an agent."""
+    require_local_request(http_request)
+
     if not AgentManager().delete(name):
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
     return AgentWriteResponse(success=True, name=name)
 
 
 @router.post("/{name}/ask")
-async def ask_agent(name: str, request: AgentAskRequest) -> AgentAskResponse:
+async def ask_agent(
+    http_request: Request, name: str, request: AgentAskRequest
+) -> AgentAskResponse:
     """Ask the agent a one-shot natural-language question.
 
     Runs NL-to-SQL, guard/safety validation, execution, and masking; the
     response matches the `rdst agent serve` /ask payload.
     """
+    require_local_request(http_request)
+
     config = _get_agent(name)
     ensure_target_password(config.target)
 
@@ -214,8 +229,10 @@ async def ask_agent(name: str, request: AgentAskRequest) -> AgentAskResponse:
 
 
 @router.get("/{name}/schema")
-async def get_agent_schema(name: str) -> dict[str, Any]:
+async def get_agent_schema(http_request: Request, name: str) -> dict[str, Any]:
     """Get the schema summary visible to an agent."""
+    require_local_request(http_request)
+
     config = _get_agent(name)
     ensure_target_password(config.target)
 
@@ -251,12 +268,16 @@ def _event_to_sse(event) -> dict:
 
 
 @router.post("/{name}/chat/sessions")
-async def create_chat_session(name: str) -> ChatSessionCreateResponse:
+async def create_chat_session(
+    http_request: Request, name: str
+) -> ChatSessionCreateResponse:
     """Start a chat session with an agent.
 
     Sessions are held in server memory; history is ephemeral and dies with
     the process, matching CLI chat semantics.
     """
+    require_local_request(http_request)
+
     config = _get_agent(name)
     ensure_target_password(config.target)
 
@@ -270,12 +291,16 @@ async def create_chat_session(name: str) -> ChatSessionCreateResponse:
 
 
 @router.post("/chat/sessions/{session_id}/message")
-async def send_chat_message(session_id: str, request: ChatMessageRequest):
+async def send_chat_message(
+    http_request: Request, session_id: str, request: ChatMessageRequest
+):
     """Send one message to a chat session and stream progress via SSE.
 
     stream_chat rejects the turn with an error event if the session is
     already processing a message.
     """
+    require_local_request(http_request)
+
     from features.agent.service import chat_sessions, stream_chat
 
     session = chat_sessions.get(session_id)
@@ -290,8 +315,12 @@ async def send_chat_message(session_id: str, request: ChatMessageRequest):
 
 
 @router.get("/chat/sessions/{session_id}")
-async def get_chat_session(session_id: str) -> ChatSessionInfo:
+async def get_chat_session(
+    http_request: Request, session_id: str
+) -> ChatSessionInfo:
     """Get a chat session's history summary."""
+    require_local_request(http_request)
+
     from features.agent.service import chat_sessions
 
     session = chat_sessions.get(session_id)
@@ -311,8 +340,12 @@ async def get_chat_session(session_id: str) -> ChatSessionInfo:
 
 
 @router.delete("/chat/sessions/{session_id}")
-async def delete_chat_session(session_id: str) -> AgentWriteResponse:
+async def delete_chat_session(
+    http_request: Request, session_id: str
+) -> AgentWriteResponse:
     """End a chat session and discard its history."""
+    require_local_request(http_request)
+
     from features.agent.service import chat_sessions
 
     if not chat_sessions.delete(session_id):

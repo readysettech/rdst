@@ -12,6 +12,23 @@ from features.cache.readyset_container import (
 )
 
 
+def _upstream_url(cmd):
+    """Read UPSTREAM_DB_URL out of a `docker run` command.
+
+    The URL carries the database password, so it is passed via --env-file and
+    never appears in the command line. The file is deleted as soon as the run
+    returns, so this has to be called from inside the subprocess mock.
+    """
+    if "--env-file" not in cmd:
+        return None
+    path = cmd[cmd.index("--env-file") + 1]
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("UPSTREAM_DB_URL="):
+                return line.split("=", 1)[1].strip()
+    return None
+
+
 class TestStartReadysetContainerDirect:
 
     @pytest.fixture
@@ -85,12 +102,14 @@ class TestStartReadysetContainerDirect:
     def test_postgresql_upstream_url(self, base_config):
         """PostgreSQL config should produce postgresql:// UPSTREAM_DB_URL."""
         docker_run_cmd = None
+        upstream_url = None
 
         def capture_cmd(*args, **_):
-            nonlocal docker_run_cmd
+            nonlocal docker_run_cmd, upstream_url
             cmd = args[0]
             if cmd[0:2] == ['docker', 'run']:
                 docker_run_cmd = cmd
+                upstream_url = _upstream_url(cmd)
                 return Mock(returncode=0, stdout="container_id", stderr="")
             elif cmd[0:2] == ['docker', 'ps'] and '-a' in cmd:
                 return Mock(returncode=0, stdout="", stderr="")
@@ -102,7 +121,7 @@ class TestStartReadysetContainerDirect:
             result = start_readyset_container_direct(target_config=base_config, readyset_port=5433)
 
             assert result["success"] is True
-            assert any("UPSTREAM_DB_URL=postgresql://" in arg for arg in docker_run_cmd)
+            assert upstream_url.startswith("postgresql://")
 
     def test_mysql_upstream_url(self):
         """MySQL config should produce mysql:// UPSTREAM_DB_URL."""
@@ -115,12 +134,14 @@ class TestStartReadysetContainerDirect:
             "password": "testpass",
         }
         docker_run_cmd = None
+        upstream_url = None
 
         def capture_cmd(*args, **_):
-            nonlocal docker_run_cmd
+            nonlocal docker_run_cmd, upstream_url
             cmd = args[0]
             if cmd[0:2] == ['docker', 'run']:
                 docker_run_cmd = cmd
+                upstream_url = _upstream_url(cmd)
                 return Mock(returncode=0, stdout="container_id", stderr="")
             elif cmd[0:2] == ['docker', 'ps'] and '-a' in cmd:
                 return Mock(returncode=0, stdout="", stderr="")
@@ -132,10 +153,12 @@ class TestStartReadysetContainerDirect:
             result = start_readyset_container_direct(target_config=mysql_config, readyset_port=3307)
 
             assert result["success"] is True
-            assert any("UPSTREAM_DB_URL=mysql://" in arg for arg in docker_run_cmd)
+            assert upstream_url.startswith("mysql://")
 
-    def test_localhost_becomes_docker_internal(self, base_config):
-        """localhost should be converted to host.docker.internal for docker."""
+    def test_local_daemon_publishes_on_loopback(self, base_config, monkeypatch):
+        """The proxy port is for this machine, not the LAN."""
+        for var in ("DOCKER_HOST", "DOCKER_CONTEXT", "RDST_DOCKER_REMOTE"):
+            monkeypatch.delenv(var, raising=False)
         docker_run_cmd = None
 
         def capture_cmd(*args, **_):
@@ -143,6 +166,46 @@ class TestStartReadysetContainerDirect:
             cmd = args[0]
             if cmd[0:2] == ['docker', 'run']:
                 docker_run_cmd = cmd
+            return Mock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=capture_cmd):
+            start_readyset_container_direct(target_config=base_config, readyset_port=5433)
+
+        published = docker_run_cmd[docker_run_cmd.index('-p') + 1]
+        assert published == "127.0.0.1:5433:5433"
+
+    def test_remote_daemon_keeps_publishing_on_its_own_interfaces(
+        self, base_config, monkeypatch
+    ):
+        monkeypatch.setenv("RDST_DOCKER_REMOTE", "true")
+        monkeypatch.setenv("RDST_DOCKER_PUBLISHED_HOST", "10.0.0.5")
+        monkeypatch.setenv("RDST_DOCKER_UPSTREAM_HOST", "10.0.0.6")
+        docker_run_cmd = None
+
+        def capture_cmd(*args, **_):
+            nonlocal docker_run_cmd
+            cmd = args[0]
+            if cmd[0:2] == ['docker', 'run']:
+                docker_run_cmd = cmd
+            return Mock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=capture_cmd):
+            start_readyset_container_direct(target_config=base_config, readyset_port=5433)
+
+        published = docker_run_cmd[docker_run_cmd.index('-p') + 1]
+        assert published == "5433:5433"
+
+    def test_localhost_becomes_docker_internal(self, base_config):
+        """localhost should be converted to host.docker.internal for docker."""
+        docker_run_cmd = None
+        upstream_url = None
+
+        def capture_cmd(*args, **_):
+            nonlocal docker_run_cmd, upstream_url
+            cmd = args[0]
+            if cmd[0:2] == ['docker', 'run']:
+                docker_run_cmd = cmd
+                upstream_url = _upstream_url(cmd)
                 return Mock(returncode=0, stdout="container_id", stderr="")
             elif cmd[0:2] == ['docker', 'ps'] and '-a' in cmd:
                 return Mock(returncode=0, stdout="", stderr="")
@@ -154,7 +217,7 @@ class TestStartReadysetContainerDirect:
             result = start_readyset_container_direct(target_config=base_config)
 
             assert result["success"] is True
-            assert any("host.docker.internal" in arg for arg in docker_run_cmd if "UPSTREAM_DB_URL=" in arg)
+            assert "host.docker.internal" in upstream_url
 
     def test_password_from_env(self, monkeypatch):
         monkeypatch.setenv("MY_DB_PASSWORD", "env_secret")
@@ -168,12 +231,14 @@ class TestStartReadysetContainerDirect:
             "password_env": "MY_DB_PASSWORD",
         }
         docker_run_cmd = None
+        upstream_url = None
 
         def capture_cmd(*args, **_):
-            nonlocal docker_run_cmd
+            nonlocal docker_run_cmd, upstream_url
             cmd = args[0]
             if cmd[0:2] == ['docker', 'run']:
                 docker_run_cmd = cmd
+                upstream_url = _upstream_url(cmd)
                 return Mock(returncode=0, stdout="container_id", stderr="")
             elif cmd[0:2] == ['docker', 'ps'] and '-a' in cmd:
                 return Mock(returncode=0, stdout="", stderr="")
@@ -185,7 +250,9 @@ class TestStartReadysetContainerDirect:
             result = start_readyset_container_direct(target_config=config)
 
             assert result["success"] is True
-            assert any("env_secret@" in arg for arg in docker_run_cmd if "UPSTREAM_DB_URL=" in arg)
+            assert "env_secret@" in upstream_url
+            # and never on the command line, where `ps` would expose it
+            assert not any("env_secret" in arg for arg in docker_run_cmd)
 
     def test_docker_run_error(self, base_config):
         """Docker run failures should return error result."""

@@ -32,6 +32,7 @@ PASSWORD HANDLING:
 """
 
 import json
+import re
 import sys
 import os
 import signal
@@ -40,11 +41,17 @@ import subprocess
 from shared.child_process import rdst_child_argv
 from shared.shell import environment_assignment
 from shared.stdio import configure_utf8_stdio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 # MCP Protocol constants
 JSONRPC_VERSION = "2.0"
 MCP_VERSION = "2024-11-05"
+
+# rdst_set_env exists so a client can supply a credential for the current
+# session. Every child process inherits the environment, so a name outside that
+# shape (LD_PRELOAD, BASH_ENV, PATH, ...) would change how those children run.
+_CREDENTIAL_ENV_SUFFIXES = ("PASSWORD", "PASSWD", "API_KEY", "SECRET", "TOKEN")
+_ENV_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 _PASSWORD_ASSIGNMENT = environment_assignment("PASSWORD_ENV_NAME", "actual-password")
 _PROD_PASSWORD_ASSIGNMENT = environment_assignment("PROD_DB_PASSWORD", "secret123")
@@ -860,13 +867,16 @@ WORKFLOW:
 4. Now rdst_analyze, rdst_top, etc. will work for that target
 
 The env var persists for the lifetime of this MCP session.
+
+Only credential variables can be set: an uppercase name ending in PASSWORD,
+PASSWD, API_KEY, SECRET, or TOKEN. Any other name is refused.
 """,
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Environment variable name (e.g., PROD_DB_PASSWORD)"
+                        "description": "Credential env var name ending in PASSWORD, PASSWD, API_KEY, SECRET, or TOKEN (e.g., PROD_DB_PASSWORD)"
                     },
                     "value": {
                         "type": "string",
@@ -1762,6 +1772,20 @@ Examples:
     ]
 
 
+def advertised_tool_names() -> Set[str]:
+    """Names a client is allowed to call.
+
+    get_tools() withholds retired tools from the listing, so dispatch has to
+    read the same list or it keeps answering for tools nobody can see.
+    """
+    return {tool["name"] for tool in get_tools()}
+
+
+def is_credential_env_name(name: str) -> bool:
+    """Whether rdst_set_env may set this environment variable."""
+    return bool(_ENV_NAME_PATTERN.match(name)) and name.endswith(_CREDENTIAL_ENV_SUFFIXES)
+
+
 def get_prompts() -> List[Dict[str, Any]]:
     """Return the list of available MCP prompts.
 
@@ -1791,6 +1815,14 @@ def get_resources() -> List[Dict[str, Any]]:
 
 def handle_tool_call(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     """Handle a tool call and return the result."""
+
+    if name not in advertised_tool_names():
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": f"Unknown tool: {name}",
+            "returncode": 1
+        }
 
     if name == "rdst_configure_add":
         # Always use --skip-verify for MCP (non-interactive, can't prompt for confirmation)
@@ -2004,6 +2036,17 @@ This is the RDST configuration file. Key sections:
     elif name == "rdst_set_env":
         env_name = arguments["name"]
         env_value = arguments["value"]
+        if not is_credential_env_name(env_name):
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": (
+                    f"Refusing to set '{env_name}'. rdst_set_env only sets credential "
+                    f"variables: an uppercase name ending in "
+                    f"{', '.join(_CREDENTIAL_ENV_SUFFIXES)}."
+                ),
+                "returncode": 1
+            }
         os.environ[env_name] = env_value
         return {
             "success": True,

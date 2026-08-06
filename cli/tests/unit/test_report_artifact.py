@@ -85,6 +85,15 @@ def test_saved_artifact_uses_utf8_on_legacy_windows_locale(
     assert Path(saved_path).read_text(encoding="utf-8") == html
 
 
+@pytest.mark.parametrize(
+    "run_id", ["../escaped", "..", "sub/dir", "back\\slash", ""]
+)
+def test_report_is_not_written_outside_the_reports_directory(tmp_rdst_home, run_id):
+    """`run_id` reaches here from `--save-name` and the fleet audit body."""
+    assert save_report_locally(run_id, "<html>x</html>") is None
+    assert list(tmp_rdst_home.glob("escaped*")) == []
+
+
 def test_quick_audit_regenerates_with_health_score(tmp_rdst_home):
     _write_snapshot(tmp_rdst_home, "audit_prod_1", _audit_snapshot())
 

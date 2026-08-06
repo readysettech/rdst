@@ -15,11 +15,17 @@ import sqlparse
 from sqlparse.sql import Statement, Token, TokenList
 from sqlparse.tokens import DML, Keyword
 
+# Shared with the analyze validator so the two lists cannot drift apart.
+# _QUOTED_SPANS blanks out literals and quoted identifiers: a keyword inside one
+# is text, not an operation, and scanning the raw string reads it as an operation.
+from shared.query_safety import SIDE_EFFECT_FUNCTIONS, _QUOTED_SPANS
+
 
 # Dangerous keywords that indicate write operations
 WRITE_KEYWORDS = {
     'INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'TRUNCATE',
-    'REPLACE', 'MERGE', 'GRANT', 'REVOKE', 'SET', 'RESET'
+    'REPLACE', 'MERGE', 'GRANT', 'REVOKE', 'SET', 'RESET', 'COPY', 'CALL',
+    'EXECUTE', 'DO', 'VACUUM', 'LOAD', 'IMPORT', 'ATTACH'
 }
 
 # Safe read-only keywords
@@ -75,7 +81,7 @@ def validate_sql_for_ask(
         }
 
     # Step 2: Check for dangerous keywords
-    read_only_check = _check_read_only(sql)
+    read_only_check = check_read_only(sql)
     if not read_only_check['is_read_only']:
         issues.extend(read_only_check['issues'])
         return {
@@ -104,6 +110,21 @@ def validate_sql_for_ask(
                 'limit_value': None
             }
 
+        # Only the leading statement is inspected below, so anything trailing a
+        # semicolon would reach the driver unexamined.
+        meaningful = [s for s in parsed if str(s).strip().strip(';').strip()]
+        if len(meaningful) > 1:
+            issues.append('Only a single statement is allowed')
+            return {
+                'is_valid': False,
+                'is_safe': False,
+                'validated_sql': sql,
+                'issues': issues,
+                'warnings': warnings,
+                'has_limit': False,
+                'limit_value': None
+            }
+
         statement = parsed[0]
 
         # Check if it's a SELECT statement
@@ -121,6 +142,22 @@ def validate_sql_for_ask(
 
     except Exception as e:
         issues.append(f'SQL parsing error: {str(e)}')
+        return {
+            'is_valid': False,
+            'is_safe': False,
+            'validated_sql': sql,
+            'issues': issues,
+            'warnings': warnings,
+            'has_limit': False,
+            'limit_value': None
+        }
+
+    # Step 3b: Constructs that stay inside a SELECT but reach past the queried
+    # tables. These block rather than warn -- they return their payload to the
+    # caller before any rollback, so an advisory verdict buys nothing.
+    forbidden = _check_forbidden_constructs(sql)
+    if forbidden:
+        issues.extend(forbidden)
         return {
             'is_valid': False,
             'is_safe': False,
@@ -170,7 +207,7 @@ def validate_sql_for_ask(
     }
 
 
-def _check_read_only(sql: str) -> Dict[str, Any]:
+def check_read_only(sql: str) -> Dict[str, Any]:
     """
     Check if SQL is read-only (no write operations).
 
@@ -178,7 +215,7 @@ def _check_read_only(sql: str) -> Dict[str, Any]:
     1. Keyword pattern matching
     2. SQL parsing to check statement type
     """
-    sql_upper = sql.upper()
+    sql_upper = _QUOTED_SPANS.sub(' ', sql).upper()
     dangerous_found = []
 
     # Check for write keywords
@@ -330,23 +367,47 @@ def _replace_limit(sql: str, new_limit: int) -> str:
     return re.sub(pattern, replace_func, sql, flags=re.IGNORECASE)
 
 
+# A SELECT reaching this check is single-statement and read-only, so every
+# remaining INTO is a destination: a new table (PostgreSQL SELECT ... INTO, with
+# or without TEMP/UNLOGGED/TABLE), a variable, or the OUTFILE/DUMPFILE forms
+# reported separately.
+_SELECT_INTO = re.compile(r'\bINTO\s+(?!OUTFILE\b|DUMPFILE\b)', re.IGNORECASE)
+
+
+def _check_forbidden_constructs(sql: str) -> List[str]:
+    """
+    Check for constructs that must block execution rather than warn.
+
+    Returns:
+        List of issue messages; empty means nothing forbidden was found
+    """
+    issues = []
+    sql_upper = _QUOTED_SPANS.sub(' ', sql).upper()
+
+    if 'INTO OUTFILE' in sql_upper or 'INTO DUMPFILE' in sql_upper:
+        issues.append('INTO OUTFILE/DUMPFILE writes to the database server filesystem')
+
+    if _SELECT_INTO.search(sql_upper):
+        issues.append('SELECT ... INTO writes the result set outside the queried tables')
+
+    for func in sorted(SIDE_EFFECT_FUNCTIONS):
+        if re.search(r'\b' + func + r'\s*\(', sql_upper):
+            issues.append(
+                f'{func}() reaches outside the queried tables and is not permitted'
+            )
+
+    return issues
+
+
 def _check_dangerous_patterns(sql: str) -> List[str]:
     """
-    Check for potentially dangerous SQL patterns even in SELECT queries.
+    Check for patterns worth surfacing to the user without blocking.
 
     Returns:
         List of warning messages
     """
     warnings = []
     sql_upper = sql.upper()
-
-    # Check for INTO OUTFILE (MySQL) - can write to filesystem
-    if 'INTO OUTFILE' in sql_upper or 'INTO DUMPFILE' in sql_upper:
-        warnings.append('Query contains INTO OUTFILE/DUMPFILE - file write operations not allowed')
-
-    # Check for LOAD_FILE or similar functions
-    if 'LOAD_FILE' in sql_upper:
-        warnings.append('Query contains LOAD_FILE - file read operations may be restricted')
 
     # Check for potentially expensive operations
     if 'CROSS JOIN' in sql_upper:

@@ -40,6 +40,13 @@ DEMO_QUERIES = {
 }
 
 
+def _publish_bind() -> str:
+    """Host-side interface for `docker run -p`. The demo ships fixed credentials,
+    so a local daemon publishes on loopback; a remote daemon is only reachable by
+    address, so its ports stay on the daemon's interfaces."""
+    return "" if DockerTopology.from_environment().remote else "127.0.0.1:"
+
+
 class DemoCommand:
     def __init__(self):
         self.console = get_console()
@@ -97,7 +104,7 @@ class DemoCommand:
             subprocess.run([
                 "docker", "run", "-d",
                 "--name", DEMO_CONTAINER,
-                "-p", f"{DEMO_PORT}:5432",
+                "-p", f"{_publish_bind()}{DEMO_PORT}:5432",
                 "-e", f"POSTGRES_PASSWORD={DEMO_PASSWORD}",
                 "-e", f"POSTGRES_DB={DEMO_DATABASE}",
                 "postgres:17",

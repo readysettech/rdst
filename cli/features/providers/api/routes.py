@@ -22,6 +22,8 @@ from pydantic import BaseModel, SecretStr
 
 from sse_starlette.sse import EventSourceResponse
 
+from shared.api.guards import require_local_request
+
 from ..service import ACCOUNT_PROVIDERS, ProvidersService
 
 router = APIRouter(prefix="/providers", tags=["providers"])
@@ -80,16 +82,22 @@ class FleetDiscoverRequest(BaseModel):
 
 
 @router.get("/aws-status")
-async def get_fleet_aws_status(profile: Optional[str] = None) -> dict[str, Any]:
+async def get_fleet_aws_status(
+    http_request: Request, profile: Optional[str] = None
+) -> dict[str, Any]:
     """Report local AWS credential state for the discovery UI."""
+    require_local_request(http_request)
+
     from ..auth import get_aws_status
 
     return await asyncio.to_thread(get_aws_status, 3.0, profile)
 
 
 @router.post("/aws-login")
-async def start_fleet_aws_login(request: AwsLoginRequest):
+async def start_fleet_aws_login(http_request: Request, request: AwsLoginRequest):
     """Start AWS CLI SSO login without blocking the local web request."""
+    require_local_request(http_request)
+
     from ..aws_login import (
         AwsCliMissing,
         AwsCliSpawnError,
@@ -132,8 +140,10 @@ async def start_fleet_aws_login(request: AwsLoginRequest):
 
 
 @router.post("/aws-logout")
-async def fleet_aws_logout():
+async def fleet_aws_logout(http_request: Request):
     """Sign out of AWS SSO (clears the CLI's cached SSO sessions)."""
+    require_local_request(http_request)
+
     from ..aws_login import AwsCliMissing, AwsCliSpawnError, logout
 
     try:
@@ -145,8 +155,10 @@ async def fleet_aws_logout():
 
 
 @router.get("/aws-login/{login_id}")
-async def get_fleet_aws_login(login_id: str):
+async def get_fleet_aws_login(http_request: Request, login_id: str):
     """Poll an AWS CLI login and verify the resulting STS session."""
+    require_local_request(http_request)
+
     from ..aws_login import get_login_status
 
     try:
@@ -159,8 +171,12 @@ async def get_fleet_aws_login(login_id: str):
 
 
 @router.post("/aws-profiles")
-async def create_fleet_aws_profile(request: AwsProfileCreateRequest):
+async def create_fleet_aws_profile(
+    http_request: Request, request: AwsProfileCreateRequest
+):
     """Create a modern AWS CLI SSO profile in the user's local config."""
+    require_local_request(http_request)
+
     from ..aws_profiles import AwsProfileExists, InvalidAwsProfile, create_sso_profile
 
     try:
@@ -178,13 +194,17 @@ async def create_fleet_aws_profile(request: AwsProfileCreateRequest):
 
 
 @router.post("/aws-sso-login")
-async def start_fleet_aws_sso_login(request: AwsSsoLoginRequest):
+async def start_fleet_aws_sso_login(
+    http_request: Request, request: AwsSsoLoginRequest
+):
     """Device-authorize an SSO token from a start URL + region alone.
 
     No account or role is needed yet: the browser flow caches a token that
     the accounts/roles endpoints read. Poll the returned login_id through the
     shared GET /providers/aws-login/{login_id} endpoint.
     """
+    require_local_request(http_request)
+
     from ..aws_login import (
         AwsCliMissing,
         AwsCliSpawnError,
@@ -225,8 +245,12 @@ async def start_fleet_aws_sso_login(request: AwsSsoLoginRequest):
 
 
 @router.get("/aws-sso-accounts")
-async def list_fleet_aws_sso_accounts(start_url: str = Query(...)):
+async def list_fleet_aws_sso_accounts(
+    http_request: Request, start_url: str = Query(...)
+):
     """List AWS accounts available from the cached SSO token for start_url."""
+    require_local_request(http_request)
+
     from ..aws_sso import list_accounts
 
     accounts, error = await asyncio.to_thread(list_accounts, start_url)
@@ -235,9 +259,13 @@ async def list_fleet_aws_sso_accounts(start_url: str = Query(...)):
 
 @router.get("/aws-sso-roles")
 async def list_fleet_aws_sso_roles(
-    start_url: str = Query(...), account_id: str = Query(...)
+    http_request: Request,
+    start_url: str = Query(...),
+    account_id: str = Query(...),
 ):
     """List roles available in one account from the cached SSO token."""
+    require_local_request(http_request)
+
     from ..aws_sso import list_account_roles
 
     roles, error = await asyncio.to_thread(list_account_roles, start_url, account_id)
@@ -245,13 +273,17 @@ async def list_fleet_aws_sso_roles(
 
 
 @router.post("/aws-sso-finalize")
-async def finalize_fleet_aws_sso_profile(request: AwsSsoFinalizeRequest):
+async def finalize_fleet_aws_sso_profile(
+    http_request: Request, request: AwsSsoFinalizeRequest
+):
     """Write the chosen account/role as a profile and verify it assumes.
 
     Reuses create_sso_profile, then runs the STS check. A ForbiddenException
     at GetRoleCredentials surfaces as an actionable error naming the account
     and role rather than a raw botocore trace.
     """
+    require_local_request(http_request)
+
     from ..aws_login import verify_profile
     from ..aws_profiles import (
         AwsProfileExists,
@@ -366,8 +398,10 @@ def _provider_return_url(request: Request, provider: str) -> str:
 
 
 @router.get("/supabase-status")
-async def get_fleet_supabase_status() -> dict[str, Any]:
+async def get_fleet_supabase_status(http_request: Request) -> dict[str, Any]:
     """Report Supabase Management API credential state for the discovery UI."""
+    require_local_request(http_request)
+
     from ..supabase import get_supabase_status
 
     return await asyncio.to_thread(get_supabase_status)
@@ -376,6 +410,8 @@ async def get_fleet_supabase_status() -> dict[str, Any]:
 @router.post("/supabase-login")
 async def start_fleet_supabase_login(request: Request):
     """Start a Supabase OAuth sign-in and hand the browser the authorize URL."""
+    require_local_request(request)
+
     # The redirect URI must match the port this server is actually serving on.
     return await _start_provider_login(
         "supabase",
@@ -428,30 +464,38 @@ async def fleet_supabase_callback(
 
 
 @router.get("/supabase-login/{login_id}")
-async def get_fleet_supabase_login(login_id: str):
+async def get_fleet_supabase_login(http_request: Request, login_id: str):
     """Poll a Supabase OAuth sign-in started on this server."""
+    require_local_request(http_request)
+
     return await _poll_provider_login("supabase", login_id)
 
 
 @router.post("/supabase-logout")
-async def fleet_supabase_logout():
+async def fleet_supabase_logout(http_request: Request):
     """Revoke and clear stored Supabase credentials."""
+    require_local_request(http_request)
+
     from ..supabase_oauth import logout
 
     return await asyncio.to_thread(logout)
 
 
 @router.get("/neon-status")
-async def get_fleet_neon_status() -> dict[str, Any]:
+async def get_fleet_neon_status(http_request: Request) -> dict[str, Any]:
     """Report Neon API credential state for the discovery UI."""
+    require_local_request(http_request)
+
     from ..neon import get_neon_status
 
     return await asyncio.to_thread(get_neon_status)
 
 
 @router.post("/neon-key")
-async def set_fleet_neon_key(request: ProviderTokenRequest):
+async def set_fleet_neon_key(http_request: Request, request: ProviderTokenRequest):
     """Store a Neon API key after validating it."""
+    require_local_request(http_request)
+
     from ..neon import store_api_key, validate_key
 
     token = request.token.strip()
@@ -469,16 +513,20 @@ async def set_fleet_neon_key(request: ProviderTokenRequest):
 
 
 @router.post("/neon-logout")
-async def fleet_neon_logout():
+async def fleet_neon_logout(http_request: Request):
     """Clear the stored Neon API key."""
+    require_local_request(http_request)
+
     from ..neon import logout
 
     return await asyncio.to_thread(logout)
 
 
 @router.get("/digitalocean-status")
-async def get_fleet_digitalocean_status() -> dict[str, Any]:
+async def get_fleet_digitalocean_status(http_request: Request) -> dict[str, Any]:
     """Report DigitalOcean API credential state for the discovery UI."""
+    require_local_request(http_request)
+
     from ..digitalocean import get_digitalocean_status
 
     return await asyncio.to_thread(get_digitalocean_status)
@@ -487,20 +535,26 @@ async def get_fleet_digitalocean_status() -> dict[str, Any]:
 @router.post("/digitalocean-login")
 async def start_fleet_digitalocean_login(request: Request):
     """Start a DigitalOcean OAuth sign-in and hand the browser the authorize URL."""
+    require_local_request(request)
+
     return await _start_provider_login(
         "digitalocean", _provider_return_url(request, "digitalocean")
     )
 
 
 @router.get("/digitalocean-login/{login_id}")
-async def get_fleet_digitalocean_login(login_id: str):
+async def get_fleet_digitalocean_login(http_request: Request, login_id: str):
     """Poll a DigitalOcean OAuth sign-in started on this server."""
+    require_local_request(http_request)
+
     return await _poll_provider_login("digitalocean", login_id)
 
 
 @router.post("/digitalocean-logout")
-async def fleet_digitalocean_logout():
+async def fleet_digitalocean_logout(http_request: Request):
     """Clear the in-process DigitalOcean session."""
+    require_local_request(http_request)
+
     from ..digitalocean_oauth import logout
 
     return await asyncio.to_thread(logout)
@@ -519,8 +573,12 @@ class FleetBulkAddRequest(BaseModel):
 
 
 @router.post("/discover-preview")
-async def discover_preview(request: FleetDiscoverPreviewRequest):
+async def discover_preview(
+    http_request: Request, request: FleetDiscoverPreviewRequest
+):
     """List discoverable provider databases without importing them."""
+    require_local_request(http_request)
+
     if request.provider in ACCOUNT_PROVIDERS:
         return await ProvidersService().discover_preview_account(request.provider)
     if not request.regions:
@@ -535,8 +593,10 @@ async def discover_preview(request: FleetDiscoverPreviewRequest):
 
 
 @router.post("/bulk-add")
-async def bulk_add_targets(request: FleetBulkAddRequest):
+async def bulk_add_targets(http_request: Request, request: FleetBulkAddRequest):
     """Add previously previewed members as fleet targets."""
+    require_local_request(http_request)
+
     if not request.members:
         raise HTTPException(status_code=400, detail="No members provided")
     service = ProvidersService()
@@ -547,8 +607,10 @@ async def bulk_add_targets(request: FleetBulkAddRequest):
 
 
 @router.post("/discover")
-async def discover_fleet(request: FleetDiscoverRequest):
+async def discover_fleet(http_request: Request, request: FleetDiscoverRequest):
     """Discover RDS/Aurora instances from AWS and add them as targets (SSE stream)."""
+    require_local_request(http_request)
+
     service = ProvidersService()
     engine_filter = request.engine_filter if request.engine_filter not in (None, "all") else None
 

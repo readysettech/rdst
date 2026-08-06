@@ -7,8 +7,10 @@ import time
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from shared.api.guards import require_local_request
 
 router = APIRouter(prefix="/tunnel", tags=["tunnel"])
 
@@ -109,15 +111,19 @@ class SshProfileResponse(SshProfileData):
 
 
 @router.get("/status", response_model=list[TunnelStatusResponse])
-async def tunnel_status() -> list[TunnelStatusResponse]:
+async def tunnel_status(http_request: Request) -> list[TunnelStatusResponse]:
     """Return the tunnels managed by this backend process."""
+    require_local_request(http_request)
+
     statuses = _get_tunnel_manager().status()
     return [TunnelStatusResponse(**status) for status in statuses]
 
 
 @router.get("/ssh-keys", response_model=SshKeysResponse)
-async def ssh_keys(jump_host: str = "") -> SshKeysResponse:
+async def ssh_keys(http_request: Request, jump_host: str = "") -> SshKeysResponse:
     """Return local SSH agent, key-file, and ssh-config authentication options."""
+    require_local_request(http_request)
+
     from shared.ssh_keys import discover_ssh_auth_options
 
     options = await asyncio.to_thread(discover_ssh_auth_options, jump_host)
@@ -154,8 +160,12 @@ def _resolve_browse_directory(requested_path: Optional[str]) -> Path:
 
 
 @router.get("/browse", response_model=FileBrowserResponse)
-async def browse_files(path: Optional[str] = None) -> FileBrowserResponse:
+async def browse_files(
+    http_request: Request, path: Optional[str] = None
+) -> FileBrowserResponse:
     """List local paths for the browser SSH key picker."""
+    require_local_request(http_request)
+
     home = Path.home().resolve()
     directory = _resolve_browse_directory(path)
     try:
@@ -190,8 +200,12 @@ async def browse_files(path: Optional[str] = None) -> FileBrowserResponse:
 
 
 @router.post("/ssh-keys/import", response_model=ImportSshKeyResponse)
-async def import_ssh_key(request: ImportSshKeyRequest) -> ImportSshKeyResponse:
+async def import_ssh_key(
+    http_request: Request, request: ImportSshKeyRequest
+) -> ImportSshKeyResponse:
     """Copy a local private key into ~/.ssh without changing the source file."""
+    require_local_request(http_request)
+
     from fastapi import HTTPException
 
     from shared.ssh_keys import import_ssh_key as copy_ssh_key
@@ -204,8 +218,10 @@ async def import_ssh_key(request: ImportSshKeyRequest) -> ImportSshKeyResponse:
 
 
 @router.get("/ssh-profiles", response_model=list[SshProfileResponse])
-async def ssh_profiles() -> list[SshProfileResponse]:
+async def ssh_profiles(http_request: Request) -> list[SshProfileResponse]:
     """Return reusable SSH jump-host profiles without resolving key material."""
+    require_local_request(http_request)
+
     from shared.config.targets import TargetsConfig
 
     config = TargetsConfig()
@@ -217,8 +233,12 @@ async def ssh_profiles() -> list[SshProfileResponse]:
 
 
 @router.post("/close", response_model=CloseTunnelResponse)
-async def close_tunnel(request: CloseTunnelRequest) -> CloseTunnelResponse:
+async def close_tunnel(
+    http_request: Request, request: CloseTunnelRequest
+) -> CloseTunnelResponse:
     """Close one target tunnel or every tunnel in this process."""
+    require_local_request(http_request)
+
     manager = _get_tunnel_manager()
     if request.all:
         count = len(manager.status())
@@ -237,8 +257,12 @@ async def close_tunnel(request: CloseTunnelRequest) -> CloseTunnelResponse:
 
 
 @router.post("/test", response_model=TestTunnelResponse)
-async def test_tunnel(request: TestTunnelRequest) -> TestTunnelResponse:
+async def test_tunnel(
+    http_request: Request, request: TestTunnelRequest
+) -> TestTunnelResponse:
     """Open a target's tunnel and probe its database through the local endpoint."""
+    require_local_request(http_request)
+
     from shared.config.targets import TargetsConfig, default_port_for
     from shared.db_connection import normalize_engine_name, probe_target_connection
 

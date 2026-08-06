@@ -10,7 +10,7 @@ import asyncio
 import hashlib
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from features.cache.performance_comparison import (
@@ -19,6 +19,7 @@ from features.cache.performance_comparison import (
     MIN_COMPARISON_ITERATIONS,
     MIN_COMPARISON_WARMUP,
 )
+from shared.api.guards import require_local_request
 from shared.api.target_guard import TargetGuard, require_target_body
 from shared.db_connection import probe_target_connection
 from shared.run_registry import run_registry
@@ -140,8 +141,10 @@ async def _require_healthy_upstream(guard: TargetGuard) -> None:
 
 
 @router.get("/sandbox", response_model=SandboxStatusResponse)
-async def get_sandbox_status() -> SandboxStatusResponse:
+async def get_sandbox_status(http_request: Request) -> SandboxStatusResponse:
     """Return process-local sandbox diagnostics without connection secrets."""
+    require_local_request(http_request)
+
     from shared.deploy.sandbox_manager import sandbox_manager
 
     diagnostics, runtime = await asyncio.gather(
@@ -157,10 +160,13 @@ async def get_sandbox_status() -> SandboxStatusResponse:
 
 @router.post("/sandbox/prewarm", response_model=SandboxPrewarmResponse)
 async def prewarm_sandbox(
+    http_request: Request,
     request: SandboxPrewarmRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SandboxPrewarmResponse:
     """Queue low-priority preparation for the requested Comparisons target."""
+    require_local_request(http_request)
+
     from shared.deploy.sandbox_manager import sandbox_manager
 
     await _require_readyset_runtime()
@@ -171,10 +177,13 @@ async def prewarm_sandbox(
 
 @router.post("/test-runs", response_model=CacheTestRunStartResponse)
 async def start_cache_test_run(
+    http_request: Request,
     request: CacheTestRunRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> CacheTestRunStartResponse:
     """Start or attach to one complete temporary Readyset speed experiment."""
+    require_local_request(http_request)
+
     from ..experiment_service import (
         ReadysetExperimentService,
         parameter_fingerprint,

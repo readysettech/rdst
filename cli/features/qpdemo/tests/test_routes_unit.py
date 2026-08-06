@@ -19,7 +19,9 @@ def _client(monkeypatch) -> tuple[TestClient, FakeService]:
     monkeypatch.setattr(routes.DemoService, "instance", classmethod(lambda cls: fake))
     app = FastAPI()
     app.include_router(routes.router, prefix="/api")
-    return TestClient(app), fake
+    # These routes are behind require_local_request, so the client has to look
+    # like the loopback caller it stands in for.
+    return TestClient(app, client=("127.0.0.1", 54321)), fake
 
 
 def test_load_start_accepts_empty_body(monkeypatch):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -19,6 +19,7 @@ from features.init.events import (
 )
 from features.init.models import InitStatus, InitValidationResult
 from features.init.service import InitService
+from shared.api.guards import require_local_request
 
 router = APIRouter()
 
@@ -133,7 +134,11 @@ async def get_init_status() -> InitStatusResponse:
 
 
 @router.post("/init/validate")
-async def validate_init(request: InitValidateRequest) -> InitValidateResponse:
+async def validate_init(
+    http_request: Request, request: InitValidateRequest
+) -> InitValidateResponse:
+    require_local_request(http_request)
+
     service = InitService()
     validation = None
     async for event in service.validate_all_events(request.targets):
@@ -147,7 +152,9 @@ async def validate_init(request: InitValidateRequest) -> InitValidateResponse:
 
 
 @router.post("/init/complete")
-async def complete_init() -> InitCompleteResponse:
+async def complete_init(http_request: Request) -> InitCompleteResponse:
+    require_local_request(http_request)
+
     service = InitService()
     success = False
     async for event in service.mark_complete_events():
@@ -166,7 +173,9 @@ async def complete_init() -> InitCompleteResponse:
 
 
 @router.post("/init/validate/stream")
-async def validate_init_stream(request: InitValidateRequest):
+async def validate_init_stream(http_request: Request, request: InitValidateRequest):
+    require_local_request(http_request)
+
     service = InitService()
 
     async def _generator():

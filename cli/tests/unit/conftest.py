@@ -12,10 +12,37 @@ import asyncio
 
 import keyring
 import pytest
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient, Response
 from keyring.backend import KeyringBackend
 
 from shared.secret_store_service import SecretStoreService
+
+
+def make_loopback_request(path: str = "/", headers: dict | None = None) -> Request:
+    """Build the minimal Request that `require_local_request` accepts.
+
+    Route handlers that are called directly (rather than over ASGI) still need
+    a request to hand the loopback guard.
+    """
+    raw_headers = [
+        (name.lower().encode(), value.encode())
+        for name, value in (headers or {}).items()
+    ]
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "headers": raw_headers,
+            "client": ("127.0.0.1", 54321),
+        }
+    )
+
+
+@pytest.fixture
+def loopback_request() -> Request:
+    return make_loopback_request()
 
 
 class _BufferedStream:

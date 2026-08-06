@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Optional, Union
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from sse_starlette.sse import EventSourceResponse
 
@@ -20,6 +20,7 @@ from features.configure.events import (
 )
 from features.configure.models import ConfigureInput, ConfigureOptions
 from features.configure.service import ConfigureService
+from shared.api.guards import require_local_request
 from shared.config.targets import TargetsConfig
 from shared.password_resolver import derive_password_env, store_target_password
 from shared.secret_store_service import SecretStoreService
@@ -316,8 +317,9 @@ def _event_to_sse(event: ConfigureEvent) -> dict:
 
 
 @router.get("/configure/targets")
-async def list_targets() -> Union[TargetListResponse, ErrorResponse]:
+async def list_targets(http_request: Request) -> Union[TargetListResponse, ErrorResponse]:
     """List all configured database targets."""
+    require_local_request(http_request)
     service = ConfigureService()
     input_data = ConfigureInput()
     options = ConfigureOptions()
@@ -343,8 +345,11 @@ async def list_targets() -> Union[TargetListResponse, ErrorResponse]:
 
 
 @router.get("/configure/targets/{name}")
-async def get_target(name: str) -> Union[TargetDetailResponse, ErrorResponse]:
+async def get_target(
+    http_request: Request, name: str
+) -> Union[TargetDetailResponse, ErrorResponse]:
     """Get details of a specific target."""
+    require_local_request(http_request)
     service = ConfigureService()
 
     result = None
@@ -385,8 +390,11 @@ async def get_target(name: str) -> Union[TargetDetailResponse, ErrorResponse]:
 
 
 @router.post("/configure/targets")
-async def add_target(request: AddTargetRequest) -> Union[TargetResponse, ErrorResponse]:
+async def add_target(
+    http_request: Request, request: AddTargetRequest
+) -> Union[TargetResponse, ErrorResponse]:
     """Add a new database target."""
+    require_local_request(http_request)
     service = ConfigureService()
     input_data = ConfigureInput(target_name=request.name)
     password_env = _password_env_for_request(request.name, request.target)
@@ -430,9 +438,10 @@ async def add_target(request: AddTargetRequest) -> Union[TargetResponse, ErrorRe
 
 @router.put("/configure/targets/{name}")
 async def update_target(
-    name: str, request: UpdateTargetRequest
+    http_request: Request, name: str, request: UpdateTargetRequest
 ) -> Union[TargetResponse, ErrorResponse]:
     """Update an existing database target."""
+    require_local_request(http_request)
     service = ConfigureService()
     cfg = TargetsConfig()
     cfg.load()
@@ -485,8 +494,11 @@ async def update_target(
 
 
 @router.delete("/configure/targets/{name}")
-async def remove_target(name: str) -> Union[TargetResponse, ErrorResponse]:
+async def remove_target(
+    http_request: Request, name: str
+) -> Union[TargetResponse, ErrorResponse]:
     """Remove a database target."""
+    require_local_request(http_request)
     service = ConfigureService()
 
     result = None
@@ -511,8 +523,11 @@ async def remove_target(name: str) -> Union[TargetResponse, ErrorResponse]:
 
 
 @router.put("/configure/default")
-async def set_default(request: SetDefaultRequest) -> Union[TargetResponse, ErrorResponse]:
+async def set_default(
+    http_request: Request, request: SetDefaultRequest
+) -> Union[TargetResponse, ErrorResponse]:
     """Set a target as the default."""
+    require_local_request(http_request)
     service = ConfigureService()
 
     result = None
@@ -538,10 +553,12 @@ async def set_default(request: SetDefaultRequest) -> Union[TargetResponse, Error
 
 @router.post("/configure/targets/{name}/test")
 async def test_connection(
+    http_request: Request,
     name: str,
     request: Optional[FormConnectionTestRequest] = Body(default=None),
 ):
     """Test a saved target or the current unsaved form values (SSE stream)."""
+    require_local_request(http_request)
 
     async def _test_generator():
         service = ConfigureService()

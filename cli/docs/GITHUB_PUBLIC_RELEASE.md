@@ -4,7 +4,10 @@ This document explains what is published to the public GitHub repository at [git
 
 ## Overview
 
-RDST (Readyset Data and SQL Toolkit) is a source-available CLI tool for database diagnostics, query analysis, and caching optimization with Readyset. It is released under the BSL 1.1 license.
+RDST (Readyset Data and SQL Toolkit) is a CLI tool for database diagnostics,
+query analysis, and caching optimization with Readyset. The authoritative
+license is the `LICENSE` file at the repo root; `pyproject.toml` must agree
+with it, since that is what PyPI shows.
 
 **Public Repository**: https://github.com/readysettech/rdst
 
@@ -16,33 +19,53 @@ RDST (Readyset Data and SQL Toolkit) is a source-available CLI tool for database
 |------|-------------|
 | `rdst.py` | Main CLI entry point |
 | `mcp_server.py` | MCP server for Claude Code integration |
-| `lib/` | Core library modules (CLI commands, functions, services) |
+| `features/` | One directory per feature: `cli/`, `api/`, `service.py` |
+| `shared/` | Cross-feature code: UI, config, DB, LLM, API server |
 | `tests/` | Test suite (unit tests, public integration tests) |
 | `devtools/` | Development utilities |
 | `README.md` | User-facing documentation |
-| `LICENSE` | MIT License |
+| `LICENSE` | License text |
 | `pyproject.toml` | Python package configuration |
 | `requirements.txt` | Dependencies |
 | `.gitignore` | Git ignore rules |
-| `.github/` | GitHub-specific configs (issue templates) |
 | `CLAUDE.md` | AI assistant instructions |
 | `AGENTS.md` | Agent configuration |
 | `docs/` | Public documentation |
 
 ### Excluded from the Public Repository
 
-The following files/directories are excluded via `.gitignore` and not pushed to GitHub:
+Exclusion is done by the josh filter in `.buildkite/pipeline.josh.yml`, **not**
+by `.gitignore`. josh rewrites the monorepo's history through that filter, so a
+path is only kept out of the public repo if the filter excludes it. Files that
+are tracked in the monorepo reach GitHub even when `rdst/.gitignore` lists them.
+The filter currently reads:
+
+```
+:/rdst:exclude[::keyservice/]:exclude[::.buildkite/]:exclude[::features/qpdemo/assets/baked/build.sh]:exclude[::run_local_tests.sh]:exclude[::MIGRATION.md]:exclude[::build_rdst_mac_buildkite.sh]:exclude[::orchestrate_mac_build.sh]:exclude[::orchestrate_rdst.sh]
+```
+
+So the excluded set is exactly:
 
 | Path | Reason |
 |------|--------|
+| `keyservice/` | Separate service, not part of the CLI |
 | `.buildkite/` | Internal CI/CD pipelines |
-| `docs/internal/` | Internal documentation |
-| `tests/integration/run_tests_local.sh` | Local test config with internal URLs |
-| `tests/integration/README.md` | Internal integration test docs |
-| `venv/`, `.venv/` | Local Python environments |
-| `__pycache__/`, `*.pyc` | Python bytecode |
-| `build/`, `dist/`, `*.egg-info/` | Build artifacts |
-| `.rdst/` | User-specific local config |
+| `features/qpdemo/assets/baked/build.sh` | Hardcodes an internal AWS account |
+| `run_local_tests.sh` | Retired local test wrapper; superseded by the containerized suite |
+| `MIGRATION.md` | Retired internal migration notes |
+| `build_rdst_mac_buildkite.sh` | Retired build script referencing internal infrastructure |
+| `orchestrate_mac_build.sh` | Retired build script referencing internal infrastructure |
+| `orchestrate_rdst.sh` | Retired build script referencing internal infrastructure |
+
+Anything else tracked under `rdst/` is published, including its full history.
+Untracked paths (`venv/`, `__pycache__/`, `build/`, `dist/`, `.rdst/`) never
+enter git, so they never reach GitHub -- but that is a property of never being
+committed, not of `.gitignore` filtering the push.
+
+Note that `docs/internal/` and `tests/integration/run_tests_local.sh` appear in
+`rdst/.gitignore` but are **not** in the josh filter. They stay private only
+because nobody has committed them. `tests/integration/README.md` *is* tracked,
+and therefore *is* published, despite being listed in `.gitignore`.
 
 ## Security Checks
 
@@ -68,37 +91,28 @@ These patterns generate warnings but don't block:
 
 ### Gitignore Verification
 
-The pipeline verifies these files are properly gitignored:
+The gate also runs a `.gitignore` assertion. Note that this is hygiene only:
+`.gitignore` has no bearing on what josh publishes, so a pass here is not
+evidence that a path stays private. The josh filter is the only control
+that does that. The paths asserted:
 
 - `.buildkite/`
 - `docs/internal/`
 - `tests/integration/run_tests_local.sh`
 - `tests/integration/README.md`
 
-## Library Structure
+## Code Structure
 
-The `lib/` directory contains the full RDST functionality:
+Behaviour lives under `features/`, one directory per feature, with
+cross-cutting code in `shared/`. See ARCHITECTURE.md.
 
 ```
-lib/
-├── cli/              # Command implementations
-│   ├── rdst_cli.py   # Main RdstCLI class
-│   ├── analyze_command.py
-│   ├── top.py
-│   └── ...
-├── functions/        # Core business logic
-│   ├── llm_analysis.py
-│   ├── explain_analysis.py
-│   └── ...
-├── services/         # Service layer
-├── llm_manager/      # LLM provider abstraction
-├── engines/          # Ask3 text-to-SQL engine
-├── semantic_layer/   # Schema metadata
-├── ui/               # Rich terminal UI components
-├── agent/            # Agent mode functionality
-├── api/              # FastAPI server components
-├── query_registry/   # Saved query management
-└── ...
+features/<name>/
+  cli/command.py     # CLI surface
+  api/routes.py      # HTTP surface
+  service.py         # behaviour shared by both
+shared/
+  cli/  ui/  config/  llm_manager/  api/  deploy/  query_registry/
 ```
 
 ## Package Distribution
@@ -121,7 +135,8 @@ install from PyPI directly.
 
 When adding new files, consider:
 
-1. **Does it contain internal infrastructure references?** → Add to `.gitignore`
+1. **Does it contain internal infrastructure references?** → Exclude it in the
+   josh filter (`.gitignore` will not keep it private)
 2. **Does it contain secrets or internal URLs?** → Add patterns to `github_push_patterns.conf`
 3. **Is it user-facing?** → Include in public repo
 
@@ -141,12 +156,14 @@ To manually check what would be pushed:
 # Run the check script
 ./.buildkite/check_github_push.sh --strict
 
-# Verify .gitignore is working
-git status --ignored
+# See exactly what josh would publish, without pushing
+/joshua.sh -f '<filter>' -r refs/heads/main -m <remote> -p false
 ```
 
 ## License
 
-RDST is released under the BSL 1.1 license. See [LICENSE](../LICENSE) for details.
+See [LICENSE](../LICENSE). Keep `pyproject.toml`'s `license` field and its
+OSI classifier in step with that file -- they are published to PyPI and are
+what users actually read.
 
 Copyright (c) 2024-2025 Readyset Technology, Inc.

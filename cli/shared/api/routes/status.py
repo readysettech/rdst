@@ -1,7 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import Optional
 
+from shared.api.guards import require_local_request
 from shared.constants import rdst_data_dir
 from shared.password_resolver import resolve_password
 from shared.config.targets import TargetsConfig
@@ -41,8 +42,10 @@ def _get_version() -> str:
 
 
 @router.get("/status")
-async def get_status() -> StatusResponse:
+async def get_status(request: Request) -> StatusResponse:
     """Check if RDST is properly configured with database targets."""
+    require_local_request(request)
+
     try:
         cfg = TargetsConfig()
         cfg.load()

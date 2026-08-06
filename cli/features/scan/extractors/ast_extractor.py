@@ -443,7 +443,7 @@ class ASTQueryExtractor(ast.NodeVisitor):
         """
         # Normalize: collapse whitespace, strip
         normalized = ' '.join(snippet.split())
-        return hashlib.md5(normalized.encode()).hexdigest()[:12]
+        return hashlib.md5(normalized.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 class CrossFileResolver:

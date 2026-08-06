@@ -223,8 +223,9 @@ class TestGuardErrorHandling:
         cmd = GuardCommand()
         cmd.manager = manager
 
+        # Read-only enough to reach the structural guards, but unparseable.
         result = cmd._check(
-            sql="not valid sql at all",
+            sql="SELECT not valid sql at all",
             guard_name="test-guard",
             target=None,
         )

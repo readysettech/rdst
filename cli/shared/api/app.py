@@ -288,9 +288,13 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Every legitimate caller is a loopback origin: the desktop app's static
+    # server, the Vite dev server, and `rdst serve` (which is same-origin
+    # anyway). A wildcard additionally hands responses to any page the user
+    # happens to have open, and the API has no auth to fall back on.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

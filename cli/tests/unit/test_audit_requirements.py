@@ -111,13 +111,13 @@ class TestRunCapturePreflight:
 
 class TestRequirementsRoute:
     @pytest.mark.asyncio
-    async def test_ok(self):
+    async def test_ok(self, loopback_request):
         guard = TargetGuard("mydb", {"engine": "postgresql", "host": "h"}, "postgresql")
         with patch(
             "shared.db_connection.create_direct_connection",
             return_value=_pg_connection(),
         ):
-            response = await audit_routes.get_capture_requirements(guard)
+            response = await audit_routes.get_capture_requirements(loopback_request, guard)
         body = response.model_dump()
         assert body["target"] == "mydb"
         assert body["engine"] == "postgresql"
@@ -125,7 +125,7 @@ class TestRequirementsRoute:
         assert body["remediation"] is None
 
     @pytest.mark.asyncio
-    async def test_missing_returns_remediation(self):
+    async def test_missing_returns_remediation(self, loopback_request):
         guard = TargetGuard("mydb", {"engine": "postgresql", "host": "h"}, "postgresql")
         connection = _pg_connection(
             Exception('relation "pg_stat_statements" does not exist')
@@ -133,20 +133,20 @@ class TestRequirementsRoute:
         with patch(
             "shared.db_connection.create_direct_connection", return_value=connection
         ):
-            response = await audit_routes.get_capture_requirements(guard)
+            response = await audit_routes.get_capture_requirements(loopback_request, guard)
         body = response.model_dump()
         assert body["query_stats"] == "missing"
         assert "CREATE EXTENSION pg_stat_statements" in body["remediation"]
         connection.close.assert_called()
 
     @pytest.mark.asyncio
-    async def test_connection_failure_is_error(self):
+    async def test_connection_failure_is_error(self, loopback_request):
         guard = TargetGuard("mydb", {"engine": "mysql", "host": "h"}, "mysql")
         with patch(
             "shared.db_connection.create_direct_connection",
             side_effect=Exception("Authentication failed for user\nextra context"),
         ):
-            response = await audit_routes.get_capture_requirements(guard)
+            response = await audit_routes.get_capture_requirements(loopback_request, guard)
         body = response.model_dump()
         assert body["query_stats"] == "error"
         assert body["category"] == "target_password_required"
@@ -157,7 +157,7 @@ class TestRequirementsRoute:
         assert body["remediation"] is None
 
     @pytest.mark.asyncio
-    async def test_ssh_failure_is_blocking_and_categorized(self):
+    async def test_ssh_failure_is_blocking_and_categorized(self, loopback_request):
         guard = TargetGuard(
             "private-db",
             {
@@ -175,7 +175,7 @@ class TestRequirementsRoute:
             "shared.db_connection.resolve_connection_params",
             side_effect=SshKeyError("missing"),
         ):
-            response = await audit_routes.get_capture_requirements(guard)
+            response = await audit_routes.get_capture_requirements(loopback_request, guard)
 
         body = response.model_dump()
         assert body["query_stats"] == "error"
@@ -185,7 +185,7 @@ class TestRequirementsRoute:
         assert "Choose an existing private key" in body["detail"]
 
     @pytest.mark.asyncio
-    async def test_healthy_ssh_target_uses_local_endpoint_without_extra_noise(self):
+    async def test_healthy_ssh_target_uses_local_endpoint_without_extra_noise(self, loopback_request):
         guard = TargetGuard(
             "private-db",
             {
@@ -224,7 +224,7 @@ class TestRequirementsRoute:
                 return_value=connection,
             ) as create_connection,
         ):
-            response = await audit_routes.get_capture_requirements(guard)
+            response = await audit_routes.get_capture_requirements(loopback_request, guard)
 
         body = response.model_dump()
         assert body["query_stats"] == "ok"

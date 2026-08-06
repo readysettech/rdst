@@ -316,7 +316,7 @@ def _line_number(source: str, pos: int) -> int:
 def _hash_snippet(snippet: str) -> str:
     """Generate deterministic hash for an ORM snippet."""
     normalized = ' '.join(snippet.split())
-    return hashlib.md5(normalized.encode()).hexdigest()[:12]
+    return hashlib.md5(normalized.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 # ---------------------------------------------------------------------------

@@ -559,7 +559,7 @@ class ScanService:
             git_root = git_root_result.stdout.strip()
 
             result = subprocess.run(
-                ["git", "diff", "--name-only", diff],
+                ["git", "diff", "--name-only", diff, "--"],
                 capture_output=True, text=True, cwd=git_root,
             )
             if result.returncode != 0:
@@ -616,7 +616,7 @@ class ScanService:
     def _hash_snippet(self, snippet: str) -> str:
         """Generate deterministic hash for ORM snippet."""
         normalized = " ".join(snippet.split())
-        return hashlib.md5(normalized.encode()).hexdigest()[:12]
+        return hashlib.md5(normalized.encode(), usedforsecurity=False).hexdigest()[:12]
 
     def _load_schema_context(self, target: Optional[str]) -> str:
         """Load schema from semantic-layer YAML."""

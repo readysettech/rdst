@@ -334,6 +334,20 @@ class TestFallbackBehavior:
         normalized, params = normalize_and_extract(sql, dialect='postgres')
         assert len(params) == 1
 
+    def test_fallback_doubles_embedded_quotes(self):
+        """The regex fallback must not let a value terminate its own literal."""
+        from shared.query_registry.sql_normalizer import _fallback_reconstruct
+
+        result = _fallback_reconstruct(
+            "SELECT * FROM users WHERE name = :p1",
+            {'p1': {'value': "O'Brien'; DROP TABLE users --", 'type': 'string'}},
+        )
+
+        assert result == (
+            "SELECT * FROM users WHERE name = "
+            "'O''Brien''; DROP TABLE users --'"
+        )
+
 
 # =============================================================================
 # denormalize_for_readyset — engine-aware conversion of :pN placeholders

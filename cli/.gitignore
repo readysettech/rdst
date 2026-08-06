@@ -57,3 +57,7 @@ tests/e2e/.env
 tests/integration/run_tests_local.sh
 tests/integration/README.md
 docs/internal/
+
+# Security review reports: roadmaps of unfixed findings, never publish
+# (SECURITY.md itself is the public disclosure policy and IS tracked)
+SECURITY_*.md

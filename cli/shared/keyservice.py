@@ -1,7 +1,6 @@
 """Resolve the RDST keyservice URL.
 
-The keyservice is currently not open-source but will be released under
-BSL 1.1 alongside the CLI in the future.
+The keyservice is currently not open-source.
 """
 
 from __future__ import annotations

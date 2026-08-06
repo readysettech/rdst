@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from shared.api.guards import require_local_request
 from shared.run_registry import RunRegistry, run_registry
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -47,7 +48,9 @@ async def run_events(run_id: str, after_seq: int = 0):
 
 
 @router.delete("/{run_id}", response_model=BackgroundRunCancelResponse)
-async def cancel_run(run_id: str) -> BackgroundRunCancelResponse:
+async def cancel_run(request: Request, run_id: str) -> BackgroundRunCancelResponse:
+    require_local_request(request)
+
     if _registry.status(run_id) is None:
         raise HTTPException(status_code=404, detail=f"Background run '{run_id}' not found")
     return BackgroundRunCancelResponse(

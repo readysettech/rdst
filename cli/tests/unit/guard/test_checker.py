@@ -508,6 +508,54 @@ class TestMultiStatementRejection:
         read_only_result = next(r for r in results if r.guard_name == "read_only")
         assert read_only_result.passed is False
 
+    def test_read_only_failure_short_circuits_db_backed_checks(self):
+        """A query blocked as non-read-only never reaches the EXPLAIN guards."""
+        from unittest.mock import patch
+
+        config = GuardConfig(
+            name="costly",
+            guards=GuardsConfig(cost_limit=100, max_estimated_rows=1000),
+        )
+        target_config = {"engine": "postgresql", "host": "localhost"}
+
+        with (
+            patch("features.guard.checker.check_cost_limit") as cost,
+            patch("features.guard.checker.check_estimated_rows") as rows,
+        ):
+            results = check_query(
+                "DROP TABLE users", config, target_config=target_config
+            )
+
+        cost.assert_not_called()
+        rows.assert_not_called()
+        assert [r.guard_name for r in results] == ["read_only"]
+        assert results[0].passed is False
+
+    def test_read_only_pass_still_runs_db_backed_checks(self):
+        """The short circuit must not skip the EXPLAIN guards for valid SQL."""
+        from unittest.mock import patch
+
+        config = GuardConfig(
+            name="costly",
+            guards=GuardsConfig(cost_limit=100),
+        )
+        target_config = {"engine": "postgresql", "host": "localhost"}
+
+        with patch(
+            "features.guard.checker.check_cost_limit",
+            return_value=CheckResult(
+                passed=True, level="info", guard_name="cost_limit", message="ok"
+            ),
+        ) as cost:
+            results = check_query(
+                "SELECT id FROM users WHERE id = 1",
+                config,
+                target_config=target_config,
+            )
+
+        cost.assert_called_once()
+        assert "cost_limit" in [r.guard_name for r in results]
+
 
 # ---------------------------------------------------------------------------
 # Tests for Bug 2 (P2): UNION queries must enforce required_filters per arm

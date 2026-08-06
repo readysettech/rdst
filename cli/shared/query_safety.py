@@ -55,6 +55,18 @@ DANGEROUS_KEYWORDS = {
     "CONNECT",
 }
 
+# Functions that reach outside the queried tables -- server filesystem, outbound
+# connections, or a parked session. They sit inside an ordinary SELECT, so
+# neither the keyword scan nor the leading-keyword check ever sees them, and
+# they return their result before any rollback, so the transaction the caller
+# happens to be in does not undo them.
+SIDE_EFFECT_FUNCTIONS = {
+    "PG_READ_FILE", "PG_READ_BINARY_FILE", "PG_LS_DIR", "PG_STAT_FILE",
+    "LO_IMPORT", "LO_EXPORT", "DBLINK", "DBLINK_EXEC", "QUERY_TO_XML",
+    "PG_SLEEP", "PG_TERMINATE_BACKEND", "PG_CANCEL_BACKEND",
+    "LOAD_FILE", "SLEEP", "BENCHMARK", "SYS_EXEC", "SYS_EVAL",
+}
+
 # Allowed keywords for read-only operations
 ALLOWED_KEYWORDS = {
     "SELECT",
@@ -109,7 +121,12 @@ def validate_query_safety(sql: str, **kwargs) -> Dict[str, Any]:
 
         first_keyword = keywords[0] if keywords else ""
         if first_keyword not in ALLOWED_KEYWORDS and first_keyword not in {"(", "WITH"}:
-            issues.append(f"Query must start with read-only operation, found: {first_keyword}")
+            # Often a typo rather than an attack, so name what was expected
+            # instead of only reporting that the query was rejected.
+            allowed = ", ".join(sorted(ALLOWED_KEYWORDS))
+            issues.append(
+                f"query must begin with one of {allowed} (found '{first_keyword}')"
+            )
 
         issues.extend(_validate_query_patterns(normalized))
 
@@ -137,8 +154,22 @@ def _normalize_query_for_safety(sql: str) -> str:
     return sql.strip()
 
 
+# Row-locking clauses read rows and take locks; they modify nothing, but they
+# contain UPDATE and SHARE, so they have to come out before keyword scanning.
+_ROW_LOCK_CLAUSE = re.compile(
+    r"\bFOR\s+(?:NO\s+KEY\s+)?UPDATE\b|\bFOR\s+(?:KEY\s+)?SHARE\b|\bLOCK\s+IN\s+SHARE\s+MODE\b",
+    re.IGNORECASE,
+)
+
+# Literals and quoted identifiers cannot execute, so a keyword inside one is
+# text, not an operation. 'DROP by the office' must not read as DROP.
+_QUOTED_SPANS = re.compile(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`(?:``|[^`])*`", re.DOTALL)
+
+
 def _extract_sql_keywords(sql: str) -> List[str]:
     """Extract SQL keywords from normalized query."""
+    sql = _QUOTED_SPANS.sub(" ", sql)
+    sql = _ROW_LOCK_CLAUSE.sub(" ", sql)
     keyword_pattern = r"\b([A-Za-z_][A-Za-z0-9_]*)\b"
     matches = re.findall(keyword_pattern, sql)
 
@@ -158,7 +189,14 @@ def _extract_sql_keywords(sql: str) -> List[str]:
 def _validate_query_patterns(sql: str) -> List[str]:
     """Validate query using pattern-based rules."""
     issues = []
-    sql_upper = sql.upper()
+    # Same reasoning as keyword extraction: every pattern below describes an
+    # executable construct, so a match inside a literal is a false positive.
+    # A semicolon in a string value is not a second statement.
+    sql_upper = _QUOTED_SPANS.sub(" ", sql).upper()
+
+    for func in sorted(SIDE_EFFECT_FUNCTIONS):
+        if re.search(r"\b" + func + r"\s*\(", sql_upper):
+            issues.append(f"{func}() reaches outside the queried tables")
 
     dangerous_patterns = [
         (r"\bINTO\s+OUTFILE\b", "INTO OUTFILE operations not allowed"),

@@ -269,7 +269,8 @@ def _fallback_reconstruct(normalized_sql: str, params: Dict[str, dict]) -> str:
         value = param_info['value']
 
         if param_info['type'] == 'string':
-            replacement = f"'{value}'"
+            # Double embedded quotes so a value cannot terminate its own literal
+            replacement = "'" + str(value).replace("'", "''") + "'"
         else:
             replacement = str(value)
 

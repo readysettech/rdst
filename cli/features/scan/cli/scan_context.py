@@ -71,10 +71,14 @@ class ContextGatherer:
         self.visited_files = set()
         self.model_files = {}
         self.query_files = {}
+        skipped_outside_root: List[str] = []
 
         # Step 1: Find which changed files have ORM queries
         for filepath in changed_files:
-            full_path = self.repo_root / filepath
+            full_path = self._resolve_in_root(filepath)
+            if full_path is None:
+                skipped_outside_root.append(filepath)
+                continue
             if not full_path.exists():
                 continue
 
@@ -100,8 +104,20 @@ class ContextGatherer:
                 "model_files_count": len(self.model_files),
                 "total_lines": sum(c.count('\n') for c in self.query_files.values()) +
                               sum(c.count('\n') for c in self.model_files.values()),
+                "skipped_outside_root": skipped_outside_root,
             }
         }
+
+    def _resolve_in_root(self, filepath: str) -> Optional[Path]:
+        """Resolve a caller-supplied path, or None if it lands outside the scan
+        root. Git can name paths above the root (submodules, `../` entries), and
+        the root is the only tree the caller consented to read."""
+        try:
+            resolved = (self.repo_root / filepath).resolve()
+            resolved.relative_to(self.repo_root)
+        except (OSError, ValueError):
+            return None
+        return resolved
 
     def _read_file(self, path: Path) -> Optional[str]:
         """Read file content safely."""

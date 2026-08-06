@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -40,6 +40,7 @@ from features.schema.models import (
     SchemaUpdateResult,
 )
 from features.schema.service import SchemaService
+from shared.api.guards import require_local_request
 from shared.api.target_guard import TargetGuard, require_target, require_target_body
 from shared.run_registry import run_registry
 
@@ -443,10 +444,13 @@ class SchemaOperationResponse(BaseModel):
 
 @router.post("/semantic-layer/refresh")
 async def refresh_schema(
+    http_request: Request,
     request: SchemaRefreshRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SchemaOperationResponse:
     """Re-introspect the database and merge structural changes, preserving annotations."""
+    require_local_request(http_request)
+
     import asyncio
 
     service = SchemaService()
@@ -475,10 +479,13 @@ async def refresh_schema(
 
 @router.post("/semantic-layer/profile")
 async def profile_schema(
+    http_request: Request,
     request: SchemaProfileRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SchemaOperationResponse:
     """Profile column data distributions into the semantic layer."""
+    require_local_request(http_request)
+
     import asyncio
 
     service = SchemaService()
@@ -507,10 +514,13 @@ async def profile_schema(
 
 @router.post("/semantic-layer/init")
 async def init_schema(
+    http_request: Request,
     request: SchemaInitRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SchemaInitResponse:
     """Initialize semantic layer by introspecting database schema."""
+    require_local_request(http_request)
+
     service = SchemaService()
     options = SchemaInitOptions(
         enum_threshold=request.enum_threshold,
@@ -617,10 +627,12 @@ def _schema_event_to_sse(event: SchemaEvent) -> dict:
 
 @router.post("/semantic-layer/init/stream")
 async def init_schema_stream(
+    http_request: Request,
     request: SchemaInitRequest,
     guard: TargetGuard = Depends(require_target_body),
 ):
     """Initialize semantic layer and stream progress via SSE."""
+    require_local_request(http_request)
 
     async def _generator():
         service = SchemaService()
@@ -650,9 +662,12 @@ async def export_schema(
 
 @router.delete("/semantic-layer")
 async def delete_schema(
+    http_request: Request,
     guard: TargetGuard = Depends(require_target),
 ) -> SchemaDeleteResponse:
     """Delete semantic layer for a target."""
+    require_local_request(http_request)
+
     service = SchemaService()
     result = service.delete(guard.target_name)
     return _delete_result_to_response(result)
@@ -660,10 +675,13 @@ async def delete_schema(
 
 @router.post("/semantic-layer/table")
 async def add_table(
+    http_request: Request,
     request: AddTableRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SchemaUpdateResponse:
     """Add or update a table annotation."""
+    require_local_request(http_request)
+
     service = SchemaService()
     result = service.add_table(
         guard.target_name,
@@ -677,10 +695,13 @@ async def add_table(
 
 @router.post("/semantic-layer/column")
 async def add_column(
+    http_request: Request,
     request: AddColumnRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SchemaUpdateResponse:
     """Add or update a column annotation."""
+    require_local_request(http_request)
+
     service = SchemaService()
     result = service.add_column(
         guard.target_name,
@@ -696,10 +717,13 @@ async def add_column(
 
 @router.post("/semantic-layer/enum")
 async def add_enum(
+    http_request: Request,
     request: AddEnumRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SchemaUpdateResponse:
     """Add enum value mappings for a column."""
+    require_local_request(http_request)
+
     service = SchemaService()
     result = service.add_enum(
         guard.target_name,
@@ -712,10 +736,13 @@ async def add_enum(
 
 @router.post("/semantic-layer/terminology")
 async def add_terminology(
+    http_request: Request,
     request: AddTerminologyRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SchemaUpdateResponse:
     """Add a terminology entry."""
+    require_local_request(http_request)
+
     service = SchemaService()
     result = service.add_terminology(
         guard.target_name,
@@ -729,10 +756,13 @@ async def add_terminology(
 
 @router.post("/semantic-layer/relationship")
 async def add_relationship(
+    http_request: Request,
     request: AddRelationshipRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SchemaUpdateResponse:
     """Add a relationship between tables."""
+    require_local_request(http_request)
+
     service = SchemaService()
     result = service.add_relationship(
         guard.target_name,
@@ -746,10 +776,13 @@ async def add_relationship(
 
 @router.post("/semantic-layer/metric")
 async def add_metric(
+    http_request: Request,
     request: AddMetricRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> SchemaUpdateResponse:
     """Add or update a metric definition."""
+    require_local_request(http_request)
+
     service = SchemaService()
     result = service.add_metric(
         guard.target_name,
@@ -763,10 +796,13 @@ async def add_metric(
 
 @router.post("/semantic-layer/annotate")
 async def annotate_schema(
+    http_request: Request,
     request: AnnotateRequest,
     guard: TargetGuard = Depends(require_target_body),
 ):
     """Use LLM to generate descriptions for tables and columns (SSE streaming)."""
+    require_local_request(http_request)
+
     return EventSourceResponse(
         _annotate_generator(
             guard.target_name,
@@ -782,10 +818,13 @@ async def annotate_schema(
     response_model=AnnotationRunStartResponse,
 )
 async def start_annotation_run(
+    http_request: Request,
     request: AnnotateRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> AnnotationRunStartResponse:
     """Start AI annotation as a process-local background run."""
+    require_local_request(http_request)
+
     existing = _registry.find_active("schema_annotation", guard.target_name)
     if existing is not None:
         return AnnotationRunStartResponse(run_id=existing, reused=True)

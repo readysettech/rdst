@@ -20,6 +20,8 @@ from .prompts.ask_prompts import (
     ERROR_RECOVERY_PROMPT,
     SCHEMA_FILTER_PROMPT,
 )
+from .sql_validation import check_read_only
+from shared.constants import rdst_data_dir
 from shared.error_parser import parse_syntax_error
 
 
@@ -174,11 +176,14 @@ def generate_sql_from_nl(
             raw_response=result_data
         )
 
-        # Validate safety
-        if not safety.get('is_read_only', True):
-            result.success = False
-            result.error = "Generated query is not read-only (safety violation)"
-            result.warnings.append("LLM attempted to generate non-SELECT query")
+        # Validate safety. The model's own safety_assessment is not evidence --
+        # the same model wrote the SQL -- so check the generated statement.
+        if result.sql:
+            read_only_check = check_read_only(result.sql)
+            if not read_only_check['is_read_only']:
+                result.success = False
+                result.error = "Generated query is not read-only (safety violation)"
+                result.warnings.extend(read_only_check['issues'])
 
         # Convert to dict for workflow compatibility
         return {
@@ -207,10 +212,13 @@ def generate_sql_from_nl(
             error_context = response_text[context_start:context_end]
             logger.debug(f"JSON error context around position {error_pos}: ...{error_context}...")
             logger.debug(f"Full response length: {len(response_text)} chars")
-            # Save to file for inspection
+            # Save to file for inspection. The response can carry schema and
+            # sampled values, so it stays in the user's own directory rather
+            # than a world-readable temp path.
             try:
-                import tempfile
-                debug_path = os.path.join(tempfile.gettempdir(), 'rdst_ask_llm_response.json')
+                debug_dir = rdst_data_dir() / 'debug'
+                debug_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+                debug_path = debug_dir / 'ask_llm_response.json'
                 with open(debug_path, 'w', encoding='utf-8', newline='\n') as f:
                     f.write(response_text)
                 logger.debug(f"Full response saved to {debug_path}")

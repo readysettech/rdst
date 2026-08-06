@@ -109,7 +109,7 @@ class FleetRouterClient:
         async def _send():
             transport = ASGITransport(app=self.app)
             async with AsyncClient(
-                transport=transport, base_url="http://testserver"
+                transport=transport, base_url="http://127.0.0.1:8787"
             ) as client:
                 return await client.request(method, url, **kwargs)
 

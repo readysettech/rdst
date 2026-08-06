@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from shared.persistence import write_json
+from shared.persistence import is_safe_file_stem, require_safe_file_stem, write_json
 
 from .models import FleetAuditSnapshot, FleetDiff, FleetDiffEntry
 
@@ -38,18 +38,22 @@ class SnapshotStore:
         self.base_dir = base_dir or (Path.home() / ".rdst" / "fleet" / "snapshots")
 
     def save(self, snapshot: FleetAuditSnapshot) -> str:
+        require_safe_file_stem(snapshot.snapshot_id, "snapshot id")
         self.base_dir.mkdir(parents=True, exist_ok=True)
         path = self.base_dir / f"{snapshot.snapshot_id}.json"
         write_json(path, asdict(snapshot))
         return str(path)
 
     def save_raw(self, snapshot_id: str, data: Any) -> str:
+        require_safe_file_stem(snapshot_id, "snapshot id")
         self.base_dir.mkdir(parents=True, exist_ok=True)
         path = self.base_dir / f"{snapshot_id}.json"
         write_json(path, data)
         return str(path)
 
     def load(self, snapshot_id: str) -> dict[str, Any] | None:
+        if not is_safe_file_stem(snapshot_id):
+            return None
         path = self.base_dir / f"{snapshot_id}.json"
         if path.exists():
             with open(path, encoding="utf-8") as file_obj:
@@ -112,6 +116,8 @@ class SnapshotStore:
         return snapshots
 
     def delete(self, snapshot_id: str) -> bool:
+        if not is_safe_file_stem(snapshot_id):
+            return False
         path = self.base_dir / f"{snapshot_id}.json"
         if path.exists():
             os.unlink(path)

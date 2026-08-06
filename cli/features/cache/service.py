@@ -512,6 +512,21 @@ class CacheService:
                 yield ErrorEvent(type="error", message="Missing query.", stage="add")
                 return
 
+            # The query text reaches ReadySet interpolated into CREATE SHALLOW
+            # CACHE FROM, and much of it originates in the registry (captured
+            # from the database). Only a single read-only statement is cacheable
+            # anyway, so refuse anything else before it is interpolated.
+            from features.query_registry.service import benchmark_read_only_reason
+
+            not_read_only = benchmark_read_only_reason(input_data.query)
+            if not_read_only:
+                yield ErrorEvent(
+                    type="error",
+                    message=f"This query cannot be cached. {not_read_only}",
+                    stage="add",
+                )
+                return
+
             resolved = self._resolve_cache_target(input_data.target)
             if resolved is None:
                 yield ErrorEvent(
@@ -686,6 +701,15 @@ class CacheService:
                         f"Pass a `q_<hash>` from `rdst cache show`, or use a registry hash "
                         f"that has been cached at least once."
                     ),
+                    stage="delete",
+                )
+                return
+            # The resolved id comes from the registry, so it gets the same
+            # format check as the caller-supplied one before it reaches DDL.
+            if not re.match(r'^[a-zA-Z0-9_]+$', resolved_id):
+                yield ErrorEvent(
+                    type="error",
+                    message=f"Invalid resolved cache ID format: '{resolved_id}'",
                     stage="delete",
                 )
                 return

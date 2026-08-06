@@ -7,10 +7,11 @@ for monitoring top slow queries from database telemetry.
 import json
 from typing import AsyncGenerator, Optional, Union
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from shared.api.guards import require_local_request
 from shared.api.target_guard import TargetGuard, require_target
 from shared.telemetry import telemetry
 from ..service import TopService
@@ -282,6 +283,7 @@ async def _historical_generator(
 
 @router.get("/top", response_model=TopHistoricalResponse)
 async def get_top_queries(
+    request: Request,
     guard: TargetGuard = Depends(require_target),
     limit: int = Query(10, description="Number of top queries to return"),
     realtime: bool = Query(False, description="Enable realtime SSE streaming"),
@@ -327,6 +329,8 @@ async def get_top_queries(
     GET /api/top?target=mydb&realtime=true&duration=10
     ```
     """
+    require_local_request(request)
+
     options = TopOptions(
         limit=limit,
         sort=sort,
@@ -421,6 +425,7 @@ async def get_top_queries(
 
 @router.get("/top/realtime")
 async def get_top_queries_realtime(
+    request: Request,
     guard: TargetGuard = Depends(require_target),
     limit: int = Query(10, description="Number of top queries to return"),
     duration: Optional[int] = Query(
@@ -458,6 +463,8 @@ async def get_top_queries_realtime(
     });
     ```
     """
+    require_local_request(request)
+
     options = TopOptions(
         limit=limit,
         auto_save_registry=auto_save,

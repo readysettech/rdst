@@ -24,6 +24,20 @@ CHANNEL_OPEN_RETRY_SECONDS = 0.25
 logger = logging.getLogger(__name__)
 
 
+def _ensure_known_hosts_file() -> str:
+    """Return the user's known_hosts path, creating it if absent.
+
+    paramiko refuses to load a file that is not there, and the file has to
+    exist before it can record anything.
+    """
+    ssh_dir = Path.home() / ".ssh"
+    ssh_dir.mkdir(mode=0o700, exist_ok=True)
+    known_hosts = ssh_dir / "known_hosts"
+    if not known_hosts.exists():
+        known_hosts.touch(mode=0o600)
+    return str(known_hosts)
+
+
 class SshTunnelError(RuntimeError):
     """Base error for SSH tunnel failures."""
 
@@ -259,6 +273,13 @@ class TunnelManager:
 
         client = paramiko.SSHClient()
         client.load_system_host_keys()
+        # AutoAddPolicy only persists a newly seen key when a host-keys file is
+        # set, and load_system_host_keys() does not set one. Without this the
+        # first sight of a host is accepted and then forgotten, so every later
+        # connection accepts whatever answers -- there is nothing to compare
+        # against. Loading the file gives accept-new semantics instead: unknown
+        # hosts are recorded, and a key that changes afterwards is refused.
+        client.load_host_keys(_ensure_known_hosts_file())
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
             connect_args = {

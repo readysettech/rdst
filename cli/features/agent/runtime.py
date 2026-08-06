@@ -96,9 +96,10 @@ def validate_read_only(sql: str) -> tuple[bool, str]:
                 return False, f"Write operation not allowed: {key.upper()}"
         return True, ""
     except Exception as e:
-        # If we can't parse, allow it through - Ask3Engine will catch real errors
+        # Unparseable SQL cannot be shown to be read-only, and the agent is the
+        # component this check exists to constrain, so refuse it.
         logger.warning(f"Could not parse SQL for read-only check: {e}")
-        return True, ""
+        return False, f"Could not verify SQL is read-only: {e}"
 
 
 def inject_limit(sql: str, max_rows: int) -> str:
@@ -281,7 +282,14 @@ class AgentRuntime:
             # Use guard-based validation
             check_query = _get_guard_module().check_query
 
-            results = check_query(sql, guard)
+            # Cost and row-estimate guards need a connection; without the target
+            # they report nothing and the policy silently loses those checks.
+            results = check_query(
+                sql,
+                guard,
+                target_name=self.config.target,
+                target_config=self._target_config,
+            )
             for result in results:
                 if not result.passed and result.level == "block":
                     raise SafetyViolationError(result.message)

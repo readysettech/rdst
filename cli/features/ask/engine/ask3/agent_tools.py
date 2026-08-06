@@ -248,6 +248,11 @@ class AgentToolExecutor:
         if not table_name:
             return "Error: table_name is required"
 
+        # The name is interpolated into SQL below, so it has to hold up on its
+        # own -- schema_info is not guaranteed to be populated for every caller.
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table_name):
+            return f"Error: Invalid table name '{table_name}'"
+
         # Verify table exists
         if self.schema_info:
             valid_tables = {t.lower(): t for t in self.schema_info.tables.keys()}
@@ -369,6 +374,25 @@ class AgentToolExecutor:
 
         if not sql:
             return "Error: sql is required"
+
+        # Validation is also offered as its own tool, but a tool description is
+        # not an enforcement point: the model decides whether to call it, and the
+        # model may be acting on text it read out of the database. Gate here so
+        # execution cannot happen without it.
+        from features.ask.sql_validation import validate_sql_for_ask
+
+        validation_result = validate_sql_for_ask(
+            sql=sql, max_limit=1000, default_limit=100
+        )
+
+        if not validation_result.get("is_valid"):
+            issues = validation_result.get("issues", [])
+            ctx.record_query_attempt(sql, error="rejected by validation")
+            return "Query REJECTED by validation:\n" + "\n".join(
+                f"- {i}" for i in issues
+            )
+
+        sql = validation_result.get("validated_sql", sql)
 
         result = self._run_query(sql)
 

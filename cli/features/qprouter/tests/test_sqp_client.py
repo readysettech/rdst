@@ -251,3 +251,26 @@ def test_allocate_ports_skips_an_occupied_base_port(monkeypatch):
         ports = qdeploy.allocate_ports()
         assert ports.pg != busy
         assert qdeploy._port_free(ports.pg)
+
+
+def test_readyset_client_rejects_non_read_only_digest():
+    """Digest text observed on the wire is interpolated into CREATE CACHE FROM."""
+    import pytest
+
+    from features.qprouter.readyset_client import ReadysetClient
+
+    client = ReadysetClient("127.0.0.1", 5433)
+    with pytest.raises(ValueError):
+        client.create_cache("SELECT 1; DROP TABLE users")
+
+
+def test_readyset_client_rejects_non_identifier_cache_name():
+    import pytest
+
+    from features.qprouter.readyset_client import ReadysetClient
+
+    client = ReadysetClient("127.0.0.1", 5433)
+    with pytest.raises(ValueError):
+        client.drop_cache("q_abc; DROP TABLE users")
+    with pytest.raises(ValueError):
+        client.create_cache("SELECT 1", name="q_abc; DROP TABLE users")

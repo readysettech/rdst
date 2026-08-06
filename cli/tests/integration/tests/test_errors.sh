@@ -18,10 +18,12 @@ test_error_handling() {
     "${RDST_CMD[@]}" analyze --target "does-not-exist" --query "SELECT 1" --skip-warning
   assert_contains "Target 'does-not-exist' not found" "invalid target error message"
 
-  # Malformed SQL - analyze succeeds but reports error in output
+  # Malformed SQL is refused before it reaches the database: an unrecognised
+  # leading keyword cannot be shown to be read-only, and analyze executes what
+  # it is given via EXPLAIN ANALYZE.
   run_cmd "Analyze malformed SQL" \
     "${RDST_CMD[@]}" analyze --target "$TARGET_NAME" --query "SELCT * FORM title_basics" --skip-warning
-  assert_regex "FAILED|SyntaxError|syntax error" "malformed SQL should show error in output"
+  assert_regex "FAILED|SyntaxError|syntax error|must begin with" "malformed SQL should show error in output"
 
   run_expect_fail "Analyze using unknown hash id" \
     "${RDST_CMD[@]}" analyze "deadbeefcafe" --skip-warning

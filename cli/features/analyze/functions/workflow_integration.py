@@ -9,7 +9,25 @@ import json
 import time
 from typing import Dict, Any, Optional
 from shared.query_registry import QueryRegistry, hash_sql
+from shared.query_safety import validate_query_safety
+from shared.workflow_manager_runtime import WorkflowError
 from .validation import validate_recommendations, reorder_index_columns
+
+
+def enforce_query_safety(sql: str, **kwargs) -> Dict[str, Any]:
+    """Run the safety check as a workflow step and stop the run on rejection.
+
+    ``validate_query_safety`` reports a verdict; something has to act on it.
+    The runtime supports only Task and Parallel states, so a rejection cannot
+    be expressed as a branch -- raising is how a step refuses to continue.
+    This matters because analyze reaches the database through EXPLAIN ANALYZE,
+    which executes the statement rather than just planning it.
+    """
+    result = validate_query_safety(sql, **kwargs)
+    if not result.get("safe"):
+        issues = "; ".join(result.get("issues") or []) or "failed safety validation"
+        raise WorkflowError(f"Refusing to analyze this query: {issues}")
+    return result
 
 
 def _ensure_dict(value: Any) -> Dict[str, Any]:

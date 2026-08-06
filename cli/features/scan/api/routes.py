@@ -9,10 +9,11 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncGenerator, Optional, Union
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from shared.api.guards import require_local_request
 from shared.api.target_guard import TargetGuard, require_target_body
 from shared.telemetry import telemetry
 
@@ -164,6 +165,7 @@ async def _scan_generator(
 
 @router.post("/scan")
 async def scan_directory(
+    http_request: Request,
     request: ScanRequest,
     guard: TargetGuard = Depends(require_target_body),
 ):
@@ -178,6 +180,8 @@ async def scan_directory(
     - `complete`: Scan complete with summary
     - `error`: Error occurred
     """
+    require_local_request(http_request)
+
     return EventSourceResponse(
         _scan_generator(
             request.directory,
@@ -190,6 +194,7 @@ async def scan_directory(
 
 @router.post("/scan/json")
 async def scan_directory_json(
+    http_request: Request,
     request: ScanRequest,
     guard: TargetGuard = Depends(require_target_body),
 ) -> Union[ScanJsonSuccess, ScanJsonError]:
@@ -197,6 +202,8 @@ async def scan_directory_json(
 
     Collects all events and returns the final summary.
     """
+    require_local_request(http_request)
+
     service = ScanService()
     input_data = ScanInput(
         directory=request.directory, target=guard.target_name, source="web"

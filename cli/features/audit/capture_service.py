@@ -73,7 +73,7 @@ def _hash_sql(sql_text: str) -> str:
     except Exception:
         # Fallback if registry import fails
         normalized = _LITERAL_RE.sub("?", sql_text).strip()
-        return hashlib.md5(normalized.encode()).hexdigest()[:12]
+        return hashlib.md5(normalized.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 def _parse_duration(duration_str: str) -> int:

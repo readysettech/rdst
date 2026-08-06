@@ -92,12 +92,17 @@ async def test_clear_keyring_clears_secrets_and_trial_config(
     assert cfg2.get_trial_config() == {}
 
 
-async def test_clear_keyring_rejects_mismatched_origin_host(app, tmp_rdst_home):
+async def test_clear_keyring_rejects_cross_site_origin(app, tmp_rdst_home):
+    """A page on the web must not be able to wipe the local keyring.
+
+    Loopback aliases (127.0.0.1 / localhost / ::1) all name this server and
+    are interchangeable; anything else is another origin.
+    """
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8787") as c:
         response = await c.post(
             "/api/dev/clear-keyring",
-            headers={"origin": "http://localhost:8787"},
+            headers={"origin": "https://evil.example"},
         )
     assert response.status_code == 403
     # B7/T24 additive error envelope: the original `detail` is preserved, with

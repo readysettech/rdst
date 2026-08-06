@@ -14,6 +14,7 @@ import os
 from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
+    quote_identifier,
     resolve_connection_params,
 )
 
@@ -338,6 +339,9 @@ class SchemaIntrospector:
         Returns:
             List of distinct values if <= threshold, else None
         """
+        col = quote_identifier(col_name)
+        table = quote_identifier(table_name)
+
         # Progressive sampling: start small, increase if needed
         for sample_pct in [0.1, 1, 10, 100]:
             if sample_pct < 100:
@@ -345,22 +349,22 @@ class SchemaIntrospector:
                 # Remove ORDER BY to avoid temp file creation
                 cursor.execute(f"""
                     WITH sampled AS (
-                        SELECT "{col_name}"
-                        FROM "{table_name}" TABLESAMPLE SYSTEM({sample_pct})
+                        SELECT {col}
+                        FROM {table} TABLESAMPLE SYSTEM({sample_pct})
                         LIMIT 50000
                     )
-                    SELECT DISTINCT "{col_name}"
+                    SELECT DISTINCT {col}
                     FROM sampled
-                    WHERE "{col_name}" IS NOT NULL
+                    WHERE {col} IS NOT NULL
                     LIMIT {threshold + 1}
                 """)
             else:
                 # Final attempt: full table but still with LIMIT
                 # Remove ORDER BY to avoid temp file creation on large tables
                 cursor.execute(f"""
-                    SELECT DISTINCT "{col_name}"
-                    FROM "{table_name}"
-                    WHERE "{col_name}" IS NOT NULL
+                    SELECT DISTINCT {col}
+                    FROM {table}
+                    WHERE {col} IS NOT NULL
                     LIMIT {threshold + 1}
                 """)
 
@@ -612,7 +616,7 @@ class SchemaIntrospector:
         table = TableAnnotation(name=table_name, description="", row_estimate=row_str)
 
         # Get columns
-        cursor.execute(f"DESCRIBE `{table_name}`")
+        cursor.execute(f"DESCRIBE {quote_identifier(table_name, 'mysql')}")
         columns = cursor.fetchall()
 
         for col in columns:
@@ -677,7 +681,7 @@ class SchemaIntrospector:
                 pass
 
         # Get indexes
-        cursor.execute(f"SHOW INDEX FROM `{table_name}`")
+        cursor.execute(f"SHOW INDEX FROM {quote_identifier(table_name, 'mysql')}")
         idx_rows = cursor.fetchall()
         idx_dict: dict[str, list] = {}
         idx_meta: dict[str, dict] = {}
@@ -731,16 +735,19 @@ class SchemaIntrospector:
         """
         # Progressive sampling: start with small samples, increase if needed
         # MySQL doesn't have TABLESAMPLE, so we use LIMIT on subqueries
+        col = quote_identifier(col_name, "mysql")
+        table = quote_identifier(table_name, "mysql")
+
         for sample_limit in [10000, 50000, 100000]:
             # Remove ORDER BY to avoid temp file creation
             cursor.execute(f"""
-                SELECT DISTINCT `{col_name}`
+                SELECT DISTINCT {col}
                 FROM (
-                    SELECT `{col_name}`
-                    FROM `{table_name}`
+                    SELECT {col}
+                    FROM {table}
                     LIMIT {sample_limit}
                 ) subq
-                WHERE `{col_name}` IS NOT NULL
+                WHERE {col} IS NOT NULL
                 LIMIT {threshold + 1}
             """)
 
@@ -759,9 +766,9 @@ class SchemaIntrospector:
         # Final attempt with no limit (but still bounded distinct)
         # Remove ORDER BY to avoid temp file creation
         cursor.execute(f"""
-            SELECT DISTINCT `{col_name}`
-            FROM `{table_name}`
-            WHERE `{col_name}` IS NOT NULL
+            SELECT DISTINCT {col}
+            FROM {table}
+            WHERE {col} IS NOT NULL
             LIMIT {threshold + 1}
         """)
         values = [str(row[0]) for row in cursor.fetchall()]
