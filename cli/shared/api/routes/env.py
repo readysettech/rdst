@@ -3,11 +3,11 @@
 from __future__ import annotations
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, SecretStr
 
 from shared.anthropic_env import ANTHROPIC_API_KEY_NAMES
-from shared.api.guards import is_loopback_request, require_local_request
+from shared.api.guards import require_local_request
 from shared.env_requirements_service import EnvRequirementsService
 from shared.run_registry import run_registry
 
@@ -62,8 +62,7 @@ class AnthropicValidateResponse(BaseModel):
 
 @router.get("/env/requirements")
 async def get_env_requirements(request: Request) -> EnvRequirementsResponse:
-    if not is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    require_local_request(request)
 
     service = EnvRequirementsService()
     requirements = service.get_requirements()

@@ -19,9 +19,7 @@ from httpx import ASGITransport, AsyncClient, Response
 from shared.api.routes import settings as settings_mod
 from shared.config.targets import TargetsConfig
 
-FIXTURE = (
-    Path(__file__).parent / "fixtures" / "email_validation_cases.json"
-)
+FIXTURE = Path(__file__).parent / "fixtures" / "email_validation_cases.json"
 
 
 class _Client:
@@ -83,12 +81,12 @@ def config_path(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(config_path, monkeypatch):
-    # Treat every test request as loopback + same-host; the 403 guard paths are
-    # exercised separately with the real guards.
-    monkeypatch.setattr(settings_mod, "is_loopback_request", lambda request: True)
+    # Trust ordinary fixture requests; guard failures are exercised separately.
     monkeypatch.setattr(settings_mod, "require_local_request", lambda request: None)
     # Default: MX check passes. Individual tests override.
-    monkeypatch.setattr(settings_mod, "_domain_has_mx", lambda domain, resolver=None: True)
+    monkeypatch.setattr(
+        settings_mod, "_domain_has_mx", lambda domain, resolver=None: True
+    )
     app = FastAPI()
     app.include_router(settings_mod.router, prefix="/api")
     return _Client(app)
@@ -103,18 +101,27 @@ def _stored_email(config_path: Path) -> str | None:
 def test_get_email_empty(client, config_path):
     resp = client.get("/api/settings/email")
     assert resp.status_code == 200
-    assert resp.json() == {"email": None, "first_name": None, "last_name": None, "verified": False}
+    assert resp.json() == {
+        "email": None,
+        "first_name": None,
+        "last_name": None,
+        "verified": False,
+    }
 
 
 def test_post_then_get_roundtrip(client, config_path):
     resp = client.post("/api/settings/email", json={"email": "mike@example.com"})
     assert resp.status_code == 200
     assert resp.json() == {
-        "success": True, "email": "mike@example.com",
-        "verified": False, "verification_started": True,
+        "success": True,
+        "email": "mike@example.com",
+        "verified": False,
+        "verification_started": True,
     }
     assert client.get("/api/settings/email").json() == {
-        "email": "mike@example.com", "first_name": None, "last_name": None,
+        "email": "mike@example.com",
+        "first_name": None,
+        "last_name": None,
         "verified": False,
     }
 
@@ -133,7 +140,9 @@ def test_post_invalid_format_400(client, config_path):
 
 
 def test_post_rejects_nxdomain_400(client, config_path, monkeypatch):
-    monkeypatch.setattr(settings_mod, "_domain_has_mx", lambda domain, resolver=None: False)
+    monkeypatch.setattr(
+        settings_mod, "_domain_has_mx", lambda domain, resolver=None: False
+    )
     resp = client.post("/api/settings/email", json={"email": "user@nope.invalid"})
     assert resp.status_code == 400
     assert "mail server" in resp.json()["detail"].lower()
@@ -142,14 +151,21 @@ def test_post_rejects_nxdomain_400(client, config_path, monkeypatch):
 
 def test_post_allows_when_mx_undeterminable(client, config_path, monkeypatch):
     # None == resolver unavailable / timeout / offline: never strand the user.
-    monkeypatch.setattr(settings_mod, "_domain_has_mx", lambda domain, resolver=None: None)
+    monkeypatch.setattr(
+        settings_mod, "_domain_has_mx", lambda domain, resolver=None: None
+    )
     resp = client.post("/api/settings/email", json={"email": "user@example.com"})
     assert resp.status_code == 200
     assert _stored_email(config_path) == "user@example.com"
 
 
-def test_get_email_forbidden_off_loopback(config_path, monkeypatch):
-    monkeypatch.setattr(settings_mod, "is_loopback_request", lambda request: False)
+def test_get_email_rejects_untrusted_request(  # trufflehog:ignore
+    config_path, monkeypatch
+):
+    def forbidden(_request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    monkeypatch.setattr(settings_mod, "require_local_request", forbidden)
     app = FastAPI()
     app.include_router(settings_mod.router, prefix="/api")
     resp = _Client(app).get("/api/settings/email")
@@ -169,6 +185,7 @@ def test_post_email_forbidden_off_loopback(config_path, monkeypatch):
 
 # --- client/server regex parity ------------------------------------------------
 
+
 def test_email_regex_parity_against_shared_fixture():
     cases = json.loads(FIXTURE.read_text())["cases"]
     assert cases, "fixture must not be empty"
@@ -178,6 +195,7 @@ def test_email_regex_parity_against_shared_fixture():
 
 
 # --- gate/trial identity coherence ---------------------------------------------
+
 
 def test_gate_email_is_primary_over_trial_email(tmp_path):
     cfg = TargetsConfig(path=str(tmp_path / "config.toml"))
@@ -194,6 +212,7 @@ def test_gate_email_is_primary_over_trial_email(tmp_path):
 
 
 # --- _domain_has_mx behavior matrix (fake resolver, no network) -----------------
+
 
 class _FakeResolver:
     def __init__(self, mx=None, a=None):
@@ -236,15 +255,23 @@ def test_domain_has_mx_none_on_timeout():
 
 
 class TestSignupFlow:
-
-    def test_post_stores_machine_level_names_and_starts_verification(self, client, config_path):
-        r = client.post("/api/settings/email", json={
-            "email": "Ada@Example.com", "first_name": " Ada ", "last_name": "Lovelace",
-        })
+    def test_post_stores_machine_level_names_and_starts_verification(
+        self, client, config_path
+    ):
+        r = client.post(
+            "/api/settings/email",
+            json={
+                "email": "Ada@Example.com",
+                "first_name": " Ada ",
+                "last_name": "Lovelace",
+            },
+        )
         assert r.status_code == 200
         assert r.json() == {
-            "success": True, "email": "ada@example.com",
-            "verified": False, "verification_started": True,
+            "success": True,
+            "email": "ada@example.com",
+            "verified": False,
+            "verification_started": True,
         }
         # Names never leave the machine: the keyservice payload is email-only.
         assert _StubEmailService.last_register == {"email": "ada@example.com"}
@@ -256,11 +283,18 @@ class TestSignupFlow:
 
     def test_already_verified_email_passes_instantly(self, client, config_path):
         _StubEmailService.register_result = {
-            "success": True, "verified": True, "report_token": "tok-1",
+            "success": True,
+            "verified": True,
+            "report_token": "tok-1",
         }
-        r = client.post("/api/settings/email", json={
-            "email": "ada@example.com", "first_name": "Ada", "last_name": "L",
-        })
+        r = client.post(
+            "/api/settings/email",
+            json={
+                "email": "ada@example.com",
+                "first_name": "Ada",
+                "last_name": "L",
+            },
+        )
         assert r.json()["verified"] is True
         cfg = TargetsConfig(path=str(config_path))
         cfg.load()
@@ -269,9 +303,14 @@ class TestSignupFlow:
 
     def test_keyservice_unreachable_returns_service_error(self, client, config_path):
         _StubEmailService.register_result = {"success": False, "error": "boom"}
-        r = client.post("/api/settings/email", json={
-            "email": "ada@example.com", "first_name": "Ada", "last_name": "L",
-        })
+        r = client.post(
+            "/api/settings/email",
+            json={
+                "email": "ada@example.com",
+                "first_name": "Ada",
+                "last_name": "L",
+            },
+        )
         body = r.json()
         assert r.status_code == 502
         assert "temporarily unavailable" in body["detail"]
@@ -281,23 +320,37 @@ class TestSignupFlow:
         assert cfg.get_identity()["email"] == "ada@example.com"
 
     def test_verify_poll_persists_token(self, client, config_path):
-        client.post("/api/settings/email", json={
-            "email": "ada@example.com", "first_name": "Ada", "last_name": "L",
-        })
+        client.post(
+            "/api/settings/email",
+            json={
+                "email": "ada@example.com",
+                "first_name": "Ada",
+                "last_name": "L",
+            },
+        )
         _StubEmailService.status_result = {"verified": True, "report_token": "tok-9"}
-        assert client.post("/api/settings/email/verify-poll").json() == {"verified": True}
+        assert client.post("/api/settings/email/verify-poll").json() == {
+            "verified": True
+        }
         cfg = TargetsConfig(path=str(config_path))
         cfg.load()
         assert cfg.get_identity()["verified"] is True
         assert cfg.get_token_for_email("ada@example.com") == "tok-9"
 
     def test_verify_poll_without_email(self, client):
-        assert client.post("/api/settings/email/verify-poll").json() == {"verified": False}
+        assert client.post("/api/settings/email/verify-poll").json() == {
+            "verified": False
+        }
 
     def test_verify_poll_distinguishes_service_failure_from_pending(self, client):
-        client.post("/api/settings/email", json={
-            "email": "ada@example.com", "first_name": "Ada", "last_name": "L",
-        })
+        client.post(
+            "/api/settings/email",
+            json={
+                "email": "ada@example.com",
+                "first_name": "Ada",
+                "last_name": "L",
+            },
+        )
         _StubEmailService.status_result = {
             "verified": False,
             "error": "HTTP 500",
@@ -309,9 +362,14 @@ class TestSignupFlow:
         assert "temporarily unavailable" in response.json()["detail"]
 
     def test_names_are_per_machine_across_email_swaps(self, client, config_path):
-        client.post("/api/settings/email", json={
-            "email": "one@example.com", "first_name": "Ada", "last_name": "Lovelace",
-        })
+        client.post(
+            "/api/settings/email",
+            json={
+                "email": "one@example.com",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+            },
+        )
         client.post("/api/settings/email", json={"email": "two@example.com"})
         cfg = TargetsConfig(path=str(config_path))
         cfg.load()

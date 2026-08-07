@@ -6,20 +6,15 @@ conversation persistence, history retrieval, and error handling.
 """
 
 import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from unittest.mock import Mock
 
 from features.interactive.service import (
     InteractiveService,
     _get_interactive_mode_prompt,
 )
 from features.interactive.events import (
-    ChunkEvent,
     InteractiveCompleteEvent,
     InteractiveErrorEvent,
-    InteractiveEvent,
     MessageEvent,
 )
 
@@ -201,6 +196,63 @@ class TestInteractiveServiceSendMessage:
         assert len(chunk_events) == 3
         # Should not create new conversation
         mock_registry.create_conversation.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_continue_sends_history_and_migrates_retired_model(
+        self, mock_registry
+    ):
+        from shared.query_registry.conversation_registry import (
+            ConversationMessage,
+            InteractiveConversation,
+        )
+
+        captured = {}
+
+        async def stream(**kwargs):
+            captured.update(kwargs)
+            yield "continued"
+
+        llm = Mock()
+        llm.query_stream = stream
+        conversation = InteractiveConversation(
+            conversation_id="test_hash_claude",
+            query_hash="test_hash",
+            provider="claude",
+            model="claude-sonnet-4-20250514",
+            analysis_id="analysis-1",
+            target="db",
+            query_sql="SELECT 1",
+            messages=[
+                ConversationMessage("system", "INTERACTIVE MODE ACTIVATED", "t0"),
+                ConversationMessage("user", "Why this index?", "t1"),
+                ConversationMessage("assistant", "Because it is selective.", "t2"),
+            ],
+            started_at="t0",
+            last_updated="t2",
+            total_exchanges=1,
+        )
+        mock_registry.load_conversation.return_value = conversation
+        service = InteractiveService(conv_registry=mock_registry, llm_manager=llm)
+
+        events = [
+            event
+            async for event in service.send_message(
+                query_hash="test_hash",
+                message="Would another order work?",
+                analysis_results={},
+                continue_existing=True,
+            )
+        ]
+
+        assert captured["history"] == [
+            {"role": "user", "content": "Why this index?"},
+            {"role": "assistant", "content": "Because it is selective."},
+        ]
+        assert captured["user_query"] == "Would another order work?"
+        assert captured["model"] == "claude-sonnet-4-6"
+        assert conversation.model == "claude-sonnet-4-6"
+        assert conversation.total_exchanges == 2
+        assert events[-1].type == "complete"
 
     @pytest.mark.asyncio
     async def test_send_message_fresh_start(
@@ -476,7 +528,7 @@ class TestInteractiveServiceLoadOrCreateConversation:
         mock_conv.add_message = Mock()
         mock_registry.load_conversation.return_value = mock_conv
 
-        result = service._load_or_create_conversation(
+        service._load_or_create_conversation(
             query_hash="test_hash",
             analysis_results={},
             continue_existing=True,

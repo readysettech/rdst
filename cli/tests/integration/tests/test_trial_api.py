@@ -9,7 +9,10 @@ on the on-disk trial config.
 
 from __future__ import annotations
 
+from httpx import ASGITransport, AsyncClient
+
 from features.trial.api import routes as trial_routes
+from features.trial.models import TrialRegisterResult
 from shared.config.targets import TargetsConfig
 
 
@@ -78,9 +81,7 @@ async def test_activate_trial_wakes_parked_jobs(
     assert registry.wake_calls == 1
 
 
-async def test_simulate_exhaust_flips_status_and_zeros_remaining(
-    client, tmp_rdst_home
-):
+async def test_simulate_exhaust_flips_status_and_zeros_remaining(client, tmp_rdst_home):
     """`/trial/simulate/exhaust` should set status=exhausted and zero
     remaining; the change must persist to disk."""
     _seed_active_trial()
@@ -117,3 +118,55 @@ async def test_simulate_exhaust_with_no_active_trial_returns_no_op(
     body = response.json()
     assert body["success"] is False
     assert "No active trial" in (body.get("message") or "")
+
+
+async def test_register_accepts_remote_same_origin_browser(
+    app, tmp_rdst_home, monkeypatch
+):
+    """A browser on the Vagrant host reaches TrialService through the VM IP."""
+    calls = []
+
+    async def register(_service, email: str, source: str):
+        calls.append((email, source))
+        return TrialRegisterResult(success=True, limit_display="150K tokens")
+
+    monkeypatch.setattr(trial_routes.TrialService, "register", register)
+
+    transport = ASGITransport(app=app, client=("192.168.56.1", 50000))
+    async with AsyncClient(
+        transport=transport, base_url="http://192.168.56.10:8787"
+    ) as remote:
+        response = await remote.post(
+            "/api/trial/register",
+            headers={"origin": "http://192.168.56.10:8787"},
+            json={"email": "person@hotmail.com"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["success"] is True
+    assert calls == [("person@hotmail.com", "web")]
+
+
+async def test_register_rejects_remote_cross_origin_browser(
+    app, tmp_rdst_home, monkeypatch
+):
+    calls = []
+
+    async def register(_service, email: str, source: str):
+        calls.append((email, source))
+        return TrialRegisterResult(success=True)
+
+    monkeypatch.setattr(trial_routes.TrialService, "register", register)
+
+    transport = ASGITransport(app=app, client=("192.168.56.1", 50000))
+    async with AsyncClient(
+        transport=transport, base_url="http://192.168.56.10:8787"
+    ) as remote:
+        response = await remote.post(
+            "/api/trial/register",
+            headers={"origin": "https://evil.example"},
+            json={"email": "person@hotmail.com"},
+        )
+
+    assert response.status_code == 403
+    assert calls == []

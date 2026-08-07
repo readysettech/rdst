@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -12,6 +13,8 @@ from shared.secret_store_service import SecretStoreService
 from shared.telemetry import telemetry
 
 from .models import TrialActivateResult, TrialRegisterResult, TrialStatusResult
+
+logger = logging.getLogger(__name__)
 
 
 class TrialService:
@@ -39,8 +42,14 @@ class TrialService:
 
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.post(keyservice_url("/register"), json={"email": email})
-        except Exception:
+                resp = await client.post(
+                    keyservice_url("/register"), json={"email": email}
+                )
+        except Exception as exc:
+            logger.warning(
+                "Unable to reach keyservice during trial registration: error=%s",
+                type(exc).__name__,
+            )
             return TrialRegisterResult(
                 success=False,
                 error_code="CONNECTION_ERROR",
@@ -54,6 +63,22 @@ class TrialService:
             resp_data = {}
 
         code = resp_data.get("code", "")
+
+        if resp.status_code >= 400:
+            detail = " ".join(str(resp_data.get("detail", "")).split())[:500]
+            logger.warning(
+                "Keyservice trial registration rejected: status=%s code=%s detail=%s",
+                resp.status_code,
+                code or "unknown",
+                detail or "not provided",
+            )
+        else:
+            logger.info(
+                "Keyservice trial registration accepted: status=%s tier=%s resent=%s",
+                resp.status_code,
+                resp_data.get("email_tier", "unknown"),
+                bool(resp_data.get("token_resent")),
+            )
 
         if resp.status_code == 503:
             return TrialRegisterResult(
@@ -196,8 +221,11 @@ class TrialService:
         token = token.strip()
         if limit_cents is None:
             limit_cents = (
-                500 if email_tier == "business"
-                else 150 if email_tier == "personal" else None
+                500
+                if email_tier == "business"
+                else 150
+                if email_tier == "personal"
+                else None
             )
         # A fresh activation has spent nothing; only a reported balance carries
         # real remaining.
@@ -258,7 +286,9 @@ class TrialService:
         except Exception:
             pass
 
-        return TrialActivateResult(success=True, message="Trial activated successfully.")
+        return TrialActivateResult(
+            success=True, message="Trial activated successfully."
+        )
 
     def _build_status_result(
         self,

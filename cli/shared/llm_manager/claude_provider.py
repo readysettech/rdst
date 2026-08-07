@@ -8,10 +8,11 @@ from typing import Any, Dict, Generator
 import json
 import requests
 
-logger = logging.getLogger(__name__)
+from shared.shell import environment_assignment
 
 from .base import LLMError, Provider, ProviderRequest, ProviderResponse
-from shared.shell import environment_assignment
+
+logger = logging.getLogger(__name__)
 
 
 class AnthropicModel(str, Enum):
@@ -38,23 +39,150 @@ class AnthropicModel(str, Enum):
     CLAUDE_4_OPUS = "claude-opus-4-20250514"
 
 
+_RETIRED_MODEL_REPLACEMENTS = {
+    AnthropicModel.SONNET_4.value: AnthropicModel.SONNET_4_6.value,
+    AnthropicModel.OPUS_4.value: AnthropicModel.OPUS_4_6.value,
+}
+
+
+def normalize_anthropic_model(model: str | AnthropicModel) -> str:
+    """Map models retired by Anthropic to RDST's current equivalents."""
+    value = model.value if isinstance(model, AnthropicModel) else str(model)
+    return _RETIRED_MODEL_REPLACEMENTS.get(value, value)
+
+
 class ClaudeProvider(Provider):
     """
     Anthropic Claude Messages API wrapper.
 
-    Default: Sonnet 4.5 (fast, cost-effective for query analysis)
+    Default: Sonnet 4.6 (fast, cost-effective for query analysis)
     Override via RDST_ANTHROPIC_MODEL env var to use Opus for more sophisticated analysis.
     """
 
-    _DEFAULT_MODEL = AnthropicModel(
-        os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.SONNET_4_5.value)
-    )
+    _DEFAULT_MODEL = os.getenv("RDST_ANTHROPIC_MODEL", AnthropicModel.SONNET_4_6.value)
 
     _BASE_URL = "https://api.anthropic.com/v1/messages"
     _API_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
 
     def default_model(self) -> str:
-        return self._DEFAULT_MODEL.value
+        return normalize_anthropic_model(self._DEFAULT_MODEL)
+
+    @staticmethod
+    def _error_payload(response) -> tuple[dict[str, Any], str, str | None]:
+        try:
+            payload = response.json()
+            if not isinstance(payload, dict):
+                payload = {}
+        except Exception:
+            payload = {}
+
+        error = payload.get("error")
+        error_obj = error if isinstance(error, dict) else {}
+        message = (
+            error_obj.get("message")
+            or payload.get("detail")
+            or (error if isinstance(error, str) else None)
+            or f"HTTP {response.status_code}"
+        )
+        # Provider bodies are useful, but never let an upstream HTML error page
+        # flood the CLI/web response.
+        message = " ".join(str(message).split())[:500]
+        request_id = payload.get("request_id")
+        if not isinstance(request_id, str):
+            header_id = response.headers.get("request-id")
+            request_id = header_id if isinstance(header_id, str) else None
+        return payload, message, request_id
+
+    @classmethod
+    def _raise_http_error(
+        cls,
+        response,
+        *,
+        base_url: str | None,
+        model: str,
+    ) -> None:
+        if response.status_code < 400:
+            return
+
+        payload, detail, request_id = cls._error_payload(response)
+        request_suffix = f" (request ID: {request_id})" if request_id else ""
+
+        if base_url:
+            code = payload.get("code") if isinstance(payload.get("code"), str) else None
+            if response.status_code == 401:
+                message = (
+                    "RDST's AI service could not validate your trial access. "
+                    "Refresh your trial token or configure your own Anthropic API key."
+                )
+                code = "TRIAL_AUTH_INVALID"
+            elif code == "TRIAL_EXHAUSTED":
+                message = (
+                    f"{detail}\n\nTo continue, configure your own Anthropic API key "
+                    "or email hello@readyset.io about trial access."
+                )
+            elif code == "INVALID_CLIENT":
+                message = f"Trial client authentication failed: {detail}"
+            elif response.status_code == 429:
+                message = f"RDST's AI service is rate limited: {detail}"
+            elif response.status_code >= 500:
+                message = f"RDST's AI service is temporarily unavailable: {detail}"
+            else:
+                message = f"RDST's AI service rejected the request: {detail}"
+            raise LLMError(
+                message + request_suffix,
+                code=code or "PROXY_HTTP",
+                status=response.status_code,
+                request_id=request_id,
+            )
+
+        messages = {
+            400: (
+                f"Anthropic rejected the request for model '{model}': {detail}. "
+                "Check the configured model and request parameters."
+            ),
+            401: "Anthropic rejected the configured API key. Check the key and try again.",
+            402: f"Anthropic reports a billing or credit problem: {detail}",
+            403: f"The Anthropic API key is not authorized to use model '{model}': {detail}",
+            404: f"Anthropic could not find model or endpoint '{model}': {detail}",
+            429: f"Anthropic rate limited the request: {detail}",
+        }
+        if response.status_code in messages:
+            message = messages[response.status_code]
+        elif response.status_code >= 500:
+            message = f"Anthropic is temporarily unavailable: {detail}"
+        else:
+            message = f"Anthropic API error: {detail}"
+
+        error_obj = payload.get("error")
+        provider_type = (
+            error_obj.get("type")
+            if isinstance(error_obj, dict) and isinstance(error_obj.get("type"), str)
+            else None
+        )
+        code = {
+            400: "ANTHROPIC_INVALID_REQUEST",
+            401: "ANTHROPIC_AUTH_INVALID",
+            402: "ANTHROPIC_BILLING",
+            403: "ANTHROPIC_PERMISSION",
+            404: "ANTHROPIC_NOT_FOUND",
+            429: "ANTHROPIC_RATE_LIMIT",
+        }.get(
+            response.status_code,
+            "ANTHROPIC_UNAVAILABLE" if response.status_code >= 500 else "PROVIDER_HTTP",
+        )
+        if provider_type:
+            logger.debug(
+                "Anthropic request failed: status=%s type=%s request_id=%s",
+                response.status_code,
+                provider_type,
+                request_id or "unknown",
+            )
+        raise LLMError(
+            message + request_suffix,
+            code=code,
+            status=response.status_code,
+            request_id=request_id,
+        )
 
     def complete(
         self,
@@ -89,7 +217,7 @@ class ClaudeProvider(Provider):
         ]
 
         payload: Dict[str, Any] = {
-            "model": request.model,
+            "model": normalize_anthropic_model(request.model),
             "messages": msg_list,
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
@@ -150,7 +278,9 @@ class ClaudeProvider(Provider):
         if request.max_tokens and request.max_tokens > 4096:
             timeout = 120
         try:
-            resp = requests.post(target_url, headers=headers, data=json.dumps(payload), timeout=timeout)
+            resp = requests.post(
+                target_url, headers=headers, data=json.dumps(payload), timeout=timeout
+            )
         except requests.exceptions.ConnectionError as e:
             if base_url:
                 raise LLMError(
@@ -166,70 +296,11 @@ class ClaudeProvider(Provider):
         except Exception as e:
             raise LLMError(f"Claude request error: {e}", code="HTTP_ERROR", cause=e)
 
-        if resp.status_code in (401, 403) and base_url:
-            # Check for trial-specific errors from our proxy. These responses
-            # come from the RDST keyservice, not from Claude, so do not label
-            # them as Claude API failures in user-facing errors.
-            try:
-                err_json = resp.json()
-            except Exception:
-                err_json = {}
-            if resp.status_code == 401:
-                raise LLMError(
-                    "RDST's AI service could not validate your trial access. "
-                    "Try again shortly, refresh your trial token, or configure "
-                    "your own Anthropic API key.",
-                    code="TRIAL_AUTH_INVALID",
-                    status=401,
-                )
-            if err_json.get("code") == "TRIAL_EXHAUSTED":
-                detail = err_json.get("detail", "Trial credits exhausted.")
-                raise LLMError(
-                    f"{detail}\n\n"
-                    "To continue using RDST:\n"
-                    "  1. Get your own key: https://console.anthropic.com/\n"
-                    f"  2. Set it: {environment_assignment('ANTHROPIC_API_KEY', 'sk-ant-...')}\n\n"
-                    "Want more trial credits? Email hello@readyset.io",
-                    code="TRIAL_EXHAUSTED",
-                    status=403,
-                )
-            if err_json.get("code") == "INVALID_CLIENT":
-                raise LLMError(
-                    f"Trial authentication failed: {err_json.get('detail', 'unknown')}",
-                    code="INVALID_CLIENT",
-                    status=403,
-                )
-
-        if resp.status_code >= 400:
-            try:
-                err_json = resp.json()
-            except Exception:
-                err_json = {"error": {"message": resp.text}}
-            # Anthropic puts message under "error": {"message": "..."}
-            msg = (err_json.get("error") or {}).get(
-                "message", f"HTTP {resp.status_code}"
-            )
-            logger.debug(f"Full API error response: {json.dumps(err_json, indent=2)}")
-            logger.debug(f"Status code: {resp.status_code}")
-            if base_url:
-                raise LLMError(
-                    "The RDST AI service returned an error. Try again shortly "
-                    "or configure your own Anthropic API key.",
-                    code="PROXY_HTTP",
-                    status=resp.status_code,
-                )
-            if resp.status_code == 401:
-                raise LLMError(
-                    "Anthropic rejected the configured API key. Check the key "
-                    "and try again.",
-                    code="ANTHROPIC_AUTH_INVALID",
-                    status=401,
-                )
-            raise LLMError(
-                f"Anthropic API error: {msg}",
-                code="PROVIDER_HTTP",
-                status=resp.status_code,
-            )
+        self._raise_http_error(
+            resp,
+            base_url=base_url,
+            model=normalize_anthropic_model(request.model),
+        )
 
         data = resp.json()
         try:
@@ -320,7 +391,7 @@ class ClaudeProvider(Provider):
         ]
 
         payload: Dict[str, Any] = {
-            "model": request.model,
+            "model": normalize_anthropic_model(request.model),
             "messages": msg_list,
             "temperature": request.temperature,
             "max_tokens": request.max_tokens or 2000,
@@ -342,21 +413,49 @@ class ClaudeProvider(Provider):
                 stream=True,
                 timeout=120,
             )
-            response.raise_for_status()
-        except Exception as e:
-            raise LLMError(
-                f"Claude streaming request error: {e}", code="HTTP_ERROR", cause=e
-            )
+        except requests.exceptions.ConnectionError as e:
+            target = "RDST trial service" if base_url else "Anthropic"
+            raise LLMError(f"Unable to reach {target}: {e}", code="HTTP_ERROR", cause=e)
 
-        for line in response.iter_lines():
-            if line:
-                line_str = line.decode("utf-8")
-                if line_str.startswith("data: "):
-                    try:
-                        data = json.loads(line_str[6:])
-                        if data.get("type") == "content_block_delta":
-                            delta = data.get("delta", {})
-                            if delta.get("type") == "text_delta":
-                                yield delta.get("text", "")
-                    except json.JSONDecodeError:
-                        continue
+        self._raise_http_error(
+            response,
+            base_url=base_url,
+            model=normalize_anthropic_model(request.model),
+        )
+
+        try:
+            for line in response.iter_lines():
+                if line:
+                    line_str = line.decode("utf-8")
+                    if line_str.startswith("data: "):
+                        try:
+                            data = json.loads(line_str[6:])
+                            if data.get("type") == "content_block_delta":
+                                delta = data.get("delta", {})
+                                if delta.get("type") == "text_delta":
+                                    yield delta.get("text", "")
+                            elif data.get("type") == "error":
+                                error = data.get("error") or {}
+                                detail = error.get("message", "Unknown streaming error")
+                                error_type = error.get("type", "stream_error")
+                                request_id = data.get("request_id")
+                                suffix = (
+                                    f" (request ID: {request_id})"
+                                    if isinstance(request_id, str)
+                                    else ""
+                                )
+                                raise LLMError(
+                                    f"Anthropic streaming error: {detail}{suffix}",
+                                    code=f"ANTHROPIC_{str(error_type).upper()}",
+                                    request_id=request_id
+                                    if isinstance(request_id, str)
+                                    else None,
+                                )
+                        except json.JSONDecodeError:
+                            continue
+        except requests.exceptions.RequestException as e:
+            raise LLMError(
+                f"The Anthropic response stream was interrupted: {e}",
+                code="STREAM_INTERRUPTED",
+                cause=e,
+            )

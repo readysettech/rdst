@@ -96,9 +96,7 @@ export async function setEnvSecret(
       persist: payload.persist ?? true,
     }),
   })
-  if (!response.ok) {
-    throw new Error(`Failed to set secret: ${response.status}`)
-  }
+  await throwIfNotOk(response, 'Failed to save secret')
   return response.json()
 }
 
@@ -118,9 +116,7 @@ export async function validateAnthropicKey(): Promise<AnthropicKeyValidation> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   })
-  if (!response.ok) {
-    throw new Error(`Failed to validate Anthropic key: ${response.status}`)
-  }
+  await throwIfNotOk(response, 'Failed to validate Anthropic key')
   return response.json()
 }
 
@@ -333,10 +329,13 @@ export async function resetLocalData(): Promise<void> {
 export async function registerTrial(
   email: string
 ): Promise<TrialRegisterResponse> {
-  const { data, response } = await typedClient.POST('/api/trial/register', {
-    body: { email },
-  })
-  await throwIfNotOk(response, 'Failed to register trial')
+  const { data, error, response } = await typedClient.POST(
+    '/api/trial/register',
+    {
+      body: { email },
+    }
+  )
+  throwIfApiError(response, error, 'Failed to register trial')
   if (!data) throw new Error('Missing response body')
   return data
 }

@@ -28,11 +28,13 @@ class LLMError(Exception):
         code: str = "LLM_ERROR",
         status: Optional[int] = None,
         cause: Optional[Exception] = None,
+        request_id: Optional[str] = None,
     ):
         super().__init__(message)
         self.code = code
         self.status = status
         self.cause = cause
+        self.request_id = request_id
 
 
 @dataclass

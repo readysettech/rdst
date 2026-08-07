@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from features.trial.service import TrialService
-from shared.api.guards import is_loopback_request, require_local_request
+from shared.api.guards import require_local_request
 from shared.run_registry import run_registry
 
 router = APIRouter()
@@ -95,8 +95,12 @@ async def activate_trial(
 
     service = TrialService()
     result = await service.activate(
-        body.token, body.email, body.email_tier, source="web",
-        limit_cents=body.limit_cents, remaining_cents=body.remaining_cents,
+        body.token,
+        body.email,
+        body.email_tier,
+        source="web",
+        limit_cents=body.limit_cents,
+        remaining_cents=body.remaining_cents,
     )
     if result.success:
         run_registry.wake_needs_key()
@@ -108,8 +112,7 @@ async def activate_trial(
 
 @router.get("/trial/status")
 async def get_trial_status(request: Request) -> TrialStatusResponse:
-    if not is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    require_local_request(request)
 
     service = TrialService()
     result = service.get_status()

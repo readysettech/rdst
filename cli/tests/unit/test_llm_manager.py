@@ -4,6 +4,8 @@ Unit tests for LLM manager base module.
 Tests base provider infrastructure (LLMError, LLMDefaults, Conversation, etc.)
 """
 
+import asyncio
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -66,10 +68,7 @@ class TestLLMDefaults:
     def test_custom_values(self):
         """Test custom values are applied."""
         defaults = LLMDefaults(
-            provider="claude",
-            model="claude-3-opus",
-            max_tokens=2000,
-            temperature=0.7
+            provider="claude", model="claude-3-opus", max_tokens=2000, temperature=0.7
         )
 
         assert defaults.provider == "claude"
@@ -110,7 +109,7 @@ class TestProviderRequest:
         """Test converting to chat dictionaries."""
         messages = [
             ProviderMessage(role="system", content="Be helpful"),
-            ProviderMessage(role="user", content="Hi")
+            ProviderMessage(role="user", content="Hi"),
         ]
         request = ProviderRequest(model="gpt-4", messages=messages)
 
@@ -133,11 +132,7 @@ class TestProviderResponse:
 
     def test_response_with_usage(self):
         """Test response with token usage."""
-        usage = {
-            "prompt_tokens": 10,
-            "completion_tokens": 20,
-            "total_tokens": 30
-        }
+        usage = {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
         response = ProviderResponse(text="Response", usage=usage)
 
         assert response.usage["total_tokens"] == 30
@@ -152,8 +147,7 @@ class TestConversation:
         provider = MagicMock()
         provider.default_model.return_value = "default-model"
         provider.complete.return_value = ProviderResponse(
-            text="AI response",
-            usage={"total_tokens": 50}
+            text="AI response", usage={"total_tokens": 50}
         )
         return provider
 
@@ -217,3 +211,80 @@ class TestConversation:
         assert len(conv.messages) == 2
         assert conv.messages[1].role == "assistant"
         assert conv.messages[1].content == "AI response"
+
+
+class TestStreamingBridge:
+    def test_preserves_llm_error_metadata_without_thread_exception(self, tmp_rdst_home):
+        from shared.llm_manager.llm_manager import LLMManager
+
+        failure = LLMError(
+            "Anthropic rejected this request",
+            code="ANTHROPIC_INVALID_REQUEST",
+            status=400,
+            request_id="req_test",
+        )
+        provider = MagicMock()
+        provider.default_model.return_value = "claude-sonnet-4-6"
+        provider.stream.side_effect = failure
+
+        manager = LLMManager(defaults={"model": "claude-sonnet-4-6"})
+        manager.register_provider("claude", provider)
+        thread_errors = []
+        previous_hook = threading.excepthook
+        threading.excepthook = lambda args: thread_errors.append(args.exc_value)
+
+        async def consume():
+            async for _token in manager.query_stream(
+                system_message="system",
+                user_query="question",
+                api_key="test-key",
+            ):
+                pass
+
+        try:
+            with pytest.raises(LLMError) as raised:
+                asyncio.run(consume())
+        finally:
+            threading.excepthook = previous_hook
+
+        assert raised.value is failure
+        assert raised.value.status == 400
+        assert raised.value.request_id == "req_test"
+        assert thread_errors == []
+
+    def test_history_is_sent_before_current_question(self, tmp_rdst_home):
+        from shared.llm_manager.llm_manager import LLMManager
+
+        captured = []
+        provider = MagicMock()
+        provider.default_model.return_value = "claude-sonnet-4-6"
+
+        def stream(request, **_kwargs):
+            captured.extend(request.messages)
+            yield "ok"
+
+        provider.stream = stream
+        manager = LLMManager(defaults={"model": "claude-sonnet-4-6"})
+        manager.register_provider("claude", provider)
+
+        async def consume():
+            return [
+                token
+                async for token in manager.query_stream(
+                    system_message="system",
+                    user_query="follow up",
+                    history=[
+                        {"role": "user", "content": "first question"},
+                        {"role": "assistant", "content": "first answer"},
+                    ],
+                    api_key="test-key",
+                )
+            ]
+
+        assert asyncio.run(consume()) == ["ok"]
+        assert captured == [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "first answer"},
+            {"role": "user", "content": "follow up"},
+        ]

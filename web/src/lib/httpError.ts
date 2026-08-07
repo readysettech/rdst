@@ -4,14 +4,22 @@
 //   - `throwIfNotOk` reads the still-unconsumed response body (plain `fetch`).
 //   - `throwIfApiError` reads openapi-fetch's already-parsed `error` payload.
 
-/** Throw the response body, or `${ctx}: ${status}` when the body is empty. */
+/** Throw a human-readable response detail, or `${ctx}: ${status}`. */
 export async function throwIfNotOk(
   response: Response,
   ctx: string
 ): Promise<void> {
   if (response.ok) return
   const body = await response.text().catch(() => '')
-  throw new Error(body || `${ctx}: ${response.status}`)
+  let detail = ''
+  if (body) {
+    try {
+      detail = extractDetail(JSON.parse(body))
+    } catch {
+      detail = body
+    }
+  }
+  throw new Error(detail || `${ctx}: ${response.status}`)
 }
 
 /**

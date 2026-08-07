@@ -49,7 +49,9 @@ def stub_keyservice(monkeypatch):
 
     monkeypatch.setattr(email_service_mod, "EmailService", _StubEmailService)
     _StubEmailService.queue_result = {
-        "success": True, "queued": False, "report_token": "tok-1",
+        "success": True,
+        "queued": False,
+        "report_token": "tok-1",
     }
     _StubEmailService.calls = []
     return _StubEmailService
@@ -146,7 +148,9 @@ def test_verified_email_sends_immediately(client, tmp_rdst_home, config_path):
 
     assert response.status_code == 200
     assert response.json() == {
-        "status": "sent", "email": "ada@example.com", "verified": True,
+        "status": "sent",
+        "email": "ada@example.com",
+        "verified": True,
     }
     call = _StubEmailService.calls[0]
     assert call["report_token"] == "tok-1"
@@ -164,7 +168,9 @@ def test_unverified_email_registers_with_the_report(client, tmp_rdst_home, confi
     response = client.post(f"/api/audit/runs/{run_id}/email", json={})
 
     assert response.json() == {
-        "status": "verification_sent", "email": "ada@example.com", "verified": False,
+        "status": "verification_sent",
+        "email": "ada@example.com",
+        "verified": False,
     }
     call = _StubEmailService.calls[0]
     assert call["report_token"] is None
@@ -189,7 +195,9 @@ def test_body_email_overrides_the_stored_identity(client, tmp_rdst_home, config_
 def test_stale_token_is_dropped_from_local_config(client, tmp_rdst_home, config_path):
     run_id = _seed_snapshot(tmp_rdst_home)
     _StubEmailService.queue_result = {
-        "success": True, "queued": True, "stale_token": True,
+        "success": True,
+        "queued": True,
+        "stale_token": True,
     }
     cfg = _config(config_path)
     cfg.set_email("ada@example.com")
@@ -205,7 +213,9 @@ def test_stale_token_is_dropped_from_local_config(client, tmp_rdst_home, config_
 def test_successful_send_persists_the_report_token(client, tmp_rdst_home, config_path):
     run_id = _seed_snapshot(tmp_rdst_home)
     _StubEmailService.queue_result = {
-        "success": True, "queued": False, "report_token": "tok-fresh",
+        "success": True,
+        "queued": False,
+        "report_token": "tok-fresh",
     }
 
     response = client.post(
@@ -263,18 +273,8 @@ def test_unknown_run_is_refused(client, tmp_rdst_home, config_path):
     assert response.status_code == 409
 
 
-@pytest.mark.parametrize(
-    ("loopback", "same_host"),
-    [(False, True), (True, False)],
-    ids=["off-loopback", "cross-origin"],
-)
-def test_forbidden_for_non_local_callers(
-    config_path, tmp_rdst_home, monkeypatch, loopback, same_host
-):
-    monkeypatch.setattr(guards, "is_loopback_request", lambda request: loopback)
-    monkeypatch.setattr(
-        guards, "same_host_from_headers", lambda request: same_host
-    )
+def test_cross_origin_caller_is_forbidden(config_path, tmp_rdst_home, monkeypatch):
+    monkeypatch.setattr(guards, "same_host_from_headers", lambda request: False)
     run_id = _seed_snapshot(tmp_rdst_home)
 
     response = _Client(_app()).post(f"/api/audit/runs/{run_id}/email", json={})

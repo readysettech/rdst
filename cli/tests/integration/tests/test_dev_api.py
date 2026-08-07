@@ -69,9 +69,7 @@ async def test_clear_keyring_clears_secrets_and_trial_config(
     inmemory_keyring.set_password("rdst-web", "RDST_TRIAL_TOKEN", "trial-token")
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://127.0.0.1:8787"
-    ) as c:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8787") as c:
         response = await c.post(
             "/api/dev/clear-keyring",
             headers={"origin": "http://127.0.0.1:8787"},
@@ -86,9 +84,7 @@ async def test_clear_keyring_clears_secrets_and_trial_config(
     assert "local trial state" in body["message"]
 
     # Side effects: keyring entry removed, env var removed, trial config gone.
-    assert (
-        inmemory_keyring.get_password("rdst-web", "RDST_TRIAL_TOKEN") is None
-    )
+    assert inmemory_keyring.get_password("rdst-web", "RDST_TRIAL_TOKEN") is None
     assert "RDST_TRIAL_TOKEN" not in os.environ
 
     cfg2 = TargetsConfig()
@@ -98,9 +94,7 @@ async def test_clear_keyring_clears_secrets_and_trial_config(
 
 async def test_clear_keyring_rejects_mismatched_origin_host(app, tmp_rdst_home):
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://127.0.0.1:8787"
-    ) as c:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8787") as c:
         response = await c.post(
             "/api/dev/clear-keyring",
             headers={"origin": "http://localhost:8787"},
@@ -117,9 +111,7 @@ async def test_clear_keyring_rejects_mismatched_origin_host(app, tmp_rdst_home):
 
 async def test_clear_keyring_rejects_non_loopback_client(app, tmp_rdst_home):
     transport = ASGITransport(app=app, client=("203.0.113.10", 50000))
-    async with AsyncClient(
-        transport=transport, base_url="http://127.0.0.1:8787"
-    ) as c:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8787") as c:
         response = await c.post(
             "/api/dev/clear-keyring",
             headers={"origin": "http://127.0.0.1:8787"},
@@ -129,6 +121,6 @@ async def test_clear_keyring_rejects_non_loopback_client(app, tmp_rdst_home):
     # `message` added.
     assert response.json() == {
         "code": "forbidden",
-        "message": "Forbidden",
-        "detail": "Forbidden",
+        "message": "Origin/Referer does not match the RDST web address",
+        "detail": "Origin/Referer does not match the RDST web address",
     }

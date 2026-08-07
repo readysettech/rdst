@@ -4,11 +4,13 @@ import asyncio
 import logging
 import os
 import threading
-from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Sequence
 
 from .base import LLMDefaults, LLMError, Provider, ProviderRequest, ProviderResponse
-from .claude_provider import ClaudeProvider
+from .claude_provider import ClaudeProvider, normalize_anthropic_model
+
+if TYPE_CHECKING:
+    from .key_resolution import KeyResolution
 
 
 class LLMManager:
@@ -98,6 +100,7 @@ class LLMManager:
         debug: Optional[bool] = None,
         api_key: Optional[str] = None,
         extra: Optional[Dict[str, Any]] = None,
+        history: Optional[Sequence[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         """
         Provider-agnostic query interface.
@@ -125,7 +128,9 @@ class LLMManager:
             "stop_sequences": list(
                 stop_sequences or self.defaults.stop_sequences or []
             ),
-            "model": model or self.defaults.model or prov.default_model(),
+            "model": normalize_anthropic_model(
+                model or self.defaults.model or prov.default_model()
+            ),
             "debug": bool(self.defaults.debug if debug is None else debug),
         }
 
@@ -142,13 +147,16 @@ class LLMManager:
 
         # Resolve API key and routing (direct vs trial proxy)
         from .key_resolution import KeyResolution
+
         if api_key:
             resolution = KeyResolution(api_key=api_key, is_trial=False)
         else:
             resolution = self._safe_load_key_for_query(name)
 
         # normalize into a ProviderRequest
-        messages = _assemble_messages(system_message, user_query, context)
+        messages = _assemble_messages(
+            system_message, user_query, context, history=history
+        )
         req = ProviderRequest(
             messages=messages,
             model=resolved["model"],
@@ -248,6 +256,7 @@ class LLMManager:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         api_key: Optional[str] = None,
+        history: Optional[Sequence[Dict[str, str]]] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream LLM response tokens asynchronously.
 
@@ -259,14 +268,19 @@ class LLMManager:
 
         # Build request using existing _assemble_messages
         from .key_resolution import KeyResolution
+
         if api_key:
             resolution = KeyResolution(api_key=api_key, is_trial=False)
         else:
             resolution = self._safe_load_key_for_query(name)
-        messages = _assemble_messages(system_message, user_query, context)
+        messages = _assemble_messages(
+            system_message, user_query, context, history=history
+        )
 
         request = ProviderRequest(
-            model=model or self.defaults.model or prov.default_model(),
+            model=normalize_anthropic_model(
+                model or self.defaults.model or prov.default_model()
+            ),
             messages=messages,
             max_tokens=max_tokens or self.defaults.max_tokens,
             temperature=temperature
@@ -279,27 +293,53 @@ class LLMManager:
         # Queue-based async bridge
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+        stopped = threading.Event()
+
+        def _enqueue(item: tuple[str, Any]) -> bool:
+            if stopped.is_set() or loop.is_closed():
+                return False
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, item)
+                return True
+            except RuntimeError:
+                # The async consumer may have been cancelled while the sync
+                # HTTP request was still unwinding. There is no receiver left.
+                return False
 
         def _run_sync_stream():
             try:
-                for token in prov.stream(request, api_key=resolution.api_key, base_url=resolution.proxy_url, extra_headers=resolution.extra_headers):
-                    loop.call_soon_threadsafe(queue.put_nowait, ("token", token))
+                for token in prov.stream(
+                    request,
+                    api_key=resolution.api_key,
+                    base_url=resolution.proxy_url,
+                    extra_headers=resolution.extra_headers,
+                ):
+                    if stopped.is_set() or not _enqueue(("token", token)):
+                        return
             except Exception as e:
-                loop.call_soon_threadsafe(queue.put_nowait, ("error", e))
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+                _enqueue(("error", e))
+                return
+            _enqueue(("done", None))
 
         thread = threading.Thread(target=_run_sync_stream, daemon=True)
         thread.start()
 
-        while True:
-            msg_type, value = await queue.get()
-            if msg_type == "done":
-                break
-            elif msg_type == "error":
-                raise LLMError(f"Streaming failed: {value}", cause=value)
-            else:  # "token"
+        try:
+            while True:
+                msg_type, value = await queue.get()
+                if msg_type == "done":
+                    break
+                if msg_type == "error":
+                    if isinstance(value, LLMError):
+                        raise value
+                    raise LLMError(
+                        f"Streaming failed: {value}",
+                        code="STREAM_FAILED",
+                        cause=value,
+                    )
                 yield value
+        finally:
+            stopped.set()
 
     def generate_response(
         self, prompt: str, model: Optional[str] = None, **kwargs
@@ -328,6 +368,7 @@ class LLMManager:
                 "debug",
                 "api_key",
                 "extra",
+                "history",
             }
 
             filtered_kwargs = {
@@ -363,16 +404,26 @@ class LLMManager:
         Returns KeyResolution with api_key, routing info, and attestation headers.
         """
         from .key_resolution import resolve_api_key
+
         return resolve_api_key()
 
 
 def _assemble_messages(
-    system_message: str, user_query: str, context: Optional[str]
+    system_message: str,
+    user_query: str,
+    context: Optional[str],
+    *,
+    history: Optional[Sequence[Dict[str, str]]] = None,
 ) -> List[Dict[str, str]]:
     msgs: List[Dict[str, str]] = []
     if system_message:
         msgs.append({"role": "system", "content": system_message})
     if context:
         msgs.append({"role": "user", "content": f"[CONTEXT]\n{context}"})
+    for message in history or ():
+        role = message.get("role")
+        content = message.get("content")
+        if role in {"user", "assistant"} and isinstance(content, str) and content:
+            msgs.append({"role": role, "content": content})
     msgs.append({"role": "user", "content": user_query})
     return msgs

@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any, AsyncGenerator
 
 from shared.llm import create_llm_manager
+from shared.llm_manager.claude_provider import (
+    AnthropicModel,
+    normalize_anthropic_model,
+)
 from shared.query_registry import ConversationRegistry, InteractiveConversation
 
 from .events import (
@@ -99,9 +103,11 @@ class InteractiveService:
     """Service for interactive analysis conversations."""
 
     DEFAULT_PROVIDER = "claude"
-    DEFAULT_MODEL = "claude-sonnet-4-20250514"
+    DEFAULT_MODEL = AnthropicModel.SONNET_4_6.value
 
-    def __init__(self, conv_registry: ConversationRegistry | None = None, llm_manager=None):
+    def __init__(
+        self, conv_registry: ConversationRegistry | None = None, llm_manager=None
+    ):
         self.conv_registry = conv_registry or ConversationRegistry()
         self.llm_manager = llm_manager or create_llm_manager()
 
@@ -116,21 +122,21 @@ class InteractiveService:
             conversation = self._load_or_create_conversation(
                 query_hash, analysis_results, continue_existing
             )
-            conversation.add_message("user", message)
             messages = conversation.get_messages_for_llm()
             system_messages = [
                 msg["content"] for msg in messages if msg["role"] == "system"
             ]
             combined_system_message = "\n\n".join(system_messages)
-            conversation.messages.pop()
+            history = [msg for msg in messages if msg["role"] in {"user", "assistant"}]
 
             full_response = ""
             async for token in self.llm_manager.query_stream(
                 system_message=combined_system_message,
                 user_query=message,
-                context="",
+                history=history,
                 max_tokens=2000,
                 temperature=0.1,
+                model=conversation.model,
             ):
                 full_response += token
                 yield ChunkEvent(type="chunk", text=token)
@@ -188,7 +194,7 @@ class InteractiveService:
         continue_existing: bool,
     ) -> InteractiveConversation:
         provider = self.DEFAULT_PROVIDER
-        model = self.DEFAULT_MODEL
+        model = self._resolved_model()
 
         if not continue_existing:
             self.conv_registry.delete_conversation(query_hash, provider)
@@ -196,6 +202,10 @@ class InteractiveService:
         if continue_existing:
             conversation = self.conv_registry.load_conversation(query_hash, provider)
             if conversation:
+                normalized_model = normalize_anthropic_model(conversation.model)
+                if normalized_model != conversation.model:
+                    conversation.model = normalized_model
+                    self.conv_registry.save_conversation(conversation)
                 if not self._has_interactive_mode_message(conversation):
                     interactive_prompt = get_interactive_mode_prompt()
                     conversation.add_message("system", interactive_prompt)
@@ -224,7 +234,23 @@ class InteractiveService:
         self.conv_registry.save_conversation(conversation)
         return conversation
 
-    def _has_interactive_mode_message(self, conversation: InteractiveConversation) -> bool:
+    def _resolved_model(self) -> str:
+        defaults = getattr(self.llm_manager, "defaults", None)
+        configured = getattr(defaults, "model", None)
+        if isinstance(configured, str) and configured:
+            return normalize_anthropic_model(configured)
+        try:
+            provider = self.llm_manager.provider(self.DEFAULT_PROVIDER)
+            model = provider.default_model()
+            if isinstance(model, str) and model:
+                return normalize_anthropic_model(model)
+        except Exception:
+            pass
+        return self.DEFAULT_MODEL
+
+    def _has_interactive_mode_message(
+        self, conversation: InteractiveConversation
+    ) -> bool:
         for msg in conversation.messages:
             if msg.role == "system" and "INTERACTIVE MODE ACTIVATED" in msg.content:
                 return True
@@ -255,14 +281,14 @@ class InteractiveService:
             index_recs = llm_analysis.get("index_recommendations", [])
             if index_recs:
                 index_lines = [f"  - {rec.get('sql', 'N/A')}" for rec in index_recs]
-                parts.append(f"INDEX RECOMMENDATIONS:\n" + "\n".join(index_lines))
+                parts.append("INDEX RECOMMENDATIONS:\n" + "\n".join(index_lines))
 
             rewrite_sug = llm_analysis.get("rewrite_suggestions", [])
             if rewrite_sug:
                 rewrite_lines = [
                     f"  - {sug.get('description', 'N/A')}" for sug in rewrite_sug
                 ]
-                parts.append(f"QUERY REWRITES:\n" + "\n".join(rewrite_lines))
+                parts.append("QUERY REWRITES:\n" + "\n".join(rewrite_lines))
             else:
                 parts.append("QUERY REWRITES: None recommended")
 
@@ -274,24 +300,22 @@ class InteractiveService:
         self, conversation: InteractiveConversation, user_question: str
     ) -> str | None:
         try:
-            conversation.add_message("user", user_question)
             messages = conversation.get_messages_for_llm()
             system_messages = [
                 msg["content"] for msg in messages if msg["role"] == "system"
             ]
             combined_system_message = "\n\n".join(system_messages)
+            history = [msg for msg in messages if msg["role"] in {"user", "assistant"}]
             response_data = self.llm_manager.query(
                 system_message=combined_system_message,
                 user_query=user_question,
-                context="",
+                history=history,
                 max_tokens=2000,
                 temperature=0.1,
+                model=conversation.model,
             )
-            conversation.messages.pop()
             if response_data and "text" in response_data:
                 return response_data["text"]
             return "Sorry, I couldn't generate a response. Please try again."
         except Exception:
-            if conversation.messages and conversation.messages[-1].role == "user":
-                conversation.messages.pop()
             return None

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from shared.api.email import EMAIL_RE as _EMAIL_RE
 from shared.api.email import normalized_email as _normalized_email
-from shared.api.guards import is_loopback_request, require_local_request
+from shared.api.guards import require_local_request
 from shared.config.targets import TargetsConfig
 
 router = APIRouter(prefix="/settings")
@@ -118,8 +118,7 @@ def _fire_email_captured(email: str, domain: str) -> None:
 
 @router.get("/email")
 async def get_email(request: Request) -> EmailResponse:
-    if not is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    require_local_request(request)
     cfg = TargetsConfig()
     cfg.load()
     identity = cfg.get_identity()
@@ -166,7 +165,10 @@ async def set_email(request: Request, body: EmailRequest) -> EmailUpdateResponse
             cfg.add_verified_email(email, token)
             cfg.save()
         return EmailUpdateResponse(
-            success=True, email=email, verified=True, verification_started=True,
+            success=True,
+            email=email,
+            verified=True,
+            verification_started=True,
         )
     if result.get("error"):
         logger.warning("Email verification registration failed: %s", result["error"])
@@ -178,7 +180,10 @@ async def set_email(request: Request, body: EmailRequest) -> EmailUpdateResponse
             ),
         )
     return EmailUpdateResponse(
-        success=True, email=email, verified=False, verification_started=True,
+        success=True,
+        email=email,
+        verified=False,
+        verification_started=True,
     )
 
 
@@ -232,8 +237,7 @@ async def verify_poll(request: Request) -> VerifyPollResponse:
     """One non-blocking check of the primary email's verification, mirroring
     the CLI report flow's /report-status poll; persists the report token the
     moment the keyservice confirms the click."""
-    if not is_loopback_request(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    require_local_request(request)
     cfg = TargetsConfig()
     cfg.load()
     identity = cfg.get_identity()

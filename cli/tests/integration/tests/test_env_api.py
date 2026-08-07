@@ -128,9 +128,7 @@ async def test_set_env_secret_persists_to_keyring(
 
     # Side effects landed where we expect.
     assert os.environ["PROD_DB_PASSWORD"] == "s3cret"
-    assert (
-        inmemory_keyring.get_password("rdst-web", "PROD_DB_PASSWORD") == "s3cret"
-    )
+    assert inmemory_keyring.get_password("rdst-web", "PROD_DB_PASSWORD") == "s3cret"
 
 
 async def test_set_env_secret_session_only_when_persist_false(
@@ -152,9 +150,7 @@ async def test_set_env_secret_session_only_when_persist_false(
 
     assert os.environ["PROD_DB_PASSWORD"] == "transient"
     # Persisted=False must mean: did NOT touch the keyring.
-    assert (
-        inmemory_keyring.get_password("rdst-web", "PROD_DB_PASSWORD") is None
-    )
+    assert inmemory_keyring.get_password("rdst-web", "PROD_DB_PASSWORD") is None
 
 
 async def test_set_target_password_stays_session_only_when_keyring_unavailable(
@@ -241,9 +237,7 @@ async def test_set_env_secret_rejects_mismatched_origin(
     """Loopback request whose `Origin` header points at a different
     loopback alias must be 403'd by the same-host check."""
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://127.0.0.1:8787"
-    ) as c:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:8787") as c:
         response = await c.post(
             "/api/env/set",
             headers={"origin": "http://localhost:8787"},
@@ -253,8 +247,36 @@ async def test_set_env_secret_rejects_mismatched_origin(
 
 
 async def test_env_routes_reject_non_loopback_client(app, tmp_rdst_home):
-    """Non-loopback peer is forbidden even before request parsing."""
+    """A headerless non-loopback peer is not treated as an RDST browser."""
     transport = ASGITransport(app=app, client=("203.0.113.10", 50000))
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         response = await c.get("/api/env/requirements")
     assert response.status_code == 403
+
+
+async def test_env_routes_accept_remote_same_origin_browser(
+    app, tmp_rdst_home, inmemory_keyring
+):
+    """The settings UI works when RDST is opened through a VM/private IP."""
+    transport = ASGITransport(app=app, client=("192.168.56.1", 50000))
+    async with AsyncClient(
+        transport=transport, base_url="http://192.168.56.10:8787"
+    ) as c:
+        headers = {"origin": "http://192.168.56.10:8787"}
+        requirements = await c.get(
+            "/api/env/requirements",
+            headers={"referer": "http://192.168.56.10:8787/settings"},
+        )
+        saved = await c.post(
+            "/api/env/set",
+            headers=headers,
+            json={
+                "name": "ANTHROPIC_API_KEY",
+                "value": "sk-ant-test",
+                "persist": False,
+            },
+        )
+
+    assert requirements.status_code == 200, requirements.text
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["success"] is True

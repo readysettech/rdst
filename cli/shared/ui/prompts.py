@@ -21,7 +21,7 @@ Usage:
     )
 """
 
-from typing import List, Optional, Any, Union
+from typing import List, Optional, Union
 
 from rich.prompt import (
     Prompt as RichPrompt,
@@ -64,7 +64,7 @@ class Prompt:
         Returns:
             User input string
         """
-        return RichPrompt.ask(
+        value = RichPrompt.ask(
             prompt,
             default=default if default else None,
             choices=choices,
@@ -72,6 +72,9 @@ class Prompt:
             show_choices=show_choices,
             password=password,
         )
+        # Rich returns None for a blank answer when no default is supplied,
+        # despite Prompt.ask's text contract. Keep all callers on strings.
+        return value or ""
 
 
 class Confirm:
