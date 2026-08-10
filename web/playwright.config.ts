@@ -15,7 +15,11 @@ const isCI = Boolean(process.env.CI)
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.spec.ts',
-  testIgnore: '**/full-stack/**',
+  // Both excluded suites need infrastructure this project does not stand up:
+  // full-stack wants a live Postgres, web-e2e wants that plus a deployed
+  // keyservice Worker. They each have their own config, and collecting them
+  // here fails the whole run at import time rather than skipping them.
+  testIgnore: ['**/full-stack/**', '**/web-e2e/**'],
   outputDir: './test-results/artifacts',
   // The production test server intentionally uses one isolated RDST home.
   // Keep stateful target and registry flows serial in local runs as well as CI.

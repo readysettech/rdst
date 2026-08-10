@@ -10,6 +10,7 @@
     "test:e2e": "pnpm run test:browser-integration",
     "test:browser-integration": "node ./e2e/run.mjs",
     "test:e2e:postgres": "node ./e2e/run.mjs --config playwright.postgres.config.ts",
+    "test:e2e:web": "node ./e2e/run.mjs --config playwright.web-e2e.config.ts",
     "test:e2e:ui": "node ./e2e/run.mjs --ui",
     "test:e2e:debug": "node ./e2e/run.mjs --debug",
     "clean": "rm -rf node_modules .output dist",

@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:15.14
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    environment:
+      POSTGRES_DB: rdst_test
+      POSTGRES_PASSWORD: rdst_e2e_password
+      POSTGRES_USER: rdst_test
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U rdst_test -d rdst_test]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - ../../../../rdst/tests/integration/init-scripts/postgres:/docker-entrypoint-initdb.d:ro
+
+  # A health check captures live query traffic, and an idle database yields
+  # none: the run completes with zero queries, no analysis, and therefore no
+  # report to email. This keeps a trickle of realistic reads flowing so the
+  # capture window has something to find, the way a real database being audited
+  # would. Same image as the server, so psql is already present.
+  traffic:
+    image: postgres:15.14
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: rdst_e2e_password
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          psql -h postgres -U rdst_test -d rdst_test -qtAc \
+            "SELECT count(*) FROM title_basics;" >/dev/null 2>&1
+          psql -h postgres -U rdst_test -d rdst_test -qtAc \
+            "SELECT t.primarytitle, r.averagerating FROM title_basics t
+               JOIN title_ratings r ON r.tconst = t.tconst
+              ORDER BY r.averagerating DESC LIMIT 5;" >/dev/null 2>&1
+          psql -h postgres -U rdst_test -d rdst_test -qtAc \
+            "SELECT startyear, count(*) FROM title_basics
+              GROUP BY startyear ORDER BY 2 DESC LIMIT 5;" >/dev/null 2>&1
+          sleep 0.3
+        done
+
+  browser:
+    image: mcr.microsoft.com/playwright:v1.61.0-noble
+    # Root so writes to the mounted checkout succeed, matching the pipeline's
+    # other docker steps. Override locally to keep artifacts owned by your user.
+    user: "${RDST_E2E_BROWSER_USER:-0:0}"
+    working_dir: /workdir
+    environment:
+      CI: "${CI:-true}"
+      RDST_E2E_DB_HOST: postgres
+      RDST_E2E_DB_PORT: "5432"
+      RDST_E2E_DB_PASSWORD: rdst_e2e_password
+      # Left empty in CI: the runner derives the preview URL from the CL id.
+      RDST_KEYSERVICE_URL: "${RDST_KEYSERVICE_URL:-}"
+      # Credentials to talk to that Worker as both a client (attestation) and
+      # an operator (admin cleanup).
+      RDST_ATTESTATION_SECRET: "${RDST_ATTESTATION_SECRET}"
+      RDST_KEYSERVICE_ADMIN_SECRET: "${RDST_KEYSERVICE_ADMIN_SECRET}"
+      # Full-access Resend key: the suite reads the CI inbox, which the
+      # Worker's send-only key cannot do.
+      RDST_CI_RESEND_API_KEY: "${RDST_CI_RESEND_API_KEY}"
+      # Addresses are keyed on these so concurrent CLs never collide.
+      GERRIT_CHANGE_ID: "${GERRIT_CHANGE_ID:-local}"
+      BUILDKITE_BUILD_NUMBER: "${BUILDKITE_BUILD_NUMBER:-0}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      traffic:
+        condition: service_started
+    volumes:
+      - ../../../..:/workdir
