@@ -55,7 +55,7 @@ export default defineConfig({
     // `python -m uvicorn` resolves inside the project interpreter, so a venv
     // whose console-script shebangs have gone stale (e.g. after the repo
     // moved on disk) still serves.
-    command: `pnpm run build && uv run --directory "${rdstDir}" python -m uvicorn tests.web_e2e.server:app --host 127.0.0.1 --port ${serverPort}`,
+    command: `pnpm run build && uv run --directory "${rdstDir}" python -m uvicorn tests.web_e2e.server:app --host ${serverURL.hostname} --port ${serverPort}`,
     cwd: appDir,
     env: {
       ...process.env,

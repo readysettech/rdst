@@ -69,18 +69,14 @@ test('explains why a queued benchmark has not started', async ({ page }) => {
 
   await page.goto('/benchmark')
 
-  await expect(page.getByText('Waiting', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('Queued', { exact: true }).first()).toBeVisible()
   await expect(
-    page.getByRole('heading', {
-      name: 'Waiting for another performance test',
-    })
+    page.getByText('Waiting for an isolated test slot', { exact: true })
   ).toBeVisible()
   await expect(
-    page.getByText(/runs performance measurements one at a time/i)
+    page.getByText(/another performance measurement is active/i)
   ).toBeVisible()
-  await expect(
-    page.getByText(/30s test timer begins only after/i)
-  ).toBeVisible()
+  await expect(page.getByText(/no action is required/i)).toBeVisible()
   await expect(
     page.getByRole('button', { name: /Cancel queued test/ })
   ).toBeVisible()

@@ -12,6 +12,7 @@ import { ErrorState, InlineNotice } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
+import { TabItemButton, TabList } from '@rs/ui-new/tab'
 import { Text } from '@rs/ui-new/text'
 import { toast } from '@rs/ui-new/use-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -516,28 +517,17 @@ function AuditPage() {
         Health Check
       </Text>
 
-      <div
-        role="tablist"
-        aria-label="Health Check sections"
-        className="flex gap-1 border-b border-border-layout-1"
-      >
+      <TabList aria-label="Health Check sections" className="gap-6">
         {(['run', 'history'] as const).map((tab) => (
-          <button
+          <TabItemButton
             key={tab}
-            type="button"
-            role="tab"
-            aria-selected={view === tab}
+            layoutPrefix="health-check-sections"
+            label={tab === 'history' ? 'Reports' : 'Run'}
+            active={view === tab}
             onClick={() => setView(tab)}
-            className={`px-4 py-2 text-sm capitalize cursor-pointer border-b-2 ${
-              view === tab
-                ? 'border-border-primary-soft text-content-primary-soft'
-                : 'border-transparent text-content-layout-3 hover:text-content-layout-2'
-            }`}
-          >
-            {tab === 'history' ? 'Reports' : 'Run'}
-          </button>
+          />
         ))}
-      </div>
+      </TabList>
 
       {view === 'run' && launcher}
 

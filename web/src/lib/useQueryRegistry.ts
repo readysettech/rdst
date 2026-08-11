@@ -1,122 +1,157 @@
-import { useState, useCallback, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { fetchQueryRegistry, addQueryToRegistry, removeQueryFromRegistry, updateQueryTag, updateQuerySql, importQueries, type QueryRegistryEntry, type ImportQueriesResponse } from './api';
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  addQueryToRegistry,
+  fetchQueryRegistry,
+  type ImportQueriesResponse,
+  importQueries,
+  markQueryReviewed,
+  type QueryRegistryEntry,
+  removeQueryFromRegistry,
+  updateQuerySql,
+  updateQueryTag,
+} from './api'
 
-export type { QueryRegistryEntry };
+export type { QueryRegistryEntry }
 
 export function useQueryRegistry(initialLimit = 100, target?: string | null) {
-  const queryClient = useQueryClient();
-  const [limit, setLimit] = useState(initialLimit);
-  const [offset, setOffset] = useState(0);
+  const queryClient = useQueryClient()
+  const [limit, setLimit] = useState(initialLimit)
+  const [offset, setOffset] = useState(0)
 
   // Scope the list to the selected database when a target is given, and reset
   // pagination when it changes so a stale offset never spans a smaller list.
   useEffect(() => {
-    setOffset(0);
-  }, [target]);
+    setOffset(0)
+  }, [target])
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ['queryRegistry', limit, offset, target ?? null],
     queryFn: () => fetchQueryRegistry(limit, offset, target),
     staleTime: 30 * 1000,
     placeholderData: keepPreviousData,
-  });
-  const queries = data?.queries ?? [];
-  const total = data?.total ?? 0;
-  const listError = data?.error ?? null;
+  })
+  const queries = data?.queries ?? []
+  const total = data?.total ?? 0
+  const listError =
+    data?.error ??
+    (error instanceof Error
+      ? error.message
+      : error
+        ? 'Failed to load the query registry'
+        : null)
 
   useEffect(() => {
     if (total > 0 && offset >= total) {
-      setOffset(Math.max(total - limit, 0));
+      setOffset(Math.max(total - limit, 0))
     }
-  }, [total, offset, limit]);
+  }, [total, offset, limit])
 
   const addMutation = useMutation({
     mutationFn: ({ sql, target }: { sql: string; target?: string }) =>
       addQueryToRegistry(sql, target).then((result) => {
         if (!result.success) {
-          throw new Error(result.error || 'Failed to add query');
+          throw new Error(result.error || 'Failed to add query')
         }
-        return result;
+        return result
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] });
+      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] })
     },
-  });
+  })
 
   const removeMutation = useMutation({
     mutationFn: (hash: string) =>
       removeQueryFromRegistry(hash).then((result) => {
         if (!result.success) {
-          throw new Error(result.error || 'Failed to remove query');
+          throw new Error(result.error || 'Failed to remove query')
         }
-        return result;
+        return result
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] });
+      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] })
     },
-  });
+  })
 
   const updateTagMutation = useMutation({
     mutationFn: ({ hash, tag }: { hash: string; tag: string }) =>
       updateQueryTag(hash, tag).then((result) => {
         if (!result.success) {
-          throw new Error(result.error || 'Failed to update query tag');
+          throw new Error(result.error || 'Failed to update query tag')
         }
-        return result;
+        return result
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] });
+      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] })
     },
-  });
+  })
+
+  const markReviewedMutation = useMutation({
+    mutationFn: ({ hash, target }: { hash: string; target: string }) =>
+      markQueryReviewed(hash, target).then((result) => {
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to mark query reviewed')
+        }
+        return result
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] })
+    },
+  })
 
   const updateSqlMutation = useMutation({
     mutationFn: ({ hash, sql }: { hash: string; sql: string }) =>
       updateQuerySql(hash, sql).then((result) => {
         if (!result.success) {
-          throw new Error(result.error || 'Failed to update SQL');
+          throw new Error(result.error || 'Failed to update SQL')
         }
-        return result;
+        return result
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] });
+      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] })
     },
-  });
+  })
 
   const importMutation = useMutation<
     ImportQueriesResponse,
     Error,
     { file: string; update?: boolean; target?: string }
   >({
-    mutationFn: ({ file, update, target }) => importQueries(file, { update, target }),
+    mutationFn: ({ file, update, target }) =>
+      importQueries(file, { update, target }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] });
+      queryClient.invalidateQueries({ queryKey: ['queryRegistry'] })
     },
-  });
+  })
 
   const addQuery = (sql: string, target?: string) => {
-    addMutation.mutate({ sql, target });
-  };
+    addMutation.mutate({ sql, target })
+  }
 
   const removeQuery = (hash: string) => {
-    removeMutation.mutate(hash);
-  };
+    removeMutation.mutate(hash)
+  }
 
   const updateTag = (hash: string, tag: string) => {
-    updateTagMutation.mutate({ hash, tag });
-  };
+    updateTagMutation.mutate({ hash, tag })
+  }
 
   const nextPage = useCallback(() => {
-    setOffset((prev) => prev + limit);
-  }, [limit]);
+    setOffset((prev) => prev + limit)
+  }, [limit])
 
   const prevPage = useCallback(() => {
-    setOffset((prev) => Math.max(prev - limit, 0));
-  }, [limit]);
+    setOffset((prev) => Math.max(prev - limit, 0))
+  }, [limit])
 
   const resetPagination = useCallback(() => {
-    setOffset(0);
-  }, []);
+    setOffset(0)
+  }, [])
 
   return {
     queries,
@@ -124,6 +159,7 @@ export function useQueryRegistry(initialLimit = 100, target?: string | null) {
     isFetching,
     total,
     listError,
+    refetch,
     limit,
     offset,
     setLimit,
@@ -134,8 +170,9 @@ export function useQueryRegistry(initialLimit = 100, target?: string | null) {
     addQuery,
     addMutation,
     removeQuery,
+    markReviewedMutation,
     updateTag,
     updateSqlMutation,
     importMutation,
-  };
+  }
 }

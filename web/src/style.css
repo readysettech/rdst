@@ -58,15 +58,15 @@
     }
   }
 
-  /* Transparent chrome lets the desktop app's native glass show through;
-     the browser app paints its own background in the layout shell. */
+  /* Keep the document surface opaque so Electron never exposes native window
+     material during startup, route transitions, or renderer recovery. */
   html,
   body,
   #root {
     height: 100%;
     margin: 0;
     padding: 0;
-    background: transparent;
+    background: var(--color-surface-layout-2);
   }
 
   /* Fixed-viewport layout: the document itself must never scroll, even when

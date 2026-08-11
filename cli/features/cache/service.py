@@ -1326,6 +1326,8 @@ class CacheService:
                 speedup_median=result["speedup"]["median"],
                 improvement_pct=result["speedup"]["improvement_pct"],
                 winner=result["winner"],
+                origin_samples_ms=result["original"].get("times", []),
+                cache_samples_ms=result["readyset"].get("times", []),
             )
         except Exception as e:
             from shared.api.ssh_errors import connectivity_error_payload

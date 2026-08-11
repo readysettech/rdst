@@ -1,5 +1,6 @@
 import { Button } from '@rs/ui-new/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover'
+import { Pressable } from '@rs/ui-new/pressable'
 import { Progress } from '@rs/ui-new/progress'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useRef, useState } from 'react'
@@ -76,7 +77,12 @@ export function DesktopUpdateControl({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
+        {/* Kept as a hand-roll: this is the PopoverTrigger asChild target with
+            hover-intent handlers, and a compact h-7 status pill below the
+            smallest Button/IconButton size — a Button here would grow its visual
+            weight and IconButton's tooltip wrapper breaks asChild ref
+            forwarding. */}
+        <Pressable
           type="button"
           aria-label={`${copy.button}: ${copy.title}`}
           onClick={handleClick}
@@ -85,7 +91,7 @@ export function DesktopUpdateControl({
           className="inline-flex h-7 min-w-14 cursor-pointer items-center justify-center rounded-lg border border-border-primary-soft bg-surface-primary-soft px-2 text-button-small text-content-primary-soft transition-colors hover:bg-surface-primary-soft-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-primary-soft"
         >
           {copy.button}
-        </button>
+        </Pressable>
       </PopoverTrigger>
       <PopoverContent
         side="right"

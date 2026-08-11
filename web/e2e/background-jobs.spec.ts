@@ -53,13 +53,20 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   await configureTestTarget(page, { hasPassword: true })
 
   await page.goto('/configure')
-  await page.getByRole('button', { name: 'Add Target' }).click()
+  // The settings drawer keeps its disabled submit button mounted while closed.
+  // Select the page-level trigger explicitly so Playwright strict mode does not
+  // confuse it with the hidden form action.
+  await page
+    .getByRole('button', { name: 'Add connection', exact: true })
+    .first()
+    .click()
+  await page.getByRole('tab', { name: 'Manual setup' }).click()
   await page.locator('[name="name"]').fill('needs-key-db')
   await page.locator('[name="host"]').fill('database.external.test')
   await page.locator('[name="database"]').fill('application')
   await page.locator('[name="user"]').fill('rdst_e2e')
   await page.locator('[name="password"]').fill('test-password')
-  await page.getByRole('button', { name: 'Add Target' }).click()
+  await page.getByRole('button', { name: 'Add connection' }).last().click()
 
   const jobsTrigger = page.getByTestId('jobs-trigger')
   await expect(jobsTrigger).toContainText('Setting up needs-key-db')
@@ -80,7 +87,7 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   await parkedJob.click()
 
   await expect(
-    page.getByRole('heading', { name: 'Start Free Trial' })
+    page.getByRole('heading', { name: 'Start free trial' })
   ).toBeVisible()
   await page.getByRole('button', { name: 'Add AI key' }).click()
 
@@ -90,7 +97,7 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   await page
     .getByRole('textbox', { name: 'Anthropic API Key', exact: true })
     .fill('sk-ant-e2e-test')
-  await page.getByRole('button', { name: 'Save Secrets' }).click()
+  await page.getByRole('button', { name: 'Save secrets' }).click()
 
   // The fixture has no polling path: reaching completion proves that
   // /api/env/set asked RunRegistry to wake the parked needs_key handle.

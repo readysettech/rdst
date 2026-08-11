@@ -335,6 +335,7 @@ def create_app(static_dist_dir: str | None = None) -> FastAPI:
     app.include_router(providers.router, prefix="/api", tags=["providers"])
     app.include_router(guard.router, prefix="/api")
     app.include_router(cache.router, prefix="/api", tags=["cache"])
+    app.include_router(cache.compare_router, prefix="/api", tags=["cache"])
     app.include_router(ask.router, prefix="/api", tags=["ask"])
     app.include_router(configure.router, prefix="/api", tags=["configure"])
     app.include_router(interactive.router, prefix="/api", tags=["interactive"])

@@ -89,7 +89,7 @@ describe('ConnectPage', () => {
   })
 
   it('skip for now leaves the gate and goes home', () => {
-    renderPage({ redirectTo: '/analyze' })
+    renderPage({ redirectTo: '/queries' })
 
     fireEvent.click(screen.getByRole('button', { name: /Skip for now/i }))
 
@@ -97,14 +97,34 @@ describe('ConnectPage', () => {
     expect(cancel).toHaveBeenCalled()
   })
 
+  it('presents the live demo as the primary zero-setup path', () => {
+    renderPage()
+
+    expect(
+      screen.getByRole('heading', { name: 'Start with Readyset' })
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Launch the demo' }))
+
+    expect(mockNavigate).toHaveBeenCalledWith({ to: '/demo' })
+  })
+
+  it('does not repeat the demo promotion when returning from the demo', () => {
+    renderPage({ from: 'demo' })
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect your database' })
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Launch the demo' })).toBeNull()
+  })
+
   it('completes init and returns to the intended destination on connect', async () => {
-    const queryClient = renderPage({ redirectTo: '/analyze' })
+    const queryClient = renderPage({ redirectTo: '/queries' })
     queryClient.setQueryData(['init-status'], { initialized: false })
 
     fireEvent.click(screen.getByRole('button', { name: /Mock Submit/i }))
 
     await waitFor(() => {
-      expect(mockHistoryPush).toHaveBeenCalledWith('/analyze')
+      expect(mockHistoryPush).toHaveBeenCalledWith('/queries')
     })
     expect(addTarget).toHaveBeenCalled()
     expect(setDefaultTarget).toHaveBeenCalledWith('mydb')

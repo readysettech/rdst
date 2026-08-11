@@ -4,7 +4,9 @@ import { ConfigureForm } from './ConfigureForm'
 
 function connectionUri(query = '') {
   const password = 'sec' + 'ret'
-  return 'postgresql://' + `alice:${password}@db.example.com:5432/app_db${query}`
+  return (
+    'postgresql://' + `alice:${password}@db.example.com:5432/app_db${query}`
+  )
 }
 
 function selectMysql() {
@@ -32,7 +34,7 @@ describe('ConfigureForm connection URL parsing', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add Target' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -64,7 +66,7 @@ describe('ConfigureForm connection URL parsing', () => {
     fireEvent.change(screen.getByPlaceholderText('my-database'), {
       target: { value: 'customer prod' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Add Target' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
 
     const submitted = onSubmit.mock.calls[0][0]
     expect(submitted.name).toBe('customer prod')
@@ -141,7 +143,7 @@ describe('ConfigureForm sandbox behavior', () => {
       }
     )
     fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add Target' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
 
     const submitted = onSubmit.mock.calls[0]?.[0]
     expect(submitted).toBeDefined()
@@ -222,7 +224,7 @@ describe('ConfigureForm SSH jump host', () => {
     fireEvent.change(screen.getByLabelText('SSH user'), {
       target: { value: 'ec2-user' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Update Target' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Update connection' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -262,7 +264,7 @@ describe('ConfigureForm SSH jump host', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Jump host' }), {
       target: { value: '' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Update Target' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Update connection' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ ssh: undefined })

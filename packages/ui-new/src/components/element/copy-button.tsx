@@ -1,7 +1,18 @@
 import { useState } from 'react'
 import { Button } from './button'
 
-export const CopyButton = ({ text }: { text: string }) => {
+interface CopyButtonProps {
+  text: string
+  /** Optional visible resting label. Omit it for the compact icon-only form. */
+  label?: string
+  copiedLabel?: string
+}
+
+export const CopyButton = ({
+  text,
+  label,
+  copiedLabel = 'Copied',
+}: CopyButtonProps) => {
   const [isCopied, setIsCopied] = useState(false)
 
   const copyTextToClipboard = async (text: string) => {
@@ -17,11 +28,12 @@ export const CopyButton = ({ text }: { text: string }) => {
 
   return (
     <Button
-      label={isCopied ? 'Copied' : 'Copy'}
+      label={isCopied ? copiedLabel : (label ?? 'Copy')}
+      variant="primary"
       modifier="link"
       size="small"
       icon={isCopied ? 'tick-double' : 'copy'}
-      iconPosition={isCopied ? 'left' : 'icon'}
+      iconPosition={isCopied || label ? 'left' : 'icon'}
       onClick={() => copyTextToClipboard(text)}
       className="no-underline"
     />

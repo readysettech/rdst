@@ -6,16 +6,10 @@
 import { BaseInputSelect } from '@rs/ui-new/base-input-select'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
-import { Icon } from '@rs/ui-new/icon'
+import { IconButton } from '@rs/ui-new/icon-button'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@rs/ui-new/tooltip'
 import { formatDuration } from '../../lib/auditReportFormat'
 import { cancelActiveAudit } from '../../lib/auditSession'
 
@@ -83,25 +77,14 @@ export function RunLauncher({
                   <Text level="caption" className="text-content-layout-3">
                     Duration
                   </Text>
-                  <TooltipProvider delayDuration={150}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="About capture duration"
-                          className="cursor-help text-content-layout-3 hover:text-content-layout-2"
-                        >
-                          <Icon
-                            name="info"
-                            label=""
-                            aria-hidden="true"
-                            className="w-3.5 h-3.5"
-                          />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent label="Set a capture window during which Health Check monitors the traffic running against your database to discover query patterns, slow queries, and anything affecting performance." />
-                    </Tooltip>
-                  </TooltipProvider>
+                  <IconButton
+                    icon="info"
+                    label="About capture duration"
+                    tooltip="Set a capture window during which Health Check monitors the traffic running against your database to discover query patterns, slow queries, and anything affecting performance."
+                    size="small"
+                    modifier="ghost"
+                    classMerge="bg-transparent text-content-layout-3 hover:text-content-layout-2"
+                  />
                 </HStack>
                 <BaseInputSelect
                   name="capture-duration"
@@ -162,25 +145,14 @@ export function RunLauncher({
                   iconPosition="left"
                   onClick={cancelActiveAudit}
                 />
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="A health check is already running"
-                        className="cursor-help text-content-layout-3 hover:text-content-layout-2"
-                      >
-                        <Icon
-                          name="info"
-                          label=""
-                          aria-hidden="true"
-                          className="w-4 h-4"
-                        />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent label="A health check is already running. Cancel it before starting another." />
-                  </Tooltip>
-                </TooltipProvider>
+                <IconButton
+                  icon="info"
+                  label="A health check is already running"
+                  tooltip="A health check is already running. Cancel it before starting another."
+                  size="small"
+                  modifier="ghost"
+                  classMerge="bg-transparent text-content-layout-3 hover:text-content-layout-2"
+                />
               </Show>
             </HStack>
           </VStack>

@@ -8,6 +8,7 @@
 
 import { Text } from '@rs/ui-new/text';
 import { Icon } from '@rs/ui-new/icon';
+import { IconButton } from '@rs/ui-new/icon-button';
 import { HStack, VStack } from '@rs/ui-new/stack';
 import { Show } from '@rs/ui-new/show';
 import { Spinner } from '@rs/ui-new/spinner';
@@ -113,15 +114,14 @@ export function ConfigureConnectionTest({
             </Text>
           </Show>
           <Show when={!!onDismiss}>
-            <button
-              type="button"
-              title="Dismiss test result"
-              aria-label="Dismiss test result"
+            <IconButton
+              icon="close"
+              label="Dismiss test result"
+              variant="primary"
+              modifier="ghost"
+              size="small"
               onClick={onDismiss}
-              className="flex items-center justify-center h-6 w-6 rounded-lg text-content-layout-3 hover:text-content-layout-1 hover:bg-surface-layout-2 transition-colors cursor-pointer"
-            >
-              <Icon name="close" label="Dismiss" className="w-3.5 h-3.5" />
-            </button>
+            />
           </Show>
         </HStack>
       </div>

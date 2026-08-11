@@ -3,7 +3,7 @@ import {
   clearQueryRegistry,
   configureTestTarget,
   expect,
-  fillCodeMirror,
+  mockConnectivityOk,
   setBackendFixtures,
   test,
 } from './fixtures'
@@ -104,15 +104,30 @@ function serviceEvents(
   return events.map(({ event, data }) => ({ type: event, ...data }))
 }
 
-async function prepareAnalysisPage(
+async function prepareResultsPage(
   page: Parameters<typeof configureTestTarget>[0],
-  { consent = true }: { consent?: boolean } = {}
+  { consent = true, fast = false }: { consent?: boolean; fast?: boolean } = {}
 ) {
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
+  // Analyze preflights target reachability before POST /api/analyze.
+  await mockConnectivityOk(page)
   if (consent) await acceptExplainAnalyzeConsent(page)
-  await page.goto('/analyze')
-  await expect(page.getByText('e2e-guard', { exact: true })).toBeVisible()
+  const search = new URLSearchParams({
+    query,
+    target: 'e2e-guard',
+    fast: String(fast),
+  })
+  await page.goto(`/results?${search.toString()}`)
+  if (consent) {
+    await expect(
+      page.getByRole('heading', { name: 'Query analysis' })
+    ).toBeVisible()
+  } else {
+    await expect(
+      page.getByRole('dialog').getByText('Run EXPLAIN ANALYZE?')
+    ).toBeVisible()
+  }
 }
 
 test('gates the first EXPLAIN ANALYZE run behind explicit consent', async ({
@@ -121,7 +136,6 @@ test('gates the first EXPLAIN ANALYZE run behind explicit consent', async ({
   setBackendFixtures({
     analyze: [{ events: serviceEvents(successEvents) }],
   })
-  await prepareAnalysisPage(page, { consent: false })
 
   let analysisCalls = 0
   page.on('request', (request) => {
@@ -132,9 +146,7 @@ test('gates the first EXPLAIN ANALYZE run behind explicit consent', async ({
       analysisCalls += 1
     }
   })
-
-  await fillCodeMirror(page.locator('.cm-editor'), query)
-  await page.getByRole('button', { name: 'Analyze Query' }).click()
+  await prepareResultsPage(page, { consent: false })
 
   const consentDialog = page.getByRole('dialog')
   await expect(
@@ -158,7 +170,7 @@ test('gates the first EXPLAIN ANALYZE run behind explicit consent', async ({
   await analysisRequest
 
   await expect(
-    page.getByText('Performance Summary', { exact: true })
+    page.getByText('Performance score', { exact: true })
   ).toBeVisible()
   expect(analysisCalls).toBe(1)
   await expect
@@ -171,7 +183,11 @@ test('gates the first EXPLAIN ANALYZE run behind explicit consent', async ({
 })
 
 test('submits SQL and renders streamed analysis results', async ({ page }) => {
-  await prepareAnalysisPage(page)
+  await clearQueryRegistry(page.request)
+  await configureTestTarget(page, { hasPassword: true })
+  // Analyze preflights target reachability before POST /api/analyze.
+  await mockConnectivityOk(page)
+  await acceptExplainAnalyzeConsent(page)
   const registryResponse = await page.request.post('/api/query-registry', {
     data: { sql: query, target: 'e2e-guard' },
   })
@@ -182,7 +198,13 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
     entry.event === 'complete'
       ? {
           ...entry,
-          data: { ...completeAnalysis, query_hash: registryHash },
+          data: {
+            ...completeAnalysis,
+            query_hash: registryHash,
+            // Hold completion back so the in-progress state stays observable
+            // between the streamed progress events and the final render.
+            _delay_ms: 1500,
+          },
         }
       : entry
   )
@@ -190,20 +212,17 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
     analyze: [{ events: serviceEvents(matchingEvents), delay_ms: 250 }],
   })
 
-  await fillCodeMirror(page.locator('.cm-editor'), query)
-  // C-09 moved the fast-mode switch behind the editor's "Options" popover;
-  // open it first — the switch only mounts while the popover is open.
-  await page.getByRole('button', { name: 'Options' }).click()
-  const fastMode = page.getByRole('switch')
-  await fastMode.click()
-  await expect(fastMode).toHaveAttribute('data-state', 'checked')
-
   const analysisRequest = page.waitForRequest(
     (request) =>
       request.method() === 'POST' &&
       new URL(request.url()).pathname === '/api/analyze'
   )
-  await page.getByRole('button', { name: 'Analyze Query' }).click()
+  const search = new URLSearchParams({
+    query,
+    target: 'e2e-guard',
+    fast: 'true',
+  })
+  await page.goto(`/results?${search.toString()}`)
 
   const request = await analysisRequest
   expect(request.postDataJSON()).toEqual({
@@ -212,20 +231,18 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
     target: 'e2e-guard',
   })
   await expect(page).toHaveURL(/\/results(?:\?|$)/)
-  // The analyzing view now shows "Preparing" twice (stage caption + current
-  // stage headline), so pick the first match.
   await expect(
-    page.getByText('Preparing', { exact: true }).first()
+    page.getByRole('status', { name: 'Analysis in progress' })
   ).toBeVisible()
 
   await expect(
-    page.getByText('Performance Summary', { exact: true })
+    page.getByText('Performance score', { exact: true })
   ).toBeVisible()
   await expect(
     page.getByText('Sequential scan reads too many rows')
   ).toBeVisible()
   await expect(
-    page.getByRole('heading', { name: 'Index Recommendations' })
+    page.getByText('Recommended next step', { exact: true })
   ).toBeVisible()
   // The optimization-opportunities section collapsed into a quiet
   // "More recommendations (N)" disclosure on the results page; open it and
@@ -235,20 +252,15 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
     page.getByText('Return only columns needed by the caller.')
   ).toBeVisible()
   await expect(
-    page.getByRole('heading', { name: 'Readyset Compatibility' })
+    page.getByText('Readyset compatibility', { exact: true })
   ).toBeVisible()
   await expect(
-    page.getByRole('paragraph').filter({ hasText: /^No obvious blockers$/ })
+    page.getByText('No obvious Readyset blockers', { exact: true })
   ).toBeVisible()
   await expect(
-    page.locator('div.rounded-xl.border-border-positive-soft').filter({
-      hasText: 'No obvious blockers',
-    })
+    page.getByText('Static check', { exact: true }).first()
   ).toBeVisible()
-  await expect(page.getByText('STATIC CHECK')).toBeVisible()
-  await expect(
-    page.getByRole('button', { name: 'Try with Readyset' })
-  ).toBeVisible()
+  await expect(page.getByText('Readyset verification required')).toBeVisible()
 
   await expect
     .poll(async () => {
@@ -265,20 +277,9 @@ test('submits SQL and renders streamed analysis results', async ({ page }) => {
       sql: 'SELECT id, total FROM orders WHERE customer_id = :p1 ORDER BY created_at DESC',
       target: 'e2e-guard',
     })
-
-  await page.getByRole('button', { name: 'Try with Readyset' }).click()
-  await expect(page).toHaveURL(new RegExp(`/cache\\?hash=${registryHash}`))
-  const focusedQuery = page.locator(
-    `[data-testid="speed-test-query"][data-query-hash="${registryHash}"]`
-  )
-  await expect(focusedQuery).toBeVisible()
-  await expect(focusedQuery).toHaveClass(/ring-2/)
-  await expect(
-    focusedQuery.getByRole('button', { name: 'Compare with Readyset' })
-  ).toBeVisible()
 })
 
-test('shows a streamed failure and can retry from query history', async ({
+test('shows a streamed failure and can retry the analysis', async ({
   page,
 }) => {
   setBackendFixtures({
@@ -287,14 +288,14 @@ test('shows a streamed failure and can retry from query history', async ({
         events: [
           {
             type: 'error',
-            message: 'EXPLAIN ANALYZE timed out after 30 seconds',
+            code: 'rate_limited',
+            message: 'The analysis service is temporarily busy',
           },
         ],
       },
       { events: serviceEvents(successEvents) },
     ],
   })
-  await prepareAnalysisPage(page)
   let analysisCalls = 0
   page.on('request', (request) => {
     if (
@@ -304,48 +305,21 @@ test('shows a streamed failure and can retry from query history', async ({
       analysisCalls += 1
     }
   })
+  await prepareResultsPage(page)
 
-  await fillCodeMirror(page.locator('.cm-editor'), query)
-  await page.getByRole('button', { name: 'Analyze Query' }).click()
-
-  // C-01 rebuilt the analyze failure surface on the shared ErrorState. The
-  // title is now reserved for invalid-SQL ("Analysis Failed"); every other
-  // failure (a timeout classifies as `database`) titles "Analysis could not
-  // complete". The streamed message is the humane summary and stays visible;
-  // no technical-details expander renders here because the SSE error carried
-  // no separate `detail`. Retry-from-history still runs through the page's
-  // "Back" affordance (the ErrorState's own action routes to Settings).
-  // Match the visible title paragraph by role: the branded ErrorState also
-  // exposes the title as the status icon's accessible label, so a plain text
-  // match collides with that second node. Scoping to the paragraph keeps the
-  // assertion stable across the error-surface's mid-stack refinements.
   await expect(
     page
       .getByRole('paragraph')
-      .filter({ hasText: /^Analysis could not complete$/ })
+      .filter({ hasText: /^Analysis couldn't complete$/ })
   ).toBeVisible()
   await expect(
-    page.getByText('EXPLAIN ANALYZE timed out after 30 seconds')
+    page.getByText('The analysis service is temporarily busy')
   ).toBeVisible()
 
-  await page.getByRole('button', { name: 'Back', exact: true }).click()
-  await expect(page).toHaveURL(/\/analyze$/)
-  // The query-history row is itself a div[role="button"] card that nests a real
-  // <button> "Use query". The shared Button renders its label for BOTH the icon's
-  // a11y-name and the visible text, so the accessible name is "Use query Use
-  // query" — target the real <button> element (the card is a div) to dodge both
-  // the doubled name and the strict-mode collision with the card.
-  await page.locator('button', { hasText: 'Use query' }).click()
-  // "Use query" reloads the saved query with its captured parameter values
-  // applied (rdst-e7s.28), so :p1 comes back pre-filled with the 42 it last ran
-  // with — re-analyzing prompts for no parameters and runs directly.
-  await expect(page.locator('.cm-content[contenteditable="true"]')).toHaveText(
-    /SELECT id, total FROM orders WHERE customer_id = 42 ORDER BY created_at DESC/
-  )
-  await page.getByRole('button', { name: 'Analyze Query' }).click()
+  await page.getByRole('button', { name: 'Try again' }).click()
 
   await expect(
-    page.getByText('Performance Summary', { exact: true })
+    page.getByText('Performance score', { exact: true })
   ).toBeVisible()
   expect(analysisCalls).toBe(2)
 })
@@ -379,15 +353,12 @@ test('presents an EXPLAIN connection failure as a target problem', async ({
       },
     ],
   })
-  await prepareAnalysisPage(page)
-
-  await fillCodeMirror(page.locator('.cm-editor'), query)
-  await page.getByRole('button', { name: 'Analyze Query' }).click()
+  await prepareResultsPage(page)
 
   await expect(
     page
       .getByRole('paragraph')
-      .filter({ hasText: /^Analysis could not complete$/ })
+      .filter({ hasText: /^Analysis couldn't complete$/ })
   ).toBeVisible()
   await expect(
     page.getByText(

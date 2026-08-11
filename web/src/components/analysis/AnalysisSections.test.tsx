@@ -6,7 +6,7 @@ import { ReadysetCacheabilitySection } from './AnalysisSections'
 afterEach(cleanup)
 
 describe('ReadysetCacheabilitySection', () => {
-  it('does not turn an unavailable ReadySet check into a blocked verdict', () => {
+  it('does not turn an unavailable Readyset check into a blocked verdict', () => {
     render(
       <ReadysetCacheabilitySection
         cacheability={{
@@ -14,7 +14,7 @@ describe('ReadysetCacheabilitySection', () => {
           cacheable: null,
           confidence: 'unknown',
           method: 'readyset_unavailable',
-          explanation: 'ReadySet endpoint was not reachable',
+          explanation: 'Readyset endpoint was not reachable',
           issues: [],
           warnings: [],
         }}
@@ -24,7 +24,7 @@ describe('ReadysetCacheabilitySection', () => {
     expect(screen.getAllByText('Not Verified').length).toBeGreaterThan(0)
     expect(screen.getByText('UNAVAILABLE')).toBeTruthy()
     expect(screen.queryByText('Not Cacheable')).toBeNull()
-    expect(screen.queryByText('BLOCKED')).toBeNull()
+    expect(screen.queryByText('Not cacheable')).toBeNull()
   })
 
   it('presents a positive static screen without claiming verification', () => {

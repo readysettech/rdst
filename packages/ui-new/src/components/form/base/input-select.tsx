@@ -103,7 +103,7 @@ export type BaseInputSelectProps = SelectRootProps & {
   blockClose?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
-  options: { value: string | number; label: string }[]
+  options: { value: string | number; label: string; disabled?: boolean }[]
   value?: string
   onValueChange?(value: string): void
   placeholder?: string
@@ -198,6 +198,7 @@ const BaseInputSelect = forwardRef<
                 {(option) => (
                   <RadixSelect.Item
                     value={option.value as any}
+                    disabled={option.disabled}
                     className={itemClasses}
                     translate="no"
                   >

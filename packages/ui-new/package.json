@@ -86,8 +86,15 @@
     "./dom-animation": "./src/motion/dom-animation.ts",
     "./transition": "./src/motion/transition.ts",
     "./variants": "./src/motion/variants.ts",
-
-    "./style.css": "./style.css"
+    "./style.css": "./style.css",
+    "./segmented-control": "./src/components/element/segmented-control.tsx",
+    "./tab": "./src/components/element/tab.tsx",
+    "./disclosure": "./src/components/element/disclosure.tsx",
+    "./icon-button": "./src/components/element/icon-button.tsx",
+    "./interactive-row": "./src/components/element/interactive-row.tsx",
+    "./pressable": "./src/components/element/pressable.tsx",
+    "./icon-tile": "./src/components/element/icon-tile.tsx",
+    "./empty-state": "./src/components/feedback/empty-state.tsx"
   },
   "scripts": {
     "clean": "rm -rf node_modules"

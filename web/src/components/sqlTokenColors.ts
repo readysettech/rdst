@@ -8,16 +8,23 @@
  * @lezer/highlight and @codemirror/view) would drag CodeMirror into the eager
  * entry graph. [PS5 dedup item 3]
  */
+/**
+ * Hues mirror cloud's Prism SQL palette (ui-new `highlight.css`) so query text
+ * reads the same across both apps: amber keywords, green strings, yellow
+ * numbers, blue params/quoted identifiers, purple functions. The `var()`
+ * entries resolve against the design-system theme at paint time, so they adapt
+ * with it.
+ */
 export const SQL_TOKEN_COLORS = {
-  comment: '#6b7280',
-  keyword: '#f472b6',
-  string: '#86efac',
-  quotedIdent: '#93c5fd',
-  number: '#fcd34d',
-  bool: '#fcd34d',
-  null: '#fb923c',
-  param: '#67e8f9',
-  fn: '#c4b5fd',
-  punctuation: '#64748b',
-  identifier: '#e8e8e8',
+  comment: '#8da1b9',
+  keyword: 'var(--color-content-warning-plain)',
+  string: '#91d076',
+  quotedIdent: '#6cb8e6',
+  number: '#e6d37a',
+  bool: '#e6d37a',
+  null: '#e6d37a',
+  param: '#6cb8e6',
+  fn: '#c699e3',
+  punctuation: 'var(--color-content-layout-2)',
+  identifier: 'var(--color-content-layout-1)',
 } as const

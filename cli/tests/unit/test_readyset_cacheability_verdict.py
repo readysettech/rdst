@@ -70,6 +70,32 @@ def test_yes_is_cacheable(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["cacheable"] is True
 
 
+def test_registry_placeholders_are_converted_before_postgres_explain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    def run_explain(**kwargs):
+        captured.update(kwargs)
+        return _FakeProc(
+            returncode=0,
+            stdout=(
+                "q_abc123\tSELECT * FROM votes "
+                "ORDER BY $1 DESC\tyes"
+            ),
+        )
+
+    monkeypatch.setattr(rec, "_run_explain_postgres", run_explain)
+
+    result = _explain("SELECT * FROM votes ORDER BY :p1 DESC")
+
+    assert result["cacheable"] is True
+    assert captured["explain_query"] == (
+        "EXPLAIN CREATE SHALLOW CACHE FROM "
+        "SELECT * FROM votes ORDER BY $1 DESC"
+    )
+
+
 def test_bare_error_line_is_a_failed_check(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_stdout(monkeypatch, "ERROR: server closed the connection unexpectedly")
     result = _explain()

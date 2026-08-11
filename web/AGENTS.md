@@ -24,6 +24,14 @@ pnpm build        # Production build
 
 ## CONVENTIONS
 
+### Design-system guidelines (read first)
+
+Before writing or reviewing any UI here, read
+[../../packages/ui-new/docs/GUIDELINES.md](../../packages/ui-new/docs/GUIDELINES.md)
+— the ten-rule cheat sheet linking the full foundations/patterns/components
+corpus. `turbo lint` enforces the mechanical subset (semantic tokens only,
+count-pinned raw `<button>` baselines).
+
 ### Use @rs/ui-new Components
 
 **NEVER use raw HTML form elements:**

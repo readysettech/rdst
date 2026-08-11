@@ -17,7 +17,14 @@ export default defineConfig({
   },
   plugins: [
     tailwindcss(),
-    tanstackRouter({ target: 'react', autoCodeSplitting: true }),
+    tanstackRouter({
+      target: 'react',
+      autoCodeSplitting: true,
+      // Route-adjacent unit tests are not routes. Ignoring them prevents the
+      // production build from scanning every test file and flooding CI with
+      // one warning per file before Rollup starts emitting chunks.
+      routeFileIgnorePattern: '\\.test\\.',
+    }),
     viteReact({
       babel: {
         plugins: ['babel-plugin-react-compiler'],

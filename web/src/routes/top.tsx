@@ -1,20 +1,9 @@
-/**
- * Top Queries page - Monitor and analyze slow queries
- */
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
-import { createFileRoute } from '@tanstack/react-router';
-// The page component lives in the route-ignored `-top-page` sibling so the
-// code-splitter can relocate its `../components` barrel import (which re-exports
-// the CodeMirror SQL-editor stack) out of the eager entry chunk. `component:`
-// must reference a non-exported local wrapper that TanStack `autoCodeSplitting`
-// can move to the lazy route chunk; the `TopPage` import is used only there, so
-// it rides along. See evidence/gates-final.md §Defect D-1.
-import { TopPage } from './-top-page';
-
+// Historical discovery now feeds the Query Library automatically. Keep the
+// old URL useful by opening its closest lifecycle view.
 export const Route = createFileRoute('/top')({
-  component: TopPageRoute,
-});
-
-function TopPageRoute() {
-  return <TopPage />;
-}
+  beforeLoad: () => {
+    throw redirect({ to: '/queries', search: { view: 'high-impact' } })
+  },
+})

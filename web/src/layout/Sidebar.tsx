@@ -1,6 +1,8 @@
-import { cn, tv } from '@rs/tailwind-base'
+import { tv } from '@rs/tailwind-base'
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
+import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
+import { Pressable } from '@rs/ui-new/pressable'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { Text } from '@rs/ui-new/text'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -49,7 +51,7 @@ function SidebarIdentity() {
 
 const sidebarStyles = tv({
   base: [
-    'w-64',
+    'w-80',
     'flex',
     'flex-col',
     'border-r border-border-layout-1',
@@ -67,11 +69,8 @@ const sidebarStyles = tv({
         'absolute',
         'inset-y-0',
         'h-full',
-        'bg-surface-layout-1/10',
-        'backdrop-blur-2xl',
-        'backdrop-saturate-150',
-        'border-border-layout-1/45',
-        'shadow-[inset_-1px_0_0_rgba(255,255,255,0.06)]',
+        'bg-surface-layout-1',
+        'border-border-layout-1',
       ],
       false: ['fixed', 'top-0', 'h-dvh', 'bg-surface-layout-1'],
     },
@@ -86,9 +85,10 @@ const navItemStyles = tv({
   base: [
     'flex',
     'items-center',
-    'gap-3',
-    'px-3',
-    'py-2.5',
+    'gap-2',
+    'px-2',
+    'py-1',
+    'h-10',
     'rounded-lg',
     'text-sm',
     'font-medium',
@@ -120,36 +120,20 @@ interface NavItem {
 
 const homeItem: NavItem = { label: 'Home', icon: 'dashboard', to: '/' }
 
-// Demo sits in its own section directly under Home, above Diagnose/Optimize.
-const tryItSection: { title: string; items: NavItem[] } = {
-  title: 'Try it',
-  items: [{ label: 'Demo', icon: 'querypilot', to: '/demo' }],
-}
-
-const primaryItems: NavItem[] = [{ label: 'Ask', icon: 'sparkles', to: '/ask' }]
-
-const sections: Array<{ title: string; items: NavItem[] }> = [
-  {
-    title: 'Diagnose',
-    items: [
-      { label: 'Slow Queries', icon: 'observe', to: '/top' },
-      { label: 'Health Check', icon: 'document-validation', to: '/audit' },
-      { label: 'Analyze Query', icon: 'speedometer', to: '/analyze' },
-    ],
-  },
-  {
-    title: 'Optimize',
-    items: [
-      { label: 'Comparisons', icon: 'database-settings', to: '/cache' },
-      { label: 'Queries', icon: 'folder-file', to: '/query-registry' },
-    ],
-  },
+// The daily nav is a single flat list, top to bottom: Home, Ask, the Queries
+// workspace, Performance tests, Health Check, then the demo. No group headers here —
+// only Advanced gets one, since it's opt-in rather than daily-driver.
+const primaryItems: NavItem[] = [
+  { label: 'Ask', icon: 'sparkles', to: '/ask' },
+  { label: 'Queries', icon: 'folder-file', to: '/queries' },
+  { label: 'Performance tests', icon: 'speedometer', to: '/cache' },
+  { label: 'Health check', icon: 'document-validation', to: '/audit' },
+  { label: 'Try the demo', icon: 'querypilot', to: '/demo' },
 ]
 
 const advancedItems: NavItem[] = [
-  { label: 'Benchmark', icon: 'play', to: '/benchmark' },
   { label: 'Schema', icon: 'layers', to: '/schema' },
-  { label: 'Code Scan', icon: 'search', to: '/scan' },
+  { label: 'Code scan', icon: 'search', to: '/scan' },
   { label: 'Agents', icon: 'message-multiple', to: '/agents' },
   { label: 'Guards', icon: 'user-shield', to: '/guards' },
 ]
@@ -197,17 +181,6 @@ function NavLink({
         </span>
       )}
     </Link>
-  )
-}
-
-function SectionTitle({ title }: { title: string }) {
-  return (
-    <Text
-      level="caption"
-      className="text-content-layout-3 uppercase tracking-wider px-3 pt-3 pb-1"
-    >
-      {title}
-    </Text>
   )
 }
 
@@ -336,7 +309,11 @@ export function Sidebar({
 
   const isActive = (item: NavItem) =>
     currentPath === item.to ||
-    (item.to === '/analyze' && currentPath === '/results')
+    // The Queries workspace owns the analysis result route.
+    (item.to === '/queries' && currentPath === '/results') ||
+    // `/benchmark` remains as a compatibility route, but its navigation owner
+    // is the unified Performance tests workspace.
+    (item.to === '/cache' && currentPath === '/benchmark')
 
   // Keep the active item visible when landing directly on an advanced route.
   const advancedActive = advancedItems.some(isActive)
@@ -348,21 +325,12 @@ export function Sidebar({
     localStorage.setItem(ADVANCED_STORAGE_KEY, next ? 'open' : 'closed')
   }
 
-  // Match the sidebar surface at 10% over the transparent window so the
-  // native glass tint reads through it.
-  const macGlassStyle = isElectronMac
-    ? {
-        background:
-          'color-mix(in oklab, var(--color-surface-layout-1) 10%, transparent)',
-      }
-    : undefined
-
   return (
     <>
       {/* Scrim behind the open mobile drawer; tap to dismiss. Tablet+ never
           shows it (the sidebar is always in-flow there). */}
       {mobileOpen && (
-        <button
+        <Pressable
           ref={scrimRef}
           type="button"
           aria-label="Close navigation"
@@ -374,21 +342,13 @@ export function Sidebar({
         ref={asideRef}
         id="app-sidebar"
         className={sidebarStyles({ isElectronMac, mobileOpen })}
-        style={macGlassStyle}
       >
         {/* On desktop mac the window traffic lights get their own draggable
           strip above the target selector. */}
         {isElectronMac && <div className="draggable-region h-8 shrink-0" />}
 
         {/* Target selector */}
-        <div
-          className={cn(
-            'draggable-region h-14 border-b',
-            isElectronMac
-              ? 'border-border-layout-1/45'
-              : 'border-border-layout-1'
-          )}
-        >
+        <div className="draggable-region h-14 border-b border-border-layout-1">
           <div className="no-drag h-full">
             <TargetDropdown
               selectedTarget={selectedTarget}
@@ -402,39 +362,28 @@ export function Sidebar({
         <Scrollable className="flex-1" type="auto">
           {/* gap-2 BETWEEN groups > gap-1 WITHIN a group — spacing carries the
             grouping, one step up on the scale (design-system §1 [VIS-036]). */}
-          <nav className="flex flex-col gap-2 p-3">
-            <NavLink
-              key={homeItem.to}
-              item={homeItem}
-              active={isActive(homeItem)}
-            />
-
-            <div key={tryItSection.title} className="flex flex-col gap-1">
-              <SectionTitle title={tryItSection.title} />
-              {tryItSection.items.map((item) => (
-                <NavLink key={item.to} item={item} active={isActive(item)} />
+          <nav className="flex flex-col gap-2 p-2">
+            <div className="flex flex-col gap-1">
+              <NavLink
+                key={homeItem.to}
+                item={homeItem}
+                active={isActive(homeItem)}
+              />
+              {primaryItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  item={item}
+                  active={isActive(item)}
+                  running={item.to === '/audit' && auditRunning}
+                />
               ))}
             </div>
 
-            {primaryItems.map((item) => (
-              <NavLink key={item.to} item={item} active={isActive(item)} />
-            ))}
-
-            {sections.map((section) => (
-              <div key={section.title} className="flex flex-col gap-1">
-                <SectionTitle title={section.title} />
-                {section.items.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    item={item}
-                    active={isActive(item)}
-                    running={item.to === '/audit' && auditRunning}
-                  />
-                ))}
-              </div>
-            ))}
-
-            <button
+            {/* Advanced group toggle — kept as a hand-roll: a quiet caption +
+                chevron disclosure whose panel is the nav items rendered below,
+                not inside a bordered container, so ui-new Disclosure's single
+                trigger+panel box doesn't fit this nav grouping. */}
+            <Pressable
               type="button"
               onClick={toggleAdvanced}
               className="flex items-center gap-1.5 px-3 pt-3 pb-1 cursor-pointer text-content-layout-3 hover:text-content-layout-2 transition-colors"
@@ -450,7 +399,7 @@ export function Sidebar({
                 label=""
                 className="w-3 h-3"
               />
-            </button>
+            </Pressable>
             {showAdvanced && (
               <>
                 {advancedItems.map((item) => (
@@ -465,28 +414,30 @@ export function Sidebar({
         </Scrollable>
 
         {/* Footer */}
-        <div className="p-3 border-t border-border-layout-1 space-y-2">
+        <div className="p-2 border-t border-border-layout-1 space-y-2">
           <SidebarIdentity />
           <BackgroundRuns />
           <TrialBalanceBadge />
-          <button
+          <Button
             type="button"
+            label="Get free AI credits"
+            icon="sparkles"
+            iconPosition="left"
+            modifier="outline"
+            fullWidth
             onClick={() => setTrialOpen(true)}
-            className={navItemStyles({
+            classMerge={navItemStyles({
               className:
                 'cursor-pointer border border-border-primary-soft bg-gradient-to-r from-surface-primary-soft to-surface-info-soft text-content-primary-soft shadow-elevation-1 hover:shadow-elevation-2',
             })}
-          >
-            <Icon
-              name="sparkles"
-              label="Get free AI credits"
-              className="w-4 h-4 text-content-primary-soft group-hover:scale-110 group-hover:rotate-6 transition-transform"
-            />
-            <span>Get free AI credits</span>
-          </button>
+          />
           {/* Settings recedes here as a quiet utility, out of the daily nav. */}
           <NavLink item={settingsItem} active={isActive(settingsItem)} />
-          <button
+          {/* Give Feedback — kept as a hand-roll: it reuses navItemStyles so it
+              reads as a sibling of the NavLinks above while opening a dialog
+              rather than navigating; a ui-new Button would break that shared
+              nav-item styling. */}
+          <Pressable
             type="button"
             onClick={() => setReportOpen(true)}
             className={navItemStyles({ className: 'cursor-pointer' })}
@@ -495,11 +446,11 @@ export function Sidebar({
               (chrome prescription #9, VIS-008/010). */}
             <Icon
               name="customer-support"
-              label="Give Feedback"
+              label="Give feedback"
               className="w-4 h-4 text-content-layout-3 group-hover:scale-110 transition-transform"
             />
-            <span>Give Feedback</span>
-          </button>
+            <span>Give feedback</span>
+          </Pressable>
 
           {(status?.version || desktopUpdateState) && (
             <div className="flex items-center justify-between gap-2 px-3 py-2">

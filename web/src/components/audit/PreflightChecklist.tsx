@@ -1,13 +1,8 @@
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
+import { IconButton } from '@rs/ui-new/icon-button'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@rs/ui-new/tooltip'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import type { EnvRequirement } from '../../lib/api'
@@ -315,23 +310,14 @@ export function PreflightChecklist({
                 <Text level="label-small" className="text-content-layout-1">
                   AWS data
                 </Text>
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="Why sign in to AWS?"
-                        className="inline-flex rounded text-content-layout-3 hover:text-content-layout-2"
-                      >
-                        <Icon name="info" label="" className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      className="max-w-80 whitespace-normal"
-                      label="AWS sign-in adds actual monthly cost, provisioned compute, and CloudWatch CPU metrics for more accurate sizing and savings. It is required only when AWS-hosted targets are selected."
-                    />
-                  </Tooltip>
-                </TooltipProvider>
+                <IconButton
+                  icon="info"
+                  label="Why sign in to AWS?"
+                  tooltip="AWS sign-in adds actual monthly cost, provisioned compute, and CloudWatch CPU metrics for more accurate sizing and savings. It is required only when AWS-hosted targets are selected."
+                  size="small"
+                  modifier="ghost"
+                  classMerge="bg-transparent text-content-layout-3 hover:text-content-layout-2"
+                />
               </HStack>
               <Check
                 ok={

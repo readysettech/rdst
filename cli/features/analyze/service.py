@@ -642,7 +642,11 @@ class AnalyzeService:
             type="complete",
             success=True,
             analysis_id=context.get("storage_result", {}).get("analysis_id"),
-            query_hash=context.get("registry_normalization", {}).get("hash")
+            # Deep links must use the identifier that was actually persisted
+            # in the registry. Parameter normalization can intentionally
+            # produce a different hash, which does not identify a Saved card.
+            query_hash=context.get("storage_result", {}).get("query_hash")
+            or context.get("registry_normalization", {}).get("hash")
             or input.hash,
             explain_results=_serialize_for_json(explain_results),
             llm_analysis=_serialize_for_json(context.get("llm_analysis", {})),

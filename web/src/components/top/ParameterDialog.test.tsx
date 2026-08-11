@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ParameterDialog } from './ParameterDialog'
@@ -19,9 +25,11 @@ describe('ParameterDialog', () => {
 
   afterEach(() => {
     cleanup()
+    vi.unstubAllGlobals()
   })
 
-  const fewParamsQuery = 'SELECT * FROM users WHERE id = :p1 AND name = :p2 AND age = :p3'
+  const fewParamsQuery =
+    'SELECT * FROM users WHERE id = :p1 AND name = :p2 AND age = :p3'
   const manyParamsQuery =
     'SELECT * FROM orders WHERE shop_id = :p1 AND status = :p2 AND created_at >= :p3 AND updated_at >= :p4 AND test = :p5 AND id > :p6 AND currency = :p7 AND fulfillment = :p8 AND archived = :p9 AND type = :p10'
 
@@ -32,12 +40,14 @@ describe('ParameterDialog', () => {
         onClose={onClose}
         onSubmit={onSubmit}
         query={fewParamsQuery}
-      />,
+      />
     )
 
-    expect(screen.getByText('3 parameters detected')).toBeTruthy()
+    expect(
+      screen.getByText('3 parameters detected. Values apply only to this run.')
+    ).toBeTruthy()
     expect(screen.getAllByPlaceholderText('Enter value')).toHaveLength(3)
-    expect(screen.getByText('Original Query')).toBeTruthy()
+    expect(screen.getByText('Original query')).toBeTruthy()
     expect(screen.getAllByText('Parameters').length).toBeGreaterThanOrEqual(1)
   })
 
@@ -48,12 +58,14 @@ describe('ParameterDialog', () => {
         onClose={onClose}
         onSubmit={onSubmit}
         query={manyParamsQuery}
-      />,
+      />
     )
 
-    expect(screen.getByText('10 parameters detected')).toBeTruthy()
+    expect(
+      screen.getByText('10 parameters detected. Values apply only to this run.')
+    ).toBeTruthy()
     expect(screen.getAllByPlaceholderText('Enter value')).toHaveLength(10)
-    expect(screen.getByText('Original Query')).toBeTruthy()
+    expect(screen.getByText('Original query')).toBeTruthy()
     expect(screen.getAllByText('Parameters').length).toBeGreaterThanOrEqual(1)
   })
 
@@ -64,7 +76,7 @@ describe('ParameterDialog', () => {
         onClose={onClose}
         onSubmit={onSubmit}
         query={fewParamsQuery}
-      />,
+      />
     )
 
     const button = screen.getByRole('button', { name: /Analyze Query/i })
@@ -78,7 +90,7 @@ describe('ParameterDialog', () => {
         onClose={onClose}
         onSubmit={onSubmit}
         query={fewParamsQuery}
-      />,
+      />
     )
 
     const inputs = screen.getAllByPlaceholderText('Enter value')
@@ -97,7 +109,7 @@ describe('ParameterDialog', () => {
         onClose={onClose}
         onSubmit={onSubmit}
         query={fewParamsQuery}
-      />,
+      />
     )
 
     const inputs = screen.getAllByPlaceholderText('Enter value')
@@ -123,12 +135,87 @@ describe('ParameterDialog', () => {
         onSubmit={onSubmit}
         query={fewParamsQuery}
         initialValues={{ p1: 42, p2: 'Bob', p3: 30 }}
-      />,
+      />
     )
 
-    const inputs = screen.getAllByPlaceholderText('Enter value') as HTMLInputElement[]
+    const inputs = screen.getAllByPlaceholderText(
+      'Enter value'
+    ) as HTMLInputElement[]
     expect(inputs[0].value).toBe('42')
     expect(inputs[1].value).toBe('Bob')
     expect(inputs[2].value).toBe('30')
+  })
+
+  it('fills only unresolved values from safe schema evidence', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          target: 'prod',
+          tables: [
+            {
+              name: 'users',
+              description: null,
+              business_context: null,
+              row_estimate: null,
+              relationships: [],
+              columns: [
+                {
+                  name: 'id',
+                  data_type: 'bigint',
+                  description: null,
+                  unit: null,
+                  is_pii: false,
+                  enum_values: null,
+                },
+                {
+                  name: 'name',
+                  data_type: 'text',
+                  description: null,
+                  unit: null,
+                  is_pii: false,
+                  enum_values: { Alice: 'Example account' },
+                },
+                {
+                  name: 'age',
+                  data_type: 'integer',
+                  description: null,
+                  unit: null,
+                  is_pii: false,
+                  enum_values: null,
+                },
+              ],
+            },
+          ],
+          terminology: [],
+          extensions: [],
+          custom_types: [],
+          metrics: [],
+        }),
+      })
+    )
+    render(
+      <ParameterDialog
+        isOpen
+        onClose={onClose}
+        onSubmit={onSubmit}
+        query={fewParamsQuery}
+        target="prod"
+        initialValues={{ p1: 42 }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest values' }))
+
+    const inputs = screen.getAllByPlaceholderText(
+      'Enter value'
+    ) as HTMLInputElement[]
+    await waitFor(() => expect(inputs[1].value).toBe('Alice'))
+    expect(inputs[0].value).toBe('42')
+    expect(inputs[2].value).toBe('1')
+    expect(screen.getByText('Observed value')).toBeTruthy()
+    expect(screen.getByText('Schema enum · users.name')).toBeTruthy()
   })
 })

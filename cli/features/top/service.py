@@ -1010,6 +1010,7 @@ class TopService:
                 avg_duration_ms=float(query_data.get("avg_duration_ms", 0.0) or 0.0),
                 observation_count=int(query_data.get("observation_count", 0) or 0),
                 max_duration_ms=float(query_data.get("max_duration_ms", 0.0) or 0.0),
+                observed=True,
             )
             return is_new
         except ValueError as e:

@@ -5,11 +5,6 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 
 import { type BackendHandle, startBackend, stopBackend } from './backend.js'
-import {
-  createGlassFallbackLogger,
-  type GlassModule,
-  loadLiquidGlass,
-} from './liquid-glass.js'
 import { type StaticServerHandle, startStaticServer } from './static-server.js'
 import { setupAutoUpdates } from './updater.js'
 
@@ -26,64 +21,7 @@ let backend: BackendHandle | null = null
 let webServer: StaticServerHandle | null = null
 let quitCleanupStarted = false
 let cleanupPromise: Promise<void> | null = null
-let liquidGlass: GlassModule | null = null
-let liquidGlassFailureReason: string | null = null
-let glassViewID: number | null = null
-let lastGlassFocusState: boolean | null = null
 let deepLinkPending = false
-
-const logGlassFallback = createGlassFallbackLogger(process.platform)
-
-function tuneGlassForFocus(focused: boolean): void {
-  if (!liquidGlass || glassViewID == null) return
-  if (lastGlassFocusState === focused) return
-  lastGlassFocusState = focused
-
-  try {
-    liquidGlass.unstable_setSubdued?.(glassViewID, focused ? 0 : 1)
-    liquidGlass.unstable_setScrim?.(glassViewID, focused ? 0 : 1)
-  } catch {
-    // Best effort only.
-  }
-}
-
-function applyGlassEffects(win: BrowserWindow): void {
-  if (process.platform !== 'darwin') return
-
-  glassViewID = null
-  lastGlassFocusState = null
-  let fallbackReason = liquidGlassFailureReason
-
-  try {
-    const supported = liquidGlass?.isGlassSupported?.() ?? false
-    if (supported && liquidGlass?.addView) {
-      glassViewID = liquidGlass.addView(win.getNativeWindowHandle(), {
-        cornerRadius: 14,
-        tintColor: '#121212e6',
-        opaque: false,
-      })
-      tuneGlassForFocus(win.isFocused())
-      return
-    }
-
-    if (!fallbackReason) {
-      fallbackReason = liquidGlass
-        ? 'electron-liquid-glass reported that native glass is unavailable on this macOS version.'
-        : 'electron-liquid-glass was unavailable at runtime.'
-    }
-  } catch (error) {
-    fallbackReason = `electron-liquid-glass threw while applying native glass: ${errorMessage(error)}`
-  }
-
-  logGlassFallback(fallbackReason ?? 'unknown liquid glass failure')
-
-  try {
-    win.setVibrancy?.('sidebar')
-    win.setBackgroundMaterial?.('auto')
-  } catch {
-    // Ignore optional visual effect errors.
-  }
-}
 
 function getResourcesPath(): string {
   return app.isPackaged
@@ -153,16 +91,15 @@ async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
     minHeight: 620,
     title: 'RDST',
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
-    // Centered in the renderer's traffic-light strip, which sits inside the
-    // shell's 8px window inset.
+    // Centered in the renderer's dedicated traffic-light strip.
     trafficLightPosition: isMac ? { x: 22, y: 18 } : undefined,
     // Frameless on Linux; the renderer draws its own window controls in the
     // header and marks drag regions with -webkit-app-region.
     frame: isMac,
-    transparent: isMac,
+    transparent: false,
     // Matches --surface-layout-2 in the renderer's dark theme so there is no
     // flash before first paint.
-    backgroundColor: isMac ? '#00000000' : '#171616',
+    backgroundColor: '#171616',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -208,13 +145,9 @@ async function createWindow(rendererUrl: string): Promise<BrowserWindow> {
 
   await window.loadURL(rendererUrl)
 
-  applyGlassEffects(window)
   if (isMac) {
     window.setWindowButtonVisibility(true)
   }
-  tuneGlassForFocus(window.isFocused())
-  window.on('focus', () => tuneGlassForFocus(true))
-  window.on('blur', () => tuneGlassForFocus(false))
 
   return window
 }
@@ -291,13 +224,6 @@ async function startApplication(): Promise<void> {
 
   await app.whenReady()
   smokeLog('electron ready')
-
-  const liquidGlassResult = await loadLiquidGlass({
-    platform: process.platform,
-  })
-  liquidGlass = liquidGlassResult.module
-  liquidGlassFailureReason = liquidGlassResult.failureReason
-  smokeLog('liquid glass loaded')
 
   registerWindowControlHandlers()
 

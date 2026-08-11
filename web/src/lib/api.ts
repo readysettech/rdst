@@ -176,6 +176,22 @@ export async function removeQueryFromRegistry(
   return data
 }
 
+export async function markQueryReviewed(
+  hash: string,
+  target: string
+): Promise<{ success: boolean; error?: string | null }> {
+  const { data, response } = await typedClient.POST(
+    '/api/query-registry/{query_hash}/reviewed',
+    {
+      params: { path: { query_hash: hash } },
+      body: { target },
+    }
+  )
+  await throwIfNotOk(response, 'Failed to mark query reviewed')
+  if (!data) throw new Error('Missing response body')
+  return data
+}
+
 export async function updateQueryTag(
   hash: string,
   tag: string

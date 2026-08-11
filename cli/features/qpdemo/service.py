@@ -615,7 +615,7 @@ class DemoService:
             return "not_applicable"
         if not docker_running:
             return "not_applicable"
-        if self._amd64_emulation_ok:
+        if getattr(self, "_amd64_emulation_ok", False):
             return "ok"
         try:
             r = qdeploy._run(

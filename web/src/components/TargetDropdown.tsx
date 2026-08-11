@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
 import { Dropdown } from '@rs/ui-new/dropdown';
 import { Icon } from '@rs/ui-new/icon';
-import { Text } from '@rs/ui-new/text';
+import { Pressable } from '@rs/ui-new/pressable';
 import { Skeleton } from '@rs/ui-new/skeleton';
+import { Text } from '@rs/ui-new/text';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@rs/ui-new/tooltip';
+import { useEffect, useRef, useState } from 'react';
 import { type TargetInfo } from '../lib/api';
-import { useSystemStatus } from '../lib/useSystemStatus';
 import { useTargetSwitchLockState } from '../lib/targetSwitchLock';
+import { useSystemStatus } from '../lib/useSystemStatus';
 
 interface TargetDropdownProps {
   selectedTarget: string | null;
@@ -86,11 +87,11 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
     setOpen(nextOpen);
   };
 
-  // A real <button> so the one always-visible config control is keyboard
-  // focusable and Enter/Space-activatable — the Dropdown.Trigger→<button> fix
+  // A real <Pressable> so the one always-visible config control is keyboard
+  // focusable and Enter/Space-activatable — the Dropdown.Trigger→<Pressable> fix
   // (configure-and-identity step 2 / app-chrome HIGH). [USE-030, USE-018]
   const trigger = (
-    <button
+    <Pressable
       type="button"
       aria-label={`Switch database — current: ${currentTarget ?? 'none'}`}
       aria-disabled={isLocked}
@@ -113,7 +114,7 @@ export function TargetDropdown({ selectedTarget, onSelectTarget }: TargetDropdow
         )}
         <Icon name="chevron-down" label="Target Dropdown" />
       </div>
-    </button>
+    </Pressable>
   );
 
   if (targets.length === 0) {

@@ -1,11 +1,12 @@
-import { useState } from 'react'
-import { Text } from '@rs/ui-new/text'
-import { Tag } from '@rs/ui-new/tag'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
-import { HStack, VStack } from '@rs/ui-new/stack'
+import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { Pressable } from '@rs/ui-new/pressable'
 import { Show } from '@rs/ui-new/show'
-import { m, AnimatePresence } from '@rs/ui-new/motion'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
+import { Text } from '@rs/ui-new/text'
+import { useState } from 'react'
 import type { SchemaTable, SchemaTableColumn, SchemaTableRelationship } from '../../types/schema'
 
 interface SchemaTableTreeProps {
@@ -71,7 +72,7 @@ export function SchemaTableTree({
         return (
           <div key={table.name} className="overflow-hidden">
             {/* Table header */}
-            <button
+            <Pressable
               type="button"
               onClick={() => toggleTable(table.name)}
               className="w-full px-5 py-4 flex items-center gap-3 hover:bg-surface-layout-2/50 transition-colors text-left group"
@@ -107,7 +108,7 @@ export function SchemaTableTree({
                 label="Edit"
                 className="w-4 h-4 text-content-layout-3 opacity-0 group-hover:opacity-100 transition-opacity"
               />
-            </button>
+            </Pressable>
 
             {/* Expanded content */}
             <AnimatePresence>
@@ -128,7 +129,7 @@ export function SchemaTableTree({
                           size="small"
                           icon="edit"
                           iconPosition="left"
-                          label="Edit Table"
+                          label="Edit table"
                           onClick={() => onEditTable?.(table)}
                         />
                       </div>

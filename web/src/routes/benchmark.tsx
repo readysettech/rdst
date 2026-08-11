@@ -1,28 +1,16 @@
-import { createFileRoute } from '@tanstack/react-router'
-// The page component lives in the route-ignored `-benchmark-page` sibling so the
-// code-splitter can relocate its SQLDisplay/CodeMirror imports out of the eager
-// entry chunk. `component:` must reference a non-exported local wrapper that
-// TanStack `autoCodeSplitting` can move to the lazy route chunk; the
-// `BenchmarkPage` import is used only there, so it rides along. See
-// evidence/gates-final.md §Defect D-1.
-import { BenchmarkPage } from './-benchmark-page'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/benchmark')({
   validateSearch: (search: Record<string, unknown>) => ({
     run: typeof search.run === 'string' ? search.run : undefined,
   }),
-  component: BenchmarkPageRoute,
+  // Load test is now one mode of the unified Performance tests workspace.
+  // Preserve old bookmarks and background-run links without keeping a second
+  // user-facing surface alive.
+  beforeLoad: ({ search }) => {
+    throw redirect({
+      to: '/cache',
+      search: { view: 'load-test', run: search.run },
+    })
+  },
 })
-
-function BenchmarkPageRoute() {
-  const { run } = Route.useSearch()
-  const navigate = Route.useNavigate()
-  return (
-    <BenchmarkPage
-      selectedRunId={run}
-      onClearSelectedRun={() =>
-        navigate({ search: { run: undefined }, replace: true })
-      }
-    />
-  )
-}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Query, Request
+from pydantic import BaseModel, Field
 from typing import Any, Optional, Literal, AsyncGenerator, Union
 from datetime import datetime
 from sse_starlette.sse import EventSourceResponse
@@ -12,7 +12,8 @@ import logging
 import time
 import uuid
 
-from shared.api.target_guard import TargetGuard, require_target_body
+from shared.api.target_guard import TargetGuard, require_target, require_target_body
+from ..discovery import query_discovery
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,18 @@ class QueryRegistryEntry(BaseModel):
     readyset_query_id: str = ""
     readyset_supported: str = ""
     last_cache_target: str = ""
+    readyset_last_observed_at: str = ""
+    # Target-scoped lifecycle read model used by the unified Query Library.
+    first_observed_at: str = ""
+    last_observed_at: str = ""
+    reviewed_at: str = ""
+    saved_at: str = ""
+    last_analyzed_at: str = ""
+    analysis_count: int = 0
+    last_compared_at: str = ""
+    comparison_count: int = 0
+    sources: list[str] = Field(default_factory=list)
+    is_new: bool = False
 
 
 class QueryRegistryResponse(BaseModel):
@@ -67,6 +80,49 @@ class RemoveQueryResponse(BaseModel):
     error: Optional[str] = None
 
 
+class MarkQueryReviewedRequest(BaseModel):
+    target: str
+
+
+class MarkQueryReviewedResponse(BaseModel):
+    success: bool
+    error: Optional[str] = None
+
+
+@router.get("/query-registry/discovery/stream")
+async def stream_query_discovery(
+    request: Request,
+    guard: TargetGuard = Depends(require_target),
+    cursor: Optional[int] = Query(
+        None,
+        ge=0,
+        description="Last processed discovery cursor for reconnect reconciliation",
+    ),
+) -> EventSourceResponse:
+    """Stream automatic Query Library discovery updates for one target.
+
+    This web/desktop-only endpoint opts into the background collector. Existing
+    CLI commands and the legacy top endpoints keep their current behavior.
+    """
+    header_cursor = request.headers.get("last-event-id")
+    after_cursor = cursor
+    if after_cursor is None and header_cursor:
+        try:
+            after_cursor = max(int(header_cursor), 0)
+        except ValueError:
+            after_cursor = None
+
+    collector = query_discovery.collector_for(guard.target_name)
+
+    async def event_stream() -> AsyncGenerator[dict, None]:
+        async for event in collector.subscribe(after_cursor):
+            if await request.is_disconnected():
+                break
+            yield event.to_sse()
+
+    return EventSourceResponse(event_stream())
+
+
 @router.get("/query-registry")
 async def get_query_registry(
     limit: Optional[int] = 200, offset: int = 0, target: Optional[str] = None
@@ -83,7 +139,7 @@ async def get_query_registry(
             # Scope to the selected database by the query's home target. Without
             # this the list leaks cross-dialect queries, e.g. a Postgres query
             # shown and cached against a MySQL target.
-            all_queries = [q for q in all_queries if q.home_target == target]
+            all_queries = [q for q in all_queries if q.belongs_to_target(target)]
         total = len(all_queries)
 
         if offset < 0:
@@ -101,6 +157,8 @@ async def get_query_registry(
         entries: list[QueryRegistryEntry] = []
         for q in queries:
             try:
+                entry_target = target or q.home_target
+                lifecycle = q.lifecycle_for(entry_target)
                 entries.append(
                     QueryRegistryEntry(
                         sql=q.sql,
@@ -110,7 +168,7 @@ async def get_query_registry(
                         # Clients treat target as the DB a query belongs to; the
                         # mutable last_target alone leaked queries into the wrong
                         # per-DB list (rdst-e7s.31).
-                        target=q.home_target,
+                        target=entry_target,
                         frequency=q.frequency,
                         source=q.source,
                         most_recent_params=q.most_recent_params,
@@ -123,6 +181,31 @@ async def get_query_registry(
                         readyset_query_id=q.readyset_query_id,
                         readyset_supported=q.readyset_supported,
                         last_cache_target=q.last_cache_target,
+                        readyset_last_observed_at=q.readyset_last_observed_at,
+                        first_observed_at=(
+                            lifecycle.first_observed_at if lifecycle else ""
+                        ),
+                        last_observed_at=(
+                            lifecycle.last_observed_at if lifecycle else ""
+                        ),
+                        reviewed_at=lifecycle.reviewed_at if lifecycle else "",
+                        saved_at=lifecycle.saved_at if lifecycle else "",
+                        last_analyzed_at=(
+                            lifecycle.last_analyzed_at if lifecycle else ""
+                        ),
+                        analysis_count=lifecycle.analysis_count if lifecycle else 0,
+                        last_compared_at=(
+                            lifecycle.last_compared_at if lifecycle else ""
+                        ),
+                        comparison_count=(
+                            lifecycle.comparison_count if lifecycle else 0
+                        ),
+                        sources=(
+                            list(lifecycle.sources)
+                            if lifecycle
+                            else ([q.source] if q.source else [])
+                        ),
+                        is_new=q.is_new_for(entry_target),
                     )
                 )
             except Exception:
@@ -181,6 +264,25 @@ async def remove_query_from_registry(query_hash: str) -> RemoveQueryResponse:
 
     except Exception as e:
         return RemoveQueryResponse(success=False, error=str(e))
+
+
+@router.post("/query-registry/{query_hash}/reviewed")
+async def mark_query_reviewed(
+    query_hash: str,
+    request: MarkQueryReviewedRequest,
+) -> MarkQueryReviewedResponse:
+    """Mark a query reviewed for exactly one target."""
+    try:
+        from shared.query_registry import QueryRegistry
+
+        registry = QueryRegistry()
+        registry.load()
+        updated = registry.mark_reviewed(query_hash, target=request.target)
+        if not updated:
+            return MarkQueryReviewedResponse(success=False, error="Query not found")
+        return MarkQueryReviewedResponse(success=True)
+    except Exception as e:
+        return MarkQueryReviewedResponse(success=False, error=str(e))
 
 
 class UpdateTagRequest(BaseModel):
@@ -471,12 +573,10 @@ async def run_benchmark(request: BenchmarkRequest, guard: TargetGuard = Depends(
         queries=request.queries,
         target=guard.target_name,
         mode=request.mode,
-        interval_ms=request.interval_ms if request.interval_ms is not None else 100,
-        concurrency=request.concurrency if request.concurrency is not None else 1,
+        interval_ms=100 if request.interval_ms is None else request.interval_ms,
+        concurrency=1 if request.concurrency is None else request.concurrency,
         duration_seconds=(
-            request.duration_seconds
-            if request.duration_seconds is not None
-            else 30
+            30 if request.duration_seconds is None else request.duration_seconds
         ),
         max_count=request.max_count,
     ))

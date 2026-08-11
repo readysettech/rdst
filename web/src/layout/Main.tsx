@@ -1,12 +1,10 @@
-import { cn } from '@rs/tailwind-base'
 import * as ScrollArea from '@rs/ui-new/scroll'
 
 interface MainProps {
   children: React.ReactNode
-  isElectronMac?: boolean
 }
 
-export function Main({ children, isElectronMac = false }: MainProps) {
+export function Main({ children }: MainProps) {
   return (
     <ScrollArea.Root asChild>
       <main
@@ -21,12 +19,9 @@ export function Main({ children, isElectronMac = false }: MainProps) {
           if (root.scrollTop !== 0) root.scrollTop = 0
           if (root.scrollLeft !== 0) root.scrollLeft = 0
         }}
-        className={cn(
-          // Sidebar offset only from tablet up; below that the sidebar is
-          // off-canvas so content spans full width (responsive chrome, T19).
-          'relative tablet:pl-64 h-[calc(100dvh-56px)] overflow-y-hidden',
-          isElectronMac ? 'bg-surface-layout-2/30' : 'bg-surface-layout-2'
-        )}
+        // Sidebar offset only from tablet up; below that the sidebar is
+        // off-canvas so content spans full width (responsive chrome, T19).
+        className="relative tablet:pl-80 h-[calc(100dvh-56px)] overflow-y-hidden bg-surface-layout-2"
       >
         {/* Radix's direct child is a `display:table; min-width:100%`
             measurement wrapper. Keep it as a table so its height tracks
@@ -37,10 +32,10 @@ export function Main({ children, isElectronMac = false }: MainProps) {
         <ScrollArea.Viewport className="w-full h-full overflow-auto custom-scrollbar [&>div]:!w-full [&>div]:!table-fixed">
           {/* Fluid content column: w-full + max-w + min-w-0, never the fixed
               `container` width (which computes off the viewport, ignoring the
-              264px sidebar). Centered by mx-auto on wide screens. */}
+              320px sidebar). Centered by mx-auto on wide screens. */}
           <div
             id="main-content"
-            className="p-6 w-full max-w-6xl min-w-0 mx-auto"
+            className="p-6 w-full max-w-7xl min-w-0 mx-auto"
           >
             {children}
           </div>

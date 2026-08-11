@@ -521,6 +521,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cache/compare-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Cache Compare Run
+         * @description Start an adjustable, equal-concurrency comparison in the same sandbox.
+         */
+        post: operations["start_cache_compare_run_api_cache_compare_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cache/compare-runs/{run_id}/load": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Cache Compare Load
+         * @description Adjust the in-flight clients for an active live comparison.
+         */
+        patch: operations["update_cache_compare_load_api_cache_compare_runs__run_id__load_patch"];
+        trace?: never;
+    };
     "/api/cache/sandbox": {
         parameters: {
             query?: never;
@@ -2020,6 +2060,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/query-registry/discovery/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Query Discovery
+         * @description Stream automatic Query Library discovery updates for one target.
+         *
+         *     This web/desktop-only endpoint opts into the background collector. Existing
+         *     CLI commands and the legacy top endpoints keep their current behavior.
+         */
+        get: operations["stream_query_discovery_api_query_registry_discovery_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/query-registry/import": {
         parameters: {
             query?: never;
@@ -2076,6 +2139,26 @@ export interface paths {
          * @description Remove a query from the registry.
          */
         delete: operations["remove_query_from_registry_api_query_registry__query_hash__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/query-registry/{query_hash}/reviewed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Query Reviewed
+         * @description Mark a query reviewed for exactly one target.
+         */
+        post: operations["mark_query_reviewed_api_query_registry__query_hash__reviewed_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2821,6 +2904,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tunnel/browse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Browse Files
+         * @description List local paths for the browser SSH key picker.
+         */
+        get: operations["browse_files_api_tunnel_browse_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tunnel/close": {
         parameters: {
             query?: never;
@@ -3365,7 +3468,10 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /** AnnotateCompleteEvent */
+        /**
+         * AnnotateCompleteEvent
+         * @description Annotation process completed, possibly with individual table failures.
+         */
         AnnotateCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -3383,7 +3489,10 @@ export interface components {
              */
             type: "annotate_complete";
         };
-        /** AnnotateErrorEvent */
+        /**
+         * AnnotateErrorEvent
+         * @description Annotation process encountered an error.
+         */
         AnnotateErrorEvent: {
             /** Message */
             message: string;
@@ -3393,7 +3502,10 @@ export interface components {
              */
             type: "annotate_error";
         };
-        /** AnnotateProgressEvent */
+        /**
+         * AnnotateProgressEvent
+         * @description Progress update during annotation.
+         */
         AnnotateProgressEvent: {
             /** Message */
             message: string;
@@ -3421,7 +3533,10 @@ export interface components {
             /** Target */
             target: string;
         };
-        /** AnnotateStartedEvent */
+        /**
+         * AnnotateStartedEvent
+         * @description Annotation process started.
+         */
         AnnotateStartedEvent: {
             /**
              * Completed Tables
@@ -3438,7 +3553,10 @@ export interface components {
              */
             type: "annotate_started";
         };
-        /** AnnotateTableCompleteEvent */
+        /**
+         * AnnotateTableCompleteEvent
+         * @description A table has been annotated.
+         */
         AnnotateTableCompleteEvent: {
             /** Columns Annotated */
             columns_annotated: number;
@@ -3478,7 +3596,10 @@ export interface components {
             /** Valid */
             valid: boolean;
         };
-        /** AskClarificationNeededEvent */
+        /**
+         * AskClarificationNeededEvent
+         * @description Clarification needed from the user.
+         */
         AskClarificationNeededEvent: {
             /** Interpretations */
             interpretations: components["schemas"]["AskInterpretation"][];
@@ -3492,7 +3613,10 @@ export interface components {
              */
             type: "clarification_needed";
         };
-        /** AskClarificationQuestion */
+        /**
+         * AskClarificationQuestion
+         * @description A clarification question for the user.
+         */
         AskClarificationQuestion: {
             /** Id */
             id: string;
@@ -3501,7 +3625,10 @@ export interface components {
             /** Question */
             question: string;
         };
-        /** AskErrorEvent */
+        /**
+         * AskErrorEvent
+         * @description Ask encountered an error.
+         */
         AskErrorEvent: {
             /**
              * Category
@@ -3559,7 +3686,10 @@ export interface components {
             /** Items */
             items: components["schemas"]["AskHistoryItem"][];
         };
-        /** AskInterpretation */
+        /**
+         * AskInterpretation
+         * @description A possible interpretation of the user's question.
+         */
         AskInterpretation: {
             /** Assumptions */
             assumptions: string[];
@@ -3608,7 +3738,10 @@ export interface components {
              */
             timeout?: number;
         };
-        /** AskResultEvent */
+        /**
+         * AskResultEvent
+         * @description Ask completed with results.
+         */
         AskResultEvent: {
             /** Columns */
             columns: string[];
@@ -3647,7 +3780,10 @@ export interface components {
              */
             type: "result";
         };
-        /** AskSchemaLoadedEvent */
+        /**
+         * AskSchemaLoadedEvent
+         * @description Schema has been loaded.
+         */
         AskSchemaLoadedEvent: {
             /** Source */
             source: string;
@@ -3666,7 +3802,10 @@ export interface components {
              */
             type: "schema_loaded";
         };
-        /** AskSqlGeneratedEvent */
+        /**
+         * AskSqlGeneratedEvent
+         * @description SQL has been generated.
+         */
         AskSqlGeneratedEvent: {
             /**
              * Explanation
@@ -3681,7 +3820,10 @@ export interface components {
              */
             type: "sql_generated";
         };
-        /** AskStatusEvent */
+        /**
+         * AskStatusEvent
+         * @description Status update during ask execution.
+         */
         AskStatusEvent: {
             /** Message */
             message: string;
@@ -4100,7 +4242,13 @@ export interface components {
             target?: string | null;
         };
         BootstrapEvent: components["schemas"]["BootstrapStageEvent"] | components["schemas"]["BootstrapNeedsKeyEvent"] | components["schemas"]["ErrorEvent"];
-        /** BootstrapNeedsKeyEvent */
+        /**
+         * BootstrapNeedsKeyEvent
+         * @description The run reached the annotate gate without a usable Anthropic key.
+         *
+         *     The event name doubles as the run registry's gating signal: the run's
+         *     status parks on needs_key until the next event arrives.
+         */
         BootstrapNeedsKeyEvent: {
             /** Message */
             message: string;
@@ -4117,7 +4265,14 @@ export interface components {
             /** Status */
             status: string;
         };
-        /** BootstrapStageEvent */
+        /**
+         * BootstrapStageEvent
+         * @description Progress of one bootstrap stage.
+         *
+         *     status is started | progress | done | failed | skipped. Child-service
+         *     events surface as status="progress" with the child's payload in detail,
+         *     so the stream stays one flat, typed union.
+         */
         BootstrapStageEvent: {
             /**
              * Detail
@@ -4170,13 +4325,51 @@ export interface components {
             /** Parent */
             parent: string | null;
         };
-        /** CacheRunCompleteEvent */
+        /** CacheCompareLoadRequest */
+        CacheCompareLoadRequest: {
+            /** Concurrency */
+            concurrency: number;
+        };
+        /** CacheCompareLoadResponse */
+        CacheCompareLoadResponse: {
+            /** Concurrency */
+            concurrency: number;
+            /** Run Id */
+            run_id: string;
+        };
+        /** CacheCompareRunRequest */
+        CacheCompareRunRequest: {
+            /**
+             * Concurrency
+             * @default 4
+             */
+            concurrency?: number;
+            /**
+             * Duration Seconds
+             * @default 30
+             */
+            duration_seconds?: number;
+            /** Label */
+            label?: string | null;
+            /** Query */
+            query: string;
+            /** Query Hash */
+            query_hash?: string | null;
+            /** Target */
+            target?: string | null;
+        };
+        /**
+         * CacheRunCompleteEvent
+         * @description Performance comparison result (origin vs cache).
+         */
         CacheRunCompleteEvent: {
             /**
              * Cache Iterations
              * @default null
              */
             cache_iterations?: number | null;
+            /** Cache Samples Ms */
+            cache_samples_ms?: number[];
             /** Cache Stats */
             cache_stats: {
                 [key: string]: number;
@@ -4190,6 +4383,8 @@ export interface components {
              * @default null
              */
             origin_iterations?: number | null;
+            /** Origin Samples Ms */
+            origin_samples_ms?: number[];
             /** Origin Stats */
             origin_stats: {
                 [key: string]: number;
@@ -4343,7 +4538,14 @@ export interface components {
              */
             type: "tool_call";
         };
-        /** ChatToolResultEvent */
+        /**
+         * ChatToolResultEvent
+         * @description Result of one tool execution.
+         *
+         *     For query_database, `data` carries sql/columns/rows/row_count/
+         *     execution_time_ms/truncated/query_hash/query_tag; for get_schema it
+         *     carries tables/source.
+         */
         ChatToolResultEvent: {
             /** Content */
             content: string;
@@ -4578,7 +4780,16 @@ export interface components {
             /** Success */
             success: boolean;
         };
-        /** ErrorEvent */
+        /**
+         * ErrorEvent
+         * @description Error event for service workflows.
+         *
+         *     ``code`` and ``detail`` mirror the shared HTTP error envelope
+         *     (``shared.api.app._error_envelope``) so an SSE failure carries the same
+         *     {code, message, detail} shape the client normalizes in ``lib/sse.ts``.
+         *     Both stay optional so existing producers that only set ``message`` keep
+         *     working; the client derives a code when one is absent.
+         */
         ErrorEvent: {
             /**
              * Code
@@ -4715,6 +4926,24 @@ export interface components {
             success: boolean;
         } & {
             [key: string]: unknown;
+        };
+        /** FileBrowserEntry */
+        FileBrowserEntry: {
+            /** Is Dir */
+            is_dir: boolean;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+        };
+        /** FileBrowserResponse */
+        FileBrowserResponse: {
+            /** Entries */
+            entries: components["schemas"]["FileBrowserEntry"][];
+            /** Parent */
+            parent?: string | null;
+            /** Path */
+            path: string;
         };
         /** FingerprintBody */
         FingerprintBody: {
@@ -4876,11 +5105,10 @@ export interface components {
             group?: string | null;
             /** Name Pattern */
             name_pattern?: string | null;
-            /**
-             * Password Env
-             * @default FLEET_PASS
-             */
-            password_env?: string;
+            /** Password */
+            password?: string | null;
+            /** Password Env */
+            password_env?: string | null;
             /** Profile */
             profile?: string | null;
             /** Regions */
@@ -4953,11 +5181,10 @@ export interface components {
             dry_run?: boolean;
             /** Group */
             group?: string | null;
-            /**
-             * Password Env
-             * @default FLEET_PASS
-             */
-            password_env?: string;
+            /** Password */
+            password?: string | null;
+            /** Password Env */
+            password_env?: string | null;
             /** Tags */
             tags?: string[] | null;
         };
@@ -5527,6 +5754,18 @@ export interface components {
             /** Run Id */
             run_id: string;
         };
+        /** MarkQueryReviewedRequest */
+        MarkQueryReviewedRequest: {
+            /** Target */
+            target: string;
+        };
+        /** MarkQueryReviewedResponse */
+        MarkQueryReviewedResponse: {
+            /** Error */
+            error?: string | null;
+            /** Success */
+            success: boolean;
+        };
         /**
          * MessageResponse
          * @description Single message in conversation history.
@@ -5604,7 +5843,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** ProgressEvent */
+        /**
+         * ProgressEvent
+         * @description Progress update during a multi-step operation.
+         */
         ProgressEvent: {
             /** Message */
             message: string;
@@ -5623,7 +5865,10 @@ export interface components {
             /** Token */
             token: string;
         };
-        /** QueryBenchmarkCompleteEvent */
+        /**
+         * QueryBenchmarkCompleteEvent
+         * @description Benchmark finished; carries the final tally.
+         */
         QueryBenchmarkCompleteEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -5643,7 +5888,16 @@ export interface components {
              */
             type: "complete";
         };
-        /** QueryBenchmarkErrorEvent */
+        /**
+         * QueryBenchmarkErrorEvent
+         * @description Benchmark failed (or was rejected by a safety rail) before completion.
+         *
+         *     Carries the shared error envelope ({code, message, detail}, B7/T24) so the
+         *     client normalizes a benchmark failure exactly like every other SSE error.
+         *     ``message`` stays humane and safe to show; ``detail`` holds only the
+         *     exception class name for correlation — never the raw ``str(e)``, which can
+         *     embed host / DSN / SQL material.
+         */
         QueryBenchmarkErrorEvent: {
             /**
              * Code
@@ -5664,7 +5918,10 @@ export interface components {
             type: "error";
         };
         QueryBenchmarkEvent: components["schemas"]["QueryBenchmarkProgressEvent"] | components["schemas"]["QueryBenchmarkCompleteEvent"] | components["schemas"]["QueryBenchmarkErrorEvent"];
-        /** QueryBenchmarkProgressEvent */
+        /**
+         * QueryBenchmarkProgressEvent
+         * @description Benchmark progress tick.
+         */
         QueryBenchmarkProgressEvent: {
             /** Elapsed Seconds */
             elapsed_seconds: number;
@@ -5684,7 +5941,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** QueryBenchmarkStats */
+        /**
+         * QueryBenchmarkStats
+         * @description Statistics for a single benchmarked query.
+         */
         QueryBenchmarkStats: {
             /** Avg Ms */
             avg_ms: number;
@@ -5722,23 +5982,58 @@ export interface components {
         /** QueryRegistryEntry */
         QueryRegistryEntry: {
             /**
+             * Analysis Count
+             * @default 0
+             */
+            analysis_count?: number;
+            /**
              * Avg Duration Ms
              * @default 0
              */
             avg_duration_ms?: number;
+            /**
+             * Comparison Count
+             * @default 0
+             */
+            comparison_count?: number;
             /** First Analyzed */
             first_analyzed?: string | null;
+            /**
+             * First Observed At
+             * @default
+             */
+            first_observed_at?: string;
             /** Frequency */
             frequency: number;
             /** Hash */
             hash: string;
+            /**
+             * Is New
+             * @default false
+             */
+            is_new?: boolean;
             /** Last Analyzed */
             last_analyzed: string;
+            /**
+             * Last Analyzed At
+             * @default
+             */
+            last_analyzed_at?: string;
             /**
              * Last Cache Target
              * @default
              */
             last_cache_target?: string;
+            /**
+             * Last Compared At
+             * @default
+             */
+            last_compared_at?: string;
+            /**
+             * Last Observed At
+             * @default
+             */
+            last_observed_at?: string;
             /**
              * Max Duration Ms
              * @default 0
@@ -5767,6 +6062,11 @@ export interface components {
              */
             question?: string;
             /**
+             * Readyset Last Observed At
+             * @default
+             */
+            readyset_last_observed_at?: string;
+            /**
              * Readyset Query Id
              * @default
              */
@@ -5776,8 +6076,20 @@ export interface components {
              * @default
              */
             readyset_supported?: string;
+            /**
+             * Reviewed At
+             * @default
+             */
+            reviewed_at?: string;
+            /**
+             * Saved At
+             * @default
+             */
+            saved_at?: string;
             /** Source */
             source: string;
+            /** Sources */
+            sources?: string[];
             /** Sql */
             sql: string;
             /** Tag */
@@ -6095,7 +6407,10 @@ export interface components {
             /** Verified */
             verified: boolean;
         };
-        /** RunEndEvent */
+        /**
+         * RunEndEvent
+         * @description Terminal event appended by the registry after every run.
+         */
         RunEndEvent: {
             /** Status */
             status: string;
@@ -6148,7 +6463,10 @@ export interface components {
             /** Queued Requests */
             queued_requests: number;
         };
-        /** ScanCompleteEvent */
+        /**
+         * ScanCompleteEvent
+         * @description Scan completed.
+         */
         ScanCompleteEvent: {
             /** Success */
             success: boolean;
@@ -6162,7 +6480,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** ScanErrorEvent */
+        /**
+         * ScanErrorEvent
+         * @description Scan error.
+         */
         ScanErrorEvent: {
             /** Message */
             message: string;
@@ -6178,7 +6499,10 @@ export interface components {
             type: "error";
         };
         ScanEvent: components["schemas"]["ScanStatusEvent"] | components["schemas"]["ScanFilesFoundEvent"] | components["schemas"]["ScanProgressEvent"] | components["schemas"]["ScanQueryResultEvent"] | components["schemas"]["ScanRegistryEvent"] | components["schemas"]["ScanCompleteEvent"] | components["schemas"]["ScanErrorEvent"];
-        /** ScanFilesFoundEvent */
+        /**
+         * ScanFilesFoundEvent
+         * @description Files with ORM patterns discovered.
+         */
         ScanFilesFoundEvent: {
             /** Files */
             files: {
@@ -6221,7 +6545,10 @@ export interface components {
          * @enum {string}
          */
         ScanPhase: "config" | "discovery" | "extraction" | "conversion" | "registry" | "analysis";
-        /** ScanProgressEvent */
+        /**
+         * ScanProgressEvent
+         * @description Progress update within a scan phase.
+         */
         ScanProgressEvent: {
             /** Current */
             current: number;
@@ -6237,7 +6564,10 @@ export interface components {
              */
             type: "progress";
         };
-        /** ScanQueryResultEvent */
+        /**
+         * ScanQueryResultEvent
+         * @description Individual query result from scan.
+         */
         ScanQueryResultEvent: {
             /** Query */
             query: {
@@ -6249,7 +6579,10 @@ export interface components {
              */
             type: "query_result";
         };
-        /** ScanRegistryEvent */
+        /**
+         * ScanRegistryEvent
+         * @description Registry save results.
+         */
         ScanRegistryEvent: {
             /** New Queries */
             new_queries: number;
@@ -6319,7 +6652,10 @@ export interface components {
              */
             warn_threshold?: number;
         };
-        /** ScanStatusEvent */
+        /**
+         * ScanStatusEvent
+         * @description Status update during scan.
+         */
         ScanStatusEvent: {
             /** Message */
             message: string;
@@ -6904,7 +7240,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** TopCompleteEvent */
+        /**
+         * TopCompleteEvent
+         * @description Operation completed.
+         */
         TopCompleteEvent: {
             /** Newly Saved */
             newly_saved: number;
@@ -6920,7 +7259,10 @@ export interface components {
              */
             type: "complete";
         };
-        /** TopConnectedEvent */
+        /**
+         * TopConnectedEvent
+         * @description Database connection established.
+         */
         TopConnectedEvent: {
             /** Db Engine */
             db_engine: string;
@@ -6945,7 +7287,10 @@ export interface components {
             /** Setting Name */
             setting_name: string;
         };
-        /** TopDbLimitWarningEvent */
+        /**
+         * TopDbLimitWarningEvent
+         * @description Database query size limit is below recommended threshold.
+         */
         TopDbLimitWarningEvent: {
             /** Db Engine */
             db_engine: string;
@@ -6961,7 +7306,14 @@ export interface components {
              */
             type: "db_limit_warning";
         };
-        /** TopErrorEvent */
+        /**
+         * TopErrorEvent
+         * @description Error occurred.
+         *
+         *     ``code`` and ``detail`` mirror the shared error envelope (B7/T24):
+         *     ``message`` stays humane, ``detail`` carries the exception class name for
+         *     correlation — never the raw ``str(e)``, which can embed host/DSN material.
+         */
         TopErrorEvent: {
             /**
              * Code
@@ -7015,7 +7367,10 @@ export interface components {
             /** Target */
             target?: string | null;
         };
-        /** TopQueriesEvent */
+        /**
+         * TopQueriesEvent
+         * @description Batch of top queries.
+         */
         TopQueriesEvent: {
             /** Db Engine */
             db_engine: string;
@@ -7041,7 +7396,10 @@ export interface components {
              */
             type: "queries";
         };
-        /** TopQueryData */
+        /**
+         * TopQueryData
+         * @description Individual query data.
+         */
         TopQueryData: {
             /** Avg Time */
             avg_time: string;
@@ -7103,7 +7461,10 @@ export interface components {
             /** Total Time */
             total_time: string;
         };
-        /** TopQuerySavedEvent */
+        /**
+         * TopQuerySavedEvent
+         * @description Query saved to registry.
+         */
         TopQuerySavedEvent: {
             /** Is New */
             is_new: boolean;
@@ -7115,7 +7476,10 @@ export interface components {
              */
             type: "query_saved";
         };
-        /** TopSourceFallbackEvent */
+        /**
+         * TopSourceFallbackEvent
+         * @description Source fallback occurred.
+         */
         TopSourceFallbackEvent: {
             /** From Source */
             from_source: string;
@@ -7129,7 +7493,10 @@ export interface components {
              */
             type: "source_fallback";
         };
-        /** TopStatusEvent */
+        /**
+         * TopStatusEvent
+         * @description Progress status update.
+         */
         TopStatusEvent: {
             /** Message */
             message: string;
@@ -8339,6 +8706,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrowseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_cache_compare_run_api_cache_compare_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheCompareRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTestRunStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_cache_compare_load_api_cache_compare_runs__run_id__load_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheCompareLoadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheCompareLoadResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10760,6 +11195,40 @@ export interface operations {
             };
         };
     };
+    stream_query_discovery_api_query_registry_discovery_stream_get: {
+        parameters: {
+            query: {
+                /** @description Last processed discovery cursor for reconnect reconciliation */
+                cursor?: number | null;
+                /** @description Target database name */
+                target: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     import_queries_api_query_registry_import_post: {
         parameters: {
             query?: never;
@@ -10844,6 +11313,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RemoveQueryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_query_reviewed_api_query_registry__query_hash__reviewed_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                query_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkQueryReviewedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkQueryReviewedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12017,6 +12521,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrialStatusResponse"];
+                };
+            };
+        };
+    };
+    browse_files_api_tunnel_browse_get: {
+        parameters: {
+            query?: {
+                path?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileBrowserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

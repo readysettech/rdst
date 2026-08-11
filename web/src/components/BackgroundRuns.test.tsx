@@ -299,8 +299,8 @@ describe('BackgroundRuns', () => {
     fireEvent.click(screen.getByTitle('View results'))
 
     expect(navigate).toHaveBeenCalledWith({
-      to: '/query-registry',
-      search: { hash: 'abc123', run: 'cache_test_imdb_done' },
+      to: '/queries',
+      search: { view: 'saved', hash: 'abc123', run: 'cache_test_imdb_done' },
     })
     expect(setTarget).toHaveBeenCalledWith('imdb')
     expect(backgroundRuns.acknowledgeBackgroundRun).toHaveBeenCalledWith(
@@ -309,13 +309,13 @@ describe('BackgroundRuns', () => {
     expect(backgroundRuns.dismissBackgroundRun).not.toHaveBeenCalled()
   })
 
-  it('opens and acknowledges a completed benchmark from the jobs list', () => {
+  it('opens and acknowledges a completed load test from the jobs list', () => {
     useRuns.mockReturnValue([
       run({
         runId: 'load_test_imdb_done',
         kind: 'load_test',
         status: 'done',
-        message: 'Benchmark complete',
+        message: 'Load test complete',
       }),
     ])
 
@@ -324,8 +324,8 @@ describe('BackgroundRuns', () => {
     fireEvent.click(screen.getByTitle('View results'))
 
     expect(navigate).toHaveBeenCalledWith({
-      to: '/benchmark',
-      search: { run: 'load_test_imdb_done' },
+      to: '/cache',
+      search: { view: 'load-test', run: 'load_test_imdb_done' },
     })
     expect(setTarget).toHaveBeenCalledWith('imdb')
     expect(backgroundRuns.acknowledgeBackgroundRun).toHaveBeenCalledWith(

@@ -422,6 +422,12 @@ def wait_for_database_ready(
     try:
         port = int(port)
         timeout = int(timeout)
+        database = kwargs.get("database") or (
+            "postgres" if database_type == "postgresql" else None
+        )
+        user = kwargs.get("user") or (
+            "postgres" if database_type == "postgresql" else "root"
+        )
 
         if not container_name:
             return {
@@ -432,7 +438,6 @@ def wait_for_database_ready(
 
         print(f"Waiting for {database_type} to be ready...")
 
-        published_host = DockerTopology.from_environment().published_host
         start_time = time.time()
         while (time.time() - start_time) < timeout:
             # Check if container is still running
@@ -450,25 +455,55 @@ def wait_for_database_ready(
                     "error": f"Container {container_name} not running"
                 }
 
-            # Try to connect
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                result = sock.connect_ex((published_host, port))
-                sock.close()
+            if database_type == "postgresql":
+                probe = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        container_name,
+                        "psql",
+                        "-U",
+                        user,
+                        "-d",
+                        database,
+                        "-tAc",
+                        "SELECT 1",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            elif database_type == "mysql":
+                probe = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        container_name,
+                        "mysql",
+                        "-u",
+                        user,
+                        database,
+                        "-e",
+                        "SELECT 1",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            else:
+                return {
+                    "success": False,
+                    "ready": False,
+                    "error": f"Unsupported database type: {database_type}",
+                }
 
-                if result == 0:
-                    # Port is open, wait a bit more for DB to fully initialize
-                    time.sleep(2)
-                    print(f"✓ {database_type} is ready!")
-                    return {
-                        "success": True,
-                        "ready": True,
-                        "wait_time": time.time() - start_time
-                    }
-            except Exception:
-                pass
+            if probe.returncode == 0:
+                print(f"✓ {database_type} is ready!")
+                return {
+                    "success": True,
+                    "ready": True,
+                    "wait_time": time.time() - start_time,
+                }
 
             time.sleep(1)
 
@@ -607,6 +642,7 @@ def recreate_schema_from_target(
             restore_cmd = [
                 'docker', 'exec', '-i', test_container,
                 'psql',
+                '-v', 'ON_ERROR_STOP=1',
                 '-U', target_user,
                 '-d', test_database
             ]
@@ -620,12 +656,10 @@ def recreate_schema_from_target(
             )
 
             if restore_result.returncode != 0:
-                # Check if it's just warnings
-                if "ERROR" in restore_result.stderr:
-                    return {
-                        "success": False,
-                        "error": f"Failed to restore schema: {restore_result.stderr}"
-                    }
+                return {
+                    "success": False,
+                    "error": f"Failed to restore schema: {restore_result.stderr}"
+                }
 
             print("✓ Schema recreated successfully")
 

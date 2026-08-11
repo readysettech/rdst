@@ -13,7 +13,7 @@ test('demo page opens without an email gate', async ({ page }) => {
   await configureTestTarget(page, { hasPassword: true })
 
   await page.goto('/')
-  await expect(page.getByText('Welcome to RDST', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
   await expect(gate).toHaveCount(0)
 
   await page.goto('/demo')

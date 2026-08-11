@@ -24,6 +24,15 @@
  *      `bg-surface-raised`/`bg-surface-overlay` fails: tertiary grey is below
  *      AA-text on the raised tiers (4.22:1 on overlay) — AA-critical text
  *      there uses `content-layout-2` (T19+ rule, evidence/token-contrast-table.md).
+ *   4. RAW PALETTE COLORS (P3-0/D4) — Tailwind's built-in palette
+ *      (`emerald-400`, `bg-amber-500/10`, …) bypasses the semantic-token
+ *      layer entirely, so checks 1–3 above can't see it. Every raw palette
+ *      class fails unless it's pre-existing drift within its file's
+ *      COUNT-PINNED `KNOWN_PALETTE` baseline (same ratchet as `KNOWN_UNDEFINED`:
+ *      growth past the baseline fails, shrinkage prints a lower-the-pin nudge).
+ *      Migrate these to semantic tokens (severity colors → `content-positive`/
+ *      `content-warning`/`content-negative`, brand accents → the brand tokens)
+ *      in P3-2/P3-3; this check only stops new ones from landing.
  *
  * Scope = the rdst dependency surface: apps/rdst/src + packages/ui-new/src.
  * (.qpdemo raw hex in demo.tsx is a CSS-variable block, not a class utility, and
@@ -66,25 +75,21 @@ const KNOWN_UNDEFINED = new Map([])
 // allowed for that value in that file — a duplicated allowlisted value fails.
 //
 // The AnalysisSections verdict-card glows (4×) folded into the shadow-glow-*
-// tokens in C-09 (T21 analyze migration) and left the allowlist. What remains
-// are two STRUCTURAL app-chrome shadows that carry no semantic-role meaning
-// (so no shadow-glow-*/elevation-* token fits) and are not screen-migration
-// surfaces — the minimal, justified allowlist the plan permits.
-const ALLOWLIST = [
-  // Sidebar raised-edge hairline (structural top-lit right-edge inset) → app-chrome, T19/C-08.
-  {
-    file: 'layout/Sidebar.tsx',
-    value: 'shadow-[inset_-1px_0_0_rgba(255,255,255,0.06)]',
-    count: 1,
-  },
-  // Branded root boundary overlay shadow (full-page error card lift) → app-chrome, T19/C-08.
-  {
-    file: 'routes/__root.tsx',
-    value: 'shadow-[0_20px_48px_rgba(0,0,0,0.35)]',
-    count: 1,
-  },
-  // (Toast focus ring raw #ccc → migrated to focus-visible:shadow-focus in T19/C-08.)
-]
+// tokens in C-09 (T21 analyze migration) and left the allowlist. The remaining
+// app-chrome shadows were removed in the Queries closeout, so new arbitrary
+// shadows now fail without an exception.
+const ALLOWLIST = []
+
+// Raw Tailwind PALETTE color classes (P3-0/D4 audit, 2026-07-22): pre-existing
+// usages that bypass the semantic-token layer, keyed by file with the exact
+// count at HEAD. COUNT-PINNED like KNOWN_UNDEFINED: a file's count may never
+// grow past its baseline (a new `text-emerald-400` fails immediately, whether
+// the file already has drift or not — files absent from this map have a
+// baseline of 0). Driven to 0 across ReportDialog/SchemaEmptyState/SchemaAdd*/
+// -demo-page in P3-2/P3-3 as each migrates to semantic tokens.
+// Emptied 2026-07-22: raw palette usage was driven to zero in the P3-2
+// migrations, so every raw palette class is now a hard failure.
+const KNOWN_PALETTE = new Map([])
 
 // ---- 1. Parse the valid token names out of style.css -----------------------
 const css = readFileSync(STYLE_CSS, 'utf8')
@@ -172,6 +177,7 @@ const undefinedTokens = [] // {file, line, cls} — NEW drift, fails
 const knownDrift = [] // {file, line, cls} — pre-existing, count-pinned
 const adhocValues = [] // {file, line, cls}
 const contrastRisk = [] // {file, line} — content-layout-3 on raised/overlay
+const paletteHits = [] // {file, line, cls} — raw palette color, count-pinned per file
 for (const a of ALLOWLIST) a.measured = 0
 
 // T19+ AA rule (evidence/token-contrast-table.md): content-layout-3 is only
@@ -181,6 +187,16 @@ for (const a of ALLOWLIST) a.measured = 0
 // review checklist's job.
 const RAISED_RE = /(?<![\w-])bg-surface-(?:raised|overlay)(?![\w-])/
 const TERTIARY_RE = /(?<![\w-])text-content-layout-3(?![\w-])/
+
+// Raw Tailwind palette color classes — the built-in scale, not our semantic
+// tokens. Matches e.g. `text-emerald-400`, `bg-amber-500/10`, `from-violet-500`.
+// Reuses FAMILY so every color-carrying utility prefix is covered.
+const PALETTE_RE = new RegExp(
+  String.raw`\b` +
+    FAMILY +
+    String.raw`-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}(?:\/\d+)?\b`,
+  'g'
+)
 
 for (const file of files) {
   const rel = relative(WORKSPACE, file)
@@ -246,6 +262,12 @@ for (const file of files) {
     if (RAISED_RE.test(line) && TERTIARY_RE.test(line)) {
       contrastRisk.push({ file: rel, line: i + 1 })
     }
+    // Raw Tailwind palette color — bypasses the semantic-token layer.
+    let p
+    PALETTE_RE.lastIndex = 0
+    while ((p = PALETTE_RE.exec(line))) {
+      paletteHits.push({ file: rel, line: i + 1, cls: p[0] })
+    }
   })
 }
 
@@ -272,6 +294,29 @@ if (contrastRisk.length) {
     `\n✗ ${contrastRisk.length} contrast-risk element(s) — text-content-layout-3 on bg-surface-raised/overlay is below AA-text (4.22:1 on overlay); use text-content-layout-2 (see evidence/token-contrast-table.md):`
   )
   for (const v of contrastRisk) console.error(`  ${v.file}:${v.line}`)
+}
+
+// Count-pin: raw palette usage may never grow past its per-file baseline
+// (files with no baseline entry have an implicit baseline of 0, so any hit in
+// a fresh file fails immediately — this is what stops NEW palette usage).
+const paletteByFile = new Map()
+for (const v of paletteHits)
+  paletteByFile.set(v.file, (paletteByFile.get(v.file) || 0) + 1)
+const paletteLower = []
+for (const [file, measured] of paletteByFile) {
+  const baseline = KNOWN_PALETTE.get(file) || 0
+  if (measured > baseline) {
+    failed = true
+    console.error(
+      `\n✗ raw palette color(s) grew in ${file}: ${measured} usages > pinned baseline ${baseline}. Use a semantic token instead:`
+    )
+    for (const v of paletteHits.filter((h) => h.file === file))
+      console.error(`  ${v.file}:${v.line}  ${v.cls}`)
+  }
+}
+for (const [file, baseline] of KNOWN_PALETTE) {
+  const measured = paletteByFile.get(file) || 0
+  if (measured < baseline) paletteLower.push(`${file} ${measured}<${baseline}`)
 }
 
 // Count-pin: known drift may never grow past its baseline…
@@ -310,7 +355,7 @@ if (failed) {
   process.exit(1)
 }
 console.log(
-  `✓ token check passed — ${files.length} files, ${COLOR.size} color + ${SHADOW.size} shadow tokens, 0 new undefined, 0 unlisted ad-hoc values, 0 contrast risks.`
+  `✓ token check passed — ${files.length} files, ${COLOR.size} color + ${SHADOW.size} shadow tokens, 0 new undefined, 0 unlisted ad-hoc values, 0 contrast risks, ${paletteHits.length} raw palette usage(s) within pinned baselines.`
 )
 if (knownDrift.length) {
   const byToken = {}
@@ -328,3 +373,5 @@ for (const s of allowLower)
   console.log(
     `  note: allowlist entry now unused/partial — remove or lower it: ${s}`
   )
+for (const s of paletteLower)
+  console.log(`  note: palette usage shrank — lower the KNOWN_PALETTE pin: ${s}`)

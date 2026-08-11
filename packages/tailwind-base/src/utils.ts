@@ -10,6 +10,7 @@ const twMergeConfig: TWMergeConfig = {
   extend: {
     classGroups: {
       'font-size': [
+        'text-stat-hero',
         'text-display-large',
         'text-display-medium',
         'text-display-small',

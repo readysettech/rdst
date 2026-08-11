@@ -9,6 +9,7 @@
  * and offers the password action instead of the driver text.
  */
 
+import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
@@ -126,18 +127,14 @@ export function UnreachableNotice({
             />
           </div>
           {error && !passwordIssue && (
-            <button
+            <Button
               type="button"
+              size="small"
+              modifier="link"
+              label={detailsOpen ? 'Hide details' : 'Details'}
+              classMerge="h-auto p-0"
               onClick={() => setDetailsOpen((open) => !open)}
-              className="cursor-pointer"
-            >
-              <Text
-                level="caption"
-                className="text-content-layout-3 hover:underline"
-              >
-                {detailsOpen ? 'Hide details' : 'Details'}
-              </Text>
-            </button>
+            />
           )}
         </HStack>
         {detailsOpen && error && !passwordIssue && (

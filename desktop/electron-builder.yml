@@ -10,8 +10,6 @@ directories:
 files:
   - out/**/*
   - node_modules/**/*
-asarUnpack:
-  - node_modules/electron-liquid-glass/prebuilds/**/*.node
 extraFiles:
   - from: "sidecar/${os}-${arch}"
     to: "sidecar"

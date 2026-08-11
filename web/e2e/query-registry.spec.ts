@@ -3,6 +3,7 @@ import {
   clearQueryRegistry,
   configureTestTarget,
   expect,
+  mockConnectivityOk,
   fillCodeMirror,
   setBackendFixtures,
   test,
@@ -27,18 +28,23 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   })
   await clearQueryRegistry(page.request)
   await configureTestTarget(page, { hasPassword: true })
+  // The Analyze handoff lands on /results, which preflights target
+  // reachability before POST /api/analyze.
+  await mockConnectivityOk(page)
   await acceptExplainAnalyzeConsent(page)
 
   const initialSql = 'SELECT id FROM users'
   const updatedSql = 'SELECT id, email FROM users ORDER BY id'
 
   await page.goto('/query-registry')
-  await expect(page.getByRole('heading', { name: 'Queries' })).toBeVisible()
-  await expect(page.getByText('No saved queries')).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Queries', exact: true })
+  ).toBeVisible()
+  await expect(page.getByText('No queries match these filters')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Add Query' }).click()
+  await page.getByRole('button', { name: 'Add query' }).click()
   await fillCodeMirror(page.locator('.cm-editor').first(), initialSql)
-  await page.getByRole('button', { name: 'Save Query' }).click()
+  await page.getByRole('button', { name: 'Save query' }).click()
 
   let queryRow = page.getByTestId('query-registry-row')
   await expect(queryRow).toHaveCount(1)
@@ -85,18 +91,27 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   // its title attribute carries the full query as a stable per-row hook.
   await expect(queryRow.locator('[title]')).toHaveAttribute('title', updatedSql)
 
-  await page.locator('[name="search"]').fill('active-users')
+  const search = page.getByPlaceholder('Search name, hash, or SQL...')
+  await search.fill('active-users')
   await expect(queryRow).toHaveCount(1)
-  await page.locator('[name="search"]').fill('missing-query')
-  await expect(page.getByText('No matching queries')).toBeVisible()
-  await page.locator('[name="search"]').fill('active-users')
+  await search.fill('missing-query')
+  await expect(
+    page.getByRole('heading', { name: 'No queries match this search' })
+  ).toBeVisible()
+  await search.fill('active-users')
 
   queryRow = page.getByTestId('query-registry-row')
-  await queryRow.getByRole('button', { name: 'Analyze' }).click()
-  await expect(page).toHaveURL(/\/results\?/)
+  const analyzeButton = queryRow.getByRole('button', { name: 'Analyze' })
+  await expect(analyzeButton).toBeEnabled()
+  await Promise.all([
+    page.waitForURL((url) => url.pathname === '/results'),
+    analyzeButton.click(),
+  ])
   expect(new URL(page.url()).searchParams.get('query')).toBe(updatedSql)
   await expect(page.getByText(updatedSql, { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Re-analyze' })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Run analysis again' })
+  ).toBeVisible()
 
   await page.goto('/query-registry')
   queryRow = page.getByTestId('query-registry-row')
@@ -106,7 +121,7 @@ test('creates, renames, edits, searches, analyzes, and deletes a saved query', a
   await expect(queryRow.getByText('Delete this query?')).toBeVisible()
   await queryRow.getByRole('button', { name: 'Delete' }).click()
 
-  await expect(page.getByText('No saved queries')).toBeVisible()
+  await expect(page.getByText('No queries match these filters')).toBeVisible()
   const registryAfterDelete = await page.request.get(
     '/api/query-registry?limit=150'
   )

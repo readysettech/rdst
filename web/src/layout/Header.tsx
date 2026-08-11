@@ -1,5 +1,6 @@
 import { cn } from '@rs/tailwind-base'
 import { Icon } from '@rs/ui-new/icon'
+import { Pressable } from '@rs/ui-new/pressable'
 import { HStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { Link, useRouterState } from '@tanstack/react-router'
@@ -31,21 +32,28 @@ interface RouteConfig {
 const routeConfig: Record<string, RouteConfig> = {
   '/': { label: 'Home', icon: 'dashboard' },
   '/demo': { label: 'Demo', icon: 'querypilot' },
-  '/analyze': { label: 'Analyze Query', icon: 'speedometer' },
-  '/results': { label: 'Results', icon: 'speedometer', parent: '/analyze' },
+  '/queries': { label: 'Queries', icon: 'folder-file' },
+  '/results': {
+    label: 'Results',
+    icon: 'speedometer',
+    parent: '/queries',
+  },
   '/ask': { label: 'Ask', icon: 'sparkles' },
-  '/top': { label: 'Slow Queries', icon: 'observe' },
-  '/scan': { label: 'Code Scan', icon: 'search' },
-  '/query-registry': { label: 'Queries', icon: 'folder-file' },
-  '/cache': { label: 'Caching', icon: 'database-settings' },
-  '/benchmark': { label: 'Benchmark', icon: 'play' },
+  '/scan': { label: 'Code scan', icon: 'search' },
+  '/cache': { label: 'Performance tests', icon: 'speedometer' },
+  '/benchmark': {
+    label: 'Load test',
+    icon: 'play',
+    parent: '/cache',
+  },
   '/schema': { label: 'Schema', icon: 'layers' },
-  '/audit': { label: 'Health Check', icon: 'document-validation' },
+  '/audit': { label: 'Health check', icon: 'document-validation' },
   '/guards': { label: 'Guards', icon: 'user-shield' },
   '/agents': { label: 'Agents', icon: 'message-multiple' },
+  '/fleet': { label: 'Fleet', icon: 'building' },
   '/configure': { label: 'Settings', icon: 'settings' },
-  '/onboarding': { label: 'Get Started', icon: 'querypilot' },
-  '/dev-settings': { label: 'Dev Settings', icon: 'adjustment-horizontal' },
+  '/onboarding': { label: 'Get started', icon: 'querypilot' },
+  '/dev-settings': { label: 'Dev settings', icon: 'adjustment-horizontal' },
   '/test': { label: 'Test', icon: 'adjustment-horizontal' },
 }
 
@@ -74,12 +82,21 @@ export function Header({
     icon: 'document-validation',
     parent: '/audit',
   }
+  const queriesLabConfig: RouteConfig = {
+    label: `Queries lab ${currentPath.split('/').at(-1) ?? ''}`,
+    icon: 'test-tube',
+    parent: '/queries',
+  }
   const config =
     routeConfig[currentPath] ??
-    (currentPath.startsWith('/audit/runs/') ? auditRunConfig : undefined)
+    (currentPath.startsWith('/audit/runs/')
+      ? auditRunConfig
+      : currentPath.startsWith('/lab/queries/')
+        ? queriesLabConfig
+        : undefined)
   // An unknown path is a 404 (the branded notFoundComponent renders below the
   // breadcrumb). Show "Not Found" rather than a redundant "RDST › RDST" (QW7).
-  const currentLabel = config?.label || 'Not Found'
+  const currentLabel = config?.label || 'Not found'
   const currentIcon = config?.icon || 'search'
   const parentPath = config?.parent
   const parentConfig = parentPath ? routeConfig[parentPath] : null
@@ -90,10 +107,10 @@ export function Header({
         'draggable-region',
         'h-14',
         isElectronMac
-          ? 'bg-surface-layout-1/55 backdrop-blur-xl border-b border-border-layout-1/60'
+          ? 'bg-surface-layout-1 border-b border-border-layout-1'
           : 'bg-surface-layout-1/80 backdrop-blur-md border-b border-border-layout-1',
         // Sidebar offset only at tablet+; below that the sidebar is off-canvas.
-        'tablet:pl-64',
+        'tablet:pl-80',
         'sticky top-0 z-20'
       )}
     >
@@ -101,8 +118,10 @@ export function Header({
         {/* Breadcrumb */}
         <HStack className="no-drag items-center gap-2">
           {/* Mobile-only hamburger to open the off-canvas nav (tablet+ hides
-              it — the sidebar is always in view there). */}
-          <button
+              it — the sidebar is always in view there). Kept as a hand-roll: it
+              is bespoke app chrome — a nav toggle carrying aria-expanded /
+              aria-controls for the drawer, not a design-system action button. */}
+          <Pressable
             type="button"
             onClick={onMenuClick}
             aria-label="Open navigation"
@@ -111,7 +130,7 @@ export function Header({
             className="no-drag tablet:hidden -ml-1 mr-1 flex h-8 w-8 items-center justify-center rounded-lg text-content-layout-2 hover:bg-surface-layout-2 hover:text-content-layout-1 transition-colors"
           >
             <Icon name="menu" label="Open navigation" className="w-5 h-5" />
-          </button>
+          </Pressable>
           <Link
             to="/"
             className="text-content-layout-3 hover:text-content-layout-1 transition-colors"

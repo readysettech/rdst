@@ -28,6 +28,15 @@ function selectInnerTab(name: string) {
   )
 }
 
+function openDetailDisclosures(names: string[]) {
+  for (const name of names) {
+    const disclosure = screen.getByRole('button', { name })
+    if (disclosure.getAttribute('aria-expanded') !== 'true') {
+      fireEvent.click(disclosure)
+    }
+  }
+}
+
 const INNER_TAB_NAMES = INNER_REPORT_TABS.map((tab) => tab.label)
 
 const INNER_TAB_DESCRIPTIONS = INNER_REPORT_TABS.map(
@@ -267,6 +276,16 @@ describe('AuditReportView', () => {
     // assertion message names the tab rather than splitting into it.each.
     for (const [tab, texts, exact] of TAB_CONTENT) {
       selectInnerTab(tab)
+      if (tab === 'Detailed Analysis') {
+        openDetailDisclosures([
+          'Table statistics (1)',
+          'Unused indexes (1)',
+          'Duplicate indexes (1)',
+          'Long-running idle transactions (1)',
+          'Database settings (1)',
+          'Replication slots (1)',
+        ])
+      }
       for (const text of texts) {
         expect(
           screen.getAllByText(text, { exact }),
@@ -276,6 +295,7 @@ describe('AuditReportView', () => {
     }
 
     selectInnerTab('Detailed Analysis')
+    openDetailDisclosures(['Database settings (1)'])
     expect(
       screen.queryByRole('button', { name: /overview metrics/i })
     ).toBeNull()
@@ -760,12 +780,11 @@ describe('AuditReportView', () => {
     }
   })
 
-  it.each(EMPTY_TAB_MESSAGES)(
-    'states honestly that the %s tab has no data',
-    (tab, message) => {
-      renderEmptyReport()
-      selectInnerTab(tab)
-      expect(screen.getByText(message)).toBeTruthy()
-    }
-  )
+  it.each(
+    EMPTY_TAB_MESSAGES
+  )('states honestly that the %s tab has no data', (tab, message) => {
+    renderEmptyReport()
+    selectInnerTab(tab)
+    expect(screen.getByText(message)).toBeTruthy()
+  })
 })

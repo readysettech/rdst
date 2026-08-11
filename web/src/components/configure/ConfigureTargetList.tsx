@@ -11,56 +11,55 @@
  * USE-005/018/099]
  */
 
-import { useState } from "react";
-import { Button } from "@rs/ui-new/button";
-import { Text } from "@rs/ui-new/text";
-import { Icon } from "@rs/ui-new/icon";
-import { Tag } from "@rs/ui-new/tag";
-import { Card } from "@rs/ui-new/card";
-import { HStack, VStack } from "@rs/ui-new/stack";
-import { Show } from "@rs/ui-new/show";
-import { Dropdown } from "@rs/ui-new/dropdown";
-import { ConfirmDialog } from "@rs/ui-new/confirm-dialog";
-import { m } from "@rs/ui-new/motion";
-import type { ConfigureTarget } from "../../types/configure";
-import type { FleetConnectivityEvent } from "../../types/fleet";
-import type { TunnelStatus } from "../../lib/tunnels";
+import { Button } from '@rs/ui-new/button'
+import { Card } from '@rs/ui-new/card'
+import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
+import { Dropdown } from '@rs/ui-new/dropdown'
+import { Icon } from '@rs/ui-new/icon'
+import { m } from '@rs/ui-new/motion'
+import { Pressable } from '@rs/ui-new/pressable'
+import { Show } from '@rs/ui-new/show'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
+import { Text } from '@rs/ui-new/text'
+import { useState } from 'react'
+import type { TunnelStatus } from '../../lib/tunnels'
+import type { ConfigureTarget } from '../../types/configure'
+import type { FleetConnectivityEvent } from '../../types/fleet'
 import {
   isUnreachable,
   TargetConnectivity,
   UnreachableNotice,
-} from "./TargetConnectivity";
+} from './TargetConnectivity'
 
 interface ConfigureTargetListProps {
-  targets: ConfigureTarget[];
-  onEdit?: (target: ConfigureTarget) => void;
-  onTest?: (targetName: string) => void;
-  onDelete?: (targetName: string) => void;
-  onSetDefault?: (targetName: string) => void;
-  onAdd?: () => void;
-  /** Empty-state secondary action: open the discovery drawer. */
-  onDiscover?: () => void;
-  onMoveToGroup?: (target: ConfigureTarget) => void;
-  isLoading?: boolean;
+  targets: ConfigureTarget[]
+  onEdit?: (target: ConfigureTarget) => void
+  onTest?: (targetName: string) => void
+  onDelete?: (targetName: string) => void
+  onSetDefault?: (targetName: string) => void
+  onAdd?: () => void
+  onMoveToGroup?: (target: ConfigureTarget) => void
+  isLoading?: boolean
   /** Latest connectivity result per target name. */
-  connectivity?: Record<string, FleetConnectivityEvent>;
+  connectivity?: Record<string, FleetConnectivityEvent>
   /** Names the connectivity check covers; others cannot be tested from here. */
-  checkableTargets?: Set<string>;
+  checkableTargets?: Set<string>
   /** Name of the connection currently being tested (drives the inline spinner). */
-  testingTargetName?: string | null;
-  onSetPassword?: (target: ConfigureTarget) => void;
-  onRetryConnection?: (target: ConfigureTarget) => Promise<boolean>;
-  tunnelStatuses?: Record<string, TunnelStatus>;
-  testingTunnelName?: string | null;
-  onTestTunnel?: (targetName: string) => void;
+  testingTargetName?: string | null
+  onSetPassword?: (target: ConfigureTarget) => void
+  onRetryConnection?: (target: ConfigureTarget) => Promise<boolean>
+  tunnelStatuses?: Record<string, TunnelStatus>
+  testingTunnelName?: string | null
+  onTestTunnel?: (targetName: string) => void
 }
 
 /** `engine · host:port` — the quiet identity line under the name. */
 function connectionMeta(target: ConfigureTarget): string {
   const hostPort = target.host
-    ? `${target.host}${target.port != null ? `:${target.port}` : ""}`
-    : "";
-  return [target.engine, hostPort].filter(Boolean).join(" · ");
+    ? `${target.host}${target.port != null ? `:${target.port}` : ''}`
+    : ''
+  return [target.engine, hostPort].filter(Boolean).join(' · ')
 }
 
 export function ConfigureTargetList({
@@ -70,7 +69,6 @@ export function ConfigureTargetList({
   onDelete,
   onSetDefault,
   onAdd,
-  onDiscover,
   onMoveToGroup,
   isLoading,
   connectivity,
@@ -82,7 +80,7 @@ export function ConfigureTargetList({
   testingTunnelName,
   onTestTunnel,
 }: ConfigureTargetListProps) {
-  const [deleteTargetName, setDeleteTargetName] = useState<string | null>(null);
+  const [deleteTargetName, setDeleteTargetName] = useState<string | null>(null)
 
   if (targets.length === 0) {
     return (
@@ -90,59 +88,52 @@ export function ConfigureTargetList({
         <Card.Content className="py-16">
           <VStack className="gap-5 items-center text-center">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
-              <Icon name="database" label="No connections" className="w-8 h-8 text-content-primary-soft" />
+              <Icon
+                name="database"
+                label="No connections"
+                className="w-8 h-8 text-content-primary-soft"
+              />
             </div>
             <VStack className="gap-1.5 items-center">
               <Text level="headline-5" className="text-content-layout-1">
                 No databases connected yet
               </Text>
-              <Text level="body-small" className="text-content-layout-3 max-w-xs">
-                Add your first database so RDST has something to analyze. Paste a
-                connection string to start.
+              <Text
+                level="body-small"
+                className="text-content-layout-3 max-w-xs"
+              >
+                Choose an integration or enter connection details manually. You
+                can test access before saving anything.
               </Text>
             </VStack>
-            <HStack className="gap-3 items-center flex-wrap justify-center">
-              <Show when={!!onAdd}>
-                <Button
-                  variant="rising"
-                  modifier="solid"
-                  icon="add"
-                  iconPosition="left"
-                  label="Add your first connection"
-                  onClick={onAdd}
-                  disabled={isLoading}
-                />
-              </Show>
-              {/* The zero-target lockout exempts Settings precisely because
-                  discovery lives here, so the empty state has to offer it. */}
-              <Show when={!!onDiscover}>
-                <Button
-                  variant="primary"
-                  modifier="outline"
-                  icon="search"
-                  iconPosition="left"
-                  label="Discover from your cloud provider"
-                  onClick={onDiscover}
-                  disabled={isLoading}
-                />
-              </Show>
-            </HStack>
+            <Show when={!!onAdd}>
+              <Button
+                variant="rising"
+                modifier="solid"
+                icon="add"
+                iconPosition="left"
+                label="Add connection"
+                onClick={onAdd}
+                disabled={isLoading}
+              />
+            </Show>
           </VStack>
         </Card.Content>
       </Card>
-    );
+    )
   }
 
   return (
     <>
       <VStack className="gap-3 items-stretch w-full">
         {targets.map((target, index) => {
-          const meta = connectionMeta(target);
-          const isTesting = testingTargetName === target.name;
-          const status = connectivity?.[target.name];
-          const checkable = !checkableTargets || checkableTargets.has(target.name);
-          const tunnel = tunnelStatuses?.[target.name];
-          const tunnelActive = tunnel?.state === "active";
+          const meta = connectionMeta(target)
+          const isTesting = testingTargetName === target.name
+          const status = connectivity?.[target.name]
+          const checkable =
+            !checkableTargets || checkableTargets.has(target.name)
+          const tunnel = tunnelStatuses?.[target.name]
+          const tunnelActive = tunnel?.state === 'active'
 
           return (
             <m.div
@@ -158,7 +149,7 @@ export function ConfigureTargetList({
                 <VStack className="gap-2 items-start min-w-0 flex-1">
                   <HStack className="gap-2 items-center flex-wrap">
                     {/* Name = click-to-edit trigger [USE-018] */}
-                    <button
+                    <Pressable
                       type="button"
                       title="Edit connection"
                       aria-label={`Edit connection ${target.name}`}
@@ -166,10 +157,13 @@ export function ConfigureTargetList({
                       disabled={isLoading}
                       className="max-w-full text-left rounded-sm cursor-pointer hover:underline underline-offset-2 disabled:cursor-not-allowed disabled:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-primary-soft"
                     >
-                      <Text level="label-medium" className="text-content-layout-1">
+                      <Text
+                        level="label-medium"
+                        className="text-content-layout-1"
+                      >
                         {target.name}
                       </Text>
-                    </button>
+                    </Pressable>
 
                     <Show when={target.is_default}>
                       {/* Default marker — the one place (besides Add/Save) the
@@ -184,18 +178,18 @@ export function ConfigureTargetList({
                         size="small"
                         variant={
                           tunnelActive
-                            ? "positive"
+                            ? 'positive'
                             : tunnel
-                              ? "negative"
-                              : "neutral"
+                              ? 'negative'
+                              : 'neutral'
                         }
                         modifier="ghost"
                         label={
                           tunnelActive
-                            ? "Tunnel active"
+                            ? 'Tunnel active'
                             : tunnel
-                              ? "Tunnel down"
-                              : "Tunnel closed"
+                              ? 'Tunnel down'
+                              : 'Tunnel closed'
                         }
                       />
                     </Show>
@@ -227,7 +221,10 @@ export function ConfigureTargetList({
                     </span>
 
                     <Show when={!!meta}>
-                      <Text level="body-small" className="text-content-layout-2 truncate min-w-0">
+                      <Text
+                        level="body-small"
+                        className="text-content-layout-2 truncate min-w-0"
+                      >
                         {meta}
                       </Text>
                     </Show>
@@ -247,8 +244,8 @@ export function ConfigureTargetList({
                     label="Test"
                     title={
                       checkable
-                        ? "Test connection"
-                        : "Connectivity checks cover database targets only"
+                        ? 'Test connection'
+                        : 'Connectivity checks cover database targets only'
                     }
                     onClick={() => onTest?.(target.name)}
                     loading={isTesting}
@@ -258,15 +255,19 @@ export function ConfigureTargetList({
                   {/* Overflow — tertiary actions [VIS-114, USE-018] */}
                   <Dropdown>
                     <Dropdown.Trigger asChild>
-                      <button
+                      <Pressable
                         type="button"
                         title="More actions"
                         aria-label={`More actions for ${target.name}`}
                         disabled={isLoading}
                         className="flex items-center justify-center h-8 w-8 rounded-lg text-content-layout-3 hover:text-content-layout-1 hover:bg-surface-layout-1 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <Icon name="more" label="More actions" className="w-4 h-4" />
-                      </button>
+                        <Icon
+                          name="more"
+                          label="More actions"
+                          className="w-4 h-4"
+                        />
+                      </Pressable>
                     </Dropdown.Trigger>
                     <Dropdown.Content align="end">
                       <Dropdown.Item
@@ -293,8 +294,8 @@ export function ConfigureTargetList({
                           leftIcon="connect"
                           label={
                             testingTunnelName === target.name
-                              ? "Testing tunnel…"
-                              : "Test tunnel"
+                              ? 'Testing tunnel…'
+                              : 'Test tunnel'
                           }
                           disabled={testingTunnelName === target.name}
                           onClick={() => onTestTunnel?.(target.name)}
@@ -325,7 +326,7 @@ export function ConfigureTargetList({
                 </div>
               </Show>
             </m.div>
-          );
+          )
         })}
       </VStack>
 
@@ -335,19 +336,19 @@ export function ConfigureTargetList({
         onClose={() => setDeleteTargetName(null)}
         onConfirm={() => {
           if (deleteTargetName) {
-            onDelete?.(deleteTargetName);
+            onDelete?.(deleteTargetName)
           }
-          setDeleteTargetName(null);
+          setDeleteTargetName(null)
         }}
-        title={`Delete connection “${deleteTargetName ?? ""}”?`}
-        description={`Delete the ${deleteTargetName ?? ""} connection from RDST.`}
+        title={`Delete connection “${deleteTargetName ?? ''}”?`}
+        description={`Delete the ${deleteTargetName ?? ''} connection from RDST.`}
         notice={{
-          accent: "negative",
-          message: `“${deleteTargetName ?? ""}” will be removed from RDST's connections.`,
+          accent: 'negative',
+          message: `“${deleteTargetName ?? ''}” will be removed from RDST's connections.`,
         }}
         confirmLabel="Delete connection"
         confirmIcon="trash"
       />
     </>
-  );
+  )
 }

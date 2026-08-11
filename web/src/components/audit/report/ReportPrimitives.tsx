@@ -5,11 +5,13 @@
 
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { Card } from '@rs/ui-new/card'
+import { Disclosure } from '@rs/ui-new/disclosure'
 import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
+import { TabItemButton, TabList } from '@rs/ui-new/tab'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
-import { useState } from 'react'
+import { useId } from 'react'
 import { recordValue, severityVariant } from '../../../lib/auditReportFormat'
 import type { AuditReport, HealthFinding } from '../../../types/audit'
 import { TableHeaderCell } from '../../TableHeaderCell'
@@ -32,6 +34,7 @@ export function ReportTabs<T extends string>({
   description?: string
 }) {
   const secondary = variant === 'secondary'
+  const tabLayoutId = useId()
   return (
     <div
       className={
@@ -42,38 +45,23 @@ export function ReportTabs<T extends string>({
             }`
       }
     >
-      <div
-        role="tablist"
+      <TabList
         aria-label={label}
-        className={`flex overflow-x-auto custom-scrollbar ${
-          secondary ? 'gap-2 p-2' : 'gap-1'
+        className={`overflow-x-auto custom-scrollbar ${
+          secondary ? 'gap-2 border-b-0 p-2' : 'gap-4 px-4'
         }`}
       >
         {tabs.map((tab) => (
-          <button
+          <TabItemButton
             key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={selected === tab.id}
+            layoutPrefix={`report-${tabLayoutId}`}
+            label={tab.label}
+            active={selected === tab.id}
             onClick={() => onSelect(tab.id)}
-            className={
-              secondary
-                ? `px-3 py-2 text-sm whitespace-nowrap cursor-pointer rounded-lg border shrink-0 ${
-                    selected === tab.id
-                      ? 'bg-surface-raised border-border-primary-soft text-content-primary-soft shadow-elevation-1'
-                      : 'bg-transparent border-transparent text-content-layout-3 hover:bg-surface-layout-2/50 hover:text-content-layout-2'
-                  }`
-                : `px-4 py-3 text-sm whitespace-nowrap cursor-pointer border-b-2 shrink-0 ${
-                    selected === tab.id
-                      ? 'border-border-primary-soft text-content-primary-soft'
-                      : 'border-transparent text-content-layout-3 hover:text-content-layout-2'
-                  }`
-            }
-          >
-            {tab.label}
-          </button>
+            className={secondary ? 'h-10 shrink-0 px-3' : 'shrink-0'}
+          />
         ))}
-      </div>
+      </TabList>
       {description && (
         <div className="px-4 pb-3">
           <ReportTabDescription>{description}</ReportTabDescription>
@@ -342,30 +330,13 @@ export function DetailDisclosure({
   count: number
   children: React.ReactNode
 }) {
-  const [open, setOpen] = useState(false)
   return (
-    <div className="border-t border-border-layout-1">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className="w-full cursor-pointer px-5 py-3 text-left text-content-layout-2"
-      >
-        <HStack className="gap-2 items-center">
-          <Icon
-            name={open ? 'chevron-down' : 'chevron-right'}
-            label=""
-            aria-hidden="true"
-            className="w-3.5 h-3.5 shrink-0"
-          />
-          <Text as="span" level="label-small">
-            {label} ({count})
-          </Text>
-        </HStack>
-      </button>
-      <div hidden={!open} className="border-t border-border-layout-1">
-        {children}
-      </div>
-    </div>
+    <Disclosure
+      title={`${label} (${count})`}
+      className="rounded-none border-x-0 border-b-0"
+      panelClassName="p-0"
+    >
+      {children}
+    </Disclosure>
   )
 }

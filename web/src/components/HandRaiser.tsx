@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
 import { cn } from '@rs/tailwind-base'
-import { Text } from '@rs/ui-new/text'
+import { Pressable } from '@rs/ui-new/pressable'
 import { HStack, VStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import { useEffect, useState } from 'react'
 import {
   HAND_RAISER_URL,
   isHandRaiserSeen,
@@ -74,13 +75,16 @@ export function HandRaiser({
             {linkLabel} &rarr;
           </a>
           {showDismiss && (
-            <button
+            // Kept as a hand-roll: a quiet muted-text tertiary dismiss paired
+            // beside the primary invitation link; a link-modifier Button (primary
+            // color + underline) would break that quiet pairing.
+            <Pressable
               type="button"
               onClick={() => setVisible(false)}
               className="text-label-small text-content-layout-3 hover:text-content-layout-1"
             >
               Don't show again
-            </button>
+            </Pressable>
           )}
         </HStack>
       </VStack>

@@ -50,6 +50,8 @@
                 "container_name": "{{container_start.container_name}}",
                 "port": "{{default_port}}",
                 "database_type": "{{target_config.engine}}",
+                "database": "{{default_database}}",
+                "user": "{{default_user}}",
                 "timeout": 30
             },
             "ResultPath": "$.database_ready",
@@ -139,10 +141,10 @@
         },
         "WaitForReadysetReady": {
             "Type": "Task",
-            "Resource": "wait_for_readyset_ready",
+            "Resource": "wait_for_readyset_ready_shallow",
             "Parameters": {
                 "readyset_container_name": "{{readyset_container_name}}",
-                "timeout": 120
+                "timeout": 60
             },
             "ResultPath": "$.readyset_ready",
             "Next": "ReturnFinalConfig"

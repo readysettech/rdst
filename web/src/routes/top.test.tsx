@@ -1,22 +1,24 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SlowQueriesPage } from '../features/queries/slow/SlowQueriesPage'
 import { useQueryRegistry } from '../lib/useQueryRegistry'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
 import { useTop } from '../lib/useTop'
-import { TopPage } from './-top-page'
+
+afterEach(cleanup)
 
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => options,
   useNavigate: () => vi.fn(),
   // autoCodeSplitting rewrites the route's `component` to a lazyRouteComponent
-  // call; the tests render TopPage directly, so this just needs to exist.
+  // call; the tests render SlowQueriesPage directly, so this just needs to exist.
   lazyRouteComponent: (loader: unknown) => loader,
 }))
 
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
-    // -top-page reads/writes its filters cache on this client; stub the surface
+    // SlowQueriesPage reads/writes its filters cache on this client; stub the surface
     // it touches so the page mounts (getQueryData returns "no persisted run").
     getQueryData: vi.fn(() => undefined),
     setQueryData: vi.fn(),
@@ -61,10 +63,6 @@ vi.mock('../components', () => ({
 }))
 
 vi.mock('../components/top', () => ({
-  TopFilters: () => <div data-testid="top-filters" />,
-  TopHeader: () => <div data-testid="top-header" />,
-  TopQueryTable: () => <div data-testid="top-query-table" />,
-  TopStatus: () => <div data-testid="top-status" />,
   ParameterDialog: () => null,
   hasParameters: () => false,
 }))
@@ -74,6 +72,7 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
     queries: [],
     listError: null,
     isLoading: false,
+    refetch: vi.fn(),
     addQuery: vi.fn(),
     addMutation: {
       mutate: vi.fn(),
@@ -94,6 +93,7 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
       isPaused: false,
     } as any,
     removeQuery: vi.fn(),
+    markReviewedMutation: { mutate: vi.fn(), isPending: false } as any,
     updateTag: vi.fn(),
     updateSqlMutation: { mutate: vi.fn(), isPending: false } as any,
     importMutation: {
@@ -141,12 +141,14 @@ function setupMocks(overrides: Partial<ReturnType<typeof useTop>> = {}) {
   })
 }
 
-describe('TopPage db limit warning', () => {
+describe('SlowQueriesPage db limit warning', () => {
   it('does not show warning when dbLimitWarning is null', () => {
     setupMocks({ dbLimitWarning: null })
-    render(<TopPage />)
+    render(<SlowQueriesPage />)
 
-    expect(screen.queryByText(/Low Database Query Size Limit/i)).toBeNull()
+    expect(
+      screen.queryByText(/Database query text may be truncated/i)
+    ).toBeNull()
   })
 
   it('shows warning when dbLimitWarning is present', () => {
@@ -158,9 +160,11 @@ describe('TopPage db limit warning', () => {
         db_engine: 'postgresql',
       },
     })
-    render(<TopPage />)
+    render(<SlowQueriesPage />)
 
-    expect(screen.getByText(/Low Database Query Size Limit/i)).toBeTruthy()
+    expect(
+      screen.getByText(/Database query text may be truncated/i)
+    ).toBeTruthy()
     expect(
       screen.getAllByText(/track_activity_query_size/i).length
     ).toBeGreaterThan(0)
@@ -177,7 +181,7 @@ describe('TopPage db limit warning', () => {
         db_engine: 'postgresql',
       },
     })
-    render(<TopPage />)
+    render(<SlowQueriesPage />)
 
     expect(
       screen.getAllByText(/ALTER SYSTEM SET track_activity_query_size/i).length
@@ -193,11 +197,83 @@ describe('TopPage db limit warning', () => {
         db_engine: 'mysql',
       },
     })
-    render(<TopPage />)
+    render(<SlowQueriesPage />)
 
     expect(
       screen.getAllByText(/SET GLOBAL performance_schema_max_digest_length/i)
         .length
     ).toBeGreaterThan(0)
+  })
+})
+
+describe('SlowQueriesPage header composition', () => {
+  it('opens directly in realtime mode without the legacy mode switch', () => {
+    setupMocks()
+
+    render(<SlowQueriesPage initialMode="realtime" realtimeOnly />)
+
+    expect(screen.queryByRole('radiogroup', { name: 'Query mode' })).toBeNull()
+    expect(screen.getByText(/Start live monitoring/i)).toBeTruthy()
+  })
+
+  it('shows one primary action while idle', () => {
+    setupMocks()
+
+    render(<SlowQueriesPage />)
+
+    expect(
+      screen.getAllByRole('button', { name: /Find slow queries/ })
+    ).toHaveLength(1)
+  })
+
+  it('keeps the primary controls and results controls in one card', () => {
+    setupMocks({
+      state: 'complete',
+      queries: [
+        {
+          query_hash: 'query-1',
+          query_text: 'select 1',
+          normalized_query: 'select 1',
+          freq: 1,
+          total_time: '1s',
+          avg_time: '1s',
+          pct_load: '10%',
+        },
+      ],
+    })
+
+    render(<SlowQueriesPage />)
+
+    const headerCard = screen.getByRole('region', {
+      name: 'Slow query controls',
+    })
+    const primaryContent = screen.getByTestId('slow-query-control-content')
+    const resultsContent = screen.getByTestId(
+      'slow-query-results-header-content'
+    )
+    const statusRow = within(primaryContent).getByTestId(
+      'slow-query-status-row'
+    )
+    const scopeRow = within(primaryContent).getByTestId('slow-query-scope-row')
+    const context = within(resultsContent).getByTestId('slow-query-context')
+
+    expect(primaryContent.parentElement).toBe(headerCard)
+    expect(resultsContent.parentElement).toBe(headerCard)
+    expect(within(statusRow).getByText('Status: Complete')).toBeTruthy()
+    expect(
+      within(statusRow).getByRole('button', { name: /Find slow queries/ })
+    ).toBeTruthy()
+    expect(
+      within(scopeRow).getByRole('radiogroup', { name: 'Query mode' })
+    ).toBeTruthy()
+    expect(
+      within(scopeRow).getByRole('button', { name: 'Filters' })
+    ).toBeTruthy()
+    expect(within(scopeRow).getByText('1 query')).toBeTruthy()
+    expect(within(context).getByText('Target')).toBeTruthy()
+    expect(within(context).getByText('prod')).toBeTruthy()
+    expect(within(context).getByText('Source')).toBeTruthy()
+    expect(within(context).getByText('auto')).toBeTruthy()
+    expect(primaryContent.firstElementChild?.className).toContain('space-y-3')
   })
 })

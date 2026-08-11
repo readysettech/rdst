@@ -1,24 +1,18 @@
-import { createFileRoute } from '@tanstack/react-router'
-// The page component lives in the route-ignored `-query-registry-page` sibling
-// so the code-splitter can relocate its QueryCard → SQLDisplay/SQLInput imports
-// (the CodeMirror SQL-editor stack) out of the eager entry chunk. `component:`
-// must reference a non-exported local wrapper that TanStack `autoCodeSplitting`
-// can move to the lazy route chunk; the `QueryRegistryPage` import is used only
-// there, so it rides along. [FIX-1 / Defect D-1]
-import { QueryRegistryPage } from './-query-registry-page'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
+// Saved is now a Query Library facet. Preserve exact-query and run handoffs.
 export const Route = createFileRoute('/query-registry')({
-  // Optional deep-link to focus one query (served-cache links, Analyze handoff).
+  // Keep parsing the deep-link params so they survive the redirect.
   validateSearch: (
     search: Record<string, unknown>
   ): { hash?: string; run?: string } => ({
     hash: typeof search.hash === 'string' ? search.hash : undefined,
     run: typeof search.run === 'string' ? search.run : undefined,
   }),
-  component: QueryRegistryPageRoute,
+  beforeLoad: ({ search }) => {
+    throw redirect({
+      to: '/queries',
+      search: { view: 'saved', hash: search.hash, run: search.run },
+    })
+  },
 })
-
-function QueryRegistryPageRoute() {
-  const { hash, run } = Route.useSearch()
-  return <QueryRegistryPage deepLinkHash={hash} deepLinkRunId={run} />
-}

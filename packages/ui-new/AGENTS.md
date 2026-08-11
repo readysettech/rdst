@@ -20,6 +20,15 @@ packages/ui-new/src/
 
 ## CONVENTIONS
 
+### Guidelines corpus
+
+The written law for this design system lives in
+[docs/GUIDELINES.md](docs/GUIDELINES.md) (ten-rule cheat sheet) plus
+[docs/foundations/](docs/foundations/), [docs/patterns/](docs/patterns/), and
+per-component usage pages in [docs/components/](docs/components/). New or
+changed components ship WITH a four-part usage doc (Usage · Style · Code ·
+Accessibility), and doc claims must match the implementation exactly.
+
 ### Import Pattern
 Components are exported individually - import by subpath:
 

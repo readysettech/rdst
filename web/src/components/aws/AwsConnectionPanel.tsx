@@ -370,18 +370,14 @@ function AwsSsoWizard({
             onChange={setStartUrl}
           />
           <div>
-            <button
+            <Button
               type="button"
+              size="small"
+              modifier="link"
+              label={showAdvanced ? 'Hide advanced' : 'Advanced'}
+              classMerge="h-auto p-0"
               onClick={() => setShowAdvanced((v) => !v)}
-              className="cursor-pointer"
-            >
-              <Text
-                level="caption"
-                className="text-content-layout-3 hover:underline"
-              >
-                {showAdvanced ? 'Hide advanced' : 'Advanced'}
-              </Text>
-            </button>
+            />
             {showAdvanced && (
               <div className="mt-2 w-full max-w-64">
                 <Field
@@ -869,18 +865,14 @@ export function AwsConnectionPanel({
             </Text>
           )}
           {profileField('w-full max-w-96 pt-1')}
-          <button
+          <Button
             type="button"
+            size="small"
+            modifier="link"
+            label="Add another account or role"
+            classMerge="h-auto self-start p-0"
             onClick={() => setShowAddProfile(true)}
-            className="cursor-pointer self-start"
-          >
-            <Text
-              level="caption"
-              className="text-content-primary-soft hover:underline"
-            >
-              Add another account or role
-            </Text>
-          </button>
+          />
         </VStack>
       </div>
     )
@@ -980,18 +972,14 @@ export function AwsConnectionPanel({
                 void beginLogin(selectedProfile || aws.available_profiles[0])
               }
             />
-            <button
+            <Button
               type="button"
+              size="small"
+              modifier="link"
+              label="Add another profile"
+              classMerge="h-auto p-0"
               onClick={() => setShowAddProfile(true)}
-              className="cursor-pointer"
-            >
-              <Text
-                level="caption"
-                className="text-content-layout-3 hover:underline"
-              >
-                Add another profile
-              </Text>
-            </button>
+            />
             <Button
               variant="primary"
               modifier="ghost"

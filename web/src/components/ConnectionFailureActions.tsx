@@ -1,4 +1,5 @@
 import { Button } from '@rs/ui-new/button'
+import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useNavigate } from '@tanstack/react-router'
@@ -75,19 +76,39 @@ export function ConnectionFailureActions({
 
   return (
     <VStack className="gap-2 items-stretch">
-      <Text level="caption" className="text-content-negative-soft">
-        {displayMessage}
-      </Text>
-      {effectivePasswordRequired && onSetPassword && (
-        <Button
-          variant="primary"
-          modifier="solid"
-          size="small"
-          icon="key"
-          iconPosition="left"
-          label="Set password"
-          onClick={onSetPassword}
-        />
+      {effectivePasswordRequired && onSetPassword ? (
+        <div className="rounded-xl border border-border-layout-1 bg-surface-layout-1 p-3 shadow-small">
+          <HStack className="items-center gap-3 flex-wrap">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-warning-soft">
+              <Icon
+                name="key"
+                label=""
+                aria-hidden="true"
+                className="size-4 text-content-warning-soft"
+              />
+            </div>
+            <Text
+              level="body-small"
+              className="min-w-48 flex-1 text-content-layout-1"
+            >
+              {displayMessage}
+            </Text>
+            <Button
+              variant="rising"
+              modifier="solid"
+              size="base"
+              icon="key"
+              iconPosition="left"
+              label="Set password"
+              className="shrink-0"
+              onClick={onSetPassword}
+            />
+          </HStack>
+        </div>
+      ) : (
+        <Text level="caption" className="text-content-negative-soft">
+          {displayMessage}
+        </Text>
       )}
       {providerBlocked && (
         <ProviderAllowlistPanel

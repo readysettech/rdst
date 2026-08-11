@@ -47,7 +47,7 @@ describe("SchemaReinitDialog (B4/T4)", () => {
       <SchemaReinitDialog isOpen target="demo" onConfirm={onConfirm} onClose={vi.fn()} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Discard & Re-init" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard & re-init" }));
 
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
@@ -65,6 +65,6 @@ describe("SchemaReinitDialog (B4/T4)", () => {
     expect(
       screen.queryAllByRole("heading", { name: "Re-initialize semantic layer?" }).length,
     ).toBe(0);
-    expect(screen.queryByRole("button", { name: "Discard & Re-init" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Discard & re-init" })).toBeNull();
   });
 });

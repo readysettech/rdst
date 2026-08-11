@@ -10,6 +10,7 @@ import { Card } from '@rs/ui-new/card'
 import { DetailExpander } from '@rs/ui-new/error-state'
 import { Icon } from '@rs/ui-new/icon'
 import { m } from '@rs/ui-new/motion'
+import { Pressable } from '@rs/ui-new/pressable'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
@@ -922,7 +923,7 @@ export function AdditionalRecommendationsSection({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.4 }}
       >
-        <button
+        <Pressable
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
@@ -941,7 +942,7 @@ export function AdditionalRecommendationsSection({
             label=""
             className={`w-4 h-4 text-content-layout-3 transition-transform ${open ? 'rotate-180' : ''}`}
           />
-        </button>
+        </Pressable>
         {open && list}
       </m.div>
     )

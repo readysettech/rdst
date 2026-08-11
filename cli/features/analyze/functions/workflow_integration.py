@@ -90,6 +90,8 @@ def store_analysis_results(**kwargs) -> Dict[str, Any]:
             tag=kwargs.get("save_as", ""),
             source=source,
             target=target,
+            analyzed=True,
+            save_intent=False,
         )
 
         return {

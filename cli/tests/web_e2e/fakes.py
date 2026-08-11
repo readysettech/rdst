@@ -191,6 +191,19 @@ class FakeReadysetExperimentService(ReadysetExperimentService):
         async for event in fixtures.events("speed_test", CACHE_EVENT):
             yield event
 
+    async def compare_live(
+        self,
+        *,
+        owner_id,
+        target,
+        query,
+        duration_seconds,
+        controller,
+    ):
+        del owner_id, target, query, duration_seconds, controller
+        async for event in fixtures.events("cache_compare", CACHE_EVENT):
+            yield event
+
 
 _ABSENT_SANDBOX = {
     "phase": "absent",

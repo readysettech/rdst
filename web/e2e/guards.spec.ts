@@ -77,7 +77,7 @@ test('loads guard details, checks SQL, and creates a guard', async ({
   await expect(page.getByText('tenant_id', { exact: true })).toBeVisible()
 
   await page.locator('[name="test-sql"]').fill('SELECT * FROM users')
-  await page.getByRole('button', { name: 'Run Check' }).click()
+  await page.getByRole('button', { name: 'Run check' }).click()
   await expect(
     page.getByText('BLOCKED by pii-guard', { exact: true })
   ).toBeVisible()

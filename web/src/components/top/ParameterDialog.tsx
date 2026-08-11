@@ -4,16 +4,15 @@
 
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
-import { Icon } from '@rs/ui-new/icon'
-import {
-  Modal,
-  ModalContent,
-  ModalContentContainer,
-  ModalTitle,
-} from '@rs/ui-new/modal'
+import { Modal, ModalContentContainer } from '@rs/ui-new/modal'
 import * as ScrollArea from '@rs/ui-new/scroll'
 import { Text } from '@rs/ui-new/text'
 import { useEffect, useMemo, useState } from 'react'
+import {
+  buildParameterSuggestions,
+  fetchParameterSchema,
+  parameterValueKey,
+} from '../../lib/parameterSuggestions'
 import {
   detectParameters,
   hasParameters,
@@ -21,6 +20,7 @@ import {
   substituteParameters,
 } from '../../lib/sqlParameters'
 import { useFormatSql } from '../../lib/useFormatSql'
+import { TaskDialogContent } from '../dialog/TaskDialogContent'
 import {
   buildParameterHighlights,
   getParameterColor,
@@ -35,6 +35,7 @@ interface ParameterDialogProps {
   onSubmit: (substitutedQuery: string) => void
   query: string
   initialValues?: Record<string, unknown>
+  target?: string | null
   submitLabel?: string
   submitIcon?: 'speedometer' | 'play' | 'tick'
 }
@@ -45,7 +46,8 @@ export function ParameterDialog({
   onSubmit,
   query,
   initialValues,
-  submitLabel = 'Analyze Query',
+  target,
+  submitLabel = 'Analyze query',
   submitIcon = 'speedometer',
 }: ParameterDialogProps) {
   const parameters = useMemo(() => detectParameters(query), [query])
@@ -69,18 +71,78 @@ export function ParameterDialog({
     [parameterHighlights]
   )
   const [values, setValues] = useState<Record<string, string>>({})
+  const [provenance, setProvenance] = useState<Record<string, string>>({})
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestionMessage, setSuggestionMessage] = useState<string | null>(
+    null
+  )
 
   useEffect(() => {
     const init: Record<string, string> = {}
+    const sources: Record<string, string> = {}
     parameters.forEach((p) => {
-      const key = p.placeholder === '?' ? `?${p.index}` : p.placeholder
-      init[key] = resolveInitialValue(p, initialValues)
+      const key = parameterValueKey(p)
+      const value = resolveInitialValue(p, initialValues)
+      init[key] = value
+      if (value) sources[key] = 'Observed value'
     })
     setValues(init)
+    setProvenance(sources)
+    setSuggestionMessage(null)
   }, [query, parameters, initialValues])
 
   const handleValueChange = (key: string, value: string) => {
     setValues((prev) => ({ ...prev, [key]: value }))
+    setProvenance((current) => {
+      if (!current[key]) return current
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }
+
+  const missingCount = parameters.filter(
+    (parameter) => !values[parameterValueKey(parameter)]?.trim()
+  ).length
+
+  const suggestValues = async () => {
+    if (!target || missingCount === 0) return
+    setSuggesting(true)
+    setSuggestionMessage(null)
+    try {
+      const schema = await fetchParameterSchema(target)
+      const suggestions = buildParameterSuggestions(query, parameters, schema)
+      const applicable = Object.entries(suggestions).filter(
+        ([key]) => !values[key]?.trim()
+      )
+      const filled = applicable.length
+      setValues((current) => {
+        const next = { ...current }
+        for (const [key, suggestion] of applicable) {
+          if (next[key]?.trim()) continue
+          next[key] = suggestion.value
+        }
+        return filled > 0 ? next : current
+      })
+      setProvenance((current) => {
+        const next = { ...current }
+        for (const [key, suggestion] of applicable) {
+          next[key] = suggestion.provenance
+        }
+        return next
+      })
+      setSuggestionMessage(
+        filled > 0
+          ? `Filled ${filled} unresolved ${filled === 1 ? 'parameter' : 'parameters'} from safe schema evidence. Review before running.`
+          : 'No safe schema-grounded suggestions were found. Existing values were preserved.'
+      )
+    } catch {
+      setSuggestionMessage(
+        'Schema suggestions are unavailable. Existing values were preserved.'
+      )
+    } finally {
+      setSuggesting(false)
+    }
   }
 
   const handleSubmit = () => {
@@ -93,32 +155,33 @@ export function ParameterDialog({
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={isOpen}>
-        <ModalContent size="extra-large" className="p-0 gap-0">
-          {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border-layout-1 bg-surface-layout-1">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-surface-primary-soft">
-                <Icon
-                  name="edit"
-                  label="Parameters"
-                  size="base"
-                  className="text-content-primary-soft"
-                />
-              </div>
-              <div>
-                <ModalTitle className="text-headline-5 h-auto">
-                  Enter Parameter Values
-                </ModalTitle>
-                <Text level="body-small" className="text-content-layout-3">
-                  {parameters.length} parameter
-                  {parameters.length !== 1 ? 's' : ''} detected
-                </Text>
-              </div>
+        <TaskDialogContent
+          size="extra-large"
+          icon="edit"
+          title="Enter parameter values"
+          description={`${parameters.length} parameter${parameters.length === 1 ? '' : 's'} detected. Values apply only to this run.`}
+          bodyClassName="p-0"
+          footer={
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="primary"
+                modifier="ghost"
+                label="Cancel"
+                onClick={onClose}
+              />
+              <Button
+                variant="primary"
+                modifier="solid"
+                label={submitLabel}
+                icon={submitIcon}
+                iconPosition="left"
+                onClick={handleSubmit}
+                disabled={!allFilled}
+              />
             </div>
-          </div>
-
-          {/* Content — two columns: SQL left, params right */}
-          <div className="grid grid-cols-2 gap-5 p-5 h-[min(65vh,560px)]">
+          }
+        >
+          <div className="grid h-[min(65vh,560px)] grid-cols-1 gap-6 p-6 md:grid-cols-2">
             {/* Left: SQL Query */}
             <div className="flex flex-col min-h-0">
               <Text
@@ -126,7 +189,7 @@ export function ParameterDialog({
                 level="label-small"
                 className="text-content-layout-3 uppercase tracking-wider mb-2 shrink-0"
               >
-                Original Query
+                Original query
               </Text>
               <div className="bg-surface-layout-1 rounded-lg p-3 border border-border-layout-1 min-h-0 overflow-auto flex-1 [&_.cm-scroller]:!overflow-visible">
                 <SQLDisplay
@@ -139,21 +202,32 @@ export function ParameterDialog({
 
             {/* Right: Parameters */}
             <div className="flex flex-col min-h-0">
-              <Text
-                as="label"
-                level="label-small"
-                className="text-content-layout-3 uppercase tracking-wider mb-2 shrink-0"
-              >
-                Parameters
-              </Text>
+              <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
+                <Text
+                  as="label"
+                  level="label-small"
+                  className="text-content-layout-3 uppercase tracking-wider"
+                >
+                  Parameters
+                </Text>
+                {target && missingCount > 0 ? (
+                  <Button
+                    variant="primary"
+                    modifier="outline"
+                    size="small"
+                    icon="sparkles"
+                    iconPosition="left"
+                    label="Suggest values"
+                    loading={suggesting}
+                    onClick={() => void suggestValues()}
+                  />
+                ) : null}
+              </div>
               <ScrollArea.Root className="min-h-0 flex-1 overflow-hidden">
                 <ScrollArea.Viewport className="h-full w-full custom-scrollbar">
                   <div className="space-y-3">
                     {parameters.map((param) => {
-                      const key =
-                        param.placeholder === '?'
-                          ? `?${param.index}`
-                          : param.placeholder
+                      const key = parameterValueKey(param)
                       const colorIndex =
                         colorByPlaceholder.get(param.placeholder) ?? 0
                       const color = getParameterColor(colorIndex)
@@ -174,20 +248,34 @@ export function ParameterDialog({
                           <div className="flex-1">
                             <BaseInputText
                               name={`param-${key}`}
+                              aria-label={`Value for ${key}`}
                               value={values[key] || ''}
                               onChange={(
                                 e: React.ChangeEvent<HTMLInputElement>
                               ) => handleValueChange(key, e.target.value)}
                               placeholder="Enter value"
                             />
+                            {provenance[key] ? (
+                              <Text
+                                level="caption"
+                                className="mt-1 text-content-positive-soft"
+                              >
+                                {provenance[key]}
+                              </Text>
+                            ) : null}
                           </div>
                         </div>
                       )
                     })}
                     <Text level="body-small" className="text-content-layout-3">
-                      Strings are automatically quoted. Numbers, NULL, TRUE,
-                      FALSE are passed as-is.
+                      Text values are quoted automatically. Numbers, NULL, TRUE,
+                      and FALSE are used as entered.
                     </Text>
+                    {suggestionMessage ? (
+                      <Text level="caption" className="text-content-layout-2">
+                        {suggestionMessage}
+                      </Text>
+                    ) : null}
                   </div>
                 </ScrollArea.Viewport>
                 <ScrollArea.Scrollbar
@@ -199,26 +287,7 @@ export function ParameterDialog({
               </ScrollArea.Root>
             </div>
           </div>
-
-          {/* Footer */}
-          <div className="flex justify-end gap-3 px-5 py-4 border-t border-border-layout-1 bg-surface-layout-1">
-            <Button
-              variant="primary"
-              modifier="ghost"
-              label="Cancel"
-              onClick={onClose}
-            />
-            <Button
-              variant="primary"
-              modifier="solid"
-              label={submitLabel}
-              icon={submitIcon}
-              iconPosition="left"
-              onClick={handleSubmit}
-              disabled={!allFilled}
-            />
-          </div>
-        </ModalContent>
+        </TaskDialogContent>
       </ModalContentContainer>
     </Modal>
   )

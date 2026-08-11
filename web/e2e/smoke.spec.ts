@@ -14,21 +14,18 @@ test('loads the production application and backend', async ({ page }) => {
   await expect(health.json()).resolves.toEqual({ status: 'ok' })
 
   await page.goto('/')
-  // The adaptive home greets with a welcome header (rendered as plain text,
-  // not a heading element) plus job cards (a target is configured, so the
-  // launcher branch renders).
-  await expect(page.getByText('Welcome to RDST', { exact: true })).toBeVisible()
-  await expect(
-    page.getByText('speed up the queries running on your database')
-  ).toBeVisible()
+  // A configured target renders the connected home and its next actions.
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
+  await expect(page.getByText('Run a health check')).toBeVisible()
 })
 
 test('serves client-side routes directly', async ({ page }) => {
   setBackendFixtures()
   await configureTestTarget(page, { hasPassword: true })
   await page.goto('/query-registry')
+  // /query-registry redirects into the Queries workspace's Saved view.
   await expect(
-    page.getByRole('heading', { name: 'Queries' })
+    page.getByRole('heading', { name: 'Queries', exact: true })
   ).toBeVisible()
-  await expect(page).toHaveURL(/\/query-registry$/)
+  await expect(page).toHaveURL(/\/queries\?.*view=saved/)
 })

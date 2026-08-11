@@ -106,7 +106,7 @@ test('a trial pays for a real question and mails an openable report', async ({
     await clearTargets(page.request)
     await page.goto('/onboarding')
     await expect(
-      page.getByRole('heading', { name: 'Connect your database' })
+      page.getByRole('heading', { name: 'Start with Readyset' })
     ).toBeVisible()
     await page.locator('[name="name"]').fill(TARGET)
     await page.locator('[name="host"]').fill(process.env.RDST_E2E_DB_HOST!)
@@ -184,13 +184,13 @@ test('a trial pays for a real question and mails an openable report', async ({
     await page.goto('/ask')
     await expect(page.getByRole('heading', { name: 'Ask' })).toBeVisible()
     await page
-      .getByPlaceholder('Ask a question about your data...')
+      .getByPlaceholder(
+        'For example: Which customers placed the most orders this month?'
+      )
       .fill('How many rows are in title_basics?')
-    // Exact, because the accessible-name match is a substring by default and
-    // the history cards rendered beside the input also contain "Ask" once a
-    // previous run has left questions on disk. Without this the step passes on
-    // a clean server and fails on a retry.
-    await page.getByRole('button', { name: 'Ask', exact: true }).click()
+    // The composer submit is the only button named "Get answer"; the view
+    // switcher's "Ask" segment is a tab, so it never collides on the role.
+    await page.getByRole('button', { name: 'Get answer' }).click()
 
     // A live model call behind a schema load and a validation pass, so this is
     // by far the slowest assertion in the suite.

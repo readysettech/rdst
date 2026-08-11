@@ -87,14 +87,14 @@ export function ProviderTokenForm({
           onClick={() => void submit()}
         />
         {onCancel && (
-          <button type="button" onClick={onCancel} className="cursor-pointer">
-            <Text
-              level="caption"
-              className="text-content-layout-3 hover:underline"
-            >
-              Cancel
-            </Text>
-          </button>
+          <Button
+            type="button"
+            size="small"
+            modifier="link"
+            label="Cancel"
+            classMerge="h-auto p-0"
+            onClick={onCancel}
+          />
         )}
       </HStack>
       {failure && (

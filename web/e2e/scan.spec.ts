@@ -3,6 +3,7 @@ import {
   clearQueryRegistry,
   configureTestTarget,
   expect,
+  mockConnectivityOk,
   setBackendFixtures,
   test,
 } from './fixtures'
@@ -141,7 +142,7 @@ async function prepareScanPage(
   await acceptExplainAnalyzeConsent(page)
   await page.goto('/scan')
   await expect(page.getByRole('heading', { name: 'Scan' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Start Scan' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Start scan' })).toBeDisabled()
 }
 
 async function chooseScanDirectory(
@@ -149,7 +150,7 @@ async function chooseScanDirectory(
 ) {
   await page.getByRole('button', { name: 'Choose a project folder...' }).click()
   await page.getByRole('button', { name: 'Select this folder' }).click()
-  await expect(page.getByRole('button', { name: 'Start Scan' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Start scan' })).toBeEnabled()
 }
 
 test('scans a project, renders analysis, speed-tests a query, and hands off to Analyze', async ({
@@ -235,7 +236,7 @@ test('scans a project, renders analysis, speed-tests a query, and hands off to A
       request.method() === 'POST' &&
       new URL(request.url()).pathname === '/api/scan'
   )
-  await page.getByRole('button', { name: 'Start Scan' }).click()
+  await page.getByRole('button', { name: 'Start scan' }).click()
   expect((await scanRequest).postDataJSON()).toEqual({
     target: 'e2e-guard',
     directory,
@@ -308,6 +309,9 @@ test('scans a project, renders analysis, speed-tests a query, and hands off to A
     },
   ])
 
+  // The Analyze handoff lands on /results, which preflights target
+  // reachability before POST /api/analyze.
+  await mockConnectivityOk(page)
   await sqlRow.getByRole('button', { name: 'Analyze' }).click()
   await expect(page).toHaveURL(/\/results(?:\?|$)/)
   const resultsUrl = new URL(page.url())
@@ -362,16 +366,16 @@ test('shows a scan failure, retries, and renders the empty result', async ({
     if (new URL(request.url()).pathname === '/api/scan') scanCalls += 1
   })
 
-  await page.getByRole('button', { name: 'Start Scan' }).click()
+  await page.getByRole('button', { name: 'Start scan' }).click()
   await expect(
     page.getByText('Error: Unable to read the selected project directory', {
       exact: true,
     })
   ).toBeVisible()
 
-  await page.getByRole('button', { name: 'New Scan' }).click()
-  await expect(page.getByRole('button', { name: 'Start Scan' })).toBeEnabled()
-  await page.getByRole('button', { name: 'Start Scan' }).click()
+  await page.getByRole('button', { name: 'New scan' }).click()
+  await expect(page.getByRole('button', { name: 'Start scan' })).toBeEnabled()
+  await page.getByRole('button', { name: 'Start scan' }).click()
 
   await expect(
     page.getByText('No ORM queries found in the scanned directory.', {

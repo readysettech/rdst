@@ -270,7 +270,7 @@ test('/fleet?add=aws lands with the discovery drawer open on the AWS tab', async
   await page.goto('/fleet?add=aws')
   await page.waitForURL(/\/configure/)
 
-  const drawer = page.getByRole('dialog', { name: 'Add Targets' })
+  const drawer = page.getByRole('dialog', { name: 'Add connection' })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByText('Regions', { exact: true })).toBeVisible()
   await expect(
@@ -328,7 +328,8 @@ test('completes the signed-out AWS SSO browser flow and polls to success', async
 
   // Signed out, AWS sign-in lives inside the discovery drawer.
   await page.goto('/configure')
-  await page.getByRole('button', { name: 'Discover & import' }).click()
+  await page.getByRole('button', { name: 'Add connection' }).first().click()
+  await page.getByRole('button', { name: 'AWS', exact: true }).click()
 
   await expect(
     page.getByText(
@@ -512,7 +513,7 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
   })
 
   await page.goto('/configure')
-  await page.getByRole('button', { name: 'Discover & import' }).click()
+  await page.getByRole('button', { name: 'Add connection' }).first().click()
   await page.getByRole('button', { name: 'AWS', exact: true }).click()
   await expect(
     page.getByText(
@@ -527,7 +528,9 @@ test('discovery previews grouped targets and bulk-adds only checked new targets'
   ).toBeVisible()
   expect(previewBody?.profile).toBe('dev')
   expect(previewBody?.regions).toEqual(expect.arrayContaining(['us-east-1']))
-  const addTargetsDialog = page.getByRole('dialog', { name: 'Add Targets' })
+  const addTargetsDialog = page.getByRole('dialog', {
+    name: 'Add connection',
+  })
   const groupedPreviewLabel = addTargetsDialog.getByText('orders-cluster', {
     exact: true,
   })
@@ -635,8 +638,8 @@ test('CSV picker posts browser file content instead of a server path', async ({
     'name,host,engine,port,database,user\n' +
     'browser-csv,browser.test,postgresql,5432,app,app_user\n'
   await page.goto('/configure')
-  await page.getByRole('button', { name: 'Discover & import' }).click()
-  await page.getByRole('button', { name: 'Import from a CSV file', exact: true }).click()
+  await page.getByRole('button', { name: 'Add connection' }).first().click()
+  await page.getByRole('button', { name: 'CSV file', exact: true }).click()
   await page.locator('input[type="file"]').setInputFiles({
     name: 'fleet.csv',
     mimeType: 'text/csv',

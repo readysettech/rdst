@@ -11,7 +11,9 @@ import type {
 } from './api'
 import type { components } from './api.generated'
 import {
+  type BackgroundRunStatus,
   cancelBackgroundRun,
+  type LoadTestProgress,
   startLoadTestRun,
   useBackgroundRuns,
 } from './backgroundRuns'
@@ -332,7 +334,9 @@ interface UseBenchmarkReturn {
   stage: string | undefined
   message: string | undefined
   progress: BenchmarkProgress | undefined
+  timeline: LoadTestProgress[]
   request: BenchmarkRequest | undefined
+  status: BackgroundRunStatus | undefined
   error: string | undefined
   reset: () => void
 }
@@ -382,6 +386,7 @@ export function useBenchmark(
           ? 'complete'
           : 'running'
   const progress = run?.loadResult
+  const timeline = run?.loadSamples ?? []
   const request = run?.loadRequest
   const error =
     state === 'error' ? run?.message || 'Benchmark failed' : undefined
@@ -412,7 +417,9 @@ export function useBenchmark(
     stage: run?.stage,
     message: run?.message,
     progress,
+    timeline,
     request,
+    status: run?.status,
     error,
     reset,
   }

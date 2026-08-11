@@ -212,7 +212,7 @@ describe('ConfigWarning env secret flow', () => {
   });
 
   it('routes a zero-target database feature to onboarding', async () => {
-    mockPathname = '/analyze';
+    mockPathname = '/queries';
     vi.mocked(fetchStatus).mockResolvedValue({
       configured: false,
       default_target: null,
@@ -231,16 +231,16 @@ describe('ConfigWarning env secret flow', () => {
 
     await waitFor(() => {
       // Routes to Connect preserving the intended destination so the user
-      // returns to /analyze after connecting (route-with-intent).
+      // returns to /queries after connecting (route-with-intent).
       expect(mockNavigate).toHaveBeenCalledWith({
         to: '/onboarding',
-        search: { redirect: '/analyze' },
+        search: { redirect: '/queries' },
       });
     });
   });
 
   it('never gates a feature page once a target exists, even if init never completed', async () => {
-    mockPathname = '/analyze';
+    mockPathname = '/queries';
     // A target added outside the guided flow (configure page, bulk import, or
     // a partially-failed onboarding submit) leaves init.completed unset; that
     // must not lock the user out of the app.

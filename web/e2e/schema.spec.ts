@@ -49,6 +49,7 @@ const semanticLayer = {
 
 test('shows only the actionable password notice for a locked target', async ({
   page,
+  browserErrors,
 }) => {
   await configureTestTarget(page)
 
@@ -56,6 +57,10 @@ test('shows only the actionable password notice for a locked target', async ({
 
   await expect(page.getByText('Connection needs a password')).toBeVisible()
   await expect(page.getByText(/^Error: HTTP 423:/)).toHaveCount(0)
+  consumeBrowserError(
+    browserErrors,
+    'Failed to load resource: the server responded with a status of 423 (Locked)'
+  )
 })
 
 test('initializes, explores, refreshes, and deletes a semantic layer', async ({
@@ -125,7 +130,7 @@ test('initializes, explores, refreshes, and deletes a semantic layer', async ({
     page.getByText('Initialize Semantic Layer', { exact: true })
   ).toBeVisible()
 
-  await page.getByRole('button', { name: 'Initialize Schema' }).click()
+  await page.getByRole('button', { name: 'Initialize schema' }).click()
 
   await expect(
     page.getByText('Customer accounts and contact details')

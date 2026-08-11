@@ -704,6 +704,8 @@ class TestCacheRunComparison:
         assert final.winner == "readyset"
         assert final.origin_stats["mean"] == 20.0
         assert final.cache_stats["mean"] == 1.0
+        assert final.origin_samples_ms == [15.0, 18.0, 19.0, 20.0, 30.0]
+        assert final.cache_samples_ms == [0.5, 0.8, 0.9, 1.0, 2.0]
 
     @pytest.mark.asyncio
     async def test_run_comparison_no_cache_target(self):
@@ -754,7 +756,7 @@ class TestCacheRunComparison:
             "host": "127.0.0.1", "port": 5433, "user": "admin",
             "database": "myapp",
         }
-        failed_result = {"success": False, "error": "All original database queries failed"}
+        failed_result = {"success": False, "error": "All paired measurements failed"}
 
         with patch("features.cache.service.TargetsConfig") as MockConfig:
             MockConfig.return_value.load.return_value = None
@@ -768,7 +770,7 @@ class TestCacheRunComparison:
 
         final = events[-1]
         assert isinstance(final, ErrorEvent)
-        assert "All original database queries failed" in final.message
+        assert "All paired measurements failed" in final.message
 
 
 # ============================================================================

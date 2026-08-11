@@ -1,47 +1,41 @@
-import { useState, useCallback, useRef } from 'react';
-import { useTargetSwitchLock } from './targetSwitchLock';
-import type { components } from './api.generated';
-import { normalizeHttpError, normalizeSseError } from './errorContract';
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { components } from './api.generated'
+import { normalizeHttpError, normalizeSseError } from './errorContract'
+import { useTargetSwitchLock } from './targetSwitchLock'
 
-// Ask API types
 export interface AskRequest {
-  question: string;
-  target?: string;
-  dry_run?: boolean;
-  timeout?: number;
-  agent_mode?: boolean;
-  // For resuming after clarification
-  session_id?: string;
-  selected_interpretation_id?: number;
-  clarification_answers?: Record<string, string>;
+  question: string
+  target?: string
+  dry_run?: boolean
+  timeout?: number
+  agent_mode?: boolean
+  session_id?: string
+  selected_interpretation_id?: number
+  clarification_answers?: Record<string, string>
 }
 
-// SSE event types are derived from the backend-generated discriminated union.
-// Backend source of truth: rdst/features/ask/events.py (AskEvent).
-type AskEvent = components['schemas']['AskEvent'];
-export type AskEventType = AskEvent['type'];
+type AskEvent = components['schemas']['AskEvent']
+export type AskEventType = AskEvent['type']
 
-export type AskInterpretation = components['schemas']['AskInterpretation'];
+export type AskInterpretation = components['schemas']['AskInterpretation']
 export type AskClarificationQuestion =
-  components['schemas']['AskClarificationQuestion'];
-
-export type AskStatusEvent = Extract<AskEvent, { type: 'status' }>;
-export type AskSchemaLoadedEvent = Extract<AskEvent, { type: 'schema_loaded' }>;
+  components['schemas']['AskClarificationQuestion']
+export type AskStatusEvent = Extract<AskEvent, { type: 'status' }>
+export type AskSchemaLoadedEvent = Extract<AskEvent, { type: 'schema_loaded' }>
 export type AskClarificationNeededEvent = Extract<
   AskEvent,
   { type: 'clarification_needed' }
->;
-export type AskSqlGeneratedEvent = Extract<AskEvent, { type: 'sql_generated' }>;
-// Backend emits `rows: list` (untyped); refine to row arrays for consumers.
+>
+export type AskSqlGeneratedEvent = Extract<AskEvent, { type: 'sql_generated' }>
 export type AskResultEvent = Omit<
   Extract<AskEvent, { type: 'result' }>,
   'rows'
-> & { rows: unknown[][] };
+> & { rows: unknown[][] }
 export type AskErrorEvent = Extract<AskEvent, { type: 'error' }> & {
-  code?: string;
-  category?: string;
-  target?: string;
-};
+  code?: string
+  category?: string
+  target?: string
+}
 
 export type AskState =
   | 'idle'
@@ -49,229 +43,269 @@ export type AskState =
   | 'clarification_needed'
   | 'generating'
   | 'complete'
-  | 'error';
+  | 'cancelled'
+  | 'error'
 
 export interface UseAskReturn {
-  ask: (request: AskRequest) => Promise<void>;
-  resumeWithAnswers: (answers: Record<string, string>) => Promise<void>;
-  state: AskState;
-  status: AskStatusEvent | undefined;
-  schemaLoaded: AskSchemaLoadedEvent | undefined;
-  clarification: AskClarificationNeededEvent | undefined;
-  sqlGenerated: AskSqlGeneratedEvent | undefined;
-  result: AskResultEvent | undefined;
-  error: AskErrorEvent | undefined;
-  reset: () => void;
+  ask: (request: AskRequest) => Promise<void>
+  resumeWithAnswers: (answers: Record<string, string>) => Promise<void>
+  cancel: () => void
+  state: AskState
+  status: AskStatusEvent | undefined
+  schemaLoaded: AskSchemaLoadedEvent | undefined
+  clarification: AskClarificationNeededEvent | undefined
+  sqlGenerated: AskSqlGeneratedEvent | undefined
+  result: AskResultEvent | undefined
+  error: AskErrorEvent | undefined
+  reset: () => void
+}
+
+type SseFrame = {
+  event: string
+  data: string
+}
+
+function extractSseFrames(buffer: string, flush = false) {
+  const normalized = buffer.replace(/\r\n/g, '\n')
+  const chunks = normalized.split('\n\n')
+  const remainder = flush ? '' : (chunks.pop() ?? '')
+  const frames: SseFrame[] = []
+
+  for (const chunk of chunks) {
+    let event = ''
+    const data: string[] = []
+    for (const line of chunk.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim()
+      if (line.startsWith('data:')) data.push(line.slice(5).trimStart())
+    }
+    if (event && data.length > 0) frames.push({ event, data: data.join('\n') })
+  }
+
+  return { frames, remainder }
 }
 
 export function useAsk(): UseAskReturn {
-  const [state, setState] = useState<AskState>('idle');
-  const [status, setStatus] = useState<AskStatusEvent | undefined>(undefined);
-  const [schemaLoaded, setSchemaLoaded] = useState<AskSchemaLoadedEvent | undefined>(undefined);
-  const [clarification, setClarification] = useState<AskClarificationNeededEvent | undefined>(undefined);
-  const [sqlGenerated, setSqlGenerated] = useState<AskSqlGeneratedEvent | undefined>(undefined);
-  const [result, setResult] = useState<AskResultEvent | undefined>(undefined);
-  const [error, setError] = useState<AskErrorEvent | undefined>(undefined);
+  const [state, setState] = useState<AskState>('idle')
+  const [status, setStatus] = useState<AskStatusEvent>()
+  const [schemaLoaded, setSchemaLoaded] = useState<AskSchemaLoadedEvent>()
+  const [clarification, setClarification] =
+    useState<AskClarificationNeededEvent>()
+  const [sqlGenerated, setSqlGenerated] = useState<AskSqlGeneratedEvent>()
+  const [result, setResult] = useState<AskResultEvent>()
+  const [error, setError] = useState<AskErrorEvent>()
 
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const currentRequestRef = useRef<AskRequest | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const currentRequestRef = useRef<AskRequest | null>(null)
+  const mountedRef = useRef(true)
+
   useTargetSwitchLock(
     'ask',
-    state === 'loading' || state === 'generating' || state === 'clarification_needed'
-  );
+    state === 'loading' ||
+      state === 'generating' ||
+      state === 'clarification_needed'
+  )
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+      abortControllerRef.current?.abort()
+    }
+  }, [])
+
+  const clearResponse = useCallback(() => {
+    setStatus(undefined)
+    setSchemaLoaded(undefined)
+    setClarification(undefined)
+    setSqlGenerated(undefined)
+    setResult(undefined)
+    setError(undefined)
+  }, [])
 
   const reset = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setState('idle');
-    setStatus(undefined);
-    setSchemaLoaded(undefined);
-    setClarification(undefined);
-    setSqlGenerated(undefined);
-    setResult(undefined);
-    setError(undefined);
-    currentRequestRef.current = null;
-  }, []);
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    clearResponse()
+    setState('idle')
+    currentRequestRef.current = null
+  }, [clearResponse])
 
-  const processStream = useCallback(async (request: AskRequest) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+  const cancel = useCallback(() => {
+    if (!abortControllerRef.current) return
+    abortControllerRef.current.abort()
+    abortControllerRef.current = null
+    setError(undefined)
+    setState('cancelled')
+  }, [])
 
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    currentRequestRef.current = request;
+  const processStream = useCallback(
+    async (request: AskRequest) => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
 
-    setState('loading');
-    setStatus(undefined);
-    setClarification(undefined);
-    setSqlGenerated(undefined);
-    setResult(undefined);
-    setError(undefined);
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+      currentRequestRef.current = request
+      clearResponse()
+      setState('loading')
 
-    try {
-      const response = await fetch('/api/ask', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-        signal: controller.signal,
-      });
+      let terminalEventReceived = false
 
-      if (!response.ok) {
-        let body: unknown;
+      const processFrame = (frame: SseFrame) => {
+        let data: unknown
         try {
-          body = await response.clone().json();
-        } catch {
-          body = await response.text().catch(() => undefined);
+          data = JSON.parse(frame.data)
+        } catch (parseError) {
+          console.warn('[Ask SSE] Ignoring malformed event data:', parseError)
+          return
         }
-        const envelope = normalizeHttpError(response.status, body);
+
+        switch (frame.event) {
+          case 'status': {
+            const next = data as AskStatusEvent
+            setStatus(next)
+            if (next.phase === 'generate') setState('generating')
+            break
+          }
+          case 'schema_loaded':
+            setSchemaLoaded(data as AskSchemaLoadedEvent)
+            break
+          case 'clarification_needed':
+            terminalEventReceived = true
+            setClarification(data as AskClarificationNeededEvent)
+            setState('clarification_needed')
+            break
+          case 'sql_generated':
+            setSqlGenerated(data as AskSqlGeneratedEvent)
+            break
+          case 'result':
+            terminalEventReceived = true
+            setResult(data as AskResultEvent)
+            setState('complete')
+            break
+          case 'error': {
+            terminalEventReceived = true
+            const event = data as AskErrorEvent
+            const envelope = normalizeSseError(event)
+            setError({
+              type: 'error',
+              message: envelope.message,
+              phase: event.phase ?? null,
+              code: envelope.code,
+              category: envelope.category,
+              target: envelope.target ?? request.target,
+            })
+            setState('error')
+            break
+          }
+          default:
+            console.warn('[Ask SSE] Unknown event type (ignored):', frame.event)
+        }
+      }
+
+      try {
+        const response = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          let body: unknown
+          try {
+            body = await response.clone().json()
+          } catch {
+            body = await response.text().catch(() => undefined)
+          }
+          const envelope = normalizeHttpError(response.status, body)
+          setError({
+            type: 'error',
+            message: envelope.message,
+            phase: null,
+            code: envelope.code,
+            category: envelope.category,
+            target: envelope.target ?? request.target,
+          })
+          setState('error')
+          terminalEventReceived = true
+          return
+        }
+
+        if (!response.body) throw new Error('The Ask response had no body.')
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const extracted = extractSseFrames(buffer)
+          buffer = extracted.remainder
+          extracted.frames.forEach(processFrame)
+        }
+
+        buffer += decoder.decode()
+        extractSseFrames(buffer, true).frames.forEach(processFrame)
+
+        if (!terminalEventReceived && mountedRef.current) {
+          setError({
+            type: 'error',
+            message:
+              'The answer stream ended before RDST received a complete response.',
+            phase: null,
+            code: 'ASK_STREAM_INCOMPLETE',
+            target: request.target,
+          })
+          setState('error')
+        }
+      } catch (streamError: unknown) {
+        if (streamError instanceof Error && streamError.name === 'AbortError') {
+          return
+        }
+        if (!mountedRef.current) return
         setError({
           type: 'error',
-          message: envelope.message,
+          message:
+            streamError instanceof Error
+              ? streamError.message
+              : 'The question could not be completed.',
           phase: null,
-          code: envelope.code,
-          category: envelope.category,
-          target: envelope.target ?? request.target,
-        });
-        setState('error');
-        return;
-      }
-
-      if (!response.body) {
-        throw new Error('No response body');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let currentEvent = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-
-          if (!trimmed) {
-            currentEvent = '';
-            continue;
-          }
-
-          if (trimmed.startsWith('event:')) {
-            currentEvent = trimmed.substring(6).trim();
-          } else if (trimmed.startsWith('data:')) {
-            const dataStr = trimmed.substring(5).trim();
-
-            try {
-              const data = JSON.parse(dataStr);
-
-              const eventType = currentEvent as AskEventType;
-              switch (eventType) {
-                case 'status':
-                  setStatus(data as AskStatusEvent);
-                  if (data.phase === 'generate') {
-                    setState('generating');
-                  }
-                  break;
-
-                case 'schema_loaded':
-                  setSchemaLoaded(data as AskSchemaLoadedEvent);
-                  break;
-
-                case 'clarification_needed':
-                  setClarification(data as AskClarificationNeededEvent);
-                  setState('clarification_needed');
-                  break;
-
-                case 'sql_generated':
-                  setSqlGenerated(data as AskSqlGeneratedEvent);
-                  break;
-
-                case 'result':
-                  setResult(data as AskResultEvent);
-                  setState('complete');
-                  break;
-
-                case 'error':
-                  {
-                    const envelope = normalizeSseError(data);
-                    setError({
-                      type: 'error',
-                      message: envelope.message,
-                      phase: data.phase ?? null,
-                      code: envelope.code,
-                      category: envelope.category,
-                      target: envelope.target ?? request.target,
-                    });
-                  }
-                  setState('error');
-                  break;
-
-                default: {
-                  // Exhaustiveness guard: if AskEventType gains a variant that
-                  // isn't handled above, `eventType` narrows to that literal
-                  // inside this branch and the assignment to `never` fails
-                  // tsc. Do NOT replace with `as never` — that defeats the
-                  // check.
-                  const _exhaustive: never = eventType;
-                  console.warn('[Ask SSE] Unknown event type (ignored):', currentEvent, data);
-                  void _exhaustive;
-                  break;
-                }
-              }
-            } catch (e) {
-              console.error('[Ask SSE] Failed to parse JSON:', e);
-            }
-          }
+          target: request.target,
+        })
+        setState('error')
+      } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null
         }
       }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return;
-      }
-      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
-      setError({ type: 'error', message: errorMessage, phase: null });
-      setState('error');
-    } finally {
-      abortControllerRef.current = null;
-    }
-  }, []);
+    },
+    [clearResponse]
+  )
 
-  const ask = useCallback(async (request: AskRequest) => {
-    await processStream(request);
-  }, [processStream]);
+  const ask = useCallback(
+    async (request: AskRequest) => processStream(request),
+    [processStream]
+  )
 
-  const resumeWithAnswers = useCallback(async (answers: Record<string, string>) => {
-    if (!clarification?.session_id || !currentRequestRef.current) {
-      console.error('No session to resume');
-      return;
-    }
-
-    const resumeRequest: AskRequest = {
-      ...currentRequestRef.current,
-      session_id: clarification.session_id,
-      clarification_answers: answers,
-    };
-
-    await processStream(resumeRequest);
-  }, [clarification, processStream]);
+  const resumeWithAnswers = useCallback(
+    async (answers: Record<string, string>) => {
+      if (!clarification?.session_id || !currentRequestRef.current) return
+      await processStream({
+        ...currentRequestRef.current,
+        session_id: clarification.session_id,
+        clarification_answers: answers,
+      })
+    },
+    [clarification, processStream]
+  )
 
   return {
     ask,
     resumeWithAnswers,
+    cancel,
     state,
     status,
     schemaLoaded,
@@ -280,5 +314,5 @@ export function useAsk(): UseAskReturn {
     result,
     error,
     reset,
-  };
+  }
 }

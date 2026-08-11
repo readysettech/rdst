@@ -1,3 +1,4 @@
+import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
@@ -9,6 +10,7 @@ import { startBootstrapRun } from '../../lib/backgroundRuns'
 import { useConfigure } from '../../lib/useConfigure'
 import { useOnboarding } from '../../lib/useOnboarding'
 import type { ConfigureFormData } from '../../types/configure'
+import { AnimatedSurfaceBackdrop } from '../AnimatedSurfaceBackdrop'
 import { ConfigureForm } from '../configure'
 import type { AddTab } from '../configure/addTabs'
 import {
@@ -50,18 +52,19 @@ function ProviderDiscoverTile({
   onDiscover: () => void
 }) {
   return (
-    <button
+    <Button
       type="button"
+      label={label}
+      modifier="outline"
+      fullWidth
       onClick={onDiscover}
-      className="flex items-center gap-2 rounded-xl border border-border-layout-1 bg-surface-raised px-3 h-11 shadow-elevation-1 transition-colors hover:border-surface-primary-solid cursor-pointer"
+      classMerge="h-11 justify-start rounded-xl border-border-layout-1 bg-surface-raised px-3 text-content-layout-1 shadow-elevation-1 hover:border-border-primary-solid hover:bg-surface-raised"
+      innerClassName="gap-2"
     >
       <span className="shrink-0 inline-flex" aria-hidden="true">
         {logo}
       </span>
-      <Text level="label-small" className="text-content-layout-1">
-        {label}
-      </Text>
-    </button>
+    </Button>
   )
 }
 
@@ -69,8 +72,8 @@ function ProviderDiscoverTile({
  * First-run "Connect your database" — a single, exitable page that replaces the
  * four-step `fixed inset-0` wizard (onboarding-and-first-run). One job: point
  * RDST at a database. The AI key is deferred to just-in-time (never asked here),
- * the demo is offered as a zero-setup escape hatch, and the page is a normal
- * route inside the app shell — skippable, never a takeover.
+ * the demo is a primary zero-setup product path, and the page is a normal route
+ * inside the app shell — skippable, never a takeover.
  * [USE-006, USE-008, USE-068, USE-050/052, VIS-011, VIS-116]
  */
 export function ConnectPage({
@@ -117,9 +120,8 @@ export function ConnectPage({
       // user can fix the connection details instead of dead-ending.
       return
     }
-    // Kick off schema/annotation bootstrap. Readyset starts lazily only when
-    // the user runs a comparison.
-    // while the user lands in the app.
+    // Kick off schema/annotation bootstrap while the user lands in the app.
+    // Readyset itself starts lazily only when the user runs a comparison.
     startBootstrapRun(data.name)
     toast({ title: `Connected to ${data.name}`, variant: 'positive' })
     finishToHome()
@@ -151,14 +153,15 @@ export function ConnectPage({
             RDST
           </Text>
         </HStack>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          modifier="link"
+          size="small"
+          label="Skip for now"
+          icon="arrow-right"
+          iconPosition="right"
           onClick={skip}
-          className="text-content-layout-3 hover:text-content-layout-1 transition-colors text-sm inline-flex items-center gap-1"
-        >
-          Skip for now
-          <Icon name="arrow-right" label="" className="w-3.5 h-3.5" />
-        </button>
+        />
       </HStack>
 
       <div className="mx-auto w-full max-w-xl pb-16 pt-8">
@@ -182,16 +185,68 @@ export function ConnectPage({
 
         <VStack className="gap-2 items-start mb-6">
           <Text as="h1" level="headline-1" className="text-content-layout-1">
-            Connect your database
+            {fromDemo ? 'Connect your database' : 'Start with Readyset'}
           </Text>
           <Text
             level="body-medium"
             className="text-content-layout-2 leading-relaxed"
           >
-            Use a read-only database user. RDST runs EXPLAIN, schema, index, and
-            performance-statistics queries against PostgreSQL or MySQL.
+            {fromDemo
+              ? 'Use a read-only database user. RDST runs EXPLAIN, schema, index, and performance-statistics queries against PostgreSQL or MySQL.'
+              : 'See Readyset on a prepared workload first, or connect your own database when you are ready.'}
           </Text>
         </VStack>
+
+        {!fromDemo && (
+          <div className="relative mb-8 overflow-hidden rounded-2xl bg-surface-rising-solid shadow-elevation-2">
+            <AnimatedSurfaceBackdrop palette="purple" />
+            <div className="relative flex flex-col gap-6 p-6 tablet:flex-row tablet:items-end tablet:justify-between">
+              <VStack className="max-w-md items-start gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface-layout-1/20">
+                  <Icon
+                    name="querypilot"
+                    label=""
+                    className="h-6 w-6 text-content-rising-solid"
+                  />
+                </div>
+                <VStack className="items-start gap-1">
+                  <Text
+                    level="headline-4"
+                    className="text-content-rising-solid"
+                  >
+                    Try the live demo
+                  </Text>
+                  <Text
+                    level="body-small"
+                    className="text-content-rising-solid/80"
+                  >
+                    Run a guided comparison on a prepared workload and inspect
+                    the measured Readyset speedup. No database or setup needed.
+                  </Text>
+                </VStack>
+              </VStack>
+              <Button
+                variant="primary"
+                modifier="solid"
+                label="Launch the demo"
+                icon="arrow-right"
+                iconPosition="right"
+                className="shrink-0 bg-surface-layout-1 text-content-layout-1 hover:bg-surface-layout-2 active:bg-surface-layout-2"
+                onClick={() => navigate({ to: '/demo' })}
+              />
+            </div>
+          </div>
+        )}
+
+        {!fromDemo && (
+          <HStack className="mb-6 items-center gap-3">
+            <div className="h-px flex-1 bg-border-layout-1" />
+            <Text level="caption" className="text-content-layout-3">
+              Or connect your own database
+            </Text>
+            <div className="h-px flex-1 bg-border-layout-1" />
+          </HStack>
+        )}
 
         {/* Provider-first paths, compact: one click into the discovery drawer
             pre-selected on that provider, kept to two rows so the manual form
@@ -228,14 +283,6 @@ export function ConnectPage({
         </div>
 
         <VStack className="gap-3 items-center mt-6">
-          <button
-            type="button"
-            onClick={() => navigate({ to: '/demo' })}
-            className="text-content-primary-soft hover:underline text-sm inline-flex items-center gap-1"
-          >
-            Just exploring? Try the live demo — no database needed
-            <Icon name="arrow-right" label="" className="w-3.5 h-3.5" />
-          </button>
           <Text level="caption" className="text-content-layout-3 text-center">
             You can add an AI key later, only when a feature needs it.
           </Text>

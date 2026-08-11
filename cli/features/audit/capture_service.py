@@ -588,8 +588,10 @@ class CaptureService:
                             # hash to match so breadcrumbs resolve directly.
                             reg_hash, _ = registry.add_query(
                                 sql=save_sql,
+                                source="audit",
                                 target=target_name,
                                 skip_param_extraction=True,
+                                observed=True,
                             )
                             query.query_hash = reg_hash
                             saved_hashes.append(reg_hash)

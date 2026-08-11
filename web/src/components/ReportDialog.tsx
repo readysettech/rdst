@@ -41,25 +41,25 @@ const sentimentOptions: SentimentOption[] = [
     value: 'positive',
     label: 'Great',
     icon: '😊',
-    color: 'text-emerald-400',
-    bgColor: 'bg-emerald-500/10',
-    borderColor: 'border-emerald-500/50',
+    color: 'text-content-positive-soft',
+    bgColor: 'bg-surface-positive-soft',
+    borderColor: 'border-border-positive-soft',
   },
   {
     value: 'neutral',
     label: 'Okay',
     icon: '😐',
-    color: 'text-amber-400',
-    bgColor: 'bg-amber-500/10',
-    borderColor: 'border-amber-500/50',
+    color: 'text-content-info-soft',
+    bgColor: 'bg-surface-info-soft',
+    borderColor: 'border-border-info-soft',
   },
   {
     value: 'negative',
     label: 'Poor',
     icon: '😞',
-    color: 'text-rose-400',
-    bgColor: 'bg-rose-500/10',
-    borderColor: 'border-rose-500/50',
+    color: 'text-content-negative-soft',
+    bgColor: 'bg-surface-negative-soft',
+    borderColor: 'border-border-negative-soft',
   },
 ]
 
@@ -515,13 +515,14 @@ export function ReportDialog({
                   <Text level="body-small" className="text-content-layout-2">
                     Sending as {verifiedEmail}
                   </Text>
-                  <button
+                  <Button
                     type="button"
-                    className="mt-1 cursor-pointer text-sm text-content-primary-soft hover:underline"
+                    size="small"
+                    modifier="link"
+                    label="Use a different email"
+                    classMerge="mt-1 h-auto p-0"
                     onClick={() => setEmailOverride(true)}
-                  >
-                    Use a different email
-                  </button>
+                  />
                 </div>
               ) : (
                 <BaseInputText

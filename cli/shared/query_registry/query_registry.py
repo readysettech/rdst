@@ -58,6 +58,39 @@ def _statement_count(sql: str) -> int:
     )
 
 
+_GLOBAL_TARGET_KEY = "__global__"
+
+
+@dataclass
+class QueryTargetLifecycle:
+    """Durable web/desktop lifecycle state for one query on one target.
+
+    The query hash remains global so SQL patterns still deduplicate, while the
+    state that powers the unified Query Library stays target-correct. These
+    fields are additive: the CLI continues to read and write the legacy
+    QueryEntry fields until its own migration is coordinated separately.
+    """
+
+    first_observed_at: str = ""
+    last_observed_at: str = ""
+    reviewed_at: str = ""
+    saved_at: str = ""
+    last_analyzed_at: str = ""
+    analysis_count: int = 0
+    last_compared_at: str = ""
+    comparison_count: int = 0
+    sources: List[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "QueryTargetLifecycle":
+        """Deserialize lifecycle data written by this or a newer build."""
+        known_fields = {item.name for item in dataclass_fields(cls)}
+        values = {key: value for key, value in data.items() if key in known_fields}
+        if not isinstance(values.get("sources", []), list):
+            values["sources"] = []
+        return cls(**values)
+
+
 def canonicalize_sql(sql: str) -> str:
     """
     Strip comments and normalize whitespace while preserving statement structure.
@@ -646,6 +679,10 @@ class QueryEntry:
     readyset_supported: str = ""          # "yes" | "pending" | "unsupported: <reason>"
     last_cache_target: str = ""           # cache target where readyset_query_id was last observed
     readyset_last_observed_at: str = ""   # ISO 8601 timestamp
+    # Target-scoped lifecycle state for the unified web/desktop Query Library.
+    # Legacy timestamps above remain available to the CLI while its contract is
+    # migrated independently.
+    target_lifecycle: Dict[str, QueryTargetLifecycle] = field(default_factory=dict)
 
     @property
     def home_target(self) -> str:
@@ -655,6 +692,35 @@ class QueryEntry:
         across databases (rdst-e7s.26, rdst-e7s.31)."""
         return self.ask_target or self.last_target
 
+    @staticmethod
+    def target_key(target: str) -> str:
+        """Return the stable serialized key for a target or global entry."""
+        return target or _GLOBAL_TARGET_KEY
+
+    def lifecycle_for(
+        self, target: str = "", *, create: bool = False
+    ) -> Optional[QueryTargetLifecycle]:
+        """Return lifecycle state for a target without leaking another target."""
+        key = self.target_key(target or self.home_target)
+        lifecycle = self.target_lifecycle.get(key)
+        if lifecycle is None and create:
+            lifecycle = QueryTargetLifecycle()
+            self.target_lifecycle[key] = lifecycle
+        return lifecycle
+
+    def belongs_to_target(self, target: str) -> bool:
+        """Whether this deduplicated SQL pattern has activity on ``target``."""
+        return self.target_key(target) in self.target_lifecycle or self.home_target == target
+
+    def is_new_for(self, target: str = "") -> bool:
+        """A first system observation remains New until explicitly reviewed."""
+        lifecycle = self.lifecycle_for(target)
+        return bool(
+            lifecycle
+            and lifecycle.first_observed_at
+            and not lifecycle.reviewed_at
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for TOML serialization."""
         return asdict(self)
@@ -662,6 +728,7 @@ class QueryEntry:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "QueryEntry":
         """Create QueryEntry from dictionary (TOML deserialization)."""
+        data = copy.deepcopy(data)
         # Handle backward compatibility
         if "last_target" not in data:
             data["last_target"] = ""
@@ -689,6 +756,34 @@ class QueryEntry:
                     "readyset_last_observed_at"):
             if key not in data:
                 data[key] = ""
+
+        lifecycle_data = data.get("target_lifecycle")
+        if isinstance(lifecycle_data, dict):
+            data["target_lifecycle"] = {
+                str(target): QueryTargetLifecycle.from_dict(value)
+                for target, value in lifecycle_data.items()
+                if isinstance(value, dict)
+            }
+        else:
+            # Before T7A every registry row appeared in Saved. Preserve that
+            # intent while only treating database-discovery sources as observed.
+            target = data.get("ask_target") or data.get("last_target") or ""
+            source = data.get("source", "")
+            first_activity = data.get("first_analyzed", "")
+            last_activity = data.get("last_analyzed", "") or first_activity
+            lifecycle = QueryTargetLifecycle(
+                saved_at=first_activity,
+                sources=[source] if source else [],
+            )
+            if source in {"top", "top-historical", "audit"}:
+                lifecycle.first_observed_at = first_activity
+                lifecycle.last_observed_at = last_activity
+            if source == "analyze":
+                lifecycle.last_analyzed_at = last_activity
+                lifecycle.analysis_count = 1 if last_activity else 0
+            data["target_lifecycle"] = {
+                cls.target_key(target): lifecycle,
+            }
 
         # Remove deprecated parameter_history if present in old data
         data.pop("parameter_history", None)
@@ -799,6 +894,38 @@ class QueryRegistry:
         }
         self._baseline_data = self._toml_data()
 
+    @staticmethod
+    def _update_lifecycle(
+        entry: QueryEntry,
+        *,
+        target: str,
+        source: str,
+        occurred_at: str,
+        observed: bool,
+        analyzed: bool,
+        compared: bool,
+        save_intent: bool,
+    ) -> None:
+        """Update additive Query Library state without changing CLI metadata."""
+        lifecycle = entry.lifecycle_for(target, create=True)
+        if lifecycle is None:
+            return
+
+        if source and source not in lifecycle.sources:
+            lifecycle.sources.append(source)
+        if observed:
+            if not lifecycle.first_observed_at:
+                lifecycle.first_observed_at = occurred_at
+            lifecycle.last_observed_at = occurred_at
+        if save_intent and not lifecycle.saved_at:
+            lifecycle.saved_at = occurred_at
+        if analyzed:
+            lifecycle.last_analyzed_at = occurred_at
+            lifecycle.analysis_count += 1
+        if compared:
+            lifecycle.last_compared_at = occurred_at
+            lifecycle.comparison_count += 1
+
     def add_query(
         self,
         sql: str,
@@ -813,6 +940,10 @@ class QueryRegistry:
         avg_duration_ms: float = 0.0,
         observation_count: int = 0,
         skip_param_extraction: bool = False,
+        observed: bool = False,
+        analyzed: bool = False,
+        compared: bool = False,
+        save_intent: bool = True,
     ) -> tuple[str, bool]:
         """
         Add a query to the registry with parameter extraction and history.
@@ -831,6 +962,11 @@ class QueryRegistry:
             max_duration_ms: Maximum observed duration in ms (from rdst top)
             avg_duration_ms: Average observed duration in ms (from rdst top)
             observation_count: Number of times query was observed (from rdst top)
+            observed: Record a system observation for the target-scoped web lifecycle
+            analyzed: Record a completed analysis for the web lifecycle
+            compared: Record a completed cache comparison for the web lifecycle
+            save_intent: Record user/system save intent. Defaults to True to
+                preserve the existing CLI and registry contract.
 
         Returns:
             Tuple of (query_hash, is_new) where is_new is True if this was a new query pattern
@@ -963,6 +1099,17 @@ class QueryRegistry:
             )
             self._queries[query_hash] = entry
 
+        self._update_lifecycle(
+            entry,
+            target=target,
+            source=source,
+            occurred_at=now,
+            observed=observed,
+            analyzed=analyzed,
+            compared=compared,
+            save_intent=save_intent,
+        )
+
         self.save()
         return query_hash, is_new_query
 
@@ -1064,6 +1211,29 @@ class QueryRegistry:
             return True
 
         return False
+
+    def mark_reviewed(
+        self,
+        query_hash: str,
+        target: str = "",
+        reviewed_at: Optional[str] = None,
+    ) -> bool:
+        """Mark a query reviewed for one target without affecting other targets."""
+        if not self._loaded:
+            self.load()
+
+        entry = self.get_query(query_hash)
+        if entry is None or not target or not entry.belongs_to_target(target):
+            return False
+
+        lifecycle = entry.lifecycle_for(target)
+        if lifecycle is None:
+            return False
+        lifecycle.reviewed_at = reviewed_at or (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+        self.save()
+        return True
 
     def update_readyset_identity(
         self,

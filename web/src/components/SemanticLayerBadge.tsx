@@ -1,3 +1,4 @@
+import { Button } from '@rs/ui-new/button'
 import { HStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
 import { useQuery } from '@tanstack/react-query'
@@ -35,13 +36,15 @@ export function SemanticLayerBadge({ target }: { target?: string | null }) {
         }
       />
       {!hasSemanticLayer && (
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          modifier="link"
+          size="small"
+          label="Discover schema"
+          icon="arrow-right"
+          iconPosition="right"
           onClick={() => navigate({ to: '/schema' })}
-          className="text-content-primary-soft text-label-small hover:underline"
-        >
-          Discover schema →
-        </button>
+        />
       )}
     </HStack>
   )

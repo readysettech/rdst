@@ -43,7 +43,7 @@ export function SchemaReinitDialog({
         message:
           'Re-init rebuilds the layer from a fresh introspection and does not merge existing annotations. All table and column descriptions, enum meanings, business terms, metrics, and relationships — human and AI-authored — will be permanently deleted. This cannot be undone.',
       }}
-      confirmLabel="Discard & Re-init"
+      confirmLabel="Discard & re-init"
       confirmVariant="negative"
       loading={isLoading}
       blockCloseWhileLoading

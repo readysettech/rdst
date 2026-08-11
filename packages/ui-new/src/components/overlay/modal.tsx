@@ -168,6 +168,11 @@ function treeHasTitle(node: ReactNode): boolean {
 
 export type ModalContentProps = {
   layoutId?: string
+  /**
+   * Lets a `layoutId` transition own the dialog's position and size. Shared
+   * layout content must be centered with CSS instead of `animate` transforms.
+   */
+  sharedLayout?: boolean
   hideClose?: boolean
   overlayClassName?: string
   innerClassName?: string
@@ -196,6 +201,7 @@ export const ModalContent = forwardRef<
     {
       children,
       layoutId,
+      sharedLayout,
       hideClose,
       size,
       className,
@@ -237,10 +243,27 @@ export const ModalContent = forwardRef<
         >
           <m.div
             layoutId={layoutId}
-            initial={{ scale: 0.9, opacity: 0, y: '-50%', x: '-50%' }}
-            animate={{ scale: 1, opacity: 1, y: '-50%', x: '-50%' }}
-            exit={{ scale: 0.9, opacity: 0, y: '-50%', x: '-50%' }}
-            transition={transition}
+            {...(sharedLayout
+              ? {
+                  initial: false as const,
+                  transition: { layout: getTransition('cubicSlow') },
+                }
+              : {
+                  initial: {
+                    scale: 0.9,
+                    opacity: 0,
+                    y: '-50%',
+                    x: '-50%',
+                  },
+                  animate: { scale: 1, opacity: 1, y: '-50%', x: '-50%' },
+                  exit: {
+                    scale: 0.9,
+                    opacity: 0,
+                    y: '-50%',
+                    x: '-50%',
+                  },
+                  transition,
+                })}
             className={cn(innerClassName)}
           >
             {title ? (

@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from features.query_registry.service import (
+    MAX_BENCHMARK_CONCURRENCY,
     MAX_BENCHMARK_DURATION_SECONDS,
     MAX_BENCHMARK_MAX_COUNT,
     QueryService,
@@ -337,3 +338,60 @@ class TestStreamBenchmarkRails:
         assert len(events) == 1
         assert events[0].type == "error"
         assert events[0].code == "benchmark_count_capped"
+
+    @pytest.mark.asyncio
+    async def test_over_cap_concurrency_rejected(self):
+        events = await _collect(
+            QueryService().stream_benchmark(
+                queries=[{"sql": "SELECT 1"}],
+                target="demo",
+                mode="concurrency",
+                interval_ms=0,
+                concurrency=MAX_BENCHMARK_CONCURRENCY + 1,
+                duration_seconds=5,
+                max_count=10,
+            )
+        )
+
+        assert len(events) == 1
+        assert events[0].type == "error"
+        assert events[0].code == "benchmark_concurrency_capped"
+
+    @pytest.mark.asyncio
+    async def test_concurrency_mode_opens_one_read_only_connection_per_worker(self):
+        connections: list[_FakeConnection] = []
+
+        def create_connection(_config):
+            connection = _FakeConnection()
+            connections.append(connection)
+            return connection
+
+        with (
+            patch(
+                "shared.db_connection.create_direct_connection",
+                side_effect=create_connection,
+            ),
+            patch(
+                "shared.config.targets.create_targets_config",
+                return_value=_FakeTargetsConfig(),
+            ),
+        ):
+            events = await _collect(
+                QueryService().stream_benchmark(
+                    queries=[{"identifier": "q", "sql": "SELECT 1"}],
+                    target="demo",
+                    mode="concurrency",
+                    interval_ms=0,
+                    concurrency=3,
+                    duration_seconds=1,
+                    max_count=6,
+                )
+            )
+
+        assert len(connections) == 3
+        assert all(
+            connection.executed[0] == "SET default_transaction_read_only = on"
+            for connection in connections
+        )
+        assert events[-1].type == "complete"
+        assert events[-1].total_executions == 6

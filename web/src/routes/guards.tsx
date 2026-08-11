@@ -1,26 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createFileRoute } from '@tanstack/react-router';
-import { ExperimentalBanner } from '../components/ExperimentalBanner';
 import { cn } from '@rs/tailwind-base';
+import type { IconStrokeName } from '@rs/ui-icons/icon-name';
+import { BaseInputSelect } from '@rs/ui-new/base-input-select';
+import { BaseInputSwitch } from '@rs/ui-new/base-input-switch';
+import { BaseInputText } from '@rs/ui-new/base-input-text';
+import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea';
 import { Button } from '@rs/ui-new/button';
 import { Card } from '@rs/ui-new/card';
 import { ConfirmDialog } from '@rs/ui-new/confirm-dialog';
+import { Disclosure } from '@rs/ui-new/disclosure';
 import { Icon } from '@rs/ui-new/icon';
-import type { IconStrokeName } from '@rs/ui-icons/icon-name';
+import { IconTile } from '@rs/ui-new/icon-tile';
+import { AnimatePresence, m } from '@rs/ui-new/motion';
+import { Pressable } from '@rs/ui-new/pressable';
+import {
+  SegmentedControl,
+  type SegmentedControlSegment,
+} from '@rs/ui-new/segmented-control';
 import { Show } from '@rs/ui-new/show';
 import { Spinner } from '@rs/ui-new/spinner';
+import { HStack, VStack } from '@rs/ui-new/stack';
 import { Tag } from '@rs/ui-new/tag';
 import { Text } from '@rs/ui-new/text';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { BaseInputText } from '@rs/ui-new/base-input-text';
-import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea';
-import { BaseInputSelect } from '@rs/ui-new/base-input-select';
-import { BaseInputSwitch } from '@rs/ui-new/base-input-switch';
-import { m, AnimatePresence } from '@rs/ui-new/motion';
-import { useDisclosure } from '@rs/ui-new/use-disclosure';
 import { toast } from '@rs/ui-new/use-toast';
+import { createFileRoute } from '@tanstack/react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ExperimentalBanner } from '../components/ExperimentalBanner';
 import { RoutableNotice } from '../components/RoutableNotice';
-import { useSystemStatus } from '../lib/useSystemStatus';
 import { useTarget } from '../hooks/useTarget';
 import {
   checkGuardSql,
@@ -32,13 +37,14 @@ import {
   useGuardsList,
   useUpdateGuard,
 } from '../lib/useGuards';
-import { MASK_TYPES } from '../types/guards';
+import { useSystemStatus } from '../lib/useSystemStatus';
 import type {
   GuardCheckLevel,
   GuardCheckResponse,
   GuardDetail,
   GuardSummary,
 } from '../types/guards';
+import { MASK_TYPES } from '../types/guards';
 
 export const Route = createFileRoute('/guards')({
   component: GuardsPage,
@@ -321,65 +327,13 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Collapsed-by-default section wrapper. Secondary guard settings (restrictions,
-// filters, rules, limits) sit behind these so the primary "What to mask" section
-// leads the editor; the underlying form state is lifted to GuardsPage, so
-// collapsing a section never discards its values. [USE-093, VIS-017, VIS-103]
-function Disclosure({
-  title,
-  hint,
-  children,
-}: {
-  title: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useDisclosure({});
-  return (
-    <div className="rounded-xl border border-border-layout-1 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="w-full text-left px-4 py-3 hover:bg-surface-layout-2/50 transition-colors cursor-pointer"
-      >
-        <HStack className="gap-2 items-center">
-          <Icon
-            name={open ? 'chevron-down' : 'chevron-right'}
-            label="Toggle section"
-            className="w-4 h-4 text-content-layout-3 shrink-0"
-          />
-          <Text level="label-small" className="text-content-layout-2">
-            {title}
-          </Text>
-          <Show when={!!hint}>
-            <Text level="caption" className="text-content-layout-3 truncate">
-              {hint}
-            </Text>
-          </Show>
-        </HStack>
-      </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <m.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden border-t border-border-layout-1"
-          >
-            <div className="p-4">{children}</div>
-          </m.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
 // Segmented control that merges the former "New Guard" / "Describe Intent" heroes
-// into one create flow. Accent discipline: the selected segment is a raised,
-// greyscale surface; only the "Describe with AI" glyph carries the rising accent.
-// [VIS-022, USE-056, VIS-121, VIS-097, VIS-114]
+// into one create flow. [VIS-022, USE-056, VIS-121, VIS-097, VIS-114]
+const MODE_SEGMENTS: Array<SegmentedControlSegment<'manual' | 'intent'>> = [
+  { value: 'manual', label: 'Build manually' },
+  { value: 'intent', label: 'Describe with AI', icon: 'sparkles' },
+];
+
 function ModeToggle({
   mode,
   onChange,
@@ -387,33 +341,15 @@ function ModeToggle({
   mode: 'manual' | 'intent';
   onChange: (mode: 'manual' | 'intent') => void;
 }) {
-  const segment = (active: boolean) =>
-    cn(
-      'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-label-small transition-colors cursor-pointer',
-      active
-        ? 'bg-surface-raised text-content-layout-1 shadow-elevation-1'
-        : 'text-content-layout-3 hover:text-content-layout-2',
-    );
   return (
-    <div className="inline-flex items-center gap-1 self-start rounded-xl bg-surface-layout-2 p-1">
-      <button
-        type="button"
-        onClick={() => onChange('manual')}
-        aria-pressed={mode === 'manual'}
-        className={segment(mode === 'manual')}
-      >
-        Build manually
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange('intent')}
-        aria-pressed={mode === 'intent'}
-        className={segment(mode === 'intent')}
-      >
-        <Icon name="sparkles" label="" aria-hidden="true" className="w-3.5 h-3.5 text-content-rising-soft" />
-        Describe with AI
-      </button>
-    </div>
+    <SegmentedControl
+      aria-label="Guard creation mode"
+      mode="radio"
+      segments={MODE_SEGMENTS}
+      value={mode}
+      onValueChange={onChange}
+      className="self-start"
+    />
   );
 }
 
@@ -672,7 +608,7 @@ function GuardEditor({
       </VStack>
 
       {/* Restrictions: denied columns + allowed tables — collapsed by default */}
-      <Disclosure title="Table & column restrictions" hint="denied columns · allowed tables">
+      <Disclosure title="Table & column restrictions" subtitle="denied columns · allowed tables">
       <div className="grid grid-cols-1 tablet:grid-cols-2 gap-4">
         <VStack className="gap-1.5 items-start">
           <FieldLabel>Denied Columns</FieldLabel>
@@ -770,7 +706,7 @@ function GuardEditor({
       </Disclosure>
 
       {/* Rule toggles — collapsed by default */}
-      <Disclosure title="Rules" hint="require WHERE / require LIMIT / no SELECT *">
+      <Disclosure title="Rules" subtitle="require WHERE / require LIMIT / no SELECT *">
       <VStack className="gap-3 items-stretch">
         <div className="grid grid-cols-1 tablet:grid-cols-3 gap-3">
           <HStack className="gap-2 items-center">
@@ -814,7 +750,7 @@ function GuardEditor({
       </Disclosure>
 
       {/* Numeric limits — collapsed by default */}
-      <Disclosure title="Limits" hint="rows, tables, cost, est. rows">
+      <Disclosure title="Limits" subtitle="rows, tables, cost, est. rows">
       <div className="grid grid-cols-2 tablet:grid-cols-5 gap-4">
         <VStack className="gap-1.5 items-start">
           <FieldLabel>Max Tables</FieldLabel>
@@ -981,7 +917,7 @@ function TestSqlPanel({ guardNames }: { guardNames: string[] }) {
               guard") — one solid primary per screen [S4; VIS-011/016,
               VIS-022/023]. */}
           <Button
-            label="Run Check"
+            label="Run check"
             icon="play"
             iconPosition="left"
             variant="primary"
@@ -1146,7 +1082,7 @@ function GuardListRow({
 
   return (
     <div className={expanded ? 'bg-surface-primary-soft/5' : ''}>
-      <button
+      <Pressable
         type="button"
         onClick={onToggle}
         className="w-full text-left px-5 py-3 hover:bg-surface-layout-2/50 transition-colors cursor-pointer"
@@ -1194,7 +1130,7 @@ function GuardListRow({
             </Text>
           </HStack>
         </HStack>
-      </button>
+      </Pressable>
 
       <AnimatePresence>
         {expanded && (
@@ -1471,9 +1407,7 @@ function GuardsPage() {
       >
         <HStack className="justify-between items-start">
           <HStack className="gap-4 items-center">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-surface-primary-soft to-surface-info-soft flex items-center justify-center">
-              <Icon name="user-shield" label="Guards" className="w-6 h-6 text-content-primary-soft" />
-            </div>
+            <IconTile icon="user-shield" />
             <VStack className="gap-1 items-start">
               <Text as="h1" level="headline-3" className="text-content-layout-1">
                 Query Guards

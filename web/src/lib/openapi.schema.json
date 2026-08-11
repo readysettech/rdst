@@ -1066,6 +1066,7 @@
         "type": "object"
       },
       "AnnotateCompleteEvent": {
+        "description": "Annotation process completed, possibly with individual table failures.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -1105,6 +1106,7 @@
         "type": "object"
       },
       "AnnotateErrorEvent": {
+        "description": "Annotation process encountered an error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1124,6 +1126,7 @@
         "type": "object"
       },
       "AnnotateProgressEvent": {
+        "description": "Progress update during annotation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -1187,6 +1190,7 @@
         "type": "object"
       },
       "AnnotateStartedEvent": {
+        "description": "Annotation process started.",
         "properties": {
           "completed_tables": {
             "default": 0,
@@ -1216,6 +1220,7 @@
         "type": "object"
       },
       "AnnotateTableCompleteEvent": {
+        "description": "A table has been annotated.",
         "properties": {
           "columns_annotated": {
             "title": "Columns Annotated",
@@ -1315,6 +1320,7 @@
         "type": "object"
       },
       "AskClarificationNeededEvent": {
+        "description": "Clarification needed from the user.",
         "properties": {
           "interpretations": {
             "items": {
@@ -1350,6 +1356,7 @@
         "type": "object"
       },
       "AskClarificationQuestion": {
+        "description": "A clarification question for the user.",
         "properties": {
           "id": {
             "title": "Id",
@@ -1376,6 +1383,7 @@
         "type": "object"
       },
       "AskErrorEvent": {
+        "description": "Ask encountered an error.",
         "properties": {
           "category": {
             "anyOf": [
@@ -1543,6 +1551,7 @@
         "type": "object"
       },
       "AskInterpretation": {
+        "description": "A possible interpretation of the user's question.",
         "properties": {
           "assumptions": {
             "items": {
@@ -1663,6 +1672,7 @@
         "type": "object"
       },
       "AskResultEvent": {
+        "description": "Ask completed with results.",
         "properties": {
           "columns": {
             "items": {
@@ -1736,6 +1746,7 @@
         "type": "object"
       },
       "AskSchemaLoadedEvent": {
+        "description": "Schema has been loaded.",
         "properties": {
           "source": {
             "title": "Source",
@@ -1773,6 +1784,7 @@
         "type": "object"
       },
       "AskSqlGeneratedEvent": {
+        "description": "SQL has been generated.",
         "properties": {
           "explanation": {
             "anyOf": [
@@ -1804,6 +1816,7 @@
         "type": "object"
       },
       "AskStatusEvent": {
+        "description": "Status update during ask execution.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2831,6 +2844,7 @@
         ]
       },
       "BootstrapNeedsKeyEvent": {
+        "description": "The run reached the annotate gate without a usable Anthropic key.\n\nThe event name doubles as the run registry's gating signal: the run's\nstatus parks on needs_key until the next event arrives.",
         "properties": {
           "message": {
             "title": "Message",
@@ -2868,6 +2882,7 @@
         "type": "object"
       },
       "BootstrapStageEvent": {
+        "description": "Progress of one bootstrap stage.\n\nstatus is started | progress | done | failed | skipped. Child-service\nevents surface as status=\"progress\" with the child's payload in detail,\nso the stream stays one flat, typed union.",
         "properties": {
           "detail": {
             "anyOf": [
@@ -2985,7 +3000,101 @@
         "title": "BrowseResponse",
         "type": "object"
       },
+      "CacheCompareLoadRequest": {
+        "properties": {
+          "concurrency": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "concurrency"
+        ],
+        "title": "CacheCompareLoadRequest",
+        "type": "object"
+      },
+      "CacheCompareLoadResponse": {
+        "properties": {
+          "concurrency": {
+            "title": "Concurrency",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "concurrency"
+        ],
+        "title": "CacheCompareLoadResponse",
+        "type": "object"
+      },
+      "CacheCompareRunRequest": {
+        "properties": {
+          "concurrency": {
+            "default": 4,
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "type": "integer"
+          },
+          "duration_seconds": {
+            "default": 30,
+            "maximum": 180.0,
+            "minimum": 10.0,
+            "title": "Duration Seconds",
+            "type": "integer"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "query_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Hash"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "CacheCompareRunRequest",
+        "type": "object"
+      },
       "CacheRunCompleteEvent": {
+        "description": "Performance comparison result (origin vs cache).",
         "properties": {
           "cache_iterations": {
             "anyOf": [
@@ -2998,6 +3107,13 @@
             ],
             "default": null,
             "title": "Cache Iterations"
+          },
+          "cache_samples_ms": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Cache Samples Ms",
+            "type": "array"
           },
           "cache_stats": {
             "additionalProperties": {
@@ -3025,6 +3141,13 @@
             ],
             "default": null,
             "title": "Origin Iterations"
+          },
+          "origin_samples_ms": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Origin Samples Ms",
+            "type": "array"
           },
           "origin_stats": {
             "additionalProperties": {
@@ -3394,6 +3517,7 @@
         "type": "object"
       },
       "ChatToolResultEvent": {
+        "description": "Result of one tool execution.\n\nFor query_database, `data` carries sql/columns/rows/row_count/\nexecution_time_ms/truncated/query_hash/query_tag; for get_schema it\ncarries tables/source.",
         "properties": {
           "content": {
             "title": "Content",
@@ -4005,6 +4129,7 @@
         "type": "object"
       },
       "ErrorEvent": {
+        "description": "Error event for service workflows.\n\n``code`` and ``detail`` mirror the shared HTTP error envelope\n(``shared.api.app._error_envelope``) so an SSE failure carries the same\n{code, message, detail} shape the client normalizes in ``lib/sse.ts``.\nBoth stay optional so existing producers that only set ``message`` keep\nworking; the client derives a code when one is absent.",
         "properties": {
           "code": {
             "anyOf": [
@@ -4288,6 +4413,61 @@
           "cost_estimate"
         ],
         "title": "ExplainResults",
+        "type": "object"
+      },
+      "FileBrowserEntry": {
+        "properties": {
+          "is_dir": {
+            "title": "Is Dir",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "is_dir"
+        ],
+        "title": "FileBrowserEntry",
+        "type": "object"
+      },
+      "FileBrowserResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/FileBrowserEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "entries"
+        ],
+        "title": "FileBrowserResponse",
         "type": "object"
       },
       "FingerprintBody": {
@@ -4714,10 +4894,29 @@
             ],
             "title": "Name Pattern"
           },
+          "password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
           "password_env": {
-            "default": "FLEET_PASS",
-            "title": "Password Env",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Env"
           },
           "profile": {
             "anyOf": [
@@ -4932,10 +5131,29 @@
             ],
             "title": "Group"
           },
+          "password": {
+            "anyOf": [
+              {
+                "format": "password",
+                "type": "string",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
           "password_env": {
-            "default": "FLEET_PASS",
-            "title": "Password Env",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Env"
           },
           "tags": {
             "anyOf": [
@@ -6350,6 +6568,43 @@
         "title": "LoadTestRunStartResponse",
         "type": "object"
       },
+      "MarkQueryReviewedRequest": {
+        "properties": {
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "MarkQueryReviewedRequest",
+        "type": "object"
+      },
+      "MarkQueryReviewedResponse": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "MarkQueryReviewedResponse",
+        "type": "object"
+      },
       "MessageResponse": {
         "description": "Single message in conversation history.",
         "properties": {
@@ -6525,6 +6780,7 @@
         "type": "object"
       },
       "ProgressEvent": {
+        "description": "Progress update during a multi-step operation.",
         "properties": {
           "message": {
             "title": "Message",
@@ -6567,6 +6823,7 @@
         "type": "object"
       },
       "QueryBenchmarkCompleteEvent": {
+        "description": "Benchmark finished; carries the final tally.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6614,6 +6871,7 @@
         "type": "object"
       },
       "QueryBenchmarkErrorEvent": {
+        "description": "Benchmark failed (or was rejected by a safety rail) before completion.\n\nCarries the shared error envelope ({code, message, detail}, B7/T24) so the\nclient normalizes a benchmark failure exactly like every other SSE error.\n``message`` stays humane and safe to show; ``detail`` holds only the\nexception class name for correlation \u2014 never the raw ``str(e)``, which can\nembed host / DSN / SQL material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -6670,6 +6928,7 @@
         ]
       },
       "QueryBenchmarkProgressEvent": {
+        "description": "Benchmark progress tick.",
         "properties": {
           "elapsed_seconds": {
             "title": "Elapsed Seconds",
@@ -6717,6 +6976,7 @@
         "type": "object"
       },
       "QueryBenchmarkStats": {
+        "description": "Statistics for a single benchmarked query.",
         "properties": {
           "avg_ms": {
             "title": "Avg Ms",
@@ -6806,10 +7066,20 @@
       },
       "QueryRegistryEntry": {
         "properties": {
+          "analysis_count": {
+            "default": 0,
+            "title": "Analysis Count",
+            "type": "integer"
+          },
           "avg_duration_ms": {
             "default": 0.0,
             "title": "Avg Duration Ms",
             "type": "number"
+          },
+          "comparison_count": {
+            "default": 0,
+            "title": "Comparison Count",
+            "type": "integer"
           },
           "first_analyzed": {
             "anyOf": [
@@ -6822,6 +7092,11 @@
             ],
             "title": "First Analyzed"
           },
+          "first_observed_at": {
+            "default": "",
+            "title": "First Observed At",
+            "type": "string"
+          },
           "frequency": {
             "title": "Frequency",
             "type": "integer"
@@ -6830,13 +7105,33 @@
             "title": "Hash",
             "type": "string"
           },
+          "is_new": {
+            "default": false,
+            "title": "Is New",
+            "type": "boolean"
+          },
           "last_analyzed": {
             "title": "Last Analyzed",
+            "type": "string"
+          },
+          "last_analyzed_at": {
+            "default": "",
+            "title": "Last Analyzed At",
             "type": "string"
           },
           "last_cache_target": {
             "default": "",
             "title": "Last Cache Target",
+            "type": "string"
+          },
+          "last_compared_at": {
+            "default": "",
+            "title": "Last Compared At",
+            "type": "string"
+          },
+          "last_observed_at": {
+            "default": "",
+            "title": "Last Observed At",
             "type": "string"
           },
           "max_duration_ms": {
@@ -6865,6 +7160,11 @@
             "title": "Question",
             "type": "string"
           },
+          "readyset_last_observed_at": {
+            "default": "",
+            "title": "Readyset Last Observed At",
+            "type": "string"
+          },
           "readyset_query_id": {
             "default": "",
             "title": "Readyset Query Id",
@@ -6875,9 +7175,26 @@
             "title": "Readyset Supported",
             "type": "string"
           },
+          "reviewed_at": {
+            "default": "",
+            "title": "Reviewed At",
+            "type": "string"
+          },
+          "saved_at": {
+            "default": "",
+            "title": "Saved At",
+            "type": "string"
+          },
           "source": {
             "title": "Source",
             "type": "string"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
           },
           "sql": {
             "title": "Sql",
@@ -7683,6 +8000,7 @@
         "type": "object"
       },
       "RunEndEvent": {
+        "description": "Terminal event appended by the registry after every run.",
         "properties": {
           "status": {
             "title": "Status",
@@ -7863,6 +8181,7 @@
         "type": "object"
       },
       "ScanCompleteEvent": {
+        "description": "Scan completed.",
         "properties": {
           "success": {
             "title": "Success",
@@ -7888,6 +8207,7 @@
         "type": "object"
       },
       "ScanErrorEvent": {
+        "description": "Scan error.",
         "properties": {
           "message": {
             "title": "Message",
@@ -7947,6 +8267,7 @@
         ]
       },
       "ScanFilesFoundEvent": {
+        "description": "Files with ORM patterns discovered.",
         "properties": {
           "files": {
             "items": {
@@ -8042,6 +8363,7 @@
         "type": "string"
       },
       "ScanProgressEvent": {
+        "description": "Progress update within a scan phase.",
         "properties": {
           "current": {
             "title": "Current",
@@ -8083,6 +8405,7 @@
         "type": "object"
       },
       "ScanQueryResultEvent": {
+        "description": "Individual query result from scan.",
         "properties": {
           "query": {
             "additionalProperties": true,
@@ -8103,6 +8426,7 @@
         "type": "object"
       },
       "ScanRegistryEvent": {
+        "description": "Registry save results.",
         "properties": {
           "new_queries": {
             "title": "New Queries",
@@ -8218,6 +8542,7 @@
         "type": "object"
       },
       "ScanStatusEvent": {
+        "description": "Status update during scan.",
         "properties": {
           "message": {
             "title": "Message",
@@ -10009,6 +10334,7 @@
         "type": "object"
       },
       "TopCompleteEvent": {
+        "description": "Operation completed.",
         "properties": {
           "newly_saved": {
             "title": "Newly Saved",
@@ -10046,6 +10372,7 @@
         "type": "object"
       },
       "TopConnectedEvent": {
+        "description": "Database connection established.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -10103,6 +10430,7 @@
         "type": "object"
       },
       "TopDbLimitWarningEvent": {
+        "description": "Database query size limit is below recommended threshold.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -10137,6 +10465,7 @@
         "type": "object"
       },
       "TopErrorEvent": {
+        "description": "Error occurred.\n\n``code`` and ``detail`` mirror the shared error envelope (B7/T24):\n``message`` stays humane, ``detail`` carries the exception class name for\ncorrelation \u2014 never the raw ``str(e)``, which can embed host/DSN material.",
         "properties": {
           "code": {
             "anyOf": [
@@ -10322,6 +10651,7 @@
         "type": "object"
       },
       "TopQueriesEvent": {
+        "description": "Batch of top queries.",
         "properties": {
           "db_engine": {
             "title": "Db Engine",
@@ -10383,6 +10713,7 @@
         "type": "object"
       },
       "TopQueryData": {
+        "description": "Individual query data.",
         "properties": {
           "avg_time": {
             "title": "Avg Time",
@@ -10561,6 +10892,7 @@
         "type": "object"
       },
       "TopQuerySavedEvent": {
+        "description": "Query saved to registry.",
         "properties": {
           "is_new": {
             "title": "Is New",
@@ -10585,6 +10917,7 @@
         "type": "object"
       },
       "TopSourceFallbackEvent": {
+        "description": "Source fallback occurred.",
         "properties": {
           "from_source": {
             "title": "From Source",
@@ -10614,6 +10947,7 @@
         "type": "object"
       },
       "TopStatusEvent": {
+        "description": "Progress status update.",
         "properties": {
           "message": {
             "title": "Message",
@@ -12787,6 +13121,103 @@
         "summary": "Browse Directory",
         "tags": [
           "browse"
+        ]
+      }
+    },
+    "/api/cache/compare-runs": {
+      "post": {
+        "description": "Start an adjustable, equal-concurrency comparison in the same sandbox.",
+        "operationId": "start_cache_compare_run_api_cache_compare_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheCompareRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTestRunStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Cache Compare Run",
+        "tags": [
+          "cache",
+          "cache"
+        ]
+      }
+    },
+    "/api/cache/compare-runs/{run_id}/load": {
+      "patch": {
+        "description": "Adjust the in-flight clients for an active live comparison.",
+        "operationId": "update_cache_compare_load_api_cache_compare_runs__run_id__load_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheCompareLoadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheCompareLoadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Cache Compare Load",
+        "tags": [
+          "cache",
+          "cache"
         ]
       }
     },
@@ -16033,6 +16464,65 @@
         "summary": "Run Benchmark"
       }
     },
+    "/api/query-registry/discovery/stream": {
+      "get": {
+        "description": "Stream automatic Query Library discovery updates for one target.\n\nThis web/desktop-only endpoint opts into the background collector. Existing\nCLI commands and the legacy top endpoints keep their current behavior.",
+        "operationId": "stream_query_discovery_api_query_registry_discovery_stream_get",
+        "parameters": [
+          {
+            "description": "Last processed discovery cursor for reconnect reconciliation",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last processed discovery cursor for reconnect reconciliation",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Target database name",
+            "in": "query",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "description": "Target database name",
+              "title": "Target",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Query Discovery"
+      }
+    },
     "/api/query-registry/import": {
       "post": {
         "description": "Import queries from a local SQL file (semicolon-separated, with\noptional `-- name:` / `-- target:` metadata comments).",
@@ -16149,6 +16639,56 @@
           }
         },
         "summary": "Remove Query From Registry"
+      }
+    },
+    "/api/query-registry/{query_hash}/reviewed": {
+      "post": {
+        "description": "Mark a query reviewed for exactly one target.",
+        "operationId": "mark_query_reviewed_api_query_registry__query_hash__reviewed_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_hash",
+            "required": true,
+            "schema": {
+              "title": "Query Hash",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkQueryReviewedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkQueryReviewedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Query Reviewed"
       }
     },
     "/api/query-registry/{query_hash}/sql": {
@@ -17889,6 +18429,57 @@
         "summary": "Get Trial Status",
         "tags": [
           "trial"
+        ]
+      }
+    },
+    "/api/tunnel/browse": {
+      "get": {
+        "description": "List local paths for the browser SSH key picker.",
+        "operationId": "browse_files_api_tunnel_browse_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileBrowserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Browse Files",
+        "tags": [
+          "tunnel",
+          "tunnel"
         ]
       }
     },

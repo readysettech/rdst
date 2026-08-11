@@ -110,8 +110,8 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
 
   it('traps Tab within scrim + drawer while open (background not tabbable)', () => {
     render(<Sidebar mobileOpen onMobileClose={vi.fn()} />)
-    // Last focusable inside the drawer set: the footer "Give Feedback" button.
-    const feedback = screen.getByRole('button', { name: /Give Feedback/ })
+    // Last focusable inside the drawer set: the footer "Give feedback" button.
+    const feedback = screen.getByRole('button', { name: /Give feedback/ })
     feedback.focus()
     fireEvent.keyDown(document, { key: 'Tab' })
     // Wraps to the first element of the trap set — the scrim.
@@ -179,12 +179,12 @@ describe('Sidebar mobile drawer a11y (T19 · USE-077/USE-090)', () => {
 
     render(<Sidebar />)
     expect(
-      screen.getByRole('status', { name: 'Health Check is running' })
+      screen.getByRole('status', { name: 'Health check is running' })
     ).toBeTruthy()
 
     act(() => finishAuditSession(sessionId!))
     expect(
-      screen.queryByRole('status', { name: 'Health Check is running' })
+      screen.queryByRole('status', { name: 'Health check is running' })
     ).toBeNull()
   })
 })

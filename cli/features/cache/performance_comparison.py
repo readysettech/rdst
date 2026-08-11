@@ -57,8 +57,13 @@ class ComparisonController:
 
     def cancel(self) -> None:
         self._cancelled.set()
+        self.close_connections()
+
+    def close_connections(self) -> None:
+        """Interrupt and forget every connection currently owned by the run."""
         with self._lock:
             connections = list(self._connections)
+            self._connections.clear()
         self.cancel_connections(connections)
 
     @classmethod
@@ -72,7 +77,8 @@ class ComparisonController:
             cancel = getattr(connection, "cancel", None)
             if callable(cancel):
                 cancel()
-            else:
+            close = getattr(connection, "close", None)
+            if callable(close):
                 connection.close()
         except Exception:
             pass

@@ -158,6 +158,21 @@ describe('AddTargetsDrawer', () => {
 
   afterEach(cleanup)
 
+  it('starts with one integration picker and switches to manual setup', () => {
+    renderDrawer({
+      manualContent: <div>Manual connection form</div>,
+    })
+
+    expect(screen.getByText('Choose an integration')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'AWS' })).toBeTruthy()
+    expect(screen.queryByText('Manual connection form')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Manual setup' }))
+
+    expect(screen.getByText('Manual connection form')).toBeTruthy()
+    expect(screen.queryByText('Choose an integration')).toBeNull()
+  })
+
   it('opens on the requested source tab', () => {
     renderDrawer({ initialTab: 'csv' })
 
@@ -211,24 +226,22 @@ describe('AddTargetsDrawer', () => {
     )
 
     expect(screen.getAllByText('us-east-1')).toHaveLength(2)
-    fireEvent.click(screen.getAllByRole('button', { name: 'Clear selection' })[0])
+    fireEvent.click(
+      screen.getAllByRole('button', { name: 'Clear selection' })[0]
+    )
     expect(
-      screen
-        .getByLabelText('Select orders-writer')
-        .getAttribute('aria-checked')
+      screen.getByLabelText('Select orders-writer').getAttribute('aria-checked')
     ).toBe('false')
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Select all' })[1])
     expect(
-      screen
-        .getByLabelText('Select orders-writer')
-        .getAttribute('aria-checked')
+      screen.getByLabelText('Select orders-writer').getAttribute('aria-checked')
     ).toBe('true')
-    fireEvent.click(screen.getAllByRole('button', { name: 'Clear selection' })[0])
+    fireEvent.click(
+      screen.getAllByRole('button', { name: 'Clear selection' })[0]
+    )
     expect(
-      screen
-        .getByLabelText('Select orders-writer')
-        .getAttribute('aria-checked')
+      screen.getByLabelText('Select orders-writer').getAttribute('aria-checked')
     ).toBe('false')
   })
 

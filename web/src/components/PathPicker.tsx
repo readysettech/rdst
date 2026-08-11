@@ -4,13 +4,14 @@
  * that extension instead.
  */
 
-import { useState, useCallback } from 'react';
-import { Popover, PopoverTrigger, PopoverContent } from '@rs/ui-new/popover';
 import { Button } from '@rs/ui-new/button';
 import { Icon } from '@rs/ui-new/icon';
+import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover';
+import { Pressable } from '@rs/ui-new/pressable';
 import { Scrollable } from '@rs/ui-new/scrollable';
-import { Text } from '@rs/ui-new/text';
 import { VStack } from '@rs/ui-new/stack';
+import { Text } from '@rs/ui-new/text';
+import { useCallback, useState } from 'react';
 import { useBrowse } from '../lib/useBrowse';
 
 interface PathPickerProps {
@@ -90,7 +91,11 @@ export function PathPicker({
 
       <Popover open={open} onOpenChange={handleOpen}>
         <PopoverTrigger asChild>
-          <button
+          {/* Kept as a hand-roll (as are the recent/breadcrumb/parent/dir/file
+              rows in the popover below): this is an input-styled PopoverTrigger
+              asChild target and the list rows are menu items, none of which are
+              design-system Button candidates. */}
+          <Pressable
             type="button"
             disabled={disabled}
             className="flex items-center gap-2 h-10 w-full rounded-lg border border-border-layout-1 bg-surface-layout-2 px-3 py-2 text-body-medium text-left cursor-pointer hover:border-border-layout-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -104,8 +109,7 @@ export function PathPicker({
               // RTL outer span moves the ellipsis to the left so the final
               // path segment stays visible; the bdi keeps the path itself LTR.
               <span
-                className="text-content-layout-1 truncate text-left"
-                style={{ direction: 'rtl' }}
+                className="text-content-layout-1 truncate text-left [direction:rtl]"
                 title={value}
               >
                 <bdi>{value}</bdi>
@@ -116,7 +120,7 @@ export function PathPicker({
                   (fileExt ? `Choose a .${fileExt} file...` : 'Choose a project folder...')}
               </span>
             )}
-          </button>
+          </Pressable>
         </PopoverTrigger>
 
           <PopoverContent
@@ -135,7 +139,7 @@ export function PathPicker({
                   </Text>
                 </div>
                 {recentDirs.map((dir) => (
-                  <button
+                  <Pressable
                     key={dir}
                     type="button"
                     onClick={() => {
@@ -152,7 +156,7 @@ export function PathPicker({
                     <Text level="label-small" className="text-content-layout-1 truncate">
                       {dir}
                     </Text>
-                  </button>
+                  </Pressable>
                 ))}
               </div>
             )}
@@ -168,13 +172,13 @@ export function PathPicker({
                       className="w-3 h-3 text-content-layout-3"
                     />
                   )}
-                  <button
+                  <Pressable
                     type="button"
                     onClick={() => navigateTo(crumb.path)}
                     className="text-label-extra-small text-content-layout-2 hover:text-content-layout-1 cursor-pointer whitespace-nowrap"
                   >
                     {crumb.label}
-                  </button>
+                  </Pressable>
                 </span>
               ))}
               {isLoading && (
@@ -197,7 +201,7 @@ export function PathPicker({
               {!isError && data && (
                 <>
                   {data.parent && (
-                    <button
+                    <Pressable
                       type="button"
                       onClick={() => navigateTo(data.parent!)}
                       className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-surface-layout-2 cursor-pointer text-left"
@@ -210,11 +214,11 @@ export function PathPicker({
                       <Text level="label-small" className="text-content-layout-2">
                         ..
                       </Text>
-                    </button>
+                    </Pressable>
                   )}
 
                   {data.directories.map((dir) => (
-                    <button
+                    <Pressable
                       key={dir.path}
                       type="button"
                       onClick={() => navigateTo(dir.path)}
@@ -228,11 +232,11 @@ export function PathPicker({
                       <Text level="label-small" className="text-content-layout-1 truncate">
                         {dir.name}
                       </Text>
-                    </button>
+                    </Pressable>
                   ))}
 
                   {files.map((file) => (
-                    <button
+                    <Pressable
                       key={file.path}
                       type="button"
                       onClick={() => {
@@ -249,7 +253,7 @@ export function PathPicker({
                       <Text level="label-small" className="text-content-layout-1 truncate">
                         {file.name}
                       </Text>
-                    </button>
+                    </Pressable>
                   ))}
 
                   {data.directories.length === 0 && files.length === 0 && (

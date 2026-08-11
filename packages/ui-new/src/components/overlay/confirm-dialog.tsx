@@ -3,6 +3,7 @@
 import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { type ReactNode, useRef } from 'react'
 import { Button } from '../element/button'
+import { IconTile, type IconTileProps } from '../element/icon-tile'
 import { HStack, VStack } from '../element/stack'
 import { InlineNotice } from '../feedback/error-state'
 import {
@@ -49,6 +50,18 @@ export interface ConfirmDialogProps {
   size?: 'base' | 'large'
 }
 
+function resolveIconAccent(
+  notice: ConfirmDialogNotice | undefined,
+  confirmVariant: ConfirmDialogProps['confirmVariant']
+): IconTileProps['accent'] {
+  if (notice?.accent === 'negative' || confirmVariant === 'negative') {
+    return 'negative'
+  }
+  if (notice?.accent === 'warning') return 'warning'
+  if (notice?.accent === 'info') return 'info'
+  return 'primary'
+}
+
 /**
  * One shared destructive-confirmation dialog (design-system §6.6, launch-polish
  * Carry-over). Names the target + the consequence next to the action, offers a
@@ -87,6 +100,7 @@ export function ConfirmDialog({
   // opt out of Radix's aria-describedby requirement (the visible notice carries
   // the context) rather than leave a dev "Missing Description" warning.
   const hasDescription = subtitle != null || description != null
+  const identityIcon = notice?.icon ?? confirmIcon
 
   const handleOpenChange = (open: boolean) => {
     if (open) return
@@ -101,7 +115,7 @@ export function ConfirmDialog({
       <ModalContentContainer open={isOpen}>
         <ModalContent
           size={size}
-          className="bg-surface-overlay shadow-elevation-3"
+          className="gap-0 overflow-hidden bg-surface-layout-1 p-0 shadow-elevation-3"
           // A confirm is a two-button decision: no third X affordance (which
           // would also silently no-op while blockCloseWhileLoading holds).
           // Escape/overlay dismissal still routes through handleOpenChange.
@@ -121,35 +135,49 @@ export function ConfirmDialog({
             cancelRef.current?.focus()
           }}
         >
-          <VStack className="gap-5 p-6 items-stretch">
-            <VStack className="gap-2 items-start">
-              <HStack className="gap-2 items-center flex-wrap">
-                <ModalTitle className="h-auto text-headline-4 text-content-layout-1">
-                  {title}
-                </ModalTitle>
-                {titleAccessory}
-              </HStack>
-              {subtitle != null && (
-                <ModalDescription className="text-content-layout-2">
-                  {subtitle}
-                </ModalDescription>
-              )}
+          <header className="border-b-(length:--border-base) border-border-layout-1 px-6 py-5">
+            <HStack className="items-start gap-3">
+              {identityIcon ? (
+                <IconTile
+                  icon={identityIcon}
+                  size="base"
+                  accent={resolveIconAccent(notice, confirmVariant)}
+                />
+              ) : null}
+              <VStack className="min-w-0 items-start gap-1">
+                <HStack className="flex-wrap items-center gap-2">
+                  <ModalTitle className="h-auto text-headline-4 text-content-layout-1">
+                    {title}
+                  </ModalTitle>
+                  {titleAccessory}
+                </HStack>
+                {subtitle != null ? (
+                  <ModalDescription className="text-body-small text-content-layout-3">
+                    {subtitle}
+                  </ModalDescription>
+                ) : null}
+              </VStack>
+            </HStack>
+          </header>
+
+          {notice || children ? (
+            <VStack className="items-stretch gap-4 p-6">
+              {notice ? (
+                <InlineNotice
+                  accent={notice.accent ?? 'warning'}
+                  icon={notice.icon}
+                  // Empty string = no heading; InlineNotice renders the title
+                  // conditionally and labels its glyph "Notice" instead.
+                  title={notice.title ?? ''}
+                  message={notice.message}
+                />
+              ) : null}
+              {children}
             </VStack>
+          ) : null}
 
-            {notice && (
-              <InlineNotice
-                accent={notice.accent ?? 'warning'}
-                icon={notice.icon}
-                // Empty string = no heading; InlineNotice renders the title
-                // conditionally and labels its glyph "Notice" instead.
-                title={notice.title ?? ''}
-                message={notice.message}
-              />
-            )}
-
-            {children}
-
-            <HStack className="gap-3 justify-end">
+          <footer className="border-t-(length:--border-base) border-border-layout-1 bg-surface-layout-1 px-6 py-4">
+            <HStack className="justify-end gap-2">
               <Button
                 ref={cancelRef}
                 variant="primary"
@@ -169,7 +197,7 @@ export function ConfirmDialog({
                 loading={loading}
               />
             </HStack>
-          </VStack>
+          </footer>
         </ModalContent>
       </ModalContentContainer>
     </Modal>

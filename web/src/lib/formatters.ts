@@ -2,6 +2,8 @@
  * Shared formatting utilities for RDST web UI.
  */
 
+import { formatDuration as formatDurationShared } from "@rs/ui-new/format";
+
 /** Format an ISO timestamp as a relative time string (e.g. "5m ago", "2d ago"). */
 export function formatTimestamp(isoString: string): string {
   if (!isoString) return "";
@@ -19,11 +21,14 @@ export function formatTimestamp(isoString: string): string {
   return date.toLocaleDateString();
 }
 
-/** Format a duration in milliseconds as a human-readable string. */
+/**
+ * Format a duration in milliseconds as a human-readable string. Delegates to
+ * the shared unit-explicit formatter with two-decimal seconds. Durations of a
+ * minute or more render as `Nm Ns` (the shared contract), which reads better
+ * than a large seconds count in the slow-query registry's max-duration column.
+ */
 export function formatDuration(ms?: number): string {
-  if (!ms || ms <= 0) return "-";
-  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
-  return `${ms.toFixed(1)}ms`;
+  return formatDurationShared({ ms: ms ?? 0 }, { decimals: 2 });
 }
 
 /** Clock-style seconds readout: `Xm Ys`, or `Ys` under a minute. */

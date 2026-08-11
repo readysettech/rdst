@@ -1,6 +1,7 @@
 import { Text } from '@rs/ui-new/text'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
+import { IconTile } from '@rs/ui-new/icon-tile'
 import { Card } from '@rs/ui-new/card'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { m } from '@rs/ui-new/motion'
@@ -22,9 +23,13 @@ export function SchemaEmptyState({ target, onInit, isLoading }: SchemaEmptyState
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ duration: 0.3 }}
-              className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500/20 to-purple-600/20 flex items-center justify-center border border-violet-500/30"
             >
-              <Icon name="sparkles" label="Initialize" className="w-8 h-8 text-violet-400" />
+              <IconTile
+                icon="sparkles"
+                accent="rising"
+                className="w-16 h-16 rounded-2xl border border-border-primary-soft"
+                iconClassName="w-8 h-8"
+              />
             </m.div>
             <VStack className="gap-1 items-center">
               <Text level="headline-4" className="text-content-layout-1">
@@ -93,7 +98,7 @@ export function SchemaEmptyState({ target, onInit, isLoading }: SchemaEmptyState
               modifier="solid"
               icon="sparkles"
               iconPosition="left"
-              label={isLoading ? 'Initializing...' : 'Initialize Schema'}
+              label={isLoading ? 'Initializing...' : 'Initialize schema'}
               onClick={onInit}
               loading={isLoading}
               disabled={isLoading}

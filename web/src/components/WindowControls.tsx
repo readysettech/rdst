@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
 import { cn } from "@rs/tailwind-base";
-import { HStack } from "@rs/ui-new/stack";
+import { Pressable } from "@rs/ui-new/pressable";
 import { Show } from "@rs/ui-new/show";
+import { HStack } from "@rs/ui-new/stack";
+import { useEffect, useState } from "react";
 import { getWindowControls } from "../lib/desktop";
 
 interface ControlButtonProps {
@@ -12,8 +13,12 @@ interface ControlButtonProps {
 }
 
 function ControlButton({ label, onClick, negative = false, children }: ControlButtonProps) {
+  // Kept as a hand-roll: OS window chrome (minimize/maximize/close) with custom
+  // SVG glyphs, a non-square h-7 w-9 hit area matching the title bar, the
+  // no-drag region marker, and a destructive close hover — none of which map to
+  // a design-system IconButton.
   return (
-    <button
+    <Pressable
       type="button"
       aria-label={label}
       title={label}
@@ -27,7 +32,7 @@ function ControlButton({ label, onClick, negative = false, children }: ControlBu
       )}
     >
       {children}
-    </button>
+    </Pressable>
   );
 }
 

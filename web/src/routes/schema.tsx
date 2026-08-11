@@ -4,6 +4,7 @@ import { Card } from '@rs/ui-new/card'
 import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
 import { Icon } from '@rs/ui-new/icon'
 import { m } from '@rs/ui-new/motion'
+import { Pressable } from '@rs/ui-new/pressable'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Tag } from '@rs/ui-new/tag'
@@ -17,8 +18,8 @@ import {
 import { toast } from '@rs/ui-new/use-toast'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
-import { RoutableNotice } from '../components/RoutableNotice'
 import { ConnectionFailureActions } from '../components/ConnectionFailureActions'
+import { RoutableNotice } from '../components/RoutableNotice'
 import {
   SchemaAddMetricDialog,
   SchemaAddRelationshipDialog,
@@ -41,11 +42,11 @@ import {
   startSchemaAnnotationRun,
   useBackgroundRun,
 } from '../lib/backgroundRuns'
+import { isConnectionFailure } from '../lib/errorContract'
 import { useTrialSource } from '../lib/trialQueries'
 import { useAnthropicValidity } from '../lib/useAnthropicValidity'
 import { useSchema } from '../lib/useSchema'
 import { useTargetPasswordLock } from '../lib/useTargetPasswordLock'
-import { isConnectionFailure } from '../lib/errorContract'
 import type {
   AddColumnData,
   AddEnumData,
@@ -79,7 +80,7 @@ function SemanticLayerInfoTooltip() {
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
+          <Pressable
             type="button"
             className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border-primary-soft/50 bg-surface-primary-soft/20 text-content-primary-soft hover:bg-surface-primary-soft/30 hover:border-border-primary-soft transition-colors"
             aria-label="What is the semantic layer?"
@@ -87,7 +88,7 @@ function SemanticLayerInfoTooltip() {
             <Text level="caption" className="leading-none font-semibold">
               i
             </Text>
-          </button>
+          </Pressable>
         </TooltipTrigger>
         <TooltipContent label={SEMANTIC_LAYER_TOOLTIP_LABEL} />
       </Tooltip>
@@ -885,7 +886,7 @@ function SchemaPage() {
                     ).map((tab) => {
                       const isActive = activeTab === tab.id
                       return (
-                        <button
+                        <Pressable
                           key={tab.id}
                           type="button"
                           role="tab"
@@ -904,7 +905,7 @@ function SchemaPage() {
                             modifier="ghost"
                             label={String(tab.count)}
                           />
-                        </button>
+                        </Pressable>
                       )
                     })}
                   </div>

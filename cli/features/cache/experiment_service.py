@@ -23,7 +23,13 @@ from shared.deploy.sandbox_manager import (
 from shared.password_resolver import resolve_password_value
 from shared.service_events import ErrorEvent, ProgressEvent
 
-from .events import CacheEvent, CacheRunCompleteEvent
+from .events import (
+    CacheCompareCompleteEvent,
+    CacheCompareSampleEvent,
+    CacheEvent,
+    CacheRunCompleteEvent,
+)
+from .live_comparison import LiveComparisonController, run_live_comparison
 from .performance_comparison import (
     ComparisonController,
     run_comparison,
@@ -84,6 +90,7 @@ class ReadysetExperimentService:
                 interval_ms=interval_ms,
                 concurrency=concurrency,
                 duration_seconds=duration_seconds,
+                live_controller=None,
             )
         )
         try:
@@ -107,6 +114,54 @@ class ReadysetExperimentService:
             except asyncio.CancelledError:
                 pass
 
+    async def compare_live(
+        self,
+        *,
+        owner_id: str,
+        target: str,
+        query: str,
+        duration_seconds: int,
+        controller: LiveComparisonController,
+    ) -> AsyncGenerator[CacheEvent, None]:
+        """Run a live equal-concurrency comparison in the managed sandbox."""
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        worker = asyncio.create_task(
+            self._compare_worker(
+                queue=queue,
+                owner_id=owner_id,
+                target=target,
+                query=query,
+                iterations=1,
+                warmup=0,
+                interval_ms=None,
+                concurrency=controller.concurrency,
+                duration_seconds=duration_seconds,
+                live_controller=controller,
+            )
+        )
+        try:
+            while True:
+                event = await queue.get()
+                if event is _DONE:
+                    break
+                yield event
+        except asyncio.CancelledError:
+            controller.cancel()
+            worker.cancel()
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
+            raise
+        finally:
+            if not worker.done():
+                controller.cancel()
+                worker.cancel()
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
+
     async def _compare_worker(
         self,
         *,
@@ -119,10 +174,11 @@ class ReadysetExperimentService:
         interval_ms: int | None,
         concurrency: int | None,
         duration_seconds: int | None,
+        live_controller: LiveComparisonController | None,
     ) -> None:
         cache_name = temporary_cache_name(owner_id, query)
         created = False
-        result_event: CacheRunCompleteEvent | None = None
+        result_event: CacheRunCompleteEvent | CacheCompareCompleteEvent | None = None
         error_event: ErrorEvent | None = None
 
         async def progress(stage: str, message: str, percent: int = 0) -> None:
@@ -153,7 +209,7 @@ class ReadysetExperimentService:
             async with self._manager.lease(
                 target=target,
                 owner_id=owner_id,
-                purpose="speed_test",
+                purpose="live_compare" if live_controller else "speed_test",
                 priority=SandboxPriority.USER_TEST,
                 progress=lambda stage, message: progress(stage, message, 10),
             ) as acquired:
@@ -231,41 +287,70 @@ class ReadysetExperimentService:
                         "Benchmarking origin and Readyset",
                         65,
                     )
-                    result = await _run_comparison_cancellable(
-                        query=query,
-                        origin=origin,
-                        readyset=readyset,
-                        iterations=iterations,
-                        warmup=warmup,
-                        interval_ms=interval_ms,
-                        concurrency=concurrency,
-                        duration_seconds=duration_seconds,
-                        progress=progress,
-                    )
+                    if live_controller is not None:
+                        result = await _run_live_comparison_cancellable(
+                            query=query,
+                            origin=origin,
+                            readyset=readyset,
+                            duration_seconds=duration_seconds or 30,
+                            controller=live_controller,
+                            event_queue=queue,
+                        )
+                    else:
+                        result = await _run_comparison_cancellable(
+                            query=query,
+                            origin=origin,
+                            readyset=readyset,
+                            iterations=iterations,
+                            warmup=warmup,
+                            interval_ms=interval_ms,
+                            concurrency=concurrency,
+                            duration_seconds=duration_seconds,
+                            progress=progress,
+                        )
                     if not result.get("success"):
                         if result.get("cancelled"):
                             raise asyncio.CancelledError
                         raise RuntimeError(
                             result.get("error") or "Speed test failed"
                         )
-                    result_event = CacheRunCompleteEvent(
-                        type="cache_run_complete",
-                        success=True,
-                        query=query,
-                        iterations=result["iterations"],
-                        origin_stats=result["original"]["stats"],
-                        cache_stats=result["readyset"]["stats"],
-                        speedup_mean=result["speedup"]["mean"],
-                        speedup_median=result["speedup"]["median"],
-                        improvement_pct=result["speedup"]["improvement_pct"],
-                        winner=result["winner"],
-                        origin_iterations=result["original"].get(
-                            "iterations", result["iterations"]
-                        ),
-                        cache_iterations=result["readyset"].get(
-                            "iterations", result["iterations"]
-                        ),
-                    )
+                    if live_controller is not None:
+                        result_event = CacheCompareCompleteEvent(
+                            type="cache_compare_complete",
+                            success=True,
+                            query=query,
+                            duration_seconds=result["duration_seconds"],
+                            elapsed_seconds=result["elapsed_seconds"],
+                            concurrency=result["concurrency"],
+                            origin=result["origin"],
+                            readyset=result["readyset"],
+                            timeline=result["timeline"],
+                            phases=result["phases"],
+                            speedup_mean=result["speedup_mean"],
+                            improvement_pct=result["improvement_pct"],
+                            winner=result["winner"],
+                        )
+                    else:
+                        result_event = CacheRunCompleteEvent(
+                            type="cache_run_complete",
+                            success=True,
+                            query=query,
+                            iterations=result["iterations"],
+                            origin_stats=result["original"]["stats"],
+                            cache_stats=result["readyset"]["stats"],
+                            origin_samples_ms=result["original"].get("times", []),
+                            cache_samples_ms=result["readyset"].get("times", []),
+                            speedup_mean=result["speedup"]["mean"],
+                            speedup_median=result["speedup"]["median"],
+                            improvement_pct=result["speedup"]["improvement_pct"],
+                            winner=result["winner"],
+                            origin_iterations=result["original"].get(
+                                "iterations", result["iterations"]
+                            ),
+                            cache_iterations=result["readyset"].get(
+                                "iterations", result["iterations"]
+                            ),
+                        )
                 finally:
                     if created:
                         await progress(
@@ -598,6 +683,61 @@ async def _run_comparison_cancellable(
                 ),
                 last_percent,
             )
+        return future.result()
+    except asyncio.CancelledError as cancellation:
+        controller.cancel()
+        while not future.done():
+            try:
+                await asyncio.shield(future)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        raise cancellation
+
+
+async def _run_live_comparison_cancellable(
+    *,
+    query: str,
+    origin: dict[str, Any],
+    readyset: dict[str, Any],
+    duration_seconds: int,
+    controller: LiveComparisonController,
+    event_queue: asyncio.Queue[Any],
+) -> dict[str, Any]:
+    """Bridge the blocking live runner into replayable background events."""
+    sample_queue: Queue = Queue()
+    future = start_blocking(
+        run_live_comparison,
+        query=query,
+        original_db_config=origin,
+        readyset_db_config=readyset,
+        duration_seconds=duration_seconds,
+        controller=controller,
+        on_sample=sample_queue.put,
+    )
+
+    async def publish_samples() -> None:
+        while True:
+            try:
+                sample = sample_queue.get_nowait()
+            except Empty:
+                return
+            await event_queue.put(
+                CacheCompareSampleEvent(
+                    type="cache_compare_sample",
+                    elapsed_seconds=sample["elapsed_seconds"],
+                    concurrency=sample["concurrency"],
+                    origin=sample["origin"],
+                    readyset=sample["readyset"],
+                )
+            )
+
+    try:
+        while not future.done():
+            await publish_samples()
+            await asyncio.sleep(0.05)
+        await publish_samples()
         return future.result()
     except asyncio.CancelledError as cancellation:
         controller.cancel()

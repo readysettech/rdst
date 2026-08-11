@@ -1,15 +1,11 @@
-import { useState, useEffect } from 'react'
-import { Text } from '@rs/ui-new/text'
-import { Button } from '@rs/ui-new/button'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { BaseInputTextarea } from '@rs/ui-new/base-input-textarea'
-import {
-  Modal,
-  ModalContent,
-  ModalContentContainer,
-  ModalTitle,
-} from '@rs/ui-new/modal'
+import { Button } from '@rs/ui-new/button'
+import { Modal, ModalContentContainer } from '@rs/ui-new/modal'
+import { Text } from '@rs/ui-new/text'
+import { useEffect, useState } from 'react'
 import type { AddTerminologyData, SchemaTerminology } from '../../types/schema'
+import { TaskDialogContent } from '../dialog/TaskDialogContent'
 
 interface SchemaAddTermDialogProps {
   isOpen: boolean
@@ -80,86 +76,96 @@ export function SchemaAddTermDialog({
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <ModalContentContainer open={isOpen}>
-        <ModalContent size="base" className="gap-6">
-          <ModalTitle>{isEditing ? 'Edit Terminology' : 'Add Terminology'}</ModalTitle>
-
-          <div className="space-y-4">
-            {/* Term */}
-            <div>
-              <Text level="label-small" className="text-content-layout-2 mb-1">
-                Term <span className="text-red-400">*</span>
-              </Text>
-              <BaseInputText
-                value={term}
-                onChange={(e) => setTerm(e.target.value)}
-                placeholder="e.g., active users"
-                disabled={isEditing}
+        <TaskDialogContent
+          size="base"
+          icon="edit"
+          title={isEditing ? 'Edit business term' : 'Add business term'}
+          description="Connect familiar language to the SQL that implements it."
+          bodyClassName="space-y-4"
+          footer={
+            <div className="flex justify-end gap-3">
+              <Button
+                modifier="ghost"
+                label="Cancel"
+                onClick={onClose}
+                disabled={isLoading}
               />
-              <Text level="body-small" className="text-content-layout-3 mt-1">
-                {isEditing ? 'Term name cannot be changed.' : 'The business term or phrase.'}
-              </Text>
-            </div>
-
-            {/* Definition */}
-            <div>
-              <Text level="label-small" className="text-content-layout-2 mb-1">
-                Definition <span className="text-red-400">*</span>
-              </Text>
-              <BaseInputTextarea
-                value={definition}
-                onChange={(e) => setDefinition(e.target.value)}
-                placeholder="e.g., Users who have logged in within the last 30 days"
-                rows={2}
+              <Button
+                variant="rising"
+                label={isEditing ? 'Save changes' : 'Add term'}
+                onClick={handleSave}
+                loading={isLoading}
+                disabled={isLoading || !isValid}
               />
-              <Text level="body-small" className="text-content-layout-3 mt-1">
-                Plain English definition of what this term means.
-              </Text>
             </div>
-
-            {/* SQL Pattern */}
-            <div>
-              <Text level="label-small" className="text-content-layout-2 mb-1">
-                SQL Pattern <span className="text-red-400">*</span>
-              </Text>
-              <BaseInputTextarea
-                value={sqlPattern}
-                onChange={(e) => setSqlPattern(e.target.value)}
-                placeholder="e.g., last_login_at > NOW() - INTERVAL '30 days'"
-                rows={2}
-                className="font-mono"
-              />
-              <Text level="body-small" className="text-content-layout-3 mt-1">
-                SQL condition or expression that implements this term.
-              </Text>
-            </div>
-
-            {/* Synonyms */}
-            <div>
-              <Text level="label-small" className="text-content-layout-2 mb-1">
-                Synonyms
-              </Text>
-              <BaseInputText
-                value={synonymsText}
-                onChange={(e) => setSynonymsText(e.target.value)}
-                placeholder="e.g., engaged users, recent users"
-              />
-              <Text level="body-small" className="text-content-layout-3 mt-1">
-                Comma-separated list of alternative names for this term.
-              </Text>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-3">
-            <Button modifier="ghost" label="Cancel" onClick={onClose} disabled={isLoading} />
-            <Button
-              label={isLoading ? 'Saving...' : isEditing ? 'Save Changes' : 'Add Term'}
-              onClick={handleSave}
-              loading={isLoading}
-              disabled={isLoading || !isValid}
+          }
+        >
+          {/* Term */}
+          <div>
+            <Text level="label-small" className="text-content-layout-2 mb-1">
+              Term <span className="text-content-negative-soft">*</span>
+            </Text>
+            <BaseInputText
+              value={term}
+              onChange={(e) => setTerm(e.target.value)}
+              placeholder="e.g., active users"
+              disabled={isEditing}
             />
+            <Text level="body-small" className="text-content-layout-3 mt-1">
+              {isEditing
+                ? 'Term name cannot be changed.'
+                : 'The business term or phrase.'}
+            </Text>
           </div>
-        </ModalContent>
+
+          {/* Definition */}
+          <div>
+            <Text level="label-small" className="text-content-layout-2 mb-1">
+              Definition <span className="text-content-negative-soft">*</span>
+            </Text>
+            <BaseInputTextarea
+              value={definition}
+              onChange={(e) => setDefinition(e.target.value)}
+              placeholder="e.g., Users who have logged in within the last 30 days"
+              rows={2}
+            />
+            <Text level="body-small" className="text-content-layout-3 mt-1">
+              Plain English definition of what this term means.
+            </Text>
+          </div>
+
+          {/* SQL Pattern */}
+          <div>
+            <Text level="label-small" className="text-content-layout-2 mb-1">
+              SQL Pattern <span className="text-content-negative-soft">*</span>
+            </Text>
+            <BaseInputTextarea
+              value={sqlPattern}
+              onChange={(e) => setSqlPattern(e.target.value)}
+              placeholder="e.g., last_login_at > NOW() - INTERVAL '30 days'"
+              rows={2}
+              className="font-mono"
+            />
+            <Text level="body-small" className="text-content-layout-3 mt-1">
+              SQL condition or expression that implements this term.
+            </Text>
+          </div>
+
+          {/* Synonyms */}
+          <div>
+            <Text level="label-small" className="text-content-layout-2 mb-1">
+              Synonyms
+            </Text>
+            <BaseInputText
+              value={synonymsText}
+              onChange={(e) => setSynonymsText(e.target.value)}
+              placeholder="e.g., engaged users, recent users"
+            />
+            <Text level="body-small" className="text-content-layout-3 mt-1">
+              Comma-separated list of alternative names for this term.
+            </Text>
+          </div>
+        </TaskDialogContent>
       </ModalContentContainer>
     </Modal>
   )

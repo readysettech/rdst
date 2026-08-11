@@ -223,7 +223,7 @@ function ScanPage() {
                     variant="primary"
                     modifier="ghost"
                     size="small"
-                    label="New Scan"
+                    label="New scan"
                     icon="search"
                     iconPosition="left"
                     onClick={handleNewScan}

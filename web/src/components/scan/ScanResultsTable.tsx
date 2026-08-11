@@ -14,6 +14,7 @@ import {
   ModalTitle,
 } from '@rs/ui-new/modal'
 import { AnimatePresence, m } from '@rs/ui-new/motion'
+import { Pressable } from '@rs/ui-new/pressable'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
@@ -400,7 +401,7 @@ function QueryRow({
       <HStack className="mt-1.5 gap-3 items-center">
         <div className="flex-1 min-w-0">
           {query.status === 'sql' && query.sql ? (
-            <button
+            <Pressable
               type="button"
               onClick={onViewDetail}
               className="text-left bg-surface-layout-2 px-2.5 py-1.5 rounded-lg hover:bg-surface-primary-soft transition-colors cursor-pointer max-w-full overflow-hidden flex items-center gap-2"
@@ -417,7 +418,7 @@ function QueryRow({
               >
                 {sqlPreview}
               </Text>
-            </button>
+            </Pressable>
           ) : query.status === 'skipped' ? (
             <Text
               level="mono-small"

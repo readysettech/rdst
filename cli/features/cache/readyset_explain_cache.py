@@ -4,6 +4,8 @@ import subprocess  # nosec B404  # nosemgrep: gitlab.bandit.B404 - subprocess re
 import json
 from typing import Dict, Any
 
+from shared.query_registry.sql_normalizer import denormalize_for_readyset
+
 
 # Tokens that mark a Readyset compatibility check that did not *complete* — a
 # transient startup/connectivity/timeout/db error — as opposed to a definitive
@@ -86,8 +88,12 @@ def explain_create_cache_readyset(
         password = test_db_config.get("password", "")
         engine = (test_db_config.get("engine") or "postgresql").lower()
 
+        # Registry queries use RDST's engine-neutral :pN placeholders.
+        # Readyset parses the upstream dialect, so translate them before
+        # sending the statement ($N for Postgres, ? for MySQL).
+        readyset_query = denormalize_for_readyset(query, engine=engine)
         # Be explicit: this helper assesses the shallow-cache path.
-        explain_query = f"EXPLAIN CREATE SHALLOW CACHE FROM {query}"
+        explain_query = f"EXPLAIN CREATE SHALLOW CACHE FROM {readyset_query}"
 
         if not quiet:
             print(
@@ -489,8 +495,11 @@ def create_cache_readyset(
         password = test_db_config.get("password", "")
         engine = (test_db_config.get("engine") or "postgresql").lower()
 
-        # Build CREATE SHALLOW CACHE command (shallow mode - no replication)
-        cache_query = f"CREATE SHALLOW CACHE FROM {query}"
+        # Build CREATE SHALLOW CACHE command (shallow mode - no replication).
+        # Keep this in lockstep with EXPLAIN so a query that validates can be
+        # created with the same engine-specific placeholder syntax.
+        readyset_query = denormalize_for_readyset(query, engine=engine)
+        cache_query = f"CREATE SHALLOW CACHE FROM {readyset_query}"
 
         if not quiet:
             print(f"Creating cache in Readyset on port {readyset_port}...")
@@ -817,7 +826,9 @@ def get_cache_id_for_query(
         password = db_config.get("password", "")
         engine = (db_config.get("engine") or "postgresql").lower()
 
-        normalized_query = " ".join(query.strip().split())
+        normalized_query = " ".join(
+            denormalize_for_readyset(query, engine=engine).strip().split()
+        )
 
         if engine == "mysql":
             cmd = [

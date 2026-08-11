@@ -38,6 +38,7 @@ from .models import (
 
 MAX_BENCHMARK_DURATION_SECONDS = 300
 MAX_BENCHMARK_MAX_COUNT = 100_000
+MAX_BENCHMARK_CONCURRENCY = 32
 
 # DML/DDL keywords that must never appear anywhere in a benchmarked statement —
 # scanned even mid-statement to defeat data-modifying CTEs, e.g.
@@ -359,11 +360,16 @@ class QueryService:
                     f"({max_count:,} requested).",
                     code="benchmark_count_capped",
                 )
-            if mode == "concurrency" or concurrency != 1:
+            if concurrency < 1 or concurrency > MAX_BENCHMARK_CONCURRENCY:
                 raise BenchmarkValidationError(
-                    "Concurrent workers are not supported by Query Load Test yet. "
-                    "Use fixed interval mode.",
-                    code="load_test_concurrency_unsupported",
+                    "Concurrent workers must be between 1 and "
+                    f"{MAX_BENCHMARK_CONCURRENCY}.",
+                    code="benchmark_concurrency_capped",
+                )
+            if interval_ms < 0:
+                raise BenchmarkValidationError(
+                    "The pacing interval cannot be negative.",
+                    code="benchmark_interval_invalid",
                 )
             # Even when the caller omits max_count, bound the loop so a tight
             # loop (interval 0) can never run unbounded.
@@ -513,7 +519,10 @@ class QueryService:
                     total_exec = sum(s.executions for s in query_stats.values())
                     total_succ = sum(s.successes for s in query_stats.values())
                     total_fail = sum(s.failures for s in query_stats.values())
-                    qps = total_exec / elapsed if elapsed > 0 else 0
+                    # Throughput reports successful work. Failed attempts stay
+                    # visible in total_failures/error rate instead of inflating
+                    # the headline QPS while latency is success-only.
+                    qps = total_succ / elapsed if elapsed > 0 else 0
                     queries_list = [s.to_model() for s in query_stats.values()]
                     if event_type == "complete":
                         return QueryBenchmarkCompleteEvent(
@@ -535,73 +544,137 @@ class QueryService:
                         queries=queries_list,
                     )
 
-            conn = create_direct_connection(target_config)
-            controller.register(conn)
+            def _has_measurements() -> bool:
+                """Return whether the run has produced an observable result."""
+                with stats_lock:
+                    return any(stats.executions > 0 for stats in query_stats.values())
+
+            scheduler_lock = Lock()
             query_index = 0
+            claimed_count = 0
+            worker_errors: list[BenchmarkValidationError] = []
 
-            try:
-                # Session-level read-only rail (B5 must-fix): even a write that
-                # slips past the lexical classifier (SELECT-invoked functions
-                # like setval()) fails at execution inside the DB. Fail closed:
-                # if the session cannot be made read-only, do not run at all.
-                try:
-                    set_session_read_only(conn, str(target_config.get("engine", "")))
-                except Exception as exc:
-                    raise BenchmarkValidationError(
-                        "Could not establish a read-only session on the target; "
-                        "benchmark aborted.",
-                        code="benchmark_read_only_session",
-                    ) from exc
-
-                last_progress_time = 0.0
-                progress_interval = 0.25
-
-                while not stop_event.is_set():
+            def _claim_query() -> _ResolvedQuery | None:
+                """Claim one bounded round-robin execution for a worker."""
+                nonlocal query_index, claimed_count
+                with scheduler_lock:
+                    if stop_event.is_set():
+                        return None
                     elapsed = time.perf_counter() - start_time
-
                     if duration_seconds and elapsed >= duration_seconds:
-                        break
-
-                    total_exec = sum(s.executions for s in query_stats.values())
-                    if effective_max_count and total_exec >= effective_max_count:
-                        break
-
+                        return None
+                    if (
+                        effective_max_count
+                        and claimed_count >= effective_max_count
+                    ):
+                        return None
                     rq = resolved_queries[query_index]
                     query_index = (query_index + 1) % len(resolved_queries)
+                    claimed_count += 1
+                    return rq
 
-                    exec_start = time.perf_counter()
+            def _worker() -> None:
+                conn = None
+                try:
+                    # Each concurrent worker owns its connection. Sharing a DB
+                    # connection would serialize driver calls and make the
+                    # advertised concurrency fictional.
+                    conn = create_direct_connection(target_config)
                     try:
-                        cursor = conn.cursor()
-                        cursor.execute(rq.sql)
-                        cursor.fetchall()
-                        cursor.close()
-                        duration_ms = (time.perf_counter() - exec_start) * 1000
-                        _record_execution(
-                            rq.identifier, rq.name, duration_ms, success=True
+                        set_session_read_only(
+                            conn, str(target_config.get("engine", ""))
                         )
-                    except Exception as e:
-                        duration_ms = (time.perf_counter() - exec_start) * 1000
-                        _record_execution(
-                            rq.identifier,
-                            rq.name,
-                            duration_ms,
-                            success=False,
-                            error_msg=str(e),
-                        )
+                    except Exception as exc:
+                        raise BenchmarkValidationError(
+                            "Could not establish a read-only session on the target; "
+                            "benchmark aborted.",
+                            code="benchmark_read_only_session",
+                        ) from exc
 
-                    now = time.perf_counter()
-                    if now - last_progress_time >= progress_interval:
+                    while not stop_event.is_set():
+                        rq = _claim_query()
+                        if rq is None:
+                            break
+
+                        exec_start = time.perf_counter()
+                        cursor = None
                         try:
-                            progress_queue.put_nowait(_progress("progress"))
-                        except Exception:
-                            pass
-                        last_progress_time = now
+                            cursor = conn.cursor()
+                            cursor.execute(rq.sql)
+                            cursor.fetchall()
+                            _record_execution(
+                                rq.identifier,
+                                rq.name,
+                                (time.perf_counter() - exec_start) * 1000,
+                                success=True,
+                            )
+                        except Exception as exc:
+                            _record_execution(
+                                rq.identifier,
+                                rq.name,
+                                (time.perf_counter() - exec_start) * 1000,
+                                success=False,
+                                error_msg=str(exc),
+                            )
+                        finally:
+                            if cursor is not None:
+                                try:
+                                    cursor.close()
+                                except Exception:
+                                    pass
 
-                    if mode == "interval" and interval_ms > 0:
-                        stop_event.wait(interval_ms / 1000.0)
-            finally:
-                controller.unregister(conn)
-                close_connection(conn)
+                        # Interval mode is intentionally a paced closed loop:
+                        # wait after the completed query. Concurrency mode keeps
+                        # the configured number of independent workers busy.
+                        if mode == "interval" and interval_ms > 0:
+                            stop_event.wait(interval_ms / 1000.0)
+                except BenchmarkValidationError as exc:
+                    with scheduler_lock:
+                        worker_errors.append(exc)
+                    stop_event.set()
+                except Exception:
+                    with scheduler_lock:
+                        worker_errors.append(
+                            BenchmarkValidationError(
+                                "A benchmark worker could not connect to the target.",
+                                code="benchmark_worker_failed",
+                            )
+                        )
+                    stop_event.set()
+                finally:
+                    if conn is not None:
+                        close_connection(conn)
+
+            worker_count = concurrency if mode == "concurrency" else 1
+            workers = [
+                threading.Thread(
+                    target=_worker,
+                    name=f"query-benchmark-{index + 1}",
+                    daemon=True,
+                )
+                for index in range(worker_count)
+            ]
+            for worker in workers:
+                worker.start()
+
+            last_progress_time = 0.0
+            progress_interval = 0.25
+            while any(worker.is_alive() for worker in workers):
+                now = time.perf_counter()
+                if (
+                    now - last_progress_time >= progress_interval
+                    and _has_measurements()
+                ):
+                    try:
+                        progress_queue.put_nowait(_progress("progress"))
+                    except Exception:
+                        pass
+                    last_progress_time = now
+                for worker in workers:
+                    worker.join(timeout=0.02)
+
+            if worker_errors:
+                raise worker_errors[0]
 
             final = _progress("complete")
             try:

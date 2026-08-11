@@ -2,16 +2,17 @@
  * Filter controls for Scan — CLI parity with rdst scan options
  */
 
-import { useState } from 'react';
-import { Button } from '@rs/ui-new/button';
-import { BaseInputText } from '@rs/ui-new/base-input-text';
 import { BaseInputSwitch } from '@rs/ui-new/base-input-switch';
-import { Text } from '@rs/ui-new/text';
-import { Icon } from '@rs/ui-new/icon';
-import { HStack, VStack } from '@rs/ui-new/stack';
+import { BaseInputText } from '@rs/ui-new/base-input-text';
+import { Button } from '@rs/ui-new/button';
 import { Card } from '@rs/ui-new/card';
+import { Icon } from '@rs/ui-new/icon';
+import { AnimatePresence, m } from '@rs/ui-new/motion';
+import { Pressable } from '@rs/ui-new/pressable';
 import { Show } from '@rs/ui-new/show';
-import { m, AnimatePresence } from '@rs/ui-new/motion';
+import { HStack, VStack } from '@rs/ui-new/stack';
+import { Text } from '@rs/ui-new/text';
+import { useState } from 'react';
 import type { ScanState } from '../../types/scan';
 import { PathPicker } from '../PathPicker';
 
@@ -103,7 +104,7 @@ export function ScanFilters({
                 <Button
                   variant="rising"
                   modifier="solid"
-                  label="Start Scan"
+                  label="Start scan"
                   icon="search"
                   iconPosition="left"
                   onClick={onStart}
@@ -126,8 +127,11 @@ export function ScanFilters({
 
             {/* Tertiary — advanced disclosure + experimental caveat */}
             <VStack className="gap-2.5 items-start">
-              {/* Advanced toggle */}
-              <button
+              {/* Advanced disclosure trigger — kept as a hand-roll: a quiet
+                  muted-text toggle whose panel renders as a separate full-width
+                  region below, so a filled ui-new Button and the single-container
+                  Disclosure would both change its look. */}
+              <Pressable
                 type="button"
                 onClick={() => setShowAdvanced(!showAdvanced)}
                 className="flex items-center gap-1.5 text-content-layout-3 hover:text-content-layout-2 transition-colors cursor-pointer"
@@ -140,7 +144,7 @@ export function ScanFilters({
                 <Text level="caption" className="inherit">
                   Advanced options
                 </Text>
-              </button>
+              </Pressable>
 
               {/* Honesty caveat — the converted SQL is AI-generated */}
               <HStack className="gap-1.5 items-center">

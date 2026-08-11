@@ -7,6 +7,8 @@ from .events import (
     CacheDropAllEvent,
     CacheEvent,
     CacheListEvent,
+    CacheCompareCompleteEvent,
+    CacheCompareSampleEvent,
     CacheRunCompleteEvent,
     CacheStatusEvent,
 )
@@ -21,6 +23,8 @@ __all__ = [
     "CacheEvent",
     "CacheInput",
     "CacheListEvent",
+    "CacheCompareCompleteEvent",
+    "CacheCompareSampleEvent",
     "CacheOptions",
     "CacheRunCompleteEvent",
     "CacheService",

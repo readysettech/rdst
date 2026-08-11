@@ -48,7 +48,7 @@ declare global {
 
 /**
  * True when running inside the rdst-desktop Electron shell on macOS, where the
- * window is transparent and native liquid glass shows through the layout.
+ * renderer reserves space for native traffic lights.
  */
 export function isDesktopMac(): boolean {
   return (

@@ -279,7 +279,8 @@ class RunRegistry:
                     preserved_speed_result = (
                         data.get("code") == "speed_test_cleanup_failed"
                         and any(
-                            record["event"] == "cache_run_complete"
+                            record["event"]
+                            in ("cache_run_complete", "cache_compare_complete")
                             for record in handle.events
                         )
                     )

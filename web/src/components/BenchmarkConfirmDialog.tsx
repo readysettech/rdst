@@ -13,7 +13,7 @@ interface BenchmarkConfirmDialogProps {
   queryCount: number
   /** Human load summary, e.g. "100ms interval · 30s" or "4 workers · 30s". */
   loadSummary: string
-  /** Estimated total executions, or null for an unbounded tight loop (interval 0). */
+  /** Theoretical request ceiling, or null for a tight loop (interval 0). */
   estimatedExecutions: number | null
   /** Server-side hard cap on total executions (shown for the tight-loop case). */
   executionCap: number
@@ -22,7 +22,7 @@ interface BenchmarkConfirmDialogProps {
 }
 
 /**
- * Pre-flight confirmation for a Benchmark run.
+ * Pre-flight confirmation for a Load test run.
  *
  * Names the destination and the planned load before any real DB work. Local
  * targets get a single explicit confirm; non-local (remote) targets get a
@@ -57,8 +57,8 @@ export function BenchmarkConfirmDialog({
 
   const execLabel =
     estimatedExecutions === null
-      ? `up to ${executionCap.toLocaleString()} executions`
-      : `~${estimatedExecutions.toLocaleString()} executions`
+      ? `hard cap ${executionCap.toLocaleString()} requests`
+      : `up to ~${estimatedExecutions.toLocaleString()} requests before query latency`
 
   const handleConfirm = () => {
     if (!remoteConfirmed) return
@@ -70,7 +70,7 @@ export function BenchmarkConfirmDialog({
       isOpen={isOpen}
       onClose={onClose}
       onConfirm={handleConfirm}
-      title={`Run Benchmark against ${target}?`}
+      title={`Run load test against ${target}?`}
       titleAccessory={
         isRemote ? (
           <Tag
@@ -88,7 +88,7 @@ export function BenchmarkConfirmDialog({
               accent: 'negative',
               icon: 'alert',
               title: 'This is a remote database',
-              message: `${target} is not a local target. Benchmark runs real read-only load against a remote — possibly production — database. Type the target name below to confirm you intend to run load against it.`,
+              message: `${target} is not a local target. Load tests run real read-only traffic against a remote — possibly production — database. Type the target name below to confirm you intend to run load against it.`,
             }
           : {
               accent: 'warning',
@@ -97,7 +97,7 @@ export function BenchmarkConfirmDialog({
               message: `The selected queries will execute repeatedly against ${target} for the configured duration. Only read-only SELECT queries are allowed — writes are rejected server-side.`,
             }
       }
-      confirmLabel={isRemote ? 'Run against remote' : 'Run benchmark'}
+      confirmLabel={isRemote ? 'Run against remote' : 'Run load test'}
       confirmVariant={isRemote ? 'negative' : 'primary'}
       confirmIcon="play"
       confirmDisabled={!remoteConfirmed}

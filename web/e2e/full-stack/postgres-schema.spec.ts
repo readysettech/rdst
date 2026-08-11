@@ -10,7 +10,7 @@ test('configures Postgres and bootstraps its schema through the UI', async ({
 
   await page.goto('/onboarding')
   await expect(
-    page.getByRole('heading', { name: 'Connect your database' })
+    page.getByRole('heading', { name: 'Start with Readyset' })
   ).toBeVisible()
   await page.locator('[name="name"]').fill('postgres-e2e')
   await page.locator('[name="host"]').fill(host)
@@ -23,19 +23,23 @@ test('configures Postgres and bootstraps its schema through the UI', async ({
   await page.getByRole('button', { name: 'Test & connect' }).click()
 
   await expect(page).toHaveURL('/')
-  await expect(page.getByText('Run a health check')).toBeVisible()
 
-  const schemaResponse = await page.request.get(
-    '/api/schema?target=postgres-e2e'
-  )
-  expect(schemaResponse.ok()).toBe(true)
-  await expect(schemaResponse.json()).resolves.toMatchObject({
-    dialect: 'postgresql',
-    tables: {
-      title_basics: expect.arrayContaining(['tconst', 'primarytitle']),
-      title_ratings: expect.arrayContaining(['tconst', 'averagerating']),
-    },
-  })
+  // Connecting starts schema discovery in the background. Poll the API for
+  // the discovered tables instead of racing the bootstrap request fired by
+  // the onboarding page.
+  await expect(async () => {
+    const schemaResponse = await page.request.get(
+      '/api/schema?target=postgres-e2e'
+    )
+    expect(schemaResponse.ok()).toBe(true)
+    await expect(schemaResponse.json()).resolves.toMatchObject({
+      dialect: 'postgresql',
+      tables: {
+        title_basics: expect.arrayContaining(['tconst', 'primarytitle']),
+        title_ratings: expect.arrayContaining(['tconst', 'averagerating']),
+      },
+    })
+  }).toPass({ timeout: 30_000 })
 
   // Connecting kicked off the background bootstrap, which initializes the
   // semantic layer on its own; wait for the layer server-side rather than

@@ -1,5 +1,13 @@
 import { useSyncExternalStore } from 'react'
-import type { CacheRunResult, CacheTestRunRequest } from '../types/cache'
+import {
+  type CacheCompareRunResult,
+  type CacheCompareSample,
+  type CacheRunResult,
+  type CacheTestRunRequest,
+  isCacheCompareRunResult,
+  isCacheCompareSample,
+  isCacheRunResult,
+} from '../types/cache'
 import type { BenchmarkRequest } from './api'
 import type { components } from './api.generated'
 import { api } from './client'
@@ -15,6 +23,7 @@ export type BackgroundRunKind =
   | 'audit'
   | 'audit_capture'
   | 'fleet_audit'
+  | 'cache_compare'
 export type BackgroundRunStatus =
   | 'running'
   | 'reconnecting'
@@ -27,7 +36,7 @@ export type BackgroundRunStatus =
   | 'interrupted'
 
 type QueryBenchmarkEvent = components['schemas']['QueryBenchmarkEvent']
-type LoadTestProgress = Extract<
+export type LoadTestProgress = Extract<
   QueryBenchmarkEvent,
   { type: 'progress' | 'complete' }
 >
@@ -49,7 +58,12 @@ export interface BackgroundRunState {
   errorCategory?: string
   result?: CacheRunResult
   loadResult?: LoadTestProgress
+  loadSamples?: LoadTestProgress[]
   loadRequest?: BenchmarkRequest
+  compareSamples?: CacheCompareSample[]
+  compareResult?: CacheCompareRunResult
+  concurrency?: number
+  durationSeconds?: number
   hidden?: boolean
   /** Saved audit/capture run to deep-link to once the run has produced one. */
   snapshotId?: string
@@ -86,6 +100,7 @@ const INITIAL_STAGES: Record<BackgroundRunKind, string> = {
   audit: 'config',
   audit_capture: 'config',
   fleet_audit: 'config',
+  cache_compare: 'connecting',
 }
 
 const BOOTSTRAP_STAGE_LABELS: Record<string, string> = {
@@ -108,6 +123,16 @@ const streaming = new Map<string, symbol>()
 const streamControllers = new Map<string, AbortController>()
 const probing = new Set<string>()
 const reconnectStatuses = new Map<string, BackgroundRunStatus>()
+
+interface RunMetadata {
+  queryHash?: string
+  queryLabel?: string
+  loadRequest?: BenchmarkRequest
+  errorCode?: string
+  errorCategory?: string
+  concurrency?: number
+  durationSeconds?: number
+}
 
 function isTerminal(status: BackgroundRunStatus): boolean {
   return TERMINAL.includes(status)
@@ -185,13 +210,7 @@ function attachRun(
   kind: BackgroundRunKind,
   target: string,
   message: string,
-  metadata: {
-    queryHash?: string
-    queryLabel?: string
-    loadRequest?: BenchmarkRequest
-    errorCode?: string
-    errorCategory?: string
-  } = {}
+  metadata: RunMetadata = {}
 ): BackgroundRunState {
   const existing = runs.get(runId)
   if (existing) return existing
@@ -218,12 +237,7 @@ function kickoffFailed(
   kind: BackgroundRunKind,
   target: string,
   message: string,
-  metadata: {
-    queryHash?: string
-    queryLabel?: string
-    errorCode?: string
-    errorCategory?: string
-  } = {}
+  metadata: RunMetadata = {}
 ): string {
   const runId = `${kind}_${target}_start_failed_${Date.now()}`
   runs.set(runId, {
@@ -304,16 +318,11 @@ export async function startCacheTestRun(
     })
     if (error || !data) {
       const envelope = normalizeHttpError(response.status, error)
-      kickoffFailed(
-        'speed_test',
-        request.target ?? '',
-        envelope.message,
-        {
-          ...metadata,
-          errorCode: envelope.code,
-          errorCategory: envelope.category,
-        }
-      )
+      kickoffFailed('speed_test', request.target ?? '', envelope.message, {
+        ...metadata,
+        errorCode: envelope.code,
+        errorCategory: envelope.category,
+      })
       return null
     }
     attachRun(
@@ -461,6 +470,75 @@ export async function startLoadTestRun(
   }
 }
 
+/** Start an equal-concurrency capacity comparison that survives route changes. */
+export async function startCacheCompareRun(request: {
+  query: string
+  target: string
+  query_hash?: string
+  label?: string
+  concurrency: number
+  duration_seconds: number
+}): Promise<string | null> {
+  const metadata: RunMetadata = {
+    queryHash: request.query_hash,
+    queryLabel: request.label,
+    concurrency: request.concurrency,
+    durationSeconds: request.duration_seconds,
+  }
+  try {
+    const response = await fetch('/api/cache/compare-runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!response.ok) {
+      throw new Error(`Comparison start failed with HTTP ${response.status}`)
+    }
+    const data = (await response.json()) as { run_id?: string }
+    if (!data.run_id) throw new Error('Comparison run ID is missing')
+    attachRun(
+      data.run_id,
+      'cache_compare',
+      request.target,
+      'Connecting both lanes...',
+      metadata
+    )
+    return data.run_id
+  } catch (error) {
+    kickoffFailed(
+      'cache_compare',
+      request.target,
+      error instanceof Error ? error.message : 'Comparison could not start',
+      metadata
+    )
+    return null
+  }
+}
+
+export async function updateCacheCompareLoad(
+  runId: string,
+  concurrency: number
+): Promise<boolean> {
+  try {
+    const response = await fetch(`/api/cache/compare-runs/${runId}/load`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ concurrency }),
+    })
+    if (!response.ok) {
+      updateRun(runId, {
+        message: `Load change failed with HTTP ${response.status}`,
+      })
+      return false
+    }
+    updateRun(runId, { concurrency })
+    return true
+  } catch {
+    updateRun(runId, { message: 'Could not change the target load' })
+    return false
+  }
+}
+
 /** Restore every in-flight run saved by this browser. */
 export function reattachBackgroundRuns(): void {
   if (reattachStarted) return
@@ -517,6 +595,14 @@ async function probeAndStream(runId: string): Promise<void> {
           ? data.metadata.label
           : current.queryLabel,
       loadRequest,
+      concurrency:
+        typeof data.metadata?.concurrency === 'number'
+          ? data.metadata.concurrency
+          : current.concurrency,
+      durationSeconds:
+        typeof data.metadata?.duration_seconds === 'number'
+          ? data.metadata.duration_seconds
+          : current.durationSeconds,
       // Keep the stream attachable until missed terminal frames (including the
       // useful failure message) have replayed.
       status:
@@ -543,7 +629,27 @@ function readStoredRuns(): StoredRun[] {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (!Array.isArray(parsed)) return []
-      return parsed as StoredRun[]
+      return parsed.map((value: unknown) => {
+        const stored = value as StoredRun
+        const normalizedResult = isCacheRunResult(stored.result)
+          ? stored.result
+          : undefined
+        const normalizedCompareResult = isCacheCompareRunResult(
+          stored.compareResult
+        )
+          ? stored.compareResult
+          : undefined
+        const normalizedSamples = Array.isArray(stored.compareSamples)
+          ? stored.compareSamples.filter(isCacheCompareSample)
+          : undefined
+        const normalized = {
+          ...stored,
+          result: normalizedResult,
+          compareResult: normalizedCompareResult,
+          compareSamples: normalizedSamples,
+        }
+        return normalized
+      })
     }
     const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!legacyRaw) return []
@@ -649,11 +755,13 @@ function applyFrame(runId: string, event: string, data: unknown): void {
         run.kind === 'load_test' &&
         typeof payload.total_executions === 'number'
       ) {
+        const sample = payload as unknown as LoadTestProgress
         updateRun(runId, {
           ...base,
           stage: 'running',
           message: `${Number(payload.total_executions).toLocaleString()} executions`,
-          loadResult: payload as unknown as LoadTestProgress,
+          loadResult: sample,
+          loadSamples: [...(run.loadSamples ?? []), sample].slice(-240),
         })
         break
       }
@@ -798,11 +906,17 @@ function applyFrame(runId: string, event: string, data: unknown): void {
       break
     case 'complete': {
       if (run.kind === 'load_test') {
+        const sample = payload as unknown as LoadTestProgress
+        const previous = run.loadSamples?.[run.loadSamples.length - 1]
         updateRun(runId, {
           ...base,
           stage: 'complete',
-          message: 'Benchmark complete',
-          loadResult: payload as unknown as LoadTestProgress,
+          message: 'Load test complete',
+          loadResult: sample,
+          loadSamples:
+            previous?.total_executions === sample.total_executions
+              ? run.loadSamples
+              : [...(run.loadSamples ?? []), sample].slice(-240),
         })
         break
       }
@@ -829,15 +943,55 @@ function applyFrame(runId: string, event: string, data: unknown): void {
       })
       break
     }
-    case 'cache_run_complete':
+    case 'cache_run_complete': {
+      const result = isCacheRunResult(payload) ? payload : undefined
       updateRun(runId, {
         ...base,
-        result: payload as unknown as CacheRunResult,
-        message: 'Performance test complete',
+        result,
+        message: result
+          ? 'Performance test complete'
+          : 'Performance result is incomplete',
         current: 100,
         total: 100,
       })
       break
+    }
+    case 'cache_compare_sample': {
+      if (!isCacheCompareSample(payload)) {
+        updateRun(runId, base)
+        break
+      }
+      const duration = run.durationSeconds ?? 30
+      updateRun(runId, {
+        ...base,
+        compareSamples: [...(run.compareSamples ?? []), payload].slice(-240),
+        concurrency: payload.concurrency,
+        stage: 'measuring',
+        message: `Comparing with ${payload.concurrency} concurrent clients`,
+        current: Math.min(
+          99,
+          Math.round((payload.elapsed_seconds / duration) * 100)
+        ),
+        total: 100,
+      })
+      break
+    }
+    case 'cache_compare_complete': {
+      const compareResult = isCacheCompareRunResult(payload)
+        ? payload
+        : undefined
+      updateRun(runId, {
+        ...base,
+        compareResult,
+        compareSamples: compareResult?.timeline ?? run.compareSamples,
+        message: compareResult
+          ? 'Live comparison complete'
+          : 'Comparison result is incomplete',
+        current: 100,
+        total: 100,
+      })
+      break
+    }
     case 'error':
     case 'annotate_error': {
       const envelope = normalizeSseError(data)

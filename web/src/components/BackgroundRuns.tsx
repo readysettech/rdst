@@ -1,5 +1,7 @@
 import { Icon } from '@rs/ui-new/icon'
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover'
+import { Pressable } from '@rs/ui-new/pressable'
+import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useQueryClient } from '@tanstack/react-query'
@@ -25,10 +27,12 @@ function titleFor(run: BackgroundRunState): string {
   if (run.kind === 'bootstrap') return `Setting up ${run.target}`
   if (run.kind === 'cache_test' || run.kind === 'speed_test')
     return `Testing ${run.queryLabel || run.queryHash || run.target}`
-  if (run.kind === 'load_test') return `Benchmark · ${run.target}`
+  if (run.kind === 'load_test') return `Load test · ${run.target}`
   if (run.kind === 'audit') return `Health check on ${run.target}`
   if (run.kind === 'fleet_audit') return 'Fleet health check'
   if (run.kind === 'audit_capture') return `Capturing ${run.target}`
+  if (run.kind === 'cache_compare')
+    return `Comparing ${run.queryLabel || run.queryHash || run.target}`
   return `Annotating ${run.target}`
 }
 
@@ -36,7 +40,7 @@ function doneLabel(run: BackgroundRunState): string {
   if (run.kind === 'bootstrap') return `${run.target} is ready`
   if (run.kind === 'cache_test' || run.kind === 'speed_test')
     return run.message || 'Performance test complete'
-  if (run.kind === 'load_test') return run.message || 'Benchmark complete'
+  if (run.kind === 'load_test') return run.message || 'Load test complete'
   if (run.kind === 'fleet_audit')
     return run.message || 'Fleet health check complete'
   if (isAuditKind(run.kind))
@@ -48,10 +52,13 @@ function terminalLabel(run: BackgroundRunState): string {
   if (run.status === 'cancelled') {
     if (run.kind === 'cache_test' || run.kind === 'speed_test')
       return 'Performance test cancelled'
+    if (run.kind === 'cache_compare') return 'Cache comparison cancelled'
     if (isHealthCheckKind(run.kind)) return 'Health check cancelled'
   }
   if (run.status !== 'done')
     return run.message || 'Background task did not finish'
+  if (run.kind === 'cache_compare')
+    return run.message || 'Cache comparison complete'
   return doneLabel(run)
 }
 
@@ -122,6 +129,7 @@ function isOpenable(run: BackgroundRunState): boolean {
     run.kind === 'cache_test' ||
     run.kind === 'speed_test' ||
     run.kind === 'load_test' ||
+    run.kind === 'cache_compare' ||
     isHealthCheckKind(run.kind)
   )
 }
@@ -137,7 +145,7 @@ function RunCard({
 }) {
   if (run.status === 'needs_key') {
     return (
-      <button
+      <Pressable
         type="button"
         onClick={onNeedsKey}
         className="w-full min-w-0 cursor-pointer rounded-lg bg-surface-warning-soft/20 px-3 py-2 text-left"
@@ -164,7 +172,7 @@ function RunCard({
             </Text>
           </VStack>
         </HStack>
-      </button>
+      </Pressable>
     )
   }
 
@@ -179,8 +187,10 @@ function RunCard({
         data-testid={`background-run-${run.runId}`}
       >
         <HStack className="items-start gap-2">
-          <span className="mt-0.5 h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-content-primary-soft border-t-transparent" />
-          <button
+          <span className="mt-0.5 shrink-0">
+            <Spinner color="primary-soft" />
+          </span>
+          <Pressable
             type="button"
             onClick={isOpenable(run) ? onOpen : undefined}
             className={`min-w-0 flex-1 text-left ${
@@ -201,15 +211,15 @@ function RunCard({
                 {detailFor(run)}
               </Text>
             </VStack>
-          </button>
-          <button
+          </Pressable>
+          <Pressable
             type="button"
             onClick={() => void cancelBackgroundRun(run.runId)}
             className="cursor-pointer text-content-layout-3 hover:text-content-layout-1"
             aria-label={`Cancel ${titleFor(run)}`}
           >
             <Icon name="close" label="" className="h-3.5 w-3.5" />
-          </button>
+          </Pressable>
         </HStack>
       </div>
     )
@@ -266,22 +276,22 @@ function RunCard({
       className={`flex min-w-0 items-center rounded-lg px-3 py-2 ${tone}`}
       data-testid={`background-run-${run.runId}`}
     >
-      <button
+      <Pressable
         type="button"
         onClick={onOpen}
         className="min-w-0 flex-1 cursor-pointer overflow-hidden text-left"
         title={isOpenable(run) ? 'View results' : 'Dismiss job'}
       >
         {content}
-      </button>
-      <button
+      </Pressable>
+      <Pressable
         type="button"
         onClick={() => dismissBackgroundRun(run.runId)}
         className="ml-2 shrink-0 cursor-pointer text-content-layout-3 hover:text-content-layout-1"
         aria-label={`Dismiss ${titleFor(run)}`}
       >
         <Icon name="close" label="" className="h-3.5 w-3.5" />
-      </button>
+      </Pressable>
     </div>
   )
 }
@@ -356,7 +366,15 @@ export function BackgroundRuns() {
     }
     if (run.kind === 'load_test') {
       setTarget(run.target)
-      void navigate({ to: '/benchmark', search: { run: run.runId } })
+      void navigate({
+        to: '/cache',
+        search: { view: 'load-test', run: run.runId },
+      })
+      return
+    }
+    if (run.kind === 'cache_compare') {
+      setTarget(run.target)
+      void navigate({ to: '/cache', search: { view: 'compare' } })
       return
     }
     if (
@@ -366,8 +384,8 @@ export function BackgroundRuns() {
       return
     setTarget(run.target)
     void navigate({
-      to: '/query-registry',
-      search: { hash: run.queryHash, run: run.runId },
+      to: '/queries',
+      search: { view: 'saved', hash: run.queryHash, run: run.runId },
     })
   }
 
@@ -375,7 +393,7 @@ export function BackgroundRuns() {
     <>
       <Popover open={jobsOpen} onOpenChange={setJobsOpen}>
         <PopoverTrigger asChild>
-          <button
+          <Pressable
             type="button"
             className={`group flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium text-content-layout-2 transition-all duration-150 ${triggerTone}`}
             aria-label={`Open jobs: ${titleFor(triggerRun)}. ${detailFor(triggerRun)} ${runs.length} total`}
@@ -397,10 +415,12 @@ export function BackgroundRuns() {
               />
             ) : pendingCount > 0 ? (
               <span
-                className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-content-primary-soft border-t-transparent"
+                className="shrink-0"
                 data-testid="running-job-spinner"
                 aria-hidden="true"
-              />
+              >
+                <Spinner color="primary-soft" />
+              </span>
             ) : (
               <Icon
                 name="notification"
@@ -434,13 +454,13 @@ export function BackgroundRuns() {
                     ? 'bg-surface-warning-soft text-content-warning-soft'
                     : pendingCount > 0
                       ? 'bg-surface-primary-soft text-content-primary-soft'
-                      : 'bg-surface-layout-3 text-content-layout-2'
+                      : 'bg-surface-layout-2 text-content-layout-2'
               }`}
               aria-hidden="true"
             >
               {runs.length > 99 ? '99+' : runs.length}
             </span>
-          </button>
+          </Pressable>
         </PopoverTrigger>
         <PopoverContent
           side="right"

@@ -45,6 +45,6 @@ describe('ComparisonCard sample counts', () => {
       />
     )
 
-    expect(screen.getByText(/12 origin \/ 10 Readyset samples/)).toBeTruthy()
+    expect(screen.getByText(/12 upstream \/ 10 Readyset samples/)).toBeTruthy()
   })
 })

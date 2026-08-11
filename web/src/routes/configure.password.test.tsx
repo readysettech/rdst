@@ -8,6 +8,7 @@ import {
   makeTarget,
   renderWithClient,
 } from '@/test-utils'
+import { SettingsPage } from '../features/settings/SettingsPage'
 import { setEnvSecret } from '../lib/api'
 import { useTrialSource } from '../lib/trialQueries'
 import { useConfigure } from '../lib/useConfigure'
@@ -16,8 +17,14 @@ import {
   fetchFleetTargets,
   useFleetStatus,
 } from '../lib/useFleet'
+import { useSystemStatus } from '../lib/useSystemStatus'
 import type { FleetConnectivityEvent } from '../types/fleet'
 import { Route } from './configure'
+
+const routerSpies = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  push: vi.fn(),
+}))
 
 vi.mock('@tanstack/react-router', () =>
   fileRouteModuleMock({
@@ -30,8 +37,8 @@ vi.mock('@tanstack/react-router', () =>
     }: {
       select: (location: { hash: string }) => unknown
     }) => select({ hash: '' }),
-    useNavigate: () => vi.fn(),
-    useRouter: () => ({ history: { push: vi.fn() } }),
+    useNavigate: () => routerSpies.navigate,
+    useRouter: () => ({ history: { push: routerSpies.push } }),
   })
 )
 vi.mock('../lib/api', async (importOriginal) => ({
@@ -49,9 +56,7 @@ vi.mock('../lib/trialQueries', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/trialQueries')>()),
   useTrialSource: vi.fn(),
 }))
-vi.mock('../lib/useSystemStatus', () => ({
-  useSystemStatus: () => ({ data: undefined }),
-}))
+vi.mock('../lib/useSystemStatus', () => ({ useSystemStatus: vi.fn() }))
 vi.mock('../lib/useAnthropicValidity', () => ({
   useAnthropicValidity: () => ({
     data: undefined,
@@ -66,7 +71,23 @@ vi.mock('../components/aws/AwsConnectionPanel', () => ({
 // row's password path; the connection list itself renders for real.
 vi.mock('../components/configure', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../components/configure')>()),
-  AddTargetsDrawer: () => null,
+  AddTargetsDrawer: ({
+    open,
+    initialTab,
+    onClose,
+  }: {
+    open: boolean
+    initialTab: string
+    onClose: () => void
+  }) =>
+    open ? (
+      <div data-testid="add-targets-drawer">
+        <span>{`Provider: ${initialTab}`}</span>
+        <button type="button" onClick={onClose}>
+          Close provider drawer
+        </button>
+      </div>
+    ) : null,
   DevSettingsSection: () => null,
 }))
 
@@ -92,7 +113,7 @@ const passwordFailure: FleetConnectivityEvent = {
 }
 
 function mockUseConfigure(listTargets: () => Promise<void>) {
-  vi.mocked(useConfigure).mockReturnValue({
+  const value = {
     listTargets,
     getTarget: vi.fn(),
     addTarget: vi.fn(),
@@ -117,12 +138,19 @@ function mockUseConfigure(listTargets: () => Promise<void>) {
     connectionTestResult: null,
     error: null,
     loading: false,
-  })
+  } satisfies ReturnType<typeof useConfigure>
+  vi.mocked(useConfigure).mockReturnValue(value)
+  return value
 }
 
 describe('Settings row password save', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(useSystemStatus).mockReturnValue({
+      data: undefined,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useSystemStatus>)
     vi.mocked(fetchFleetTargets).mockResolvedValue({
       members: [makeTarget({ name: 'orders', user: 'app_ro' })],
       groups: [],
@@ -202,5 +230,169 @@ describe('Settings row password save', () => {
     )
     expect(listTargets).toHaveBeenCalled()
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['fleet-targets'] })
+  })
+
+  it('keeps settings areas mutually exclusive while switching panels', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{}} />)
+
+    expect(await screen.findByText('Database connections')).toBeTruthy()
+    expect(screen.queryByText('AI keys')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'AI' }))
+    expect(await screen.findByText('AI keys')).toBeTruthy()
+    expect(screen.queryByText('Database connections')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Data & privacy' }))
+    expect(
+      await screen.findByText('Loading local storage details…')
+    ).toBeTruthy()
+    expect(screen.queryByText('AI keys')).toBeNull()
+  })
+
+  it('opens an edit deep link and clears it when the form is cancelled', async () => {
+    const configure = mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    configure.getTarget.mockResolvedValue({
+      name: 'orders',
+      engine: 'postgresql',
+      host: 'orders.test',
+      port: 5432,
+      database: 'orders',
+      user: 'app_ro',
+      has_password: true,
+      is_default: true,
+    })
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{ edit: 'orders' }} />)
+
+    await waitFor(() =>
+      expect(configure.getTarget).toHaveBeenCalledWith('orders')
+    )
+    expect(await screen.findByText('Edit connection')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(routerSpies.navigate).toHaveBeenCalledWith({
+      to: '/configure',
+      search: { panel: 'connections' },
+      replace: true,
+    })
+  })
+
+  it('returns to the owning feature when a connection repair is cancelled', async () => {
+    const configure = mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    configure.getTarget.mockResolvedValue({
+      name: 'orders',
+      engine: 'postgresql',
+      host: 'orders.test',
+      port: 5432,
+      database: 'orders',
+      user: 'app_ro',
+      has_password: true,
+      is_default: true,
+    })
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(
+      <SettingsPage search={{ edit: 'orders', returnTo: '/audit' }} />
+    )
+
+    expect(await screen.findByText('Edit connection')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(routerSpies.push).toHaveBeenCalledWith('/audit')
+    expect(routerSpies.navigate).not.toHaveBeenCalledWith({
+      to: '/configure',
+      search: { panel: 'connections' },
+      replace: true,
+    })
+  })
+
+  it('opens legacy AI deep links and removes the action state on close', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{ section: 'ai' }} />)
+
+    expect(await screen.findByText('AI keys')).toBeTruthy()
+    expect(
+      (await screen.findAllByText(/Anthropic API Key/)).length
+    ).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(routerSpies.navigate).toHaveBeenCalledWith({
+      to: '/configure',
+      search: { panel: 'ai' },
+      replace: true,
+    })
+  })
+
+  it('returns to the owning feature when its AI-key dialog is cancelled', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(
+      <SettingsPage search={{ section: 'ai', returnTo: '/ask' }} />
+    )
+
+    expect(
+      (await screen.findAllByText('Update Anthropic API key')).length
+    ).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(routerSpies.push).toHaveBeenCalledWith('/ask')
+    expect(routerSpies.navigate).not.toHaveBeenCalledWith({
+      to: '/configure',
+      search: { panel: 'ai' },
+      replace: true,
+    })
+  })
+
+  it('opens provider deep links on the requested source and cleans the URL on close', async () => {
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{ add: 'csv' }} />)
+
+    expect(await screen.findByText('Provider: csv')).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Close provider drawer' })
+    )
+
+    expect(routerSpies.navigate).toHaveBeenCalledWith({
+      to: '/configure',
+      search: { panel: 'connections' },
+      replace: true,
+    })
+  })
+
+  it('shows a recoverable privacy error instead of an endless loading state', async () => {
+    const refetch = vi.fn()
+    vi.mocked(useSystemStatus).mockReturnValue({
+      data: undefined,
+      isError: true,
+      refetch,
+    } as unknown as ReturnType<typeof useSystemStatus>)
+    mockUseConfigure(vi.fn().mockResolvedValue(undefined))
+    vi.mocked(useFleetStatus).mockReturnValue(
+      fleetStatusStub({ state: 'idle' }) as ReturnType<typeof useFleetStatus>
+    )
+    renderWithClient(<SettingsPage search={{ panel: 'privacy' }} />)
+
+    expect(
+      await screen.findByText("Local storage details couldn't be loaded")
+    ).toBeTruthy()
+    expect(screen.queryByText('Loading local storage details…')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(refetch).toHaveBeenCalledTimes(1)
   })
 })

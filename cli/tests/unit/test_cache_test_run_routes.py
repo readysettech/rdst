@@ -33,11 +33,15 @@ class _Client:
     def post(self, path: str, **kwargs) -> Response:
         return self.request("POST", path, **kwargs)
 
+    def patch(self, path: str, **kwargs) -> Response:
+        return self.request("PATCH", path, **kwargs)
+
 
 class StubRegistry:
     def __init__(self):
         self.started = []
         self.match_calls = []
+        self.runs = {}
 
     def find_active_matching(self, kind, target, metadata, keys):
         self.match_calls.append((kind, target, metadata, keys))
@@ -45,7 +49,21 @@ class StubRegistry:
 
     def start_factory(self, kind, target, factory, metadata=None):
         self.started.append((kind, target, factory, metadata))
-        return "speed_test_imdb_new"
+        run_id = f"{kind}_imdb_new"
+        self.runs[run_id] = {
+            "run_id": run_id,
+            "kind": kind,
+            "target": target,
+            "status": "running",
+        }
+        return run_id
+
+    def status(self, run_id):
+        run = self.runs.get(run_id)
+        return run["status"] if run else None
+
+    def describe(self, run_id):
+        return self.runs.get(run_id)
 
 
 class StubCacheService:
@@ -129,6 +147,86 @@ def test_rejects_invalid_speed_test_counts_before_start(monkeypatch):
 
     assert zero.status_code == 422
     assert excessive.status_code == 422
+    assert registry.started == []
+
+
+def test_starts_live_comparison_and_updates_its_load(monkeypatch):
+    registry = StubRegistry()
+    controllers = {}
+    monkeypatch.setattr(routes, "_run_registry", registry)
+    monkeypatch.setattr(routes, "_compare_controllers", controllers)
+    monkeypatch.setattr(routes, "_docker_runtime_status", healthy_docker)
+    monkeypatch.setattr(routes, "_probe_upstream", healthy_upstream)
+    app = FastAPI()
+    app.include_router(routes.compare_router, prefix="/api")
+    app.dependency_overrides[require_target_body] = _target_guard
+    client = _Client(app)
+
+    started = client.post(
+        "/api/cache/compare-runs",
+        json={
+            "target": "imdb",
+            "query": "SELECT 1",
+            "query_hash": "abc123",
+            "label": "Capacity check",
+            "concurrency": 4,
+            "duration_seconds": 30,
+        },
+    )
+
+    assert started.status_code == 200
+    assert started.json() == {"run_id": "cache_compare_imdb_new"}
+    kind, target, _factory, metadata = registry.started[0]
+    assert (kind, target) == ("cache_compare", "imdb")
+    assert metadata["query_hash"] == "abc123"
+    assert metadata["concurrency"] == 4
+    assert metadata["duration_seconds"] == 30
+
+    updated = client.patch(
+        "/api/cache/compare-runs/cache_compare_imdb_new/load",
+        json={"concurrency": 12},
+    )
+
+    assert updated.status_code == 200
+    assert updated.json() == {
+        "run_id": "cache_compare_imdb_new",
+        "concurrency": 12,
+    }
+    assert controllers["cache_compare_imdb_new"].concurrency == 12
+
+
+def test_rejects_invalid_live_comparison_limits(monkeypatch):
+    registry = StubRegistry()
+    monkeypatch.setattr(routes, "_run_registry", registry)
+    monkeypatch.setattr(routes, "_compare_controllers", {})
+    monkeypatch.setattr(routes, "_docker_runtime_status", healthy_docker)
+    monkeypatch.setattr(routes, "_probe_upstream", healthy_upstream)
+    app = FastAPI()
+    app.include_router(routes.compare_router, prefix="/api")
+    app.dependency_overrides[require_target_body] = _target_guard
+    client = _Client(app)
+
+    excessive_load = client.post(
+        "/api/cache/compare-runs",
+        json={
+            "target": "imdb",
+            "query": "SELECT 1",
+            "concurrency": 33,
+            "duration_seconds": 30,
+        },
+    )
+    excessive_duration = client.post(
+        "/api/cache/compare-runs",
+        json={
+            "target": "imdb",
+            "query": "SELECT 1",
+            "concurrency": 4,
+            "duration_seconds": 181,
+        },
+    )
+
+    assert excessive_load.status_code == 422
+    assert excessive_duration.status_code == 422
     assert registry.started == []
 
 

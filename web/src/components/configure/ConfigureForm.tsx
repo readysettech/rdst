@@ -34,6 +34,8 @@ interface ConfigureFormProps {
   /** Size of the primary submit button; first run uses a large hero CTA
    *  [VIS-022, VIS-035]. Defaults to `base` so other callers are unchanged. */
   submitSize?: 'base' | 'large'
+  /** The unified Add connection drawer already owns the page title. */
+  showHeader?: boolean
 }
 
 const engineOptions = [
@@ -64,29 +66,26 @@ function Disclosure({
 }) {
   return (
     <div className="rounded-xl border border-border-layout-1 overflow-hidden">
-      <button
+      <Button
         type="button"
+        label={title}
+        icon={open ? 'chevron-up' : 'chevron-down'}
+        iconPosition="right-full"
+        modifier="ghost"
+        fullWidth
         aria-expanded={open}
         aria-controls={id}
         onClick={() => onToggle(!open)}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-layout-2/50 transition-colors cursor-pointer"
-      >
-        <VStack className="gap-0.5 items-start">
-          <Text as="span" level="label-small" className="text-content-layout-1">
-            {title}
-          </Text>
-          <Show when={!!subtitle}>
-            <Text as="span" level="caption" className="text-content-layout-3">
-              {subtitle}
-            </Text>
-          </Show>
-        </VStack>
-        <Icon
-          name={open ? 'chevron-up' : 'chevron-down'}
-          label={open ? 'Collapse' : 'Expand'}
-          className="w-4 h-4 text-content-layout-3 shrink-0"
-        />
-      </button>
+        classMerge="h-auto min-h-12 rounded-none bg-transparent px-4 py-3 text-left text-content-layout-1 hover:bg-surface-layout-2/50"
+      />
+      <Show when={!!subtitle}>
+        <Text
+          level="caption"
+          className="-mt-2 block px-4 pb-3 text-content-layout-3"
+        >
+          {subtitle}
+        </Text>
+      </Show>
       <div id={id} hidden={!open} className="px-4 pb-4 pt-1">
         {children}
       </div>
@@ -197,6 +196,7 @@ export function ConfigureForm({
   testResult,
   submitLabel,
   submitSize = 'base',
+  showHeader = true,
 }: ConfigureFormProps) {
   const isAddMode = !initialData?.name
   const [connectionUrl, setConnectionUrl] = useState('')
@@ -324,18 +324,20 @@ export function ConfigureForm({
   return (
     <form onSubmit={handleSubmit}>
       <Card className="w-full">
-        <Card.Header>
-          <HStack className="gap-2 items-center">
-            <Icon
-              name={isAddMode ? 'add' : 'edit'}
-              label={isAddMode ? 'Add' : 'Edit'}
-              className="w-4 h-4 text-content-layout-3"
-            />
-            <Text level="label-medium" className="text-content-layout-1">
-              {initialData?.name ? 'Edit Target' : 'New Target'}
-            </Text>
-          </HStack>
-        </Card.Header>
+        <Show when={showHeader}>
+          <Card.Header>
+            <HStack className="gap-2 items-center">
+              <Icon
+                name={isAddMode ? 'add' : 'edit'}
+                label={isAddMode ? 'Add' : 'Edit'}
+                className="w-4 h-4 text-content-layout-3"
+              />
+              <Text level="label-medium" className="text-content-layout-1">
+                {initialData?.name ? 'Edit connection' : 'New connection'}
+              </Text>
+            </HStack>
+          </Card.Header>
+        </Show>
         <Card.Content>
           <div className="space-y-5">
             {/* Quick Setup — the primary path. Hidden when editing a known
@@ -446,8 +448,8 @@ export function ConfigureForm({
                       options={engineOptions}
                       value={engine}
                       onValueChange={(nextEngine) => {
-                        setEngine(nextEngine);
-                        if (!portTouched) setPort(defaultPortFor(nextEngine));
+                        setEngine(nextEngine)
+                        if (!portTouched) setPort(defaultPortFor(nextEngine))
                       }}
                       disabled={isLoading}
                     />
@@ -478,10 +480,10 @@ export function ConfigureForm({
                       type="number"
                       value={String(port)}
                       onChange={(e) => {
-                        setPortTouched(true);
+                        setPortTouched(true)
                         setPort(
-                          Number(e.target.value) || defaultPortFor(engine),
-                        );
+                          Number(e.target.value) || defaultPortFor(engine)
+                        )
                       }}
                       placeholder={String(defaultPortFor(engine))}
                       disabled={isLoading}
@@ -592,8 +594,8 @@ export function ConfigureForm({
                     aria-label="TLS encryption"
                     checked={tls}
                     onCheckedChange={(next) => {
-                      setTls(next);
-                      if (!next) setTlsVerify(false);
+                      setTls(next)
+                      if (!next) setTlsVerify(false)
                     }}
                     disabled={isLoading}
                   />
@@ -602,12 +604,23 @@ export function ConfigureForm({
                 <Show when={tls}>
                   <div className="space-y-4">
                     <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
-                      <label htmlFor="cfg-tls-verify" className="cursor-pointer">
+                      <label
+                        htmlFor="cfg-tls-verify"
+                        className="cursor-pointer"
+                      >
                         <VStack className="gap-0.5 items-start">
-                          <Text as="span" level="label-small" className="text-content-layout-1">
+                          <Text
+                            as="span"
+                            level="label-small"
+                            className="text-content-layout-1"
+                          >
                             Verify TLS certificate
                           </Text>
-                          <Text as="span" level="caption" className="text-content-layout-3">
+                          <Text
+                            as="span"
+                            level="caption"
+                            className="text-content-layout-3"
+                          >
                             Verify the certificate chain and database hostname
                           </Text>
                         </VStack>
@@ -623,7 +636,9 @@ export function ConfigureForm({
                     </div>
                     <Show when={tlsVerify}>
                       <div>
-                        <FieldLabel htmlFor="cfg-tls-ca">TLS CA path</FieldLabel>
+                        <FieldLabel htmlFor="cfg-tls-ca">
+                          TLS CA path
+                        </FieldLabel>
                         <BaseInputText
                           id="cfg-tls-ca"
                           name="tls_ca"
@@ -646,9 +661,7 @@ export function ConfigureForm({
               result={testResult ?? null}
               isLoading={isTesting}
               targetName={name.trim() || 'form-test'}
-              onRetry={async () =>
-                Boolean(await onTest?.(currentData()))
-              }
+              onRetry={async () => Boolean(await onTest?.(currentData()))}
             />
           </div>
         </Show>
@@ -678,8 +691,8 @@ export function ConfigureForm({
               size={submitSize}
               label={
                 initialData?.name
-                  ? 'Update Target'
-                  : (submitLabel ?? 'Add Target')
+                  ? 'Update connection'
+                  : (submitLabel ?? 'Add connection')
               }
               type="submit"
               loading={isLoading}

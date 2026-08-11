@@ -322,6 +322,190 @@ class TestQueryEntry:
         assert QueryEntry.from_dict({**base, "last_target": ["pgtest"]}).last_target == "pgtest"
 
 
+class TestQueryLifecycleMigration:
+    """The unified web lifecycle stays truthful and backward-compatible."""
+
+    def test_legacy_discovery_entry_migrates_as_new_and_saved(self):
+        entry = QueryEntry.from_dict(
+            {
+                "sql": "SELECT * FROM users",
+                "hash": "abc123",
+                "source": "top-historical",
+                "last_target": "demo",
+                "first_analyzed": "2026-08-01T10:00:00Z",
+                "last_analyzed": "2026-08-02T10:00:00Z",
+            }
+        )
+
+        lifecycle = entry.lifecycle_for("demo")
+        assert lifecycle is not None
+        assert lifecycle.first_observed_at == "2026-08-01T10:00:00Z"
+        assert lifecycle.last_observed_at == "2026-08-02T10:00:00Z"
+        assert lifecycle.saved_at == "2026-08-01T10:00:00Z"
+        assert lifecycle.sources == ["top-historical"]
+        assert entry.is_new_for("demo") is True
+
+    def test_legacy_manual_entry_is_saved_but_not_new(self):
+        entry = QueryEntry.from_dict(
+            {
+                "sql": "SELECT * FROM users",
+                "hash": "abc123",
+                "source": "manual",
+                "last_target": "demo",
+                "first_analyzed": "2026-08-01T10:00:00Z",
+                "last_analyzed": "2026-08-01T10:00:00Z",
+            }
+        )
+
+        lifecycle = entry.lifecycle_for("demo")
+        assert lifecycle is not None
+        assert lifecycle.saved_at == "2026-08-01T10:00:00Z"
+        assert lifecycle.first_observed_at == ""
+        assert entry.is_new_for("demo") is False
+
+    def test_from_dict_does_not_mutate_serialized_input(self):
+        data = {
+            "sql": "SELECT 1",
+            "hash": "abc123",
+            "last_target": ["demo"],
+        }
+
+        QueryEntry.from_dict(data)
+
+        assert data["last_target"] == ["demo"]
+        assert "target_lifecycle" not in data
+
+
+class TestQueryRegistryLifecycle:
+    def _make_registry(self, tmp_path: Path) -> QueryRegistry:
+        registry = QueryRegistry(registry_path=str(tmp_path / "queries.toml"))
+        registry.load()
+        return registry
+
+    def test_same_sql_keeps_lifecycle_for_each_target(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        query_hash, _ = registry.add_query(
+            "SELECT * FROM users",
+            source="top-historical",
+            target="demo",
+            observed=True,
+        )
+        registry.add_query(
+            "SELECT * FROM users",
+            source="scan",
+            target="analytics",
+        )
+
+        entry = registry.get_query(query_hash)
+        assert entry is not None
+        assert entry.belongs_to_target("demo") is True
+        assert entry.belongs_to_target("analytics") is True
+        assert entry.lifecycle_for("demo").sources == ["top-historical"]
+        assert entry.lifecycle_for("analytics").sources == ["scan"]
+
+    def test_review_is_target_scoped_and_first_observation_stays_reviewed(
+        self, tmp_path
+    ):
+        registry = self._make_registry(tmp_path)
+        query_hash, _ = registry.add_query(
+            "SELECT * FROM users",
+            source="top-historical",
+            target="demo",
+            observed=True,
+            save_intent=False,
+        )
+        assert registry.get_query(query_hash).is_new_for("demo") is True
+
+        assert registry.mark_reviewed(
+            query_hash,
+            target="demo",
+            reviewed_at="2026-08-03T10:00:00Z",
+        )
+        registry.add_query(
+            "SELECT * FROM users",
+            source="top-historical",
+            target="demo",
+            observed=True,
+            save_intent=False,
+        )
+
+        entry = registry.get_query(query_hash)
+        assert entry.is_new_for("demo") is False
+        assert entry.lifecycle_for("demo").reviewed_at == "2026-08-03T10:00:00Z"
+
+    def test_analysis_activity_does_not_imply_saved_intent(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        query_hash, _ = registry.add_query(
+            "SELECT * FROM users",
+            source="web",
+            target="demo",
+            analyzed=True,
+            save_intent=False,
+        )
+        registry.add_query(
+            "SELECT * FROM users",
+            source="web",
+            target="demo",
+            analyzed=True,
+            save_intent=False,
+        )
+
+        lifecycle = registry.get_query(query_hash).lifecycle_for("demo")
+        assert lifecycle.saved_at == ""
+        assert lifecycle.last_analyzed_at
+        assert lifecycle.analysis_count == 2
+        assert lifecycle.sources == ["web"]
+
+    def test_target_lifecycle_persists_across_reload(self, tmp_path):
+        registry_path = tmp_path / "queries.toml"
+        registry = QueryRegistry(registry_path=str(registry_path))
+        query_hash, _ = registry.add_query(
+            "SELECT * FROM users",
+            source="top-historical",
+            target="demo",
+            observed=True,
+        )
+        registry.mark_reviewed(
+            query_hash,
+            target="demo",
+            reviewed_at="2026-08-03T10:00:00Z",
+        )
+
+        reloaded = QueryRegistry(registry_path=str(registry_path))
+        reloaded.load()
+        lifecycle = reloaded.get_query(query_hash).lifecycle_for("demo")
+        assert lifecycle.first_observed_at
+        assert lifecycle.reviewed_at == "2026-08-03T10:00:00Z"
+        assert lifecycle.sources == ["top-historical"]
+
+    def test_default_add_query_keeps_cli_legacy_contract(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        query_hash, is_new = registry.add_query(
+            "SELECT * FROM users",
+            source="manual",
+            target="demo",
+        )
+
+        entry = registry.get_query(query_hash)
+        assert is_new is True
+        assert entry.first_analyzed
+        assert entry.last_analyzed
+        assert entry.lifecycle_for("demo").saved_at
+        assert entry.is_new_for("demo") is False
+
+    def test_review_rejects_a_target_the_query_does_not_belong_to(self, tmp_path):
+        registry = self._make_registry(tmp_path)
+        query_hash, _ = registry.add_query(
+            "SELECT * FROM users",
+            source="top-historical",
+            target="demo",
+            observed=True,
+        )
+
+        assert registry.mark_reviewed(query_hash, target="analytics") is False
+        assert registry.get_query(query_hash).lifecycle_for("analytics") is None
+
+
 class TestProceduralStatementRejection:
     """Procedural statements get a clear error, not a parse failure."""
 

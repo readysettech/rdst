@@ -1,15 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// The page module runs createFileRoute('/agents')(...) at import time; neutralise
-// it so the exported dialog can be imported without a router context. Everything
-// else in @tanstack/react-router stays real.
-vi.mock("@tanstack/react-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@tanstack/react-router")>();
-  return { ...actual, createFileRoute: () => (options: unknown) => options };
-});
-
-import { AgentDeleteDialog } from "./agents";
+import { AgentDeleteDialog } from "./-agents-page";
 import type { AgentSummary } from "../types/agents";
 
 const agent: AgentSummary = {

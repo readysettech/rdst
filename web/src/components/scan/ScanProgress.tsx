@@ -5,6 +5,7 @@
 import { Text } from '@rs/ui-new/text';
 import { Icon } from '@rs/ui-new/icon';
 import { HStack } from '@rs/ui-new/stack';
+import { Spinner } from '@rs/ui-new/spinner';
 import { Card } from '@rs/ui-new/card';
 import { m } from '@rs/ui-new/motion';
 import type { ScanPhase } from '../../types/scan';
@@ -82,7 +83,7 @@ export function ScanProgress({
                       />
                     )}
                     {status === 'active' && (
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-content-primary-soft border-t-transparent animate-spin" />
+                      <Spinner color="primary-soft" />
                     )}
                     {status === 'pending' && (
                       <div className="w-3.5 h-3.5 rounded-full border border-border-layout-1" />

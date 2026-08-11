@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from features.cache.events import CacheRunCompleteEvent
+from features.cache.events import CacheCompareCompleteEvent, CacheRunCompleteEvent
 from features.cache.experiment_service import (
     ReadysetExperimentService,
     _execute_rows_cancellable,
@@ -14,6 +14,7 @@ from features.cache.experiment_service import (
     parameter_fingerprint,
     temporary_cache_name,
 )
+from features.cache.live_comparison import LiveComparisonController
 from shared.deploy.sandbox_manager import SandboxConnection
 from shared.service_events import ErrorEvent
 
@@ -288,6 +289,59 @@ async def test_compare_creates_and_drops_only_its_named_cache(experiment_stubs):
     ]
     assert manager.acquired[0]["target"] == "origin"
     assert manager.lease_value.dirty_reasons == []
+
+
+@pytest.mark.asyncio
+async def test_live_compare_reuses_the_temporary_cache_lifecycle(
+    experiment_stubs, monkeypatch
+):
+    async def live_comparison(**_kwargs):
+        return {
+            "success": True,
+            "query": "SELECT 1",
+            "duration_seconds": 30,
+            "elapsed_seconds": 30.1,
+            "concurrency": 4,
+            "origin": {"throughput_rps": 10.0, "mean_ms": 20.0},
+            "readyset": {"throughput_rps": 100.0, "mean_ms": 1.0},
+            "timeline": [],
+            "phases": [{"elapsed_seconds": 0.0, "concurrency": 4}],
+            "speedup_mean": 20.0,
+            "improvement_pct": 1900.0,
+            "winner": "readyset",
+        }
+
+    monkeypatch.setattr(
+        "features.cache.experiment_service._run_live_comparison_cancellable",
+        live_comparison,
+    )
+    manager = _Manager()
+    cache = _Cache(manager=manager)
+    controller = LiveComparisonController(4)
+    service = ReadysetExperimentService(manager, cache)
+
+    events = [
+        event
+        async for event in service.compare_live(
+            owner_id="cache_compare_123",
+            target="origin",
+            query="SELECT 1",
+            duration_seconds=30,
+            controller=controller,
+        )
+    ]
+
+    result = next(
+        event for event in events if isinstance(event, CacheCompareCompleteEvent)
+    )
+    cache_name = temporary_cache_name("cache_compare_123", "SELECT 1")
+    assert result.readyset["throughput_rps"] == 100.0
+    assert cache.statements == [
+        "EXPLAIN CREATE CACHE FROM SELECT 1",
+        f"CREATE CACHE {cache_name} FROM SELECT 1",
+        f"DROP CACHE {cache_name}",
+    ]
+    assert manager.acquired[0]["purpose"] == "live_compare"
 
 
 @pytest.mark.asyncio

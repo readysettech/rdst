@@ -6,7 +6,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Button } from '@rs/ui-new/button'
-import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { Text } from '@rs/ui-new/text'
@@ -146,9 +145,14 @@ function MockComparisonResult({ result }: { result: CacheRunResult }) {
             {isWinner ? 'ReadySet cache outperforms origin' : 'Origin is faster — cache may need warming'}
           </Text>
         </HStack>
-        <button type="button" className="p-1 rounded-md hover:bg-surface-layout-2 transition-colors text-content-layout-3 hover:text-content-layout-1 cursor-pointer">
-          <Icon name="close" label="Dismiss" className="w-4 h-4" />
-        </button>
+        <Button
+          variant="primary"
+          modifier="ghost"
+          size="small"
+          icon="close"
+          iconPosition="icon"
+          label="Dismiss"
+        />
       </div>
       <div className="px-5 py-4 grid grid-cols-2 gap-6">
         <div className="space-y-2">
@@ -307,7 +311,7 @@ function TestPage() {
           <Button
             variant="primary"
             modifier="solid"
-            label="Open Small Query Dialog"
+            label="Open small query dialog"
             onClick={() => setOpenDialog('small')}
           />
           <ParameterDialog
@@ -329,7 +333,7 @@ function TestPage() {
           <Button
             variant="primary"
             modifier="solid"
-            label="Open Medium Query Dialog"
+            label="Open medium query dialog"
             onClick={() => setOpenDialog('medium')}
           />
           <ParameterDialog
@@ -351,7 +355,7 @@ function TestPage() {
           <Button
             variant="primary"
             modifier="solid"
-            label="Open Large Query Dialog"
+            label="Open large query dialog"
             onClick={() => setOpenDialog('large')}
           />
           <ParameterDialog
@@ -374,7 +378,7 @@ function TestPage() {
           <Button
             variant="primary"
             modifier="solid"
-            label="Open Pre-filled Dialog"
+            label="Open pre-filled dialog"
             onClick={() => setOpenDialog('prefilled')}
           />
           <ParameterDialog
@@ -392,12 +396,12 @@ function TestPage() {
         {/* Custom submit label */}
         <div className="border border-border-layout-1 rounded-lg p-4 space-y-3">
           <Text level="label-small" className="text-content-layout-1">
-            Custom submit label — "Run Comparison" with play icon
+            Custom submit label — "Run comparison" with play icon
           </Text>
           <Button
             variant="primary"
             modifier="solid"
-            label="Open Custom Label Dialog"
+            label="Open custom label dialog"
             onClick={() => setOpenDialog('custom-label')}
           />
           <ParameterDialog
@@ -408,7 +412,7 @@ function TestPage() {
               setOpenDialog(null)
             }}
             query={MEDIUM_QUERY}
-            submitLabel="Run Comparison"
+            submitLabel="Run comparison"
             submitIcon="play"
           />
         </div>

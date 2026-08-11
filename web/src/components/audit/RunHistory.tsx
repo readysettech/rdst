@@ -2,6 +2,7 @@ import type { IconStrokeName } from '@rs/ui-icons/icon-name'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
 import { Icon } from '@rs/ui-new/icon'
+import { InteractiveRow } from '@rs/ui-new/interactive-row'
 import { Show } from '@rs/ui-new/show'
 import { Spinner } from '@rs/ui-new/spinner'
 import { HStack, VStack } from '@rs/ui-new/stack'
@@ -85,12 +86,11 @@ function HistoryRow({
   onOpen: (entry: HistoryEntry) => void
 }) {
   return (
-    <button
-      type="button"
+    <InteractiveRow
+      label={`Open ${entry.scopeLabel} report`}
+      active={active}
       onClick={() => onOpen(entry)}
-      className={`group w-full text-left px-4 py-2 hover:bg-surface-layout-2/50 transition-colors cursor-pointer ${
-        active ? 'bg-surface-primary-soft/10' : ''
-      }`}
+      className="px-4 py-2 hover:bg-surface-layout-2/50"
     >
       <HStack className="justify-between items-center gap-4">
         <VStack className="gap-1 items-start min-w-0">
@@ -147,7 +147,7 @@ function HistoryRow({
           />
         </HStack>
       </HStack>
-    </button>
+    </InteractiveRow>
   )
 }
 

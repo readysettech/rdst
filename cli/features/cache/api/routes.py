@@ -13,6 +13,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from features.cache.live_comparison import (
+    MAX_COMPARE_CONCURRENCY_PER_LANE,
+    MAX_COMPARE_DURATION_SECONDS,
+    MIN_COMPARE_CONCURRENCY_PER_LANE,
+    MIN_COMPARE_DURATION_SECONDS,
+    LiveComparisonController,
+)
 from features.cache.performance_comparison import (
     MAX_COMPARISON_ITERATIONS,
     MAX_COMPARISON_WARMUP,
@@ -25,6 +32,7 @@ from shared.db_connection import probe_target_connection
 from shared.run_registry import run_registry
 
 router = APIRouter(prefix="/cache", tags=["cache"])
+compare_router = APIRouter(prefix="/cache", tags=["cache"])
 
 
 class CacheRunRequest(BaseModel):
@@ -49,6 +57,35 @@ class CacheTestRunRequest(CacheRunRequest):
 
 class CacheTestRunStartResponse(BaseModel):
     run_id: str
+
+
+class CacheCompareRunRequest(BaseModel):
+    query: str
+    target: Optional[str] = None
+    query_hash: Optional[str] = None
+    label: Optional[str] = None
+    concurrency: int = Field(
+        default=4,
+        ge=MIN_COMPARE_CONCURRENCY_PER_LANE,
+        le=MAX_COMPARE_CONCURRENCY_PER_LANE,
+    )
+    duration_seconds: int = Field(
+        default=30,
+        ge=MIN_COMPARE_DURATION_SECONDS,
+        le=MAX_COMPARE_DURATION_SECONDS,
+    )
+
+
+class CacheCompareLoadRequest(BaseModel):
+    concurrency: int = Field(
+        ge=MIN_COMPARE_CONCURRENCY_PER_LANE,
+        le=MAX_COMPARE_CONCURRENCY_PER_LANE,
+    )
+
+
+class CacheCompareLoadResponse(BaseModel):
+    run_id: str
+    concurrency: int
 
 
 class SandboxStatusResponse(BaseModel):
@@ -79,6 +116,14 @@ class SandboxPrewarmResponse(BaseModel):
 
 # Tests replace this with an isolated process-local registry.
 _run_registry = run_registry
+_compare_controllers: dict[str, LiveComparisonController] = {}
+
+
+def _prune_compare_controllers() -> None:
+    terminal = (None, "done", "partial", "failed", "cancelled")
+    for run_id in list(_compare_controllers):
+        if _run_registry.status(run_id) in terminal:
+            _compare_controllers.pop(run_id, None)
 
 
 async def _probe_upstream(target_config: dict) -> dict:
@@ -227,3 +272,62 @@ async def start_cache_test_run(
         metadata=metadata,
     )
     return CacheTestRunStartResponse(run_id=run_id)
+
+
+@compare_router.post("/compare-runs", response_model=CacheTestRunStartResponse)
+async def start_cache_compare_run(
+    request: CacheCompareRunRequest,
+    guard: TargetGuard = Depends(require_target_body),
+) -> CacheTestRunStartResponse:
+    """Start an adjustable, equal-concurrency comparison in the same sandbox."""
+    from ..experiment_service import ReadysetExperimentService, parameter_fingerprint
+
+    await _require_readyset_runtime()
+    await _require_healthy_upstream(guard)
+    _prune_compare_controllers()
+    controller = LiveComparisonController(request.concurrency)
+    service = ReadysetExperimentService()
+    metadata = {
+        "query_hash": request.query_hash
+        or hashlib.sha256(request.query.encode()).hexdigest()[:16],
+        "label": request.label,
+        "parameter_fingerprint": parameter_fingerprint(request.query),
+        "concurrency": request.concurrency,
+        "duration_seconds": request.duration_seconds,
+    }
+    run_id = _run_registry.start_factory(
+        "cache_compare",
+        guard.target_name,
+        lambda owner_id: service.compare_live(
+            owner_id=owner_id,
+            target=guard.target_name,
+            query=request.query,
+            duration_seconds=request.duration_seconds,
+            controller=controller,
+        ),
+        metadata=metadata,
+    )
+    _compare_controllers[run_id] = controller
+    return CacheTestRunStartResponse(run_id=run_id)
+
+
+@compare_router.patch(
+    "/compare-runs/{run_id}/load", response_model=CacheCompareLoadResponse
+)
+async def update_cache_compare_load(
+    run_id: str, request: CacheCompareLoadRequest
+) -> CacheCompareLoadResponse:
+    """Adjust the in-flight clients for an active live comparison."""
+    _prune_compare_controllers()
+    run = _run_registry.describe(run_id)
+    controller = _compare_controllers.get(run_id)
+    if run is None or run.get("kind") != "cache_compare":
+        raise HTTPException(status_code=404, detail="Comparison run not found")
+    if run.get("status") != "running" or controller is None:
+        raise HTTPException(
+            status_code=409, detail="Comparison is no longer running"
+        )
+    controller.set_concurrency(request.concurrency)
+    return CacheCompareLoadResponse(
+        run_id=run_id, concurrency=controller.concurrency
+    )

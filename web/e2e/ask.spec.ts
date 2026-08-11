@@ -1,6 +1,7 @@
 import {
   configureTestTarget,
   expect,
+  mockConnectivityOk,
   setBackendFixtures,
   test,
 } from './fixtures'
@@ -82,6 +83,8 @@ test('asks a question and renders the answer first with the post-validation SQL 
     ],
   })
   await configureTestTarget(page, { hasPassword: true })
+  // Ask preflights target reachability before POST /api/ask.
+  await mockConnectivityOk(page)
   const requests: Record<string, unknown>[] = []
   page.on('request', (request) => {
     if (
@@ -97,9 +100,13 @@ test('asks a question and renders the answer first with the post-validation SQL 
 
   const question = 'Who are our highest revenue customers?'
   await page
-    .getByPlaceholder('Ask a question about your data...')
+    .getByPlaceholder(
+      'For example: Which customers placed the most orders this month?'
+    )
     .fill(question)
-  await page.getByRole('button', { name: 'Ask' }).click()
+  // The composer submit is the only button named "Ask" — the view switcher's
+  // "Ask" segment is a tab, so it never collides on the button role.
+  await page.getByRole('button', { name: 'Get answer' }).click()
 
   // Answer-first: the results table leads, with provenance stamped from the
   // stream's own target and the plain-English explanation beside it.
@@ -132,14 +139,14 @@ test('asks a question and renders the answer first with the post-validation SQL 
   ).toBeVisible()
 
   // The silent auto-save is surfaced with the returned registry label.
-  await expect(
-    page.getByText('Saved to Queries as top customers')
-  ).toBeVisible()
+  await expect(page.getByText('Saved as top customers')).toBeVisible()
 
   // Only "Ask another" clears the input.
   await page.getByRole('button', { name: 'Ask another' }).click()
   await expect(
-    page.getByPlaceholder('Ask a question about your data...')
+    page.getByPlaceholder(
+      'For example: Which customers placed the most orders this month?'
+    )
   ).toHaveValue('')
 })
 
@@ -205,6 +212,8 @@ test('answers a clarification and resumes the original ask session', async ({
     ],
   })
   await configureTestTarget(page, { hasPassword: true })
+  // Ask preflights target reachability before POST /api/ask.
+  await mockConnectivityOk(page)
   const requests: Record<string, unknown>[] = []
   page.on('request', (request) => {
     if (
@@ -218,9 +227,13 @@ test('answers a clarification and resumes the original ask session', async ({
   await page.goto('/ask')
   const question = 'How much revenue did we make?'
   await page
-    .getByPlaceholder('Ask a question about your data...')
+    .getByPlaceholder(
+      'For example: Which customers placed the most orders this month?'
+    )
     .fill(question)
-  await page.getByRole('button', { name: 'Ask' }).click()
+  // The composer submit is the only button named "Ask" — the view switcher's
+  // "Ask" segment is a tab, so it never collides on the button role.
+  await page.getByRole('button', { name: 'Get answer' }).click()
 
   // Calm clarification heading with the original question echoed above the
   // options — never dropped.
@@ -280,6 +293,8 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
     ],
   })
   await configureTestTarget(page, { hasPassword: true })
+  // Ask preflights target reachability before POST /api/ask.
+  await mockConnectivityOk(page)
   const requests: Record<string, unknown>[] = []
   page.on('request', (request) => {
     if (
@@ -293,9 +308,13 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
   await page.goto('/ask')
   const question = 'Show recent orders'
   await page
-    .getByPlaceholder('Ask a question about your data...')
+    .getByPlaceholder(
+      'For example: Which customers placed the most orders this month?'
+    )
     .fill(question)
-  await page.getByRole('button', { name: 'Ask' }).click()
+  // The composer submit is the only button named "Ask" — the view switcher's
+  // "Ask" segment is a tab, so it never collides on the button role.
+  await page.getByRole('button', { name: 'Get answer' }).click()
 
   await expect(
     page.getByText("Couldn't generate SQL", { exact: true })
@@ -310,7 +329,15 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
   ).toBeVisible()
 
   // TRUE retry: the SAME question is re-run — the input is never wiped.
+  // The retry renders the same error text as the first attempt, so waiting on
+  // it cannot distinguish the attempts; synchronize on the second POST itself.
+  const retryRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/ask'
+  )
   await page.getByRole('button', { name: 'Try again' }).click()
+  await retryRequest
   await expect(
     page.getByText("Couldn't generate SQL", { exact: true })
   ).toBeVisible()
@@ -322,9 +349,9 @@ test('a streamed Ask failure keeps the question and Try again re-runs it', async
   // Only "Ask another" clears the box and returns to a clean input.
   await page.getByRole('button', { name: 'Ask another' }).click()
   await expect(
-    page.getByPlaceholder('Ask a question about your data...')
+    page.getByPlaceholder(
+      'For example: Which customers placed the most orders this month?'
+    )
   ).toHaveValue('')
-  await expect(
-    page.getByRole('button', { name: 'Ask' })
-  ).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Get answer' })).toBeDisabled()
 })

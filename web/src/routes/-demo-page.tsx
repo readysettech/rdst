@@ -10,6 +10,7 @@ import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
 import { Dropdown } from '@rs/ui-new/dropdown'
 import { Icon } from '@rs/ui-new/icon'
 import { Popover, PopoverContent, PopoverTrigger } from '@rs/ui-new/popover'
+import { Pressable } from '@rs/ui-new/pressable'
 import { Text } from '@rs/ui-new/text'
 import {
   Tooltip,
@@ -20,7 +21,7 @@ import {
 import { useDisclosure } from '@rs/ui-new/use-disclosure'
 import { toast } from '@rs/ui-new/use-toast'
 import { useNavigate } from '@tanstack/react-router'
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
+import type { CSSProperties } from 'react'
 import {
   Fragment,
   useCallback,
@@ -30,10 +31,14 @@ import {
   useRef,
   useState,
 } from 'react'
+import {
+  ComparisonLineChart,
+  comparisonChartMax,
+} from '../components/ComparisonLineChart'
 import { buildParameterHighlights } from '../components/parameterHighlighting'
-import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
 import { SQLDisplay } from '../components/SQLDisplay'
 import { TableHeaderCell } from '../components/TableHeaderCell'
+import { TrialRegistrationDialog } from '../components/TrialRegistrationDialog'
 import {
   type ContainerProgress,
   type DiscoveryMode,
@@ -188,14 +193,6 @@ function formatMs(value: number | null | undefined) {
 function formatWholeMs(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return '—'
   return `${Math.round(value).toLocaleString()} ms`
-}
-
-function niceMax(value: number) {
-  if (value <= 100) return 100
-  const power = 10 ** Math.floor(Math.log10(value))
-  const scaled = value / power
-  const nice = scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10
-  return nice * power
 }
 
 // Turn a workload query with literal values into the parameterized shape that
@@ -377,15 +374,6 @@ function ThroughputChart({
   // the hero provides a single elevated container. [VIS-105, VIS-127]
   bare?: boolean
 }) {
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
-  const W = 920
-  const H = 250
-  // Wider right gutter reserves room for the end-of-line value labels that keep
-  // both series legible at high lift (the baseline would otherwise flatten onto
-  // the x-axis and vanish). [T16, audit LOW #9, VIS-011]
-  const m = { left: 42, right: 70, top: 16, bottom: 40 }
-  const plotW = W - m.left - m.right
-  const plotH = H - m.top - m.bottom
   const windowSeconds = windowMode === '1m' ? 60 : 300
   const allPts = useMemo(() => samples.slice(-600), [samples])
   const latest = latestSample(allPts)
@@ -402,49 +390,12 @@ function ThroughputChart({
     () => allPts.filter((p) => p.t >= start - 1),
     [allPts, start]
   )
-  const maxY = niceMax(
+  const maxY = comparisonChartMax(
     Math.max(100, ...pts.flatMap((p) => [p.direct.qps, p.router.qps]))
   )
-  const xFor = (t: number) => m.left + ((t - start) / span) * plotW
-  const yFor = (qps: number) => m.top + plotH - (qps / maxY) * plotH
-  const points = (sel: (p: LoadSample) => number) =>
-    pts.map((p) => `${xFor(p.t)},${yFor(sel(p))}`).join(' ')
-  const hover = hoverIndex == null ? null : pts[hoverIndex]
   const visibleEvents = events
     .filter((e) => e.t >= start && e.t <= end + 2)
     .slice(-8)
-
-  const nearEvent = hover
-    ? visibleEvents.reduce<{ event: LoadEvent; d: number } | null>(
-        (best, event) => {
-          const d = Math.abs(xFor(event.t) - xFor(hover.t))
-          if (!best || d < best.d) return { event, d }
-          return best
-        },
-        null
-      )
-    : null
-  // Event text appears only when the crosshair sits within a few px of the
-  // marker; ordinary points show throughput values with no event text.
-  const hoverEvent = nearEvent && nearEvent.d <= 7 ? nearEvent.event : null
-  const tipHeight = hoverEvent ? 96 : 74
-
-  function onPointerMove(e: ReactPointerEvent<SVGSVGElement>) {
-    if (!pts.length) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    const width = rect.width || W
-    const svgX = ((e.clientX - rect.left) / width) * W
-    let best = 0
-    let bestDistance = Number.POSITIVE_INFINITY
-    pts.forEach((p, i) => {
-      const distance = Math.abs(xFor(p.t) - svgX)
-      if (distance < bestDistance) {
-        best = i
-        bestDistance = distance
-      }
-    })
-    setHoverIndex(best)
-  }
 
   return (
     <div
@@ -457,15 +408,18 @@ function ThroughputChart({
             <Text as="h2" level="subtitle-2" className="text-content-layout-1">
               Total throughput
             </Text>
+            {/* Raw button: TooltipTrigger asChild target. IconButton wraps
+                itself in a Tooltip, which would nest tooltips and break
+                asChild's single-child ref forwarding. */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
+                <Pressable
                   type="button"
                   aria-label="About this chart"
                   className="inline-flex h-4 w-4 items-center justify-center text-content-layout-3 hover:text-content-layout-1"
                 >
                   <Icon name="info" label="" className="h-4 w-4" />
-                </button>
+                </Pressable>
               </TooltipTrigger>
               <TooltipContent label={CHART_INFO_TOOLTIP} />
             </Tooltip>
@@ -492,212 +446,46 @@ function ThroughputChart({
           )}
         </div>
       </TooltipProvider>
-      <div className="overflow-x-auto">
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          width="100%"
-          role="img"
-          aria-label={`Total throughput chart with ${pts.length} history samples`}
-          className="min-w-[720px]"
-          onPointerMove={onPointerMove}
-          onPointerLeave={() => setHoverIndex(null)}
-        >
-          {[0, 0.5, 1].map((g) => {
-            const y = m.top + plotH - g * plotH
-            const value = g * maxY
-            return (
-              <Fragment key={g}>
-                <line
-                  x1={m.left}
-                  y1={y}
-                  x2={W - m.right}
-                  y2={y}
-                  stroke="var(--qpdemo-grid)"
-                  strokeWidth="1"
-                />
-                <text x={m.left - 8} y={y + 4} textAnchor="end">
-                  {formatAxis(value)}
-                </text>
-              </Fragment>
-            )
-          })}
-          <text x={m.left} y={H - 16}>
-            {formatSpanLabel(span)}
-          </text>
-          <text x={W - m.right} y={H - 16} textAnchor="end">
-            now
-          </text>
-
-          {visibleEvents.map((event, i) => {
-            const x = xFor(event.t)
-            return (
-              <line
-                key={`${event.t}-${event.type}-${i}`}
-                x1={x}
-                y1={m.top}
-                x2={x}
-                y2={m.top + plotH}
-                stroke="var(--color-border-layout-1)"
-                strokeDasharray="3 4"
-              >
-                <title>{eventDescription(event)}</title>
-              </line>
-            )
-          })}
-
-          {pts.length > 0 && (
-            <>
-              <polyline
-                points={points((p) => p.direct.qps)}
-                fill="none"
-                stroke="var(--qpdemo-control)"
-                strokeWidth="2.2"
-                strokeLinejoin="round"
-              />
-              <polyline
-                points={points((p) => p.router.qps)}
-                fill="none"
-                stroke="var(--qpdemo-router)"
-                strokeWidth="2.4"
-                strokeLinejoin="round"
-              />
-            </>
-          )}
-          {latest &&
-            (() => {
-              // Keep BOTH series legible even when the cached line rockets to
-              // ~3k qps and the ~16 qps baseline would otherwise collapse onto the
-              // x-axis. The polylines stay exact; the endpoint dot for the baseline
-              // is nudged just off the axis, and each series gets an end-of-line
-              // value label in the right gutter. The gap between the lines is the
-              // whole story, so the baseline must never vanish. [T16, LOW #9, VIS-011]
-              const axisY = m.top + plotH
-              const labelX = W - m.right + 8
-              const routerVal = latest.router.qps
-              const directVal = latest.direct.qps
-              const routerDotY = clamp(yFor(routerVal), m.top + 2, axisY)
-              const directDotY = Math.min(yFor(directVal), axisY - 4)
-              const MIN_GAP = 14
-              let ry = clamp(yFor(routerVal), m.top + 6, axisY - 6)
-              let dy = clamp(yFor(directVal), m.top + 6, axisY - 6)
-              if (Math.abs(ry - dy) < MIN_GAP) {
-                if (routerVal >= directVal) {
-                  dy = Math.min(axisY - 6, ry + MIN_GAP)
-                  ry = dy - MIN_GAP
-                } else {
-                  ry = Math.min(axisY - 6, dy + MIN_GAP)
-                  dy = ry - MIN_GAP
-                }
-              }
-              const lifted = routerVal >= directVal * 1.5
-              return (
-                <>
-                  <circle
-                    cx={xFor(latest.t)}
-                    cy={routerDotY}
-                    r="3.5"
-                    fill="var(--qpdemo-router)"
-                  />
-                  <circle
-                    cx={xFor(latest.t)}
-                    cy={directDotY}
-                    r="3.5"
-                    fill="var(--qpdemo-control)"
-                  />
-                  <text
-                    className="endlabel"
-                    x={labelX}
-                    y={ry + 4}
-                    style={{ fill: 'var(--qpdemo-router)' }}
-                  >
-                    {formatQps(routerVal)} qps
-                  </text>
-                  <text
-                    className="endlabel"
-                    x={labelX}
-                    y={dy + 4}
-                    style={{ fill: 'var(--qpdemo-control)' }}
-                  >
-                    {formatQps(directVal)} qps
-                  </text>
-                  {lifted && (
-                    <text
-                      x={labelX}
-                      y={dy + 17}
-                      style={{ fill: 'var(--color-content-layout-3)' }}
-                    >
-                      baseline
-                    </text>
-                  )}
-                </>
-              )
-            })()}
-
-          {hover && (
-            <g pointerEvents="none">
-              <line
-                x1={xFor(hover.t)}
-                y1={m.top}
-                x2={xFor(hover.t)}
-                y2={m.top + plotH}
-                stroke="var(--color-content-layout-2)"
-                strokeDasharray="2 3"
-              />
-              <circle
-                cx={xFor(hover.t)}
-                cy={yFor(hover.router.qps)}
-                r="4"
-                fill="var(--qpdemo-router)"
-              />
-              <circle
-                cx={xFor(hover.t)}
-                cy={yFor(hover.direct.qps)}
-                r="4"
-                fill="var(--qpdemo-control)"
-              />
-              <g
-                transform={`translate(${Math.min(xFor(hover.t) + 10, W - 214)}, ${m.top + 8})`}
-              >
-                <rect
-                  width="204"
-                  height={tipHeight}
-                  rx="8"
-                  fill="var(--color-surface-layout-1)"
-                  stroke="var(--color-border-layout-1)"
-                />
-                <text x="10" y="20" className="endlabel">
-                  {new Date(hover.t * 1000).toLocaleTimeString([], {
-                    minute: '2-digit',
-                    second: '2-digit',
-                  })}
-                </text>
-                <text x="10" y="42" style={{ fill: 'var(--qpdemo-router)' }}>
-                  Readyset path: {formatQps(hover.router.qps)} qps
-                </text>
-                <text x="10" y="62" style={{ fill: 'var(--qpdemo-control)' }}>
-                  Postgres direct: {formatQps(hover.direct.qps)} qps
-                </text>
-                {hoverEvent && (
-                  <text
-                    x="10"
-                    y="84"
-                    className="endlabel"
-                    style={{ fill: 'var(--color-content-layout-1)' }}
-                  >
-                    {eventDescription(hoverEvent)}
-                  </text>
-                )}
-              </g>
-            </g>
-          )}
-
-          {!pts.length && (
-            <text x={W / 2} y={H / 2} textAnchor="middle">
-              Waiting for load history
-            </text>
-          )}
-        </svg>
-      </div>
+      <ComparisonLineChart
+        series={[
+          {
+            id: 'readyset',
+            label: 'Readyset path',
+            color: 'var(--qpdemo-router)',
+            points: pts.map((point) => ({
+              x: point.t,
+              y: point.router.qps,
+            })),
+          },
+          {
+            id: 'upstream',
+            label: 'Postgres direct',
+            color: 'var(--qpdemo-control)',
+            points: pts.map((point) => ({
+              x: point.t,
+              y: point.direct.qps,
+            })),
+          },
+        ]}
+        annotations={visibleEvents.map((event) => ({
+          x: event.t,
+          label: eventDescription(event),
+        }))}
+        ariaLabel={`Total throughput chart with ${pts.length} history samples`}
+        emptyLabel="Waiting for load history"
+        xDomain={[start, end]}
+        yMax={maxY}
+        xStartLabel={formatSpanLabel(span)}
+        xEndLabel="now"
+        formatAxisValue={formatAxis}
+        formatValue={(value) => `${formatQps(value)} qps`}
+        formatHoverX={(value) =>
+          new Date(value * 1000).toLocaleTimeString([], {
+            minute: '2-digit',
+            second: '2-digit',
+          })
+        }
+      />
     </div>
   )
 }
@@ -736,7 +524,7 @@ function WindowToggle({
       aria-label="Chart window"
     >
       {(['5m', '1m'] as WindowMode[]).map((option) => (
-        <button
+        <Pressable
           key={option}
           type="button"
           aria-pressed={windowMode === option}
@@ -744,7 +532,7 @@ function WindowToggle({
           onClick={() => onWindowMode(option)}
         >
           {option === '5m' ? '5 min' : '1 min'}
-        </button>
+        </Pressable>
       ))}
     </div>
   )
@@ -770,7 +558,7 @@ function PolicyControl({
       </Text>
       <div className="inline-flex overflow-hidden rounded-xl border border-border-layout-1 text-button-small">
         {(['count_star', 'sum_time'] as DiscoveryMode[]).map((option) => (
-          <button
+          <Pressable
             key={option}
             type="button"
             disabled={disabled}
@@ -778,7 +566,7 @@ function PolicyControl({
             onClick={() => onMode(option)}
           >
             {MODE_LABEL[option]}
-          </button>
+          </Pressable>
         ))}
       </div>
     </div>
@@ -1107,7 +895,7 @@ function PreflightItem({
       : state === 'blocked'
         ? 'bg-[var(--qpdemo-deny-bg)] text-[var(--qpdemo-deny)]'
         : state === 'pending'
-          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+          ? 'bg-surface-info-soft text-content-info-soft'
           : 'bg-surface-layout-2 text-content-layout-3'
   return (
     <li className="flex items-center gap-2">
@@ -1164,19 +952,22 @@ function DemoTrialInvite() {
           <Text level="headline-4" className="text-content-layout-1">
             Try this on your own database
           </Text>
-          <button
+          {/* Kept a bare icon button: a 16px borderless dismiss glyph.
+              IconButton would add a 32-44px box + hover fill, changing the
+              card's corner weight. */}
+          <Pressable
             type="button"
             aria-label="Dismiss"
             onClick={() => setDismissed(true)}
             className="shrink-0 text-content-layout-3 hover:text-content-layout-1"
           >
             <Icon name="close" label="Dismiss" className="h-4 w-4" />
-          </button>
+          </Pressable>
         </div>
         <Text level="body-small" className="mt-2 text-content-layout-2">
-          You just watched Readyset cache these queries live — the same
-          speedup works on your data. Claim free trial credits to power AI
-          analysis (no credit card), then point RDST at your database.
+          You just watched Readyset cache these queries live — the same speedup
+          works on your data. Claim free trial credits to power AI analysis (no
+          credit card), then point RDST at your database.
         </Text>
         <div className="mt-4 flex flex-col gap-2">
           <Button
@@ -1304,7 +1095,7 @@ function StartCard({ onStart }: { onStart: () => void }) {
       <Text
         as="p"
         level="caption"
-        className="mt-3 max-w-[58ch] rounded-lg border border-border-layout-1 bg-surface-layout-soft/40 p-2.5 text-content-layout-2"
+        className="mt-3  rounded-lg border border-border-layout-1 bg-surface-layout-soft/40 p-2.5 text-content-layout-2"
       >
         <span className="font-semibold text-[var(--qpdemo-router)]">Note:</span>{' '}
         the environment cleans itself up after an hour, or remove it yourself
@@ -1440,8 +1231,10 @@ function StatusPopover({
   }
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
+      {/* Raw button: PopoverTrigger asChild target with its own hover-open
+          timers; a labelled status chip, not an icon action. Stays bespoke. */}
       <PopoverTrigger asChild>
-        <button
+        <Pressable
           type="button"
           aria-label={`${label} details`}
           onMouseEnter={hoverOpen}
@@ -1450,7 +1243,7 @@ function StatusPopover({
         >
           {label}
           <Icon name="info" label="" className="h-3 w-3 shrink-0 opacity-70" />
-        </button>
+        </Pressable>
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -1632,58 +1425,58 @@ function PatternTable({
               {/* Header clicks take a one-time value snapshot; rows never
                   re-sort live, and sorting is inert while the tour runs. */}
               <TableHeaderCell>
-                <button
+                <Pressable
                   className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={resetOrder}
                 >
                   Query{sortMark('query')}
-                </button>
+                </Pressable>
               </TableHeaderCell>
               <TableHeaderCell align="right" className="w-28">
-                <button
+                <Pressable
                   className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('postgres_hits')}
                 >
                   Postgres hits{sortMark('postgres_hits')}
-                </button>
+                </Pressable>
               </TableHeaderCell>
               <TableHeaderCell align="right" className="w-28">
-                <button
+                <Pressable
                   className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('readyset_hits')}
                 >
                   Readyset hits{sortMark('readyset_hits')}
-                </button>
+                </Pressable>
               </TableHeaderCell>
               <TableHeaderCell align="right" className="w-28">
-                <button
+                <Pressable
                   className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('direct_avg_ms')}
                 >
                   Postgres avg{sortMark('direct_avg_ms')}
-                </button>
+                </Pressable>
               </TableHeaderCell>
               <TableHeaderCell align="right" className="w-28">
-                <button
+                <Pressable
                   className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('router_avg_ms')}
                 >
                   Readyset avg{sortMark('router_avg_ms')}
-                </button>
+                </Pressable>
               </TableHeaderCell>
               <TableHeaderCell className="w-44">
-                <button
+                <Pressable
                   className="disabled:cursor-default"
                   disabled={tourActive}
                   onClick={() => snapshotSort('status')}
                 >
                   Status{sortMark('status')}
-                </button>
+                </Pressable>
               </TableHeaderCell>
               <TableHeaderCell className="w-24">Cache status</TableHeaderCell>
             </tr>
@@ -1713,15 +1506,15 @@ function PatternTable({
                     className={`border-b border-border-layout-1 hover:bg-surface-layout-2/40 ${expanded ? 'border-b-0' : ''}`}
                   >
                     <td className="px-3 py-2 text-content-layout-3">
-                      <button
+                      <Pressable
                         aria-label={`Expand ${row.title}`}
                         onClick={() => toggleSql(row.key)}
                       >
                         {expanded ? '▾' : '▸'}
-                      </button>
+                      </Pressable>
                     </td>
                     <td className="px-3 py-2">
-                      <button
+                      <Pressable
                         className="block w-full text-left"
                         title={sqlText}
                         onClick={() => toggleSql(row.key)}
@@ -1741,7 +1534,7 @@ function PatternTable({
                         >
                           {sqlText}
                         </Text>
-                      </button>
+                      </Pressable>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-content-layout-2">
                       {row.postgres_hits.toLocaleString()}
@@ -2637,10 +2430,10 @@ export function DemoPage() {
             level="body-small"
             className="mt-1 max-w-[72ch] text-content-layout-2"
           >
-            Readyset Platform is a drop-in cache for Postgres and MySQL: it
-            sits in front of your database, serves hot queries from memory,
-            and keeps results fresh automatically as your data changes — no
-            application changes required.{' '}
+            Readyset Platform is a drop-in cache for Postgres and MySQL: it sits
+            in front of your database, serves hot queries from memory, and keeps
+            results fresh automatically as your data changes — no application
+            changes required.{' '}
             <a
               href="https://readyset.io/docs"
               target="_blank"
@@ -2654,14 +2447,16 @@ export function DemoPage() {
         </div>
         {showTeardown && (
           <Dropdown>
+            {/* Raw button: Dropdown.Trigger asChild target — IconButton's
+                Tooltip wrapper breaks asChild's single-child ref forwarding. */}
             <Dropdown.Trigger asChild>
-              <button
+              <Pressable
                 type="button"
                 aria-label="Demo actions"
                 className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-content-layout-3 transition-colors hover:bg-surface-layout-2 hover:text-content-layout-1"
               >
                 <Icon name="more" label="Demo actions" className="h-5 w-5" />
-              </button>
+              </Pressable>
             </Dropdown.Trigger>
             <Dropdown.Content align="end" className="min-w-52">
               {d.phase === 'ready' && (

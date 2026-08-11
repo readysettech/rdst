@@ -1,4 +1,3 @@
-import { cn } from '@rs/tailwind-base'
 import { Button } from '@rs/ui-new/button'
 import { ErrorState } from '@rs/ui-new/error-state'
 import { HStack } from '@rs/ui-new/stack'
@@ -14,6 +13,7 @@ import { ActivityPulse } from '../components/audit/ActivityPulse'
 // Direct import: the components barrel re-exports the SQL editor stack,
 // which would statically pull CodeMirror into the eager entry chunk.
 import { ConfigWarning } from '../components/ConfigWarning'
+import { useTarget } from '../hooks/useTarget'
 import { Header } from '../layout/Header'
 import { Main } from '../layout/Main'
 import { Sidebar } from '../layout/Sidebar'
@@ -25,6 +25,7 @@ import {
 } from '../lib/auditSession'
 import { isDesktopFrameless, isDesktopMac } from '../lib/desktop'
 import { useDesktopUpdates } from '../lib/useDesktopUpdates'
+import { useQueryDiscoveryTransport } from '../lib/useQueryDiscovery'
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -48,14 +49,7 @@ function AppShell({ children }: { children: ReactNode }) {
     useDesktopUpdates()
 
   return (
-    <div
-      className={cn(
-        'relative h-dvh overflow-hidden',
-        isElectronMac
-          ? 'm-2 rounded-2xl border border-border-layout-1/70 bg-surface-layout-2/35 backdrop-blur-xl shadow-[0_20px_48px_rgba(0,0,0,0.35)]'
-          : 'bg-surface-layout-2'
-      )}
-    >
+    <div className="relative h-dvh overflow-hidden bg-surface-layout-2">
       {/* Skip-to-content: the first focusable element, hidden until focused
           (USE-089). Jumps keyboard users past the chrome to the content. */}
       <a
@@ -77,12 +71,15 @@ function AppShell({ children }: { children: ReactNode }) {
         desktopUpdateState={desktopUpdateState}
         onInstallUpdate={installDesktopUpdate}
       />
-      <Main isElectronMac={isElectronMac}>{children}</Main>
+      <Main>{children}</Main>
     </div>
   )
 }
 
 function RootComponent() {
+  const { target } = useTarget()
+  useQueryDiscoveryTransport(target)
+
   return (
     <AppShell>
       <ConfigWarning />

@@ -15,6 +15,7 @@ import { Route as SchemaRouteImport } from './routes/schema'
 import { Route as ScanRouteImport } from './routes/scan'
 import { Route as ResultsRouteImport } from './routes/results'
 import { Route as QueryRegistryRouteImport } from './routes/query-registry'
+import { Route as QueriesRouteImport } from './routes/queries'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as GuardsRouteImport } from './routes/guards'
 import { Route as FleetRouteImport } from './routes/fleet'
@@ -28,6 +29,7 @@ import { Route as AskRouteImport } from './routes/ask'
 import { Route as AnalyzeRouteImport } from './routes/analyze'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LabQueriesVariantRouteImport } from './routes/lab.queries.$variant'
 import { Route as AuditRunsRunIdRouteImport } from './routes/audit_.runs.$runId'
 
 const TopRoute = TopRouteImport.update({
@@ -58,6 +60,11 @@ const ResultsRoute = ResultsRouteImport.update({
 const QueryRegistryRoute = QueryRegistryRouteImport.update({
   id: '/query-registry',
   path: '/query-registry',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QueriesRoute = QueriesRouteImport.update({
+  id: '/queries',
+  path: '/queries',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OnboardingRoute = OnboardingRouteImport.update({
@@ -125,6 +132,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LabQueriesVariantRoute = LabQueriesVariantRouteImport.update({
+  id: '/lab/queries/$variant',
+  path: '/lab/queries/$variant',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuditRunsRunIdRoute = AuditRunsRunIdRouteImport.update({
   id: '/audit_/runs/$runId',
   path: '/audit/runs/$runId',
@@ -145,6 +157,7 @@ export interface FileRoutesByFullPath {
   '/fleet': typeof FleetRoute
   '/guards': typeof GuardsRoute
   '/onboarding': typeof OnboardingRoute
+  '/queries': typeof QueriesRoute
   '/query-registry': typeof QueryRegistryRoute
   '/results': typeof ResultsRoute
   '/scan': typeof ScanRoute
@@ -152,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/test': typeof TestRoute
   '/top': typeof TopRoute
   '/audit/runs/$runId': typeof AuditRunsRunIdRoute
+  '/lab/queries/$variant': typeof LabQueriesVariantRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -167,6 +181,7 @@ export interface FileRoutesByTo {
   '/fleet': typeof FleetRoute
   '/guards': typeof GuardsRoute
   '/onboarding': typeof OnboardingRoute
+  '/queries': typeof QueriesRoute
   '/query-registry': typeof QueryRegistryRoute
   '/results': typeof ResultsRoute
   '/scan': typeof ScanRoute
@@ -174,6 +189,7 @@ export interface FileRoutesByTo {
   '/test': typeof TestRoute
   '/top': typeof TopRoute
   '/audit/runs/$runId': typeof AuditRunsRunIdRoute
+  '/lab/queries/$variant': typeof LabQueriesVariantRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -190,6 +206,7 @@ export interface FileRoutesById {
   '/fleet': typeof FleetRoute
   '/guards': typeof GuardsRoute
   '/onboarding': typeof OnboardingRoute
+  '/queries': typeof QueriesRoute
   '/query-registry': typeof QueryRegistryRoute
   '/results': typeof ResultsRoute
   '/scan': typeof ScanRoute
@@ -197,6 +214,7 @@ export interface FileRoutesById {
   '/test': typeof TestRoute
   '/top': typeof TopRoute
   '/audit_/runs/$runId': typeof AuditRunsRunIdRoute
+  '/lab/queries/$variant': typeof LabQueriesVariantRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -214,6 +232,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/guards'
     | '/onboarding'
+    | '/queries'
     | '/query-registry'
     | '/results'
     | '/scan'
@@ -221,6 +240,7 @@ export interface FileRouteTypes {
     | '/test'
     | '/top'
     | '/audit/runs/$runId'
+    | '/lab/queries/$variant'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -236,6 +256,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/guards'
     | '/onboarding'
+    | '/queries'
     | '/query-registry'
     | '/results'
     | '/scan'
@@ -243,6 +264,7 @@ export interface FileRouteTypes {
     | '/test'
     | '/top'
     | '/audit/runs/$runId'
+    | '/lab/queries/$variant'
   id:
     | '__root__'
     | '/'
@@ -258,6 +280,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/guards'
     | '/onboarding'
+    | '/queries'
     | '/query-registry'
     | '/results'
     | '/scan'
@@ -265,6 +288,7 @@ export interface FileRouteTypes {
     | '/test'
     | '/top'
     | '/audit_/runs/$runId'
+    | '/lab/queries/$variant'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -281,6 +305,7 @@ export interface RootRouteChildren {
   FleetRoute: typeof FleetRoute
   GuardsRoute: typeof GuardsRoute
   OnboardingRoute: typeof OnboardingRoute
+  QueriesRoute: typeof QueriesRoute
   QueryRegistryRoute: typeof QueryRegistryRoute
   ResultsRoute: typeof ResultsRoute
   ScanRoute: typeof ScanRoute
@@ -288,6 +313,7 @@ export interface RootRouteChildren {
   TestRoute: typeof TestRoute
   TopRoute: typeof TopRoute
   AuditRunsRunIdRoute: typeof AuditRunsRunIdRoute
+  LabQueriesVariantRoute: typeof LabQueriesVariantRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -332,6 +358,13 @@ declare module '@tanstack/react-router' {
       path: '/query-registry'
       fullPath: '/query-registry'
       preLoaderRoute: typeof QueryRegistryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/queries': {
+      id: '/queries'
+      path: '/queries'
+      fullPath: '/queries'
+      preLoaderRoute: typeof QueriesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding': {
@@ -425,6 +458,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/lab/queries/$variant': {
+      id: '/lab/queries/$variant'
+      path: '/lab/queries/$variant'
+      fullPath: '/lab/queries/$variant'
+      preLoaderRoute: typeof LabQueriesVariantRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/audit_/runs/$runId': {
       id: '/audit_/runs/$runId'
       path: '/audit/runs/$runId'
@@ -449,6 +489,7 @@ const rootRouteChildren: RootRouteChildren = {
   FleetRoute: FleetRoute,
   GuardsRoute: GuardsRoute,
   OnboardingRoute: OnboardingRoute,
+  QueriesRoute: QueriesRoute,
   QueryRegistryRoute: QueryRegistryRoute,
   ResultsRoute: ResultsRoute,
   ScanRoute: ScanRoute,
@@ -456,6 +497,7 @@ const rootRouteChildren: RootRouteChildren = {
   TestRoute: TestRoute,
   TopRoute: TopRoute,
   AuditRunsRunIdRoute: AuditRunsRunIdRoute,
+  LabQueriesVariantRoute: LabQueriesVariantRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

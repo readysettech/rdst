@@ -148,6 +148,19 @@ describe('background run store', () => {
         return sseResponse(
           frames(
             [
+              'progress',
+              {
+                type: 'progress',
+                elapsed_seconds: 2.5,
+                total_executions: 40,
+                total_successes: 40,
+                total_failures: 0,
+                qps: 16,
+                queries: [],
+                seq: 1,
+              },
+            ],
+            [
               'complete',
               {
                 type: 'complete',
@@ -157,10 +170,10 @@ describe('background run store', () => {
                 total_failures: 0,
                 qps: 20,
                 queries: [],
-                seq: 1,
+                seq: 2,
               },
             ],
-            ['run_end', { status: 'done', seq: 2 }]
+            ['run_end', { status: 'done', seq: 3 }]
           )
         )
       })
@@ -172,6 +185,10 @@ describe('background run store', () => {
       expect(run('load_test_imdb_reload')?.status).toBe('done')
     )
     expect(run('load_test_imdb_reload')?.loadRequest).toEqual(request)
+    expect(run('load_test_imdb_reload')?.loadSamples).toEqual([
+      expect.objectContaining({ elapsed_seconds: 2.5, qps: 16 }),
+      expect.objectContaining({ elapsed_seconds: 5, qps: 20 }),
+    ])
     expect(
       JSON.parse(localStorage.getItem('rdst_background_runs') ?? '[]')[0]
         .loadRequest
@@ -654,10 +671,10 @@ describe('background run store', () => {
     )
 
     await waitFor(() => expect(run('cache_test_imdb_z')?.status).toBe('done'))
-    expect(run('cache_test_imdb_z')?.result).toMatchObject({
-      speedup_mean: 5,
-      winner: 'readyset',
-    })
+    expect(run('cache_test_imdb_z')?.result).toBeUndefined()
+    expect(run('cache_test_imdb_z')?.message).toBe(
+      'Performance result is incomplete'
+    )
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
@@ -721,6 +738,33 @@ describe('background run store', () => {
           total: 100,
           hasWarnings: false,
           queryHash: 'abc123',
+          result: {
+            success: true,
+            query: 'SELECT 1',
+            iterations: 3,
+            origin_stats: {
+              mean: 1,
+              median: 1,
+              min: 1,
+              max: 1,
+              p50: 1,
+              p95: 1,
+              p99: 1,
+            },
+            cache_stats: {
+              mean: 2,
+              median: 2,
+              min: 2,
+              max: 2,
+              p50: 2,
+              p95: 2,
+              p99: 2,
+            },
+            speedup_mean: 0.5,
+            speedup_median: 0.5,
+            improvement_pct: -50,
+            winner: 'original',
+          },
         },
       ])
     )
@@ -728,6 +772,40 @@ describe('background run store', () => {
     reattachBackgroundRuns()
 
     expect(run('cache_test_imdb_done')?.status).toBe('done')
+    expect(run('cache_test_imdb_done')?.result?.winner).toBe('original')
+    expect(api.GET).not.toHaveBeenCalled()
+  })
+
+  it('drops incomplete stored cache results before they reach comparison UI', () => {
+    localStorage.setItem(
+      'rdst_background_runs',
+      JSON.stringify([
+        {
+          runId: 'cache_test_imdb_legacy',
+          kind: 'cache_test',
+          target: 'imdb',
+          stage: 'complete',
+          status: 'done',
+          message: 'Performance test complete',
+          lastSeq: 4,
+          current: 100,
+          total: 100,
+          hasWarnings: false,
+          queryHash: 'abc123',
+          result: {
+            speedup_mean: 20,
+            winner: 'readyset',
+          },
+        },
+      ])
+    )
+
+    reattachBackgroundRuns()
+
+    expect(run('cache_test_imdb_legacy')?.result).toBeUndefined()
+    expect(
+      JSON.parse(localStorage.getItem('rdst_background_runs') ?? '[]')[0].result
+    ).toBeUndefined()
     expect(api.GET).not.toHaveBeenCalled()
   })
 

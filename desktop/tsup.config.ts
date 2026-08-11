@@ -7,12 +7,7 @@ export default defineConfig([
     format: 'esm',
     platform: 'node',
     target: 'node22',
-    external: [
-      'electron',
-      'electron-liquid-glass',
-      'electron-updater',
-      'node-gyp-build',
-    ],
+    external: ['electron', 'electron-updater'],
     clean: false,
     sourcemap: true,
   },

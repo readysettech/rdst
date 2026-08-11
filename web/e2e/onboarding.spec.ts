@@ -34,7 +34,7 @@ test('completes first-run onboarding and persists the target', async ({
   // one form, one primary action, straight back into the app.
   await page.goto('/onboarding')
   await expect(
-    page.getByRole('heading', { name: 'Connect your database' })
+    page.getByRole('heading', { name: 'Start with Readyset' })
   ).toBeVisible()
 
   await page.locator('[name="name"]').fill('e2e-db')

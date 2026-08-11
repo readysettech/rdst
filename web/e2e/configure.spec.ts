@@ -21,7 +21,8 @@ test('adds, updates, defaults, and deletes a database target', async ({
     .filter({ has: page.getByText('e2e-guard', { exact: true }) })
   await expect(seedRow).toBeVisible()
 
-  await page.getByRole('button', { name: 'Add Target' }).click()
+  await page.getByRole('button', { name: 'Add connection' }).click()
+  await page.getByRole('tab', { name: 'Manual setup' }).click()
   await expect(
     page.getByRole('button', { name: /Connect via SSH jump host/ })
   ).toBeVisible()
@@ -83,7 +84,10 @@ test('adds, updates, defaults, and deletes a database target', async ({
     user: 'rdst_e2e',
   })
   await page.getByRole('button', { name: 'Proceed anyway' }).click()
-  await page.getByRole('button', { name: 'Add Target' }).click()
+  await page
+    .getByRole('button', { name: 'Add connection', exact: true })
+    .last()
+    .click()
 
   let targetRow = page
     .getByTestId('target-row')
@@ -116,11 +120,11 @@ test('adds, updates, defaults, and deletes a database target', async ({
 
   await targetRow.getByRole('button', { name: /More actions/ }).click()
   await page.getByRole('menuitem', { name: 'Edit connection' }).click()
-  await expect(page.getByText('Edit Target', { exact: true })).toBeVisible()
+  await expect(page.getByText('Edit connection', { exact: true })).toBeVisible()
   await expect(page.locator('[name="name"]')).toBeDisabled()
   await page.locator('[name="host"]').fill('db-updated.internal')
   await page.locator('[name="database"]').fill('application_v2')
-  await page.getByRole('button', { name: 'Update Target' }).click()
+  await page.getByRole('button', { name: 'Update connection' }).click()
 
   targetRow = page
     .getByTestId('target-row')

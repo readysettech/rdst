@@ -5,9 +5,10 @@
  */
 
 import { CopyButton } from '@rs/ui-new/copy-button'
-import { Icon } from '@rs/ui-new/icon'
+import { IconButton } from '@rs/ui-new/icon-button'
 import { Scrollable } from '@rs/ui-new/scrollable'
 import { HStack, VStack } from '@rs/ui-new/stack'
+import { TabItemButton, TabList } from '@rs/ui-new/tab'
 import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import {
@@ -70,21 +71,17 @@ export function QuerySqlDisclosure({
   const [open, setOpen] = useState(false)
   return (
     <div>
-      <button
-        type="button"
+      <IconButton
+        icon={open ? 'chevron-up' : 'chevron-down'}
+        label={open ? 'Collapse full SQL' : 'Expand full SQL'}
+        tooltip={false}
+        size="small"
+        modifier="ghost"
         aria-expanded={open}
-        aria-label={open ? 'Collapse full SQL' : 'Expand full SQL'}
         title={open ? 'Collapse full SQL' : 'Expand full SQL'}
         onClick={() => setOpen((value) => !value)}
-        className="cursor-pointer text-content-primary-soft w-fit"
-      >
-        <Icon
-          name={open ? 'chevron-up' : 'chevron-down'}
-          label=""
-          aria-hidden="true"
-          className="w-4 h-4"
-        />
-      </button>
+        classMerge="text-content-primary-soft"
+      />
       {open && (
         <div className="bg-surface-layout-2 rounded-lg mt-2 overflow-hidden">
           <HStack className="justify-between items-center px-3 py-2 border-b border-border-layout-1">
@@ -486,10 +483,9 @@ export function UnifiedQueriesSection({
             />
           </div>
         )}
-        <div
-          role="tablist"
+        <TabList
           aria-label="Query activity"
-          className="flex gap-1 px-4 pt-3 border-b border-border-layout-1 overflow-x-auto"
+          className="gap-4 overflow-x-auto px-4 pt-3"
         >
           {(
             [
@@ -500,25 +496,19 @@ export function UnifiedQueriesSection({
               ],
             ] as const
           ).map(([tab, label]) => (
-            <button
+            <TabItemButton
               key={tab}
-              type="button"
-              role="tab"
-              aria-selected={selectedTab === tab}
+              layoutPrefix={`${sectionId}-activity`}
+              label={label}
+              active={selectedTab === tab}
               onClick={() => {
                 setActiveTab(tab)
                 onQueryTabChange?.(tab)
               }}
-              className={`px-3 py-2 text-sm whitespace-nowrap cursor-pointer border-b-2 ${
-                selectedTab === tab
-                  ? 'border-border-primary-soft text-content-primary-soft'
-                  : 'border-transparent text-content-layout-3 hover:text-content-layout-2'
-              }`}
-            >
-              {label}
-            </button>
+              className="h-10 whitespace-nowrap"
+            />
           ))}
-        </div>
+        </TabList>
         {rows.length > 0 ? (
           <>
             <UnifiedQueriesTable

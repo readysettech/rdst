@@ -1,10 +1,15 @@
 export {
   AnimatePresence,
   type AnimationOptions,
+  animate,
   type DOMKeyframesDefinition,
   type ElementOrSelector,
+  LayoutGroup,
   MotionConfig,
   type MotionStyle,
   m,
   useAnimate,
+  useMotionValue,
+  useReducedMotion,
+  useSpring,
 } from 'motion/react'

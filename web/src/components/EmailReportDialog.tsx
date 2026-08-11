@@ -232,13 +232,14 @@ export function EmailReportDialog({
                 <Text level="subtitle-2" className="text-content-layout-1">
                   {email}
                 </Text>
-                <button
+                <Button
                   type="button"
-                  className="text-sm text-content-primary-soft hover:underline cursor-pointer"
+                  size="small"
+                  modifier="link"
+                  label="Use a different address"
+                  classMerge="h-auto p-0"
                   onClick={() => setStep('email')}
-                >
-                  Use a different address
-                </button>
+                />
               </VStack>
             )}
 

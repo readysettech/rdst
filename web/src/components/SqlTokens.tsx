@@ -8,8 +8,8 @@
  * pass → plain coloured <span>s, no editor, no per-card view instance.
  *
  * The palette mirrors the CodeMirror `sqlTheme` (./sqlTheme.ts) 1:1 so a card's
- * SQL reads identically to the /top expanded editor the owner approved — same
- * pink keywords, green strings, amber numbers, cyan params. Colours are applied
+ * SQL reads identically to the /top expanded editor — same amber keywords,
+ * green strings, yellow numbers, blue params. Colours are applied
  * as inline `style` (not Tailwind classes) because these are the app's
  * established SQL-theme hues, not design-system surface/content tokens; keeping
  * them inline also leaves `check:tokens` (a className grep) untouched.
@@ -20,6 +20,7 @@
  * VIS-011/017 SQL dominant, VIS-124 mono personality, USE-004 readable]
  */
 
+import { cn } from '@rs/tailwind-base'
 import { type CSSProperties, useMemo } from 'react'
 import { SQL_TOKEN_COLORS as COLOR } from './sqlTokenColors'
 
@@ -186,14 +187,18 @@ interface SqlTokensProps {
   sql: string
   /** Full SQL as a `title` tooltip + stable DOM hook for the card's e2e locators. */
   title?: string
+  className?: string
 }
 
-export function SqlTokens({ sql, title }: SqlTokensProps) {
+export function SqlTokens({ sql, title, className }: SqlTokensProps) {
   const tokens = useMemo(() => tokenize(sql), [sql])
   return (
     <code
       title={title}
-      className="block font-mono text-mono-medium leading-relaxed whitespace-pre-wrap break-words"
+      className={cn(
+        'block font-mono text-mono-large whitespace-pre-wrap break-words',
+        className
+      )}
       style={{ color: COLOR.identifier }}
     >
       {tokens.map((token, i) => (

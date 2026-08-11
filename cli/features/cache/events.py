@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal, Optional, Union
+from dataclasses import dataclass, field
+from typing import Any, Literal, Optional, Union
 
 from shared.service_events import ErrorEvent, ProgressEvent
 
@@ -100,6 +100,38 @@ class CacheRunCompleteEvent:
     winner: str
     origin_iterations: Optional[int] = None
     cache_iterations: Optional[int] = None
+    origin_samples_ms: list[float] = field(default_factory=list)
+    cache_samples_ms: list[float] = field(default_factory=list)
+
+
+@dataclass
+class CacheCompareSampleEvent:
+    """One live time-series bucket from an equal-concurrency comparison."""
+
+    type: Literal["cache_compare_sample"]
+    elapsed_seconds: float
+    concurrency: int
+    origin: dict[str, float | int]
+    readyset: dict[str, float | int]
+
+
+@dataclass
+class CacheCompareCompleteEvent:
+    """Final result for a live equal-concurrency comparison."""
+
+    type: Literal["cache_compare_complete"]
+    success: bool
+    query: str
+    duration_seconds: int
+    elapsed_seconds: float
+    concurrency: int
+    origin: dict[str, float | int]
+    readyset: dict[str, float | int]
+    timeline: list[dict[str, Any]]
+    phases: list[dict[str, float | int]]
+    speedup_mean: float
+    improvement_pct: float
+    winner: str
 
 
 CacheEvent = Union[
@@ -112,5 +144,7 @@ CacheEvent = Union[
     CacheDropAllEvent,
     CacheLifecycleEvent,
     CacheRunCompleteEvent,
+    CacheCompareSampleEvent,
+    CacheCompareCompleteEvent,
     ErrorEvent,
 ]
