@@ -41,7 +41,7 @@ are tracked in the monorepo reach GitHub even when `rdst/.gitignore` lists them.
 The filter currently reads:
 
 ```
-:/rdst:exclude[::keyservice/]:exclude[::.buildkite/]:exclude[::features/qpdemo/assets/baked/build.sh]:exclude[::run_local_tests.sh]:exclude[::MIGRATION.md]:exclude[::build_rdst_mac_buildkite.sh]:exclude[::orchestrate_mac_build.sh]:exclude[::orchestrate_rdst.sh]
+:/rdst:exclude[::keyservice/]:exclude[::.buildkite/]:exclude[::features/qpdemo/assets/baked/build.sh]
 ```
 
 So the excluded set is exactly:
@@ -51,11 +51,6 @@ So the excluded set is exactly:
 | `keyservice/` | Separate service, not part of the CLI |
 | `.buildkite/` | Internal CI/CD pipelines |
 | `features/qpdemo/assets/baked/build.sh` | Hardcodes an internal AWS account |
-| `run_local_tests.sh` | Retired local test wrapper; superseded by the containerized suite |
-| `MIGRATION.md` | Retired internal migration notes |
-| `build_rdst_mac_buildkite.sh` | Retired build script referencing internal infrastructure |
-| `orchestrate_mac_build.sh` | Retired build script referencing internal infrastructure |
-| `orchestrate_rdst.sh` | Retired build script referencing internal infrastructure |
 
 Anything else tracked under `rdst/` is published, including its full history.
 Untracked paths (`venv/`, `__pycache__/`, `build/`, `dist/`, `.rdst/`) never
