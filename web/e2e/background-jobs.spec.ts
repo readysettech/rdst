@@ -66,6 +66,25 @@ test('saving an Anthropic key immediately resumes a parked bootstrap', async ({
   await page.locator('[name="database"]').fill('application')
   await page.locator('[name="user"]').fill('rdst_e2e')
   await page.locator('[name="password"]').fill('test-password')
+
+  await page.route('**/api/configure/targets/needs-key-db/test', (route) =>
+    route.fulfill({
+      headers: { 'content-type': 'text/event-stream' },
+      body: [
+        'event: connection_test',
+        `data: ${JSON.stringify({
+          target_name: 'needs-key-db',
+          status: 'success',
+          server_version: 'PostgreSQL 16.3',
+          privileges: { writable: false },
+        })}`,
+        '',
+        'event: success',
+        'data: {"message":"Connection test complete"}',
+        '',
+      ].join('\n'),
+    })
+  )
   await page.getByRole('button', { name: 'Add connection' }).last().click()
 
   const jobsTrigger = page.getByTestId('jobs-trigger')

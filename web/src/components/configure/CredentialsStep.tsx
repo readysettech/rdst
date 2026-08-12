@@ -1,15 +1,13 @@
 import { Alert } from '@rs/ui-new/alert'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
-import { Tag } from '@rs/ui-new/tag'
 import { Button } from '@rs/ui-new/button'
 import { Icon } from '@rs/ui-new/icon'
 import { HStack, VStack } from '@rs/ui-new/stack'
+import { Tag } from '@rs/ui-new/tag'
 import { Text } from '@rs/ui-new/text'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  isPrivateConnectivityFailure,
-} from '../../lib/sshErrors'
+import { isPrivateConnectivityFailure } from '../../lib/sshErrors'
 import { invalidateTargetQueries } from '../../lib/targetQueries'
 import {
   updateFleetTargetCredentials,
@@ -17,14 +15,14 @@ import {
 } from '../../lib/useFleet'
 import type { FleetMember } from '../../types/fleet'
 import { ConnectionFailureActions } from '../ConnectionFailureActions'
-import { groupTargets } from './TargetGroupView'
+import type { PrivateTargetGroup } from './privateTargets'
 import {
   assembleSshConfig,
   SshFields,
-  sshFieldsValue,
   type SshFieldsValue,
+  sshFieldsValue,
 } from './SshFields'
-import type { PrivateTargetGroup } from './privateTargets'
+import { groupTargets } from './TargetGroupView'
 import { WritePrivilegesNotice } from './WritePrivilegesNotice'
 
 interface CredentialValues {
@@ -72,9 +70,7 @@ export function CredentialsStep({
     user: '',
     password: '',
   })
-  const [sshValues, setSshValues] = useState<
-    Record<string, SshFieldsValue>
-  >({})
+  const [sshValues, setSshValues] = useState<Record<string, SshFieldsValue>>({})
   const editedSshTargets = useRef(new Set<string>())
   const {
     check,
@@ -166,9 +162,7 @@ export function CredentialsStep({
 
   const privateTargetNames = useMemo(
     () => [
-      ...new Set(
-        effectivePrivateGroups.flatMap((group) => group.targetNames)
-      ),
+      ...new Set(effectivePrivateGroups.flatMap((group) => group.targetNames)),
     ],
     [effectivePrivateGroups]
   )
@@ -188,14 +182,14 @@ export function CredentialsStep({
   }
 
   const passwordMissing = targets.some(
-    (target) =>
-      !target.password_secret_arn && !values[target.name]?.password
+    (target) => !target.password_secret_arn && !values[target.name]?.password
   )
   const databaseMissing = targets.some(
     (target) => !values[target.name]?.database.trim()
   )
   const sshMissing = privateTargetNames.some(
-    (targetName) => !assembleSshConfig(sshValues[targetName] ?? sshFieldsValue())
+    (targetName) =>
+      !assembleSshConfig(sshValues[targetName] ?? sshFieldsValue())
   )
 
   const save = async () => {
@@ -204,7 +198,8 @@ export function CredentialsStep({
       passwordMissing ||
       databaseMissing ||
       sshMissing
-    ) return
+    )
+      return
     setSaving(true)
     setSaved(false)
     setError(null)
@@ -248,6 +243,11 @@ export function CredentialsStep({
     saved &&
     targets.length > 0 &&
     targets.every((target) => connectivity[target.name]?.status === 'ok')
+  const writableTargets = targets.filter(
+    (target) =>
+      connectivity[target.name]?.status === 'ok' &&
+      connectivity[target.name]?.privileges?.writable === true
+  )
   const canFinish = allConnected && !working
 
   return (
@@ -348,7 +348,10 @@ export function CredentialsStep({
                     className="rounded-lg border border-border-layout-1 bg-surface-layout-1 p-3"
                   >
                     <VStack className="gap-3 items-stretch">
-                      <Text level="label-small" className="text-content-layout-1">
+                      <Text
+                        level="label-small"
+                        className="text-content-layout-1"
+                      >
                         {targetName}
                       </Text>
                       <SshFields
@@ -367,221 +370,259 @@ export function CredentialsStep({
       )}
 
       <VStack className="gap-4 items-stretch">
+        {writableTargets.length > 0 && (
+          <Alert
+            variant="informative"
+            modifier="outline"
+            label={`Read-only access is recommended for ${writableTargets.length} connected ${writableTargets.length === 1 ? 'account' : 'accounts'}.`}
+          />
+        )}
         {groupedTargets.map(({ group: groupName, targets: members }) => (
           <div
             key={groupName || 'ungrouped'}
             className="rounded-xl border border-border-layout-1 bg-surface-layout-1 p-4"
           >
             <VStack className="gap-3 items-stretch">
-            <HStack className="gap-2.5 items-center flex-wrap border-b border-border-layout-1 pb-3">
-              <div className="w-8 h-8 rounded-lg bg-surface-layout-2 flex items-center justify-center shrink-0">
-                <Icon
-                  name={groupName ? 'layers' : 'database'}
-                  label=""
-                  aria-hidden="true"
-                  className="w-4 h-4 text-content-layout-2"
-                />
-              </div>
-              <VStack className="gap-0 items-start">
-                <Text level="label-medium" className="text-content-layout-1">
-                  {groupName || 'Ungrouped'}
-                </Text>
-                <Text level="caption" className="text-content-layout-3">
-                  {members.length === 1
-                    ? '1 instance'
-                    : `${members.length} instances`}
-                  {groupName ? ' in this cluster' : ''}
-                </Text>
-              </VStack>
-            </HStack>
-            {members.map((target) => {
-          const result = connectivity[target.name]
-          return (
-            <div
-              key={target.name}
-              className="rounded-lg border border-border-layout-1 bg-surface-layout-2/40 p-3"
-            >
-              <VStack className="gap-2 items-stretch">
-                <HStack className="justify-between gap-3 items-start">
-                  <VStack className="gap-0.5 items-start min-w-0">
-                    <HStack className="gap-2 items-center flex-wrap">
-                      <Text level="label-small" className="text-content-layout-1">
-                        {target.name}
-                      </Text>
-                      <Tag
-                        size="small"
-                        variant="neutral"
-                        modifier="ghost"
-                        label={ENGINE_LABELS[target.engine] ?? target.engine}
-                      />
-                      {roleOf(target) && (
-                        <Tag
-                          size="small"
-                          variant="informative"
-                          modifier="ghost"
-                          label={roleOf(target) as string}
+              <HStack className="gap-2.5 items-center flex-wrap border-b border-border-layout-1 pb-3">
+                <div className="w-8 h-8 rounded-lg bg-surface-layout-2 flex items-center justify-center shrink-0">
+                  <Icon
+                    name={groupName ? 'layers' : 'database'}
+                    label=""
+                    aria-hidden="true"
+                    className="w-4 h-4 text-content-layout-2"
+                  />
+                </div>
+                <VStack className="gap-0 items-start">
+                  <Text level="label-medium" className="text-content-layout-1">
+                    {groupName || 'Ungrouped'}
+                  </Text>
+                  <Text level="caption" className="text-content-layout-3">
+                    {members.length === 1
+                      ? '1 instance'
+                      : `${members.length} instances`}
+                    {groupName ? ' in this cluster' : ''}
+                  </Text>
+                </VStack>
+              </HStack>
+              {members.map((target) => {
+                const result = connectivity[target.name]
+                return (
+                  <div
+                    key={target.name}
+                    className="rounded-lg border border-border-layout-1 bg-surface-layout-2/40 p-3"
+                  >
+                    <VStack className="gap-2 items-stretch">
+                      <HStack className="justify-between gap-3 items-start">
+                        <VStack className="gap-0.5 items-start min-w-0">
+                          <HStack className="gap-2 items-center flex-wrap">
+                            <Text
+                              level="label-small"
+                              className="text-content-layout-1"
+                            >
+                              {target.name}
+                            </Text>
+                            <Tag
+                              size="small"
+                              variant="neutral"
+                              modifier="ghost"
+                              label={
+                                ENGINE_LABELS[target.engine] ?? target.engine
+                              }
+                            />
+                            {roleOf(target) && (
+                              <Tag
+                                size="small"
+                                variant="informative"
+                                modifier="ghost"
+                                label={roleOf(target) as string}
+                              />
+                            )}
+                          </HStack>
+                          <Text
+                            level="caption"
+                            className="text-content-layout-3 truncate max-w-full"
+                          >
+                            {target.host}
+                          </Text>
+                        </VStack>
+                        {result && (
+                          <HStack className="gap-1.5 items-center shrink-0">
+                            <Icon
+                              name={
+                                result.status === 'ok'
+                                  ? 'tick'
+                                  : result.status === 'checking'
+                                    ? 'observe'
+                                    : 'alert'
+                              }
+                              label={result.status}
+                              className={`w-4 h-4 ${
+                                result.status === 'ok'
+                                  ? 'text-content-positive-soft'
+                                  : result.status === 'checking'
+                                    ? 'text-content-warning-soft'
+                                    : 'text-content-negative-soft'
+                              }`}
+                            />
+                            <Text
+                              level="caption"
+                              className={
+                                result.status === 'ok'
+                                  ? 'text-content-positive-soft'
+                                  : result.status === 'checking'
+                                    ? 'text-content-warning-soft'
+                                    : 'text-content-negative-soft'
+                              }
+                            >
+                              {result.status === 'ok'
+                                ? 'Connected'
+                                : result.status === 'checking'
+                                  ? 'Checking'
+                                  : 'Failed'}
+                            </Text>
+                          </HStack>
+                        )}
+                      </HStack>
+
+                      <div className="grid grid-cols-1 laptop:grid-cols-2 gap-3">
+                        <div>
+                          <Text
+                            level="caption"
+                            className="text-content-layout-3 mb-1 block"
+                          >
+                            Database
+                          </Text>
+                          <BaseInputText
+                            name={`credentials-database-${target.name}`}
+                            value={values[target.name]?.database || ''}
+                            onChange={(event) => {
+                              setValues((current) => ({
+                                ...current,
+                                [target.name]: {
+                                  ...current[target.name],
+                                  database: event.target.value,
+                                },
+                              }))
+                            }}
+                            placeholder="Required database name"
+                            disabled={working}
+                            required
+                          />
+                          {!target.database &&
+                            ((target.tags ?? []).some((tag) =>
+                              tag.startsWith('aws-account:')
+                            ) ||
+                              target.host.endsWith('.rds.amazonaws.com')) && (
+                              <Text
+                                level="caption"
+                                className="text-content-layout-3 mt-1"
+                              >
+                                Enter the database name used by this instance.
+                              </Text>
+                            )}
+                        </div>
+                        <div>
+                          <Text
+                            level="caption"
+                            className="text-content-layout-3 mb-1 block"
+                          >
+                            Username
+                          </Text>
+                          <BaseInputText
+                            name={`credentials-user-${target.name}`}
+                            value={values[target.name]?.user || ''}
+                            onChange={(event) => {
+                              setValues((current) => ({
+                                ...current,
+                                [target.name]: {
+                                  ...current[target.name],
+                                  user: event.target.value,
+                                  password:
+                                    current[target.name]?.password || '',
+                                  database:
+                                    current[target.name]?.database || '',
+                                },
+                              }))
+                            }}
+                            disabled={working}
+                          />
+                        </div>
+                        <div>
+                          <Text
+                            level="caption"
+                            className="text-content-layout-3 mb-1 block"
+                          >
+                            Password
+                          </Text>
+                          {target.password_secret_arn ? (
+                            <Tag
+                              size="small"
+                              variant="neutral"
+                              modifier="ghost"
+                              label="Credentials stored in AWS Secrets Manager"
+                            />
+                          ) : (
+                            <BaseInputText
+                              name={`credentials-password-${target.name}`}
+                              type="password"
+                              value={values[target.name]?.password || ''}
+                              onChange={(event) => {
+                                setValues((current) => ({
+                                  ...current,
+                                  [target.name]: {
+                                    ...current[target.name],
+                                    user:
+                                      current[target.name]?.user ||
+                                      target.user ||
+                                      '',
+                                    password: event.target.value,
+                                    database:
+                                      current[target.name]?.database || '',
+                                  },
+                                }))
+                              }}
+                              autoComplete="new-password"
+                              disabled={working}
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      {result?.status === 'failed' && result.error && (
+                        <ConnectionFailureActions
+                          failure={{
+                            target: target.name,
+                            message: result.error,
+                            category: result.category,
+                            code: result.code,
+                          }}
+                          passwordRequired={
+                            result.code === 'TARGET_PASSWORD_REQUIRED' ||
+                            /environment variable|password_env|export\s+|password not available/i.test(
+                              result.error
+                            )
+                          }
+                          onRetry={async () => {
+                            const checked = await check(undefined, [
+                              target.name,
+                            ])
+                            return checked[target.name]?.status === 'ok'
+                          }}
                         />
                       )}
-                    </HStack>
-                    <Text
-                      level="caption"
-                      className="text-content-layout-3 truncate max-w-full"
-                    >
-                      {target.host}
-                    </Text>
-                  </VStack>
-                  {result && (
-                    <HStack className="gap-1.5 items-center shrink-0">
-                      <Icon
-                        name={result.status === 'ok' ? 'tick' : result.status === 'checking' ? 'observe' : 'alert'}
-                        label={result.status}
-                        className={`w-4 h-4 ${
-                          result.status === 'ok'
-                            ? 'text-content-positive-soft'
-                            : result.status === 'checking'
-                              ? 'text-content-warning-soft'
-                              : 'text-content-negative-soft'
-                        }`}
-                      />
-                      <Text
-                        level="caption"
-                        className={
-                          result.status === 'ok'
-                            ? 'text-content-positive-soft'
-                            : result.status === 'checking'
-                              ? 'text-content-warning-soft'
-                              : 'text-content-negative-soft'
-                        }
-                      >
-                        {result.status === 'ok'
-                          ? 'Connected'
-                          : result.status === 'checking'
-                            ? 'Checking'
-                            : 'Failed'}
-                      </Text>
-                    </HStack>
-                  )}
-                </HStack>
-
-                <div className="grid grid-cols-1 laptop:grid-cols-2 gap-3">
-                  <div>
-                    <Text level="caption" className="text-content-layout-3 mb-1 block">
-                      Database
-                    </Text>
-                    <BaseInputText
-                      name={`credentials-database-${target.name}`}
-                      value={values[target.name]?.database || ''}
-                      onChange={(event) =>
-                        setValues((current) => ({
-                          ...current,
-                          [target.name]: {
-                            ...current[target.name],
-                            database: event.target.value,
-                          },
-                        }))
-                      }
-                      placeholder="Required database name"
-                      disabled={working}
-                      required
-                    />
-                    {!target.database &&
-                      ((target.tags ?? []).some((tag) =>
-                        tag.startsWith('aws-account:')
-                      ) || target.host.endsWith('.rds.amazonaws.com')) && (
-                        <Text
-                          level="caption"
-                          className="text-content-layout-3 mt-1"
-                        >
-                          Enter the database name used by this instance.
-                        </Text>
-                      )}
+                      {result?.status === 'ok' &&
+                        result.privileges?.writable && (
+                          <WritePrivilegesNotice
+                            engine={target.engine}
+                            database={
+                              values[target.name]?.database || target.database
+                            }
+                          />
+                        )}
+                    </VStack>
                   </div>
-                  <div>
-                    <Text level="caption" className="text-content-layout-3 mb-1 block">
-                      Username
-                    </Text>
-                    <BaseInputText
-                      name={`credentials-user-${target.name}`}
-                      value={values[target.name]?.user || ''}
-                      onChange={(event) =>
-                        setValues((current) => ({
-                          ...current,
-                          [target.name]: {
-                            ...current[target.name],
-                            user: event.target.value,
-                            password: current[target.name]?.password || '',
-                            database: current[target.name]?.database || '',
-                          },
-                        }))
-                      }
-                      disabled={working}
-                    />
-                  </div>
-                  <div>
-                    <Text level="caption" className="text-content-layout-3 mb-1 block">
-                      Password
-                    </Text>
-                    {target.password_secret_arn ? (
-                      <Tag
-                        size="small"
-                        variant="neutral"
-                        modifier="ghost"
-                        label="Credentials stored in AWS Secrets Manager"
-                      />
-                    ) : (
-                      <BaseInputText
-                        name={`credentials-password-${target.name}`}
-                        type="password"
-                        value={values[target.name]?.password || ''}
-                        onChange={(event) =>
-                          setValues((current) => ({
-                            ...current,
-                            [target.name]: {
-                              ...current[target.name],
-                              user: current[target.name]?.user || target.user || '',
-                              password: event.target.value,
-                              database: current[target.name]?.database || '',
-                            },
-                          }))
-                        }
-                        autoComplete="new-password"
-                        disabled={working}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                {result?.status === 'failed' && result.error && (
-                  <ConnectionFailureActions
-                    failure={{
-                      target: target.name,
-                      message: result.error,
-                      category: result.category,
-                      code: result.code,
-                    }}
-                    passwordRequired={
-                      result.code === 'TARGET_PASSWORD_REQUIRED' ||
-                      /environment variable|password_env|export\s+|password not available/i.test(
-                        result.error
-                      )
-                    }
-                    onRetry={async () => {
-                      const checked = await check(undefined, [target.name])
-                      return checked[target.name]?.status === 'ok'
-                    }}
-                  />
-                )}
-                {result?.status === 'ok' && result.privileges?.writable && (
-                  <WritePrivilegesNotice
-                    engine={target.engine}
-                    database={values[target.name]?.database || target.database}
-                    evidence={result.privileges.evidence}
-                  />
-                )}
-              </VStack>
-            </div>
-          )
-            })}
+                )
+              })}
             </VStack>
           </div>
         ))}
@@ -596,7 +637,11 @@ export function CredentialsStep({
       )}
       {error && <Alert variant="negative" modifier="outline" label={error} />}
       {connectivityError && (
-        <Alert variant="negative" modifier="outline" label={connectivityError} />
+        <Alert
+          variant="negative"
+          modifier="outline"
+          label={connectivityError}
+        />
       )}
       {!keyringAvailable && (
         <Text level="caption" className="text-content-layout-3">
@@ -631,7 +676,11 @@ export function CredentialsStep({
           <Button
             variant="primary"
             modifier="solid"
-            label={connectivityState === 'running' ? 'Checking connectivity' : 'Save and check'}
+            label={
+              connectivityState === 'running'
+                ? 'Checking connectivity'
+                : 'Save and check'
+            }
             icon="connect"
             iconPosition="right"
             loading={working}

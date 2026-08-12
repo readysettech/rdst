@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ConfigureForm } from './ConfigureForm'
 
@@ -167,6 +174,123 @@ describe('ConfigureForm sandbox behavior', () => {
     expect(
       screen.queryByRole('switch', { name: 'Deploy Readyset now' })
     ).toBeNull()
+  })
+
+  it('confirms after an explicit writable connection test without retesting', async () => {
+    const onSubmit = vi.fn()
+    const onTest = vi.fn().mockResolvedValue({
+      target: 'app_db',
+      connected: true,
+      databaseEngine: 'postgresql',
+      privileges: {
+        writable: true,
+        evidence: 'PostgreSQL role is a superuser.',
+      },
+    })
+
+    render(
+      <ConfigureForm
+        onSubmit={onSubmit}
+        onTest={onTest}
+        reviewWritePrivilegesOnSubmit
+        testResult={{
+          target: 'app_db',
+          connected: true,
+          databaseEngine: 'postgresql',
+          privileges: {
+            writable: true,
+            evidence: 'PostgreSQL role is a superuser.',
+          },
+        }}
+      />
+    )
+
+    fireEvent.change(
+      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
+      { target: { value: connectionUri() } }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+
+    await waitFor(() => expect(onTest).toHaveBeenCalledOnce())
+    expect(screen.getByText('Read-only access highly recommended')).toBeTruthy()
+    expect(
+      screen.queryByText('Administrator SQL for a read-only user')
+    ).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Proceed anyway' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
+
+    expect(onTest).toHaveBeenCalledOnce()
+    expect(onSubmit).not.toHaveBeenCalled()
+    const dialog = screen.getByRole('dialog')
+    expect(
+      within(dialog).getByRole('heading', {
+        name: 'Use this database account?',
+      })
+    ).toBeTruthy()
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Add connection' })
+    )
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        database: 'app_db',
+        user: 'alice',
+        password: 'secret',
+      })
+    )
+  })
+
+  it('confirms a writable role when adding before testing', async () => {
+    const onSubmit = vi.fn()
+    const onTest = vi.fn().mockResolvedValue({
+      target: 'app_db',
+      connected: true,
+      databaseEngine: 'postgresql',
+      privileges: {
+        writable: true,
+        evidence: 'PostgreSQL role is a superuser.',
+      },
+    })
+
+    render(
+      <ConfigureForm
+        onSubmit={onSubmit}
+        onTest={onTest}
+        reviewWritePrivilegesOnSubmit
+      />
+    )
+
+    fireEvent.change(
+      screen.getByPlaceholderText('postgresql://user@host:5432/database'),
+      { target: { value: connectionUri() } }
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Parse' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Use this database account?',
+      })
+    ).toBeTruthy()
+    expect(onTest).toHaveBeenCalledOnce()
+    expect(onSubmit).not.toHaveBeenCalled()
+    const dialog = screen.getByRole('dialog')
+    expect(
+      within(dialog).getByRole('button', { name: 'View read-only setup' })
+    ).toBeTruthy()
+
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Add connection' })
+    )
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        database: 'app_db',
+        user: 'alice',
+        password: 'secret',
+      })
+    )
   })
 })
 

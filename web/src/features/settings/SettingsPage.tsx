@@ -472,7 +472,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
     try {
       const result = await testConnection(data.name.trim() || 'form-test', data)
       await tunnelStatusQuery.refetch()
-      return result?.connected ?? false
+      return result
     } finally {
       setTestingForm(false)
     }
@@ -652,7 +652,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
           <SettingsSection
             id="connections"
             title="Database connections"
-            description="Manage databases and verify RDST's read-only access."
+            description="Manage databases and review their access."
             action={
               !showForm ? (
                 <Button
@@ -982,6 +982,7 @@ export function SettingsPage({ search }: { search: ConfigureSearch }) {
             testResult={connectionTestResult}
             submitLabel="Add connection"
             showHeader={false}
+            reviewWritePrivilegesOnSubmit
           />
         }
         onClose={closeProviderPicker}

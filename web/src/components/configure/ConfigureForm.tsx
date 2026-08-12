@@ -7,12 +7,13 @@ import { BaseInputSwitch } from '@rs/ui-new/base-input-switch'
 import { BaseInputText } from '@rs/ui-new/base-input-text'
 import { Button } from '@rs/ui-new/button'
 import { Card } from '@rs/ui-new/card'
+import { ConfirmDialog } from '@rs/ui-new/confirm-dialog'
 import { Icon } from '@rs/ui-new/icon'
 import { Show } from '@rs/ui-new/show'
 import { HStack, VStack } from '@rs/ui-new/stack'
 import { Text } from '@rs/ui-new/text'
 import { useDisclosure } from '@rs/ui-new/use-disclosure'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import type {
   ConfigureConnectionStatus,
   ConfigureFormData,
@@ -20,11 +21,18 @@ import type {
 import { ConfigureConnectionTest } from './ConfigureConnectionTest'
 import { FieldLabel } from './FieldLabel'
 import { assembleSshConfig, SshFields, sshFieldsValue } from './SshFields'
+import { WritePrivilegesNotice } from './WritePrivilegesNotice'
 
 interface ConfigureFormProps {
   initialData?: Partial<ConfigureFormData>
   onSubmit?: (data: ConfigureFormData) => void
-  onTest?: (data: ConfigureFormData) => void | boolean | Promise<boolean>
+  onTest?: (
+    data: ConfigureFormData
+  ) =>
+    | undefined
+    | boolean
+    | ConfigureConnectionStatus
+    | Promise<boolean | ConfigureConnectionStatus | null>
   onCancel?: () => void
   isLoading?: boolean
   isTesting?: boolean
@@ -36,6 +44,9 @@ interface ConfigureFormProps {
   submitSize?: 'base' | 'large'
   /** The unified Add connection drawer already owns the page title. */
   showHeader?: boolean
+  /** Test unverified add-mode credentials before saving and confirm when the
+   * connected role has write privileges. */
+  reviewWritePrivilegesOnSubmit?: boolean
 }
 
 const engineOptions = [
@@ -197,6 +208,7 @@ export function ConfigureForm({
   submitLabel,
   submitSize = 'base',
   showHeader = true,
+  reviewWritePrivilegesOnSubmit = false,
 }: ConfigureFormProps) {
   const isAddMode = !initialData?.name
   const [connectionUrl, setConnectionUrl] = useState('')
@@ -219,6 +231,31 @@ export function ConfigureForm({
   const [tlsCa, setTlsCa] = useState(initialData?.tls_ca ?? '')
   const readOnly = initialData?.read_only ?? false
   const [ssh, setSsh] = useState(() => sshFieldsValue(initialData?.ssh))
+  const [pendingWritableSubmission, setPendingWritableSubmission] = useState<{
+    data: ConfigureFormData
+    result: ConfigureConnectionStatus
+  } | null>(null)
+  const [explicitConnectionTest, setExplicitConnectionTest] = useState<{
+    fingerprint: string
+    connected: boolean
+    result?: ConfigureConnectionStatus
+  } | null>(null)
+
+  useEffect(() => {
+    setPendingWritableSubmission(null)
+  }, [
+    name,
+    engine,
+    host,
+    port,
+    database,
+    user,
+    password,
+    tls,
+    tlsVerify,
+    tlsCa,
+    ssh,
+  ])
 
   // "Connection details" holds the fields the connection needs, so it opens by
   // default; "Advanced" TLS settings stay collapsed until asked for. A
@@ -297,11 +334,52 @@ export function ConfigureForm({
     ssh: assembleSshConfig(ssh),
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const fingerprint = (data: ConfigureFormData) => JSON.stringify(data)
+
+  const handleExplicitTest = async () => {
+    if (!onTest) return
+    const data = currentData()
+    const result = await onTest(data)
+    setExplicitConnectionTest({
+      fingerprint: fingerprint(data),
+      connected:
+        typeof result === 'boolean' ? result : Boolean(result?.connected),
+      result: typeof result === 'object' && result ? result : undefined,
+    })
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!isValid || !onSubmit) return
 
-    onSubmit(currentData())
+    const data = currentData()
+    const explicitlyTested =
+      explicitConnectionTest?.fingerprint === fingerprint(data) &&
+      explicitConnectionTest.connected
+    if (isAddMode && reviewWritePrivilegesOnSubmit && onTest) {
+      if (explicitlyTested) {
+        const result = explicitConnectionTest.result
+        if (result?.privileges?.writable === true) {
+          setPendingWritableSubmission({ data, result })
+          return
+        }
+      } else {
+        const result = await onTest(data)
+        const connected =
+          typeof result === 'boolean' ? result : Boolean(result?.connected)
+
+        if (!connected) return
+        if (
+          typeof result === 'object' &&
+          result?.privileges?.writable === true
+        ) {
+          setPendingWritableSubmission({ data, result })
+          return
+        }
+      }
+    }
+
+    onSubmit(data)
   }
 
   const handleCancel = () => {
@@ -322,385 +400,424 @@ export function ConfigureForm({
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <Card className="w-full">
-        <Show when={showHeader}>
-          <Card.Header>
-            <HStack className="gap-2 items-center">
-              <Icon
-                name={isAddMode ? 'add' : 'edit'}
-                label={isAddMode ? 'Add' : 'Edit'}
-                className="w-4 h-4 text-content-layout-3"
-              />
-              <Text level="label-medium" className="text-content-layout-1">
-                {initialData?.name ? 'Edit connection' : 'New connection'}
-              </Text>
-            </HStack>
-          </Card.Header>
-        </Show>
-        <Card.Content>
-          <div className="space-y-5">
-            {/* Quick Setup — the primary path. Hidden when editing a known
+    <>
+      <form onSubmit={handleSubmit}>
+        <Card className="w-full">
+          <Show when={showHeader}>
+            <Card.Header>
+              <HStack className="gap-2 items-center">
+                <Icon
+                  name={isAddMode ? 'add' : 'edit'}
+                  label={isAddMode ? 'Add' : 'Edit'}
+                  className="w-4 h-4 text-content-layout-3"
+                />
+                <Text level="label-medium" className="text-content-layout-1">
+                  {initialData?.name ? 'Edit connection' : 'New connection'}
+                </Text>
+              </HStack>
+            </Card.Header>
+          </Show>
+          <Card.Content>
+            <div className="space-y-5">
+              {/* Quick Setup — the primary path. Hidden when editing a known
                 connection (there's no string to paste). The parser itself stays
                 intact for add mode. [USE-067, VIS-121] */}
-            {isAddMode && (
-              <div className="rounded-xl bg-surface-layout-2/50 p-4">
-                <HStack className="gap-2 items-center mb-3">
-                  <Icon
-                    name="connect"
-                    label="Quick setup"
-                    className="w-4 h-4 text-content-primary-soft"
-                  />
-                  <label htmlFor="cfg-connection-url">
-                    <Text
-                      as="span"
-                      level="label-small"
-                      className="text-content-primary-soft"
-                    >
-                      Quick Setup
-                    </Text>
-                  </label>
-                </HStack>
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <BaseInputText
-                        id="cfg-connection-url"
-                        name="connectionUrl"
-                        value={connectionUrl}
-                        onChange={(e) => {
-                          setConnectionUrl(e.target.value)
-                          setUrlError(null)
-                        }}
-                        placeholder={
-                          engine === 'mysql'
-                            ? 'mysql://user@host:3306/database'
-                            : 'postgresql://user@host:5432/database'
-                        }
-                        disabled={isLoading}
-                      />
-                    </div>
-                    <Button
-                      variant="primary"
-                      modifier="outline"
-                      label="Parse"
-                      type="button"
-                      onClick={handleParseUrl}
-                      disabled={isLoading || !connectionUrl.trim()}
+              {isAddMode && (
+                <div className="rounded-xl bg-surface-layout-2/50 p-4">
+                  <HStack className="gap-2 items-center mb-3">
+                    <Icon
+                      name="connect"
+                      label="Quick setup"
+                      className="w-4 h-4 text-content-primary-soft"
                     />
-                  </div>
-                  <Show when={!!urlError}>
-                    <Text
-                      level="body-small"
-                      className="text-content-negative-soft"
-                    >
-                      {urlError}
-                    </Text>
-                  </Show>
-                  <Text level="caption" className="text-content-layout-3">
-                    Paste a connection URL to auto-fill the form fields
-                  </Text>
-                </div>
-              </div>
-            )}
-
-            {/* Name — always visible; it's the identity you'll pick the
-                connection by. */}
-            <div>
-              <FieldLabel htmlFor="cfg-name">Target Name *</FieldLabel>
-              <BaseInputText
-                id="cfg-name"
-                name="name"
-                value={name}
-                onChange={(e) => {
-                  const nextName = e.target.value
-                  setName(nextName)
-                }}
-                placeholder="my-database"
-                disabled={isLoading || !!initialData?.name}
-                required
-              />
-              <Show when={!isAddMode}>
-                <Text level="caption" className="text-content-layout-3 mt-1">
-                  The name can't be changed after a connection is created.
-                </Text>
-              </Show>
-            </div>
-
-            {/* Connection details — the manual field grid, deferred behind a
-                disclosure that opens pre-filled after a paste. [USE-067, VIS-114] */}
-            <Disclosure
-              id="cfg-connection-details"
-              title="Connection details"
-              subtitle="Engine, host, port, database, user, password"
-              open={detailsOpen}
-              onToggle={setDetailsOpen}
-            >
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <FieldLabel htmlFor="cfg-engine">
-                      Database Engine *
-                    </FieldLabel>
-                    <BaseInputSelect
-                      id="cfg-engine"
-                      name="engine"
-                      options={engineOptions}
-                      value={engine}
-                      onValueChange={(nextEngine) => {
-                        setEngine(nextEngine)
-                        if (!portTouched) setPort(defaultPortFor(nextEngine))
-                      }}
-                      disabled={isLoading}
-                    />
-                  </div>
-
-                  <div>
-                    <FieldLabel htmlFor="cfg-host">Host *</FieldLabel>
-                    <BaseInputText
-                      id="cfg-host"
-                      name="host"
-                      value={host}
-                      onChange={(e) => setHost(e.target.value)}
-                      placeholder={
-                        engine === 'mysql'
-                          ? 'mysql.example.com'
-                          : 'postgres.example.com'
-                      }
-                      disabled={isLoading}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <FieldLabel htmlFor="cfg-port">Port *</FieldLabel>
-                    <BaseInputText
-                      id="cfg-port"
-                      name="port"
-                      type="number"
-                      value={String(port)}
-                      onChange={(e) => {
-                        setPortTouched(true)
-                        setPort(
-                          Number(e.target.value) || defaultPortFor(engine)
-                        )
-                      }}
-                      placeholder={String(defaultPortFor(engine))}
-                      disabled={isLoading}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <FieldLabel htmlFor="cfg-database">Database *</FieldLabel>
-                    <BaseInputText
-                      id="cfg-database"
-                      name="database"
-                      value={database}
-                      onChange={(e) => setDatabase(e.target.value)}
-                      placeholder="myapp"
-                      disabled={isLoading}
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <FieldLabel htmlFor="cfg-user">User *</FieldLabel>
-                    <BaseInputText
-                      id="cfg-user"
-                      name="user"
-                      value={user}
-                      onChange={(e) => setUser(e.target.value)}
-                      placeholder={engine === 'mysql' ? 'root' : 'postgres'}
-                      disabled={isLoading}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <FieldLabel htmlFor="cfg-password">
-                    Database Password {isAddMode ? '*' : ''}
-                  </FieldLabel>
-                  <BaseInputText
-                    id="cfg-password"
-                    name="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={
-                      isAddMode
-                        ? 'Enter database password'
-                        : 'Leave blank to keep current password'
-                    }
-                    disabled={isLoading}
-                    required={isAddMode}
-                    autoComplete="new-password"
-                  />
-                  <Text level="caption" className="text-content-layout-3 mt-1">
-                    Stored in your local secret store, never in the target
-                    configuration
-                  </Text>
-                </div>
-              </div>
-            </Disclosure>
-
-            <Disclosure
-              id="cfg-ssh"
-              title="Connect via SSH jump host"
-              subtitle="For databases that are not directly reachable"
-              open={sshOpen}
-              onToggle={setSshOpen}
-            >
-              <SshFields
-                value={ssh}
-                onChange={setSsh}
-                disabled={isLoading}
-                idPrefix="cfg-ssh"
-              />
-            </Disclosure>
-
-            {/* Advanced — TLS verification, collapsed until asked for. [VIS-114] */}
-            <Disclosure
-              id="cfg-advanced"
-              title="Advanced"
-              subtitle="TLS and certificate verification"
-              open={advancedOpen}
-              onToggle={setAdvancedOpen}
-            >
-              <div className="space-y-4">
-                <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
-                  <label htmlFor="cfg-tls" className="cursor-pointer">
-                    <VStack className="gap-0.5 items-start">
+                    <label htmlFor="cfg-connection-url">
                       <Text
                         as="span"
                         level="label-small"
-                        className="text-content-layout-1"
+                        className="text-content-primary-soft"
                       >
-                        TLS encryption
+                        Quick Setup
                       </Text>
-                      <Text
-                        as="span"
-                        level="caption"
-                        className="text-content-layout-3"
-                      >
-                        Require encrypted connection
-                      </Text>
-                    </VStack>
-                  </label>
-                  <BaseInputSwitch
-                    id="cfg-tls"
-                    name="tls"
-                    aria-label="TLS encryption"
-                    checked={tls}
-                    onCheckedChange={(next) => {
-                      setTls(next)
-                      if (!next) setTlsVerify(false)
-                    }}
-                    disabled={isLoading}
-                  />
-                </div>
-
-                <Show when={tls}>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
-                      <label
-                        htmlFor="cfg-tls-verify"
-                        className="cursor-pointer"
-                      >
-                        <VStack className="gap-0.5 items-start">
-                          <Text
-                            as="span"
-                            level="label-small"
-                            className="text-content-layout-1"
-                          >
-                            Verify TLS certificate
-                          </Text>
-                          <Text
-                            as="span"
-                            level="caption"
-                            className="text-content-layout-3"
-                          >
-                            Verify the certificate chain and database hostname
-                          </Text>
-                        </VStack>
-                      </label>
-                      <BaseInputSwitch
-                        id="cfg-tls-verify"
-                        name="tls_verify"
-                        aria-label="Verify TLS certificate"
-                        checked={tlsVerify}
-                        onCheckedChange={setTlsVerify}
-                        disabled={isLoading}
-                      />
-                    </div>
-                    <Show when={tlsVerify}>
-                      <div>
-                        <FieldLabel htmlFor="cfg-tls-ca">
-                          TLS CA path
-                        </FieldLabel>
+                    </label>
+                  </HStack>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <div className="flex-1">
                         <BaseInputText
-                          id="cfg-tls-ca"
-                          name="tls_ca"
-                          value={tlsCa}
-                          onChange={(event) => setTlsCa(event.target.value)}
-                          placeholder="/path/to/ca-certificate.pem (optional)"
+                          id="cfg-connection-url"
+                          name="connectionUrl"
+                          value={connectionUrl}
+                          onChange={(e) => {
+                            setConnectionUrl(e.target.value)
+                            setUrlError(null)
+                          }}
+                          placeholder={
+                            engine === 'mysql'
+                              ? 'mysql://user@host:3306/database'
+                              : 'postgresql://user@host:5432/database'
+                          }
                           disabled={isLoading}
                         />
                       </div>
+                      <Button
+                        variant="primary"
+                        modifier="outline"
+                        label="Parse"
+                        type="button"
+                        onClick={handleParseUrl}
+                        disabled={isLoading || !connectionUrl.trim()}
+                      />
+                    </div>
+                    <Show when={!!urlError}>
+                      <Text
+                        level="body-small"
+                        className="text-content-negative-soft"
+                      >
+                        {urlError}
+                      </Text>
                     </Show>
+                    <Text level="caption" className="text-content-layout-3">
+                      Paste a connection URL to auto-fill the form fields
+                    </Text>
                   </div>
+                </div>
+              )}
+
+              {/* Name — always visible; it's the identity you'll pick the
+                connection by. */}
+              <div>
+                <FieldLabel htmlFor="cfg-name">Target Name *</FieldLabel>
+                <BaseInputText
+                  id="cfg-name"
+                  name="name"
+                  value={name}
+                  onChange={(e) => {
+                    const nextName = e.target.value
+                    setName(nextName)
+                  }}
+                  placeholder="my-database"
+                  disabled={isLoading || !!initialData?.name}
+                  required
+                />
+                <Show when={!isAddMode}>
+                  <Text level="caption" className="text-content-layout-3 mt-1">
+                    The name can't be changed after a connection is created.
+                  </Text>
                 </Show>
               </div>
-            </Disclosure>
-          </div>
-        </Card.Content>
-        <Show when={isTesting || !!testResult}>
-          <div className="px-5 pb-2">
-            <ConfigureConnectionTest
-              result={testResult ?? null}
-              isLoading={isTesting}
-              targetName={name.trim() || 'form-test'}
-              onRetry={async () => Boolean(await onTest?.(currentData()))}
-            />
-          </div>
-        </Show>
-        <Card.Footer>
-          <HStack className="gap-3 justify-end w-full">
-            <Button
-              variant="primary"
-              modifier="ghost"
-              label="Cancel"
-              onClick={handleCancel}
-              type="button"
-            />
-            <Button
-              variant="primary"
-              modifier="outline"
-              label="Test connection"
-              icon="connect"
-              iconPosition="left"
-              onClick={() => void onTest?.(currentData())}
-              loading={isTesting}
-              disabled={!isValid || isLoading || isTesting || !onTest}
-              type="button"
-            />
-            <Button
-              variant="rising"
-              modifier="solid"
-              size={submitSize}
-              label={
-                initialData?.name
-                  ? 'Update connection'
-                  : (submitLabel ?? 'Add connection')
-              }
-              type="submit"
-              loading={isLoading}
-              disabled={!isValid || isTesting}
-            />
-          </HStack>
-        </Card.Footer>
-      </Card>
-    </form>
+
+              {/* Connection details — the manual field grid, deferred behind a
+                disclosure that opens pre-filled after a paste. [USE-067, VIS-114] */}
+              <Disclosure
+                id="cfg-connection-details"
+                title="Connection details"
+                subtitle="Engine, host, port, database, user, password"
+                open={detailsOpen}
+                onToggle={setDetailsOpen}
+              >
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <FieldLabel htmlFor="cfg-engine">
+                        Database Engine *
+                      </FieldLabel>
+                      <BaseInputSelect
+                        id="cfg-engine"
+                        name="engine"
+                        options={engineOptions}
+                        value={engine}
+                        onValueChange={(nextEngine) => {
+                          setEngine(nextEngine)
+                          if (!portTouched) setPort(defaultPortFor(nextEngine))
+                        }}
+                        disabled={isLoading}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel htmlFor="cfg-host">Host *</FieldLabel>
+                      <BaseInputText
+                        id="cfg-host"
+                        name="host"
+                        value={host}
+                        onChange={(e) => setHost(e.target.value)}
+                        placeholder={
+                          engine === 'mysql'
+                            ? 'mysql.example.com'
+                            : 'postgres.example.com'
+                        }
+                        disabled={isLoading}
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel htmlFor="cfg-port">Port *</FieldLabel>
+                      <BaseInputText
+                        id="cfg-port"
+                        name="port"
+                        type="number"
+                        value={String(port)}
+                        onChange={(e) => {
+                          setPortTouched(true)
+                          setPort(
+                            Number(e.target.value) || defaultPortFor(engine)
+                          )
+                        }}
+                        placeholder={String(defaultPortFor(engine))}
+                        disabled={isLoading}
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel htmlFor="cfg-database">Database *</FieldLabel>
+                      <BaseInputText
+                        id="cfg-database"
+                        name="database"
+                        value={database}
+                        onChange={(e) => setDatabase(e.target.value)}
+                        placeholder="myapp"
+                        disabled={isLoading}
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <FieldLabel htmlFor="cfg-user">User *</FieldLabel>
+                      <BaseInputText
+                        id="cfg-user"
+                        name="user"
+                        value={user}
+                        onChange={(e) => setUser(e.target.value)}
+                        placeholder={engine === 'mysql' ? 'root' : 'postgres'}
+                        disabled={isLoading}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <FieldLabel htmlFor="cfg-password">
+                      Database Password {isAddMode ? '*' : ''}
+                    </FieldLabel>
+                    <BaseInputText
+                      id="cfg-password"
+                      name="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={
+                        isAddMode
+                          ? 'Enter database password'
+                          : 'Leave blank to keep current password'
+                      }
+                      disabled={isLoading}
+                      required={isAddMode}
+                      autoComplete="new-password"
+                    />
+                    <Text
+                      level="caption"
+                      className="text-content-layout-3 mt-1"
+                    >
+                      Stored in your local secret store, never in the target
+                      configuration
+                    </Text>
+                  </div>
+                </div>
+              </Disclosure>
+
+              <Disclosure
+                id="cfg-ssh"
+                title="Connect via SSH jump host"
+                subtitle="For databases that are not directly reachable"
+                open={sshOpen}
+                onToggle={setSshOpen}
+              >
+                <SshFields
+                  value={ssh}
+                  onChange={setSsh}
+                  disabled={isLoading}
+                  idPrefix="cfg-ssh"
+                />
+              </Disclosure>
+
+              {/* Advanced — TLS verification, collapsed until asked for. [VIS-114] */}
+              <Disclosure
+                id="cfg-advanced"
+                title="Advanced"
+                subtitle="TLS and certificate verification"
+                open={advancedOpen}
+                onToggle={setAdvancedOpen}
+              >
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
+                    <label htmlFor="cfg-tls" className="cursor-pointer">
+                      <VStack className="gap-0.5 items-start">
+                        <Text
+                          as="span"
+                          level="label-small"
+                          className="text-content-layout-1"
+                        >
+                          TLS encryption
+                        </Text>
+                        <Text
+                          as="span"
+                          level="caption"
+                          className="text-content-layout-3"
+                        >
+                          Require encrypted connection
+                        </Text>
+                      </VStack>
+                    </label>
+                    <BaseInputSwitch
+                      id="cfg-tls"
+                      name="tls"
+                      aria-label="TLS encryption"
+                      checked={tls}
+                      onCheckedChange={(next) => {
+                        setTls(next)
+                        if (!next) setTlsVerify(false)
+                      }}
+                      disabled={isLoading}
+                    />
+                  </div>
+
+                  <Show when={tls}>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between rounded-lg bg-surface-layout-2/50 px-4 py-3">
+                        <label
+                          htmlFor="cfg-tls-verify"
+                          className="cursor-pointer"
+                        >
+                          <VStack className="gap-0.5 items-start">
+                            <Text
+                              as="span"
+                              level="label-small"
+                              className="text-content-layout-1"
+                            >
+                              Verify TLS certificate
+                            </Text>
+                            <Text
+                              as="span"
+                              level="caption"
+                              className="text-content-layout-3"
+                            >
+                              Verify the certificate chain and database hostname
+                            </Text>
+                          </VStack>
+                        </label>
+                        <BaseInputSwitch
+                          id="cfg-tls-verify"
+                          name="tls_verify"
+                          aria-label="Verify TLS certificate"
+                          checked={tlsVerify}
+                          onCheckedChange={setTlsVerify}
+                          disabled={isLoading}
+                        />
+                      </div>
+                      <Show when={tlsVerify}>
+                        <div>
+                          <FieldLabel htmlFor="cfg-tls-ca">
+                            TLS CA path
+                          </FieldLabel>
+                          <BaseInputText
+                            id="cfg-tls-ca"
+                            name="tls_ca"
+                            value={tlsCa}
+                            onChange={(event) => setTlsCa(event.target.value)}
+                            placeholder="/path/to/ca-certificate.pem (optional)"
+                            disabled={isLoading}
+                          />
+                        </div>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+              </Disclosure>
+            </div>
+          </Card.Content>
+          <Show when={isTesting || !!testResult}>
+            <div className="px-5 pb-2">
+              <ConfigureConnectionTest
+                result={testResult ?? null}
+                isLoading={isTesting}
+                targetName={name.trim() || 'form-test'}
+                database={database.trim()}
+                onRetry={async () => {
+                  const result = await onTest?.(currentData())
+                  return typeof result === 'boolean'
+                    ? result
+                    : Boolean(result?.connected)
+                }}
+              />
+            </div>
+          </Show>
+          <Card.Footer>
+            <HStack className="gap-3 justify-end w-full">
+              <Button
+                variant="primary"
+                modifier="ghost"
+                label="Cancel"
+                onClick={handleCancel}
+                type="button"
+              />
+              <Button
+                variant="primary"
+                modifier="outline"
+                label="Test connection"
+                icon="connect"
+                iconPosition="left"
+                onClick={() => void handleExplicitTest()}
+                loading={isTesting}
+                disabled={!isValid || isLoading || isTesting || !onTest}
+                type="button"
+              />
+              <Button
+                variant="rising"
+                modifier="solid"
+                size={submitSize}
+                label={
+                  initialData?.name
+                    ? 'Update connection'
+                    : (submitLabel ?? 'Add connection')
+                }
+                type="submit"
+                loading={isLoading}
+                disabled={!isValid || isTesting}
+              />
+            </HStack>
+          </Card.Footer>
+        </Card>
+      </form>
+      <ConfirmDialog
+        isOpen={pendingWritableSubmission !== null}
+        onClose={() => setPendingWritableSubmission(null)}
+        onConfirm={() => {
+          if (!pendingWritableSubmission) return
+          onSubmit?.(pendingWritableSubmission.data)
+          setPendingWritableSubmission(null)
+        }}
+        title="Use this database account?"
+        subtitle={
+          pendingWritableSubmission
+            ? `${pendingWritableSubmission.data.name} connected successfully. RDST recommends read-only access, but you can add this account as-is.`
+            : undefined
+        }
+        confirmLabel="Add connection"
+        confirmVariant="primary"
+        size="large"
+      >
+        {pendingWritableSubmission ? (
+          <WritePrivilegesNotice
+            engine={
+              pendingWritableSubmission.result.databaseEngine ??
+              pendingWritableSubmission.data.engine
+            }
+            database={pendingWritableSubmission.data.database}
+          />
+        ) : null}
+      </ConfirmDialog>
+    </>
   )
 }

@@ -73,8 +73,14 @@ test('adds, updates, defaults, and deletes a database target', async ({
 
   await page.getByRole('button', { name: 'Test connection' }).click()
   await expect(page.getByText('Connected · PostgreSQL 16.3')).toBeVisible()
-  await expect(page.getByText('This user has write privileges.')).toBeVisible()
-  await expect(page.getByText('Use a read-only database user.')).toBeVisible()
+  await expect(
+    page.getByText('Read-only access highly recommended')
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      'This account has write access. RDST works with it, but a read-only account reduces the risk of unintended database changes.'
+    )
+  ).toBeVisible()
   expect(connectionTestBodies).toHaveLength(1)
   expect(connectionTestBodies[0].target).not.toHaveProperty('password_env')
   expect(connectionTestBodies[0].target).toMatchObject({
@@ -83,10 +89,20 @@ test('adds, updates, defaults, and deletes a database target', async ({
     database: 'application',
     user: 'rdst_e2e',
   })
-  await page.getByRole('button', { name: 'Proceed anyway' }).click()
   await page
     .getByRole('button', { name: 'Add connection', exact: true })
     .last()
+    .click()
+
+  const writableAccountDialog = page.getByRole('dialog')
+  await expect(
+    writableAccountDialog.getByRole('heading', {
+      name: 'Use this database account?',
+    })
+  ).toBeVisible()
+  expect(connectionTestBodies).toHaveLength(1)
+  await writableAccountDialog
+    .getByRole('button', { name: 'Add connection' })
     .click()
 
   let targetRow = page

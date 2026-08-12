@@ -6,32 +6,34 @@
  * reachable while a test is in flight. [USE-099, USE-025, USE-008]
  */
 
-import { Text } from '@rs/ui-new/text';
-import { Icon } from '@rs/ui-new/icon';
-import { IconButton } from '@rs/ui-new/icon-button';
-import { HStack, VStack } from '@rs/ui-new/stack';
-import { Show } from '@rs/ui-new/show';
-import { Spinner } from '@rs/ui-new/spinner';
-import { m } from '@rs/ui-new/motion';
-import type { ConfigureConnectionStatus } from '../../types/configure';
-import { ConnectionFailureActions } from '../ConnectionFailureActions';
-import { condenseServerVersion } from './TargetConnectivity';
-import { WritePrivilegesNotice } from './WritePrivilegesNotice';
+import { Icon } from '@rs/ui-new/icon'
+import { IconButton } from '@rs/ui-new/icon-button'
+import { m } from '@rs/ui-new/motion'
+import { Show } from '@rs/ui-new/show'
+import { Spinner } from '@rs/ui-new/spinner'
+import { HStack, VStack } from '@rs/ui-new/stack'
+import { Text } from '@rs/ui-new/text'
+import type { ConfigureConnectionStatus } from '../../types/configure'
+import { ConnectionFailureActions } from '../ConnectionFailureActions'
+import { condenseServerVersion } from './TargetConnectivity'
+import { WritePrivilegesNotice } from './WritePrivilegesNotice'
 
 interface ConfigureConnectionTestProps {
-  result: ConfigureConnectionStatus | null;
-  isLoading?: boolean;
+  result: ConfigureConnectionStatus | null
+  isLoading?: boolean
   /** Name of the target being tested — shown while loading (no result yet). */
-  targetName?: string;
-  onDismiss?: () => void;
-  onSetPassword?: () => void;
-  onRetry?: () => Promise<boolean>;
+  targetName?: string
+  database?: string
+  onDismiss?: () => void
+  onSetPassword?: () => void
+  onRetry?: () => Promise<boolean>
 }
 
 export function ConfigureConnectionTest({
   result,
   isLoading,
   targetName,
+  database,
   onDismiss,
   onSetPassword,
   onRetry,
@@ -49,17 +51,17 @@ export function ConfigureConnectionTest({
           </Text>
         </HStack>
       </div>
-    );
+    )
   }
 
   if (!result) {
-    return null;
+    return null
   }
 
-  const version = condenseServerVersion(result.engine);
+  const version = condenseServerVersion(result.engine)
   const passwordRequired =
     result.code === 'TARGET_PASSWORD_REQUIRED' ||
-    /environment variable|password_env|export\s+/i.test(result.error ?? '');
+    /environment variable|password_env|export\s+/i.test(result.error ?? '')
 
   return (
     <m.div
@@ -78,14 +80,18 @@ export function ConfigureConnectionTest({
             name={result.connected ? 'tick' : 'close'}
             label={result.connected ? 'Connected' : 'Failed'}
             className={`w-4 h-4 mt-0.5 shrink-0 ${
-              result.connected ? 'text-content-positive-soft' : 'text-content-negative-soft'
+              result.connected
+                ? 'text-content-positive-soft'
+                : 'text-content-negative-soft'
             }`}
           />
           <VStack className="gap-0.5 items-start min-w-0">
             <Text
               level="label-small"
               className={`truncate ${
-                result.connected ? 'text-content-positive-soft' : 'text-content-negative-soft'
+                result.connected
+                  ? 'text-content-positive-soft'
+                  : 'text-content-negative-soft'
               }`}
             >
               {result.connected ? 'Connected' : 'Connection failed'}
@@ -129,10 +135,10 @@ export function ConfigureConnectionTest({
         <div className="mt-2">
           <WritePrivilegesNotice
             engine={result.databaseEngine ?? 'postgresql'}
-            evidence={result.privileges?.evidence}
+            database={database}
           />
         </div>
       </Show>
     </m.div>
-  );
+  )
 }
