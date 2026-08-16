@@ -1,0 +1,166 @@
+{
+  "schema_version": 2,
+  "partition_revision": "bird-mini-dev-50-holdout-450-v1",
+  "dataset_revision": "f65faf4ae3b638c1fa6df1d3370c8d92c8366301",
+  "alignment_status": "gold-aligned",
+  "alignment_basis": "bird-released-gold-sql-and-evidence-v1",
+  "aligned_at": "2026-08-19T01:34:11Z",
+  "cases": [
+    {
+      "question_id": 11,
+      "gold_record_sha256": "cad5f616cce384f0211a8512fc44235c31c9c64e373f64e5043f18a8a3aeacbd",
+      "ambiguity_response_sha256": "9910e07d1283b7b1d41056f9f57d1b5c61cfac8962fc7c698dce832a7a6c6207",
+      "detector_output_sha256": "1e22c5255a0eb73eec4b5dea9cc6ffedf0f5de8268a987094e91a73c8018f1a5",
+      "resolver_output_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "expected_detection": "ambiguous",
+      "expected_auto_action": "abstain",
+      "rationale": "BIRD requires CDSCode and the sum of K-12 and Ages 5-17 enrollment; the detector omitted the required sum.",
+      "gold_alignment": [
+        {
+          "ambiguity_id": "A1",
+          "material": true,
+          "gold_target": "Return the school CDSCode.",
+          "gold_option_covered": true,
+          "correct_option_ids": ["A1-I1"],
+          "rationale": "BIRD gold selects frpm.CDSCode."
+        },
+        {
+          "ambiguity_id": "A2",
+          "material": true,
+          "gold_target": "Filter on Enrollment (K-12) plus Enrollment (Ages 5-17) greater than 500.",
+          "gold_option_covered": false,
+          "correct_option_ids": [],
+          "rationale": "Neither proposed option contains BIRD's required sum of both enrollment columns."
+        }
+      ]
+    },
+    {
+      "question_id": 26,
+      "gold_record_sha256": "d0a992046c58330ecb615e6e82c784215f687125a94edc7eb76c7eaa75a18d0c",
+      "ambiguity_response_sha256": "9f0148e9920ce51c82e57ae399f46d4ef9bcf2279b2f9b046585a27104665862",
+      "detector_output_sha256": "8eb0f1650e5312ef7127d9bc76395e258c122935e998c40b985b687da44a6a86",
+      "resolver_output_sha256": "2911d3da324f25cc0cf981f7c9345f69b6d8d15f57da7e5f298016a0bfa43cc4",
+      "expected_detection": "ambiguous",
+      "expected_auto_action": "abstain",
+      "rationale": "The detector lacks the complete BIRD interpretation for the meal metric and ranks the wrong address and school-type choices.",
+      "gold_alignment": [
+        {
+          "ambiguity_id": "A1",
+          "material": true,
+          "gold_target": "Filter School Type to High Schools (Public) only.",
+          "gold_option_covered": true,
+          "correct_option_ids": ["A1-I3"],
+          "rationale": "BIRD gold uses frpm.School Type = High Schools (Public)."
+        },
+        {
+          "ambiguity_id": "A2",
+          "material": true,
+          "gold_target": "Filter Free Meal Count (Ages 5-17) greater than 800.",
+          "gold_option_covered": false,
+          "correct_option_ids": [],
+          "rationale": "Both proposed options use FRPM Count, while BIRD gold uses Free Meal Count."
+        },
+        {
+          "ambiguity_id": "A3",
+          "material": true,
+          "gold_target": "Return the physical Street, City, State, and Zip fields.",
+          "gold_option_covered": true,
+          "correct_option_ids": ["A3-I2"],
+          "rationale": "BIRD evidence and gold SQL define the communication address as the physical address."
+        }
+      ]
+    },
+    {
+      "question_id": 28,
+      "gold_record_sha256": "da2014baba6cf06ee6ea065ffd655bce0a5a40ad5cb65973676b90cc66a1baf1",
+      "ambiguity_response_sha256": "4a2a79636b5b212b9b504da8f94b67bb7e96d7ef591c0a4c8c0cb6434d4bff46",
+      "detector_output_sha256": "31115ace9ab2482ee95f22cdd7f56e904c2d825abe65447a8e725a1cb57ae17e",
+      "resolver_output_sha256": "509e1989c36ccad56f65c15cf7c0da7839757c65f93c1afcc7136dfeb1f4a0d4",
+      "expected_detection": "ambiguous",
+      "expected_auto_action": "abstain",
+      "rationale": "BIRD selects schools.FundingType and the numeric DOC code, while the detector ranks different interpretations first.",
+      "gold_alignment": [
+        {
+          "ambiguity_id": "A1",
+          "material": true,
+          "gold_target": "Compute Enrollment (K-12) minus Enrollment (Ages 5-17).",
+          "gold_option_covered": true,
+          "correct_option_ids": ["A1-I1", "A1-I2"],
+          "rationale": "Both options state the same SQL effect required by BIRD evidence."
+        },
+        {
+          "ambiguity_id": "A2",
+          "material": true,
+          "gold_target": "Filter schools.FundingType to Locally funded.",
+          "gold_option_covered": true,
+          "correct_option_ids": ["A2-I2"],
+          "rationale": "BIRD gold uses schools.FundingType in both outer and average subqueries."
+        },
+        {
+          "ambiguity_id": "A3",
+          "material": true,
+          "gold_target": "Return the numeric schools.DOC code with the school name.",
+          "gold_option_covered": true,
+          "correct_option_ids": ["A3-I2"],
+          "rationale": "BIRD gold returns schools.DOC rather than the human-readable DOCType label."
+        }
+      ]
+    },
+    {
+      "question_id": 45,
+      "gold_record_sha256": "2ad4ddcf2db991f70eab6dd08d0f11ec90d96ffd8606a6fd88add8424beca3b0",
+      "ambiguity_response_sha256": "6786f3b7cca9fe3a42970fc8f74ceaf66e78c4c41b5c891f5da5c7c885ecd0e9",
+      "detector_output_sha256": "5490dbe18eeeaa689d38d560db8d312ecc8fcef5c790dc10ec409621d234fde1",
+      "resolver_output_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "expected_detection": "clear",
+      "expected_auto_action": "proceed",
+      "rationale": "BIRD directly uses the primary administrator fields and the stored AvgScrWrite value; clarification is unnecessary.",
+      "gold_alignment": [
+        {
+          "ambiguity_id": "A1",
+          "material": false,
+          "gold_target": "Match the primary administrator fields.",
+          "gold_option_covered": true,
+          "correct_option_ids": ["A1-I1"],
+          "rationale": "BIRD gold uses AdmFName1 and AdmLName1, but the question remains safe to execute without asking."
+        },
+        {
+          "ambiguity_id": "A2",
+          "material": false,
+          "gold_target": "Return AvgScrWrite directly.",
+          "gold_option_covered": true,
+          "correct_option_ids": ["A2-I2"],
+          "rationale": "BIRD gold returns the stored school-level average; re-averaging one row is non-material."
+        }
+      ]
+    },
+    {
+      "question_id": 46,
+      "gold_record_sha256": "523853c808e0882acb7fd7768e5c06ca083ff85c622f26f4255e1d591ef4d2c0",
+      "ambiguity_response_sha256": "e5d45357469dac12bcf742fc5a62b8314451ed07c8f5e20e8bcce21acf9e1612",
+      "detector_output_sha256": "dd68a8dcfd835cdfe26f2268fee2d07356046ca891ca223fc2e791606ec9d7fa",
+      "resolver_output_sha256": "4b3a0d507ddc0f8b77eb5a9f7c755dfc27224499f9a7c498e638e4eecf0e189c",
+      "expected_detection": "ambiguous",
+      "expected_auto_action": "abstain",
+      "rationale": "BIRD defines State Special Schools as schools.DOC = 31, which is absent from the proposed options.",
+      "gold_alignment": [
+        {
+          "ambiguity_id": "A1",
+          "material": true,
+          "gold_target": "Filter schools.DOC to 31.",
+          "gold_option_covered": false,
+          "correct_option_ids": [],
+          "rationale": "No proposed option uses BIRD's released DOC = 31 definition."
+        },
+        {
+          "ambiguity_id": "A2",
+          "material": true,
+          "gold_target": "Rank by Enrollment (K-12).",
+          "gold_option_covered": true,
+          "correct_option_ids": ["A2-I1"],
+          "rationale": "BIRD evidence defines grades 1 through 12 as K-12."
+        }
+      ]
+    }
+  ]
+}

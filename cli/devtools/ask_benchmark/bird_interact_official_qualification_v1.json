@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "suite": "bird-interact-lite-official-qualification-v1",
+  "source": {
+    "repository": "https://huggingface.co/datasets/birdsql/bird-interact-lite",
+    "revision": "f7881a9c2b9630cc4fc13b0c39279740b0a2fd87",
+    "public_data_path": "bird_interact_data.jsonl",
+    "public_data_sha256": "d155fa0855bc1885f77df2fcc357d3056e10426cd6093c0042aa99d79067af08",
+    "record_count": 300
+  },
+  "selection": {
+    "seed": "rdst-bird-interact-qualification-v1",
+    "category": "Query",
+    "excluded_inspected_case_ids": [
+      "alien_3",
+      "alien_8"
+    ],
+    "eligible_count": 193,
+    "algorithm": "Sort eligible cases by sha256(seed + NUL + instance_id), then take the first case from each previously unseen database until 10 cases are selected.",
+    "case_count": 10,
+    "cases": [
+      {
+        "instance_id": "robot_2",
+        "database": "robot",
+        "rank_sha256": "00146b68983cc3993d455e41a5e81ab8654b1a538fd56369312c228fcce0b309"
+      },
+      {
+        "instance_id": "crypto_3",
+        "database": "crypto",
+        "rank_sha256": "010a7530121df47e0f1e73992542f5d4b58efe9ed5289d43f5b854da861e584d"
+      },
+      {
+        "instance_id": "insider_8",
+        "database": "insider",
+        "rank_sha256": "01174a325988e641b27c455f9298c437943733c8feb7a1545d5c4ed19856ffc8"
+      },
+      {
+        "instance_id": "virtual_7",
+        "database": "virtual",
+        "rank_sha256": "017d7668be82c8f1fb9bd6a39d46ef6bbcb8054683cb9b81fa079749b878a368"
+      },
+      {
+        "instance_id": "credit_8",
+        "database": "credit",
+        "rank_sha256": "01d487bc18e678dc79c4b10476cae4a23ec70f99fdcfcc18f442d54fdbe89f23"
+      },
+      {
+        "instance_id": "cybermarket_8",
+        "database": "cybermarket",
+        "rank_sha256": "01e7e2a62ac403531e26a6127cd12ac9e436c71b74de1318929ab0208010f2a0"
+      },
+      {
+        "instance_id": "vaccine_4",
+        "database": "vaccine",
+        "rank_sha256": "02e177e691b3b8c0f3f2e11ee8be4297ec12417c78ca488bb670537c2c612c84"
+      },
+      {
+        "instance_id": "solar_1",
+        "database": "solar",
+        "rank_sha256": "036eea9f7180cb6ede1f7ab0409db38a92e067cd7a8613f95a6ffcb377a33343"
+      },
+      {
+        "instance_id": "fake_1",
+        "database": "fake",
+        "rank_sha256": "05e44ad4a154a7278a42680c7889f02bff8affcb700a3659d35481f2d863c223"
+      },
+      {
+        "instance_id": "mental_10",
+        "database": "mental",
+        "rank_sha256": "07b50abdceb2e8a197e24a1442ba5a8d41ed6728e13ba8aa79ae796eb0a745a7"
+      }
+    ]
+  }
+}
