@@ -5,19 +5,23 @@ Tests the LLM-powered schema annotation streaming service including
 event yielding, progress tracking, and error scenarios.
 """
 
-import pytest
 from unittest.mock import Mock, patch
 
+import pytest
+
+from features.schema.annotate_service import AnnotateService
 from features.schema.events import (
-    AnnotateStartedEvent,
-    AnnotateProgressEvent,
-    AnnotateTableCompleteEvent,
     AnnotateCompleteEvent,
     AnnotateErrorEvent,
+    AnnotateProgressEvent,
+    AnnotateStartedEvent,
+    AnnotateTableCompleteEvent,
 )
-from features.schema.annotate_service import AnnotateService
-from features.schema.semantic_models import ColumnAnnotation, TableAnnotation
-
+from features.schema.semantic_models import (
+    ColumnAnnotation,
+    IndexAnnotation,
+    TableAnnotation,
+)
 
 pytestmark = pytest.mark.usefixtures("run_blocking_inline")
 
@@ -31,7 +35,9 @@ ANNOTATOR = "features.schema.annotate_service.create_ai_annotator"
 
 
 def _mock_col(description=None, data_type="text"):
-    return ColumnAnnotation(name="col", description=description or "", data_type=data_type)
+    return ColumnAnnotation(
+        name="col", description=description or "", data_type=data_type
+    )
 
 
 def _mock_table(description=None, columns=None):
@@ -54,7 +60,9 @@ def _ok_result(table_desc="desc", col_names=(), col_desc="desc"):
     return {
         "description": table_desc,
         "business_context": "",
-        "columns": {n: {"description": col_desc, "enum_mappings": {}} for n in col_names},
+        "columns": {
+            n: {"description": col_desc, "enum_mappings": {}} for n in col_names
+        },
     }
 
 
@@ -68,6 +76,206 @@ class TestAnnotateServiceInit:
     def test_initialization(self):
         service = AnnotateService()
         assert service is not None
+
+    def test_mysql_sample_rows_use_mysql_connection_and_quoting(self):
+        cursor = Mock()
+        cursor.description = [("id",), ("name",)]
+        cursor.fetchall.return_value = [(1, "Ada")]
+        connection = Mock()
+        connection.cursor.return_value = cursor
+        params = {
+            "engine": "mysql",
+            "host": "localhost",
+            "port": 3306,
+            "user": "user",
+            "password": "password",
+            "database": "database",
+        }
+        with (
+            patch(
+                "features.schema.annotate_service.resolve_connection_params",
+                return_value=params,
+            ),
+            patch(
+                "features.schema.annotate_service.create_mysql_connection_from_params",
+                return_value=connection,
+            ) as connect,
+        ):
+            samples = AnnotateService()._create_sample_data_function(
+                "target",
+                {"engine": "mysql"},
+                3,
+                order_columns_by_table={"user`records": ["id"]},
+            )
+            result = samples("user`records")
+
+        assert result == [{"id": 1, "name": "Ada"}]
+        connect.assert_called_once_with(params)
+        cursor.execute.assert_called_once_with(
+            "SELECT * FROM `user``records` ORDER BY `id` LIMIT %s", (3,)
+        )
+        connection.close.assert_called_once()
+
+    def test_sample_order_prefers_primary_key_and_hashes_keyless_rows(self):
+        primary = ColumnAnnotation(name="tenant_id")
+        secondary = ColumnAnnotation(name="id")
+        payload = ColumnAnnotation(name="payload")
+        keyed = TableAnnotation(
+            name="keyed",
+            columns={"tenant_id": primary, "id": secondary, "payload": payload},
+            indexes={
+                "PRIMARY": IndexAnnotation(
+                    name="PRIMARY",
+                    columns=["tenant_id", "id"],
+                    is_primary=True,
+                )
+            },
+        )
+        unkeyed = TableAnnotation(
+            name="unkeyed",
+            columns={"name": ColumnAnnotation(name="name"), "age": payload},
+        )
+
+        order = AnnotateService._sample_order_columns(
+            _mock_layer({"keyed": keyed, "unkeyed": unkeyed})
+        )
+
+        assert order == {
+            "keyed": ["tenant_id", "id"],
+            "unkeyed": ["name", "age"],
+        }
+        _, hash_order_tables = AnnotateService._sample_order_plan(
+            _mock_layer({"keyed": keyed, "unkeyed": unkeyed})
+        )
+        assert hash_order_tables == {"unkeyed"}
+
+    def test_keyless_sample_query_sorts_by_fixed_width_row_hash(self):
+        cursor = Mock()
+        cursor.description = [("name",), ("payload",)]
+        cursor.fetchall.return_value = [("Ada", "x" * 100)]
+        connection = Mock()
+        connection.cursor.return_value = cursor
+        params = {"engine": "mysql"}
+        with (
+            patch(
+                "features.schema.annotate_service.resolve_connection_params",
+                return_value=params,
+            ),
+            patch(
+                "features.schema.annotate_service.create_mysql_connection_from_params",
+                return_value=connection,
+            ),
+        ):
+            samples = AnnotateService()._create_sample_data_function(
+                "target",
+                {"engine": "mysql"},
+                5,
+                order_columns_by_table={"records": ["name", "payload"]},
+                hash_order_tables={"records"},
+            )
+
+            result = samples("records")
+
+        assert result == [{"name": "Ada", "payload": "x" * 100}]
+        cursor.execute.assert_called_once_with(
+            "SELECT * FROM `records` ORDER BY "
+            "SHA2(CONCAT_WS(CHAR(31), COALESCE(CAST(`name` AS CHAR), CHAR(30)), "
+            "COALESCE(CAST(`payload` AS CHAR), CHAR(30))), 256) LIMIT %s",
+            (5,),
+        )
+
+    def test_keyless_postgres_sample_query_uses_postgres_row_hash(self):
+        cursor = Mock()
+        cursor.description = [("name",), ("payload",)]
+        cursor.fetchall.return_value = [("Ada", "value")]
+        connection = Mock()
+        connection.cursor.return_value = cursor
+        params = {"engine": "postgres"}
+        with (
+            patch(
+                "features.schema.annotate_service.resolve_connection_params",
+                return_value=params,
+            ),
+            patch(
+                "features.schema.annotate_service.postgres_connection_kwargs",
+                return_value={},
+            ),
+            patch("psycopg2.connect", return_value=connection),
+        ):
+            samples = AnnotateService()._create_sample_data_function(
+                "target",
+                {"engine": "postgres"},
+                5,
+                order_columns_by_table={"records": ["name", "payload"]},
+                hash_order_tables={"records"},
+            )
+
+            result = samples("records")
+
+        assert result == [{"name": "Ada", "payload": "value"}]
+        cursor.execute.assert_called_once_with(
+            'SELECT * FROM "records" ORDER BY '
+            'MD5(CONCAT_WS(CHR(31), COALESCE(CAST("name" AS TEXT), CHR(30)), '
+            'COALESCE(CAST("payload" AS TEXT), CHR(30)))) LIMIT %s',
+            (5,),
+        )
+
+    def test_mysql_sample_query_escapes_percent_for_driver_parameterization(self):
+        cursor = Mock()
+        cursor.description = [("Percent (%) Eligible",)]
+        cursor.fetchall.return_value = [(42,)]
+        connection = Mock()
+        connection.cursor.return_value = cursor
+        params = {"engine": "mysql"}
+        with (
+            patch(
+                "features.schema.annotate_service.resolve_connection_params",
+                return_value=params,
+            ),
+            patch(
+                "features.schema.annotate_service.create_mysql_connection_from_params",
+                return_value=connection,
+            ),
+        ):
+            samples = AnnotateService()._create_sample_data_function(
+                "target",
+                {"engine": "mysql"},
+                5,
+                order_columns_by_table={
+                    "rates%": ["Percent (%) Eligible"],
+                },
+            )
+
+            result = samples("rates%")
+
+        assert result == [{"Percent (%) Eligible": 42}]
+        cursor.execute.assert_called_once_with(
+            "SELECT * FROM `rates%%` ORDER BY `Percent (%%) Eligible` LIMIT %s",
+            (5,),
+        )
+
+    def test_strict_sample_mode_surfaces_database_failure(self):
+        params = {"engine": "mysql"}
+        with (
+            patch(
+                "features.schema.annotate_service.resolve_connection_params",
+                return_value=params,
+            ),
+            patch(
+                "features.schema.annotate_service.create_mysql_connection_from_params",
+                side_effect=RuntimeError("database unavailable"),
+            ),
+        ):
+            samples = AnnotateService()._create_sample_data_function(
+                "target",
+                {"engine": "mysql"},
+                3,
+                order_columns_by_table={"users": ["id"]},
+                raise_sample_errors=True,
+            )
+
+            with pytest.raises(RuntimeError, match="Failed to sample table 'users'"):
+                samples("users")
 
     def test_has_required_methods(self):
         service = AnnotateService()
@@ -83,7 +291,9 @@ class TestAnnotateServicePreflight:
 
     @pytest.mark.asyncio
     async def test_error_when_no_api_key(self, service):
-        with patch(VALIDATE, return_value={"valid": False, "reason": "no_key", "model": None}):
+        with patch(
+            VALIDATE, return_value={"valid": False, "reason": "no_key", "model": None}
+        ):
             events = await _collect(service, "t", {})
         assert len(events) == 1
         assert isinstance(events[0], AnnotateErrorEvent)
@@ -93,7 +303,9 @@ class TestAnnotateServicePreflight:
     async def test_rejected_key_fails_preflight_without_marching(self, service):
         # The bug's core case: a present-but-rejected key must fail up front,
         # not advance through tables and report a false success (rdst-0yy.11).
-        with patch(VALIDATE, return_value={"valid": False, "reason": "rejected", "model": "m"}):
+        with patch(
+            VALIDATE, return_value={"valid": False, "reason": "rejected", "model": "m"}
+        ):
             with patch(MANAGER) as create_manager:
                 events = await _collect(service, "t", {})
         assert len(events) == 1
@@ -104,7 +316,10 @@ class TestAnnotateServicePreflight:
 
     @pytest.mark.asyncio
     async def test_provider_error_fails_preflight(self, service):
-        with patch(VALIDATE, return_value={"valid": False, "reason": "provider_error", "model": "m"}):
+        with patch(
+            VALIDATE,
+            return_value={"valid": False, "reason": "provider_error", "model": "m"},
+        ):
             events = await _collect(service, "t", {})
         assert len(events) == 1
         assert isinstance(events[0], AnnotateErrorEvent)
@@ -131,9 +346,11 @@ class TestAnnotateServiceMarch:
     @pytest.mark.asyncio
     async def test_yields_started_event(self, service):
         layer = _mock_layer({"users": _mock_table(), "orders": _mock_table()})
-        with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
-            ANNOTATOR
-        ) as create_annotator:
+        with (
+            patch(VALIDATE, return_value=VALID),
+            patch(MANAGER) as create_manager,
+            patch(ANNOTATOR) as create_annotator,
+        ):
             create_manager.return_value.exists.return_value = True
             create_manager.return_value.load.return_value = layer
             ai = Mock()
@@ -157,9 +374,11 @@ class TestAnnotateServiceMarch:
         # complete.
         cols = {"id": _mock_col(), "name": _mock_col()}
         layer = _mock_layer({"users": _mock_table(columns=cols)})
-        with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
-            ANNOTATOR
-        ) as create_annotator:
+        with (
+            patch(VALIDATE, return_value=VALID),
+            patch(MANAGER) as create_manager,
+            patch(ANNOTATOR) as create_annotator,
+        ):
             create_manager.return_value.exists.return_value = True
             create_manager.return_value.load.return_value = layer
             ai = Mock()
@@ -187,9 +406,11 @@ class TestAnnotateServiceMarch:
                 return _ok_result("A good description", col_names=("id",))
             raise RuntimeError("rate_limit")
 
-        with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
-            ANNOTATOR
-        ) as create_annotator:
+        with (
+            patch(VALIDATE, return_value=VALID),
+            patch(MANAGER) as create_manager,
+            patch(ANNOTATOR) as create_annotator,
+        ):
             create_manager.return_value.exists.return_value = True
             create_manager.return_value.load.return_value = layer
             ai = Mock()
@@ -211,10 +432,14 @@ class TestAnnotateServiceMarch:
         # Everything already documented: no LLM calls, no failures; an honest
         # zero-work complete, never a false error.
         cols = {"id": _mock_col(description="the id")}
-        layer = _mock_layer({"users": _mock_table(description="users table", columns=cols)})
-        with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
-            ANNOTATOR
-        ) as create_annotator:
+        layer = _mock_layer(
+            {"users": _mock_table(description="users table", columns=cols)}
+        )
+        with (
+            patch(VALIDATE, return_value=VALID),
+            patch(MANAGER) as create_manager,
+            patch(ANNOTATOR) as create_annotator,
+        ):
             create_manager.return_value.exists.return_value = True
             create_manager.return_value.load.return_value = layer
             ai = Mock()
@@ -244,9 +469,11 @@ class TestAnnotateServiceMarch:
         }
         layer = _mock_layer({"users": complete_table, **pending_tables})
 
-        with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
-            ANNOTATOR
-        ) as create_annotator:
+        with (
+            patch(VALIDATE, return_value=VALID),
+            patch(MANAGER) as create_manager,
+            patch(ANNOTATOR) as create_annotator,
+        ):
             create_manager.return_value.exists.return_value = True
             create_manager.return_value.load.return_value = layer
             ai = Mock()
@@ -270,9 +497,11 @@ class TestAnnotateServiceBatching:
     """One batched LLM call per table, concurrent mini-batches, fill-if-empty."""
 
     async def _run(self, layer, ai):
-        with patch(VALIDATE, return_value=VALID), patch(MANAGER) as create_manager, patch(
-            ANNOTATOR
-        ) as create_annotator:
+        with (
+            patch(VALIDATE, return_value=VALID),
+            patch(MANAGER) as create_manager,
+            patch(ANNOTATOR) as create_annotator,
+        ):
             create_manager.return_value.exists.return_value = True
             create_manager.return_value.load.return_value = layer
             create_annotator.return_value = ai
@@ -284,7 +513,10 @@ class TestAnnotateServiceBatching:
         cols_a = {"id": _mock_col(), "name": _mock_col(), "email": _mock_col()}
         cols_b = {"id": _mock_col(), "total": _mock_col()}
         layer = _mock_layer(
-            {"users": _mock_table(columns=cols_a), "orders": _mock_table(columns=cols_b)}
+            {
+                "users": _mock_table(columns=cols_a),
+                "orders": _mock_table(columns=cols_b),
+            }
         )
         ai = Mock()
         ai.annotate_table.side_effect = lambda name, *_a, **_k: _ok_result(
@@ -306,7 +538,11 @@ class TestAnnotateServiceBatching:
         described = _mock_col(description="keep me")
         blank = _mock_col()
         layer = _mock_layer(
-            {"users": _mock_table(description=None, columns={"a": described, "b": blank})}
+            {
+                "users": _mock_table(
+                    description=None, columns={"a": described, "b": blank}
+                )
+            }
         )
         ai = Mock()
         ai.annotate_table.return_value = _ok_result(
@@ -324,9 +560,7 @@ class TestAnnotateServiceBatching:
     @pytest.mark.asyncio
     async def test_saves_once_per_concurrent_batch(self):
         # Five tables at a batch size of three: two saves, both incremental.
-        tables = {
-            f"t{i}": _mock_table(columns={"id": _mock_col()}) for i in range(5)
-        }
+        tables = {f"t{i}": _mock_table(columns={"id": _mock_col()}) for i in range(5)}
         layer = _mock_layer(tables)
         ai = Mock()
         ai.annotate_table.return_value = _ok_result(col_names=("id",))
@@ -353,6 +587,13 @@ class TestAnnotateServiceBatching:
         await self._run(layer, ai)
 
         assert col.enum_values == {"A": "Active account", "B": "Banned account"}
+
+    def test_empty_string_enum_value_is_valid_self_description(self):
+        col = _mock_col(description="Patient admission flag")
+        col.enum_values = {"": "", "+": "+", "-": "-"}
+
+        assert col.missing_enum_meanings() == []
+        assert not col.needs_annotation
 
     @pytest.mark.asyncio
     async def test_partial_rerun_requests_only_pending_columns(self):

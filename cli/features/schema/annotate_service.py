@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncGenerator, Callable, Optional
+from collections.abc import AsyncGenerator, Callable
+from typing import Any, Optional
 
 from shared.anthropic_env import validate_anthropic_key
 from shared.db_connection import (
+    create_mysql_connection_from_params,
     postgres_connection_kwargs,
     quote_identifier,
     resolve_connection_params,
 )
-
-from .semantic_layer import create_ai_annotator, create_semantic_layer_manager
 
 from .events import (
     AnnotateCompleteEvent,
@@ -22,6 +22,7 @@ from .events import (
     AnnotateStartedEvent,
     AnnotateTableCompleteEvent,
 )
+from .semantic_layer import create_ai_annotator, create_semantic_layer_manager
 
 
 class AnnotateService:
@@ -100,8 +101,13 @@ class AnnotateService:
             message=start_message,
         )
 
+        order_columns_by_table, hash_order_tables = self._sample_order_plan(layer)
         sample_data_fn = self._create_sample_data_function(
-            target, target_config, sample_rows
+            target,
+            target_config,
+            sample_rows,
+            order_columns_by_table=order_columns_by_table,
+            hash_order_tables=hash_order_tables,
         )
         total_tables_annotated = 0
         total_columns_annotated = 0
@@ -109,7 +115,7 @@ class AnnotateService:
         last_failure: Optional[str] = None
 
         for start in range(0, len(work), self.CONCURRENT_TABLES):
-            batch = work[start:start + self.CONCURRENT_TABLES]
+            batch = work[start : start + self.CONCURRENT_TABLES]
             for offset, (tbl_name, _table) in enumerate(batch):
                 yield AnnotateProgressEvent(
                     type="annotate_progress",
@@ -169,9 +175,7 @@ class AnnotateService:
         # complete; the false-success the user hit (rdst-0yy.11). A no-op run
         # (everything already annotated, no failures) still completes honestly.
         if total_tables_annotated + total_columns_annotated == 0 and total_failures > 0:
-            message = (
-                f"Annotated 0 of {len(work)} table(s): every AI request failed."
-            )
+            message = f"Annotated 0 of {len(work)} table(s): every AI request failed."
             if last_failure:
                 message += f" Last error: {self._one_line(last_failure)}"
             yield AnnotateErrorEvent(type="annotate_error", message=message)
@@ -305,32 +309,103 @@ class AnnotateService:
         return collapsed[:limit] + "..."
 
     def _create_sample_data_function(
-        self, target: str, target_config: dict[str, Any], sample_rows: int
+        self,
+        target: str,
+        target_config: dict[str, Any],
+        sample_rows: int,
+        *,
+        order_columns_by_table: dict[str, list[str]],
+        hash_order_tables: set[str] | None = None,
+        raise_sample_errors: bool = False,
     ) -> Optional[Callable[[str], list[dict]]]:
         if not target_config:
             return None
 
         def get_samples(table_name: str) -> list[dict]:
+            conn = None
             try:
-                import psycopg2
-
                 params = resolve_connection_params(
                     target=target,
                     target_config=target_config,
                 )
-                conn = psycopg2.connect(
-                    **postgres_connection_kwargs(params)
-                )
+                engine = params["engine"]
+                if engine == "mysql":
+                    conn = create_mysql_connection_from_params(params)
+                else:
+                    import psycopg2
+
+                    conn = psycopg2.connect(**postgres_connection_kwargs(params))
                 cursor = conn.cursor()
+                order_columns = order_columns_by_table.get(table_name, [])
+                if not order_columns:
+                    return []
+                quoted_columns = [
+                    quote_identifier(column, engine).replace("%", "%%")
+                    for column in order_columns
+                ]
+                if table_name in (hash_order_tables or set()):
+                    order_clause = self._row_hash_order_clause(quoted_columns, engine)
+                else:
+                    order_clause = ", ".join(quoted_columns)
+                quoted_table = quote_identifier(table_name, engine).replace("%", "%%")
                 cursor.execute(
-                    f"SELECT * FROM {quote_identifier(table_name)} LIMIT %s",
+                    f"SELECT * FROM {quoted_table} ORDER BY {order_clause} LIMIT %s",
                     (sample_rows,),
                 )
                 columns = [desc[0] for desc in cursor.description]
                 rows = cursor.fetchall()
-                conn.close()
                 return [dict(zip(columns, row)) for row in rows]
-            except Exception:
+            except Exception as exc:
+                if raise_sample_errors:
+                    raise RuntimeError(
+                        f"Failed to sample table {table_name!r}: {exc}"
+                    ) from exc
                 return []
+            finally:
+                if conn is not None:
+                    conn.close()
 
         return get_samples
+
+    @staticmethod
+    def _row_hash_order_clause(quoted_columns: list[str], engine: str) -> str:
+        """Build a fixed-width deterministic sort expression for keyless rows."""
+        if engine == "mysql":
+            serialized_columns = ", ".join(
+                f"COALESCE(CAST({column} AS CHAR), CHAR(30))"
+                for column in quoted_columns
+            )
+            return f"SHA2(CONCAT_WS(CHAR(31), {serialized_columns}), 256)"
+        serialized_columns = ", ".join(
+            f"COALESCE(CAST({column} AS TEXT), CHR(30))" for column in quoted_columns
+        )
+        return f"MD5(CONCAT_WS(CHR(31), {serialized_columns}))"
+
+    @staticmethod
+    def _sample_order_columns(layer) -> dict[str, list[str]]:
+        """Return columns used by the deterministic sample ordering plan."""
+        return AnnotateService._sample_order_plan(layer)[0]
+
+    @staticmethod
+    def _sample_order_plan(layer) -> tuple[dict[str, list[str]], set[str]]:
+        """Prefer primary keys; hash complete rows for keyless tables.
+
+        Ordering a wide table by every column can exhaust the database sort
+        buffer.  A fixed-width row digest preserves deterministic sampling
+        without making the sort key proportional to the row width.
+        """
+        result = {}
+        hash_order_tables = set()
+        for table_name, table in layer.tables.items():
+            primary_keys = next(
+                (
+                    list(index.columns)
+                    for _name, index in sorted(table.indexes.items())
+                    if index.is_primary and index.columns
+                ),
+                [],
+            )
+            result[table_name] = primary_keys or list(table.columns)
+            if not primary_keys:
+                hash_order_tables.add(table_name)
+        return result, hash_order_tables

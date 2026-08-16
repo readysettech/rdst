@@ -6,17 +6,19 @@ Supports both bulk annotation and on-demand suggestions within the wizard.
 """
 
 import json
-from typing import Optional, Dict, List, Any
-from shared.llm_manager import LLMManager
+from typing import Any, Dict, List, Optional
+
 from features.schema.semantic_models import (
-    TableAnnotation,
     ColumnAnnotation,
-    Terminology
+    TableAnnotation,
+    Terminology,
 )
+from shared.llm_manager import LLMManager
 
 # Very wide tables are annotated in column chunks of this size so each
 # response fits comfortably in the output-token budget.
 COLUMNS_PER_CALL = 40
+SAMPLE_ROWS_PER_PROMPT = 5
 
 
 class AIAnnotator:
@@ -36,9 +38,12 @@ class AIAnnotator:
     - Web search results for known schemas
     """
 
-    def __init__(self, llm_manager: Optional[LLMManager] = None,
-                 provider: Optional[str] = None,
-                 model: Optional[str] = None):
+    def __init__(
+        self,
+        llm_manager: Optional[LLMManager] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ):
         """
         Initialize AI annotator.
 
@@ -52,12 +57,14 @@ class AIAnnotator:
         self.model = model
         self._cache = {}  # Cache suggestions to avoid re-querying
 
-    def annotate_table(self,
-                       table_name: str,
-                       table: TableAnnotation,
-                       sample_data: Optional[List[Dict]] = None,
-                       schema_context: Optional[str] = None,
-                       only_columns: Optional[List[str]] = None) -> Dict[str, Any]:
+    def annotate_table(
+        self,
+        table_name: str,
+        table: TableAnnotation,
+        sample_data: Optional[List[Dict]] = None,
+        schema_context: Optional[str] = None,
+        only_columns: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """
         Annotate a whole table in one LLM call.
 
@@ -91,19 +98,23 @@ class AIAnnotator:
         sample_text = ""
         if sample_data:
             sample_text = "\n\nSample rows:\n" + json.dumps(
-                sample_data[:3], indent=2, default=str
+                sample_data[:SAMPLE_ROWS_PER_PROMPT], indent=2, default=str
             )
 
         if col_items:
             chunks = [
-                col_items[start:start + COLUMNS_PER_CALL]
+                col_items[start : start + COLUMNS_PER_CALL]
                 for start in range(0, len(col_items), COLUMNS_PER_CALL)
             ]
         else:
             # No columns to annotate; one call still fills the table fields.
             chunks = [[]]
 
-        merged: Dict[str, Any] = {"description": "", "business_context": "", "columns": {}}
+        merged: Dict[str, Any] = {
+            "description": "",
+            "business_context": "",
+            "columns": {},
+        }
         for chunk in chunks:
             prompt = self._build_table_prompt(
                 table_name, table, chunk, sample_text, schema_context
@@ -112,13 +123,16 @@ class AIAnnotator:
                 system_message="You are an expert database analyst helping document schema semantics.",
                 user_query=prompt,
                 max_tokens=4096,
-                temperature=0.2,
+                temperature=0.0,
                 provider=self.provider,
-                model=self.model
+                model=self.model,
+                purpose="schema_annotation",
             )
 
-            result = self._parse_json_response(response['text'])
-            if not isinstance(result, dict) or not isinstance(result.get('columns'), dict):
+            result = self._parse_json_response(response["text"])
+            if not isinstance(result, dict) or not isinstance(
+                result.get("columns"), dict
+            ):
                 raise ValueError(
                     f"Unparseable annotation response for table '{table_name}'"
                 )
@@ -140,12 +154,14 @@ class AIAnnotator:
 
         return merged
 
-    def _build_table_prompt(self,
-                            table_name: str,
-                            table: TableAnnotation,
-                            columns: List[tuple],
-                            sample_text: str,
-                            schema_context: Optional[str]) -> str:
+    def _build_table_prompt(
+        self,
+        table_name: str,
+        table: TableAnnotation,
+        columns: List[tuple],
+        sample_text: str,
+        schema_context: Optional[str],
+    ) -> str:
         """Build the single-call prompt for one table (or one column chunk)."""
         col_lines = "\n".join(
             self._column_stats_line(name, col) for name, col in columns
@@ -176,7 +192,8 @@ Return a JSON object with this exact structure:
 
 Guidelines:
 - Provide a description for every listed column.
-- Populate enum_mappings only for columns with listed enum values.
+- Populate enum_mappings only for opaque codes whose human meaning differs from the
+  listed value. Omit self-explanatory values and dates.
 - Focus on business meaning, not technical details."""
 
     @staticmethod
@@ -198,12 +215,14 @@ Guidelines:
             line += " -- " + "; ".join(details)
         return line
 
-    def generate_table_description(self,
-                                   table_name: str,
-                                   columns: Dict[str, ColumnAnnotation],
-                                   row_estimate: str,
-                                   sample_data: Optional[List[Dict]] = None,
-                                   schema_context: Optional[str] = None) -> str:
+    def generate_table_description(
+        self,
+        table_name: str,
+        columns: Dict[str, ColumnAnnotation],
+        row_estimate: str,
+        sample_data: Optional[List[Dict]] = None,
+        schema_context: Optional[str] = None,
+    ) -> str:
         """
         Generate a description for a database table.
 
@@ -236,7 +255,9 @@ Guidelines:
         # Build sample data text
         sample_text = ""
         if sample_data:
-            sample_text = "\n\nSample rows:\n" + json.dumps(sample_data[:3], indent=2, default=str)
+            sample_text = "\n\nSample rows:\n" + json.dumps(
+                sample_data[:3], indent=2, default=str
+            )
 
         # Build context
         context_prefix = ""
@@ -266,30 +287,32 @@ Focus on business purpose, not technical details."""
                 max_tokens=500,
                 temperature=0.2,
                 provider=self.provider,
-                model=self.model
+                model=self.model,
             )
 
             # Try to parse JSON response
-            result = self._parse_json_response(response['text'])
-            if result and 'description' in result:
-                description = result['description']
+            result = self._parse_json_response(response["text"])
+            if result and "description" in result:
+                description = result["description"]
                 self._cache[cache_key] = description
                 return description
 
             # Fallback to raw text if JSON parsing fails
-            text = response['text'].strip()
+            text = response["text"].strip()
             self._cache[cache_key] = text
             return text
 
         except Exception as e:
             return f"Error generating description: {e}"
 
-    def generate_column_description(self,
-                                    table_name: str,
-                                    column_name: str,
-                                    data_type: str,
-                                    sample_values: Optional[List[Any]] = None,
-                                    table_context: Optional[str] = None) -> str:
+    def generate_column_description(
+        self,
+        table_name: str,
+        column_name: str,
+        data_type: str,
+        sample_values: Optional[List[Any]] = None,
+        table_context: Optional[str] = None,
+    ) -> str:
         """
         Generate a description for a table column.
 
@@ -336,27 +359,29 @@ Focus on business meaning, not technical type."""
                 max_tokens=200,
                 temperature=0.2,
                 provider=self.provider,
-                model=self.model
+                model=self.model,
             )
 
-            result = self._parse_json_response(response['text'])
-            if result and 'description' in result:
-                description = result['description']
+            result = self._parse_json_response(response["text"])
+            if result and "description" in result:
+                description = result["description"]
                 self._cache[cache_key] = description
                 return description
 
-            text = response['text'].strip()
+            text = response["text"].strip()
             self._cache[cache_key] = text
             return text
 
         except Exception as e:
             return f"Error: {e}"
 
-    def generate_enum_mappings(self,
-                              table_name: str,
-                              column_name: str,
-                              enum_values: List[str],
-                              schema_context: Optional[str] = None) -> Dict[str, str]:
+    def generate_enum_mappings(
+        self,
+        table_name: str,
+        column_name: str,
+        enum_values: List[str],
+        schema_context: Optional[str] = None,
+    ) -> Dict[str, str]:
         """
         Generate meaning descriptions for enum values.
 
@@ -402,10 +427,10 @@ Be specific about what each value represents in the business domain."""
                 max_tokens=800,
                 temperature=0.2,
                 provider=self.provider,
-                model=self.model
+                model=self.model,
             )
 
-            result = self._parse_json_response(response['text'])
+            result = self._parse_json_response(response["text"])
             if result and isinstance(result, dict):
                 # Filter to only include values we asked about
                 mappings = {k: v for k, v in result.items() if k in enum_values}
@@ -418,11 +443,13 @@ Be specific about what each value represents in the business domain."""
         except Exception as e:
             return {v: f"Error: {e}" for v in enum_values}
 
-    def generate_terminology(self,
-                           table_name: str,
-                           column_name: str,
-                           enum_mappings: Dict[str, str],
-                           schema_context: Optional[str] = None) -> List[Terminology]:
+    def generate_terminology(
+        self,
+        table_name: str,
+        column_name: str,
+        enum_mappings: Dict[str, str],
+        schema_context: Optional[str] = None,
+    ) -> List[Terminology]:
         """
         Generate business terminology definitions based on enum values.
 
@@ -445,13 +472,15 @@ Be specific about what each value represents in the business domain."""
             # E.g., "Active - can place orders" -> "active"
             term_words = description.lower().split()
             if term_words:
-                term_name = term_words[0].strip('- ')
+                term_name = term_words[0].strip("- ")
 
-                terms.append(Terminology(
-                    term=term_name,
-                    definition=description,
-                    sql_pattern=f"{column_name} = '{value}'"
-                ))
+                terms.append(
+                    Terminology(
+                        term=term_name,
+                        definition=description,
+                        sql_pattern=f"{column_name} = '{value}'",
+                    )
+                )
 
         return terms
 

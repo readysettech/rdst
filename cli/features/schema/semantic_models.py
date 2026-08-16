@@ -13,15 +13,20 @@ The semantic layer includes:
 
 Storage: Per-target YAML files in ~/.rdst/semantic-layer/<target>.yaml
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
 import yaml
 
 from shared.persistence import write_text
+
+if TYPE_CHECKING:
+    from .semantic_layer.data_profiler import TableProfile
 
 
 def _utcnow() -> datetime:
@@ -65,59 +70,59 @@ class ColumnAnnotation:
         """Convert to dictionary for YAML serialization."""
         result = {}
         if self.description:
-            result['description'] = self.description
+            result["description"] = self.description
         if self.data_type:
-            result['type'] = self.data_type
+            result["type"] = self.data_type
         if self.unit:
-            result['unit'] = self.unit
+            result["unit"] = self.unit
         if self.timezone:
-            result['timezone'] = self.timezone
+            result["timezone"] = self.timezone
         if self.nullable_meaning:
-            result['nullable_meaning'] = self.nullable_meaning
+            result["nullable_meaning"] = self.nullable_meaning
         if self.enum_values:
-            result['enum_values'] = self.enum_values
+            result["enum_values"] = self.enum_values
         if self.default_filter:
-            result['default_filter'] = self.default_filter
+            result["default_filter"] = self.default_filter
         if self.is_pii:
-            result['is_pii'] = self.is_pii
+            result["is_pii"] = self.is_pii
         if self.quality_notes:
-            result['quality_notes'] = self.quality_notes
+            result["quality_notes"] = self.quality_notes
         if self.value_pattern:
-            result['value_pattern'] = self.value_pattern
+            result["value_pattern"] = self.value_pattern
         # Column statistics under a separate 'stats' sub-key
         stats = {}
         if self.null_fraction is not None:
-            stats['null_fraction'] = round(float(self.null_fraction), 4)
+            stats["null_fraction"] = round(float(self.null_fraction), 4)
         if self.distinct_count is not None:
-            stats['distinct_count'] = int(self.distinct_count)
+            stats["distinct_count"] = int(self.distinct_count)
         if self.top_values:
-            stats['top_values'] = self.top_values
+            stats["top_values"] = self.top_values
         if self.stats_profiled_at:
-            stats['profiled_at'] = self.stats_profiled_at
+            stats["profiled_at"] = self.stats_profiled_at
         if stats:
-            result['stats'] = stats
+            result["stats"] = stats
         return result
 
     @classmethod
-    def from_dict(cls, name: str, data: dict) -> 'ColumnAnnotation':
+    def from_dict(cls, name: str, data: dict) -> "ColumnAnnotation":
         """Create from dictionary loaded from YAML."""
-        stats = data.get('stats', {})
+        stats = data.get("stats", {})
         return cls(
             name=name,
-            description=data.get('description', ''),
-            data_type=data.get('type', ''),
-            unit=data.get('unit', ''),
-            timezone=data.get('timezone', ''),
-            nullable_meaning=data.get('nullable_meaning', ''),
-            enum_values=data.get('enum_values', {}),
-            default_filter=data.get('default_filter', ''),
-            is_pii=data.get('is_pii', False),
-            quality_notes=data.get('quality_notes', ''),
-            value_pattern=data.get('value_pattern', ''),
-            null_fraction=stats.get('null_fraction'),
-            distinct_count=stats.get('distinct_count'),
-            top_values=stats.get('top_values'),
-            stats_profiled_at=stats.get('profiled_at', ''),
+            description=data.get("description", ""),
+            data_type=data.get("type", ""),
+            unit=data.get("unit", ""),
+            timezone=data.get("timezone", ""),
+            nullable_meaning=data.get("nullable_meaning", ""),
+            enum_values=data.get("enum_values", {}),
+            default_filter=data.get("default_filter", ""),
+            is_pii=data.get("is_pii", False),
+            quality_notes=data.get("quality_notes", ""),
+            value_pattern=data.get("value_pattern", ""),
+            null_fraction=stats.get("null_fraction"),
+            distinct_count=stats.get("distinct_count"),
+            top_values=stats.get("top_values"),
+            stats_profiled_at=stats.get("profiled_at", ""),
         )
 
     def missing_enum_meanings(self) -> list[str]:
@@ -126,7 +131,7 @@ class ColumnAnnotation:
         return [
             value
             for value, meaning in self.enum_values.items()
-            if not meaning or meaning.startswith("TODO:")
+            if (bool(value) and not meaning) or (meaning or "").startswith("TODO:")
         ]
 
     @property
@@ -149,22 +154,22 @@ class Relationship:
     def to_dict(self) -> dict:
         """Convert to dictionary for YAML serialization."""
         result = {
-            'target': self.target_table,
-            'join': self.join_pattern,
-            'type': self.relationship_type
+            "target": self.target_table,
+            "join": self.join_pattern,
+            "type": self.relationship_type,
         }
         if self.description:
-            result['description'] = self.description
+            result["description"] = self.description
         return result
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'Relationship':
+    def from_dict(cls, data: dict) -> "Relationship":
         """Create from dictionary loaded from YAML."""
         return cls(
-            target_table=data.get('target', ''),
-            join_pattern=data.get('join', ''),
-            relationship_type=data.get('type', 'one_to_many'),
-            description=data.get('description', '')
+            target_table=data.get("target", ""),
+            join_pattern=data.get("join", ""),
+            relationship_type=data.get("type", "one_to_many"),
+            description=data.get("description", ""),
         )
 
 
@@ -181,26 +186,26 @@ class IndexAnnotation:
 
     def to_dict(self) -> dict:
         result = {
-            'columns': self.columns,
-            'type': self.index_type,
+            "columns": self.columns,
+            "type": self.index_type,
         }
         if self.is_unique:
-            result['unique'] = True
+            result["unique"] = True
         if self.is_primary:
-            result['primary'] = True
+            result["primary"] = True
         if self.definition:
-            result['definition'] = self.definition
+            result["definition"] = self.definition
         return result
 
     @classmethod
-    def from_dict(cls, name: str, data: dict) -> 'IndexAnnotation':
+    def from_dict(cls, name: str, data: dict) -> "IndexAnnotation":
         return cls(
             name=name,
-            columns=data.get('columns', []),
-            index_type=data.get('type', 'btree'),
-            is_unique=data.get('unique', False),
-            is_primary=data.get('primary', False),
-            definition=data.get('definition', ''),
+            columns=data.get("columns", []),
+            index_type=data.get("type", "btree"),
+            is_unique=data.get("unique", False),
+            is_primary=data.get("primary", False),
+            definition=data.get("definition", ""),
         )
 
 
@@ -224,26 +229,33 @@ class TableAnnotation:
     indexes: dict[str, IndexAnnotation] = field(default_factory=dict)
 
     # Access pattern hints
-    access_hints: list[str] = field(default_factory=list)  # e.g., "Always filter by tenant_id"
+    access_hints: list[str] = field(
+        default_factory=list
+    )  # e.g., "Always filter by tenant_id"
 
     # Table-level profiling stats
     row_count: int | None = None  # Exact row count from profiling
     profiled_at: str = ""  # ISO 8601 timestamp
 
-    def apply_profile(self, profile: 'TableProfile', max_cardinality: int = 50) -> None:
+    def apply_profile(self, profile: "TableProfile", max_cardinality: int = 50) -> None:
         """Persist stats from a DataProfiler TableProfile."""
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
 
-        self.row_count = int(profile.row_estimate) if profile.row_estimate is not None else None
+        self.row_count = (
+            int(profile.row_estimate) if profile.row_estimate is not None else None
+        )
         self.profiled_at = now
 
         for col_name, cp in profile.columns.items():
             if col_name not in self.columns:
                 continue
             col = self.columns[col_name]
-            col.null_fraction = float(cp.null_fraction) if cp.null_fraction is not None else None
-            col.distinct_count = int(cp.distinct_count) if cp.distinct_count is not None else None
+            col.null_fraction = (
+                float(cp.null_fraction) if cp.null_fraction is not None else None
+            )
+            col.distinct_count = (
+                int(cp.distinct_count) if cp.distinct_count is not None else None
+            )
             col.stats_profiled_at = now
 
             if cp.top_values and cp.distinct_count <= max_cardinality:
@@ -255,67 +267,66 @@ class TableAnnotation:
         """Convert to dictionary for YAML serialization."""
         result = {}
         if self.description:
-            result['description'] = self.description
+            result["description"] = self.description
         if self.business_context:
-            result['business_context'] = self.business_context
+            result["business_context"] = self.business_context
         if self.row_estimate:
-            result['row_estimate'] = self.row_estimate
+            result["row_estimate"] = self.row_estimate
         if self.row_count is not None:
-            result['row_count'] = self.row_count
+            result["row_count"] = self.row_count
         if self.profiled_at:
-            result['profiled_at'] = self.profiled_at
+            result["profiled_at"] = self.profiled_at
         if self.data_freshness:
-            result['data_freshness'] = self.data_freshness
+            result["data_freshness"] = self.data_freshness
 
         if self.columns:
-            result['columns'] = {
+            result["columns"] = {
                 name: col.to_dict()
                 for name, col in self.columns.items()
                 if col.to_dict()  # Only include non-empty
             }
 
         if self.relationships:
-            result['relationships'] = [rel.to_dict() for rel in self.relationships]
+            result["relationships"] = [rel.to_dict() for rel in self.relationships]
 
         if self.indexes:
-            result['indexes'] = {
-                name: idx.to_dict()
-                for name, idx in self.indexes.items()
+            result["indexes"] = {
+                name: idx.to_dict() for name, idx in self.indexes.items()
             }
 
         if self.access_hints:
-            result['access_hints'] = self.access_hints
+            result["access_hints"] = self.access_hints
 
         return result
 
     @classmethod
-    def from_dict(cls, name: str, data: dict) -> 'TableAnnotation':
+    def from_dict(cls, name: str, data: dict) -> "TableAnnotation":
         """Create from dictionary loaded from YAML."""
         columns = {}
-        for col_name, col_data in data.get('columns', {}).items():
+        for col_name, col_data in data.get("columns", {}).items():
             columns[col_name] = ColumnAnnotation.from_dict(col_name, col_data)
 
         relationships = [
             Relationship.from_dict(rel_data)
-            for rel_data in data.get('relationships', [])
+            for rel_data in data.get("relationships", [])
         ]
 
         indexes = {}
-        for idx_name, idx_data in data.get('indexes', {}).items():
+        for idx_name, idx_data in data.get("indexes", {}).items():
             indexes[idx_name] = IndexAnnotation.from_dict(idx_name, idx_data)
 
         return cls(
             name=name,
-            description=data.get('description', ''),
-            business_context=data.get('business_context', ''),
-            row_estimate=data.get('row_estimate', ''),
-            data_freshness=data.get('data_freshness', ''),
+            description=data.get("description", ""),
+            business_context=data.get("business_context", ""),
+            row_estimate=data.get("row_estimate", ""),
+            data_freshness=data.get("data_freshness", ""),
             columns=columns,
             relationships=relationships,
             indexes=indexes,
-            access_hints=data.get('access_hints', []),
-            row_count=data.get('row_count'),
-            profiled_at=data.get('profiled_at', ''),
+            access_hints=data.get("access_hints", []),
+            row_count=data.get("row_count"),
+            profiled_at=data.get("profiled_at", ""),
         )
 
 
@@ -328,32 +339,31 @@ class Terminology:
     sql_pattern: str  # SQL expression that implements this term
     synonyms: list[str] = field(default_factory=list)  # Alternative names
     examples: list[str] = field(default_factory=list)  # Example usage
-    tables_used: list[str] = field(default_factory=list)  # Tables referenced by this term
+    tables_used: list[str] = field(
+        default_factory=list
+    )  # Tables referenced by this term
 
     def to_dict(self) -> dict:
         """Convert to dictionary for YAML serialization."""
-        result = {
-            'definition': self.definition,
-            'sql_pattern': self.sql_pattern
-        }
+        result = {"definition": self.definition, "sql_pattern": self.sql_pattern}
         if self.synonyms:
-            result['synonyms'] = self.synonyms
+            result["synonyms"] = self.synonyms
         if self.examples:
-            result['examples'] = self.examples
+            result["examples"] = self.examples
         if self.tables_used:
-            result['tables_used'] = self.tables_used
+            result["tables_used"] = self.tables_used
         return result
 
     @classmethod
-    def from_dict(cls, term: str, data: dict) -> 'Terminology':
+    def from_dict(cls, term: str, data: dict) -> "Terminology":
         """Create from dictionary loaded from YAML."""
         return cls(
             term=term,
-            definition=data.get('definition', ''),
-            sql_pattern=data.get('sql_pattern', ''),
-            synonyms=data.get('synonyms', []),
-            examples=data.get('examples', []),
-            tables_used=data.get('tables_used', [])
+            definition=data.get("definition", ""),
+            sql_pattern=data.get("sql_pattern", ""),
+            synonyms=data.get("synonyms", []),
+            examples=data.get("examples", []),
+            tables_used=data.get("tables_used", []),
         )
 
 
@@ -369,25 +379,22 @@ class Metric:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for YAML serialization."""
-        result = {
-            'definition': self.definition,
-            'sql': self.sql
-        }
+        result = {"definition": self.definition, "sql": self.sql}
         if self.unit:
-            result['unit'] = self.unit
+            result["unit"] = self.unit
         if self.aggregation_type:
-            result['aggregation_type'] = self.aggregation_type
+            result["aggregation_type"] = self.aggregation_type
         return result
 
     @classmethod
-    def from_dict(cls, name: str, data: dict) -> 'Metric':
+    def from_dict(cls, name: str, data: dict) -> "Metric":
         """Create from dictionary loaded from YAML."""
         return cls(
             name=name,
-            definition=data.get('definition', ''),
-            sql=data.get('sql', ''),
-            unit=data.get('unit', ''),
-            aggregation_type=data.get('aggregation_type', '')
+            definition=data.get("definition", ""),
+            sql=data.get("sql", ""),
+            unit=data.get("unit", ""),
+            aggregation_type=data.get("aggregation_type", ""),
         )
 
 
@@ -409,21 +416,21 @@ class Extension:
         """Convert to dictionary for YAML serialization."""
         result = {}
         if self.version:
-            result['version'] = self.version
+            result["version"] = self.version
         if self.description:
-            result['description'] = self.description
+            result["description"] = self.description
         if self.types_provided:
-            result['types_provided'] = self.types_provided
+            result["types_provided"] = self.types_provided
         return result
 
     @classmethod
-    def from_dict(cls, name: str, data: dict) -> 'Extension':
+    def from_dict(cls, name: str, data: dict) -> "Extension":
         """Create from dictionary loaded from YAML."""
         return cls(
             name=name,
-            version=data.get('version', ''),
-            description=data.get('description', ''),
-            types_provided=data.get('types_provided', [])
+            version=data.get("version", ""),
+            description=data.get("description", ""),
+            types_provided=data.get("types_provided", []),
         )
 
 
@@ -446,27 +453,27 @@ class CustomType:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for YAML serialization."""
-        result = {'category': self.type_category}
+        result = {"category": self.type_category}
         if self.base_type:
-            result['base_type'] = self.base_type
+            result["base_type"] = self.base_type
         if self.enum_values:
-            result['enum_values'] = self.enum_values
+            result["enum_values"] = self.enum_values
         if self.description:
-            result['description'] = self.description
+            result["description"] = self.description
         if self.extension:
-            result['extension'] = self.extension
+            result["extension"] = self.extension
         return result
 
     @classmethod
-    def from_dict(cls, name: str, data: dict) -> 'CustomType':
+    def from_dict(cls, name: str, data: dict) -> "CustomType":
         """Create from dictionary loaded from YAML."""
         return cls(
             name=name,
-            type_category=data.get('category', ''),
-            base_type=data.get('base_type', ''),
-            enum_values=data.get('enum_values', []),
-            description=data.get('description', ''),
-            extension=data.get('extension', '')
+            type_category=data.get("category", ""),
+            base_type=data.get("base_type", ""),
+            enum_values=data.get("enum_values", []),
+            description=data.get("description", ""),
+            extension=data.get("extension", ""),
         )
 
 
@@ -503,87 +510,80 @@ class SemanticLayer:
     def to_dict(self) -> dict:
         """Convert to dictionary for YAML serialization."""
         result = {
-            'version': self.version,
-            'target': self.target,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat()
+            "version": self.version,
+            "target": self.target,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
         }
 
         if self.tables:
-            result['tables'] = {
-                name: table.to_dict()
-                for name, table in self.tables.items()
+            result["tables"] = {
+                name: table.to_dict() for name, table in self.tables.items()
             }
 
         if self.terminology:
-            result['terminology'] = {
-                term: t.to_dict()
-                for term, t in self.terminology.items()
+            result["terminology"] = {
+                term: t.to_dict() for term, t in self.terminology.items()
             }
 
         if self.metrics:
-            result['metrics'] = {
-                name: m.to_dict()
-                for name, m in self.metrics.items()
-            }
+            result["metrics"] = {name: m.to_dict() for name, m in self.metrics.items()}
 
         if self.extensions:
-            result['extensions'] = {
-                name: ext.to_dict()
-                for name, ext in self.extensions.items()
+            result["extensions"] = {
+                name: ext.to_dict() for name, ext in self.extensions.items()
             }
 
         if self.custom_types:
-            result['custom_types'] = {
-                name: ct.to_dict()
-                for name, ct in self.custom_types.items()
+            result["custom_types"] = {
+                name: ct.to_dict() for name, ct in self.custom_types.items()
             }
 
         if self.notes:
-            result['notes'] = self.notes
+            result["notes"] = self.notes
 
         return result
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'SemanticLayer':
+    def from_dict(cls, data: dict) -> "SemanticLayer":
         """Create from dictionary loaded from YAML."""
         tables = {}
-        for table_name, table_data in data.get('tables', {}).items():
+        for table_name, table_data in data.get("tables", {}).items():
             tables[table_name] = TableAnnotation.from_dict(table_name, table_data)
 
         terminology = {}
-        for term, term_data in data.get('terminology', {}).items():
+        for term, term_data in data.get("terminology", {}).items():
             terminology[term] = Terminology.from_dict(term, term_data)
 
         metrics = {}
-        for metric_name, metric_data in data.get('metrics', {}).items():
+        for metric_name, metric_data in data.get("metrics", {}).items():
             metrics[metric_name] = Metric.from_dict(metric_name, metric_data)
 
         extensions = {}
-        for ext_name, ext_data in data.get('extensions', {}).items():
+        for ext_name, ext_data in data.get("extensions", {}).items():
             extensions[ext_name] = Extension.from_dict(ext_name, ext_data)
 
         custom_types = {}
-        for type_name, type_data in data.get('custom_types', {}).items():
+        for type_name, type_data in data.get("custom_types", {}).items():
             custom_types[type_name] = CustomType.from_dict(type_name, type_data)
 
         # Parse timestamps
         created_at = _utcnow()
         updated_at = _utcnow()
-        if 'created_at' in data:
+        if "created_at" in data:
             try:
-                created_at = datetime.fromisoformat(data['created_at'])
+                created_at = datetime.fromisoformat(data["created_at"])
             except (ValueError, TypeError):
                 pass
-        if 'updated_at' in data:
+        if "updated_at" in data:
             try:
-                updated_at = datetime.fromisoformat(data['updated_at'])
+                updated_at = datetime.fromisoformat(data["updated_at"])
             except (ValueError, TypeError):
                 pass
 
         return cls(
-            target=data.get('target', ''),
-            version=data.get('version', 1),
+            target=data.get("target", ""),
+            version=data.get("version", 1),
             created_at=created_at,
             updated_at=updated_at,
             tables=tables,
@@ -591,7 +591,7 @@ class SemanticLayer:
             metrics=metrics,
             extensions=extensions,
             custom_types=custom_types,
-            notes=data.get('notes', '')
+            notes=data.get("notes", ""),
         )
 
     def save(self, path: Path) -> None:
@@ -606,12 +606,12 @@ class SemanticLayer:
         write_text(path, content)
 
     @classmethod
-    def load(cls, path: Path) -> 'SemanticLayer':
+    def load(cls, path: Path) -> "SemanticLayer":
         """Load semantic layer from YAML file."""
         if not path.exists():
             raise FileNotFoundError(f"Semantic layer file not found: {path}")
 
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         return cls.from_dict(data)
@@ -652,7 +652,9 @@ class SemanticLayer:
             if table.relationships:
                 parts.append("  Relationships:")
                 for rel in table.relationships:
-                    parts.append(f"    - {rel.relationship_type} to {rel.target_table}: {rel.join_pattern}")
+                    parts.append(
+                        f"    - {rel.relationship_type} to {rel.target_table}: {rel.join_pattern}"
+                    )
 
             context_parts.append("\n".join(parts))
 
@@ -734,14 +736,14 @@ class SemanticLayer:
                 parts.append("")
             parts.append("Custom Types:")
             for name, ct in self.custom_types.items():
-                if ct.type_category == 'enum' and ct.enum_values:
-                    values_str = ', '.join(ct.enum_values[:5])
+                if ct.type_category == "enum" and ct.enum_values:
+                    values_str = ", ".join(ct.enum_values[:5])
                     if len(ct.enum_values) > 5:
                         values_str += f"... ({len(ct.enum_values)} total)"
                     parts.append(f"  - {name} (enum): [{values_str}]")
-                elif ct.type_category == 'domain' and ct.base_type:
+                elif ct.type_category == "domain" and ct.base_type:
                     parts.append(f"  - {name} (domain over {ct.base_type})")
-                elif ct.type_category == 'base':
+                elif ct.type_category == "base":
                     desc = ct.description or "Compare with same type only"
                     parts.append(f"  - {name} (extension type): {desc}")
                 else:
@@ -749,20 +751,27 @@ class SemanticLayer:
 
         return "\n".join(parts) if parts else ""
 
-    def add_terminology(self, term: str, definition: str, sql_pattern: str,
-                       synonyms: list[str] = None, tables_used: list[str] = None) -> None:
+    def add_terminology(
+        self,
+        term: str,
+        definition: str,
+        sql_pattern: str,
+        synonyms: list[str] = None,
+        tables_used: list[str] = None,
+    ) -> None:
         """Add or update a terminology entry."""
         self.terminology[term] = Terminology(
             term=term,
             definition=definition,
             sql_pattern=sql_pattern,
             synonyms=synonyms or [],
-            tables_used=tables_used or []
+            tables_used=tables_used or [],
         )
         self.updated_at = _utcnow()
 
-    def add_table_description(self, table_name: str, description: str,
-                             business_context: str = "") -> None:
+    def add_table_description(
+        self, table_name: str, description: str, business_context: str = ""
+    ) -> None:
         """Add or update a table description."""
         if table_name not in self.tables:
             self.tables[table_name] = TableAnnotation(name=table_name)
@@ -772,8 +781,9 @@ class SemanticLayer:
             self.tables[table_name].business_context = business_context
         self.updated_at = _utcnow()
 
-    def add_column_description(self, table_name: str, column_name: str,
-                              description: str, **kwargs) -> None:
+    def add_column_description(
+        self, table_name: str, column_name: str, description: str, **kwargs
+    ) -> None:
         """Add or update a column description."""
         if table_name not in self.tables:
             self.tables[table_name] = TableAnnotation(name=table_name)
@@ -792,8 +802,9 @@ class SemanticLayer:
 
         self.updated_at = _utcnow()
 
-    def add_enum_values(self, table_name: str, column_name: str,
-                       enum_values: dict[str, str]) -> None:
+    def add_enum_values(
+        self, table_name: str, column_name: str, enum_values: dict[str, str]
+    ) -> None:
         """Add enum value mappings for a column."""
         if table_name not in self.tables:
             self.tables[table_name] = TableAnnotation(name=table_name)

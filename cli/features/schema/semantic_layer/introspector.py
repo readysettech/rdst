@@ -9,8 +9,16 @@ Introspects database schema to bootstrap a semantic layer with:
 """
 
 from typing import Optional
-import os
 
+from features.schema.semantic_models import (
+    ColumnAnnotation,
+    CustomType,
+    Extension,
+    IndexAnnotation,
+    Relationship,
+    SemanticLayer,
+    TableAnnotation,
+)
 from shared.db_connection import (
     create_mysql_connection_from_params,
     postgres_connection_kwargs,
@@ -19,19 +27,10 @@ from shared.db_connection import (
     resolve_connection_params,
 )
 
-from features.schema.semantic_models import (
-    SemanticLayer,
-    TableAnnotation,
-    ColumnAnnotation,
-    IndexAnnotation,
-    Relationship,
-    Extension,
-    CustomType,
-)
 from .pattern_detector import (
-    detect_delimiter_columns_sql_postgres,
-    detect_delimiter_columns_sql_mysql,
     DELIMITER_FRACTION_THRESHOLD,
+    detect_delimiter_columns_sql_mysql,
+    detect_delimiter_columns_sql_postgres,
 )
 
 # Enum sampling and delimiter probes read user tables; the lane tags the
@@ -277,24 +276,34 @@ class SchemaIntrospector:
 
         # Detect delimiter-separated list columns (single query per table)
         text_cols = [
-            name for name, col in table.columns.items()
-            if not col.enum_values and col.data_type in ('text', 'varchar', 'character varying')
+            name
+            for name, col in table.columns.items()
+            if not col.enum_values
+            and col.data_type in ("text", "varchar", "character varying")
         ]
         if text_cols:
             try:
-                sql = detect_delimiter_columns_sql_postgres(text_cols, table_name, row_estimate)
+                sql = detect_delimiter_columns_sql_postgres(
+                    text_cols, table_name, row_estimate
+                )
                 cursor.execute(sql)
                 row = cursor.fetchone()
                 if row:
                     for i, col_name in enumerate(text_cols):
                         fraction = row[i]
-                        if fraction is not None and fraction > DELIMITER_FRACTION_THRESHOLD:
-                            table.columns[col_name].value_pattern = "comma_separated_list"
+                        if (
+                            fraction is not None
+                            and fraction > DELIMITER_FRACTION_THRESHOLD
+                        ):
+                            table.columns[
+                                col_name
+                            ].value_pattern = "comma_separated_list"
             except Exception:
                 pass  # Don't abort table introspection for enrichment
 
         # Get indexes
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT
                 i.relname as index_name,
                 ix.indisunique,
@@ -308,7 +317,9 @@ class SchemaIntrospector:
             WHERE t.relname = %s
             GROUP BY i.relname, ix.indisunique, ix.indisprimary, ix.indexrelid
             ORDER BY i.relname
-        """, (table_name,))
+        """,
+            (table_name,),
+        )
 
         for idx_row in cursor.fetchall():
             idx_name, is_unique, is_primary, idx_def, idx_columns = idx_row
@@ -544,8 +555,6 @@ class SchemaIntrospector:
         self, target_name: str, enum_threshold: int, sample_enums: bool
     ) -> SemanticLayer:
         """Introspect MySQL database."""
-        import pymysql
-
         params = self._get_connection_params(target_name)
 
         if not all(
@@ -563,23 +572,24 @@ class SchemaIntrospector:
                 # Get all tables
                 cursor.execute(
                     """
-                    SELECT table_name
+                    SELECT table_name, table_type
                     FROM information_schema.tables
                     WHERE table_schema = %s
-                      AND table_type = 'BASE TABLE'
+                      AND table_type IN ('BASE TABLE', 'VIEW')
                     ORDER BY table_name
                 """,
                     (params["database"],),
                 )
-                tables = [row[0] for row in cursor.fetchall()]
+                tables = cursor.fetchall()
 
-                for table_name in tables:
+                for table_name, table_type in tables:
                     table_annotation = self._introspect_mysql_table(
                         cursor,
                         table_name,
                         params["database"],
                         enum_threshold,
                         sample_enums,
+                        include_indexes=table_type == "BASE TABLE",
                     )
                     layer.tables[table_name] = table_annotation
 
@@ -598,6 +608,8 @@ class SchemaIntrospector:
         database: str,
         enum_threshold: int,
         sample_enums: bool,
+        *,
+        include_indexes: bool = True,
     ) -> TableAnnotation:
         """Introspect a single MySQL table."""
         # Get row estimate
@@ -610,7 +622,7 @@ class SchemaIntrospector:
             (database, table_name),
         )
         result = cursor.fetchone()
-        row_estimate = result[0] if result else 0
+        row_estimate = (result[0] if result else 0) or 0
 
         # Format row estimate
         if row_estimate >= 1_000_000:
@@ -640,9 +652,7 @@ class SchemaIntrospector:
                 # Extract enum values from type definition
                 enum_str = type_str[5:-1]  # Remove 'enum(' and ')'
                 enum_values = [v.strip("'") for v in enum_str.split(",")]
-                column.enum_values = {
-                    val: f"TODO: describe '{val}'" for val in enum_values
-                }
+                column.enum_values = {val: val for val in enum_values}
 
             # Check for low cardinality strings or integer enum candidates
             # Use LIMIT-based sampling to avoid full table scans on large tables
@@ -655,7 +665,10 @@ class SchemaIntrospector:
                 "bigint",
             ] and self._is_enum_column_name(field)
 
-            if (is_string_type or is_int_enum_candidate) and row_estimate > 0:
+            # MySQL reports a NULL/zero TABLE_ROWS estimate for views even when they
+            # contain data. The sampler is independently bounded, so an unknown or
+            # zero estimate must not disable enum discovery.
+            if is_string_type or is_int_enum_candidate:
                 enum_values = self._sample_mysql_enum_values(
                     cursor, table_name, field, enum_threshold
                 )
@@ -663,62 +676,68 @@ class SchemaIntrospector:
                 if enum_values is not None and 0 < len(enum_values) <= enum_threshold:
                     column.data_type = "enum"
                     if sample_enums:
-                        column.enum_values = {
-                            val: f"TODO: describe '{val}'" for val in enum_values
-                        }
+                        column.enum_values = {val: val for val in enum_values}
 
             table.columns[field] = column
 
         # Detect delimiter-separated list columns (single query per table)
         text_cols = [
-            name for name, col in table.columns.items()
-            if not col.enum_values and col.data_type in ('text', 'varchar', 'char')
+            name
+            for name, col in table.columns.items()
+            if not col.enum_values and col.data_type in ("text", "varchar", "char")
         ]
         if text_cols:
             try:
-                sql = detect_delimiter_columns_sql_mysql(text_cols, table_name, row_estimate)
+                sql = detect_delimiter_columns_sql_mysql(
+                    text_cols, table_name, row_estimate
+                )
                 cursor.execute(sql)
                 row = cursor.fetchone()
                 if row:
                     for i, col_name in enumerate(text_cols):
                         fraction = row[i]
-                        if fraction is not None and fraction > DELIMITER_FRACTION_THRESHOLD:
-                            table.columns[col_name].value_pattern = "comma_separated_list"
+                        if (
+                            fraction is not None
+                            and fraction > DELIMITER_FRACTION_THRESHOLD
+                        ):
+                            table.columns[
+                                col_name
+                            ].value_pattern = "comma_separated_list"
             except Exception:
                 pass
 
-        # Get indexes
-        cursor.execute(f"SHOW INDEX FROM {quote_identifier(table_name, 'mysql')}")
-        idx_rows = cursor.fetchall()
-        idx_dict: dict[str, list] = {}
-        idx_meta: dict[str, dict] = {}
-        for idx_row in idx_rows:
-            # MySQL SHOW INDEX columns: Table, Non_unique, Key_name, Seq_in_index,
-            # Column_name, Collation, Cardinality, Sub_part, Packed, Null, Index_type, ...
-            idx_name = idx_row[2]
-            col_name_idx = idx_row[4]
-            non_unique = idx_row[1]
-            idx_type = idx_row[10] if len(idx_row) > 10 else "BTREE"
+        if include_indexes:
+            cursor.execute(f"SHOW INDEX FROM {quote_identifier(table_name, 'mysql')}")
+            idx_rows = cursor.fetchall()
+            idx_dict: dict[str, list] = {}
+            idx_meta: dict[str, dict] = {}
+            for idx_row in idx_rows:
+                # MySQL SHOW INDEX columns: Table, Non_unique, Key_name, Seq_in_index,
+                # Column_name, Collation, Cardinality, Sub_part, Packed, Null, Index_type, ...
+                idx_name = idx_row[2]
+                col_name_idx = idx_row[4]
+                non_unique = idx_row[1]
+                idx_type = idx_row[10] if len(idx_row) > 10 else "BTREE"
 
-            if idx_name not in idx_dict:
-                idx_dict[idx_name] = []
-                idx_meta[idx_name] = {
-                    "unique": non_unique == 0,
-                    "primary": idx_name == "PRIMARY",
-                    "type": idx_type.lower() if idx_type else "btree",
-                }
-            idx_dict[idx_name].append(col_name_idx)
+                if idx_name not in idx_dict:
+                    idx_dict[idx_name] = []
+                    idx_meta[idx_name] = {
+                        "unique": non_unique == 0,
+                        "primary": idx_name == "PRIMARY",
+                        "type": idx_type.lower() if idx_type else "btree",
+                    }
+                idx_dict[idx_name].append(col_name_idx)
 
-        for idx_name, cols in idx_dict.items():
-            meta = idx_meta[idx_name]
-            table.indexes[idx_name] = IndexAnnotation(
-                name=idx_name,
-                columns=cols,
-                index_type=meta["type"],
-                is_unique=meta["unique"],
-                is_primary=meta["primary"],
-                definition="",
-            )
+            for idx_name, cols in idx_dict.items():
+                meta = idx_meta[idx_name]
+                table.indexes[idx_name] = IndexAnnotation(
+                    name=idx_name,
+                    columns=cols,
+                    index_type=meta["type"],
+                    is_unique=meta["unique"],
+                    is_primary=meta["primary"],
+                    definition="",
+                )
 
         return table
 

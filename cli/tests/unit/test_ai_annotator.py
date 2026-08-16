@@ -67,18 +67,25 @@ class TestAnnotateTableSingleCall:
 
     def test_sample_rows_included_in_prompt(self):
         llm = _llm_returning({"description": "d", "columns": {}})
-        samples = [{"col0": "alice"}, {"col0": "bob"}]
+        samples = [{"col0": f"row-{index}"} for index in range(6)]
 
-        AIAnnotator(llm_manager=llm).annotate_table("users", _table(1), sample_data=samples)
+        AIAnnotator(llm_manager=llm).annotate_table(
+            "users", _table(1), sample_data=samples
+        )
 
         prompt = llm.query.call_args.kwargs["user_query"]
         assert "Sample rows" in prompt
-        assert "alice" in prompt
+        assert "row-4" in prompt
+        assert "row-5" not in prompt
+        assert llm.query.call_args.kwargs["temperature"] == 0.0
 
     def test_columns_not_asked_about_are_ignored(self):
         payload = {
             "description": "d",
-            "columns": {"col0": {"description": "ok"}, "invented": {"description": "no"}},
+            "columns": {
+                "col0": {"description": "ok"},
+                "invented": {"description": "no"},
+            },
         }
         llm = _llm_returning(payload)
 
